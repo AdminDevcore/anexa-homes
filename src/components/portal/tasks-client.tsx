@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createTaskAction, setTaskStatusAction, deleteTaskAction } from "@/server/modules/tasks/actions";
-import { formatDate } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 
 type Task = {
   id: string;
@@ -51,6 +51,7 @@ export function TasksClient({
   canCreate: boolean;
   canManage: boolean;
 }) {
+  const fmt = useFormat();
   const router = useRouter();
   const [title, setTitle] = React.useState("");
   const [assigneeId, setAssigneeId] = React.useState("");
@@ -253,9 +254,9 @@ export function TasksClient({
                   <td className="hidden px-3 py-2 text-muted-foreground lg:table-cell">{t.assignedBy ?? "—"}</td>
                   <td className="hidden px-3 py-2 md:table-cell">{t.assignee ?? "Unassigned"}</td>
                   <td className="px-3 py-2"><PriorityBadge priority={t.priority} /></td>
-                  <td className="px-3 py-2 text-muted-foreground tabular-nums">{formatDate(t.createdAt)}</td>
+                  <td className="px-3 py-2 text-muted-foreground tabular-nums">{fmt.date(t.createdAt)}</td>
                   <td className="px-3 py-2 tabular-nums">
-                    {t.dueAt ? <span className={cn(isOverdue(t) && "font-medium text-destructive")}>{formatDate(t.dueAt)}</span> : <span className="text-muted-foreground">—</span>}
+                    {t.dueAt ? <span className={cn(isOverdue(t) && "font-medium text-destructive")}>{fmt.date(t.dueAt)}</span> : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="px-3 py-2 text-xs">
                     {ageCell(t)}

@@ -11,11 +11,12 @@ import {
   markNotificationReadAction,
   markAllNotificationsReadAction,
 } from "@/server/modules/notifications/actions";
-import { formatDate } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 
 type Item = { id: string; title: string; body: string; link: string | null; read: boolean; createdAt: string; event: string };
 
 export function NotificationsList({ items }: { items: Item[] }) {
+  const fmt = useFormat();
   const router = useRouter();
   const qc = useQueryClient();
 
@@ -62,7 +63,7 @@ export function NotificationsList({ items }: { items: Item[] }) {
               <div className="font-medium">{item.title}</div>
               <div className="text-sm text-muted-foreground">{item.body}</div>
             </div>
-            <span className="shrink-0 text-xs text-muted-foreground">{formatDate(item.createdAt)}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{fmt.date(item.createdAt)}</span>
           </button>
         ))}
       </div>

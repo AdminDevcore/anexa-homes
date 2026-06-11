@@ -29,7 +29,7 @@ import {
   deleteCommissionRuleAction,
   toggleCommissionRuleAction,
 } from "@/server/modules/payroll/actions";
-import { formatCents } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 
 type Rule = {
   id: string;
@@ -54,6 +54,7 @@ const RULE_ROLE_LABELS: Record<string, string> = {
 const ruleRoleLabel = (r: string) => RULE_ROLE_LABELS[r] ?? r;
 
 export function CommissionRulesManager({ rules }: { rules: Rule[] }) {
+  const fmt = useFormat();
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -72,6 +73,7 @@ export function CommissionRulesManager({ rules }: { rules: Rule[] }) {
 }
 
 function RuleRow({ rule }: { rule: Rule }) {
+  const fmt = useFormat();
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
 
@@ -95,7 +97,7 @@ function RuleRow({ rule }: { rule: Rule }) {
   }
 
   const value =
-    rule.type === "flat" ? formatCents(rule.flatAmount) : `${rule.percent}%`;
+    rule.type === "flat" ? fmt.money(rule.flatAmount) : `${rule.percent}%`;
 
   return (
     <div className="flex items-center justify-between gap-3 px-5 py-3.5">

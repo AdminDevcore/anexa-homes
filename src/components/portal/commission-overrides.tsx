@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { formatCents } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 import { setCommissionOverrideAction, deleteCommissionOverrideAction } from "@/server/modules/team/actions";
 
 export type OverrideRow = {
@@ -35,6 +35,7 @@ export function CommissionOverrides({
   candidates: OverrideCandidate[];
   canEdit: boolean;
 }) {
+  const fmt = useFormat();
   const router = useRouter();
   const [adding, setAdding] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -96,7 +97,7 @@ export function CommissionOverrides({
           {overrides.map((o) => (
             <li key={o.id} className="flex items-center justify-between py-2 text-sm">
               <span>
-                <span className="font-medium">{o.type === "percentage" ? `${o.percent}%` : formatCents(o.flatAmount)}</span>
+                <span className="font-medium">{o.type === "percentage" ? `${o.percent}%` : fmt.money(o.flatAmount)}</span>
                 <span className="text-muted-foreground"> off {o.sourceName}&rsquo;s deals</span>
               </span>
               {canEdit && (

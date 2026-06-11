@@ -16,7 +16,7 @@ import {
 import { toast } from "sonner";
 import { GripVertical, Phone, MapPin, CalendarClock, Timer, PlayCircle, ClipboardCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatCents } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 import { moveLeadStage } from "@/server/modules/leads/actions";
 
 export type BoardLead = {
@@ -60,6 +60,7 @@ export function PipelineBoard({
   initialLeadsByStage: Record<string, BoardLead[]>;
   canMove: boolean;
 }) {
+  const fmt = useFormat();
   const [columns, setColumns] = React.useState(initialLeadsByStage);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -133,6 +134,7 @@ export function PipelineBoard({
 
 function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; canMove: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
+  const fmt = useFormat();
   const total = leads.reduce((sum, l) => sum + l.value, 0);
 
   return (
@@ -148,7 +150,7 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
             </span>
           </div>
           <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            {formatCents(total, { compact: true })}
+            {fmt.money(total, { compact: true })}
           </span>
         </div>
         {/* Stage-colored accent rule under the header */}
@@ -189,6 +191,7 @@ function Card({
   canMove: boolean;
   overlay?: boolean;
 }) {
+  const fmt = useFormat();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: lead.id,
     disabled: !canMove,
@@ -243,7 +246,7 @@ function Card({
 
         <div className="mt-3 flex items-center justify-between gap-2">
           <span className="rounded-md bg-muted px-2 py-0.5 text-sm font-semibold tabular-nums">
-            {formatCents(lead.value, { compact: true })}
+            {fmt.money(lead.value, { compact: true })}
           </span>
           {lead.rep && <span className="truncate text-[11px] text-muted-foreground">{lead.rep}</span>}
         </div>

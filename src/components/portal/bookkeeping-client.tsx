@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { formatCents } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 import type { BookkeepingData, BkTxn } from "@/server/modules/bookkeeping/queries";
 import {
   createTransactionAction,
@@ -38,6 +38,7 @@ const ACCOUNT_TYPES = [
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 
 export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; canEdit: boolean }) {
+  const fmt = useFormat();
   const router = useRouter();
   const [view, setView] = React.useState<"transactions" | "reports" | "manage">("transactions");
   const [reviewFilter, setReviewFilter] = React.useState<"review" | "booked">("review");
@@ -88,9 +89,9 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
         <>
           {/* Summary */}
           <div className="grid gap-4 sm:grid-cols-3">
-            <Stat label="Money in" value={formatCents(summary.moneyIn)} icon={TrendingUp} tone="emerald" />
-            <Stat label="Money out" value={formatCents(summary.moneyOut)} icon={TrendingDown} tone="red" />
-            <Stat label="Net profit" value={formatCents(pnl.netProfit)} icon={Scale} tone={pnl.netProfit >= 0 ? "emerald" : "red"} accent />
+            <Stat label="Money in" value={fmt.money(summary.moneyIn)} icon={TrendingUp} tone="emerald" />
+            <Stat label="Money out" value={fmt.money(summary.moneyOut)} icon={TrendingDown} tone="red" />
+            <Stat label="Net profit" value={fmt.money(pnl.netProfit)} icon={Scale} tone={pnl.netProfit >= 0 ? "emerald" : "red"} accent />
           </div>
 
           {/* Toolbar: review filter + actions */}
@@ -184,7 +185,7 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
                       </select>
                     </td>
                     <td className={cn("whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums", t.amountCents >= 0 ? "text-emerald-600" : "text-red-600")}>
-                      {t.amountCents >= 0 ? "+" : "−"}{formatCents(Math.abs(t.amountCents))}
+                      {t.amountCents >= 0 ? "+" : "−"}{fmt.money(Math.abs(t.amountCents))}
                     </td>
                     {canEdit && (
                       <td className="px-3 py-2 text-right">
@@ -226,7 +227,7 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
             <PnlGroup title="Expenses" rows={pnl.expense} total={pnl.totalExpense} tone="red" />
             <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
               <span className="font-semibold">Net profit</span>
-              <span className={cn("font-display text-lg font-semibold tabular-nums", pnl.netProfit >= 0 ? "text-emerald-600" : "text-red-600")}>{formatCents(pnl.netProfit)}</span>
+              <span className={cn("font-display text-lg font-semibold tabular-nums", pnl.netProfit >= 0 ? "text-emerald-600" : "text-red-600")}>{fmt.money(pnl.netProfit)}</span>
             </div>
           </div>
           <div className="rounded-xl border border-border bg-card p-5">
@@ -242,7 +243,7 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
             <PnlGroup title="Equity" rows={balanceSheet.equity} total={balanceSheet.totalEquity} tone="emerald" />
             <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
               <span className="font-semibold">Assets = Liabilities + Equity</span>
-              <span className="font-display text-lg font-semibold tabular-nums">{formatCents(balanceSheet.totalAssets)}</span>
+              <span className="font-display text-lg font-semibold tabular-nums">{fmt.money(balanceSheet.totalAssets)}</span>
             </div>
           </div>
         </div>
@@ -257,7 +258,7 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
               <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
                 <span className="min-w-0 truncate font-medium">{confirmBook.description}</span>
                 <span className={cn("ml-2 shrink-0 font-semibold tabular-nums", confirmBook.amountCents >= 0 ? "text-emerald-600" : "text-red-600")}>
-                  {confirmBook.amountCents >= 0 ? "+" : "−"}{formatCents(Math.abs(confirmBook.amountCents))}
+                  {confirmBook.amountCents >= 0 ? "+" : "−"}{fmt.money(Math.abs(confirmBook.amountCents))}
                 </span>
               </div>
             </div>
@@ -432,6 +433,7 @@ function FilterPill({ active, onClick, children }: { active: boolean; onClick: (
 }
 
 function TransactionDetail({ txn, data, canEdit, onClose, onChanged, onDeleted }: { txn: BkTxn; data: BookkeepingData; canEdit: boolean; onClose: () => void; onChanged: () => void; onDeleted: () => void }) {
+  const fmt = useFormat();
   const [busy, setBusy] = React.useState(false);
   const [notes, setNotes] = React.useState(txn.notes ?? "");
 
@@ -468,7 +470,7 @@ function TransactionDetail({ txn, data, canEdit, onClose, onChanged, onDeleted }
           <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
             <span className="text-muted-foreground">{fmtDate(txn.date)}{txn.account ? ` · ${txn.account}` : ""}</span>
             <span className={cn("font-display text-lg font-semibold tabular-nums", txn.amountCents >= 0 ? "text-emerald-600" : "text-red-600")}>
-              {txn.amountCents >= 0 ? "+" : "−"}{formatCents(Math.abs(txn.amountCents))}
+              {txn.amountCents >= 0 ? "+" : "−"}{fmt.money(Math.abs(txn.amountCents))}
             </span>
           </div>
           <DetailRow label="Source"><span className="capitalize">{txn.source}</span></DetailRow>
@@ -553,6 +555,7 @@ function VendorDialog({ vendor, onClose, onDone }: { vendor?: { id: string; name
 }
 
 function Stat({ label, value, icon: Icon, tone, accent }: { label: string; value: string; icon: typeof Scale; tone: "emerald" | "red"; accent?: boolean }) {
+  const fmt = useFormat();
   return (
     <div className={cn("rounded-xl border bg-card p-5", accent ? "border-gold/40 bg-gold/[0.04]" : "border-border")}>
       <div className="flex items-center justify-between">
@@ -565,18 +568,19 @@ function Stat({ label, value, icon: Icon, tone, accent }: { label: string; value
 }
 
 function PnlGroup({ title, rows, total, tone }: { title: string; rows: { name: string; total: number }[]; total: number; tone: "emerald" | "red" }) {
+  const fmt = useFormat();
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <span>{title}</span>
-        <span className={cn("tabular-nums", tone === "emerald" ? "text-emerald-600" : "text-red-600")}>{formatCents(total)}</span>
+        <span className={cn("tabular-nums", tone === "emerald" ? "text-emerald-600" : "text-red-600")}>{fmt.money(total)}</span>
       </div>
       <ul className="mt-1.5 space-y-1 text-sm">
         {rows.length === 0 && <li className="text-xs text-muted-foreground">None yet.</li>}
         {rows.map((r) => (
           <li key={r.name} className="flex items-center justify-between">
             <span className="text-muted-foreground">{r.name}</span>
-            <span className="tabular-nums">{formatCents(r.total)}</span>
+            <span className="tabular-nums">{fmt.money(r.total)}</span>
           </li>
         ))}
       </ul>

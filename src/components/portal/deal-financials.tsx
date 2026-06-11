@@ -7,7 +7,7 @@ import { Plus, Trash2, Loader2, Paperclip, Sparkles, FilePlus2, Receipt, Tag, Tr
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatCents } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 import { computeDealCommission } from "@/lib/commission";
 import { addProjectCostAction, deleteProjectCostAction, generateDealCommissionAction, setDealAdjustmentAction, setDealLeadProvidedAction, setDealRepGetsAction } from "@/server/modules/costs/actions";
 import type { DealFinancials } from "@/server/modules/costs/queries";
@@ -29,6 +29,7 @@ export function DealFinancialsCard({
   commissionEligible?: boolean;
   gateLabel?: string;
 }) {
+  const fmt = useFormat();
   const router = useRouter();
   const fileRef = React.useRef<HTMLInputElement | null>(null);
   const [adding, setAdding] = React.useState(false);
@@ -124,7 +125,7 @@ export function DealFinancialsCard({
     const res = await generateDealCommissionAction(projectId);
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
-    toast.success(`Rep commission set: ${formatCents(res.amount)}`);
+    toast.success(`Rep commission set: ${fmt.money(res.amount)}`);
     router.refresh();
   }
   async function toggleLeadProvided() {
@@ -169,7 +170,7 @@ export function DealFinancialsCard({
                     </a>
                   )}
                 </span>
-                <span className="tabular-nums font-medium">{formatCents(c.amount)}</span>
+                <span className="tabular-nums font-medium">{fmt.money(c.amount)}</span>
                 {canManage && (
                   <button onClick={() => removeCost(c.id)} className="text-muted-foreground hover:text-destructive" aria-label="Remove cost">
                     <Trash2 className="size-4" />
@@ -211,7 +212,7 @@ export function DealFinancialsCard({
               Tagged transactions <span className="text-xs font-normal text-muted-foreground">· from Bookkeeping</span>
             </span>
             <span className={cn("text-sm font-semibold tabular-nums", financials.linkedTotal >= 0 ? "text-emerald-600" : "text-red-600")}>
-              {financials.linkedTotal >= 0 ? "+" : "−"}{formatCents(Math.abs(financials.linkedTotal))} net
+              {financials.linkedTotal >= 0 ? "+" : "−"}{fmt.money(Math.abs(financials.linkedTotal))} net
             </span>
           </div>
           <ul className="divide-y divide-border rounded-lg border border-border">
@@ -226,7 +227,7 @@ export function DealFinancialsCard({
                   {t.category && <span className="text-muted-foreground"> · {t.category}</span>}
                 </span>
                 <span className={cn("font-medium tabular-nums", t.amountCents >= 0 ? "text-emerald-600" : "text-red-600")}>
-                  {t.amountCents >= 0 ? "+" : "−"}{formatCents(Math.abs(t.amountCents))}
+                  {t.amountCents >= 0 ? "+" : "−"}{fmt.money(Math.abs(t.amountCents))}
                 </span>
               </li>
             ))}
@@ -241,13 +242,13 @@ export function DealFinancialsCard({
       {canManage && (
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => openAdj("supplement")}>
-            <FilePlus2 className="size-3.5" /> Supplement{financials.supplementCents > 0 ? `: ${formatCents(financials.supplementCents)}` : ""}
+            <FilePlus2 className="size-3.5" /> Supplement{financials.supplementCents > 0 ? `: ${fmt.money(financials.supplementCents)}` : ""}
           </Button>
           <Button size="sm" variant="outline" onClick={() => openAdj("deductible")}>
-            <Receipt className="size-3.5" /> Deductible{financials.deductibleCents > 0 ? `: ${formatCents(financials.deductibleCents)}` : ""}
+            <Receipt className="size-3.5" /> Deductible{financials.deductibleCents > 0 ? `: ${fmt.money(financials.deductibleCents)}` : ""}
           </Button>
           <Button size="sm" variant="outline" onClick={() => openAdj("depreciation")}>
-            <TrendingDown className="size-3.5" /> Depreciation{financials.depreciationCents > 0 ? `: ${formatCents(financials.depreciationCents)}` : ""}
+            <TrendingDown className="size-3.5" /> Depreciation{financials.depreciationCents > 0 ? `: ${fmt.money(financials.depreciationCents)}` : ""}
           </Button>
           {/* Per-deal: does the rep get the supplement / depreciation in their split? */}
           {financials.supplementCents > 0 && (
@@ -307,26 +308,26 @@ export function DealFinancialsCard({
       {/* Breakdown */}
       <div className="rounded-lg border border-border p-3">
         {/* Revenue: every piece counts toward the company's adjusted contract. */}
-        <Row label="Contract value" value={formatCents(financials.contractValue)} />
-        {financials.supplementCents > 0 && <Row label="+ Supplement" value={formatCents(financials.supplementCents)} sub />}
-        {financials.deductibleCents > 0 && <Row label="+ Deductible (customer-paid)" value={formatCents(financials.deductibleCents)} sub />}
-        {financials.depreciationCents > 0 && <Row label="+ Depreciation" value={formatCents(financials.depreciationCents)} sub />}
-        {hasAdjustments && <Row label="= Adjusted contract value" value={formatCents(dc.adjustedContractCents)} strong />}
+        <Row label="Contract value" value={fmt.money(financials.contractValue)} />
+        {financials.supplementCents > 0 && <Row label="+ Supplement" value={fmt.money(financials.supplementCents)} sub />}
+        {financials.deductibleCents > 0 && <Row label="+ Deductible (customer-paid)" value={fmt.money(financials.deductibleCents)} sub />}
+        {financials.depreciationCents > 0 && <Row label="+ Depreciation" value={fmt.money(financials.depreciationCents)} sub />}
+        {hasAdjustments && <Row label="= Adjusted contract value" value={fmt.money(dc.adjustedContractCents)} strong />}
 
         {/* Rep split pool — excludes the deductible and any waived supplement/depr. */}
         {(financials.supplementCents > 0 && !financials.repGetsSupplement) && (
-          <Row label="− Supplement (rep waived)" value={`−${formatCents(financials.supplementCents)}`} sub />
+          <Row label="− Supplement (rep waived)" value={`−${fmt.money(financials.supplementCents)}`} sub />
         )}
         {(financials.depreciationCents > 0 && !financials.repGetsDepreciation) && (
-          <Row label="− Depreciation (rep waived)" value={`−${formatCents(financials.depreciationCents)}`} sub />
+          <Row label="− Depreciation (rep waived)" value={`−${fmt.money(financials.depreciationCents)}`} sub />
         )}
         {financials.deductibleCents > 0 && (
-          <Row label="− Deductible (paid as rep % below)" value={`−${formatCents(financials.deductibleCents)}`} sub />
+          <Row label="− Deductible (paid as rep % below)" value={`−${fmt.money(financials.deductibleCents)}`} sub />
         )}
-        <Row label="Split base" value={formatCents(dc.splitBaseContractCents)} strong />
-        <Row label="− Job cost" value={`−${formatCents(financials.costTotal)}`} />
-        <Row label={`− Company overhead (${financials.overheadPct}%)`} value={`−${formatCents(dc.overheadCents)}`} />
-        <Row label="= Profit pool" value={formatCents(dc.poolCents)} strong />
+        <Row label="Split base" value={fmt.money(dc.splitBaseContractCents)} strong />
+        <Row label="− Job cost" value={`−${fmt.money(financials.costTotal)}`} />
+        <Row label={`− Company overhead (${financials.overheadPct}%)`} value={`−${fmt.money(dc.overheadCents)}`} />
+        <Row label="= Profit pool" value={fmt.money(dc.poolCents)} strong />
         {financials.rep ? (
           financials.rep.splitPct == null ? (
             <p className="mt-2 text-xs text-amber-600">
@@ -336,19 +337,19 @@ export function DealFinancialsCard({
             <>
               <Row
                 label={`${financials.rep.name} — rep split (${financials.rep.splitPct}% · ${financials.companyProvidedLead ? "provided lead" : "self-gen"})`}
-                value={formatCents(dc.splitCommissionCents)}
+                value={fmt.money(dc.splitCommissionCents)}
                 sub
               />
-              <Row label="Company profit" value={formatCents(dc.poolCents - dc.splitCommissionCents)} sub />
+              <Row label="Company profit" value={fmt.money(dc.poolCents - dc.splitCommissionCents)} sub />
               {dc.deductibleCommissionCents > 0 && (
                 <Row
-                  label={`+ ${financials.rep.name} — deductible share (${financials.rep.deductiblePct}% of ${formatCents(financials.deductibleCents)})`}
-                  value={formatCents(dc.deductibleCommissionCents)}
+                  label={`+ ${financials.rep.name} — deductible share (${financials.rep.deductiblePct}% of ${fmt.money(financials.deductibleCents)})`}
+                  value={fmt.money(dc.deductibleCommissionCents)}
                   sub
                 />
               )}
               {dc.deductibleCommissionCents > 0 && (
-                <Row label={`= ${financials.rep.name} total commission`} value={formatCents(dc.repTotalCents)} strong />
+                <Row label={`= ${financials.rep.name} total commission`} value={fmt.money(dc.repTotalCents)} strong />
               )}
               {financials.companyProvidedLead && financials.rep.providedLeadSplitPct == null && (
                 <p className="mt-1 pl-3 text-[11px] text-amber-600">
@@ -374,7 +375,7 @@ export function DealFinancialsCard({
             {!commissionEligible
               ? `Commissions unlock at the “${gateLabel}” stage.`
               : financials.commission
-                ? `Current commission: ${formatCents(financials.commission.amount)} (${financials.commission.status})`
+                ? `Current commission: ${fmt.money(financials.commission.amount)} (${financials.commission.status})`
                 : "No commission generated yet."}
           </span>
           <Button

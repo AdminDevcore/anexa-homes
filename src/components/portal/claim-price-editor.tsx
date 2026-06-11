@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Loader2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatCents } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 import { setClaimPriceAction } from "@/server/modules/leads/manage";
 
 // Inline editor for the deal's CLAIM PRICE — the contract price from the
@@ -20,6 +20,7 @@ export function ClaimPriceEditor({
   claimPrice: number | null;
   canEdit: boolean;
 }) {
+  const fmt = useFormat();
   const router = useRouter();
   const [editing, setEditing] = React.useState(false);
   const [amount, setAmount] = React.useState(claimPrice != null ? String(claimPrice / 100) : "");
@@ -61,7 +62,7 @@ export function ClaimPriceEditor({
   return (
     <span className="inline-flex items-center gap-2">
       <span className={claimPrice == null ? "text-muted-foreground" : "font-medium tabular-nums"}>
-        {claimPrice != null ? formatCents(claimPrice) : "Not set"}
+        {claimPrice != null ? fmt.money(claimPrice) : "Not set"}
       </span>
       {canEdit && (
         <button onClick={() => setEditing(true)} className="inline-flex items-center gap-0.5 text-xs text-gold-muted hover:underline">

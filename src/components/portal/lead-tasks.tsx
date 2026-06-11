@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createTaskAction, setTaskStatusAction, deleteTaskAction } from "@/server/modules/tasks/actions";
-import { formatDate } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 
 type Task = { id: string; title: string; status: string; dueAt: string | null; assignee: string | null };
 type Option = { id: string; name: string };
@@ -27,6 +27,7 @@ export function LeadTasks({
   canCreate: boolean;
   canManage: boolean;
 }) {
+  const fmt = useFormat();
   const router = useRouter();
   const [title, setTitle] = React.useState("");
   const [assigneeId, setAssigneeId] = React.useState("");
@@ -92,7 +93,7 @@ export function LeadTasks({
                 <div className="text-xs text-muted-foreground">
                   {t.assignee ?? "Unassigned"}
                   {t.dueAt && (
-                    <span className={cn(overdue && "font-medium text-destructive")}> · {overdue ? "overdue" : "due"} {formatDate(t.dueAt)}</span>
+                    <span className={cn(overdue && "font-medium text-destructive")}> · {overdue ? "overdue" : "due"} {fmt.date(t.dueAt)}</span>
                   )}
                 </div>
               </div>

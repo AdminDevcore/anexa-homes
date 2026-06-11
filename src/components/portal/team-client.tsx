@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { formatDate, initials } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
+import { initials } from "@/lib/format";
 
 type Member = {
   id: string;
@@ -33,6 +34,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export function TeamClient({ members, roles }: { members: Member[]; roles: { value: string; label: string }[] }) {
+  const fmt = useFormat();
   const router = useRouter();
   const [q, setQ] = React.useState("");
   const [roleF, setRoleF] = React.useState("all");
@@ -103,7 +105,7 @@ export function TeamClient({ members, roles }: { members: Member[]; roles: { val
       <td className="px-4 py-2.5">
         <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium capitalize", STATUS_STYLES[m.status] ?? "bg-muted text-muted-foreground")}>{m.status}</span>
       </td>
-      <td className="hidden px-4 py-2.5 text-sm text-muted-foreground tabular-nums xl:table-cell">{formatDate(m.createdAt)}</td>
+      <td className="hidden px-4 py-2.5 text-sm text-muted-foreground tabular-nums xl:table-cell">{fmt.date(m.createdAt)}</td>
     </tr>
   );
 

@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatCents, formatDate } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 import { serviceTypeLabel } from "@/lib/service-types";
 
 export type ListLead = {
@@ -45,6 +45,7 @@ export function PipelineView({
   listLeads: ListLead[];
   canMove: boolean;
 }) {
+  const fmt = useFormat();
   const [view, setView] = React.useState<"kanban" | "list">("kanban");
   const [mounted, setMounted] = React.useState(false);
 
@@ -137,8 +138,8 @@ export function PipelineView({
                     </TableCell>
                     <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">{l.rep ?? "—"}</TableCell>
                     <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{l.city ?? "—"}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatCents(l.value, { compact: true })}</TableCell>
-                    <TableCell className="hidden xl:table-cell text-sm text-muted-foreground">{formatDate(l.createdAt)}</TableCell>
+                    <TableCell className="text-right font-semibold">{fmt.money(l.value, { compact: true })}</TableCell>
+                    <TableCell className="hidden xl:table-cell text-sm text-muted-foreground">{fmt.date(l.createdAt)}</TableCell>
                   </TableRow>
                 ))
               )}

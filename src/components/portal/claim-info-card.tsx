@@ -7,7 +7,7 @@ import { ShieldCheck, Plus, Trash2, Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatCents } from "@/lib/format";
+import { useFormat } from "@/components/portal/branding-provider";
 import { ClaimPriceEditor } from "@/components/portal/claim-price-editor";
 import {
   updateClaimInfoAction,
@@ -76,6 +76,7 @@ export function ClaimInfoCard({
 
   // Build the FULL payload from current state — every field, every save.
   function buildPayload() {
+  const fmt = useFormat();
     const num = (s: string) => { const v = parseFloat(s); return Number.isFinite(v) ? v : null; };
     const int = (s: string) => { const v = parseInt(s, 10); return Number.isFinite(v) ? v : null; };
     const cents = (s: string) => { const v = parseFloat(s); return Number.isFinite(v) ? Math.round(v * 100) : 0; };
@@ -301,6 +302,7 @@ function AddLineItem({ leadId }: { leadId: string }) {
 }
 
 function LineRow({ leadId, item, canEdit }: { leadId: string; item: LineItem; canEdit: boolean }) {
+  const fmt = useFormat();
   const router = useRouter();
   const total = Math.round(item.quantity * item.unitPrice);
   async function save(patch: Record<string, unknown>) {
@@ -316,7 +318,7 @@ function LineRow({ leadId, item, canEdit }: { leadId: string; item: LineItem; ca
       <td className="px-1 py-1 text-right"><input type="number" defaultValue={item.quantity} disabled={!canEdit} onBlur={(e) => save({ quantity: parseFloat(e.target.value) || 0 })} className={cn(cell, "w-16 text-right")} /></td>
       <td className="px-1 py-1"><input defaultValue={item.unit ?? ""} disabled={!canEdit} onBlur={(e) => save({ unit: e.target.value || null })} className={cn(cell, "w-16")} placeholder="SQ/LF" /></td>
       <td className="px-1 py-1 text-right"><input type="number" defaultValue={item.unitPrice ? item.unitPrice / 100 : ""} disabled={!canEdit} onBlur={(e) => { const v = parseFloat(e.target.value); save({ unitPriceCents: Number.isFinite(v) ? Math.round(v * 100) : 0 }); }} className={cn(cell, "w-20 text-right")} placeholder="0.00" /></td>
-      <td className="px-2 py-1 text-right font-medium tabular-nums">{formatCents(total)}</td>
+      <td className="px-2 py-1 text-right font-medium tabular-nums">{fmt.money(total)}</td>
       {canEdit && (
         <td className="px-1 py-1">
           <button onClick={() => deleteClaimLineItemAction({ id: item.id, leadId }).then((r) => r.ok ? router.refresh() : toast.error(r.error))} className="text-muted-foreground hover:text-destructive" aria-label="Delete">
