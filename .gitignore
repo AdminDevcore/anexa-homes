@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Anexa local artifacts
+/storage
+/test-results
+/playwright-report
+/.next-e2e

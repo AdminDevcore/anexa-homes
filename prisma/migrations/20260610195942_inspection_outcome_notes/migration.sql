@@ -1,0 +1,3 @@
+ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "appointmentNote" TEXT;
+ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "inspectionOutcome" TEXT;
+ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "inspectionNote" TEXT;

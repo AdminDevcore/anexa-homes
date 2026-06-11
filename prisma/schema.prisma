@@ -1,0 +1,1803 @@
+// Anexa Homes — Roofing CRM (multi-tenant SaaS)
+// Postgres + Prisma. All money stored as integer cents. Tenancy via companyId on every row.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  super_admin
+  admin
+  manager
+  sales_rep
+  canvasser
+  marketing
+  installer
+  accounting
+  customer
+}
+
+enum UserStatus {
+  active
+  invited
+  suspended
+  disabled
+}
+
+enum LeadStatus {
+  open
+  won
+  lost
+  junk
+}
+
+enum Priority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum ProjectStatus {
+  not_started
+  in_production
+  on_hold
+  qc
+  completed
+  closed
+  cancelled
+}
+
+enum ClaimStatus {
+  not_filed
+  filed
+  adjuster_scheduled
+  scope_received
+  supplement_needed
+  approved
+  paid
+  denied
+  closed
+}
+
+enum CustomFieldEntity {
+  lead
+  project
+}
+
+enum CustomFieldType {
+  text
+  number
+  date
+  select
+  checkbox
+  textarea
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  done
+  cancelled
+}
+
+enum FileKind {
+  document
+  photo
+  signed_document
+  other
+}
+
+enum ActivityType {
+  note
+  call
+  email
+  meeting
+  stage_change
+  status_change
+  document
+  payment
+  assignment
+  system
+}
+
+enum DocumentTemplateType {
+  roofing_contract
+  insurance_contingency
+  certificate_of_completion
+  change_order
+  depreciation_request
+  final_invoice
+  warranty_certificate
+  customer_closeout
+  custom
+}
+
+enum DocumentFieldType {
+  text
+  date
+  checkbox
+  signature
+  initials
+}
+
+enum DocumentSignerRole {
+  customer
+  co_customer
+  company_rep
+  witness
+}
+
+enum DocumentPackageStatus {
+  draft
+  sent
+  viewed
+  partially_signed
+  completed
+  declined
+  voided
+  expired
+}
+
+enum SignerStatus {
+  pending
+  sent
+  viewed
+  signed
+  declined
+}
+
+enum SignatureType {
+  typed
+  drawn
+}
+
+enum DocumentEventType {
+  created
+  sent
+  viewed
+  field_filled
+  signed
+  completed
+  declined
+  voided
+  reminder_sent
+  downloaded
+}
+
+enum CommissionType {
+  percentage
+  flat
+  job_cost
+}
+
+enum CommissionStatus {
+  pending
+  approved
+  paid
+  void
+}
+
+enum PayrollStatus {
+  draft
+  approved
+  paid
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+  void
+}
+
+enum NotificationEvent {
+  lead_created
+  lead_assigned
+  stage_changed
+  project_status_changed
+  document_sent
+  document_viewed
+  document_signed
+  document_completed
+  task_assigned
+  daily_report_submitted
+  commission_approved
+  payroll_approved
+}
+
+enum NotificationChannel {
+  in_app
+  email
+  sms
+}
+
+enum ServiceType {
+  roofing
+  storm_restoration
+  solar
+  hvac
+  water_filtration
+  windows
+  other
+}
+
+// Isolated portal workspaces. Each is a separate process/structure; users can be
+// granted access to one or more, and switch between the ones they can access.
+enum Industry {
+  roofing
+  solar
+  water
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & identity
+// ---------------------------------------------------------------------------
+
+model Company {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  phone       String?
+  email       String?
+  website     String?
+  address     String?
+  city        String?
+  state       String?
+  zip         String?
+  // Company operations overhead (% of contract) removed before the profit split.
+  overheadPct Float    @default(10)
+  timezone    String   @default("America/Chicago")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users                 User[]
+  settings              CompanySettings?
+  leadSources           LeadSource[]
+  pipelines             Pipeline[]
+  leads                 Lead[]
+  projects              Project[]
+  claims                Claim[]
+  roofMeasurements      RoofMeasurement[]
+  crews                 Crew[]
+  tasks                 Task[]
+  notes                 Note[]
+  files                 FileAsset[]
+  dailyReports          DailyReport[]
+  customFieldDefs       CustomFieldDef[]
+  documentTemplates     DocumentTemplate[]
+  documentPackages      DocumentPackage[]
+  commissionRules       CommissionRule[]
+  commissionOverrides   CommissionOverride[]
+  commissions           Commission[]
+  payrollRuns           PayrollRun[]
+  invoices              Invoice[]
+  activityLogs          ActivityLog[]
+  invitations           Invitation[]
+  notificationRules     NotificationRule[]
+  notifications         Notification[]
+  conversations         Conversation[]
+  messages              Message[]
+  knocks                Knock[]
+  territories           Territory[]
+  photoTemplates        PhotoTemplate[]
+  roofReports           RoofReport[]
+  transactions          Transaction[]
+  bookkeepingCategories BookkeepingCategory[]
+  bookkeepingVendors    BookkeepingVendor[]
+  knowledgeCategories   KnowledgeCategory[]
+  scopeOfWorks          ScopeOfWork[]
+  scopeLines            ScopeLine[]
+  scopeTemplateItems    ScopeTemplateItem[]
+
+  @@map("companies")
+}
+
+model CompanySettings {
+  id                      String   @id @default(uuid())
+  companyId               String   @unique
+  company                 Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  logoUrl                 String?
+  primaryColor            String   @default("#0B0B0C")
+  accentColor             String   @default("#BFA15F")
+  requiredDocuments       Json     @default("[]")
+  emailTemplates          Json     @default("{}")
+  smsTemplates            Json     @default("{}")
+  rolePermissions         Json     @default("{}") // per-role overrides on top of code matrix
+  // Customizable appointment outcomes ("dispositions") — JSON array of labels.
+  // Empty/unset falls back to DEFAULT_APPOINTMENT_DISPOSITIONS in code.
+  appointmentDispositions Json     @default("[]")
+  // Bookkeeping integration (bank / QuickBooks). Key stored for the connector.
+  bookkeepingProvider     String? // "quickbooks" | "plaid" | "manual"
+  bookkeepingApiKey       String?
+  updatedAt               DateTime @updatedAt
+
+  @@map("company_settings")
+}
+
+model User {
+  id                    String     @id @default(uuid())
+  companyId             String
+  company               Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email                 String
+  passwordHash          String?
+  firstName             String
+  lastName              String
+  phone                 String?
+  role                  Role       @default(sales_rep)
+  status                UserStatus @default(active)
+  avatarUrl             String?
+  title                 String?
+  // Rep's share (%) of the profit pool on a SELF-GENERATED lead (standard split).
+  commissionSplitPct    Float?
+  // Company-provided-lead comp is EITHER a percentage of the pool OR a flat lead
+  // fee deducted from the rep's self-gen commission. providedLeadType picks which.
+  providedLeadType      String     @default("percentage") // "percentage" | "flat"
+  // Rep's share (%) when the COMPANY provided the lead (percentage mode).
+  providedLeadSplitPct  Float?
+  // Flat lead/marketing fee (cents) subtracted from the rep's self-gen commission (flat mode).
+  providedLeadFlatCents Int?
+  // Rep's share (%) of the customer-paid deductible on their deals (separate from
+  // the profit-pool split). null/0 = this rep doesn't get the deductible.
+  deductiblePct         Float?
+  // Industries this user may access + switch between. Defaults to all three; the
+  // super admin can restrict a user (e.g. an installer locked to roofing only).
+  industries            Industry[] @default([roofing, solar, water])
+  // For canvassers: the sales rep they're assigned to. Their knocks, leads, and
+  // appointments auto-assign to (and are visible by) this rep.
+  salesRepId            String?
+  salesRep              User?      @relation("RepCanvassers", fields: [salesRepId], references: [id], onDelete: SetNull)
+  canvassers            User[]     @relation("RepCanvassers")
+  // For sales reps: the sales manager they report to. The manager sees this rep's
+  // deals, canvassing, tasks, and commissions — and nothing outside their team.
+  managerId             String?
+  manager               User?      @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  reports               User[]     @relation("ManagerReports")
+  permissions           Json       @default("{}") // per-user permission overrides
+  sessionVersion        Int        @default(1)
+  lastLoginAt           DateTime?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  leadsAssigned   Lead[]               @relation("LeadAssignedRep")
+  leadsCreated    Lead[]               @relation("LeadCreatedBy")
+  customerLeads   Lead[]               @relation("LeadCustomerUser")
+  projectsManaged Project[]            @relation("ProjectManager")
+  tasksAssigned   Task[]               @relation("TaskAssignee")
+  tasksCreated    Task[]               @relation("TaskCreatedBy")
+  notes           Note[]
+  filesUploaded   FileAsset[]
+  dailyReports    DailyReport[]
+  commissions     Commission[]         @relation("CommissionUser")
+  overridesEarned CommissionOverride[] @relation("OverrideBeneficiary")
+  overridesOnMe   CommissionOverride[] @relation("OverrideSource")
+  payrollItems    PayrollItem[]
+  activityLogs    ActivityLog[]
+  crewMemberships CrewMember[]
+  invitationsSent Invitation[]         @relation("InviteInviter")
+  passwordResets  PasswordResetToken[]
+  notifications   Notification[]
+
+  conversationsCreated Conversation[]       @relation("ConversationCreator")
+  conversationMembers  ConversationMember[] @relation("ConvMemberUser")
+  messagesSent         Message[]            @relation("MessageSender")
+  knocks               Knock[]              @relation("KnockRep")
+  territoriesAssigned  Territory[]          @relation("TerritoryRep")
+  territoriesCreated   Territory[]          @relation("TerritoryCreator")
+  onboarding           UserOnboarding?
+
+  @@unique([companyId, email])
+  @@index([companyId, role, status])
+  @@index([companyId, salesRepId])
+  @@index([companyId, managerId])
+  @@map("users")
+}
+
+model Invitation {
+  id          String    @id @default(uuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email       String
+  role        Role
+  tokenHash   String    @unique
+  invitedById String?
+  invitedBy   User?     @relation("InviteInviter", fields: [invitedById], references: [id])
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([companyId, email])
+  @@map("invitations")
+}
+
+model PasswordResetToken {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("password_reset_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// CRM: leads, pipeline, projects
+// ---------------------------------------------------------------------------
+
+model LeadSource {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  leads Lead[]
+
+  @@unique([companyId, name])
+  @@map("lead_sources")
+}
+
+model Pipeline {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  industry  Industry @default(roofing) // each industry has its own pipeline + stages
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  stages PipelineStage[]
+  leads  Lead[]
+
+  @@unique([companyId, name])
+  @@index([companyId, industry])
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id         String   @id @default(uuid())
+  pipelineId String
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name       String
+  key        String
+  position   Int      @default(0)
+  color      String   @default("#A1A1AA")
+  isWon      Boolean  @default(false)
+  isLost     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  leads Lead[]
+
+  @@unique([pipelineId, key])
+  @@map("pipeline_stages")
+}
+
+model Lead {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Contact
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  address   String?
+  city      String?
+  state     String?
+  zip       String?
+
+  // Pipeline
+  pipelineId String?
+  pipeline   Pipeline?      @relation(fields: [pipelineId], references: [id])
+  stageId    String?
+  stage      PipelineStage? @relation(fields: [stageId], references: [id])
+  position   Int            @default(0) // order within stage column
+
+  // Which isolated industry workspace this deal belongs to (Roofing/Solar/Water).
+  industry    Industry    @default(roofing)
+  status      LeadStatus  @default(open)
+  serviceType ServiceType @default(roofing)
+  priority    Priority    @default(medium)
+  value       Int         @default(0) // estimated job value (rep's estimate), cents
+  // The CONTRACT price from the insurance scope, set after the Scope Received
+  // inspection. When set, this (not `value`) is the deal's contract value and
+  // drives the profit pool / commissions. Cents.
+  claimPrice  Int?
+
+  // Estimated property (home) value, carried from a canvassing knock. Cents.
+  propertyValue       Int?
+  propertyValueSource String?
+  // Full estimate snapshot: range, confidence, last sale, assessed, beds/baths/sqft/year.
+  propertyData        Json?
+
+  sourceId String?
+  source   LeadSource? @relation(fields: [sourceId], references: [id])
+
+  assignedRepId String?
+  assignedRep   User?   @relation("LeadAssignedRep", fields: [assignedRepId], references: [id])
+  createdById   String?
+  createdBy     User?   @relation("LeadCreatedBy", fields: [createdById], references: [id])
+
+  // Linked customer portal user (role=customer)
+  customerUserId String?
+  customerUser   User?   @relation("LeadCustomerUser", fields: [customerUserId], references: [id])
+
+  appointmentAt          DateTime?
+  // Outcome of running the appointment (e.g. sold, follow-up, no-show) + a note.
+  appointmentDisposition String?
+  appointmentNote        String?
+  // Inspection result recorded after the appointment / when opening the claim + a note.
+  inspectionOutcome      String?
+  inspectionNote         String?
+  claimStatus            ClaimStatus @default(not_filed)
+  notes                  String?
+  customFields           Json        @default("{}")
+
+  // When the deal last entered its current pipeline stage — drives the
+  // "days in this status" age badge on pipeline cards. Null = use createdAt.
+  stageChangedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project          Project?
+  claims           Claim[]
+  roofMeasurements RoofMeasurement[]
+  tasks            Task[]
+  noteEntries      Note[]
+  files            FileAsset[]
+  documentPackages DocumentPackage[]
+  activityLogs     ActivityLog[]
+  knocks           Knock[]           @relation("KnockLead")
+  roofReport       RoofReport?
+  scope            ScopeOfWork?
+
+  @@index([companyId, stageId])
+  @@index([companyId, assignedRepId])
+  @@index([companyId, status])
+  @@index([companyId, industry])
+  @@map("leads")
+}
+
+model Project {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId    String  @unique
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  projectNumber String
+  status        ProjectStatus @default(not_started)
+  serviceType   ServiceType   @default(roofing)
+  priority      Priority      @default(medium)
+
+  managerId String?
+  manager   User?   @relation("ProjectManager", fields: [managerId], references: [id])
+
+  // Property / scope
+  address             String?
+  city                String?
+  state               String?
+  zip                 String?
+  roofingType         String?
+  materialSelection   String?
+  squares             Float?
+  pitch               String?
+  tearOffLayers       Int?
+  contractValue       Int     @default(0) // cents (base scope)
+  // Approved supplement + customer-paid deductible. Both add to the effective
+  // contract value used for the profit-pool / rep-commission math.
+  supplementCents     Int     @default(0)
+  deductibleCents     Int     @default(0)
+  depreciationCents   Int     @default(0)
+  // Per-deal: is the supplement / depreciation included in the rep+manager split
+  // pool? Off when the rep is paid upfront and the company waits on that money.
+  // The deductible is never in the split pool — the rep is paid its own % of it.
+  repGetsSupplement   Boolean @default(true)
+  repGetsDepreciation Boolean @default(true)
+  // True when the COMPANY provided the lead/appointment (vs. rep self-gen). Picks
+  // which rep split applies: providedLeadSplitPct vs the standard commissionSplitPct.
+  companyProvidedLead Boolean @default(false)
+
+  // Scheduling / production
+  scheduledStart    DateTime?
+  scheduledEnd      DateTime?
+  // Insurance adjuster meeting date (set once the deal reaches adjuster-scheduled).
+  adjusterMeetingAt DateTime?
+  // Scheduled installation date.
+  installDate       DateTime?
+  completedAt       DateTime?
+  notes             String?
+  customFields      Json      @default("{}")
+
+  // Closeout
+  qcChecklist   Json @default("[]") // [{ label, done }]
+  closeoutSheet Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  claims           Claim[]
+  roofMeasurements RoofMeasurement[]
+  crewAssignments  ProjectCrew[]
+  tasks            Task[]
+  noteEntries      Note[]
+  files            FileAsset[]
+  dailyReports     DailyReport[]
+  documentPackages DocumentPackage[]
+  invoices         Invoice[]
+  commissions      Commission[]
+  activityLogs     ActivityLog[]
+  costs            ProjectCost[]
+
+  @@unique([companyId, projectNumber])
+  @@index([companyId, status])
+  @@index([companyId, managerId])
+  @@map("projects")
+}
+
+enum ProjectCostType {
+  labor
+  material
+  other
+}
+
+// A per-deal cost line (labor/material invoice). Sum of these is the job cost
+// subtracted (with company overhead) before the rep/company profit split.
+model ProjectCost {
+  id          String          @id @default(uuid())
+  companyId   String // scalar tenancy key
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type        ProjectCostType @default(material)
+  label       String // invoice name / description
+  vendor      String? // who it's from (installer / supplier)
+  amount      Int             @default(0) // cents
+  fileAssetId String? // optional attached invoice
+  createdById String?
+  createdAt   DateTime        @default(now())
+
+  @@index([companyId, projectId])
+  @@map("project_costs")
+}
+
+// ---------------------------------------------------------------------------
+// Insurance claims (roofing / storm)
+// ---------------------------------------------------------------------------
+
+model Claim {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
+
+  carrier                 String?
+  claimNumber             String?
+  policyNumber            String?
+  adjusterName            String?
+  adjusterPhone           String?
+  adjusterEmail           String?
+  lossDate                DateTime?
+  adjusterMeetingAt       DateTime?
+  status                  ClaimStatus @default(filed)
+  rcv                     Int         @default(0) // replacement cost value, cents
+  acv                     Int         @default(0) // actual cash value, cents
+  deductible              Int         @default(0)
+  depreciation            Int         @default(0)
+  // Roof information for the claim worksheet.
+  roofSquares             Float?
+  wasteFactorPct          Float?
+  pitch                   String?
+  storyCount              Int?
+  // Flagged supplement opportunities (array of keys, e.g. ["drip_edge","ice_water"]).
+  supplementOpportunities Json        @default("[]")
+  notes                   String?
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  lineItems   ClaimLineItem[]
+  supplements ClaimSupplement[]
+
+  @@index([companyId, leadId])
+  @@map("claims")
+}
+
+model ClaimLineItem {
+  id            String   @id @default(uuid())
+  claimId       String
+  claim         Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  code          String?
+  description   String
+  quantity      Float    @default(1)
+  unit          String?
+  unitPrice     Int      @default(0) // cents
+  rcv           Int      @default(0)
+  depreciation  Int      @default(0)
+  isRecoverable Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  @@index([claimId])
+  @@map("claim_line_items")
+}
+
+model ClaimSupplement {
+  id               String   @id @default(uuid())
+  claimId          String
+  claim            Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  supplementNumber String
+  status           String   @default("requested")
+  requestedAmount  Int      @default(0)
+  approvedAmount   Int      @default(0)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([claimId])
+  @@map("claim_supplements")
+}
+
+model RoofMeasurement {
+  id           String   @id @default(uuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId       String
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId    String?
+  project      Project? @relation(fields: [projectId], references: [id])
+  source       String   @default("manual") // eagleview | hover | gaf | manual
+  totalSquares Float    @default(0)
+  wastePct     Float    @default(10)
+  pitch        String?
+  ridgeLf      Float    @default(0)
+  hipLf        Float    @default(0)
+  valleyLf     Float    @default(0)
+  eaveLf       Float    @default(0)
+  rakeLf       Float    @default(0)
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@index([companyId, leadId])
+  @@map("roof_measurements")
+}
+
+// ---------------------------------------------------------------------------
+// Crews & production
+// ---------------------------------------------------------------------------
+
+model Crew {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  leadName  String?
+  phone     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  members     CrewMember[]
+  assignments ProjectCrew[]
+
+  @@unique([companyId, name])
+  @@map("crews")
+}
+
+model CrewMember {
+  id        String   @id @default(uuid())
+  crewId    String
+  crew      Crew     @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  name      String
+  role      String   @default("installer")
+  payRate   Int      @default(0) // cents per square or hour, interpreted by rule
+  createdAt DateTime @default(now())
+
+  @@index([crewId])
+  @@map("crew_members")
+}
+
+model ProjectCrew {
+  id            String    @id @default(uuid())
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  crewId        String
+  crew          Crew      @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  role          String?
+  scheduledDate DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([projectId, crewId])
+  @@map("project_crews")
+}
+
+model DailyReport {
+  id               String   @id @default(uuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  reportedById     String?
+  reportedBy       User?    @relation(fields: [reportedById], references: [id])
+  date             DateTime @default(now())
+  squaresCompleted Float    @default(0)
+  crewSize         Int      @default(0)
+  weather          String?
+  summary          String?
+  createdAt        DateTime @default(now())
+
+  @@index([companyId, projectId])
+  @@map("daily_reports")
+}
+
+// ---------------------------------------------------------------------------
+// Tasks, notes, files, custom fields, activity
+// ---------------------------------------------------------------------------
+
+model Task {
+  id              String     @id @default(uuid())
+  companyId       String
+  company         Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title           String
+  description     String?
+  status          TaskStatus @default(todo)
+  priority        Priority   @default(medium)
+  // Industry workspace this task belongs to (isolates Roofing / Solar / Water tasks).
+  industry        Industry   @default(roofing)
+  dueAt           DateTime?
+  leadId          String?
+  lead            Lead?      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId       String?
+  project         Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assigneeId      String?
+  assignee        User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdById     String?
+  createdBy       User?      @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  // Completion stamp (who/when) for "took X days" duration tracking.
+  completedAt     DateTime?
+  completedById   String?
+  completedByName String? // denormalized so it survives user changes
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([companyId, assigneeId, status])
+  @@index([companyId, createdById])
+  @@index([companyId, industry])
+  @@map("tasks")
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  body      String
+  // Optional placement tag: null = general note; "appointment_outcome" /
+  // "inspection_outcome" = an immutable note shown under that outcome.
+  context   String?
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([companyId, leadId])
+  @@index([companyId, projectId])
+  @@map("notes")
+}
+
+model FileAsset {
+  id                  String             @id @default(uuid())
+  companyId           String
+  company             Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  kind                FileKind           @default(document)
+  name                String
+  storageKey          String
+  mimeType            String?
+  size                Int                @default(0)
+  category            String? // e.g. "before", "after", "contract", or a photo slot label
+  leadId              String?
+  lead                Lead?              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId           String?
+  project             Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // CompanyCam-style: links a photo to a checklist slot.
+  photoTemplateItemId String?
+  photoTemplateItem   PhotoTemplateItem? @relation(fields: [photoTemplateItemId], references: [id], onDelete: SetNull)
+  // Team-chat attachments: a file shared in a conversation (linked to its message).
+  conversationId      String?
+  conversation        Conversation?      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messageId           String?
+  message             Message?           @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  uploadedById        String?
+  uploadedBy          User?              @relation(fields: [uploadedById], references: [id])
+  createdAt           DateTime           @default(now())
+
+  signedPackages DocumentPackage[] @relation("PackageSignedFile")
+
+  @@index([companyId, projectId])
+  @@index([companyId, leadId])
+  @@index([photoTemplateItemId])
+  @@index([conversationId])
+  @@index([messageId])
+  @@map("files")
+}
+
+enum PhotoTemplateKind {
+  site // site / inspection photos
+  install
+}
+
+model PhotoTemplate {
+  id        String            @id @default(uuid())
+  companyId String
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  kind      PhotoTemplateKind
+  position  Int               @default(0)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  items PhotoTemplateItem[]
+
+  @@index([companyId, kind])
+  @@map("photo_templates")
+}
+
+model PhotoTemplateItem {
+  id         String        @id @default(uuid())
+  templateId String
+  template   PhotoTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  label      String
+  required   Boolean       @default(false)
+  position   Int           @default(0)
+
+  files FileAsset[]
+
+  @@index([templateId])
+  @@map("photo_template_items")
+}
+
+model CustomFieldDef {
+  id        String            @id @default(uuid())
+  companyId String
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  entity    CustomFieldEntity
+  key       String
+  label     String
+  type      CustomFieldType   @default(text)
+  options   Json              @default("[]")
+  required  Boolean           @default(false)
+  position  Int               @default(0)
+  createdAt DateTime          @default(now())
+
+  @@unique([companyId, entity, key])
+  @@map("custom_field_defs")
+}
+
+model ActivityLog {
+  id        String       @id @default(uuid())
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type      ActivityType @default(system)
+  message   String
+  actorId   String?
+  actor     User?        @relation(fields: [actorId], references: [id])
+  leadId    String?
+  lead      Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  metadata  Json         @default("{}")
+  ip        String?
+  createdAt DateTime     @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, projectId])
+  @@map("activity_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Document signer (DocuSign-style)
+// ---------------------------------------------------------------------------
+
+model DocumentTemplate {
+  id           String               @id @default(uuid())
+  companyId    String
+  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  type         DocumentTemplateType @default(custom)
+  // Industry workspace this contract template belongs to (each workspace has its own set).
+  industry     Industry             @default(roofing)
+  description  String?
+  // Page model: array of { width, height } in PDF points. Default = US Letter pages.
+  pages        Json                 @default("[]")
+  // Body content blocks rendered to PDF: [{ page, type:'heading'|'text', text, x, y }]
+  body         Json                 @default("[]")
+  // Storage key of an uploaded source PDF. When set, fields are stamped onto it.
+  sourcePdfKey String?
+  active       Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  fields   DocumentTemplateField[]
+  packages DocumentPackage[]
+
+  @@index([companyId, type])
+  @@index([companyId, industry])
+  @@map("document_templates")
+}
+
+model DocumentTemplateField {
+  id           String             @id @default(uuid())
+  templateId   String
+  template     DocumentTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  page         Int                @default(1)
+  x            Float
+  y            Float
+  width        Float              @default(160)
+  height       Float              @default(40)
+  type         DocumentFieldType
+  signerRole   DocumentSignerRole @default(customer)
+  label        String?
+  required     Boolean            @default(true)
+  // Auto-fill token, e.g. {{customer.fullName}}, {{project.address}}
+  valueToken   String?
+  // Fallback value used when the bound CRM field is empty for a given record.
+  defaultValue String?
+  createdAt    DateTime           @default(now())
+
+  @@index([templateId])
+  @@map("document_template_fields")
+}
+
+model DocumentPackage {
+  id           String                @id @default(uuid())
+  companyId    String
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  templateId   String?
+  template     DocumentTemplate?     @relation(fields: [templateId], references: [id])
+  leadId       String?
+  lead         Lead?                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId    String?
+  project      Project?              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title        String
+  status       DocumentPackageStatus @default(draft)
+  // Snapshot of template body + fields at send time so edits don't mutate sent docs
+  snapshot     Json                  @default("{}")
+  signedFileId String?
+  signedFile   FileAsset?            @relation("PackageSignedFile", fields: [signedFileId], references: [id])
+  sentAt       DateTime?
+  completedAt  DateTime?
+  voidedAt     DateTime?
+  expiresAt    DateTime?
+  createdById  String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  signers DocumentSigner[]
+  values  DocumentFieldValue[]
+  events  DocumentEvent[]
+
+  @@index([companyId, status])
+  @@index([companyId, projectId])
+  @@map("document_packages")
+}
+
+model DocumentSigner {
+  id            String             @id @default(uuid())
+  companyId     String
+  packageId     String
+  package       DocumentPackage    @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  role          DocumentSignerRole
+  order         Int                @default(1)
+  name          String
+  email         String?
+  status        SignerStatus       @default(pending)
+  tokenHash     String             @unique
+  signatureType SignatureType?
+  signatureData String? // data URL of drawn/typed signature image
+  consentAt     DateTime?
+  viewedAt      DateTime?
+  signedAt      DateTime?
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime           @default(now())
+
+  values DocumentFieldValue[]
+
+  @@index([companyId, packageId, order])
+  @@map("document_signers")
+}
+
+// Filled value for a field (per package), captured at signing time.
+model DocumentFieldValue {
+  id        String            @id @default(uuid())
+  packageId String
+  package   DocumentPackage   @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  signerId  String?
+  signer    DocumentSigner?   @relation(fields: [signerId], references: [id], onDelete: Cascade)
+  fieldKey  String // template field id reference within snapshot
+  type      DocumentFieldType
+  page      Int               @default(1)
+  x         Float             @default(0)
+  y         Float             @default(0)
+  width     Float             @default(160)
+  height    Float             @default(40)
+  value     String? // text/date/checkbox value or signature data URL
+  filledAt  DateTime?
+
+  @@index([packageId])
+  @@map("document_field_values")
+}
+
+model DocumentEvent {
+  id        String            @id @default(uuid())
+  companyId String
+  packageId String
+  package   DocumentPackage   @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  signerId  String?
+  type      DocumentEventType
+  actor     String? // name/email/system
+  ip        String?
+  userAgent String?
+  metadata  Json              @default("{}")
+  createdAt DateTime          @default(now())
+
+  @@index([companyId, packageId, createdAt])
+  @@map("document_events")
+}
+
+// ---------------------------------------------------------------------------
+// Payroll & commissions
+// ---------------------------------------------------------------------------
+
+model CommissionRule {
+  id          String         @id @default(uuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  // Commission category this rule pays out to. Not a user Role — it includes
+  // "project_manager" (the project's assigned manager via Project.managerId).
+  // One of: "sales_rep" | "manager" | "project_manager" | "installer".
+  role        String
+  type        CommissionType @default(percentage)
+  // For percentage: percent (e.g. 10 = 10% of base). For flat: amount cents. For job_cost: percent of margin.
+  percent     Float          @default(0)
+  flatAmount  Int            @default(0)
+  projectType String? // optional filter, matches Project.roofingType
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  commissions Commission[]
+
+  @@index([companyId, role])
+  @@map("commission_rules")
+}
+
+model Commission {
+  id             String              @id @default(uuid())
+  companyId      String
+  company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId      String
+  project        Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                @relation("CommissionUser", fields: [userId], references: [id])
+  ruleId         String?
+  rule           CommissionRule?     @relation(fields: [ruleId], references: [id])
+  // Set when this line is an override (X earns off Y's deal); distinguishes it
+  // from the recipient's own split line so both can coexist + recompute cleanly.
+  overrideId     String?
+  override       CommissionOverride? @relation(fields: [overrideId], references: [id], onDelete: SetNull)
+  label          String?
+  baseAmount     Int                 @default(0) // cents the commission was computed from
+  amount         Int                 @default(0) // computed commission, cents
+  // Snapshot of the split terms at generation time. Locked once created so editing
+  // a rep's split never changes existing deals; re-generating only refreshes the
+  // amount from current costs using THESE terms. amount = max(0, pool*splitPct% − splitFlatCents).
+  splitPct       Float?
+  splitFlatCents Int                 @default(0)
+  status         CommissionStatus    @default(pending)
+  notes          String?
+  approvedAt     DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  payrollItems PayrollItem[]
+
+  // One commission per (project, recipient, rule) — guards against duplicate generation.
+  @@unique([projectId, userId, ruleId])
+  @@index([companyId, userId, status])
+  @@index([companyId, projectId])
+  @@map("commissions")
+}
+
+// Person-to-person override: `beneficiary` earns a % of contract (or a flat
+// amount) on every deal whose assigned rep is `source`. E.g. a manager earning
+// 3% on a rep's deals, or a senior rep earning $500/deal off a junior rep.
+model CommissionOverride {
+  id            String         @id @default(uuid())
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  beneficiaryId String // who earns the override
+  beneficiary   User           @relation("OverrideBeneficiary", fields: [beneficiaryId], references: [id], onDelete: Cascade)
+  sourceId      String // whose deals trigger it (the assigned rep)
+  source        User           @relation("OverrideSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  type          CommissionType @default(percentage) // percentage (of contract) | flat
+  percent       Float          @default(0)
+  flatAmount    Int            @default(0) // cents per deal
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  commissions Commission[]
+
+  @@unique([companyId, beneficiaryId, sourceId])
+  @@index([companyId, sourceId])
+  @@map("commission_overrides")
+}
+
+model PayrollRun {
+  id          String        @id @default(uuid())
+  companyId   String
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label       String
+  periodStart DateTime
+  periodEnd   DateTime
+  status      PayrollStatus @default(draft)
+  notes       String?
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  items PayrollItem[]
+
+  @@index([companyId, status])
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id           String      @id @default(uuid())
+  payrollRunId String
+  payrollRun   PayrollRun  @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User        @relation(fields: [userId], references: [id])
+  commissionId String?
+  // Cascade: deleting a commission removes its payroll line so run totals can never
+  // count a commission that no longer exists (no stale snapshot, no dangling ref).
+  commission   Commission? @relation(fields: [commissionId], references: [id], onDelete: Cascade)
+  label        String
+  amount       Int         @default(0) // cents
+  paid         Boolean     @default(false)
+  notes        String?
+  createdAt    DateTime    @default(now())
+
+  @@index([payrollRunId])
+  @@map("payroll_items")
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId     String
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  invoiceNumber String
+  status        InvoiceStatus @default(draft)
+  amount        Int           @default(0) // cents
+  dueAt         DateTime?
+  paidAt        DateTime?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId, projectId])
+  @@map("invoices")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (customizable rules engine)
+// ---------------------------------------------------------------------------
+
+model NotificationRule {
+  id            String            @id @default(uuid())
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  event         NotificationEvent
+  // Event-specific match conditions, e.g. { "stageId": "..." } or { "status": "in_production" }.
+  conditions    Json              @default("{}")
+  // Who receives it: { roles: Role[], userIds: string[], dynamic: string[] }
+  // dynamic targets: assigned_rep | project_manager | customer | lead_creator | all_admins | all_managers
+  recipients    Json              @default("{}")
+  // Channels: ["in_app","email","sms"]
+  channels      Json              @default("[\"in_app\"]")
+  titleTemplate String
+  bodyTemplate  String
+  active        Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  notifications Notification[]
+
+  @@index([companyId, event, active])
+  @@map("notification_rules")
+}
+
+model Notification {
+  id        String              @id @default(uuid())
+  companyId String
+  company   Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ruleId    String?
+  rule      NotificationRule?   @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  event     NotificationEvent
+  title     String
+  body      String
+  link      String?
+  channel   NotificationChannel @default(in_app)
+  read      Boolean             @default(false)
+  readAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  @@index([companyId, userId, read, createdAt])
+  @@map("notifications")
+}
+
+// --- Internal team chat ---------------------------------------------------
+
+enum ConversationType {
+  dm
+  channel
+}
+
+model Conversation {
+  id            String           @id @default(uuid())
+  companyId     String
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type          ConversationType
+  name          String? // channel name; null for DMs
+  dmKey         String? // sorted "userA:userB" for DM uniqueness; null for channels
+  createdById   String?
+  createdBy     User?            @relation("ConversationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  lastMessageAt DateTime         @default(now())
+  createdAt     DateTime         @default(now())
+
+  members     ConversationMember[]
+  messages    Message[]
+  attachments FileAsset[]
+
+  @@unique([companyId, dmKey])
+  @@index([companyId, lastMessageAt])
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation("ConvMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt     DateTime?
+  joinedAt       DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String?
+  sender         User?        @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  body           String
+  createdAt      DateTime     @default(now())
+
+  attachments FileAsset[]
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// --- Door-to-door canvassing (SalesRabbit-style) --------------------------
+
+enum KnockDisposition {
+  not_knocked // auto-generated address pin, blank state (hollow)
+  not_home
+  not_interested
+  callback
+  appointment
+  sold
+  not_qualified
+  dnk // do not knock
+}
+
+model Territory {
+  id            String   @id @default(uuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  color         String   @default("#F4631E")
+  polygon       Json // array of [lat, lng] pairs
+  assignedRepId String?
+  assignedRep   User?    @relation("TerritoryRep", fields: [assignedRepId], references: [id], onDelete: SetNull)
+  createdById   String?
+  createdBy     User?    @relation("TerritoryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  knocks Knock[]
+  reps   TerritoryRep[]
+
+  @@index([companyId])
+  @@index([companyId, assignedRepId])
+  @@map("territories")
+}
+
+// Join: one or more reps assigned to a territory (multi-rep). assignedRepId on
+// Territory remains the "primary" rep; this table holds the full assigned set.
+model TerritoryRep {
+  id          String    @id @default(uuid())
+  territoryId String
+  territory   Territory @relation(fields: [territoryId], references: [id], onDelete: Cascade)
+  userId      String // scalar tenancy/user key (query by userId for scoping)
+  createdAt   DateTime  @default(now())
+
+  @@unique([territoryId, userId])
+  @@index([userId])
+  @@map("territory_reps")
+}
+
+model Knock {
+  id                  String           @id @default(uuid())
+  companyId           String
+  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  repId               String?
+  rep                 User?            @relation("KnockRep", fields: [repId], references: [id], onDelete: SetNull)
+  territoryId         String?
+  territory           Territory?       @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  lat                 Float
+  lng                 Float
+  address             String?
+  city                String?
+  state               String?
+  zip                 String?
+  disposition         KnockDisposition @default(not_home)
+  notes               String?
+  // Optional homeowner contact captured at the door (for lead conversion).
+  contactName         String?
+  contactPhone        String?
+  contactEmail        String?
+  bestTime            String? // best time to reach
+  // Cached estimated property value (cents) so we don't re-bill the AVM API per click.
+  propertyValue       Int?
+  propertyValueSource String?
+  propertyValueAt     DateTime?
+  propertyData        Json? // full estimate snapshot (range, last sale, assessed, structure)
+  appointmentAt       DateTime? // set when converted to an appointment
+  leadId              String?
+  lead                Lead?            @relation("KnockLead", fields: [leadId], references: [id], onDelete: SetNull)
+  knockedAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  events KnockEvent[]
+
+  @@index([companyId, repId])
+  @@index([companyId, territoryId])
+  @@index([companyId, lat, lng])
+  @@map("knocks")
+}
+
+// AVM property-value cache. Keyed by normalized address (or "lat,lng" fallback)
+// so estimates are reused across clicks/companies and we don't re-bill the API.
+// Not tenant-scoped: a home's value is the same regardless of who looks it up.
+model PropertyValue {
+  id         String   @id @default(uuid())
+  addressKey String   @unique // normalized address or "lat,lng"
+  address    String?
+  value      Int? // estimated value in cents; null = provider returned nothing
+  source     String // provider label, e.g. "RentCast", "Estated", "ATTOM"
+  confidence String? // high | medium | low
+  matched    Boolean  @default(false) // did we confidently match a real parcel?
+  data       Json? // full estimate: range, last sale, assessed, beds/baths/sqft/year
+  asOfDate   DateTime // the estimate's as-of date
+  fetchedAt  DateTime @default(now())
+
+  @@map("property_values")
+}
+
+// Per-house timeline: status changes + timestamped comments (visit history / audit).
+enum KnockEventType {
+  created
+  status_change
+  comment
+  contact_update
+  lead_created
+}
+
+model KnockEvent {
+  id          String            @id @default(uuid())
+  companyId   String // scalar tenancy key (no relation needed for the audit log)
+  knockId     String
+  knock       Knock             @relation(fields: [knockId], references: [id], onDelete: Cascade)
+  type        KnockEventType
+  body        String? // comment / note text
+  disposition KnockDisposition? // status at the time of the event
+  authorId    String?
+  authorName  String? // denormalized so history survives user deletion
+  createdAt   DateTime          @default(now())
+
+  @@index([companyId, knockId, createdAt])
+  @@map("knock_events")
+}
+
+// Aerial roof-measurement report traced on the lead detail page. One per lead
+// (re-editable). `facets` stores the traced geometry so it can be reopened.
+model RoofReport {
+  id               String   @id @default(uuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId           String   @unique
+  lead             Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  facets           Json // [{ id, points:[[lat,lng]], pitch, edgeTypes:[] }]
+  footprintArea    Float    @default(0) // sq ft
+  roofArea         Float    @default(0) // sloped sq ft
+  squares          Float    @default(0)
+  facetCount       Int      @default(0)
+  predominantPitch String?
+  perimeterFt      Float    @default(0)
+  ridgeFt          Float    @default(0)
+  hipFt            Float    @default(0)
+  valleyFt         Float    @default(0)
+  eaveFt           Float    @default(0)
+  rakeFt           Float    @default(0)
+  wastePct         Float    @default(12)
+  squaresToOrder   Float    @default(0)
+  preparedBy       String?
+  reportFileId     String? // generated PDF (FileAsset)
+  source           String   @default("manual_trace") // seam for EagleView/Hover/Nearmap
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([companyId])
+  @@map("roof_reports")
+}
+
+// ---------------------------------------------------------------------------
+// Bookkeeping (lightweight ledger: transactions → categories → P&L)
+// ---------------------------------------------------------------------------
+
+model BookkeepingCategory {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  // "income" | "expense" | "asset" | "liability" | "equity"
+  type      String   @default("expense")
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+
+  @@index([companyId, type])
+  @@map("bookkeeping_categories")
+}
+
+// Vendors / contractors (one concept) — the managed list a transaction is tagged to.
+model BookkeepingVendor {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@map("bookkeeping_vendors")
+}
+
+model Transaction {
+  id            String               @id @default(uuid())
+  companyId     String
+  company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  date          DateTime
+  description   String
+  // Signed cents: positive = money in (income/deposit), negative = money out (expense).
+  amountCents   Int
+  vendor        String?
+  account       String? // bank / ledger account name (e.g. "Operating Checking")
+  categoryId    String?
+  category      BookkeepingCategory? @relation(fields: [categoryId], references: [id])
+  // Tag a transaction to a deal or invoice (scalar links; resolved in queries).
+  projectId     String?
+  invoiceId     String?
+  status        String               @default("uncategorized") // uncategorized | categorized | reconciled
+  // Review workflow: a new/imported txn is auto-suggested a category+vendor, shown
+  // highlighted in "To review", and only booked once the user clicks Approve.
+  approved      Boolean              @default(false)
+  autoSuggested Boolean              @default(false)
+  source        String               @default("manual") // manual | import | bank | quickbooks
+  externalId    String? // dedup key for imported/synced rows
+  notes         String?
+  createdById   String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([companyId, date])
+  @@index([companyId, categoryId])
+  @@map("transactions")
+}
+
+// ---------------------------------------------------------------------------
+// User onboarding (W-9 / 1099 + direct deposit + ID docs). SSN + account number
+// are AES-encrypted at rest; only last-4 is kept in clear for display.
+// ---------------------------------------------------------------------------
+model UserOnboarding {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Identity
+  legalFirstName    String?
+  legalMiddleName   String?
+  legalLastName     String?
+  dateOfBirth       DateTime?
+  ssnEnc            String?
+  ssnLast4          String?
+  address           String?
+  city              String?
+  state             String?
+  zip               String?
+  // Direct deposit
+  bankName          String?
+  routingNumber     String?
+  accountEnc        String?
+  accountLast4      String?
+  accountType       String? // "checking" | "savings"
+  // Tax / W-9 (for 1099)
+  taxClassification String? // individual | sole_prop | llc | s_corp | c_corp | partnership
+  businessName      String?
+  einEnc            String?
+  einLast4          String?
+  signatureName     String?
+  signedAt          DateTime?
+  // Document uploads (FileAsset ids)
+  idPhotoFileId     String?
+  ssnCardFileId     String?
+  voidedCheckFileId String?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("user_onboarding")
+}
+
+// ── Knowledge Base / Training ──────────────────────────────────────────────
+// Role-gated training library. A category is visible to a non-management user
+// only when their role is listed in `visibleRoles`; management roles see all.
+
+enum KnowledgeItemType {
+  file // uploaded PDF / doc / image (FileAsset)
+  video // embedded video URL (YouTube / Vimeo / Loom)
+  link // external resource URL
+  article // rich text written in-portal
+}
+
+model KnowledgeCategory {
+  id           String          @id @default(uuid())
+  companyId    String
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  industry     Industry        @default(roofing)
+  name         String
+  description  String?
+  position     Int             @default(0)
+  // Which roles may see this category. Management roles (super_admin/admin/manager)
+  // always see every category regardless of this list.
+  visibleRoles Role[]
+  items        KnowledgeItem[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([companyId, industry])
+  @@map("knowledge_categories")
+}
+
+model KnowledgeItem {
+  id          String            @id @default(uuid())
+  companyId   String
+  categoryId  String
+  category    KnowledgeCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  type        KnowledgeItemType
+  title       String
+  description String?
+  position    Int               @default(0)
+  fileId      String? // FileAsset id when type=file (plain column, like UserOnboarding)
+  url         String? // when type=video | link
+  body        String?           @db.Text // when type=article
+  createdById String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([companyId, categoryId])
+  @@map("knowledge_items")
+}
+
+// ── Scope of Work / Job Profitability Calculator ───────────────────────────
+// On-the-spot job costing: per line, what insurance pays vs. our cost → profit.
+// 1:1 with the lead/deal (scope is known at "Scope Received", before a Project).
+
+model ScopeOfWork {
+  id        String      @id @default(uuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId    String      @unique
+  lead      Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  industry  Industry    @default(roofing)
+  pdfFileId String? // uploaded carrier scope PDF (FileAsset id, plain column)
+  notes     String?
+  lines     ScopeLine[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([companyId, leadId])
+  @@map("scopes_of_work")
+}
+
+model ScopeLine {
+  id                 String      @id @default(uuid())
+  companyId          String
+  company            Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  scopeId            String
+  scope              ScopeOfWork @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+  position           Int         @default(0)
+  category           String      @default("General")
+  description        String      @default("")
+  quantity           Float       @default(0)
+  unit               String? // sq, sq ft, lf, ea
+  insuranceUnitPrice Int         @default(0) // cents — what the carrier pays per unit
+  costUnitPrice      Int         @default(0) // cents — our cost per unit
+  createdAt          DateTime    @default(now())
+
+  @@index([scopeId])
+  @@map("scope_lines")
+}
+
+model ScopeTemplateItem {
+  id                        String   @id @default(uuid())
+  companyId                 String
+  company                   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  industry                  Industry @default(roofing)
+  position                  Int      @default(0)
+  category                  String   @default("General")
+  description               String   @default("")
+  unit                      String?
+  defaultInsuranceUnitPrice Int      @default(0) // cents
+  defaultCostUnitPrice      Int      @default(0) // cents
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@index([companyId, industry])
+  @@map("scope_template_items")
+}

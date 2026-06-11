@@ -1,0 +1,317 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/server/db/client";
+import { requireUser } from "@/server/auth/session";
+import { requireCan, can } from "@/server/rbac/guards";
+import { fireEvent } from "@/server/modules/notifications/engine";
+import { sendEmailWithAttachments } from "@/server/modules/notifications/delivery";
+import { formatCents } from "@/lib/format";
+import { computeCommissionsForProject } from "./engine";
+import { getCommissionEligibleStageIds, COMMISSION_GATE_LABEL } from "./eligibility";
+import { getPayStubData, getRunStubList, buildPayStubPdf } from "./paystub";
+
+function fail(error: string) {
+  return { ok: false as const, error };
+}
+function ok<T extends object = object>(data?: T) {
+  return { ok: true as const, ...(data ?? {}) };
+}
+
+// --------------------------- Commission generation ---------------------------
+
+export async function generateCommissionsAction() {
+  const user = await requireUser();
+  if (!can(user, "update", "Commission")) return fail("Not allowed.");
+
+  // Only deals that have reached the "Depreciation Requested" stage (or later)
+  // are eligible — commissions/payroll can't be generated before then.
+  const eligibleStageIds = await getCommissionEligibleStageIds(user.companyId);
+  if (eligibleStageIds.size === 0) {
+    return { ok: true as const, created: 0, message: `No deals have reached ${COMMISSION_GATE_LABEL} yet.` };
+  }
+
+  const projects = await prisma.project.findMany({
+    where: { companyId: user.companyId, lead: { stageId: { in: [...eligibleStageIds] } } },
+    select: { id: true },
+  });
+
+  let created = 0;
+  for (const p of projects) {
+    created += await computeCommissionsForProject(prisma, user.companyId, p.id);
+  }
+  revalidatePath("/portal/commissions");
+  return { ok: true as const, created };
+}
+
+// --------------------------- Commission status ------------------------------
+
+async function setCommissionStatus(
+  userCompanyId: string,
+  id: string,
+  data: Prisma.CommissionUpdateInput
+) {
+  const c = await prisma.commission.findFirst({ where: { id, companyId: userCompanyId }, select: { id: true } });
+  if (!c) throw new Error("Commission not found.");
+  await prisma.commission.update({ where: { id }, data });
+}
+
+export async function approveCommissionAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "approve", "Commission")) return fail("Not allowed.");
+  await setCommissionStatus(user.companyId, id, { status: "approved", approvedAt: new Date() });
+  const commission = await prisma.commission.findUnique({ where: { id }, select: { projectId: true } });
+  await fireEvent({ companyId: user.companyId, event: "commission_approved", actorId: user.userId, projectId: commission?.projectId ?? null });
+  revalidatePath("/portal/commissions");
+  return ok();
+}
+
+export async function markCommissionPaidAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "approve", "Commission")) return fail("Not allowed.");
+  await setCommissionStatus(user.companyId, id, { status: "paid", paidAt: new Date() });
+  revalidatePath("/portal/commissions");
+  return ok();
+}
+
+export async function voidCommissionAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Commission")) return fail("Not allowed.");
+  await setCommissionStatus(user.companyId, id, { status: "void" });
+  revalidatePath("/portal/commissions");
+  return ok();
+}
+
+export async function approveAllPendingCommissionsAction() {
+  const user = await requireUser();
+  if (!can(user, "approve", "Commission")) return fail("Not allowed.");
+  const res = await prisma.commission.updateMany({
+    where: { companyId: user.companyId, status: "pending" },
+    data: { status: "approved", approvedAt: new Date() },
+  });
+  revalidatePath("/portal/commissions");
+  return { ok: true as const, count: res.count };
+}
+
+// --------------------------- Commission rules -------------------------------
+
+const ruleSchema = z.object({
+  name: z.string().min(1).max(120),
+  role: z.enum(["sales_rep", "manager", "project_manager", "installer"]),
+  type: z.enum(["percentage", "flat", "job_cost"]),
+  percent: z.number().min(0).max(100).default(0),
+  flatAmount: z.number().int().min(0).default(0), // cents
+  projectType: z.string().max(80).optional().or(z.literal("")),
+});
+
+export async function createCommissionRuleAction(input: z.infer<typeof ruleSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = ruleSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid rule.");
+  await prisma.commissionRule.create({
+    data: {
+      companyId: user.companyId,
+      name: parsed.data.name,
+      role: parsed.data.role,
+      type: parsed.data.type,
+      percent: parsed.data.percent,
+      flatAmount: parsed.data.flatAmount,
+      projectType: parsed.data.projectType || null,
+    },
+  });
+  revalidatePath("/portal/settings/commissions");
+  return ok();
+}
+
+export async function updateCommissionRuleAction(id: string, input: z.infer<typeof ruleSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = ruleSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid rule.");
+  const existing = await prisma.commissionRule.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!existing) return fail("Rule not found.");
+  await prisma.commissionRule.update({
+    where: { id },
+    data: {
+      name: parsed.data.name,
+      role: parsed.data.role,
+      type: parsed.data.type,
+      percent: parsed.data.percent,
+      flatAmount: parsed.data.flatAmount,
+      projectType: parsed.data.projectType || null,
+    },
+  });
+  revalidatePath("/portal/settings/commissions");
+  return ok();
+}
+
+export async function toggleCommissionRuleAction(id: string, active: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const existing = await prisma.commissionRule.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!existing) return fail("Rule not found.");
+  await prisma.commissionRule.update({ where: { id }, data: { active } });
+  revalidatePath("/portal/settings/commissions");
+  return ok();
+}
+
+export async function deleteCommissionRuleAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const existing = await prisma.commissionRule.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!existing) return fail("Rule not found.");
+  await prisma.commissionRule.delete({ where: { id } });
+  revalidatePath("/portal/settings/commissions");
+  return ok();
+}
+
+// --------------------------- Payroll runs -----------------------------------
+
+const runSchema = z.object({
+  label: z.string().min(1).max(120),
+  periodStart: z.string(),
+  periodEnd: z.string(),
+});
+
+export async function createPayrollRunAction(input: z.infer<typeof runSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Payroll")) return fail("Not allowed.");
+  const parsed = runSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid payroll period.");
+
+  const start = new Date(parsed.data.periodStart);
+  const end = new Date(parsed.data.periodEnd);
+  end.setHours(23, 59, 59, 999);
+
+  // Pull approved, not-yet-paid commissions in range that aren't already in a run.
+  const commissions = await prisma.commission.findMany({
+    where: {
+      companyId: user.companyId,
+      status: "approved",
+      createdAt: { gte: start, lte: end },
+      payrollItems: { none: {} },
+    },
+    include: { user: { select: { firstName: true, lastName: true } }, project: { select: { projectNumber: true } } },
+  });
+
+  if (commissions.length === 0) return fail("No approved commissions found in that period.");
+
+  const run = await prisma.payrollRun.create({
+    data: {
+      companyId: user.companyId,
+      label: parsed.data.label,
+      periodStart: start,
+      periodEnd: end,
+      status: "draft",
+      items: {
+        create: commissions.map((c) => ({
+          userId: c.userId,
+          commissionId: c.id,
+          label: `${c.label ?? "Commission"} — ${c.project.projectNumber}`,
+          amount: c.amount,
+        })),
+      },
+    },
+  });
+
+  revalidatePath("/portal/payroll");
+  return { ok: true as const, runId: run.id, items: commissions.length };
+}
+
+export async function approvePayrollRunAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "approve", "Payroll")) return fail("Not allowed.");
+  const run = await prisma.payrollRun.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!run) return fail("Run not found.");
+  await prisma.payrollRun.update({ where: { id }, data: { status: "approved", approvedAt: new Date() } });
+  await fireEvent({ companyId: user.companyId, event: "payroll_approved", actorId: user.userId });
+  revalidatePath(`/portal/payroll/${id}`);
+  revalidatePath("/portal/payroll");
+  return ok();
+}
+
+export async function markPayrollRunPaidAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Payroll")) return fail("Not allowed.");
+  const run = await prisma.payrollRun.findFirst({
+    where: { id, companyId: user.companyId },
+    include: { items: true },
+  });
+  if (!run) return fail("Run not found.");
+
+  const commissionIds = run.items.map((i) => i.commissionId).filter((x): x is string => !!x);
+
+  await prisma.$transaction([
+    prisma.payrollItem.updateMany({ where: { payrollRunId: id }, data: { paid: true } }),
+    prisma.commission.updateMany({
+      where: { id: { in: commissionIds } },
+      data: { status: "paid", paidAt: new Date() },
+    }),
+    prisma.payrollRun.update({ where: { id }, data: { status: "paid", paidAt: new Date() } }),
+  ]);
+
+  revalidatePath(`/portal/payroll/${id}`);
+  revalidatePath("/portal/payroll");
+  return ok();
+}
+
+// --------------------------- Pay stub email ----------------------------------
+
+const emailStubSchema = z.object({ runId: z.string().min(1), userId: z.string().min(1) });
+
+/** Email an employee their pay stub (PDF attached). */
+export async function emailPayStubAction(input: z.infer<typeof emailStubSchema>) {
+  const me = await requireUser();
+  if (!can(me, "export", "Payroll")) return fail("Not allowed.");
+  const parsed = emailStubSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid request.");
+
+  const data = await getPayStubData(me.companyId, parsed.data.runId, parsed.data.userId);
+  if (!data) return fail("No pay stub for this employee in this run.");
+  if (!data.employee.email) return fail("That employee has no email on file.");
+
+  const pdf = await buildPayStubPdf(data);
+  const gross = data.items.reduce((s, i) => s + i.amount, 0);
+  await sendEmailWithAttachments(
+    data.employee.email,
+    `Your pay stub - ${data.run.label}`,
+    `Hi ${data.employee.firstName},\n\nAttached is your pay stub for ${data.run.label}. Net pay: ${formatCents(gross)}.\n\n- ${data.company.name}`,
+    [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }]
+  );
+  return { ok: true as const, email: data.employee.email, dev: !process.env.RESEND_API_KEY };
+}
+
+/** Email every employee in a run their own pay stub; returns a per-recipient summary. */
+export async function emailAllPayStubsAction(runId: string) {
+  const me = await requireUser();
+  if (!can(me, "export", "Payroll")) return fail("Not allowed.");
+  const list = await getRunStubList(me.companyId, runId);
+  if (list.length === 0) return fail("No pay stubs in this run.");
+
+  const results: { name: string; email: string | null; sent: boolean; error?: string }[] = [];
+  for (const data of list) {
+    const name = `${data.employee.firstName} ${data.employee.lastName}`.trim();
+    if (!data.employee.email) {
+      results.push({ name, email: null, sent: false, error: "No email on file" });
+      continue;
+    }
+    try {
+      const pdf = await buildPayStubPdf(data);
+      const gross = data.items.reduce((s, i) => s + i.amount, 0);
+      await sendEmailWithAttachments(
+        data.employee.email,
+        `Your pay stub - ${data.run.label}`,
+        `Hi ${data.employee.firstName},\n\nAttached is your pay stub for ${data.run.label}. Net pay: ${formatCents(gross)}.\n\n- ${data.company.name}`,
+        [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }]
+      );
+      results.push({ name, email: data.employee.email, sent: true });
+    } catch {
+      results.push({ name, email: data.employee.email, sent: false, error: "Send failed" });
+    }
+  }
+  const sent = results.filter((r) => r.sent).length;
+  return { ok: true as const, sent, total: results.length, results, dev: !process.env.RESEND_API_KEY };
+}

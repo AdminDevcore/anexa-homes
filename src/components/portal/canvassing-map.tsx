@@ -1,0 +1,235 @@
+"use client";
+
+import "leaflet/dist/leaflet.css";
+import * as React from "react";
+import L from "leaflet";
+import { MapContainer, TileLayer, Marker, Polygon, Popup, useMap } from "react-leaflet";
+import type { Map as LeafletMap } from "leaflet";
+import { dispositionMeta, type LatLng } from "@/lib/canvassing";
+import type { KnockDTO, TerritoryDTO } from "@/server/modules/canvassing/queries";
+
+export type Basemap = "satellite" | "street";
+
+export type Viewport = { minLat: number; minLng: number; maxLat: number; maxLng: number; zoom: number };
+
+function MapController({
+  onReady,
+  onMapClick,
+  onViewport,
+}: {
+  onReady: (map: LeafletMap) => void;
+  onMapClick: (lat: number, lng: number) => void;
+  onViewport: (v: Viewport) => void;
+}) {
+  const map = useMap();
+  const clickRef = React.useRef(onMapClick);
+  clickRef.current = onMapClick;
+  const vpRef = React.useRef(onViewport);
+  vpRef.current = onViewport;
+
+  React.useEffect(() => {
+    onReady(map);
+    const container = map.getContainer();
+
+    const report = () => {
+      const b = map.getBounds();
+      vpRef.current({
+        minLat: b.getSouth(),
+        minLng: b.getWest(),
+        maxLat: b.getNorth(),
+        maxLng: b.getEast(),
+        zoom: map.getZoom(),
+      });
+    };
+    map.on("moveend", report);
+    map.on("zoomend", report);
+    setTimeout(report, 300);
+
+    // Bind a plain DOM click on the container (Leaflet's own synthetic `click`
+    // doesn't fire reliably here). Ignore clicks on existing pins / territories /
+    // controls so those keep opening their own popups.
+    const handleClick = (ev: MouseEvent) => {
+      const t = ev.target as Element | null;
+      // Let pins, territory labels, popups, and controls handle their own clicks.
+      if (t && typeof t.closest === "function" && t.closest(".leaflet-marker-icon, .leaflet-popup, .leaflet-control")) {
+        return;
+      }
+      const ll = map.mouseEventToLatLng(ev);
+      clickRef.current(ll.lat, ll.lng);
+    };
+    // Capture phase: Leaflet stops click propagation before the bubble phase,
+    // so a normal listener never runs. Capture fires first and reliably.
+    container.addEventListener("click", handleClick, true);
+
+    const fix = () => map.invalidateSize();
+    const t1 = setTimeout(fix, 100);
+    const t2 = setTimeout(fix, 600);
+    const ro = new ResizeObserver(fix);
+    ro.observe(container);
+    window.addEventListener("resize", fix);
+
+    return () => {
+      container.removeEventListener("click", handleClick, true);
+      map.off("moveend", report);
+      map.off("zoomend", report);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      ro.disconnect();
+      window.removeEventListener("resize", fix);
+    };
+  }, [map, onReady]);
+  return null;
+}
+
+/** A colored map-pin (teardrop) carrying the disposition glyph — SalesRabbit-style.
+ *  Not-knocked houses render as a small hollow gray dot to read as "blank". */
+const iconCache = new Map<string, L.DivIcon>();
+function knockIcon(disposition: string): L.DivIcon {
+  const cached = iconCache.get(disposition);
+  if (cached) return cached;
+
+  let icon: L.DivIcon;
+  if (disposition === "not_knocked") {
+    icon = L.divIcon({
+      html: `<div style="width:14px;height:14px;border-radius:9999px;background:rgba(255,255,255,0.9);border:2px solid #94a3b8;box-shadow:0 1px 2px rgba(0,0,0,.3);"></div>`,
+      className: "anexa-knock-pin",
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+      popupAnchor: [0, -8],
+    });
+  } else {
+    const meta = dispositionMeta(disposition);
+    const html = `
+      <div style="position:relative;width:30px;height:40px;">
+        <svg width="30" height="40" viewBox="0 0 30 40" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15 0C7 0 .5 6.5.5 14.5c0 10 14.5 25 14.5 25s14.5-15 14.5-25C29.5 6.5 23 0 15 0z"
+            fill="${meta.color}" stroke="#ffffff" stroke-width="2.5"/>
+        </svg>
+        <span style="position:absolute;top:4px;left:0;width:30px;text-align:center;color:#fff;font-weight:800;font-size:15px;line-height:21px;font-family:system-ui,sans-serif;">${meta.glyph}</span>
+      </div>`;
+    icon = L.divIcon({ html, className: "anexa-knock-pin", iconSize: [30, 40], iconAnchor: [15, 40], popupAnchor: [0, -38] });
+  }
+  iconCache.set(disposition, icon);
+  return icon;
+}
+
+function centroid(points: LatLng[]): LatLng {
+  const n = points.length;
+  const sum = points.reduce((a, p) => [a[0] + p[0], a[1] + p[1]] as LatLng, [0, 0] as LatLng);
+  return [sum[0] / n, sum[1] / n];
+}
+
+function territoryLabelIcon(name: string, color: string, progress: string): L.DivIcon {
+  const safe = name.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const html = `<div style="white-space:nowrap;transform:translateX(-50%);background:${color};color:#fff;font-weight:700;font-size:12px;padding:3px 8px;border-radius:9999px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);font-family:system-ui,sans-serif;">${safe}<span style="opacity:.85;font-weight:600;"> · ${progress}</span></div>`;
+  return L.divIcon({ html, className: "anexa-territory-label", iconSize: [0, 0], iconAnchor: [0, 0] });
+}
+
+export type CanvassingMapProps = {
+  center: LatLng;
+  basemap: Basemap;
+  knocks: KnockDTO[];
+  territories: TerritoryDTO[];
+  drawPoints: LatLng[];
+  onMapClick: (lat: number, lng: number) => void;
+  onMapReady: (map: LeafletMap) => void;
+  onViewport: (v: Viewport) => void;
+  renderKnockPopup: (k: KnockDTO) => React.ReactNode;
+  renderTerritoryPopup: (t: TerritoryDTO) => React.ReactNode;
+  // When a rep is selected, the IDs of that rep's territories (emphasized; others dimmed).
+  highlightTerritoryIds?: Set<string> | null;
+};
+
+export function CanvassingMap({
+  center,
+  basemap,
+  knocks,
+  territories,
+  drawPoints,
+  onMapClick,
+  onMapReady,
+  onViewport,
+  renderKnockPopup,
+  renderTerritoryPopup,
+  highlightTerritoryIds,
+}: CanvassingMapProps) {
+  return (
+    <MapContainer center={center} zoom={16} scrollWheelZoom className="h-full w-full">
+      {basemap === "satellite" ? (
+        <>
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics"
+            maxZoom={19}
+          />
+          {/* Street/place labels on top of the imagery */}
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+            maxZoom={19}
+          />
+        </>
+      ) : (
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        />
+      )}
+
+      <MapController onReady={onMapReady} onMapClick={onMapClick} onViewport={onViewport} />
+
+      {territories.map((t) => {
+        if (t.polygon.length < 3) return null;
+        const c = centroid(t.polygon);
+        // Emphasize the selected rep's territories; dim the rest.
+        const dimmed = highlightTerritoryIds != null && !highlightTerritoryIds.has(t.id);
+        const emphasized = highlightTerritoryIds != null && highlightTerritoryIds.has(t.id);
+        return (
+          <React.Fragment key={t.id}>
+            {/* Non-interactive overlay so knocks can be logged anywhere inside it */}
+            <Polygon
+              positions={t.polygon}
+              interactive={false}
+              pathOptions={{
+                color: t.color,
+                fillColor: t.color,
+                fillOpacity: dimmed ? 0.04 : emphasized ? 0.22 : 0.12,
+                weight: emphasized ? 4 : dimmed ? 1 : 2,
+                opacity: dimmed ? 0.35 : 1,
+              }}
+            />
+            {/* Clickable name label at the center manages the territory */}
+            <Marker position={c} icon={territoryLabelIcon(t.name, t.color, `${t.knocked}/${t.total}`)}>
+              <Popup>{renderTerritoryPopup(t)}</Popup>
+            </Marker>
+          </React.Fragment>
+        );
+      })}
+
+      {knocks.map((k) => (
+        <Marker key={k.id} position={[k.lat, k.lng]} icon={knockIcon(k.disposition)}>
+          <Popup>{renderKnockPopup(k)}</Popup>
+        </Marker>
+      ))}
+
+      {/* In-progress territory drawing */}
+      {drawPoints.length >= 2 && (
+        <Polygon
+          positions={drawPoints}
+          pathOptions={{ color: "#F4631E", dashArray: "6", fillOpacity: 0.08, weight: 2 }}
+        />
+      )}
+      {drawPoints.map((p, i) => (
+        <Marker
+          key={`dp-${i}`}
+          position={p}
+          icon={L.divIcon({
+            html: '<div style="width:12px;height:12px;border-radius:9999px;background:#F4631E;border:2px solid #fff;"></div>',
+            className: "anexa-draw-vertex",
+            iconSize: [12, 12],
+            iconAnchor: [6, 6],
+          })}
+        />
+      ))}
+    </MapContainer>
+  );
+}
