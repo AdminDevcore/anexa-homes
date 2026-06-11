@@ -1,10 +1,18 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Star } from "lucide-react";
+import { headers } from "next/headers";
 import { Logo } from "@/components/marketing/logo";
 import { COMPANY } from "@/lib/site";
+import { brandingForHost } from "@/server/branding/resolve";
 
-export default function AuthLayout({ children }: { children: React.ReactNode }) {
+export default async function AuthLayout({ children }: { children: React.ReactNode }) {
+  const host = (await headers()).get("host");
+  const branding = await brandingForHost(host);
+  const companyName = branding?.companyName ?? "Anexa Homes";
+  const logoUrl = branding?.logoUrl ?? null;
+  const removePoweredBy = branding?.removePoweredBy ?? false;
+
   return (
     <div className="dark grid min-h-screen bg-background text-foreground lg:grid-cols-2">
       {/* Brand panel */}
@@ -17,16 +25,27 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
         {/* Hero emblem — the "A" mark, with the wordmark stacked underneath. */}
         <div className="relative flex flex-1 flex-col items-center justify-center gap-6 px-10">
-          <Image
-            src="/anexa-mark.png"
-            alt="Anexa Homes"
-            width={305}
-            height={329}
-            priority
-            className="h-44 w-auto object-contain opacity-95 xl:h-56"
-          />
+          {logoUrl ? (
+            <Image
+              src={logoUrl}
+              alt={companyName}
+              width={305}
+              height={329}
+              priority
+              className="h-44 w-auto object-contain opacity-95 xl:h-56"
+            />
+          ) : (
+            <Image
+              src="/anexa-mark.png"
+              alt="Anexa Homes"
+              width={305}
+              height={329}
+              priority
+              className="h-44 w-auto object-contain opacity-95 xl:h-56"
+            />
+          )}
           <span className="font-display text-2xl font-semibold uppercase tracking-[0.35em] text-white/90 xl:text-3xl">
-            Anexa Homes
+            {companyName}
           </span>
         </div>
         <div className="relative p-10">
@@ -45,6 +64,11 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             </span>
             Trusted by 600+ homeowners
           </div>
+          {!removePoweredBy && (
+            <div className="mt-8 text-xs text-white/40">
+              Powered by Anexa
+            </div>
+          )}
         </div>
       </div>
 
