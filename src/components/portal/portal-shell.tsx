@@ -93,7 +93,7 @@ export function PortalShell({
   );
 
   return (
-    <div className="flex min-h-screen bg-muted/30">
+    <div className="portal-root flex min-h-screen bg-muted/30">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-border bg-card lg:flex">
         <div className="flex h-16 items-center border-b border-border px-5">
