@@ -16,12 +16,13 @@ import { formatCents, formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ReviewSignButton } from "@/components/esign/review-sign-button";
 import { FilesSection } from "@/components/portal/files-section";
-import { COMPANY } from "@/lib/site";
+import { currentBranding } from "@/server/branding/resolve";
 
 export const metadata = { title: "My Portal" };
 
 export default async function CustomerPortalPage() {
   const user = await requireUser();
+  const branding = await currentBranding();
 
   const projectWhere = listScope(user, "Project") as Prisma.ProjectWhereInput;
   const docWhere = listScope(user, "Document") as Prisma.DocumentPackageWhereInput;
@@ -117,12 +118,14 @@ export default async function CustomerPortalPage() {
 
       <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center">
         <p className="text-sm text-muted-foreground">Questions about your project?</p>
-        <Button asChild variant="outline">
-          <a href={COMPANY.phoneHref}>
-            <Phone className="size-4 text-gold" />
-            Call your project team: {COMPANY.phone}
-          </a>
-        </Button>
+        {branding.supportPhone && (
+          <Button asChild variant="outline">
+            <a href={`tel:${branding.supportPhone.replace(/[^0-9+]/g, "")}`}>
+              <Phone className="size-4 text-gold" />
+              Call your project team: {branding.supportPhone}
+            </a>
+          </Button>
+        )}
       </div>
     </div>
   );
