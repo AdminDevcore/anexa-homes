@@ -1,5 +1,6 @@
 import type { NotificationChannel, NotificationEvent, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { brandingForCompany } from "@/server/branding/resolve";
 import type { RecipientConfig } from "./types";
 import { sendEmail, sendSms } from "./delivery";
 
@@ -89,6 +90,10 @@ async function run(args: FireArgs) {
 
   const link = buildLink(args, { leadId: lead?.id ?? leadForCtx?.id, projectId, documentId: doc?.id });
 
+  // --- Load branding for from-name override ---
+  const branding = await brandingForCompany(args.companyId);
+  const fromName = branding.emailFromName ?? branding.companyName;
+
   // --- Cache role lookups ---
   const roleCache = new Map<string, string[]>();
   async function usersByRoles(roles: string[]): Promise<string[]> {
@@ -143,7 +148,7 @@ async function run(args: FireArgs) {
           data: { companyId: args.companyId, userId: r.id, ruleId: rule.id, event: args.event, title, body, link, channel: "in_app" },
         });
       }
-      if (channels.includes("email") && r.email) await sendEmail(r.email, title, body);
+      if (channels.includes("email") && r.email) await sendEmail(r.email, title, body, { fromName });
       if (channels.includes("sms") && r.phone) await sendSms(r.phone, `${title}\n${body}`);
     }
   }

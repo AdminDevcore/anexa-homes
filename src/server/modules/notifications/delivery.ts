@@ -2,9 +2,18 @@
 // Email/SMS send through providers when configured, else log in dev so flows
 // remain testable without external accounts.
 
-export async function sendEmail(to: string, subject: string, body: string): Promise<void> {
+function buildFrom(fromName?: string): string {
+  if (fromName?.trim()) {
+    const addr = process.env.NOTIFY_EMAIL_FROM_ADDRESS ?? "notifications@anexahomes.com";
+    return `${fromName.trim()} <${addr}>`;
+  }
+  return process.env.NOTIFY_EMAIL_FROM
+    ?? `${process.env.NOTIFY_EMAIL_FROM_NAME ?? "Anexa Homes"} <${process.env.NOTIFY_EMAIL_FROM_ADDRESS ?? "notifications@anexahomes.com"}>`;
+}
+
+export async function sendEmail(to: string, subject: string, body: string, opts?: { fromName?: string }): Promise<void> {
   const key = process.env.RESEND_API_KEY;
-  const from = process.env.NOTIFY_EMAIL_FROM ?? "Anexa Homes <notifications@anexahomes.com>";
+  const from = buildFrom(opts?.fromName);
   if (!key) {
     console.log(`[email:dev] to=${to} subject="${subject}"\n${body}`);
     return;
@@ -25,10 +34,11 @@ export async function sendEmailWithAttachments(
   to: string,
   subject: string,
   body: string,
-  attachments: { filename: string; content: Buffer }[]
+  attachments: { filename: string; content: Buffer }[],
+  opts?: { fromName?: string }
 ): Promise<void> {
   const key = process.env.RESEND_API_KEY;
-  const from = process.env.NOTIFY_EMAIL_FROM ?? "Anexa Homes <notifications@anexahomes.com>";
+  const from = buildFrom(opts?.fromName);
   if (!key) {
     console.log(`[email:dev] to=${to} subject="${subject}" attachments=[${attachments.map((a) => `${a.filename} (${a.content.length}b)`).join(", ")}]\n${body}`);
     return;

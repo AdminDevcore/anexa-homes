@@ -7,6 +7,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { sendEmail } from "@/server/modules/notifications/delivery";
+import { brandingForCompany } from "@/server/branding/resolve";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -204,13 +205,16 @@ export async function inviteUserAction(input: z.infer<typeof inviteSchema>) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const inviteLink = `${appUrl}/invite/${raw}`;
   const company = await prisma.company.findUnique({ where: { id: me.companyId }, select: { name: true } });
+  const branding = await brandingForCompany(me.companyId);
+  const fromName = branding.emailFromName ?? branding.companyName;
   // Activation email — set a password, then complete onboarding.
   await sendEmail(
     email,
     `You're invited to join ${company?.name ?? "the team"} on Anexa Homes`,
     `Hi,\n\nYou've been invited to join ${company?.name ?? "the team"} on the Anexa Homes portal.\n\n` +
       `Activate your account and set your password here:\n${inviteLink}\n\n` +
-      `This link expires in 7 days. After signing in you'll complete a quick onboarding (your details for payroll/1099).\n\n— ${company?.name ?? "Anexa Homes"}`
+      `This link expires in 7 days. After signing in you'll complete a quick onboarding (your details for payroll/1099).\n\n— ${company?.name ?? "Anexa Homes"}`,
+    { fromName }
   ).catch(() => { /* best-effort; the link is still returned for manual sharing */ });
 
   revalidatePath("/portal/team");

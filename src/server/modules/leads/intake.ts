@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { serviceTypeFromSlug } from "@/lib/service-types";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
+import { brandingForCompany } from "@/server/branding/resolve";
 import { resolveStageForAppointment } from "./staging";
 import { COMPANY } from "@/lib/site";
 
@@ -164,17 +165,21 @@ export async function submitWebsiteLead(
 
   // Instant confirmation to the homeowner themselves (they aren't a CRM user,
   // so this goes direct rather than through the role-based engine).
-  await sendHomeownerConfirmation(data);
+  await sendHomeownerConfirmation(company.id, data);
 
   return { ok: true };
 }
 
-async function sendHomeownerConfirmation(data: WebsiteLeadInput): Promise<void> {
+async function sendHomeownerConfirmation(companyId: string, data: WebsiteLeadInput): Promise<void> {
+  const branding = await brandingForCompany(companyId);
+  const fromName = branding.emailFromName ?? branding.companyName;
+
   if (data.type === "careers") {
     await sendEmail(
       data.email,
       "We received your application — Anexa Homes",
-      `Hi ${data.firstName},\n\nThanks for applying to join the Anexa Homes team. Our hiring team will review your application and reach out soon.\n\n— Anexa Homes\n${COMPANY.phone}`
+      `Hi ${data.firstName},\n\nThanks for applying to join the Anexa Homes team. Our hiring team will review your application and reach out soon.\n\n— Anexa Homes\n${COMPANY.phone}`,
+      { fromName }
     );
     return;
   }
@@ -194,7 +199,7 @@ async function sendHomeownerConfirmation(data: WebsiteLeadInput): Promise<void> 
     `Need us sooner? Call ${COMPANY.phone}.\n\n— The Anexa Homes Team`;
 
   await Promise.allSettled([
-    sendEmail(data.email, subject, body),
+    sendEmail(data.email, subject, body, { fromName }),
     sendSms(
       data.phone,
       `Anexa Homes: Thanks ${data.firstName}! We received your request and will call you shortly. Questions? ${COMPANY.phone}`

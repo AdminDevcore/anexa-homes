@@ -8,6 +8,7 @@ import { requireUser } from "@/server/auth/session";
 import { requireCan, can } from "@/server/rbac/guards";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { sendEmailWithAttachments } from "@/server/modules/notifications/delivery";
+import { brandingForCompany } from "@/server/branding/resolve";
 import { formatCents } from "@/lib/format";
 import { computeCommissionsForProject } from "./engine";
 import { getCommissionEligibleStageIds, COMMISSION_GATE_LABEL } from "./eligibility";
@@ -273,13 +274,17 @@ export async function emailPayStubAction(input: z.infer<typeof emailStubSchema>)
   if (!data) return fail("No pay stub for this employee in this run.");
   if (!data.employee.email) return fail("That employee has no email on file.");
 
+  const branding = await brandingForCompany(me.companyId);
+  const fromName = branding.emailFromName ?? branding.companyName;
+
   const pdf = await buildPayStubPdf(data);
   const gross = data.items.reduce((s, i) => s + i.amount, 0);
   await sendEmailWithAttachments(
     data.employee.email,
     `Your pay stub - ${data.run.label}`,
     `Hi ${data.employee.firstName},\n\nAttached is your pay stub for ${data.run.label}. Net pay: ${formatCents(gross)}.\n\n- ${data.company.name}`,
-    [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }]
+    [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }],
+    { fromName }
   );
   return { ok: true as const, email: data.employee.email, dev: !process.env.RESEND_API_KEY };
 }
@@ -290,6 +295,9 @@ export async function emailAllPayStubsAction(runId: string) {
   if (!can(me, "export", "Payroll")) return fail("Not allowed.");
   const list = await getRunStubList(me.companyId, runId);
   if (list.length === 0) return fail("No pay stubs in this run.");
+
+  const branding = await brandingForCompany(me.companyId);
+  const fromName = branding.emailFromName ?? branding.companyName;
 
   const results: { name: string; email: string | null; sent: boolean; error?: string }[] = [];
   for (const data of list) {
@@ -305,7 +313,8 @@ export async function emailAllPayStubsAction(runId: string) {
         data.employee.email,
         `Your pay stub - ${data.run.label}`,
         `Hi ${data.employee.firstName},\n\nAttached is your pay stub for ${data.run.label}. Net pay: ${formatCents(gross)}.\n\n- ${data.company.name}`,
-        [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }]
+        [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }],
+        { fromName }
       );
       results.push({ name, email: data.employee.email, sent: true });
     } catch {
