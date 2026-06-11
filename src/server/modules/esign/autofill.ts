@@ -114,7 +114,7 @@ export const BASE_CATALOG: CatalogEntry[] = [
   { group: "Lead", token: "{{lead.source}}", label: "Lead source", sample: "Referral" },
   { group: "Lead", token: "{{lead.createdDate}}", label: "Created date", sample: "Jun 4, 2026" },
   { group: "Lead", token: "{{lead.status}}", label: "Lead status", sample: "Open" },
-  { group: "Company", token: "{{company.name}}", label: "Company name", sample: "Anexa Homes" },
+  { group: "Company", token: "{{company.name}}", label: "Company name", sample: "Your Company" },
   { group: "Company", token: "{{company.phone}}", label: "Company phone", sample: "(555) 200-7663" },
   { group: "Date", token: "{{today}}", label: "Today's date", sample: formatDate(new Date()) },
 ];

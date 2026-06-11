@@ -10,6 +10,8 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { computeRoof, type Facet, type LatLng } from "@/lib/roof";
+import { brandingForCompany } from "@/server/branding/resolve";
+import { formattersFor } from "@/lib/format-server";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -104,6 +106,8 @@ export async function generateRoofReportPdfAction(
   const report = await prisma.roofReport.findFirst({ where: { companyId: me.companyId, leadId } });
   if (!report) return fail("Trace and save the roof first.");
 
+  const branding = await brandingForCompany(me.companyId);
+  const formatters = formattersFor(branding);
   const facets = (report.facets as unknown as Facet[]) ?? [];
   const r = computeRoof(facets, report.wastePct);
 
@@ -114,7 +118,7 @@ export async function generateRoofReportPdfAction(
 
   // Header band
   page.drawRectangle({ x: 0, y: PAGE_H - 80, width: PAGE_W, height: 80, color: DARK });
-  page.drawText("Anexa Homes", { x: M, y: PAGE_H - 40, size: 20, font: bold, color: rgb(1, 1, 1) });
+  page.drawText(branding.companyName, { x: M, y: PAGE_H - 40, size: 20, font: bold, color: rgb(1, 1, 1) });
   page.drawText("Roof Measurement Report", { x: M, y: PAGE_H - 62, size: 12, font, color: ORANGE });
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
   page.drawText(dateStr, { x: PAGE_W - M - font.widthOfTextAtSize(dateStr, 10), y: PAGE_H - 40, size: 10, font, color: rgb(1, 1, 1) });
