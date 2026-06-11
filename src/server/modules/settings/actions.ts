@@ -213,8 +213,18 @@ export async function deleteCustomFieldAction(id: string) {
 
 const brandingSchema = z.object({
   logoUrl: z.string().max(500).optional().or(z.literal("")),
+  faviconUrl: z.string().max(500).optional().or(z.literal("")),
   primaryColor: z.string().min(1).max(20),
   accentColor: z.string().min(1).max(20),
+  fontFamily: z.string().max(80).optional().or(z.literal("")),
+  recordPrefix: z.string().max(8).optional().or(z.literal("")),
+  supportPhone: z.string().max(40).optional().or(z.literal("")),
+  supportEmail: z.string().max(120).optional().or(z.literal("")),
+  currencyCode: z.string().length(3),
+  locale: z.string().min(2).max(12),
+  emailFromName: z.string().max(80).optional().or(z.literal("")),
+  customDomain: z.string().max(255).optional().or(z.literal("")),
+  removePoweredBy: z.boolean().optional(),
 });
 
 export async function updateBrandingAction(input: z.infer<typeof brandingSchema>) {
@@ -222,21 +232,59 @@ export async function updateBrandingAction(input: z.infer<typeof brandingSchema>
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const parsed = brandingSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid branding values.");
-
+  const d = parsed.data;
+  const data = {
+    logoUrl: d.logoUrl || null,
+    faviconUrl: d.faviconUrl || null,
+    primaryColor: d.primaryColor,
+    accentColor: d.accentColor,
+    fontFamily: d.fontFamily || null,
+    recordPrefix: d.recordPrefix?.trim() || "",
+    supportPhone: d.supportPhone || null,
+    supportEmail: d.supportEmail || null,
+    currencyCode: d.currencyCode.toUpperCase(),
+    locale: d.locale,
+    emailFromName: d.emailFromName || null,
+    customDomain: d.customDomain?.trim().toLowerCase() || null,
+    removePoweredBy: d.removePoweredBy ?? false,
+  };
   await prisma.companySettings.upsert({
     where: { companyId: user.companyId },
-    update: {
-      logoUrl: parsed.data.logoUrl || null,
-      primaryColor: parsed.data.primaryColor,
-      accentColor: parsed.data.accentColor,
-    },
-    create: {
-      companyId: user.companyId,
-      logoUrl: parsed.data.logoUrl || null,
-      primaryColor: parsed.data.primaryColor,
-      accentColor: parsed.data.accentColor,
+    update: data,
+    create: { companyId: user.companyId, ...data },
+  });
+  revalidatePath("/portal/settings/branding");
+  revalidatePath("/portal", "layout");
+  return ok();
+}
+
+const companyIdentitySchema = z.object({
+  name: z.string().min(1).max(120),
+  address: z.string().max(200).optional().or(z.literal("")),
+  city: z.string().max(80).optional().or(z.literal("")),
+  state: z.string().max(40).optional().or(z.literal("")),
+  zip: z.string().max(20).optional().or(z.literal("")),
+  timezone: z.string().max(60),
+});
+
+export async function updateCompanyIdentityAction(input: z.infer<typeof companyIdentitySchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = companyIdentitySchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid company values.");
+  const d = parsed.data;
+  await prisma.company.update({
+    where: { id: user.companyId },
+    data: {
+      name: d.name,
+      address: d.address || null,
+      city: d.city || null,
+      state: d.state || null,
+      zip: d.zip || null,
+      timezone: d.timezone,
     },
   });
   revalidatePath("/portal/settings/branding");
+  revalidatePath("/portal", "layout");
   return ok();
 }

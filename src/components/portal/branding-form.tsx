@@ -7,22 +7,90 @@ import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { makeMoney, makeDate } from "@/lib/format-core";
 import { updateBrandingAction } from "@/server/modules/settings/actions";
+
+const FONT_FAMILIES = [
+  { value: "", label: "System default" },
+  { value: "Inter", label: "Inter" },
+  { value: "Roboto", label: "Roboto" },
+  { value: "Open Sans", label: "Open Sans" },
+  { value: "Lato", label: "Lato" },
+  { value: "Poppins", label: "Poppins" },
+  { value: "Source Sans 3", label: "Source Sans 3" },
+];
+
+const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "AUD", "MXN"];
+
+const LOCALES = [
+  { value: "en-US", label: "English (US)" },
+  { value: "en-GB", label: "English (UK)" },
+  { value: "en-CA", label: "English (Canada)" },
+  { value: "es-MX", label: "Spanish (Mexico)" },
+  { value: "fr-FR", label: "French" },
+  { value: "de-DE", label: "German" },
+];
 
 export function BrandingForm({
   initial,
 }: {
-  initial: { logoUrl: string; primaryColor: string; accentColor: string };
+  initial: {
+    logoUrl: string;
+    faviconUrl: string;
+    primaryColor: string;
+    accentColor: string;
+    fontFamily: string;
+    emailFromName: string;
+    recordPrefix: string;
+    supportPhone: string;
+    supportEmail: string;
+    currencyCode: string;
+    locale: string;
+    customDomain: string;
+    removePoweredBy: boolean;
+  };
 }) {
   const router = useRouter();
   const [logoUrl, setLogoUrl] = React.useState(initial.logoUrl);
+  const [faviconUrl, setFaviconUrl] = React.useState(initial.faviconUrl);
   const [primaryColor, setPrimaryColor] = React.useState(initial.primaryColor);
   const [accentColor, setAccentColor] = React.useState(initial.accentColor);
+  const [fontFamily, setFontFamily] = React.useState(initial.fontFamily);
+  const [emailFromName, setEmailFromName] = React.useState(initial.emailFromName);
+  const [recordPrefix, setRecordPrefix] = React.useState(initial.recordPrefix);
+  const [supportPhone, setSupportPhone] = React.useState(initial.supportPhone);
+  const [supportEmail, setSupportEmail] = React.useState(initial.supportEmail);
+  const [currencyCode, setCurrencyCode] = React.useState(initial.currencyCode);
+  const [locale, setLocale] = React.useState(initial.locale);
+  const [customDomain, setCustomDomain] = React.useState(initial.customDomain);
+  const [removePoweredBy, setRemovePoweredBy] = React.useState(initial.removePoweredBy);
   const [pending, setPending] = React.useState(false);
 
   async function save() {
     setPending(true);
-    const res = await updateBrandingAction({ logoUrl, primaryColor, accentColor });
+    const res = await updateBrandingAction({
+      logoUrl,
+      faviconUrl,
+      primaryColor,
+      accentColor,
+      fontFamily,
+      emailFromName,
+      recordPrefix,
+      supportPhone,
+      supportEmail,
+      currencyCode,
+      locale,
+      customDomain,
+      removePoweredBy,
+    });
     setPending(false);
     if (res.ok) {
       toast.success("Branding saved");
@@ -30,13 +98,25 @@ export function BrandingForm({
     } else toast.error(res.error);
   }
 
+  const formatter = makeMoney({ currency: currencyCode, locale });
+  const dateFormatter = makeDate({ locale });
+
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="space-y-6">
+      {/* Branding Card */}
       <div className="space-y-4 rounded-xl border border-border bg-card p-6">
+        <h3 className="font-medium">Branding</h3>
+
         <div className="space-y-1.5">
           <Label>Logo URL</Label>
           <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
         </div>
+
+        <div className="space-y-1.5">
+          <Label>Favicon URL</Label>
+          <Input value={faviconUrl} onChange={(e) => setFaviconUrl(e.target.value)} placeholder="https://…/favicon.ico" />
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label>Primary color</Label>
@@ -53,30 +133,130 @@ export function BrandingForm({
             </div>
           </div>
         </div>
-        <Button onClick={save} disabled={pending} className="bg-gold text-gold-foreground hover:bg-gold/90">
+
+        <div className="space-y-1.5">
+          <Label>Font Family</Label>
+          <Select value={fontFamily} onValueChange={setFontFamily}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FONT_FAMILIES.map((f) => (
+                <SelectItem key={f.value} value={f.value}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Email From Name</Label>
+          <Input value={emailFromName} onChange={(e) => setEmailFromName(e.target.value)} placeholder="e.g., Anexa Support" />
+        </div>
+
+        <Button onClick={save} disabled={pending} className="bg-gold text-gold-foreground hover:bg-gold/90 w-full">
           {pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Save branding
         </Button>
-      </div>
 
-      <div className="rounded-xl border border-border bg-card p-6">
-        <p className="mb-3 text-sm font-medium text-muted-foreground">Preview</p>
-        <div className="overflow-hidden rounded-xl border border-border">
-          <div className="flex items-center gap-3 p-4" style={{ backgroundColor: primaryColor }}>
-            {logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={logoUrl} alt="logo" className="h-7 object-contain" />
-            ) : (
-              <span className="font-display text-lg font-semibold text-white">Anexa Homes</span>
-            )}
-          </div>
-          <div className="space-y-3 p-4">
-            <div className="h-3 w-2/3 rounded bg-muted" />
-            <div className="h-3 w-1/2 rounded bg-muted" />
-            <button className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ backgroundColor: accentColor }}>
-              Request Inspection
-            </button>
+        {/* Preview */}
+        <div className="mt-6 border-t pt-4">
+          <p className="mb-3 text-sm font-medium text-muted-foreground">Preview</p>
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="flex items-center gap-3 p-4" style={{ backgroundColor: primaryColor }}>
+              {logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoUrl} alt="logo" className="h-7 object-contain" />
+              ) : (
+                <span className="font-display text-lg font-semibold text-white">Anexa</span>
+              )}
+            </div>
+            <div className="space-y-3 p-4">
+              <div className="text-sm text-foreground/60">{formatter(150000)} • {dateFormatter(new Date())}</div>
+              <button className="rounded-lg px-4 py-2 text-sm font-medium text-white" style={{ backgroundColor: accentColor }}>
+                Action
+              </button>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Localization & Support Card */}
+      <div className="space-y-4 rounded-xl border border-border bg-card p-6">
+        <h3 className="font-medium">Localization & Support</h3>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>Currency Code</Label>
+            <Select value={currencyCode} onValueChange={setCurrencyCode}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CURRENCIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Locale</Label>
+            <Select value={locale} onValueChange={setLocale}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LOCALES.map((l) => (
+                  <SelectItem key={l.value} value={l.value}>
+                    {l.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Record Prefix</Label>
+          <Input
+            value={recordPrefix}
+            onChange={(e) => setRecordPrefix(e.target.value.slice(0, 8))}
+            placeholder="e.g., SR"
+            maxLength={8}
+          />
+          <p className="text-xs text-muted-foreground">Used for new record numbers, e.g. SR-1001</p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Support Phone</Label>
+          <Input value={supportPhone} onChange={(e) => setSupportPhone(e.target.value)} placeholder="e.g., +1-800-555-0123" />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Support Email</Label>
+          <Input value={supportEmail} onChange={(e) => setSupportEmail(e.target.value)} placeholder="support@example.com" type="email" />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Custom Domain</Label>
+          <Input
+            value={customDomain}
+            onChange={(e) => setCustomDomain(e.target.value)}
+            placeholder="e.g., homes.example.com"
+          />
+          <p className="text-xs text-muted-foreground">Point a CNAME at your host, then enter it here</p>
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
+          <Label className="font-normal cursor-pointer">Remove "Powered by Anexa" branding</Label>
+          <Switch checked={removePoweredBy} onCheckedChange={setRemovePoweredBy} />
+        </div>
+
+        <Button onClick={save} disabled={pending} className="bg-gold text-gold-foreground hover:bg-gold/90 w-full">
+          {pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Save localization
+        </Button>
       </div>
     </div>
   );
