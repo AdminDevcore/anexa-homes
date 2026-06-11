@@ -12,7 +12,7 @@ import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
 import { can } from "@/server/rbac/guards";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
-import { formatCents, formatDate } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 import { Button } from "@/components/ui/button";
 import { ReviewSignButton } from "@/components/esign/review-sign-button";
 import { FilesSection } from "@/components/portal/files-section";
@@ -21,6 +21,7 @@ import { currentBranding } from "@/server/branding/resolve";
 export const metadata = { title: "My Portal" };
 
 export default async function CustomerPortalPage() {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   const branding = await currentBranding();
 
@@ -90,10 +91,10 @@ export default async function CustomerPortalPage() {
               </div>
               <div className="grid gap-4 p-5 sm:grid-cols-3">
                 <Info label="Roof System" value={p.materialSelection ?? p.roofingType ?? "—"} />
-                <Info label="Contract Value" value={formatCents(p.contractValue)} />
+                <Info label="Contract Value" value={fmt.money(p.contractValue)} />
                 <Info
                   label="Scheduled"
-                  value={p.scheduledStart ? formatDate(p.scheduledStart) : "To be scheduled"}
+                  value={p.scheduledStart ? fmt.date(p.scheduledStart) : "To be scheduled"}
                 />
               </div>
             </div>

@@ -10,7 +10,7 @@ import { listScope } from "@/server/rbac/policies";
 import { getActiveIndustry } from "@/server/auth/industry";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
-import { formatCents, formatDateTime } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel } from "@/lib/service-types";
 import {
   Table,
@@ -28,6 +28,7 @@ export default async function LeadsPage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   if (!can(user, "read", "Lead")) redirect("/portal/dashboard");
 
@@ -157,11 +158,11 @@ export default async function LeadsPage({
                     {l.assignedRep ? `${l.assignedRep.firstName} ${l.assignedRep.lastName}` : "Unassigned"}
                   </TableCell>
                   <TableCell className="text-right font-medium">
-                    {formatCents(l.value, { compact: true })}
+                    {fmt.money(l.value, { compact: true })}
                   </TableCell>
                   <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
                     {l.appointmentAt ? (
-                      formatDateTime(l.appointmentAt)
+                      fmt.dateTime(l.appointmentAt)
                     ) : (
                       <span className="text-muted-foreground/60">Not scheduled</span>
                     )}

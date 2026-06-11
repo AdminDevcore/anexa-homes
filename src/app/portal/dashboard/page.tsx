@@ -17,7 +17,7 @@ import {
   getRecentProjects,
 } from "@/server/modules/dashboard/queries";
 import { PageHeader, StatCard } from "@/components/portal/ui";
-import { formatCents, formatDate } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 import { roleLabel } from "@/lib/roles";
 import { getActiveIndustry } from "@/server/auth/industry";
 import { INDUSTRY_LABEL } from "@/lib/industry";
@@ -25,6 +25,7 @@ import { INDUSTRY_LABEL } from "@/lib/industry";
 export const metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   if (user.role === "customer") redirect("/portal/customer");
 
@@ -51,7 +52,7 @@ export default async function DashboardPage() {
         {stats.canSeeFinancials && (
           <StatCard
             label="Revenue (Closed)"
-            value={formatCents(stats.revenueCents, { compact: true })}
+            value={fmt.money(stats.revenueCents, { compact: true })}
             icon={TrendingUp}
             accent
           />
@@ -59,14 +60,14 @@ export default async function DashboardPage() {
         {stats.canSeeCommissions && (
           <StatCard
             label="Pending Commissions"
-            value={formatCents(stats.pendingCommissionsCents, { compact: true })}
+            value={fmt.money(stats.pendingCommissionsCents, { compact: true })}
             icon={DollarSign}
           />
         )}
         {stats.canSeePayroll && (
           <StatCard
             label="Pending Payroll"
-            value={formatCents(stats.pendingPayrollCents, { compact: true })}
+            value={fmt.money(stats.pendingPayrollCents, { compact: true })}
             icon={Wallet}
           />
         )}
@@ -92,12 +93,12 @@ export default async function DashboardPage() {
                     {l.firstName} {l.lastName}
                   </Link>
                   <div className="text-xs text-muted-foreground">
-                    {l.source?.name ?? "—"} · {formatDate(l.createdAt)}
+                    {l.source?.name ?? "—"} · {fmt.date(l.createdAt)}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   {l.value != null && (
-                    <span className="text-sm font-medium">{formatCents(l.value, { compact: true })}</span>
+                    <span className="text-sm font-medium">{fmt.money(l.value, { compact: true })}</span>
                   )}
                   {l.stage && (
                     <span

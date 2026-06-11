@@ -7,11 +7,12 @@ import { prisma } from "@/server/db/client";
 import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
 import { NewPayrollRunDialog } from "@/components/portal/payroll-actions";
-import { formatCents, formatDate } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 
 export const metadata = { title: "Payroll" };
 
 export default async function PayrollPage() {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   if (!can(user, "read", "Payroll")) redirect("/portal/dashboard");
 
@@ -42,8 +43,8 @@ export default async function PayrollPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Unpaid Payroll" value={formatCents(pendingAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} accent />
-        <StatCard label="Commissions Owed" value={formatCents(commissionAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} />
+        <StatCard label="Unpaid Payroll" value={fmt.money(pendingAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} accent />
+        <StatCard label="Commissions Owed" value={fmt.money(commissionAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} />
         <StatCard label="Payroll Runs" value={runs.length} icon={Wallet} />
       </div>
 
@@ -71,12 +72,12 @@ export default async function PayrollPage() {
               <div>
                 <div className="font-medium">{r.label}</div>
                 <div className="text-xs text-muted-foreground">
-                  {formatDate(r.periodStart)} – {formatDate(r.periodEnd)} · {r.items.length} item(s)
+                  {fmt.date(r.periodStart)} – {fmt.date(r.periodEnd)} · {r.items.length} item(s)
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <span className="font-medium">
-                  {formatCents(r.items.reduce((s, i) => s + i.amount, 0), { compact: true })}
+                  {fmt.money(r.items.reduce((s, i) => s + i.amount, 0), { compact: true })}
                 </span>
                 <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
                   {r.status}

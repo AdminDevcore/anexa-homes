@@ -10,7 +10,7 @@ import { getActiveIndustry } from "@/server/auth/industry";
 import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
 import { CommissionRowActions, CommissionsToolbar } from "@/components/portal/commission-actions";
 import { ListFilter } from "@/components/portal/list-filter";
-import { formatCents, formatDate } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 import {
   Table,
   TableBody,
@@ -23,6 +23,7 @@ import {
 export const metadata = { title: "Commissions" };
 
 export default async function CommissionsPage() {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   if (!can(user, "read", "Commission")) redirect("/portal/dashboard");
 
@@ -54,8 +55,8 @@ export default async function CommissionsPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Pending + Approved" value={formatCents(totalPending, { compact: true })} icon={DollarSign} accent />
-        <StatCard label="Paid" value={formatCents(totalPaid, { compact: true })} icon={DollarSign} />
+        <StatCard label="Pending + Approved" value={fmt.money(totalPending, { compact: true })} icon={DollarSign} accent />
+        <StatCard label="Paid" value={fmt.money(totalPaid, { compact: true })} icon={DollarSign} />
         <StatCard label="Records" value={commissions.length} icon={DollarSign} />
       </div>
 
@@ -95,7 +96,7 @@ export default async function CommissionsPage() {
                   </TableCell>
                   <TableCell>{c.user.firstName} {c.user.lastName}</TableCell>
                   <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{c.label ?? "—"}</TableCell>
-                  <TableCell className="text-right font-medium">{formatCents(c.amount)}</TableCell>
+                  <TableCell className="text-right font-medium">{fmt.money(c.amount)}</TableCell>
                   <TableCell>
                     <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">{c.status}</span>
                   </TableCell>
@@ -104,7 +105,7 @@ export default async function CommissionsPage() {
                       <CommissionRowActions id={c.id} status={c.status} />
                     </TableCell>
                   ) : (
-                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">{formatDate(c.createdAt)}</TableCell>
+                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">{fmt.date(c.createdAt)}</TableCell>
                   )}
                 </TableRow>
               ))}

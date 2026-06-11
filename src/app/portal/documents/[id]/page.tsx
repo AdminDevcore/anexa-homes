@@ -16,7 +16,7 @@ import { verifyChain } from "@/server/modules/esign/audit";
 import { PageHeader } from "@/components/portal/ui";
 import { VoidButton } from "@/components/esign/void-button";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 
 export const metadata = { title: "Document" };
 
@@ -25,6 +25,7 @@ export default async function DocumentDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const fmt = await currentFormatters();
   const { id } = await params;
   const user = await requireUser();
 
@@ -110,7 +111,7 @@ export default async function DocumentDetailPage({
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   {s.email ?? "—"}
-                  {s.signedAt && <> · signed {formatDate(s.signedAt)}</>}
+                  {s.signedAt && <> · signed {fmt.date(s.signedAt)}</>}
                   {s.ip && <> · IP {s.ip}</>}
                 </div>
               </li>
@@ -131,7 +132,7 @@ export default async function DocumentDetailPage({
                 <li key={e.id} className="px-5 py-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium capitalize">{e.type.replace(/_/g, " ")}</span>
-                    <span className="text-xs text-muted-foreground">{formatDate(e.createdAt)}</span>
+                    <span className="text-xs text-muted-foreground">{fmt.date(e.createdAt)}</span>
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     {e.actor ?? "system"}

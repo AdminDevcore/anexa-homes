@@ -9,7 +9,7 @@ import { PayrollRunActions } from "@/components/portal/payroll-actions";
 import { PayStubActions } from "@/components/portal/pay-stub-actions";
 import { PayStubBatchActions } from "@/components/portal/pay-stub-batch";
 import { Button } from "@/components/ui/button";
-import { formatCents, formatDate } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 import { Wallet } from "lucide-react";
 import {
   Table,
@@ -27,6 +27,7 @@ export default async function PayrollRunPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const fmt = await currentFormatters();
   const { id } = await params;
   const user = await requireUser();
   if (!can(user, "read", "Payroll")) redirect("/portal/dashboard");
@@ -69,7 +70,7 @@ export default async function PayrollRunPage({
 
       <PageHeader
         title={run.label}
-        description={`${formatDate(run.periodStart)} – ${formatDate(run.periodEnd)}`}
+        description={`${fmt.date(run.periodStart)} – ${fmt.date(run.periodEnd)}`}
         action={
           <div className="flex items-center gap-2">
             {canExport && (
@@ -89,8 +90,8 @@ export default async function PayrollRunPage({
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Total" value={formatCents(total)} icon={Wallet} accent />
-        <StatCard label="Paid" value={formatCents(paidTotal)} icon={Wallet} />
+        <StatCard label="Total" value={fmt.money(total)} icon={Wallet} accent />
+        <StatCard label="Paid" value={fmt.money(paidTotal)} icon={Wallet} />
         <StatCard label="Items" value={run.items.length} icon={Wallet} />
       </div>
 
@@ -103,7 +104,7 @@ export default async function PayrollRunPage({
                 <div>
                   <div className="font-medium">{e.name}</div>
                   <div className="text-xs text-muted-foreground">
-                    {e.count} item{e.count === 1 ? "" : "s"} · {formatCents(e.total)} net
+                    {e.count} item{e.count === 1 ? "" : "s"} · {fmt.money(e.total)} net
                   </div>
                 </div>
                 <PayStubActions runId={run.id} userId={uid} canEmail={canExport} />
@@ -132,7 +133,7 @@ export default async function PayrollRunPage({
                 <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
                   {i.commission?.project.projectNumber ?? "—"}
                 </TableCell>
-                <TableCell className="text-right font-medium">{formatCents(i.amount)}</TableCell>
+                <TableCell className="text-right font-medium">{fmt.money(i.amount)}</TableCell>
                 <TableCell>
                   <span className={`text-xs font-medium ${i.paid ? "text-emerald-600" : "text-muted-foreground"}`}>
                     {i.paid ? "Paid" : "Unpaid"}

@@ -52,7 +52,7 @@ import {
   CrewAssigner,
 } from "@/components/portal/project-workflows";
 import { Button } from "@/components/ui/button";
-import { formatCents, formatDate, formatDateTime } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel } from "@/lib/service-types";
 
 export const metadata = { title: "Appointment" };
@@ -62,6 +62,7 @@ export default async function LeadDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const fmt = await currentFormatters();
   const { id } = await params;
   const user = await requireUser();
   const lead = await getLeadDetail(user, id);
@@ -167,14 +168,14 @@ export default async function LeadDetailPage({
   } | null;
   const propertyValueLine =
     pd && pd.matched && pd.value != null
-      ? `${pd.low != null && pd.high != null ? `${formatCents(pd.low)}–${formatCents(pd.high)}` : formatCents(pd.value)}` +
+      ? `${pd.low != null && pd.high != null ? `${fmt.money(pd.low)}–${fmt.money(pd.high)}` : fmt.money(pd.value)}` +
         ` · est.${pd.source ? ` · ${pd.source}` : ""}${pd.confidence ? ` · ${pd.confidence} confidence` : ""}`
       : lead.propertyValue != null
-        ? `${formatCents(lead.propertyValue)}${lead.propertyValueSource ? ` · est. · ${lead.propertyValueSource}` : ""}`
+        ? `${fmt.money(lead.propertyValue)}${lead.propertyValueSource ? ` · est. · ${lead.propertyValueSource}` : ""}`
         : null;
   const lastSaleLine =
     pd?.lastSalePrice != null
-      ? `${formatCents(pd.lastSalePrice)}${pd.lastSaleDate ? ` · ${pd.lastSaleDate.slice(0, 4)}` : ""}`
+      ? `${fmt.money(pd.lastSalePrice)}${pd.lastSaleDate ? ` · ${pd.lastSaleDate.slice(0, 4)}` : ""}`
       : null;
 
   // The deal page is split into tabs to keep it scannable. Financials only shows
@@ -281,7 +282,7 @@ export default async function LeadDetailPage({
                   <p className="text-sm">{n.body}</p>
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     {n.author ? `${n.author.firstName} ${n.author.lastName}` : "System"} ·{" "}
-                    {formatDate(n.createdAt)}
+                    {fmt.date(n.createdAt)}
                   </p>
                 </li>
               ))}
@@ -494,7 +495,7 @@ export default async function LeadDetailPage({
           <Card title="Summary">
             <div className="space-y-3">
               <Detail label="Project Type" value={serviceTypeLabel(lead.serviceType)} />
-              <Detail label="Estimated Value" value={formatCents(lead.value)} />
+              <Detail label="Estimated Value" value={fmt.money(lead.value)} />
               {propertyValueLine && <Detail label="Property Value" value={propertyValueLine} />}
               {lastSaleLine && <Detail label="Last Sale" value={lastSaleLine} />}
               {roofReport && (
@@ -514,9 +515,9 @@ export default async function LeadDetailPage({
               <Detail label="Claim Status" value={lead.claimStatus.replace(/_/g, " ")} />
               <Detail
                 label="Appointment"
-                value={lead.appointmentAt ? formatDateTime(lead.appointmentAt) : "Not set"}
+                value={lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not set"}
               />
-              <Detail label="Created" value={formatDate(lead.createdAt)} />
+              <Detail label="Created" value={fmt.date(lead.createdAt)} />
             </div>
 
             {/* Appointment run + open claim — consolidated into the Summary card */}

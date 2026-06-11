@@ -11,11 +11,12 @@ import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
 import { SendDocumentDialog } from "@/components/esign/send-document-dialog";
 import { NewTemplateButton } from "@/components/portal/new-template-button";
-import { formatDate } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 
 export const metadata = { title: "Documents" };
 
 export default async function DocumentsPage() {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   if (!can(user, "read", "Document")) redirect("/portal/dashboard");
 
@@ -137,7 +138,7 @@ export default async function DocumentsPage() {
                   </Link>
                   <div className="text-xs text-muted-foreground">
                     {p.lead ? `${p.lead.firstName} ${p.lead.lastName} · ` : ""}
-                    {p.signers.length} signer(s) · {formatDate(p.createdAt)}
+                    {p.signers.length} signer(s) · {fmt.date(p.createdAt)}
                   </div>
                 </div>
                 <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">

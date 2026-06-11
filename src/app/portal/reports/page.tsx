@@ -14,11 +14,12 @@ import { getReportData } from "@/server/modules/reports/queries";
 import { PageHeader, StatCard } from "@/components/portal/ui";
 import { BarChartCard, PieChartCard } from "@/components/portal/charts";
 import { Button } from "@/components/ui/button";
-import { formatCents } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
 
 export const metadata = { title: "Reports" };
 
 export default async function ReportsPage() {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   if (!can(user, "read", "Report")) redirect("/portal/dashboard");
 
@@ -46,9 +47,9 @@ export default async function ReportsPage() {
         <StatCard label="Closing Rate" value={`${data.totals.closingRate}%`} icon={CheckCircle2} />
         <StatCard label="Jobs Sold" value={data.totals.jobsSold} icon={FolderKanban} />
         <StatCard label="Jobs Completed" value={data.totals.jobsCompleted} icon={CheckCircle2} />
-        <StatCard label="Revenue (Closed)" value={formatCents(data.totals.revenueCents, { compact: true })} icon={TrendingUp} accent />
-        <StatCard label="Commissions Owed" value={formatCents(data.totals.commissionsOwedCents, { compact: true })} icon={DollarSign} />
-        <StatCard label="Payroll Owed" value={formatCents(data.totals.payrollOwedCents, { compact: true })} icon={Wallet} />
+        <StatCard label="Revenue (Closed)" value={fmt.money(data.totals.revenueCents, { compact: true })} icon={TrendingUp} accent />
+        <StatCard label="Commissions Owed" value={fmt.money(data.totals.commissionsOwedCents, { compact: true })} icon={DollarSign} />
+        <StatCard label="Payroll Owed" value={fmt.money(data.totals.payrollOwedCents, { compact: true })} icon={Wallet} />
         <StatCard label="Won Appointments" value={data.totals.wonLeads} icon={CheckCircle2} />
       </div>
 

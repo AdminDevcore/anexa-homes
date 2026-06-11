@@ -6,7 +6,8 @@ import { can } from "@/server/rbac/guards";
 import { getUserDetail, getAssignableReps, getAssignableManagers, ROLE_ORDER } from "@/server/modules/team/queries";
 import { getUserOnboarding } from "@/server/modules/onboarding/queries";
 import { roleLabel } from "@/lib/roles";
-import { formatCents, formatDate, initials } from "@/lib/format";
+import { currentFormatters } from "@/lib/format-server";
+import { initials } from "@/lib/format";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TeamMemberActions } from "@/components/portal/team-member-actions";
 import { CommissionOverrides } from "@/components/portal/commission-overrides";
@@ -22,6 +23,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default async function TeamMemberPage({ params }: { params: Promise<{ id: string }> }) {
+  const fmt = await currentFormatters();
   const { id } = await params;
   const user = await requireUser();
   if (!can(user, "read", "User")) redirect("/portal/dashboard");
@@ -65,7 +67,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
     { label: "Completed tasks", value: detail.activity.doneTasks, href: "/portal/tasks" },
     { label: "Appointments", value: detail.activity.appointments, href: "/portal/canvassing" },
     { label: "Knocks", value: detail.activity.knocks, href: "/portal/canvassing" },
-    { label: "Commissions", value: `${detail.activity.commissionCount} · ${formatCents(detail.activity.commissionTotalCents)}`, href: "/portal/commissions" },
+    { label: "Commissions", value: `${detail.activity.commissionCount} · ${fmt.money(detail.activity.commissionTotalCents)}`, href: "/portal/commissions" },
   ];
 
   return (
@@ -95,8 +97,8 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               <Detail icon={Briefcase} label="Title" value={detail.title ?? "—"} />
               <Detail icon={Mail} label="Email" value={detail.email} />
               <Detail icon={Phone} label="Phone" value={detail.phone ?? "—"} />
-              <Detail icon={Calendar} label="Joined" value={formatDate(detail.createdAt)} />
-              <Detail icon={Clock} label="Last active" value={detail.lastLoginAt ? formatDate(detail.lastLoginAt) : "Never"} />
+              <Detail icon={Calendar} label="Joined" value={fmt.date(detail.createdAt)} />
+              <Detail icon={Clock} label="Last active" value={detail.lastLoginAt ? fmt.date(detail.lastLoginAt) : "Never"} />
               {["sales_rep", "manager"].includes(detail.role) && (
                 <Detail
                   icon={Percent}
@@ -132,7 +134,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               {onboarding ? (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Detail icon={Users2} label="Legal name" value={[onboarding.legalFirstName, onboarding.legalMiddleName, onboarding.legalLastName].filter(Boolean).join(" ") || "—"} />
-                  <Detail icon={Calendar} label="Date of birth" value={onboarding.dateOfBirth ? formatDate(new Date(onboarding.dateOfBirth)) : "—"} />
+                  <Detail icon={Calendar} label="Date of birth" value={onboarding.dateOfBirth ? fmt.date(new Date(onboarding.dateOfBirth)) : "—"} />
                   <Detail icon={Lock} label="SSN" value={onboarding.ssnMasked ?? "—"} />
                   <Detail icon={MapPin} label="Address" value={[onboarding.address, onboarding.city, onboarding.state, onboarding.zip].filter(Boolean).join(", ") || "—"} />
                   <Detail icon={Landmark} label="Bank" value={`${onboarding.bankName ?? "—"}${onboarding.accountType ? ` · ${onboarding.accountType}` : ""}`} />
