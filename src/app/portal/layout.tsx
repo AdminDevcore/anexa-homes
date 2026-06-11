@@ -6,6 +6,8 @@ import { roleLabel } from "@/lib/roles";
 import { PortalShell } from "@/components/portal/portal-shell";
 import { getActiveIndustry, userIndustries } from "@/server/auth/industry";
 import { needsOnboarding } from "@/server/modules/onboarding/queries";
+import { currentBranding } from "@/server/branding/resolve";
+import { BrandingProvider } from "@/components/portal/branding-provider";
 
 export default async function PortalLayout({
   children,
@@ -23,19 +25,23 @@ export default async function PortalLayout({
 
   const industries = userIndustries(user);
   const activeIndustry = await getActiveIndustry(user);
+  const branding = await currentBranding();
 
   return (
-    <PortalShell
-      user={{
-        name: user.fullName,
-        email: user.email ?? "",
-        roleLabel: roleLabel(user.role),
-      }}
-      allowedHrefs={allowedHrefs}
-      activeIndustry={activeIndustry}
-      industries={industries}
-    >
-      {children}
-    </PortalShell>
+    <BrandingProvider branding={branding}>
+      <PortalShell
+        user={{
+          name: user.fullName,
+          email: user.email ?? "",
+          roleLabel: roleLabel(user.role),
+        }}
+        allowedHrefs={allowedHrefs}
+        activeIndustry={activeIndustry}
+        industries={industries}
+        branding={branding}
+      >
+        {children}
+      </PortalShell>
+    </BrandingProvider>
   );
 }

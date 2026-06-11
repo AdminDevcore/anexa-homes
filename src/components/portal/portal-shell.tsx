@@ -6,10 +6,10 @@ import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Menu, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { COMPANY } from "@/lib/site";
 import { PORTAL_NAV } from "@/lib/nav";
 import { Logo } from "@/components/marketing/logo";
 import type { Industry } from "@prisma/client";
+import type { Branding } from "@/server/branding/defaults";
 import { UserMenu } from "./user-menu";
 import { NotificationBell } from "./notification-bell";
 import { CommandPalette } from "./command-palette";
@@ -29,12 +29,14 @@ export function PortalShell({
   allowedHrefs,
   activeIndustry,
   industries,
+  branding,
   children,
 }: {
   user: ShellUser;
   allowedHrefs: string[];
   activeIndustry: Industry;
   industries: Industry[];
+  branding: Branding;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -95,19 +97,35 @@ export function PortalShell({
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-border bg-card lg:flex">
         <div className="flex h-16 items-center border-b border-border px-5">
-          <Logo href="/portal/dashboard" />
+          <Link href="/portal/dashboard" className="group inline-flex items-center">
+            <div className="flex items-center gap-2">
+              {branding.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={branding.logoUrl} alt={branding.companyName} className="h-7 w-auto" />
+              ) : (
+                <span className="grid size-7 place-items-center rounded-md bg-foreground text-background text-xs font-bold">
+                  {branding.companyName.slice(0, 2).toUpperCase()}
+                </span>
+              )}
+              <span className="font-display text-base font-semibold tracking-tight">
+                {branding.companyName}
+              </span>
+            </div>
+          </Link>
         </div>
         <div className="flex-1 overflow-y-auto py-4">
           <NavList />
         </div>
         <div className="border-t border-border p-4">
-          <a
-            href={COMPANY.supportPhoneHref}
-            className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2.5 text-xs text-muted-foreground"
-          >
-            <Phone className="size-4 text-gold" />
-            Support: {COMPANY.supportPhone}
-          </a>
+          {branding.supportPhone && (
+            <a
+              href={`tel:${branding.supportPhone.replace(/[^0-9+]/g, "")}`}
+              className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Phone className="size-4" />
+              Support: {branding.supportPhone}
+            </a>
+          )}
         </div>
       </aside>
 
