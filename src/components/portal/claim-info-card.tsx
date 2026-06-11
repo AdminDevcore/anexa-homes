@@ -76,7 +76,6 @@ export function ClaimInfoCard({
 
   // Build the FULL payload from current state — every field, every save.
   function buildPayload() {
-  const fmt = useFormat();
     const num = (s: string) => { const v = parseFloat(s); return Number.isFinite(v) ? v : null; };
     const int = (s: string) => { const v = parseInt(s, 10); return Number.isFinite(v) ? v : null; };
     const cents = (s: string) => { const v = parseFloat(s); return Number.isFinite(v) ? Math.round(v * 100) : 0; };
