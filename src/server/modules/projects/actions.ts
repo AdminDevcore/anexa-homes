@@ -9,6 +9,7 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
 
+import { brandingForCompany } from "@/server/branding/resolve";
 function fail(error: string) {
   return { ok: false as const, error };
 }
@@ -163,11 +164,12 @@ export async function ensureProjectForLeadAction(
   if (lead.project) return { ok: true, projectId: lead.project.id };
 
   const count = await prisma.project.count({ where: { companyId: user.companyId } });
+  const { recordPrefix } = await brandingForCompany(user.companyId);
   const project = await prisma.project.create({
     data: {
       companyId: user.companyId,
       leadId: lead.id,
-      projectNumber: `AH-${1000 + count + 1}`,
+      projectNumber: `${recordPrefix}${1000 + count + 1}`,
       status: "not_started",
       serviceType: lead.serviceType,
       priority: lead.priority,
