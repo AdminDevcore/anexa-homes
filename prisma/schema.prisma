@@ -309,6 +309,17 @@ model CompanySettings {
   logoUrl                 String?
   primaryColor            String   @default("#0B0B0C")
   accentColor             String   @default("#BFA15F")
+  faviconUrl              String?
+  fontFamily              String?
+  recordPrefix            String   @default("")
+  supportPhone            String?
+  supportEmail            String?
+  currencyCode            String   @default("USD")
+  locale                  String   @default("en-US")
+  businessHours           Json     @default("{}")
+  emailFromName           String?
+  customDomain            String?  @unique
+  removePoweredBy         Boolean  @default(false)
   requiredDocuments       Json     @default("[]")
   emailTemplates          Json     @default("{}")
   smsTemplates            Json     @default("{}")
