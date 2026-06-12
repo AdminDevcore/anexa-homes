@@ -19,8 +19,25 @@ function loadPdfjs() {
   return pdfjsPromise;
 }
 
+/** Loads a PDF (reusing the lazy worker setup) and returns its page count. */
+export async function getPdfNumPages(url: string): Promise<number> {
+  const pdfjsLib = await loadPdfjs();
+  const pdf = await pdfjsLib.getDocument({ url }).promise;
+  return pdf.numPages;
+}
+
 /** Renders a single page of a PDF (by URL) into a canvas that fills its parent's width. */
-export function PdfCanvas({ url, page, className }: { url: string; page: number; className?: string }) {
+export function PdfCanvas({
+  url,
+  page,
+  className,
+  hideOpenLink = false,
+}: {
+  url: string;
+  page: number;
+  className?: string;
+  hideOpenLink?: boolean;
+}) {
   const ref = React.useRef<HTMLCanvasElement | null>(null);
   const [status, setStatus] = React.useState<"loading" | "ready" | "error">("loading");
 
@@ -85,9 +102,11 @@ export function PdfCanvas({ url, page, className }: { url: string; page: number;
             <>
               <AlertCircle className="size-5 text-destructive" />
               <span>Couldn&rsquo;t render the PDF preview.</span>
-              <a href={url} target="_blank" rel="noreferrer" className="text-gold-muted underline">
-                Open the PDF
-              </a>
+              {!hideOpenLink && (
+                <a href={url} target="_blank" rel="noreferrer" className="text-gold-muted underline">
+                  Open the PDF
+                </a>
+              )}
             </>
           )}
         </div>

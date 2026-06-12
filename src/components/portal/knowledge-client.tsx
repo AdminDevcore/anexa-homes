@@ -16,6 +16,7 @@ import {
   Download,
   ExternalLink,
   GraduationCap,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/portal/ui";
+import { PdfCanvas, getPdfNumPages } from "@/components/esign/pdf-canvas";
 import {
   createCategoryAction,
   updateCategoryAction,
@@ -57,6 +59,7 @@ type Item = {
   url: string | null;
   body: string | null;
   hasFile?: boolean;
+  isPdf?: boolean;
 };
 
 type Category = {
@@ -227,13 +230,17 @@ function CategoryCard({
         )}
       </div>
 
-      <div className="divide-y divide-border/60">
+      <div className="p-4">
         {category.items.length === 0 ? (
-          <p className="px-5 py-6 text-sm text-muted-foreground">No materials in this category yet.</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No materials in this category yet.
+          </p>
         ) : (
-          category.items.map((item) => (
-            <ItemRow key={item.id} item={item} canManage={canManage} />
-          ))
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {category.items.map((item) => (
+              <ItemCard key={item.id} item={item} canManage={canManage} />
+            ))}
+          </div>
         )}
       </div>
 
@@ -252,12 +259,112 @@ function CategoryCard({
   );
 }
 
-function ItemRow({ item, canManage }: { item: Item; canManage: boolean }) {
+/** Lazily renders the first page of a PDF as a cover thumbnail once scrolled into view. */
+function PdfThumb({ url }: { url: string }) {
+  const ref = React.useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || visible) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
+
+  return (
+    <div
+      ref={ref}
+      className="relative aspect-[4/3] w-full overflow-hidden border-b border-border bg-muted"
+    >
+      {visible ? (
+        <PdfCanvas url={url} page={1} className="block w-full" hideOpenLink />
+      ) : (
+        <div className="flex h-full items-center justify-center text-muted-foreground">
+          <FileText className="size-8" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Full-screen, read-only PDF viewer. No download/print; right-click and selection disabled. */
+function PdfViewerModal({
+  open,
+  onOpenChange,
+  url,
+  title,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  url: string;
+  title: string;
+}) {
+  const [numPages, setNumPages] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setNumPages(0);
+    getPdfNumPages(url)
+      .then((n) => {
+        if (!cancelled) setNumPages(n);
+      })
+      .catch(() => {
+        /* PdfCanvas shows its own error state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, url]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-h-[92vh] gap-0 overflow-hidden p-0 sm:max-w-4xl"
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <DialogHeader className="border-b border-border px-5 py-3">
+          <DialogTitle className="truncate pr-8">{title}</DialogTitle>
+        </DialogHeader>
+        <div className="max-h-[calc(92vh-3.5rem)] select-none space-y-4 overflow-y-auto bg-muted/40 p-4">
+          {numPages === 0 ? (
+            <div className="flex items-center justify-center py-20 text-muted-foreground">
+              <Loader2 className="size-6 animate-spin" />
+            </div>
+          ) : (
+            Array.from({ length: numPages }, (_, i) => (
+              <div
+                key={i}
+                className="relative mx-auto aspect-[8.5/11] w-full max-w-3xl bg-white shadow-sm"
+              >
+                <PdfCanvas url={url} page={i + 1} className="block w-full" hideOpenLink />
+              </div>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ItemCard({ item, canManage }: { item: Item; canManage: boolean }) {
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
   const [articleOpen, setArticleOpen] = React.useState(false);
+  const [pdfOpen, setPdfOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const Meta = TYPE_META[item.type];
+  const fileHref = `/portal/knowledge/items/${item.id}/file`;
+  const isPdf = item.type === "file" && !!item.isPdf;
 
   async function remove() {
     if (!confirm(`Delete “${item.title}”?`)) return;
@@ -269,65 +376,77 @@ function ItemRow({ item, canManage }: { item: Item; canManage: boolean }) {
     router.refresh();
   }
 
-  const fileHref = `/portal/knowledge/items/${item.id}/file`;
-
   return (
-    <div className="flex items-center gap-3 px-5 py-3">
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-        <Meta.icon className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="truncate font-medium">{item.title}</p>
-          <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex">
+    <div className="group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-shadow hover:shadow-sm">
+      {/* Thumbnail */}
+      {isPdf ? (
+        <PdfThumb url={fileHref} />
+      ) : (
+        <div className="flex aspect-[4/3] w-full items-center justify-center border-b border-border bg-muted text-muted-foreground">
+          <Meta.icon className="size-10" />
+        </div>
+      )}
+
+      {/* Management controls, on hover */}
+      {canManage && (
+        <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <Button size="icon" variant="secondary" onClick={() => setEditOpen(true)} aria-label="Edit item">
+            <Pencil className="size-4" />
+          </Button>
+          <Button size="icon" variant="secondary" onClick={remove} disabled={busy} aria-label="Delete item">
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+          </Button>
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="flex flex-1 flex-col gap-2 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="line-clamp-2 font-medium leading-tight">{item.title}</h3>
+          <Badge variant="outline" className="shrink-0 text-[10px]">
             {Meta.label}
           </Badge>
         </div>
         {item.description && (
-          <p className="truncate text-sm text-muted-foreground">{item.description}</p>
+          <p className="line-clamp-2 text-sm text-muted-foreground">{item.description}</p>
         )}
+
+        <div className="mt-auto pt-1">
+          {isPdf && (
+            <Button size="sm" variant="outline" className="w-full" onClick={() => setPdfOpen(true)}>
+              <Eye className="size-4" /> View
+            </Button>
+          )}
+          {item.type === "file" && !isPdf && (
+            <Button asChild size="sm" variant="outline" className="w-full">
+              <a href={fileHref} target="_blank" rel="noopener noreferrer">
+                <Download className="size-4" /> Open
+              </a>
+            </Button>
+          )}
+          {item.type === "video" && (item.url || item.hasFile) && (
+            <Button asChild size="sm" variant="outline" className="w-full">
+              <a href={item.url || fileHref} target="_blank" rel="noopener noreferrer">
+                {item.url ? <ExternalLink className="size-4" /> : <PlayCircle className="size-4" />} Watch
+              </a>
+            </Button>
+          )}
+          {item.type === "link" && item.url && (
+            <Button asChild size="sm" variant="outline" className="w-full">
+              <a href={item.url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="size-4" /> Open
+              </a>
+            </Button>
+          )}
+          {item.type === "article" && (
+            <Button size="sm" variant="outline" className="w-full" onClick={() => setArticleOpen(true)}>
+              <BookOpen className="size-4" /> Read
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
-        {item.type === "file" && (
-          <Button asChild size="sm" variant="outline">
-            <a href={fileHref} target="_blank" rel="noopener noreferrer">
-              <Download className="size-4" /> Open
-            </a>
-          </Button>
-        )}
-        {/* Video: external embed URL → open the link; uploaded file → stream it. */}
-        {item.type === "video" && (item.url || item.hasFile) && (
-          <Button asChild size="sm" variant="outline">
-            <a href={item.url || fileHref} target="_blank" rel="noopener noreferrer">
-              {item.url ? <ExternalLink className="size-4" /> : <PlayCircle className="size-4" />} Watch
-            </a>
-          </Button>
-        )}
-        {item.type === "link" && item.url && (
-          <Button asChild size="sm" variant="outline">
-            <a href={item.url} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="size-4" /> Open
-            </a>
-          </Button>
-        )}
-        {item.type === "article" && (
-          <Button size="sm" variant="outline" onClick={() => setArticleOpen(true)}>
-            <BookOpen className="size-4" /> Read
-          </Button>
-        )}
-        {canManage && (
-          <>
-            <Button size="icon" variant="ghost" onClick={() => setEditOpen(true)} aria-label="Edit item">
-              <Pencil className="size-4" />
-            </Button>
-            <Button size="icon" variant="ghost" onClick={remove} disabled={busy} aria-label="Delete item">
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-            </Button>
-          </>
-        )}
-      </div>
-
+      {/* Modals */}
       {item.type === "article" && (
         <Dialog open={articleOpen} onOpenChange={setArticleOpen}>
           <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
@@ -338,6 +457,9 @@ function ItemRow({ item, canManage }: { item: Item; canManage: boolean }) {
             <div className="whitespace-pre-wrap text-sm leading-relaxed">{item.body}</div>
           </DialogContent>
         </Dialog>
+      )}
+      {isPdf && (
+        <PdfViewerModal open={pdfOpen} onOpenChange={setPdfOpen} url={fileHref} title={item.title} />
       )}
       {canManage && <ItemDialog open={editOpen} onOpenChange={setEditOpen} item={item} />}
     </div>

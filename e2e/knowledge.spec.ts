@@ -57,3 +57,24 @@ test("admin sees every category and can create a new one", async ({ page }) => {
 
   await page.context().clearCookies();
 });
+
+test("sales rep can read an article from its gallery card", async ({ page }) => {
+  await login(page, "rep@anexahomes.com");
+  await page.goto("/portal/knowledge");
+
+  // The article appears as a card with a Read action.
+  await expect(page.getByText("Door Approach Script")).toBeVisible();
+  const card = page
+    .locator("div")
+    .filter({ hasText: "Door Approach Script" })
+    .filter({ has: page.getByRole("button", { name: "Read" }) })
+    .last();
+  await card.getByRole("button", { name: "Read" }).click();
+
+  // The article dialog opens with its body text.
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Door Approach Script" })).toBeVisible();
+  await expect(dialog.getByText(/free 15-minute inspection/i)).toBeVisible();
+
+  await page.context().clearCookies();
+});

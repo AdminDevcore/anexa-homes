@@ -5,13 +5,33 @@ import { categoryScope } from "./policies";
 
 /** Categories (with items) visible to `user` in the active `industry` workspace. */
 export async function listKnowledge(user: AccessUser, industry: Industry) {
-  return prisma.knowledgeCategory.findMany({
+  const categories = await prisma.knowledgeCategory.findMany({
     where: categoryScope(user, industry),
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     include: {
       items: { orderBy: [{ position: "asc" }, { createdAt: "asc" }] },
     },
   });
+
+  // fileId is a plain column (no relation), so resolve MIME types in one batch.
+  const fileIds = categories.flatMap((c) =>
+    c.items.map((i) => i.fileId).filter((id): id is string => !!id)
+  );
+  const files = fileIds.length
+    ? await prisma.fileAsset.findMany({
+        where: { id: { in: fileIds }, companyId: user.companyId },
+        select: { id: true, mimeType: true },
+      })
+    : [];
+  const mimeById = new Map(files.map((f) => [f.id, f.mimeType] as const));
+
+  return categories.map((c) => ({
+    ...c,
+    items: c.items.map((i) => ({
+      ...i,
+      fileMime: i.fileId ? mimeById.get(i.fileId) ?? null : null,
+    })),
+  }));
 }
 
 /**

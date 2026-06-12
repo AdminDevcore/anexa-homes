@@ -5,6 +5,7 @@ import { getActiveIndustry } from "@/server/auth/industry";
 import { listKnowledge } from "@/server/modules/knowledge/queries";
 import { canManageKnowledge, TRAINING_AUDIENCE_ROLES } from "@/server/modules/knowledge/policies";
 import { roleLabel } from "@/lib/roles";
+import { isPdfMime } from "@/lib/knowledge";
 import { PageHeader } from "@/components/portal/ui";
 import { KnowledgeClient } from "@/components/portal/knowledge-client";
 
@@ -44,6 +45,7 @@ export default async function KnowledgePage() {
             url: i.url,
             body: i.body,
             hasFile: !!i.fileId,
+            isPdf: i.type === "file" && isPdfMime(i.fileMime),
           })),
         }))}
       />
