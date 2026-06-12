@@ -1,0 +1,404 @@
+import type { Prisma, Role } from "@prisma/client";
+import { prisma } from "@/server/db/client";
+import { managerTeamUserFilter } from "@/server/rbac/policies";
+import { getCommissionLiability } from "./queries";
+
+// Whole-dollar formatting keeps reports scannable.
+const usd = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
+const pct = (n: number) => `${n.toFixed(1)}%`;
+
+export type ReportType = "operations" | "financial" | "payroll";
+export type Metric = { label: string; value: string; tone?: "pos" | "neg" | "muted"; hint?: string };
+export type ReportTable = { title: string; columns: string[]; rows: (string | number)[][] };
+export type ReportResult = {
+  type: ReportType;
+  title: string;
+  periodLabel: string;
+  scopeLabel: string;
+  metrics: Metric[];
+  tables: ReportTable[];
+};
+
+export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
+  operations: "Operations",
+  financial: "Financial",
+  payroll: "Payroll",
+};
+
+const FINANCE_ROLES: Role[] = ["super_admin", "admin", "accounting"];
+
+/** Report types this role may view. */
+export function allowedReportTypes(role: Role): ReportType[] {
+  const types: ReportType[] = ["operations"];
+  if (["super_admin", "admin", "accounting", "manager"].includes(role)) types.push("financial");
+  if (FINANCE_ROLES.includes(role)) types.push("payroll");
+  return types;
+}
+
+type ReportUser = { companyId: string; userId: string; role: Role };
+
+// ── Period ──────────────────────────────────────────────────────────────────
+
+export type Period = { from: Date; to: Date; label: string; preset: string };
+const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const endOfDay = (d: Date) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+
+export function resolvePeriod(preset?: string, fromStr?: string, toStr?: string): Period {
+  const now = new Date();
+  if (preset === "custom" && fromStr && toStr) {
+    const from = startOfDay(new Date(fromStr));
+    const to = endOfDay(new Date(toStr));
+    if (!Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime())) {
+      return { from, to, label: `${fromStr} → ${toStr}`, preset: "custom" };
+    }
+  }
+  const to = endOfDay(now);
+  switch (preset) {
+    case "month":
+      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to, label: "This month", preset: "month" };
+    case "quarter": {
+      const q = Math.floor(now.getMonth() / 3);
+      return { from: new Date(now.getFullYear(), q * 3, 1), to, label: "This quarter", preset: "quarter" };
+    }
+    case "ytd":
+      return { from: new Date(now.getFullYear(), 0, 1), to, label: "Year to date", preset: "ytd" };
+    case "week":
+    default: {
+      const day = (now.getDay() + 6) % 7; // Monday = 0
+      const from = startOfDay(new Date(now));
+      from.setDate(now.getDate() - day);
+      return { from, to, label: "This week", preset: "week" };
+    }
+  }
+}
+
+// ── Scope (Company / Rep / Manager-team), permission-aware ───────────────────
+
+export type ScopeOption = { value: string; label: string };
+export type ResolvedScope = {
+  value: string;
+  label: string;
+  leadWhere: Prisma.LeadWhereInput; // includes companyId
+  userIds: string[] | null; // people whose commission/payroll counts; null = everyone
+  isCompany: boolean;
+};
+
+/** The scope options this viewer may choose. */
+export async function getScopeOptions(user: ReportUser): Promise<ScopeOption[]> {
+  if (user.role === "sales_rep" || user.role === "canvasser") {
+    return [{ value: `rep:${user.userId}`, label: "Me" }];
+  }
+  if (user.role === "manager") {
+    const team = await prisma.user.findMany({
+      where: { companyId: user.companyId, OR: [{ id: user.userId }, { managerId: user.userId }, { salesRep: { managerId: user.userId } }], status: "active" },
+      orderBy: { firstName: "asc" },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    return [
+      { value: `team:${user.userId}`, label: "My team" },
+      ...team.map((u) => ({ value: `rep:${u.id}`, label: `${u.firstName} ${u.lastName}`.trim() })),
+    ];
+  }
+  // Finance / leadership: company + every rep + every manager's team.
+  const [reps, managers] = await Promise.all([
+    prisma.user.findMany({ where: { companyId: user.companyId, role: { in: ["sales_rep", "canvasser"] }, status: "active" }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
+    prisma.user.findMany({ where: { companyId: user.companyId, role: "manager", status: "active" }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
+  ]);
+  return [
+    { value: "company", label: "Whole company" },
+    ...managers.map((m) => ({ value: `team:${m.id}`, label: `${m.firstName} ${m.lastName}'s team`.trim() })),
+    ...reps.map((r) => ({ value: `rep:${r.id}`, label: `${r.firstName} ${r.lastName}`.trim() })),
+  ];
+}
+
+async function teamUserIds(companyId: string, managerId: string): Promise<string[]> {
+  const team = await prisma.user.findMany({
+    where: { companyId, OR: [{ id: managerId }, { managerId }, { salesRep: { managerId } }] },
+    select: { id: true },
+  });
+  return team.map((u) => u.id);
+}
+
+/** Resolve a scope value to filters, enforcing what the viewer may see. */
+export async function resolveScope(user: ReportUser, value?: string): Promise<ResolvedScope> {
+  const base: Prisma.LeadWhereInput = { companyId: user.companyId };
+  const repScope = (repId: string, label: string): ResolvedScope => ({
+    value: `rep:${repId}`,
+    label,
+    leadWhere: { ...base, OR: [{ assignedRepId: repId }, { createdBy: { salesRepId: repId } }] },
+    userIds: [repId],
+    isCompany: false,
+  });
+
+  // Rep / canvasser: always only themselves.
+  if (user.role === "sales_rep" || user.role === "canvasser") {
+    return repScope(user.userId, "Me");
+  }
+
+  // Manager: team or a rep within the team.
+  if (user.role === "manager") {
+    if (value?.startsWith("rep:")) {
+      const repId = value.slice(4);
+      const ids = await teamUserIds(user.companyId, user.userId);
+      if (ids.includes(repId)) {
+        const u = await prisma.user.findUnique({ where: { id: repId }, select: { firstName: true, lastName: true } });
+        return repScope(repId, u ? `${u.firstName} ${u.lastName}`.trim() : "Rep");
+      }
+    }
+    const ids = await teamUserIds(user.companyId, user.userId);
+    return {
+      value: `team:${user.userId}`,
+      label: "My team",
+      leadWhere: { ...base, OR: [{ assignedRep: managerTeamUserFilter(user.userId) }, { createdBy: managerTeamUserFilter(user.userId) }] },
+      userIds: ids,
+      isCompany: false,
+    };
+  }
+
+  // Finance / leadership.
+  if (value?.startsWith("rep:")) {
+    const repId = value.slice(4);
+    const u = await prisma.user.findUnique({ where: { id: repId, companyId: user.companyId }, select: { firstName: true, lastName: true } });
+    if (u) return repScope(repId, `${u.firstName} ${u.lastName}`.trim());
+  }
+  if (value?.startsWith("team:")) {
+    const managerId = value.slice(5);
+    const m = await prisma.user.findUnique({ where: { id: managerId, companyId: user.companyId }, select: { firstName: true, lastName: true } });
+    if (m) {
+      const ids = await teamUserIds(user.companyId, managerId);
+      return {
+        value: `team:${managerId}`,
+        label: `${m.firstName} ${m.lastName}'s team`.trim(),
+        leadWhere: { ...base, OR: [{ assignedRep: managerTeamUserFilter(managerId) }, { createdBy: managerTeamUserFilter(managerId) }] },
+        userIds: ids,
+        isCompany: false,
+      };
+    }
+  }
+  // Default = whole company.
+  return { value: "company", label: "Whole company", leadWhere: base, userIds: null, isCompany: true };
+}
+
+/** Project ids that belong to the scope (for tagging transactions by rep/team). */
+async function scopeProjectIds(scope: ResolvedScope): Promise<string[] | null> {
+  if (scope.isCompany) return null; // no filter — all company transactions
+  const projects = await prisma.project.findMany({ where: { lead: scope.leadWhere }, select: { id: true } });
+  return projects.map((p) => p.id);
+}
+
+// ── Report builders ──────────────────────────────────────────────────────────
+
+export async function buildReport(user: ReportUser, type: ReportType, period: Period, scope: ResolvedScope): Promise<ReportResult> {
+  if (type === "financial") return buildFinancial(user, period, scope);
+  if (type === "payroll") return buildPayroll(user, period, scope);
+  return buildOperations(user, period, scope);
+}
+
+async function buildOperations(user: ReportUser, period: Period, scope: ResolvedScope): Promise<ReportResult> {
+  const inPeriod = { gte: period.from, lte: period.to };
+  const leadWhere = scope.leadWhere;
+  const projectWhere: Prisma.ProjectWhereInput = { companyId: user.companyId, lead: leadWhere };
+
+  const [appts, won, jobsSold, inProduction, completed, byStatus, projectsForRep] = await Promise.all([
+    prisma.lead.count({ where: { ...leadWhere, createdAt: inPeriod } }),
+    prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: inPeriod } }),
+    prisma.project.count({ where: { ...projectWhere, createdAt: inPeriod } }),
+    prisma.project.count({ where: { ...projectWhere, status: "in_production" } }),
+    prisma.project.count({ where: { ...projectWhere, status: { in: ["completed", "closed"] } } }),
+    prisma.project.groupBy({ by: ["status"], where: projectWhere, _count: { _all: true } }),
+    prisma.project.findMany({ where: projectWhere, select: { contractValue: true, lead: { select: { assignedRep: { select: { firstName: true, lastName: true } } } } } }),
+  ]);
+
+  const closingRate = appts > 0 ? (won / appts) * 100 : 0;
+
+  // By rep: jobs + contract value.
+  const repAgg = new Map<string, { jobs: number; revenue: number }>();
+  for (const p of projectsForRep) {
+    const rep = p.lead?.assignedRep ? `${p.lead.assignedRep.firstName} ${p.lead.assignedRep.lastName}`.trim() : "Unassigned";
+    const a = repAgg.get(rep) ?? { jobs: 0, revenue: 0 };
+    a.jobs += 1;
+    a.revenue += p.contractValue;
+    repAgg.set(rep, a);
+  }
+
+  return {
+    type: "operations",
+    title: "Operations Report",
+    periodLabel: period.label,
+    scopeLabel: scope.label,
+    metrics: [
+      { label: "Appointments", value: String(appts), hint: "created in period" },
+      { label: "Won", value: String(won), tone: "pos" },
+      { label: "Closing rate", value: pct(closingRate) },
+      { label: "Jobs sold", value: String(jobsSold), hint: "in period" },
+      { label: "In production", value: String(inProduction), hint: "current" },
+      { label: "Completed", value: String(completed), hint: "current" },
+    ],
+    tables: [
+      {
+        title: "Jobs by status (current)",
+        columns: ["Status", "Jobs"],
+        rows: byStatus.map((s) => [s.status.replace(/_/g, " "), s._count._all]),
+      },
+      {
+        title: "By rep",
+        columns: ["Rep", "Jobs", "Contract value"],
+        rows: [...repAgg.entries()].sort((a, b) => b[1].revenue - a[1].revenue).map(([rep, a]) => [rep, a.jobs, usd(a.revenue)]),
+      },
+    ],
+  };
+}
+
+async function buildFinancial(user: ReportUser, period: Period, scope: ResolvedScope): Promise<ReportResult> {
+  const inPeriod = { gte: period.from, lte: period.to };
+  const projIds = await scopeProjectIds(scope);
+  const txnProjectFilter = projIds ? { projectId: { in: projIds } } : {};
+
+  // 1099 / subcontractor vendor names — for "contractor payments".
+  const vendors1099 = await prisma.bookkeepingVendor.findMany({ where: { companyId: user.companyId, is1099: true }, select: { name: true } });
+  const contractorNames = new Set(vendors1099.map((v) => v.name.toLowerCase()));
+
+  const [txns, commissionPaid, liability, activeProjects, collectedAgg] = await Promise.all([
+    prisma.transaction.findMany({ where: { companyId: user.companyId, date: inPeriod, ...txnProjectFilter }, select: { amountCents: true, vendor: true, category: { select: { name: true } } } }),
+    prisma.commission.aggregate({ where: { companyId: user.companyId, status: "paid", paidAt: inPeriod, ...(scope.userIds ? { userId: { in: scope.userIds } } : {}) }, _sum: { amount: true } }),
+    // Owed = generated-unpaid + estimated on active deals (the real liability).
+    getCommissionLiability(user.companyId, scope),
+    // Active deals' expected collectible (current snapshot).
+    prisma.project.findMany({ where: { companyId: user.companyId, lead: scope.leadWhere, status: { notIn: ["cancelled"] } }, select: { contractValue: true, deductibleCents: true, supplementCents: true } }),
+    // Money already collected on those deals = positive transactions tagged to them.
+    prisma.transaction.aggregate({ where: { companyId: user.companyId, amountCents: { gt: 0 }, ...txnProjectFilter }, _sum: { amountCents: true } }),
+  ]);
+
+  let moneyIn = 0, moneyOut = 0, contractor = 0;
+  const expenseByCat = new Map<string, number>();
+  // Contractor spend split per contractor: by 1099 vendor name, else by category.
+  const contractorByName = new Map<string, number>();
+  for (const t of txns) {
+    if (t.amountCents >= 0) moneyIn += t.amountCents;
+    else {
+      const out = -t.amountCents;
+      moneyOut += out;
+      const cat = t.category?.name ?? "Uncategorized";
+      expenseByCat.set(cat, (expenseByCat.get(cat) ?? 0) + out);
+      const is1099Vendor = !!(t.vendor && contractorNames.has(t.vendor.toLowerCase()));
+      const isContractor = is1099Vendor || /contractor|subcontractor|labor|crew/i.test(t.category?.name ?? "");
+      if (isContractor) {
+        contractor += out;
+        const bucket = is1099Vendor ? t.vendor! : cat;
+        contractorByName.set(bucket, (contractorByName.get(bucket) ?? 0) + out);
+      }
+    }
+  }
+
+  const collectible = activeProjects.reduce((s, p) => s + p.contractValue + p.deductibleCents + p.supplementCents, 0);
+  const collected = collectedAgg._sum.amountCents ?? 0;
+  const leftToCollect = Math.max(0, collectible - collected);
+  const commPaid = commissionPaid._sum.amount ?? 0;
+  const commOwed = liability.lockedInCents + liability.estimatedCents;
+  const net = moneyIn - moneyOut;
+
+  return {
+    type: "financial",
+    title: "Financial Report",
+    periodLabel: period.label,
+    scopeLabel: scope.label,
+    metrics: [
+      { label: "Revenue collected", value: usd(moneyIn), tone: "pos", hint: "in period" },
+      { label: "Left to collect", value: usd(leftToCollect), hint: "current" },
+      { label: "Commissions paid", value: usd(commPaid), tone: "neg", hint: "in period" },
+      { label: "Commissions owed", value: usd(commOwed), hint: "generated + estimated" },
+      { label: "Contractor payments", value: usd(contractor), tone: "neg", hint: "in period" },
+      { label: "Net cash", value: usd(net), tone: net >= 0 ? "pos" : "neg", hint: "in period" },
+    ],
+    tables: [
+      {
+        title: "Commissions owed — locked-in vs. estimated",
+        columns: ["Rep", "Locked-in", "Estimated", "Total"],
+        rows: [
+          ...liability.byRep.map((r) => [r.name, usd(r.lockedInCents), usd(r.estimatedCents), usd(r.lockedInCents + r.estimatedCents)]),
+          ["Total", usd(liability.lockedInCents), usd(liability.estimatedCents), usd(commOwed)],
+        ],
+      },
+      {
+        title: "Contractor payments by contractor (in period)",
+        columns: ["Contractor", "Amount"],
+        rows: [...contractorByName.entries()].sort((a, b) => b[1] - a[1]).map(([name, amt]) => [name, usd(amt)]),
+      },
+      {
+        title: "Expenses by category (in period)",
+        columns: ["Category", "Amount"],
+        rows: [...expenseByCat.entries()].sort((a, b) => b[1] - a[1]).map(([cat, amt]) => [cat, usd(amt)]),
+      },
+    ],
+  };
+}
+
+async function buildPayroll(user: ReportUser, period: Period, scope: ResolvedScope): Promise<ReportResult> {
+  const inPeriod = { gte: period.from, lte: period.to };
+  // Payroll runs whose pay period overlaps the report period.
+  const runs = await prisma.payrollRun.findMany({
+    where: { companyId: user.companyId, periodStart: { lte: period.to }, periodEnd: { gte: period.from } },
+    orderBy: { periodStart: "desc" },
+    select: {
+      id: true, label: true, status: true, periodStart: true, periodEnd: true,
+      items: { select: { userId: true, amount: true, paid: true, user: { select: { firstName: true, lastName: true } } } },
+    },
+  });
+
+  const userFilter = scope.userIds ? new Set(scope.userIds) : null;
+  let total = 0, paid = 0, pending = 0;
+  const byPerson = new Map<string, number>();
+  for (const run of runs) {
+    for (const it of run.items) {
+      if (userFilter && !userFilter.has(it.userId)) continue;
+      total += it.amount;
+      if (it.paid) paid += it.amount; else pending += it.amount;
+      const name = `${it.user.firstName} ${it.user.lastName}`.trim();
+      byPerson.set(name, (byPerson.get(name) ?? 0) + it.amount);
+    }
+  }
+
+  const [commPaid, liability] = await Promise.all([
+    prisma.commission.aggregate({
+      where: { companyId: user.companyId, status: "paid", paidAt: inPeriod, ...(scope.userIds ? { userId: { in: scope.userIds } } : {}) },
+      _sum: { amount: true },
+    }),
+    // Remaining commission liability: generated-unpaid + estimated on active deals.
+    getCommissionLiability(user.companyId, scope),
+  ]);
+  const estRemaining = liability.lockedInCents + liability.estimatedCents;
+
+  return {
+    type: "payroll",
+    title: "Payroll Report",
+    periodLabel: period.label,
+    scopeLabel: scope.label,
+    metrics: [
+      { label: "Total payroll", value: usd(total), hint: "in period" },
+      { label: "Paid", value: usd(paid), tone: "pos" },
+      { label: "Pending", value: usd(pending), tone: "neg" },
+      { label: "Commissions paid", value: usd(commPaid._sum.amount ?? 0), hint: "in period" },
+      { label: "Est. commissions remaining", value: usd(estRemaining), tone: "neg", hint: "generated + estimated" },
+    ],
+    tables: [
+      {
+        title: "Estimated commissions by person",
+        columns: ["Person", "Locked-in", "Estimated", "Total"],
+        rows: [
+          ...liability.byRep.map((r) => [r.name, usd(r.lockedInCents), usd(r.estimatedCents), usd(r.lockedInCents + r.estimatedCents)]),
+          ["Total", usd(liability.lockedInCents), usd(liability.estimatedCents), usd(estRemaining)],
+        ],
+      },
+      {
+        title: "By person",
+        columns: ["Person", "Amount"],
+        rows: [...byPerson.entries()].sort((a, b) => b[1] - a[1]).map(([name, amt]) => [name, usd(amt)]),
+      },
+      {
+        title: "Payroll runs",
+        columns: ["Run", "Period", "Status"],
+        rows: runs.map((r) => [r.label, `${r.periodStart.toLocaleDateString("en-US")} – ${r.periodEnd.toLocaleDateString("en-US")}`, r.status]),
+      },
+    ],
+  };
+}
