@@ -54,3 +54,34 @@ test("e-sign: staff sends, customer signs, signed PDF + audit produced", async (
   await expect(page.getByText(/integrity verified/i)).toBeVisible();
   await expect(page.getByRole("link", { name: /Download/ })).toBeVisible();
 });
+
+test("e-sign: send with co-borrower shows per-signer status + resend", async ({ page }) => {
+  await login(page, "admin@anexahomes.com");
+  await page.goto("/portal/documents");
+  await page.getByRole("button", { name: /Send for Signature/ }).click();
+
+  await page.locator('button:has-text("Choose a document")').click();
+  await page.getByRole("option", { name: "Roofing Contract" }).click();
+
+  await page.locator('button:has-text("Choose a lead")').click();
+  await page.getByRole("option", { name: /Johnson/ }).first().click();
+
+  // Add a co-borrower as a second signer.
+  await page.getByRole("button", { name: /Add co-borrower/ }).click();
+  await page.getByPlaceholder("Co-borrower name").fill("Jane Johnson");
+  await page.getByPlaceholder("Co-borrower email").fill("jane.johnson@example.com");
+
+  await page.getByRole("button", { name: /^Send$/ }).click();
+
+  // Two signing links produced (one per signer).
+  await expect(page.locator('input[readonly]')).toHaveCount(2, { timeout: 10000 });
+  await page.getByRole("button", { name: /^Done$/ }).click();
+
+  // List shows the per-signer summary for the new 2-signer package.
+  await expect(page.getByText("signed 0 of 2").first()).toBeVisible();
+
+  // Resend re-issues links and surfaces the "Reminder sent" dialog.
+  await page.getByRole("button", { name: /^Resend$/ }).first().click();
+  await expect(page.getByText("Reminder sent")).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('input[readonly]').first()).toBeVisible();
+});

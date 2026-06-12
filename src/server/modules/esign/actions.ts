@@ -12,6 +12,7 @@ import { getActiveIndustry } from "@/server/auth/industry";
 import { putObject } from "@/server/storage";
 import {
   sendForSignature,
+  resendSignatureRequest,
   recordSignatureByToken,
   voidPackage,
   getSigningLinkForUser,
@@ -51,6 +52,18 @@ export async function sendDocumentAction(input: SendInput) {
     return { ok: true as const, ...result };
   } catch (e) {
     return { ok: false as const, error: e instanceof Error ? e.message : "Failed to send." };
+  }
+}
+
+export async function resendDocumentAction(packageId: string) {
+  const user = await requireUser();
+  try {
+    const result = await resendSignatureRequest(user, packageId);
+    revalidatePath("/portal/documents");
+    revalidatePath(`/portal/documents/${packageId}`);
+    return { ok: true as const, ...result };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Failed to resend." };
   }
 }
 
@@ -187,4 +200,19 @@ export async function createTemplateAction() {
   });
   revalidatePath("/portal/documents");
   return { ok: true as const, id: t.id };
+}
+
+/**
+ * Delete a document template. Already-sent packages keep their snapshot of the
+ * template body + fields (their templateId just nulls out), so sent documents are
+ * unaffected.
+ */
+export async function deleteTemplateAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Document")) return { ok: false as const, error: "Not allowed." };
+  const t = await prisma.documentTemplate.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!t) return { ok: false as const, error: "Template not found." };
+  await prisma.documentTemplate.delete({ where: { id } });
+  revalidatePath("/portal/documents");
+  return { ok: true as const };
 }

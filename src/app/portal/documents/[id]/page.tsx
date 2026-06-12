@@ -15,6 +15,8 @@ import { prisma } from "@/server/db/client";
 import { verifyChain } from "@/server/modules/esign/audit";
 import { PageHeader } from "@/components/portal/ui";
 import { VoidButton } from "@/components/esign/void-button";
+import { ResendButton } from "@/components/esign/resend-button";
+import { SignatureStatusBadge, roleLabel } from "@/components/esign/signature-status-badge";
 import { Button } from "@/components/ui/button";
 import { currentFormatters } from "@/lib/format-server";
 
@@ -42,6 +44,8 @@ export default async function DocumentDetailPage({
 
   const chainValid = verifyChain(pkg.events);
   const canVoid = can(user, "update", "Document") && pkg.status !== "completed" && pkg.status !== "voided";
+  const canResend =
+    can(user, "create", "Document") && ["sent", "viewed", "partially_signed"].includes(pkg.status);
 
   return (
     <div className="space-y-6">
@@ -57,9 +61,8 @@ export default async function DocumentDetailPage({
         description={pkg.lead ? `${pkg.lead.firstName} ${pkg.lead.lastName}` : undefined}
         action={
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background capitalize">
-              {pkg.status.replace(/_/g, " ")}
-            </span>
+            <SignatureStatusBadge status={pkg.status} className="px-3 py-1 text-xs" />
+            {canResend && <ResendButton packageId={pkg.id} />}
             {/* Filled PDF on demand (auto-filled + signatures so far) — view it,
                 don't only send it. */}
             <Button asChild size="sm" variant="outline">
@@ -104,10 +107,15 @@ export default async function DocumentDetailPage({
             {pkg.signers.map((s) => (
               <li key={s.id} className="px-5 py-3.5">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium">{s.name}</span>
-                  <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
-                    {s.status}
+                  <span className="font-medium">
+                    {s.name}
+                    {s.role !== "customer" && (
+                      <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                        {roleLabel(s.role)}
+                      </span>
+                    )}
                   </span>
+                  <SignatureStatusBadge status={s.status} />
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   {s.email ?? "—"}

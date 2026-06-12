@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { FileSignature, FileText, Pencil } from "lucide-react";
+import { DeleteTemplateButton } from "@/components/portal/delete-template-button";
 import type { Prisma } from "@prisma/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
@@ -10,6 +11,8 @@ import { getActiveIndustry } from "@/server/auth/industry";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
 import { SendDocumentDialog } from "@/components/esign/send-document-dialog";
+import { SignatureStatusBadge, roleLabel } from "@/components/esign/signature-status-badge";
+import { ResendButton } from "@/components/esign/resend-button";
 import { NewTemplateButton } from "@/components/portal/new-template-button";
 import { currentFormatters } from "@/lib/format-server";
 
@@ -94,13 +97,16 @@ export default async function DocumentsPage() {
                     </div>
                   </div>
                   {can(user, "update", "Document") && (
-                    <Link
-                      href={`/portal/documents/templates/${t.id}`}
-                      className="text-muted-foreground hover:text-gold-muted"
-                      aria-label="Edit template"
-                    >
-                      <Pencil className="size-4" />
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/portal/documents/templates/${t.id}`}
+                        className="text-muted-foreground hover:text-gold-muted"
+                        aria-label="Edit template"
+                      >
+                        <Pencil className="size-4" />
+                      </Link>
+                      <DeleteTemplateButton id={t.id} name={t.name} />
+                    </div>
                   )}
                 </div>
               </li>
@@ -130,9 +136,20 @@ export default async function DocumentsPage() {
         ) : (
           <ListFilter placeholder="Search documents…" className="p-5">
           <ul className="divide-y divide-border rounded-lg border border-border">
-            {packages.map((p) => (
-              <li key={p.id} className="flex items-center justify-between px-5 py-4" data-search-item data-search-text={`${p.title} ${p.lead ? `${p.lead.firstName} ${p.lead.lastName}` : ""} ${p.status}`}>
-                <div>
+            {packages.map((p) => {
+              const signedCount = p.signers.filter((s) => s.status === "signed").length;
+              const showResend =
+                canSend && ["sent", "viewed", "partially_signed"].includes(p.status);
+              return (
+              <li
+                key={p.id}
+                className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between"
+                data-search-item
+                data-search-text={`${p.title} ${p.lead ? `${p.lead.firstName} ${p.lead.lastName}` : ""} ${p.status} ${p.signers
+                  .map((s) => `${s.name} ${s.status}`)
+                  .join(" ")}`}
+              >
+                <div className="min-w-0">
                   <Link href={`/portal/documents/${p.id}`} className="font-medium hover:text-gold-muted">
                     {p.title}
                   </Link>
@@ -140,12 +157,35 @@ export default async function DocumentsPage() {
                     {p.lead ? `${p.lead.firstName} ${p.lead.lastName} · ` : ""}
                     {p.signers.length} signer(s) · {fmt.date(p.createdAt)}
                   </div>
+                  {p.signers.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {p.signers.map((s) => (
+                        <span
+                          key={s.id}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px]"
+                        >
+                          <span className="font-medium">{s.name}</span>
+                          {s.role !== "customer" && (
+                            <span className="text-muted-foreground">{roleLabel(s.role)}</span>
+                          )}
+                          <SignatureStatusBadge status={s.status} className="px-1.5 py-0" />
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
-                  {p.status.replace(/_/g, " ")}
-                </span>
+                <div className="flex items-center gap-2 sm:flex-col sm:items-end">
+                  <SignatureStatusBadge status={p.status} />
+                  {p.signers.length > 0 && (
+                    <span className="text-[11px] text-muted-foreground">
+                      signed {signedCount} of {p.signers.length}
+                    </span>
+                  )}
+                  {showResend && <ResendButton packageId={p.id} />}
+                </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
           </ListFilter>
         )}

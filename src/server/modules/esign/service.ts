@@ -5,6 +5,7 @@ import { requireCan } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { putObject, getObject } from "@/server/storage";
 import { fireEvent } from "@/server/modules/notifications/engine";
+import { sendEmail } from "@/server/modules/notifications/delivery";
 import { generateSignerToken, sha256 } from "./tokens";
 import { appendDocumentEvent } from "./audit";
 import { buildAutofillContext, type AutofillContext } from "./autofill";
@@ -24,6 +25,38 @@ export type SendInput = {
   leadId: string;
   signers: { role: "customer" | "co_customer" | "company_rep" | "witness"; name: string; email?: string; order: number }[];
 };
+
+/**
+ * Email a signer their secure signing link (best-effort — caller wraps so a
+ * failed email never aborts the send/resend). In dev with no RESEND_API_KEY the
+ * delivery helper logs to console.
+ */
+async function emailSigningLink(opts: {
+  to: string;
+  signerName: string;
+  companyName: string;
+  title: string;
+  url: string;
+  reminder: boolean;
+}): Promise<void> {
+  const subject = opts.reminder
+    ? `Reminder: please sign ${opts.title}`
+    : `Please sign ${opts.title}`;
+  const intro = opts.reminder
+    ? `This is a reminder to review and sign "${opts.title}" from ${opts.companyName}.`
+    : `${opts.companyName} has sent you "${opts.title}" to review and sign.`;
+  const body = [
+    `Hi ${opts.signerName},`,
+    "",
+    intro,
+    "",
+    "Open your secure signing link:",
+    opts.url,
+    "",
+    "This link is private to you — please don't forward it.",
+  ].join("\n");
+  await sendEmail(opts.to, subject, body, { fromName: opts.companyName });
+}
 
 export async function sendForSignature(user: SessionUser, input: SendInput) {
   requireCan(user, "create", "Document");
@@ -60,7 +93,7 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
     })),
   };
 
-  const tokens: { name: string; raw: string }[] = [];
+  const tokens: { name: string; email: string | null; raw: string }[] = [];
 
   const pkg = await prisma.$transaction(async (tx) => {
     const created = await tx.documentPackage.create({
@@ -80,7 +113,7 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
 
     for (const s of input.signers) {
       const { raw, hash } = generateSignerToken();
-      tokens.push({ name: s.name, raw });
+      tokens.push({ name: s.name, email: s.email || null, raw });
       await tx.documentSigner.create({
         data: {
           companyId: user.companyId,
@@ -113,10 +146,92 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
   await fireEvent({ companyId: user.companyId, event: "document_sent", actorId: user.userId, documentId: pkg.id, leadId: lead.id });
 
   const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
-  return {
-    packageId: pkg.id,
-    links: tokens.map((t) => ({ name: t.name, url: `${base}/sign/${t.raw}` })),
-  };
+  const links = tokens.map((t) => ({ name: t.name, url: `${base}/sign/${t.raw}` }));
+
+  // Auto-email the signing link to each signer that has an email (best-effort).
+  const company = await prisma.company.findUnique({
+    where: { id: user.companyId },
+    select: { name: true },
+  });
+  const companyName = company?.name ?? "Anexa Homes";
+  await Promise.all(
+    tokens.map(async (t) => {
+      if (!t.email) return;
+      try {
+        await emailSigningLink({
+          to: t.email,
+          signerName: t.name,
+          companyName,
+          title: pkg.title,
+          url: `${base}/sign/${t.raw}`,
+          reminder: false,
+        });
+      } catch (err) {
+        console.error("[esign] send-link email failed", err);
+      }
+    })
+  );
+
+  return { packageId: pkg.id, links };
+}
+
+/**
+ * Re-issues a fresh signing link for every signer who has not yet signed,
+ * invalidating their previous link, emails it to them, and records a
+ * `reminder_sent` audit event per signer. Returns the new links for the UI.
+ */
+export async function resendSignatureRequest(user: SessionUser, packageId: string) {
+  requireCan(user, "create", "Document");
+
+  const scope = listScope(user, "Document") as Prisma.DocumentPackageWhereInput;
+  const pkg = await prisma.documentPackage.findFirst({
+    where: { AND: [{ id: packageId }, scope] },
+    include: {
+      signers: { orderBy: { order: "asc" } },
+      company: { select: { name: true } },
+    },
+  });
+  if (!pkg) throw new Error("Document not found.");
+  if (pkg.status === "completed") throw new Error("This document is already completed.");
+  if (pkg.status === "voided") throw new Error("This document has been voided.");
+
+  const pending = pkg.signers.filter((s) => s.status !== "signed" && s.status !== "declined");
+  if (pending.length === 0) throw new Error("All signers have already signed.");
+
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const links: { name: string; url: string }[] = [];
+
+  for (const signer of pending) {
+    const { raw, hash } = generateSignerToken();
+    await prisma.documentSigner.update({ where: { id: signer.id }, data: { tokenHash: hash } });
+    const url = `${base}/sign/${raw}`;
+    links.push({ name: signer.name, url });
+
+    await appendDocumentEvent(prisma, {
+      companyId: pkg.companyId,
+      packageId: pkg.id,
+      type: "reminder_sent",
+      signerId: signer.id,
+      actor: user.fullName,
+    });
+
+    if (signer.email) {
+      try {
+        await emailSigningLink({
+          to: signer.email,
+          signerName: signer.name,
+          companyName: pkg.company.name,
+          title: pkg.title,
+          url,
+          reminder: true,
+        });
+      } catch (err) {
+        console.error("[esign] reminder email failed", err);
+      }
+    }
+  }
+
+  return { links };
 }
 
 // ---------------------------------------------------------------------------

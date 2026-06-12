@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Send, Copy, FileSignature } from "lucide-react";
+import { Loader2, Send, Copy, FileSignature, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,6 +40,14 @@ export function SendDocumentDialog({
   const [leadId, setLeadId] = React.useState("");
   const [signerName, setSignerName] = React.useState("");
   const [signerEmail, setSignerEmail] = React.useState("");
+  // Optional co-borrower (signs in parallel with the customer).
+  const [coOpen, setCoOpen] = React.useState(false);
+  const [coName, setCoName] = React.useState("");
+  const [coEmail, setCoEmail] = React.useState("");
+  // Optional company rep (counter-signs after the customers).
+  const [repOpen, setRepOpen] = React.useState(false);
+  const [repName, setRepName] = React.useState("");
+  const [repEmail, setRepEmail] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [links, setLinks] = React.useState<{ name: string; url: string }[] | null>(null);
 
@@ -53,16 +61,39 @@ export function SendDocumentDialog({
   }
 
   async function send() {
-    if (!templateId || !leadId || !signerName) {
+    if (!templateId || !leadId || !signerName.trim()) {
       toast.error("Choose a template, a lead, and a signer.");
       return;
     }
+    if (coOpen && !coName.trim()) {
+      toast.error("Enter the co-borrower's name, or remove them.");
+      return;
+    }
+    if (repOpen && !repName.trim()) {
+      toast.error("Enter the company rep's name, or remove them.");
+      return;
+    }
+
+    // Customer + co-borrower share order 1 (either may sign first); the company
+    // rep is order 2 so they counter-sign after both customers.
+    type Signer = {
+      role: "customer" | "co_customer" | "company_rep" | "witness";
+      name: string;
+      email: string;
+      order: number;
+    };
+    const signers: Signer[] = [
+      { role: "customer", name: signerName.trim(), email: signerEmail.trim(), order: 1 },
+    ];
+    if (coOpen && coName.trim()) {
+      signers.push({ role: "co_customer", name: coName.trim(), email: coEmail.trim(), order: 1 });
+    }
+    if (repOpen && repName.trim()) {
+      signers.push({ role: "company_rep", name: repName.trim(), email: repEmail.trim(), order: 2 });
+    }
+
     setPending(true);
-    const res = await sendDocumentAction({
-      templateId,
-      leadId,
-      signers: [{ role: "customer", name: signerName, email: signerEmail, order: 1 }],
-    });
+    const res = await sendDocumentAction({ templateId, leadId, signers });
     setPending(false);
     if (res.ok) {
       setLinks(res.links);
@@ -79,6 +110,12 @@ export function SendDocumentDialog({
     setLeadId("");
     setSignerName("");
     setSignerEmail("");
+    setCoOpen(false);
+    setCoName("");
+    setCoEmail("");
+    setRepOpen(false);
+    setRepName("");
+    setRepEmail("");
   }
 
   return (
@@ -104,7 +141,8 @@ export function SendDocumentDialog({
         {links ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Document sent. Share these secure signing links (in production these are emailed):
+              Document sent. A signing link was emailed to each signer with an email — you can also
+              share these secure links directly:
             </p>
             {links.map((l) => (
               <div key={l.url} className="space-y-1">
@@ -161,6 +199,8 @@ export function SendDocumentDialog({
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Primary signer */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Signer name</Label>
@@ -171,6 +211,93 @@ export function SendDocumentDialog({
                 <Input value={signerEmail} onChange={(e) => setSignerEmail(e.target.value)} />
               </div>
             </div>
+
+            {/* Co-borrower */}
+            {coOpen ? (
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Co-borrower</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => {
+                      setCoOpen(false);
+                      setCoName("");
+                      setCoEmail("");
+                    }}
+                  >
+                    <X className="size-3.5" /> Remove
+                  </Button>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Name</Label>
+                    <Input
+                      placeholder="Co-borrower name"
+                      value={coName}
+                      onChange={(e) => setCoName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Email</Label>
+                    <Input
+                      placeholder="Co-borrower email"
+                      value={coEmail}
+                      onChange={(e) => setCoEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Button type="button" variant="outline" size="sm" onClick={() => setCoOpen(true)}>
+                <Plus className="size-4" /> Add co-borrower
+              </Button>
+            )}
+
+            {/* Company rep */}
+            {repOpen ? (
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Company rep (counter-signs last)</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => {
+                      setRepOpen(false);
+                      setRepName("");
+                      setRepEmail("");
+                    }}
+                  >
+                    <X className="size-3.5" /> Remove
+                  </Button>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Name</Label>
+                    <Input
+                      placeholder="Company rep name"
+                      value={repName}
+                      onChange={(e) => setRepName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Email</Label>
+                    <Input
+                      placeholder="Company rep email"
+                      value={repEmail}
+                      onChange={(e) => setRepEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Button type="button" variant="outline" size="sm" onClick={() => setRepOpen(true)}>
+                <Plus className="size-4" /> Add company rep
+              </Button>
+            )}
+
             <DialogFooter>
               <Button onClick={send} disabled={pending} className="bg-gold text-gold-foreground hover:bg-gold/90">
                 {pending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
