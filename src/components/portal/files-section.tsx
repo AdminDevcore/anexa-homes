@@ -23,6 +23,7 @@ export function FilesSection({
   canUpload,
   canDelete,
   headerActions,
+  children,
 }: {
   title?: string;
   files: FileItem[];
@@ -31,6 +32,9 @@ export function FilesSection({
   canUpload: boolean;
   canDelete: boolean;
   headerActions?: React.ReactNode;
+  // Optional content rendered at the top of the card body, above the file list.
+  // Used on the deal page to fold e-signature documents into this one card.
+  children?: React.ReactNode;
 }) {
   const router = useRouter();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -96,9 +100,17 @@ export function FilesSection({
       </div>
 
       <div className="space-y-4 p-5">
-        {files.length === 0 && (
-          <p className="text-sm text-muted-foreground">No files yet.</p>
-        )}
+        {children}
+
+        <div className={children ? "space-y-4 border-t border-border pt-4" : "space-y-4"}>
+          {children && (
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Attachments
+            </p>
+          )}
+          {files.length === 0 && (
+            <p className="text-sm text-muted-foreground">No files yet.</p>
+          )}
 
         {photos.length > 0 && (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -139,6 +151,7 @@ export function FilesSection({
             ))}
           </ul>
         )}
+        </div>
       </div>
     </div>
   );

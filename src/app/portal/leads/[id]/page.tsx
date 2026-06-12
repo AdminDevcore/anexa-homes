@@ -8,7 +8,6 @@ import {
   Ruler,
   ArrowLeft,
   Pencil,
-  FileSignature,
   ListTodo,
   Hammer,
   Camera,
@@ -437,9 +436,10 @@ export default async function LeadDetailPage({
 
             {/* ── Documents & files ── */}
             <div data-deal-tab="documents" className="space-y-6">
-          {/* Files & photos. Survey/Install photos live in their own grouped sets
-              (the buttons in the header); everything else shows in the generic list. */}
+          {/* One place for everything: e-signature documents + all file/photo
+              attachments. Survey/Install photo checklists are the header buttons. */}
           <FilesSection
+            title="Documents & Files"
             files={lead.files
               .filter((f) => !PHOTO_GROUP_KEYS.includes(f.category as PhotoGroup))
               .map((f) => ({
@@ -464,28 +464,31 @@ export default async function LeadDetailPage({
                 canDelete={can(user, "create", "File")}
               />
             }
-          />
-
-          {/* Documents */}
-          <Card title="Documents" icon={FileSignature}>
-            {lead.documentPackages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No documents yet.</p>
-            ) : (
-              <ul className="space-y-2">
-                {lead.documentPackages.map((d) => (
-                  <li key={d.id}>
-                    <Link
-                      href={`/portal/documents/${d.id}`}
-                      className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-gold/40"
-                    >
-                      <span className="font-medium">{d.title}</span>
-                      <span className="text-xs capitalize text-muted-foreground">{d.status.replace(/_/g, " ")}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+          >
+            {/* E-signature documents, folded into the same card. */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Documents
+              </p>
+              {lead.documentPackages.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No documents yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {lead.documentPackages.map((d) => (
+                    <li key={d.id}>
+                      <Link
+                        href={`/portal/documents/${d.id}`}
+                        className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-gold/40"
+                      >
+                        <span className="font-medium">{d.title}</span>
+                        <span className="text-xs capitalize text-muted-foreground">{d.status.replace(/_/g, " ")}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </FilesSection>
             </div>
           </DealTabs>
         </div>
