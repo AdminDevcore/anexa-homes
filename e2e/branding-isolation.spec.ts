@@ -26,21 +26,20 @@ test("each tenant sees only its own brand identity", async ({ page }) => {
   await expect(page.getByText("Anexa Homes")).toHaveCount(0);
 });
 
-test("second tenant uses distinct currency and locale settings", async ({ page }) => {
-  // Log in as Summit Roofing owner and navigate to settings
+test("editing company B's branding does not change company A", async ({ page }) => {
+  // Tenant B (Summit Roofing) renames itself via the Settings UI.
   await login(page, "ownerb@summitroofing.test");
-  // Verify we're logged in as the right tenant by checking the support phone
-  await expect(page.getByText(/\(111\) 222-3333/)).toBeVisible();
-  
-  // Navigate to branding page (no immediate errors expected)
   await page.goto("/portal/settings/branding", { waitUntil: "domcontentloaded" });
-  
-  // Verify Summit Roofing is shown (company isolation)
-  await expect(page.getByText("Summit Roofing")).toBeVisible();
-  await expect(page.getByText("Anexa Homes")).toHaveCount(0);
-  
-  // Log back in as Anexa and verify isolation
+
+  // The company-name input is in the Company Identity form (placeholder e.g. Anexa Homes).
+  const nameInput = page.getByPlaceholder("e.g., Anexa Homes");
+  await nameInput.fill("Summit Roofing Co");
+  await page.getByRole("button", { name: /save company info/i }).click();
+  await expect(page.getByText("Company information saved")).toBeVisible();
+
+  // Tenant A (Anexa) must be completely unaffected by tenant B's write.
   await login(page, "owner@anexahomes.com");
   await expect(page.getByText("Anexa Homes").first()).toBeVisible();
-  await expect(page.getByText("Summit Roofing")).toHaveCount(0);
+  // The name tenant B set must never leak into tenant A's portal.
+  await expect(page.getByText("Summit Roofing Co")).toHaveCount(0);
 });

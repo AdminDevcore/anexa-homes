@@ -18,8 +18,10 @@ import { Switch } from "@/components/ui/switch";
 import { makeMoney, makeDate } from "@/lib/format-core";
 import { updateBrandingAction } from "@/server/modules/settings/actions";
 
+// Radix <SelectItem> forbids an empty-string value, so the default option uses a
+// "system" sentinel that maps to "" (no custom font) on save.
 const FONT_FAMILIES = [
-  { value: "", label: "System default" },
+  { value: "system", label: "System default" },
   { value: "Inter", label: "Inter" },
   { value: "Roboto", label: "Roboto" },
   { value: "Open Sans", label: "Open Sans" },
@@ -81,7 +83,7 @@ export function BrandingForm({
       faviconUrl,
       primaryColor,
       accentColor,
-      fontFamily,
+      fontFamily: fontFamily || "",
       emailFromName,
       recordPrefix,
       supportPhone,
@@ -136,7 +138,7 @@ export function BrandingForm({
 
         <div className="space-y-1.5">
           <Label>Font Family</Label>
-          <Select value={fontFamily} onValueChange={setFontFamily}>
+          <Select value={fontFamily || "system"} onValueChange={(v) => setFontFamily(v === "system" ? "" : v)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
