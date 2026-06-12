@@ -60,6 +60,7 @@ type Item = {
   body: string | null;
   hasFile?: boolean;
   isPdf?: boolean;
+  createdAt?: string;
 };
 
 type Category = {
@@ -92,20 +93,19 @@ export function KnowledgeClient({
   const [newCategoryOpen, setNewCategoryOpen] = React.useState(false);
 
   const q = query.trim().toLowerCase();
-  const filtered = q
-    ? categories
-        .map((c) => ({
-          ...c,
-          items: c.items.filter(
-            (i) =>
-              i.title.toLowerCase().includes(q) ||
-              (i.description ?? "").toLowerCase().includes(q)
-          ),
-        }))
-        .filter(
-          (c) => c.items.length > 0 || c.name.toLowerCase().includes(q)
-        )
-    : categories;
+
+  // Flat list of every visible item, tagged with its category — powers the
+  // search-results gallery and the "Recently added" strip.
+  const allItems = categories.flatMap((c) => c.items.map((item) => ({ item, categoryName: c.name })));
+  const searchResults = q
+    ? allItems.filter(
+        ({ item }) =>
+          item.title.toLowerCase().includes(q) || (item.description ?? "").toLowerCase().includes(q)
+      )
+    : [];
+  const recent = [...allItems]
+    .sort((a, b) => (b.item.createdAt ?? "").localeCompare(a.item.createdAt ?? ""))
+    .slice(0, 4);
 
   return (
     <div className="space-y-6">
@@ -126,21 +126,46 @@ export function KnowledgeClient({
         )}
       </div>
 
-      {filtered.length === 0 ? (
+      {q ? (
+        // Search mode: a flat gallery of matching cards across every category.
+        searchResults.length === 0 ? (
+          <EmptyState icon={GraduationCap} title="No matching materials" description="Try a different search." />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {searchResults.length} result{searchResults.length === 1 ? "" : "s"} for &ldquo;{query.trim()}&rdquo;
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {searchResults.map(({ item, categoryName }) => (
+                <ItemCard key={item.id} item={item} canManage={canManage} categoryName={categoryName} />
+              ))}
+            </div>
+          </div>
+        )
+      ) : categories.length === 0 ? (
         <EmptyState
           icon={GraduationCap}
-          title={q ? "No matching materials" : "No training yet"}
+          title="No training yet"
           description={
-            q
-              ? "Try a different search."
-              : canManage
-                ? "Create a category and start uploading training materials for your team."
-                : "No training has been shared with your role yet."
+            canManage
+              ? "Create a category and start uploading training materials for your team."
+              : "No training has been shared with your role yet."
           }
         />
       ) : (
         <div className="space-y-6">
-          {filtered.map((category) => (
+          {/* Highlight the newest materials across all categories. */}
+          {allItems.length > 4 && (
+            <div className="space-y-3">
+              <h2 className="font-display text-lg font-semibold tracking-tight">Recently added</h2>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {recent.map(({ item, categoryName }) => (
+                  <ItemCard key={`recent-${item.id}`} item={item} canManage={canManage} categoryName={categoryName} />
+                ))}
+              </div>
+            </div>
+          )}
+          {categories.map((category) => (
             <CategoryCard
               key={category.id}
               category={category}
@@ -356,7 +381,7 @@ function PdfViewerModal({
   );
 }
 
-function ItemCard({ item, canManage }: { item: Item; canManage: boolean }) {
+function ItemCard({ item, canManage, categoryName }: { item: Item; canManage: boolean; categoryName?: string }) {
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
   const [articleOpen, setArticleOpen] = React.useState(false);
@@ -409,6 +434,11 @@ function ItemCard({ item, canManage }: { item: Item; canManage: boolean }) {
         </div>
         {item.description && (
           <p className="line-clamp-2 text-sm text-muted-foreground">{item.description}</p>
+        )}
+        {categoryName && (
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+            {categoryName}
+          </span>
         )}
 
         <div className="mt-auto pt-1">

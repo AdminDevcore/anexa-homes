@@ -46,6 +46,7 @@ export default async function KnowledgePage() {
             body: i.body,
             hasFile: !!i.fileId,
             isPdf: i.type === "file" && isPdfMime(i.fileMime),
+            createdAt: i.createdAt.toISOString(),
           })),
         }))}
       />
