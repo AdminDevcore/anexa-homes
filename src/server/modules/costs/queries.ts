@@ -1,26 +1,18 @@
 import { prisma } from "@/server/db/client";
 import { computeDealCommission, type DealCommission } from "@/lib/commission";
-
-export type DealCost = {
-  id: string;
-  type: string;
-  label: string;
-  vendor: string | null;
-  amount: number;
-  fileAssetId: string | null;
-};
+import { getDealJobCost, type JobCostExpense } from "./job-cost";
 
 export type DealFinancials = {
   contractValue: number; // base scope (cents)
   supplementCents: number; // approved supplement
   deductibleCents: number; // customer-paid deductible
-  depreciationCents: number; // recoverable depreciation
   repGetsSupplement: boolean; // per-deal: supplement in the rep/manager split pool?
-  repGetsDepreciation: boolean; // per-deal: depreciation in the split pool?
   overheadPct: number;
-  costs: DealCost[];
-  costTotal: number;
-  // Bookkeeping transactions tagged to this deal (money in/out tied to the job).
+  // Job cost is derived from bookkeeping (approved, deal-tagged expenses, minus
+  // contractor/sales payouts) — not entered on the deal.
+  jobCostCents: number;
+  jobCostExpenses: JobCostExpense[];
+  // All bookkeeping transactions tagged to this deal (money in/out), for reference.
   linkedTransactions: { id: string; date: string; description: string; vendor: string | null; category: string | null; amountCents: number }[];
   linkedTotal: number;
   companyProvidedLead: boolean;
@@ -67,23 +59,18 @@ export async function getDealFinancials(companyId: string, projectId: string): P
       contractValue: true,
       supplementCents: true,
       deductibleCents: true,
-      depreciationCents: true,
       repGetsSupplement: true,
-      repGetsDepreciation: true,
       companyProvidedLead: true,
       company: { select: { overheadPct: true } },
       lead: { select: { assignedRep: { select: { id: true, firstName: true, lastName: true, commissionSplitPct: true, providedLeadSplitPct: true, deductiblePct: true } } } },
-      costs: {
-        orderBy: { createdAt: "asc" },
-        select: { id: true, type: true, label: true, vendor: true, amount: true, fileAssetId: true },
-      },
     },
   });
   if (!project) return null;
 
   const rep = project.lead?.assignedRep ?? null;
   const overheadPct = project.company.overheadPct;
-  const costTotal = project.costs.reduce((s, c) => s + c.amount, 0);
+  // Job cost now comes from bookkeeping, not manual ProjectCost entries.
+  const jobCost = await getDealJobCost(companyId, projectId);
   // Company-provided leads use the (usually lower) provided-lead split; otherwise
   // the rep's standard self-gen split. Falls back to self-gen if provided is unset.
   const selfGen = rep?.commissionSplitPct ?? null;
@@ -93,10 +80,10 @@ export async function getDealFinancials(companyId: string, projectId: string): P
     baseCents: project.contractValue,
     supplementCents: project.supplementCents,
     deductibleCents: project.deductibleCents,
-    depreciationCents: project.depreciationCents,
+    depreciationCents: 0, // depreciation retired from the deal split
     repGetsSupplement: project.repGetsSupplement,
-    repGetsDepreciation: project.repGetsDepreciation,
-    costCents: costTotal,
+    repGetsDepreciation: false,
+    costCents: jobCost.totalCents,
     overheadPct,
     repSplitPct: activeSplit ?? 0,
     repDeductiblePct: rep?.deductiblePct ?? 0,
@@ -125,12 +112,10 @@ export async function getDealFinancials(companyId: string, projectId: string): P
     contractValue: project.contractValue,
     supplementCents: project.supplementCents,
     deductibleCents: project.deductibleCents,
-    depreciationCents: project.depreciationCents,
     repGetsSupplement: project.repGetsSupplement,
-    repGetsDepreciation: project.repGetsDepreciation,
     overheadPct,
-    costs: project.costs,
-    costTotal,
+    jobCostCents: jobCost.totalCents,
+    jobCostExpenses: jobCost.expenses,
     linkedTransactions,
     linkedTotal,
     companyProvidedLead: project.companyProvidedLead,

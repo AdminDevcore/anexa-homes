@@ -11,6 +11,7 @@ import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { computeDealCommission, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
 import { isStageCommissionEligible, COMMISSION_GATE_LABEL } from "@/server/modules/payroll/eligibility";
+import { getDealJobCost } from "./job-cost";
 
 function safeName(n: string): string {
   return n.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "file";
@@ -37,16 +38,16 @@ async function refreshDealSplitCommissions(companyId: string, projectId: string)
   const project = await prisma.project.findFirst({
     where: { id: projectId, companyId },
     select: {
-      contractValue: true, supplementCents: true, deductibleCents: true, depreciationCents: true,
-      repGetsSupplement: true, repGetsDepreciation: true,
-      company: { select: { overheadPct: true } }, costs: { select: { amount: true } },
+      contractValue: true, supplementCents: true, deductibleCents: true,
+      repGetsSupplement: true,
+      company: { select: { overheadPct: true } },
     },
   });
   if (!project) return;
-  const costCents = project.costs.reduce((s, c) => s + c.amount, 0);
+  const { totalCents: costCents } = await getDealJobCost(companyId, projectId);
   const { poolCents } = computeDealCommission({
     baseCents: project.contractValue, supplementCents: project.supplementCents, deductibleCents: project.deductibleCents,
-    depreciationCents: project.depreciationCents, repGetsSupplement: project.repGetsSupplement, repGetsDepreciation: project.repGetsDepreciation,
+    depreciationCents: 0, repGetsSupplement: project.repGetsSupplement, repGetsDepreciation: false,
     costCents, overheadPct: project.company.overheadPct, repSplitPct: 0, repDeductiblePct: 0,
   });
   await Promise.all(
@@ -126,13 +127,10 @@ export async function generateDealCommissionAction(projectId: string) {
       contractValue: true,
       supplementCents: true,
       deductibleCents: true,
-      depreciationCents: true,
       repGetsSupplement: true,
-      repGetsDepreciation: true,
       companyProvidedLead: true,
       company: { select: { overheadPct: true } },
       lead: { select: { stageId: true, assignedRep: { select: { id: true, commissionSplitPct: true, providedLeadType: true, providedLeadSplitPct: true, providedLeadFlatCents: true, deductiblePct: true } } } },
-      costs: { select: { amount: true } },
     },
   });
   if (!project) return { ok: false as const, error: "Project not found." };
@@ -145,15 +143,15 @@ export async function generateDealCommissionAction(projectId: string) {
   const rep = project.lead?.assignedRep;
   if (!rep) return { ok: false as const, error: "This project's lead has no assigned rep." };
 
-  const costTotal = project.costs.reduce((s, c) => s + c.amount, 0);
+  const { totalCents: costTotal } = await getDealJobCost(user.companyId, projectId);
   // computeDealCommission for the pool + deductible share (split done via snapshot below).
   const dc = computeDealCommission({
     baseCents: project.contractValue,
     supplementCents: project.supplementCents,
     deductibleCents: project.deductibleCents,
-    depreciationCents: project.depreciationCents,
+    depreciationCents: 0, // depreciation retired from the deal split
     repGetsSupplement: project.repGetsSupplement,
-    repGetsDepreciation: project.repGetsDepreciation,
+    repGetsDepreciation: false,
     costCents: costTotal,
     overheadPct: project.company.overheadPct,
     repSplitPct: 0,

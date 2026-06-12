@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { computeDealSplit, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
+import { getDealJobCost } from "@/server/modules/costs/job-cost";
 
 function splitLabelFor(pct: number, flatCents: number, provided: boolean): string {
   if (flatCents > 0) {
@@ -36,21 +37,22 @@ export async function computeCommissionsForProject(
       company: { select: { overheadPct: true } },
       lead: { select: { assignedRep: { select: { id: true, firstName: true, lastName: true, commissionSplitPct: true, providedLeadType: true, providedLeadSplitPct: true, providedLeadFlatCents: true, deductiblePct: true } } } },
       crewAssignments: { include: { crew: { include: { members: true } } } },
-      costs: { select: { amount: true } },
     },
   });
   if (!project) return 0;
 
   // Adjusted contract (company revenue) counts every piece; rules/overrides use it.
+  // Depreciation has been retired from the deal split.
   const contract =
-    project.contractValue + project.supplementCents + project.deductibleCents + project.depreciationCents;
-  // The SPLIT pool excludes the deductible and any supplement/depreciation the rep
-  // doesn't get on this deal (company keeps that share / pays the rep upfront).
+    project.contractValue + project.supplementCents + project.deductibleCents;
+  // The SPLIT pool excludes the deductible and any supplement the rep doesn't get
+  // on this deal (company keeps that share / pays the rep upfront).
   const splitBaseContract =
     project.contractValue +
-    (project.repGetsSupplement ? project.supplementCents : 0) +
-    (project.repGetsDepreciation ? project.depreciationCents : 0);
-  const costTotal = project.costs.reduce((s, c) => s + c.amount, 0);
+    (project.repGetsSupplement ? project.supplementCents : 0);
+  // Job cost comes from bookkeeping: approved deal-tagged expenses, excluding
+  // contractor/sales payouts (which are paid via this very split).
+  const { totalCents: costTotal } = await getDealJobCost(companyId, projectId);
   const { poolCents: pool } = computeDealSplit({
     contractCents: splitBaseContract,
     costCents: costTotal,

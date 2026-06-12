@@ -1610,6 +1610,9 @@ model BookkeepingCategory {
   name      String
   // "income" | "expense" | "asset" | "liability" | "equity"
   type      String   @default("expense")
+  // When true, approved transactions in this category are NOT counted as a deal's
+  // job cost (e.g. "Contractor Sales" — sales-rep payouts, paid via the profit split).
+  excludeFromJobCost Boolean @default(false)
   createdAt DateTime @default(now())
 
   transactions Transaction[]

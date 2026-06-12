@@ -3,18 +3,16 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Paperclip, Sparkles, FilePlus2, Receipt, Tag, TrendingDown } from "lucide-react";
+import { Loader2, Sparkles, FilePlus2, Receipt, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFormat } from "@/components/portal/branding-provider";
 import { computeDealCommission } from "@/lib/commission";
-import { addProjectCostAction, deleteProjectCostAction, generateDealCommissionAction, setDealAdjustmentAction, setDealLeadProvidedAction, setDealRepGetsAction } from "@/server/modules/costs/actions";
+import { generateDealCommissionAction, setDealAdjustmentAction, setDealLeadProvidedAction, setDealRepGetsAction } from "@/server/modules/costs/actions";
 import type { DealFinancials } from "@/server/modules/costs/queries";
 
-type AdjField = "supplement" | "deductible" | "depreciation";
-
-const TYPE_LABEL: Record<string, string> = { labor: "Labor", material: "Material", other: "Other" };
+type AdjField = "supplement" | "deductible";
 
 export function DealFinancialsCard({
   financials,
@@ -31,28 +29,22 @@ export function DealFinancialsCard({
 }) {
   const fmt = useFormat();
   const router = useRouter();
-  const fileRef = React.useRef<HTMLInputElement | null>(null);
-  const [adding, setAdding] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  const [form, setForm] = React.useState({ type: "material", label: "", vendor: "", amount: "" });
-  const [fileName, setFileName] = React.useState("");
-  // Inline editor for supplement / deductible / depreciation amounts.
+  // Inline editor for supplement / deductible amounts.
   const [editing, setEditing] = React.useState<null | AdjField>(null);
   const [adjAmount, setAdjAmount] = React.useState("");
 
-  const hasAdjustments =
-    financials.supplementCents > 0 || financials.deductibleCents > 0 || financials.depreciationCents > 0;
+  const hasAdjustments = financials.supplementCents > 0 || financials.deductibleCents > 0;
 
-  // Live breakdown: split pool (excl. deductible + any supplement/depr the rep
-  // doesn't get) + the rep's separate deductible share.
+  // Live breakdown. Job cost comes from bookkeeping; depreciation is retired.
   const dc = computeDealCommission({
     baseCents: financials.contractValue,
     supplementCents: financials.supplementCents,
     deductibleCents: financials.deductibleCents,
-    depreciationCents: financials.depreciationCents,
+    depreciationCents: 0,
     repGetsSupplement: financials.repGetsSupplement,
-    repGetsDepreciation: financials.repGetsDepreciation,
-    costCents: financials.costTotal,
+    repGetsDepreciation: false,
+    costCents: financials.jobCostCents,
     overheadPct: financials.overheadPct,
     repSplitPct: financials.rep?.splitPct ?? 0,
     repDeductiblePct: financials.rep?.deductiblePct ?? 0,
@@ -60,12 +52,10 @@ export function DealFinancialsCard({
   const ADJ_AMOUNT: Record<AdjField, number> = {
     supplement: financials.supplementCents,
     deductible: financials.deductibleCents,
-    depreciation: financials.depreciationCents,
   };
   const ADJ_LABEL: Record<AdjField, string> = {
     supplement: "Approved supplement",
     deductible: "Customer-paid deductible",
-    depreciation: "Recoverable depreciation",
   };
 
   function openAdj(field: AdjField) {
@@ -84,39 +74,10 @@ export function DealFinancialsCard({
     setEditing(null);
     router.refresh();
   }
-  async function toggleRepGets(field: "supplement" | "depreciation") {
-    const current = field === "supplement" ? financials.repGetsSupplement : financials.repGetsDepreciation;
+  async function toggleRepGetsSupplement() {
     setBusy(true);
-    const res = await setDealRepGetsAction({ projectId, field, value: !current });
+    const res = await setDealRepGetsAction({ projectId, field: "supplement", value: !financials.repGetsSupplement });
     setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    router.refresh();
-  }
-
-  async function addCost() {
-    if (!form.label.trim()) return toast.error("Add a label.");
-    if (!(parseFloat(form.amount) >= 0)) return toast.error("Add a valid amount.");
-    setBusy(true);
-    const fd = new FormData();
-    fd.set("projectId", projectId);
-    fd.set("type", form.type);
-    fd.set("label", form.label);
-    fd.set("vendor", form.vendor);
-    fd.set("amount", form.amount);
-    const f = fileRef.current?.files?.[0];
-    if (f) fd.set("file", f);
-    const res = await addProjectCostAction(fd);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Cost added");
-    setForm({ type: "material", label: "", vendor: "", amount: "" });
-    setFileName("");
-    if (fileRef.current) fileRef.current.value = "";
-    setAdding(false);
-    router.refresh();
-  }
-  async function removeCost(id: string) {
-    const res = await deleteProjectCostAction(id);
     if (!res.ok) return toast.error(res.error);
     router.refresh();
   }
@@ -146,97 +107,38 @@ export function DealFinancialsCard({
 
   return (
     <div className="space-y-4">
-      {/* Cost lines */}
+      {/* Job cost — pulled from Bookkeeping (approved, deal-tagged expenses; contractor/sales payouts excluded). */}
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-medium">Costs (labor, materials, other)</span>
-          {canManage && !adding && (
-            <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus className="size-3.5" /> Add cost</Button>
-          )}
+          <span className="text-sm font-medium">
+            Job cost <span className="text-xs font-normal text-muted-foreground">· from Bookkeeping</span>
+          </span>
+          <span className="text-sm font-semibold tabular-nums">{fmt.money(financials.jobCostCents)}</span>
         </div>
-        {financials.costs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No costs added yet.</p>
+        {financials.jobCostExpenses.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No approved expenses tagged to this deal yet.</p>
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
-            {financials.costs.map((c) => (
-              <li key={c.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium">{TYPE_LABEL[c.type] ?? c.type}</span>
-                <span className="min-w-0 flex-1 truncate">
-                  {c.label}
-                  {c.vendor && <span className="text-muted-foreground"> · {c.vendor}</span>}
-                  {c.fileAssetId && (
-                    <a href={`/portal/files/${c.fileAssetId}`} target="_blank" rel="noreferrer" className="ml-1 inline-flex items-center text-gold" title="View invoice">
-                      <Paperclip className="size-3.5" />
-                    </a>
-                  )}
-                </span>
-                <span className="tabular-nums font-medium">{fmt.money(c.amount)}</span>
-                {canManage && (
-                  <button onClick={() => removeCost(c.id)} className="text-muted-foreground hover:text-destructive" aria-label="Remove cost">
-                    <Trash2 className="size-4" />
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        {adding && (
-          <div className="mt-2 space-y-2 rounded-lg border border-border p-3">
-            <div className="grid grid-cols-2 gap-2">
-              <select value={form.type} onChange={(e) => setForm((s) => ({ ...s, type: e.target.value }))} className="rounded-md border border-border bg-background px-2 py-2 text-sm">
-                <option value="labor">Labor</option>
-                <option value="material">Material</option>
-                <option value="other">Other</option>
-              </select>
-              <Input placeholder="Amount ($)" inputMode="decimal" value={form.amount} onChange={(e) => setForm((s) => ({ ...s, amount: e.target.value }))} />
-            </div>
-            <Input placeholder="Label (e.g. Installer labor invoice)" value={form.label} onChange={(e) => setForm((s) => ({ ...s, label: e.target.value }))} />
-            <Input placeholder="From / vendor (optional)" value={form.vendor} onChange={(e) => setForm((s) => ({ ...s, vendor: e.target.value }))} />
-            <div className="flex items-center gap-2">
-              <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")} />
-              <Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}><Paperclip className="size-3.5" /> {fileName || "Attach invoice"}</Button>
-              <div className="ml-auto flex gap-2">
-                <Button size="sm" variant="ghost" onClick={() => { setAdding(false); setFileName(""); }}>Cancel</Button>
-                <Button size="sm" onClick={addCost} disabled={busy}>{busy && <Loader2 className="size-3.5 animate-spin" />} Add</Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Bookkeeping transactions tagged to this deal (via Bookkeeping → Deal column) */}
-      {financials.linkedTransactions.length > 0 && (
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-medium">
-              Tagged transactions <span className="text-xs font-normal text-muted-foreground">· from Bookkeeping</span>
-            </span>
-            <span className={cn("text-sm font-semibold tabular-nums", financials.linkedTotal >= 0 ? "text-emerald-600" : "text-red-600")}>
-              {financials.linkedTotal >= 0 ? "+" : "−"}{fmt.money(Math.abs(financials.linkedTotal))} net
-            </span>
-          </div>
-          <ul className="divide-y divide-border rounded-lg border border-border">
-            {financials.linkedTransactions.map((t) => (
-              <li key={t.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+            {financials.jobCostExpenses.map((e) => (
+              <li key={e.id} className="flex items-center gap-2 px-3 py-2 text-sm">
                 <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                  {new Date(t.date).toLocaleDateString([], { month: "short", day: "numeric" })}
+                  {new Date(e.date).toLocaleDateString([], { month: "short", day: "numeric" })}
                 </span>
                 <span className="min-w-0 flex-1 truncate">
-                  {t.description}
-                  {t.vendor && <span className="text-muted-foreground"> · {t.vendor}</span>}
-                  {t.category && <span className="text-muted-foreground"> · {t.category}</span>}
+                  {e.description}
+                  {e.vendor && <span className="text-muted-foreground"> · {e.vendor}</span>}
+                  {e.category && <span className="text-muted-foreground"> · {e.category}</span>}
                 </span>
-                <span className={cn("font-medium tabular-nums", t.amountCents >= 0 ? "text-emerald-600" : "text-red-600")}>
-                  {t.amountCents >= 0 ? "+" : "−"}{fmt.money(Math.abs(t.amountCents))}
-                </span>
+                <span className="font-medium tabular-nums">{fmt.money(e.costCents)}</span>
               </li>
             ))}
           </ul>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            Tag a transaction to this deal from the <strong>Bookkeeping → Deal</strong> column; it shows here as actual money in/out for the job.
-          </p>
-        </div>
-      )}
+        )}
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          Costs flow from <strong>Bookkeeping</strong>: tag a transaction to this deal, set its category &amp; vendor, then approve it. Contractor/sales payouts are excluded.{" "}
+          <a href="/portal/bookkeeping" className="text-gold underline">Open Bookkeeping →</a>
+        </p>
+      </div>
 
       {/* Supplement / deductible — both increase the effective contract value */}
       {canManage && (
@@ -247,32 +149,17 @@ export function DealFinancialsCard({
           <Button size="sm" variant="outline" onClick={() => openAdj("deductible")}>
             <Receipt className="size-3.5" /> Deductible{financials.deductibleCents > 0 ? `: ${fmt.money(financials.deductibleCents)}` : ""}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => openAdj("depreciation")}>
-            <TrendingDown className="size-3.5" /> Depreciation{financials.depreciationCents > 0 ? `: ${fmt.money(financials.depreciationCents)}` : ""}
-          </Button>
-          {/* Per-deal: does the rep get the supplement / depreciation in their split? */}
+          {/* Per-deal: does the rep get the supplement in their split? */}
           {financials.supplementCents > 0 && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => toggleRepGets("supplement")}
+              onClick={toggleRepGetsSupplement}
               disabled={busy}
               className={cn(!financials.repGetsSupplement && "border-amber-400 bg-amber-50 text-amber-700")}
               title="When off, the rep is paid upfront without the supplement; the company keeps that share."
             >
               {financials.repGetsSupplement ? "Rep gets supplement ✓" : "Rep waived supplement"}
-            </Button>
-          )}
-          {financials.depreciationCents > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => toggleRepGets("depreciation")}
-              disabled={busy}
-              className={cn(!financials.repGetsDepreciation && "border-amber-400 bg-amber-50 text-amber-700")}
-              title="When off, the rep's commission excludes the depreciation; the company keeps that share."
-            >
-              {financials.repGetsDepreciation ? "Rep gets depreciation ✓" : "Rep waived depreciation"}
             </Button>
           )}
           {/* Lead source toggle — picks the provided-lead vs self-gen split. */}
@@ -311,21 +198,17 @@ export function DealFinancialsCard({
         <Row label="Contract value" value={fmt.money(financials.contractValue)} />
         {financials.supplementCents > 0 && <Row label="+ Supplement" value={fmt.money(financials.supplementCents)} sub />}
         {financials.deductibleCents > 0 && <Row label="+ Deductible (customer-paid)" value={fmt.money(financials.deductibleCents)} sub />}
-        {financials.depreciationCents > 0 && <Row label="+ Depreciation" value={fmt.money(financials.depreciationCents)} sub />}
         {hasAdjustments && <Row label="= Adjusted contract value" value={fmt.money(dc.adjustedContractCents)} strong />}
 
-        {/* Rep split pool — excludes the deductible and any waived supplement/depr. */}
+        {/* Rep split pool — excludes the deductible and any waived supplement. */}
         {(financials.supplementCents > 0 && !financials.repGetsSupplement) && (
           <Row label="− Supplement (rep waived)" value={`−${fmt.money(financials.supplementCents)}`} sub />
-        )}
-        {(financials.depreciationCents > 0 && !financials.repGetsDepreciation) && (
-          <Row label="− Depreciation (rep waived)" value={`−${fmt.money(financials.depreciationCents)}`} sub />
         )}
         {financials.deductibleCents > 0 && (
           <Row label="− Deductible (paid as rep % below)" value={`−${fmt.money(financials.deductibleCents)}`} sub />
         )}
         <Row label="Split base" value={fmt.money(dc.splitBaseContractCents)} strong />
-        <Row label="− Job cost" value={`−${fmt.money(financials.costTotal)}`} />
+        <Row label="− Job cost" value={`−${fmt.money(financials.jobCostCents)}`} />
         <Row label={`− Company overhead (${financials.overheadPct}%)`} value={`−${fmt.money(dc.overheadCents)}`} />
         <Row label="= Profit pool" value={fmt.money(dc.poolCents)} strong />
         {financials.rep ? (
