@@ -118,8 +118,9 @@ async function main() {
   // generates auto-assigns to and is visible by Tyler.
   await prisma.user.update({ where: { id: users.canvasser.id }, data: { salesRepId: users.rep.id } });
   // Tyler & Dylan (reps) report to Priya (manager): she sees only her team's work.
-  await prisma.user.update({ where: { id: users.rep.id }, data: { managerId: users.manager.id } });
-  await prisma.user.update({ where: { id: users.rep2.id }, data: { managerId: users.manager.id } });
+  // Give reps a commission split so per-deal profit estimates are meaningful.
+  await prisma.user.update({ where: { id: users.rep.id }, data: { managerId: users.manager.id, commissionSplitPct: 45, deductiblePct: 100 } });
+  await prisma.user.update({ where: { id: users.rep2.id }, data: { managerId: users.manager.id, commissionSplitPct: 40 } });
 
   // Demo staff have already completed onboarding (so they land in the portal, not
   // the new-hire wizard). Real invited users still go through onboarding.
@@ -751,6 +752,124 @@ async function main() {
       })),
     });
   }
+
+  // ── Bookkeeping demo: categories + per-job transactions + an invoice ───────
+  const demoJob = await prisma.project.findFirst({
+    where: { companyId: company.id },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+  if (demoJob) {
+    // Give the demo job a customer-paid deductible so the profit card shows it.
+    await prisma.project.update({ where: { id: demoJob.id }, data: { deductibleCents: 250000 } });
+    const [revCat, matCat] = await Promise.all([
+      prisma.bookkeepingCategory.create({ data: { companyId: company.id, name: "Job Revenue", type: "income" } }),
+      prisma.bookkeepingCategory.create({ data: { companyId: company.id, name: "Materials", type: "expense" } }),
+    ]);
+    await prisma.transaction.createMany({
+      data: [
+        {
+          companyId: company.id,
+          date: new Date("2026-06-05"),
+          description: "Customer deposit — roof replacement",
+          amountCents: 850000,
+          vendor: "Chris Wilson",
+          account: "Operating Checking",
+          categoryId: revCat.id,
+          projectId: demoJob.id,
+          status: "categorized",
+          approved: true,
+          createdById: users.accounting.id,
+        },
+        {
+          companyId: company.id,
+          date: new Date("2026-06-07"),
+          description: "Shingles & underlayment — ABC Supply",
+          amountCents: -420000,
+          vendor: "ABC Supply",
+          account: "Operating Checking",
+          categoryId: matCat.id,
+          projectId: demoJob.id,
+          status: "categorized",
+          approved: true,
+          createdById: users.accounting.id,
+        },
+        {
+          companyId: company.id,
+          date: new Date("2026-06-09"),
+          description: "Dumpster rental",
+          amountCents: -45000,
+          vendor: "Waste Mgmt",
+          account: "Operating Checking",
+          categoryId: matCat.id,
+          projectId: demoJob.id,
+          status: "categorized",
+          approved: true,
+          createdById: users.accounting.id,
+        },
+      ],
+    });
+    // An unreviewed transaction so "Auto-suggest" + the pencil/receipt flow are demoable.
+    await prisma.transaction.create({
+      data: {
+        companyId: company.id,
+        date: new Date("2026-06-12"),
+        description: "ABC Supplier — shingle delivery",
+        amountCents: -1000000,
+        account: "Operating Checking",
+        status: "uncategorized",
+        approved: false,
+        source: "import",
+      },
+    });
+
+    // Two distinct 1099 subcontractors (construction vs. installation) + their
+    // payments, so the Financial report's "Contractor payments by contractor"
+    // table shows real per-contractor lines instead of $0.
+    const [constructionVendor, installVendor] = await Promise.all([
+      prisma.bookkeepingVendor.create({ data: { companyId: company.id, name: "Summit Construction Crew", is1099: true, einTaxId: "47-1100221" } }),
+      prisma.bookkeepingVendor.create({ data: { companyId: company.id, name: "ProInstall Roofing", is1099: true, einTaxId: "47-2200332" } }),
+    ]);
+    const laborCat = await prisma.bookkeepingCategory.create({ data: { companyId: company.id, name: "Subcontractor Labor", type: "expense" } });
+    await prisma.transaction.createMany({
+      data: [
+        {
+          companyId: company.id,
+          date: new Date("2026-06-08"),
+          description: "Tear-off & structural repair — Summit Construction Crew",
+          amountCents: -380000,
+          vendor: constructionVendor.name,
+          account: "Operating Checking",
+          categoryId: laborCat.id,
+          projectId: demoJob.id,
+          status: "categorized",
+          approved: true,
+          createdById: users.accounting.id,
+        },
+        {
+          companyId: company.id,
+          date: new Date("2026-06-10"),
+          description: "Shingle installation labor — ProInstall Roofing",
+          amountCents: -265000,
+          vendor: installVendor.name,
+          account: "Operating Checking",
+          categoryId: laborCat.id,
+          projectId: demoJob.id,
+          status: "categorized",
+          approved: true,
+          createdById: users.accounting.id,
+        },
+      ],
+    });
+  }
+
+  // Demo custom fields on the appointment form (one required, one optional).
+  await prisma.customFieldDef.createMany({
+    data: [
+      { companyId: company.id, entity: "lead", key: "damage_type", label: "Damage Type", type: "select", options: ["Hail", "Wind", "Hail + Wind", "Other"], required: true, position: 0 },
+      { companyId: company.id, entity: "lead", key: "roof_age_years", label: "Roof Age (years)", type: "number", required: false, position: 1 },
+    ],
+  });
 
   await prisma.activityLog.create({
     data: {
