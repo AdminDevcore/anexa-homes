@@ -135,6 +135,7 @@ export async function updateScopeLineAction(input: {
   quantity?: number;
   unit?: string | null;
   insuranceUnitPriceCents?: number;
+  supplementUnitPriceCents?: number;
   costUnitPriceCents?: number;
 }): Promise<Result> {
   const user = await requireUser();
@@ -157,12 +158,29 @@ export async function updateScopeLineAction(input: {
   if (input.insuranceUnitPriceCents !== undefined) {
     data.insuranceUnitPrice = Math.max(0, Math.round(input.insuranceUnitPriceCents));
   }
+  // Supplement price is insurance-side (not a cost) — settable by any scope editor.
+  if (input.supplementUnitPriceCents !== undefined) {
+    data.supplementUnitPrice = Math.max(0, Math.round(input.supplementUnitPriceCents));
+  }
   // Cost may only be set by management — silently ignore otherwise.
   if (input.costUnitPriceCents !== undefined && canSeeScopeCosts(user.role)) {
     data.costUnitPrice = Math.max(0, Math.round(input.costUnitPriceCents));
   }
 
   await prisma.scopeLine.update({ where: { id: input.id }, data });
+  revalidatePath(`/portal/leads/${input.leadId}`);
+  return { ok: true };
+}
+
+/** Set the public-adjuster fee % used in the supplement profit calc for a deal. */
+export async function updateScopePaFeePctAction(input: {
+  leadId: string;
+  paFeePct: number;
+}): Promise<Result> {
+  const ensured = await ensureScope(input.leadId);
+  if (!ensured.ok) return ensured;
+  const pct = Number.isFinite(input.paFeePct) ? Math.min(100, Math.max(0, input.paFeePct)) : 0;
+  await prisma.scopeOfWork.update({ where: { id: ensured.scopeId }, data: { paFeePct: pct } });
   revalidatePath(`/portal/leads/${input.leadId}`);
   return { ok: true };
 }
@@ -239,6 +257,7 @@ export async function loadScopeTemplateAction(leadId: string): Promise<Result> {
       unit: t.unit,
       insuranceUnitPrice: t.defaultInsuranceUnitPrice,
       costUnitPrice: t.defaultCostUnitPrice,
+      supplementUnitPrice: t.defaultSupplementUnitPrice,
     })),
   });
   revalidatePath(`/portal/leads/${leadId}`);
@@ -253,6 +272,7 @@ export async function addScopeTemplateItemAction(input: {
   unit?: string;
   defaultInsuranceUnitPriceCents?: number;
   defaultCostUnitPriceCents?: number;
+  defaultSupplementUnitPriceCents?: number;
 }): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return { ok: false, error: "Not allowed." };
@@ -268,6 +288,7 @@ export async function addScopeTemplateItemAction(input: {
       unit: input.unit?.trim() || null,
       defaultInsuranceUnitPrice: Math.max(0, Math.round(input.defaultInsuranceUnitPriceCents ?? 0)),
       defaultCostUnitPrice: Math.max(0, Math.round(input.defaultCostUnitPriceCents ?? 0)),
+      defaultSupplementUnitPrice: Math.max(0, Math.round(input.defaultSupplementUnitPriceCents ?? 0)),
     },
   });
   revalidatePath("/portal/settings/scope-template");
@@ -281,6 +302,7 @@ export async function updateScopeTemplateItemAction(input: {
   unit?: string | null;
   defaultInsuranceUnitPriceCents?: number;
   defaultCostUnitPriceCents?: number;
+  defaultSupplementUnitPriceCents?: number;
 }): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return { ok: false, error: "Not allowed." };
@@ -298,6 +320,8 @@ export async function updateScopeTemplateItemAction(input: {
     data.defaultInsuranceUnitPrice = Math.max(0, Math.round(input.defaultInsuranceUnitPriceCents));
   if (input.defaultCostUnitPriceCents !== undefined)
     data.defaultCostUnitPrice = Math.max(0, Math.round(input.defaultCostUnitPriceCents));
+  if (input.defaultSupplementUnitPriceCents !== undefined)
+    data.defaultSupplementUnitPrice = Math.max(0, Math.round(input.defaultSupplementUnitPriceCents));
 
   await prisma.scopeTemplateItem.update({ where: { id: input.id }, data });
   revalidatePath("/portal/settings/scope-template");

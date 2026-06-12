@@ -21,6 +21,7 @@ import {
   lineInsuranceCents,
   lineCostCents,
   lineProfitCents,
+  lineSupplementCents,
   formatScopeCents,
   SCOPE_UNITS,
 } from "@/lib/scope";
@@ -33,6 +34,7 @@ import {
   loadScopeTemplateAction,
   uploadScopePdfAction,
   deleteScopePdfAction,
+  updateScopePaFeePctAction,
 } from "@/server/modules/scope/actions";
 
 type Props = {
@@ -67,13 +69,16 @@ export function ScopeOfWorkPanel({
     router.refresh();
   }
 
+  const paFeePct = scope?.paFeePct ?? 0;
   const totals = rollup(
     lines.map((l) => ({
       category: l.category,
       quantity: l.quantity,
       insuranceUnitPrice: l.insuranceUnitPrice,
       costUnitPrice: l.costUnitPrice ?? 0,
-    }))
+      supplementUnitPrice: l.supplementUnitPrice,
+    })),
+    paFeePct
   );
 
   return (
@@ -141,8 +146,10 @@ export function ScopeOfWorkPanel({
               <th className="px-3 py-2 text-right font-medium">Qty</th>
               <th className="px-3 py-2 font-medium">Unit</th>
               <th className="px-3 py-2 text-right font-medium">Ins $/u</th>
+              <th className="px-3 py-2 text-right font-medium">Suppl $/u</th>
               {canSeeCosts && <th className="px-3 py-2 text-right font-medium">Cost $/u</th>}
-              <th className="px-3 py-2 text-right font-medium">Insurance</th>
+              <th className="px-3 py-2 text-right font-medium">Allowed</th>
+              <th className="px-3 py-2 text-right font-medium">Supplemented</th>
               {canSeeCosts && <th className="px-3 py-2 text-right font-medium">Cost</th>}
               {canSeeCosts && <th className="px-3 py-2 text-right font-medium">Profit</th>}
               {canEdit && <th className="w-8 px-2 py-2" />}
@@ -151,7 +158,7 @@ export function ScopeOfWorkPanel({
           <tbody className="divide-y divide-border/60">
             {lines.length === 0 && (
               <tr>
-                <td colSpan={canSeeCosts ? 10 : 6} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                <td colSpan={canSeeCosts ? 12 : 9} className="px-3 py-8 text-center text-sm text-muted-foreground">
                   No line items yet. {canEdit && "Add a line, import from the claim, or load your template to start costing this job."}
                 </td>
               </tr>
@@ -170,10 +177,11 @@ export function ScopeOfWorkPanel({
           {lines.length > 0 && (
             <tfoot>
               <tr className="border-t-2 border-border font-semibold">
-                <td className="px-3 py-3" colSpan={6}>
+                <td className="px-3 py-3" colSpan={canSeeCosts ? 7 : 6}>
                   Totals
                 </td>
                 <td className="px-3 py-3 text-right">{formatScopeCents(totals.insuranceCents)}</td>
+                <td className="px-3 py-3 text-right">{formatScopeCents(totals.supplementCents)}</td>
                 {canSeeCosts && <td className="px-3 py-3 text-right">{formatScopeCents(totals.costCents)}</td>}
                 {canSeeCosts && (
                   <td className={cn("px-3 py-3 text-right", totals.profitCents < 0 ? "text-destructive" : "text-emerald-600")}>
@@ -189,15 +197,106 @@ export function ScopeOfWorkPanel({
 
       {/* Profit summary */}
       {canSeeCosts && lines.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Stat label="Insurance pays" value={formatScopeCents(totals.insuranceCents)} />
-          <Stat label="Our cost" value={formatScopeCents(totals.costCents)} />
-          <Stat
-            label="Profit"
-            value={`${formatScopeCents(totals.profitCents)} · ${totals.marginPct.toFixed(1)}%`}
-            accent={totals.profitCents >= 0 ? "good" : "bad"}
-          />
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Stat label="Insurance allowed" value={formatScopeCents(totals.insuranceCents)} />
+            <Stat label="Our cost" value={formatScopeCents(totals.costCents)} />
+            <Stat
+              label="Profit (no supplement)"
+              value={`${formatScopeCents(totals.profitCents)} · ${totals.marginPct.toFixed(1)}%`}
+              accent={totals.profitCents >= 0 ? "good" : "bad"}
+            />
+          </div>
+          <SupplementSummary leadId={leadId} totals={totals} paFeePct={paFeePct} canEdit={canEdit} />
         </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, accent }: { label: string; value: string; accent?: "good" | "bad" }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "mt-0.5 text-base font-semibold tabular-nums",
+          accent === "good" && "text-emerald-600",
+          accent === "bad" && "text-destructive"
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/** "If we supplement with a public adjuster" scenario: supplemented revenue minus
+ *  cost minus the PA's cut, and the net gain over not supplementing. */
+function SupplementSummary({
+  leadId,
+  totals,
+  paFeePct,
+  canEdit,
+}: {
+  leadId: string;
+  totals: ReturnType<typeof rollup>;
+  paFeePct: number;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const supplemented = totals.supplementDeltaCents > 0;
+
+  return (
+    <div className="rounded-xl border border-gold/30 bg-gold/5 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-gold-muted">Supplement scenario (public adjuster)</span>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          PA fee
+          <input
+            type="number"
+            step="0.5"
+            min={0}
+            max={100}
+            defaultValue={paFeePct}
+            disabled={!canEdit}
+            onBlur={(e) => {
+              const v = parseFloat(e.target.value);
+              if (!Number.isFinite(v) || v === paFeePct) return;
+              updateScopePaFeePctAction({ leadId, paFeePct: v }).then((r) =>
+                r.ok ? router.refresh() : toast.error(r.error)
+              );
+            }}
+            className="w-16 rounded-md border border-border bg-background px-2 py-1 text-right text-sm disabled:opacity-60"
+          />
+          %
+        </label>
+      </div>
+
+      {supplemented ? (
+        <>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <MiniStat label="Supplemented total" value={formatScopeCents(totals.supplementCents)} />
+            <MiniStat label="Extra recovered" value={formatScopeCents(totals.supplementDeltaCents)} />
+            <MiniStat label={`PA fee (${paFeePct}%)`} value={`-${formatScopeCents(totals.paFeeCents)}`} />
+            <MiniStat
+              label="Profit if supplemented"
+              value={formatScopeCents(totals.supplementProfitCents)}
+              accent={totals.supplementProfitCents >= 0 ? "good" : "bad"}
+            />
+          </div>
+          <p className="mt-3 text-sm">
+            <span className="font-semibold text-emerald-600">{formatScopeCents(totals.supplementGainCents)}</span>{" "}
+            <span className="text-muted-foreground">
+              extra profit vs. not supplementing (net of the {paFeePct}% PA fee).
+            </span>
+          </p>
+        </>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Enter a “Suppl $/u” on any line to model the supplemented price and see the upside after the public
+          adjuster’s cut.
+        </p>
       )}
     </div>
   );
@@ -233,7 +332,12 @@ function ScopeRow({
   onDeleted: () => void;
 }) {
   const router = useRouter();
-  const calc = { quantity: line.quantity, insuranceUnitPrice: line.insuranceUnitPrice, costUnitPrice: line.costUnitPrice ?? 0 };
+  const calc = {
+    quantity: line.quantity,
+    insuranceUnitPrice: line.insuranceUnitPrice,
+    costUnitPrice: line.costUnitPrice ?? 0,
+    supplementUnitPrice: line.supplementUnitPrice,
+  };
 
   async function save(patch: Record<string, unknown>) {
     const res = await updateScopeLineAction({ id: line.id, leadId, ...patch });
@@ -303,6 +407,21 @@ function ScopeRow({
           placeholder="0.00"
         />
       </td>
+      <td className="px-2 py-1 text-right">
+        <input
+          type="number"
+          step="0.01"
+          defaultValue={line.supplementUnitPrice ? line.supplementUnitPrice / 100 : ""}
+          disabled={!canEdit}
+          onBlur={(e) => {
+            const v = parseFloat(e.target.value);
+            save({ supplementUnitPriceCents: Number.isFinite(v) ? Math.round(v * 100) : 0 });
+          }}
+          className={cn(cell, "w-20 text-right")}
+          placeholder="—"
+          title="Supplemented price per unit (with a public adjuster). Leave blank if not supplementing this line."
+        />
+      </td>
       {canSeeCosts && (
         <td className="px-2 py-1 text-right">
           <input
@@ -320,6 +439,14 @@ function ScopeRow({
         </td>
       )}
       <td className="px-3 py-1 text-right tabular-nums">{formatScopeCents(lineInsuranceCents(calc))}</td>
+      <td
+        className={cn(
+          "px-3 py-1 text-right tabular-nums",
+          lineSupplementCents(calc) > lineInsuranceCents(calc) ? "font-medium text-gold-muted" : "text-muted-foreground"
+        )}
+      >
+        {formatScopeCents(lineSupplementCents(calc))}
+      </td>
       {canSeeCosts && (
         <td className="px-3 py-1 text-right tabular-nums text-muted-foreground">{formatScopeCents(lineCostCents(calc))}</td>
       )}

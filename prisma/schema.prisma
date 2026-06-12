@@ -1768,6 +1768,9 @@ model ScopeOfWork {
   industry  Industry    @default(roofing)
   pdfFileId String? // uploaded carrier scope PDF (FileAsset id, plain column)
   notes     String?
+  // Public-adjuster fee, as a % of the supplement amount recovered (default 10%).
+  // Used to net out the PA's cut when modeling "profit if we supplement".
+  paFeePct  Float       @default(10)
   lines     ScopeLine[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
@@ -1787,8 +1790,11 @@ model ScopeLine {
   description        String      @default("")
   quantity           Float       @default(0)
   unit               String? // sq, sq ft, lf, ea
-  insuranceUnitPrice Int         @default(0) // cents — what the carrier pays per unit
+  insuranceUnitPrice Int         @default(0) // cents — what the carrier currently ALLOWS per unit
   costUnitPrice      Int         @default(0) // cents — our cost per unit
+  // cents — supplemented carrier price per unit (with a public adjuster). 0 = not
+  // supplemented; the rollup then falls back to the allowed insurance price.
+  supplementUnitPrice Int        @default(0)
   createdAt          DateTime    @default(now())
 
   @@index([scopeId])
@@ -1806,6 +1812,7 @@ model ScopeTemplateItem {
   unit                      String?
   defaultInsuranceUnitPrice Int      @default(0) // cents
   defaultCostUnitPrice      Int      @default(0) // cents
+  defaultSupplementUnitPrice Int     @default(0) // cents — supplemented price per unit
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 

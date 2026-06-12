@@ -22,6 +22,8 @@ export type ScopeLineDTO = {
   quantity: number;
   unit: string | null;
   insuranceUnitPrice: number;
+  // Supplemented carrier price per unit (insurance-side, visible to all scope roles).
+  supplementUnitPrice: number;
   // Present only for cost-capable roles.
   costUnitPrice?: number;
 };
@@ -31,6 +33,8 @@ export type ScopeDTO = {
   leadId: string;
   pdfFileId: string | null;
   notes: string | null;
+  // Public-adjuster fee, % of the supplement recovered.
+  paFeePct: number;
   lines: ScopeLineDTO[];
   canSeeCosts: boolean;
 };
@@ -58,6 +62,7 @@ export async function getScopeForLead(
     leadId: scope.leadId,
     pdfFileId: scope.pdfFileId,
     notes: scope.notes,
+    paFeePct: scope.paFeePct,
     canSeeCosts: showCosts,
     lines: scope.lines.map((l) => ({
       id: l.id,
@@ -67,6 +72,7 @@ export async function getScopeForLead(
       quantity: l.quantity,
       unit: l.unit,
       insuranceUnitPrice: l.insuranceUnitPrice,
+      supplementUnitPrice: l.supplementUnitPrice,
       ...(showCosts ? { costUnitPrice: l.costUnitPrice } : {}),
     })),
   };

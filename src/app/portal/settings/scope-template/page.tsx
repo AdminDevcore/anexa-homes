@@ -29,6 +29,7 @@ export default async function ScopeTemplatePage() {
           unit: i.unit,
           defaultInsuranceUnitPrice: i.defaultInsuranceUnitPrice,
           defaultCostUnitPrice: i.defaultCostUnitPrice,
+          defaultSupplementUnitPrice: i.defaultSupplementUnitPrice,
         }))}
       />
     </div>

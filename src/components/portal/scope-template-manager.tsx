@@ -20,6 +20,7 @@ type Item = {
   unit: string | null;
   defaultInsuranceUnitPrice: number; // cents
   defaultCostUnitPrice: number; // cents
+  defaultSupplementUnitPrice: number; // cents
 };
 
 const cell =
@@ -47,6 +48,7 @@ export function ScopeTemplateManager({ items }: { items: Item[] }) {
               <th className="px-3 py-2 font-medium">Description</th>
               <th className="px-3 py-2 font-medium">Unit</th>
               <th className="px-3 py-2 text-right font-medium">Default Ins $/u</th>
+              <th className="px-3 py-2 text-right font-medium">Default Suppl $/u</th>
               <th className="px-3 py-2 text-right font-medium">Default Cost $/u</th>
               <th className="w-8 px-2 py-2" />
             </tr>
@@ -54,7 +56,7 @@ export function ScopeTemplateManager({ items }: { items: Item[] }) {
           <tbody className="divide-y divide-border/60">
             {items.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
                   No template items yet. Add common roofing lines with your standard cost rates.
                 </td>
               </tr>
@@ -120,6 +122,19 @@ function Row({ item, onChanged }: { item: Item; onChanged: () => void }) {
           }}
           className={cn(cell, "w-24 text-right")}
           placeholder="0.00"
+        />
+      </td>
+      <td className="px-2 py-1 text-right">
+        <input
+          type="number"
+          step="0.01"
+          defaultValue={item.defaultSupplementUnitPrice ? item.defaultSupplementUnitPrice / 100 : ""}
+          onBlur={(e) => {
+            const v = parseFloat(e.target.value);
+            save({ defaultSupplementUnitPriceCents: Number.isFinite(v) ? Math.round(v * 100) : 0 });
+          }}
+          className={cn(cell, "w-24 text-right")}
+          placeholder="—"
         />
       </td>
       <td className="px-2 py-1 text-right">
