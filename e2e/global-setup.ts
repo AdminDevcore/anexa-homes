@@ -17,4 +17,5 @@ export default function globalSetup() {
   console.log(`[e2e] Preparing isolated test schema: ${E2E_DATABASE_URL}`);
   execSync("pnpm exec prisma migrate deploy", { stdio: "inherit", env });
   execSync("pnpm exec tsx prisma/seed.ts", { stdio: "inherit", env });
+  execSync("pnpm exec tsx prisma/seed-e2e-extra-tenant.ts", { stdio: "inherit", env });
 }
