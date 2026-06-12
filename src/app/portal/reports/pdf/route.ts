@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { prisma } from "@/server/db/client";
 import {
   allowedReportTypes,
   resolvePeriod,
@@ -8,11 +9,7 @@ import {
   buildReport,
   type ReportType,
 } from "@/server/modules/reports/builders";
-
-function cell(v: string | number): string {
-  const s = String(v ?? "");
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+import { buildReportPdf } from "@/server/modules/reports/pdf";
 
 export async function GET(req: Request) {
   const user = await requireUser();
@@ -31,24 +28,21 @@ export async function GET(req: Request) {
   const scope = await resolveScope(ru, url.searchParams.get("scope") ?? undefined);
   const report = await buildReport(ru, type, period, scope);
 
-  const lines: (string | number)[][] = [];
-  lines.push([report.title]);
-  lines.push([`Period: ${report.periodLabel}`, `Scope: ${report.scopeLabel}`]);
-  lines.push([]);
-  lines.push(["Summary"]);
-  for (const m of report.metrics) lines.push([`${m.label}${m.hint ? ` (${m.hint})` : ""}`, m.value]);
-  for (const t of report.tables) {
-    lines.push([]);
-    lines.push([t.title]);
-    lines.push(t.columns);
-    for (const row of t.rows) lines.push(row);
-  }
+  const company = await prisma.company.findUnique({
+    where: { id: user.companyId },
+    select: { name: true, address: true, city: true, state: true, zip: true },
+  });
 
-  const csv = lines.map((r) => r.map(cell).join(",")).join("\n");
-  return new NextResponse(csv, {
+  const pdf = await buildReportPdf(
+    { name: company?.name ?? "Company", address: company?.address ?? null, city: company?.city ?? null, state: company?.state ?? null, zip: company?.zip ?? null },
+    report
+  );
+
+  const fname = `${type}-report-${period.preset}.pdf`;
+  return new NextResponse(new Uint8Array(pdf), {
     headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${type}-report-${period.preset}.csv"`,
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${fname}"`,
     },
   });
 }
