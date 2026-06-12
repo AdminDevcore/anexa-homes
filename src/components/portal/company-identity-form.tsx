@@ -56,7 +56,7 @@ export function CompanyIdentityForm({
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g., Anexa Homes"
+          placeholder="e.g., Acme Roofing"
         />
       </div>
 

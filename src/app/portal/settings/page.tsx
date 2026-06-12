@@ -51,7 +51,7 @@ export default async function SettingsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description="Customize Anexa Homes — pipeline, fields, documents, commissions, and branding."
+        description={`Customize ${company?.name ?? "your workspace"} — pipeline, fields, documents, commissions, and branding.`}
       />
 
       <div className="rounded-xl border border-border bg-card p-5">

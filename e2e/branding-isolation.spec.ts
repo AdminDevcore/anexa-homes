@@ -32,7 +32,7 @@ test("editing company B's branding does not change company A", async ({ page }) 
   await page.goto("/portal/settings/branding", { waitUntil: "domcontentloaded" });
 
   // The company-name input is in the Company Identity form (placeholder e.g. Anexa Homes).
-  const nameInput = page.getByPlaceholder("e.g., Anexa Homes");
+  const nameInput = page.getByPlaceholder("e.g., Acme Roofing");
   await nameInput.fill("Summit Roofing Co");
   await page.getByRole("button", { name: /save company info/i }).click();
   await expect(page.getByText("Company information saved")).toBeVisible();
