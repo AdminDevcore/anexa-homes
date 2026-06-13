@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useFormat } from "@/components/portal/branding-provider";
+import { useFormat, useBranding } from "@/components/portal/branding-provider";
 import { initials } from "@/lib/format";
+import { formatEmployeeNo } from "@/lib/employee";
 
 type Member = {
   id: string;
@@ -19,6 +20,7 @@ type Member = {
   title: string | null;
   status: string;
   avatarUrl: string | null;
+  employeeNo: number | null;
   createdAt: string;
 };
 
@@ -35,6 +37,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 export function TeamClient({ members, roles }: { members: Member[]; roles: { value: string; label: string }[] }) {
   const fmt = useFormat();
+  const branding = useBranding();
   const router = useRouter();
   const [q, setQ] = React.useState("");
   const [roleF, setRoleF] = React.useState("all");
@@ -93,7 +96,14 @@ export function TeamClient({ members, roles }: { members: Member[]; roles: { val
             <AvatarFallback className="bg-foreground text-[10px] font-semibold text-background">{initials(m.name)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0">
-            <div className="font-medium">{m.name}</div>
+            <div className="flex items-center gap-1.5 font-medium">
+              {m.name}
+              {m.employeeNo != null && (
+                <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-neutral-500" title="Employee # — rank by join order">
+                  {formatEmployeeNo(branding.recordPrefix, m.employeeNo)}
+                </span>
+              )}
+            </div>
             <div className="truncate text-xs text-muted-foreground">{m.email}</div>
           </div>
         </div>

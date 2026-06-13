@@ -7,6 +7,8 @@ import { getUserDetail, getAssignableReps, getAssignableManagers, ROLE_ORDER } f
 import { getUserOnboarding } from "@/server/modules/onboarding/queries";
 import { roleLabel } from "@/lib/roles";
 import { currentFormatters } from "@/lib/format-server";
+import { currentBranding } from "@/server/branding/resolve";
+import { formatEmployeeNo } from "@/lib/employee";
 import { initials } from "@/lib/format";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TeamMemberActions } from "@/components/portal/team-member-actions";
@@ -30,6 +32,9 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
 
   const detail = await getUserDetail(user.companyId, id);
   if (!detail) notFound();
+
+  const branding = await currentBranding();
+  const employeeNo = formatEmployeeNo(branding.recordPrefix, detail.employeeNo);
 
   const isPrivileged = ["super_admin", "admin", "manager"].includes(user.role);
   const canEdit = can(user, "update", "User");
@@ -87,7 +92,12 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               </Avatar>
               <div>
                 <h1 className="font-display text-2xl font-semibold">{detail.name}</h1>
-                <div className="mt-1 flex items-center gap-2">
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  {employeeNo && (
+                    <span className="rounded-full bg-neutral-900 px-2.5 py-1 text-[11px] font-semibold tabular-nums text-white" title="Employee number — rank by join order (lower = earlier)">
+                      {employeeNo}
+                    </span>
+                  )}
                   <span className="rounded-full bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold-muted">{detail.roleLabel}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${STATUS_STYLES[detail.status] ?? "bg-muted text-muted-foreground"}`}>{detail.status}</span>
                 </div>
@@ -138,15 +148,23 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                   <Detail icon={Lock} label="SSN" value={onboarding.ssnMasked ?? "—"} />
                   <Detail icon={MapPin} label="Address" value={[onboarding.address, onboarding.city, onboarding.state, onboarding.zip].filter(Boolean).join(", ") || "—"} />
                   <Detail icon={Landmark} label="Bank" value={`${onboarding.bankName ?? "—"}${onboarding.accountType ? ` · ${onboarding.accountType}` : ""}`} />
+                  <Detail icon={Users2} label="Name on account" value={onboarding.accountHolderName ?? "—"} />
                   <Detail icon={Lock} label="Account" value={`${onboarding.accountMasked ?? "—"}${onboarding.routingNumber ? ` · rtg ${onboarding.routingNumber}` : ""}`} />
+                  <Detail icon={MapPin} label="Address on account" value={onboarding.accountAddress ?? "—"} />
                   <Detail icon={FileText} label="Tax class" value={onboarding.taxClassification ? onboarding.taxClassification.replace(/_/g, " ") : "—"} />
                   <Detail icon={Lock} label="EIN" value={onboarding.einMasked ?? "—"} />
                   <div className="flex flex-wrap gap-2 pt-1 sm:col-span-2">
                     {onboarding.idPhotoFileId && (
-                      <a href={`/portal/files/${onboarding.idPhotoFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> Government ID</a>
+                      <a href={`/portal/files/${onboarding.idPhotoFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> License front</a>
+                    )}
+                    {onboarding.idPhotoBackFileId && (
+                      <a href={`/portal/files/${onboarding.idPhotoBackFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> License back</a>
                     )}
                     {onboarding.ssnCardFileId && (
-                      <a href={`/portal/files/${onboarding.ssnCardFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> SS card</a>
+                      <a href={`/portal/files/${onboarding.ssnCardFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> SS card front</a>
+                    )}
+                    {onboarding.ssnCardBackFileId && (
+                      <a href={`/portal/files/${onboarding.ssnCardBackFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> SS card back</a>
                     )}
                     {onboarding.voidedCheckFileId && (
                       <a href={`/portal/files/${onboarding.voidedCheckFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> Voided check</a>

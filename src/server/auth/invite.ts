@@ -44,9 +44,12 @@ export async function acceptInviteAction(input: z.infer<typeof acceptSchema>) {
   if (existing) return fail("An account with that email already exists. Please sign in.");
 
   const passwordHash = await hashPassword(password);
+  // Next sequential employee number for this company (join order = rank).
+  const last = await prisma.user.aggregate({ where: { companyId: inv.companyId }, _max: { employeeNo: true } });
+  const employeeNo = (last._max.employeeNo ?? 0) + 1;
   await prisma.$transaction([
     prisma.user.create({
-      data: { companyId: inv.companyId, email: inv.email, firstName, lastName, role: inv.role, status: "active", passwordHash },
+      data: { companyId: inv.companyId, email: inv.email, firstName, lastName, role: inv.role, status: "active", passwordHash, employeeNo },
     }),
     prisma.invitation.update({ where: { id: inv.id }, data: { acceptedAt: new Date() } }),
   ]);

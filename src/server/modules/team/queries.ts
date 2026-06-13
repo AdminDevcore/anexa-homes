@@ -32,6 +32,7 @@ export type TeamMember = {
   title: string | null;
   status: string;
   avatarUrl: string | null;
+  employeeNo: number | null;
   createdAt: string;
   lastLoginAt: string | null;
 };
@@ -55,7 +56,7 @@ export async function getTeamMembers(viewer: { companyId: string; userId: string
     orderBy: [{ firstName: "asc" }],
     select: {
       id: true, firstName: true, lastName: true, email: true, phone: true,
-      role: true, title: true, status: true, avatarUrl: true, createdAt: true, lastLoginAt: true,
+      role: true, title: true, status: true, avatarUrl: true, employeeNo: true, createdAt: true, lastLoginAt: true,
     },
   });
   return users.map((u) => ({
@@ -70,6 +71,7 @@ export async function getTeamMembers(viewer: { companyId: string; userId: string
     title: u.title,
     status: u.status,
     avatarUrl: u.avatarUrl,
+    employeeNo: u.employeeNo,
     createdAt: u.createdAt.toISOString(),
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
   }));
@@ -149,7 +151,7 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
     where: { id: userId, companyId },
     select: {
       id: true, firstName: true, lastName: true, email: true, phone: true,
-      role: true, title: true, status: true, avatarUrl: true, createdAt: true, lastLoginAt: true,
+      role: true, title: true, status: true, avatarUrl: true, employeeNo: true, createdAt: true, lastLoginAt: true,
       commissionSplitPct: true,
       providedLeadType: true,
       providedLeadSplitPct: true,
@@ -187,6 +189,7 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
     title: u.title,
     status: u.status,
     avatarUrl: u.avatarUrl,
+    employeeNo: u.employeeNo,
     createdAt: u.createdAt.toISOString(),
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
     commissionSplitPct: u.commissionSplitPct,
