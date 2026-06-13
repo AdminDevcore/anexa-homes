@@ -38,6 +38,7 @@ export const RESOURCES = [
   "Bookkeeping", // lightweight ledger / P&L (accounting + owner only)
   "Knowledge", // training library / knowledge base (role-gated)
   "Scope", // scope-of-work job cost calculator (costs management-only)
+  "Proposal", // customer-facing roofing presentation / proposal builder
 ] as const;
 
 export const ACTIONS = [
@@ -104,6 +105,7 @@ const GRANTS: Record<Role, Grant> = {
     Bookkeeping: ALL,
     Knowledge: ALL,
     Scope: ALL,
+    Proposal: ALL,
   },
 
   admin: {
@@ -128,6 +130,7 @@ const GRANTS: Record<Role, Grant> = {
     Settings: ["read", "update"],
     Knowledge: ALL,
     Scope: ALL,
+    Proposal: ALL,
   },
 
   manager: {
@@ -149,6 +152,7 @@ const GRANTS: Record<Role, Grant> = {
     Report: ["read", "export"],
     Knowledge: ALL,
     Scope: ALL,
+    Proposal: ALL,
   },
 
   sales_rep: {
@@ -167,6 +171,7 @@ const GRANTS: Record<Role, Grant> = {
     Report: ["read"],
     Knowledge: ["read"],
     Scope: ["read", "update"],
+    Proposal: ["create", "read", "update"],
   },
 
   // Door-to-door canvasser: books appointments (leads) and works ONLY their own deals.
@@ -184,6 +189,7 @@ const GRANTS: Record<Role, Grant> = {
     Report: ["read"],
     Knowledge: ["read"],
     Scope: ["read"],
+    Proposal: ["create", "read", "update"],
   },
 
   // External marketing company / lead provider: submits leads and sees ONLY the
@@ -216,6 +222,7 @@ const GRANTS: Record<Role, Grant> = {
     Bookkeeping: ALL,
     Knowledge: ["read"],
     Scope: ["read"],
+    Proposal: ["read"],
   },
 
   customer: {},
