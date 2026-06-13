@@ -13,6 +13,7 @@ import { formatCents } from "@/lib/format";
 import { computeCommissionsForProject } from "./engine";
 import { getCommissionEligibleStageIds, COMMISSION_GATE_LABEL } from "./eligibility";
 import { getPayStubData, getRunStubList, buildPayStubPdf } from "./paystub";
+import { postRunToBookkeeping } from "./post-bookkeeping";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -242,6 +243,7 @@ export async function markPayrollRunPaidAction(id: string) {
     include: { items: true },
   });
   if (!run) return fail("Run not found.");
+  if (run.status === "paid") return ok(); // already paid — nothing to do
 
   const commissionIds = run.items.map((i) => i.commissionId).filter((x): x is string => !!x);
 
@@ -254,8 +256,18 @@ export async function markPayrollRunPaidAction(id: string) {
     prisma.payrollRun.update({ where: { id }, data: { status: "paid", paidAt: new Date() } }),
   ]);
 
+  // Book the payout to Bookkeeping: one money-out txn per commission line,
+  // deal-tagged + rep as vendor + pay stub attached. Best-effort: a booking
+  // hiccup must not leave the run un-paid.
+  try {
+    await postRunToBookkeeping(user.companyId, id, user.userId);
+  } catch (err) {
+    console.error("[payroll] postRunToBookkeeping failed", id, err);
+  }
+
   revalidatePath(`/portal/payroll/${id}`);
   revalidatePath("/portal/payroll");
+  revalidatePath("/portal/bookkeeping");
   return ok();
 }
 
