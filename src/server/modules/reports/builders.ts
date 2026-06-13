@@ -7,7 +7,7 @@ import { getCommissionLiability } from "./queries";
 const usd = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
-export type ReportType = "operations" | "financial" | "payroll";
+export type ReportType = "executive" | "operations" | "financial" | "payroll";
 export type Metric = { label: string; value: string; tone?: "pos" | "neg" | "muted"; hint?: string };
 export type ReportTable = { title: string; columns: string[]; rows: (string | number)[][] };
 export type ReportResult = {
@@ -20,6 +20,7 @@ export type ReportResult = {
 };
 
 export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
+  executive: "Executive Summary",
   operations: "Operations",
   financial: "Financial",
   payroll: "Payroll",
@@ -208,12 +209,108 @@ export type MasterReport = {
  */
 export async function buildMasterReport(user: ReportUser, period: Period, scope: ResolvedScope): Promise<MasterReport> {
   const types = allowedReportTypes(user.role);
-  const sections = await Promise.all(types.map((t) => buildReport(user, t, period, scope)));
+  // Finance-capable roles get the at-a-glance Executive Summary on top.
+  const showExecutive = types.includes("financial");
+  const [executive, sections] = await Promise.all([
+    showExecutive ? buildExecutive(user, period, scope) : Promise.resolve(null),
+    Promise.all(types.map((t) => buildReport(user, t, period, scope))),
+  ]);
   return {
     title: "Company Report",
     periodLabel: period.label,
     scopeLabel: scope.label,
-    sections,
+    sections: [...(executive ? [executive] : []), ...sections],
+  };
+}
+
+// ── Executive summary ────────────────────────────────────────────────────────
+// The owner's at-a-glance scorecard: sales, cash, profitability, backlog, and
+// liabilities for the period — the numbers you check to know company health.
+async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedScope): Promise<ReportResult> {
+  const inPeriod = { gte: period.from, lte: period.to };
+  const leadWhere = scope.leadWhere;
+  const projectWhere: Prisma.ProjectWhereInput = { companyId: user.companyId, lead: leadWhere };
+  const projIds = await scopeProjectIds(scope);
+  const txnProjectFilter = projIds ? { projectId: { in: projIds } } : {};
+  const BACKLOG_STATUSES = ["not_started", "in_production", "on_hold", "qc"] as const;
+
+  const [appts, won, soldAgg, activeProjects, txns, collectedAgg, liability, leadsBySource, wonBySource] = await Promise.all([
+    prisma.lead.count({ where: { ...leadWhere, createdAt: inPeriod } }),
+    prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: inPeriod } }),
+    prisma.project.aggregate({ where: { ...projectWhere, createdAt: inPeriod }, _sum: { contractValue: true }, _count: { _all: true } }),
+    prisma.project.findMany({ where: { ...projectWhere, status: { notIn: ["cancelled"] } }, select: { contractValue: true, deductibleCents: true, supplementCents: true, status: true } }),
+    prisma.transaction.findMany({ where: { companyId: user.companyId, date: inPeriod, ...txnProjectFilter }, select: { amountCents: true } }),
+    prisma.transaction.aggregate({ where: { companyId: user.companyId, amountCents: { gt: 0 }, ...txnProjectFilter }, _sum: { amountCents: true } }),
+    getCommissionLiability(user.companyId, scope),
+    prisma.lead.groupBy({ by: ["sourceId"], where: { ...leadWhere, createdAt: inPeriod }, _count: { _all: true } }),
+    prisma.lead.groupBy({ by: ["sourceId"], where: { ...leadWhere, status: "won", createdAt: inPeriod }, _count: { _all: true } }),
+  ]);
+
+  let moneyIn = 0, moneyOut = 0;
+  for (const t of txns) { if (t.amountCents >= 0) moneyIn += t.amountCents; else moneyOut += -t.amountCents; }
+  const net = moneyIn - moneyOut;
+  const contracted = soldAgg._sum.contractValue ?? 0;
+  const jobsSold = soldAgg._count._all;
+  const avgJob = jobsSold > 0 ? Math.round(contracted / jobsSold) : 0;
+  const closingRate = appts > 0 ? (won / appts) * 100 : 0;
+  const backlog = activeProjects.filter((p) => (BACKLOG_STATUSES as readonly string[]).includes(p.status)).reduce((s, p) => s + p.contractValue, 0);
+  const supplement = activeProjects.reduce((s, p) => s + p.supplementCents, 0);
+  const collectible = activeProjects.reduce((s, p) => s + p.contractValue + p.deductibleCents + p.supplementCents, 0);
+  const collected = collectedAgg._sum.amountCents ?? 0;
+  const ar = Math.max(0, collectible - collected);
+  const commOwed = liability.lockedInCents + liability.estimatedCents;
+  const netMargin = moneyIn > 0 ? (net / moneyIn) * 100 : 0;
+
+  // Marketing ROI: leads + close rate per source.
+  const wonCountBySource = new Map<string | null, number>(wonBySource.map((s) => [s.sourceId, s._count._all]));
+  const sourceIds = leadsBySource.map((s) => s.sourceId).filter((x): x is string => !!x);
+  const sourceNames = sourceIds.length
+    ? await prisma.leadSource.findMany({ where: { id: { in: sourceIds } }, select: { id: true, name: true } })
+    : [];
+  const nameById = new Map(sourceNames.map((s) => [s.id, s.name]));
+  const sourceRows = leadsBySource
+    .map((s) => {
+      const leads = s._count._all;
+      const w = wonCountBySource.get(s.sourceId) ?? 0;
+      return { name: s.sourceId ? (nameById.get(s.sourceId) ?? "Other") : "Direct / unattributed", leads, won: w };
+    })
+    .sort((a, b) => b.leads - a.leads);
+
+  return {
+    type: "executive",
+    title: "Executive Summary",
+    periodLabel: period.label,
+    scopeLabel: scope.label,
+    metrics: [
+      { label: "Revenue contracted", value: usd(contracted), tone: "pos", hint: "sold in period" },
+      { label: "Jobs sold", value: String(jobsSold), hint: "in period" },
+      { label: "Avg job size", value: usd(avgJob) },
+      { label: "Closing rate", value: pct(closingRate), hint: "won / appts" },
+      { label: "Revenue collected", value: usd(moneyIn), tone: "pos", hint: "cash in" },
+      { label: "Cash out", value: usd(moneyOut), tone: "neg", hint: "in period" },
+      { label: "Net cash", value: usd(net), tone: net >= 0 ? "pos" : "neg", hint: "in period" },
+      { label: "Net margin", value: pct(netMargin), tone: netMargin >= 0 ? "pos" : "neg" },
+      { label: "Signed backlog", value: usd(backlog), hint: "in progress" },
+      { label: "Left to collect", value: usd(ar), hint: "A/R, current" },
+      { label: "Commission liability", value: usd(commOwed), tone: "neg", hint: "owed" },
+      { label: "Supplements approved", value: usd(supplement), tone: "pos", hint: "current" },
+    ],
+    tables: [
+      {
+        title: "Cash flow (in period)",
+        columns: ["Flow", "Amount"],
+        rows: [
+          ["Money in", usd(moneyIn)],
+          ["Money out", usd(moneyOut)],
+          ["Net cash", usd(net)],
+        ],
+      },
+      {
+        title: "Lead sources (in period)",
+        columns: ["Source", "Leads", "Won", "Close rate"],
+        rows: sourceRows.map((r) => [r.name, r.leads, r.won, pct(r.leads > 0 ? (r.won / r.leads) * 100 : 0)]),
+      },
+    ],
   };
 }
 

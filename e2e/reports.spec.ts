@@ -18,13 +18,17 @@ test("admin sees one master report with all sections; period + downloads work", 
   await expect(page.getByRole("heading", { name: "Company Report" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Operations", exact: true })).toHaveCount(0);
 
-  // All three sections render together for an owner.
+  // Executive scorecard on top + all detail sections for an owner.
+  await expect(page.getByRole("heading", { name: "Executive Summary" })).toBeVisible();
+  await expect(page.getByText("Revenue contracted")).toBeVisible();
+  await expect(page.getByText("Signed backlog")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Operations Report" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Financial Report" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Payroll Report" })).toBeVisible();
   // A signature metric from each section is present on the one page.
-  await expect(page.getByText("Closing rate")).toBeVisible();
-  await expect(page.getByText("Left to collect")).toBeVisible();
+  // (Closing rate / Left to collect also appear in the Executive Summary, hence .first().)
+  await expect(page.getByText("Closing rate").first()).toBeVisible();
+  await expect(page.getByText("Left to collect").first()).toBeVisible();
   await expect(page.getByText("Total payroll")).toBeVisible();
 
   // Switch period to This month → URL + header update.
@@ -49,7 +53,8 @@ test("a sales rep sees only the Operations section, scoped to themselves", async
 
   await expect(page.getByRole("heading", { name: "Company Report" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Operations Report" })).toBeVisible();
-  // No financial / payroll sections for a rep.
+  // No executive scorecard or financial / payroll sections for a rep.
+  await expect(page.getByRole("heading", { name: "Executive Summary" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Financial Report" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Payroll Report" })).toHaveCount(0);
   // Scope locked to "Me" → no scope dropdown.
