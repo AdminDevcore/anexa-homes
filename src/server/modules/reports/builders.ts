@@ -8,7 +8,18 @@ const usd = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
 export type ReportType = "executive" | "operations" | "financial" | "payroll";
-export type Metric = { label: string; value: string; tone?: "pos" | "neg" | "muted"; hint?: string };
+export type Metric = {
+  label: string;
+  value: string;
+  tone?: "pos" | "neg" | "muted";
+  hint?: string;
+  // Trend (Executive Summary): % change vs the previous equal-length period and a
+  // mini series over the last several periods for a sparkline. lowerIsBetter flips
+  // the good/bad coloring (e.g. Cash out going down is good).
+  deltaPct?: number;
+  series?: number[];
+  lowerIsBetter?: boolean;
+};
 export type ReportTable = { title: string; columns: string[]; rows: (string | number)[][] };
 export type ReportResult = {
   type: ReportType;
@@ -253,6 +264,36 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
   const jobsSold = soldAgg._count._all;
   const avgJob = jobsSold > 0 ? Math.round(contracted / jobsSold) : 0;
   const closingRate = appts > 0 ? (won / appts) * 100 : 0;
+
+  // ── Trend: last 8 equal-length windows ending at period.to (uniform for any
+  // preset). The final window == the current period, so each series ends on the
+  // card's value; the delta compares the last two windows.
+  type Bucket = { contracted: number; collected: number; cashOut: number; net: number; jobsSold: number; closingRate: number };
+  const dur = Math.max(86_400_000, period.to.getTime() - period.from.getTime());
+  const N = 8;
+  async function bucketStats(from: Date, to: Date): Promise<Bucket> {
+    const w = { gte: from, lte: to };
+    const [a, wn, sold, btxns] = await Promise.all([
+      prisma.lead.count({ where: { ...leadWhere, createdAt: w } }),
+      prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: w } }),
+      prisma.project.aggregate({ where: { ...projectWhere, createdAt: w }, _sum: { contractValue: true }, _count: { _all: true } }),
+      prisma.transaction.findMany({ where: { companyId: user.companyId, date: w, ...txnProjectFilter }, select: { amountCents: true } }),
+    ]);
+    let ci = 0, co = 0;
+    for (const t of btxns) { if (t.amountCents >= 0) ci += t.amountCents; else co += -t.amountCents; }
+    return { contracted: sold._sum.contractValue ?? 0, collected: ci, cashOut: co, net: ci - co, jobsSold: sold._count._all, closingRate: a > 0 ? (wn / a) * 100 : 0 };
+  }
+  const windows = Array.from({ length: N }, (_, k) => {
+    const to = new Date(period.to.getTime() - (N - 1 - k) * dur);
+    return { from: new Date(to.getTime() - dur), to };
+  });
+  const buckets = await Promise.all(windows.map((win) => bucketStats(win.from, win.to)));
+  const series = (pick: (b: Bucket) => number) => buckets.map(pick);
+  const delta = (pick: (b: Bucket) => number) => {
+    const cur = pick(buckets[N - 1]); const prev = pick(buckets[N - 2]);
+    return prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : cur > 0 ? 100 : cur < 0 ? -100 : 0;
+  };
+
   const backlog = activeProjects.filter((p) => (BACKLOG_STATUSES as readonly string[]).includes(p.status)).reduce((s, p) => s + p.contractValue, 0);
   const supplement = activeProjects.reduce((s, p) => s + p.supplementCents, 0);
   const collectible = activeProjects.reduce((s, p) => s + p.contractValue + p.deductibleCents + p.supplementCents, 0);
@@ -282,13 +323,13 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
     periodLabel: period.label,
     scopeLabel: scope.label,
     metrics: [
-      { label: "Revenue contracted", value: usd(contracted), tone: "pos", hint: "sold in period" },
-      { label: "Jobs sold", value: String(jobsSold), hint: "in period" },
+      { label: "Revenue contracted", value: usd(contracted), tone: "pos", hint: "sold in period", deltaPct: delta((b) => b.contracted), series: series((b) => b.contracted) },
+      { label: "Jobs sold", value: String(jobsSold), hint: "in period", deltaPct: delta((b) => b.jobsSold), series: series((b) => b.jobsSold) },
       { label: "Avg job size", value: usd(avgJob) },
-      { label: "Closing rate", value: pct(closingRate), hint: "won / appts" },
-      { label: "Revenue collected", value: usd(moneyIn), tone: "pos", hint: "cash in" },
-      { label: "Cash out", value: usd(moneyOut), tone: "neg", hint: "in period" },
-      { label: "Net cash", value: usd(net), tone: net >= 0 ? "pos" : "neg", hint: "in period" },
+      { label: "Closing rate", value: pct(closingRate), hint: "won / appts", deltaPct: delta((b) => b.closingRate), series: series((b) => b.closingRate) },
+      { label: "Revenue collected", value: usd(moneyIn), tone: "pos", hint: "cash in", deltaPct: delta((b) => b.collected), series: series((b) => b.collected) },
+      { label: "Cash out", value: usd(moneyOut), tone: "neg", hint: "in period", deltaPct: delta((b) => b.cashOut), series: series((b) => b.cashOut), lowerIsBetter: true },
+      { label: "Net cash", value: usd(net), tone: net >= 0 ? "pos" : "neg", hint: "in period", deltaPct: delta((b) => b.net), series: series((b) => b.net) },
       { label: "Net margin", value: pct(netMargin), tone: netMargin >= 0 ? "pos" : "neg" },
       { label: "Signed backlog", value: usd(backlog), hint: "in progress" },
       { label: "Left to collect", value: usd(ar), hint: "A/R, current" },

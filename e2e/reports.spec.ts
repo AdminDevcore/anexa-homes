@@ -22,6 +22,8 @@ test("admin sees one master report with all sections; period + downloads work", 
   await expect(page.getByRole("heading", { name: "Executive Summary" })).toBeVisible();
   await expect(page.getByText("Revenue contracted")).toBeVisible();
   await expect(page.getByText("Signed backlog")).toBeVisible();
+  // Trend deltas render on the scorecard.
+  await expect(page.getByText("vs prev").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Operations Report" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Financial Report" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Payroll Report" })).toBeVisible();
