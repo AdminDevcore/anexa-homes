@@ -259,6 +259,27 @@ export async function markPayrollRunPaidAction(id: string) {
   return ok();
 }
 
+/**
+ * Delete a payroll run that hasn't been paid yet (draft or approved). Cascades
+ * its PayrollItems; the linked commissions are NOT deleted — they stay
+ * `approved` and return to the unbatched pool so a corrected run can pick them
+ * up. Paid runs can never be deleted (money already disbursed).
+ */
+export async function deletePayrollRunAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Payroll")) return fail("Not allowed.");
+  const runRow = await prisma.payrollRun.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true, status: true },
+  });
+  if (!runRow) return fail("Run not found.");
+  if (runRow.status === "paid") return fail("Paid payroll runs can't be deleted.");
+
+  await prisma.payrollRun.delete({ where: { id } });
+  revalidatePath("/portal/payroll");
+  return ok();
+}
+
 // --------------------------- Pay stub email ----------------------------------
 
 const emailStubSchema = z.object({ runId: z.string().min(1), userId: z.string().min(1) });

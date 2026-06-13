@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Loader2, Check, DollarSign } from "lucide-react";
+import { Plus, Loader2, Check, DollarSign, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ import {
   createPayrollRunAction,
   approvePayrollRunAction,
   markPayrollRunPaidAction,
+  deletePayrollRunAction,
 } from "@/server/modules/payroll/actions";
 
 export function NewPayrollRunDialog() {
@@ -90,6 +91,7 @@ export function NewPayrollRunDialog() {
 export function PayrollRunActions({ id, status }: { id: string; status: string }) {
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
 
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>, msg: string) {
     setPending(true);
@@ -98,6 +100,19 @@ export function PayrollRunActions({ id, status }: { id: string; status: string }
     if (res.ok) {
       toast.success(msg);
       router.refresh();
+    } else {
+      toast.error(res.error);
+    }
+  }
+
+  async function remove() {
+    setPending(true);
+    const res = await deletePayrollRunAction(id);
+    setPending(false);
+    if (res.ok) {
+      toast.success("Payroll run deleted");
+      setConfirmDelete(false);
+      router.push("/portal/payroll");
     } else {
       toast.error(res.error);
     }
@@ -116,6 +131,32 @@ export function PayrollRunActions({ id, status }: { id: string; status: string }
         </Button>
       )}
       {status === "paid" && <span className="text-sm text-emerald-600">Paid</span>}
+
+      {/* Unpaid runs (draft/approved) can be deleted; commissions return to the pool. */}
+      {status !== "paid" && (
+        <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+          <DialogTrigger asChild>
+            <Button size="sm" variant="outline" disabled={pending} className="text-destructive hover:text-destructive">
+              <Trash2 className="size-4" /> Delete
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete this payroll run?</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              This deletes the run and its lines. The commissions in it stay approved and return to the
+              unpaid pool, so you can create a corrected run. This can&rsquo;t be undone.
+            </p>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setConfirmDelete(false)} disabled={pending}>Cancel</Button>
+              <Button variant="destructive" onClick={remove} disabled={pending}>
+                {pending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Delete run
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
