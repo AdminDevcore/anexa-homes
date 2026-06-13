@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { AccessUser } from "@/server/rbac/guards";
@@ -187,6 +188,30 @@ async function assembleView(
     },
     signUrl: null, // wired in Phase 4 (deep-link to esign) — null = rep will send docs
   };
+}
+
+/** Render-safe get-or-create (no revalidatePath) — used by the builder page. */
+export async function ensureProposal(user: AccessUser, leadId: string): Promise<boolean> {
+  const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  const lead = await prisma.lead.findFirst({
+    where: { AND: [{ id: leadId }, scope] },
+    select: { id: true, firstName: true, lastName: true, address: true, city: true, state: true, zip: true },
+  });
+  if (!lead) return false;
+  const existing = await prisma.proposal.findFirst({ where: { companyId: user.companyId, leadId }, select: { id: true } });
+  if (existing) return true;
+  await prisma.proposal.create({
+    data: {
+      companyId: user.companyId,
+      leadId,
+      publicToken: randomBytes(24).toString("base64url"),
+      customerName: `${lead.firstName} ${lead.lastName}`.trim(),
+      propertyAddress: [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", "),
+      content: defaultProposalContent() as unknown as Prisma.InputJsonValue,
+      createdById: user.userId,
+    },
+  });
+  return true;
 }
 
 /** Builder payload for the authed deal owner. Photos served via the portal route. */

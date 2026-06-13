@@ -8,7 +8,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
-import { defaultProposalContent, requiredPhotosMet, type ProposalContent } from "@/lib/proposal";
+import { defaultProposalContent, requiredPhotosMet } from "@/lib/proposal";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -141,5 +141,3 @@ export async function askQuestionAction(input: z.infer<typeof replySchema>) {
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid request.");
   return postCustomerNote(parsed.data.token, parsed.data.message, "Question");
 }
-
-export type { ProposalContent };

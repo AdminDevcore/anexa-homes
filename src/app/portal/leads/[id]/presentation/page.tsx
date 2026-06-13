@@ -3,8 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { ensureProposalAction } from "@/server/modules/proposals/actions";
-import { getProposalForBuilder } from "@/server/modules/proposals/queries";
+import { ensureProposal, getProposalForBuilder } from "@/server/modules/proposals/queries";
 import { PresentationBuilder } from "@/components/portal/presentation-builder";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +14,7 @@ export default async function PresentationBuilderPage({ params }: { params: Prom
   if (!can(user, "create", "Proposal") && !can(user, "update", "Proposal")) redirect(`/portal/leads/${id}`);
 
   // Get-or-create the draft so the builder always has a record.
-  const ensured = await ensureProposalAction(id);
-  if (!ensured.ok) notFound();
+  if (!(await ensureProposal(user, id))) notFound();
 
   const data = await getProposalForBuilder(user, id);
   if (!data) notFound();
