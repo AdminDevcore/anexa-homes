@@ -1,0 +1,36 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+import { requireUser } from "@/server/auth/session";
+import { can } from "@/server/rbac/guards";
+import { ensureProposalAction } from "@/server/modules/proposals/actions";
+import { getProposalForBuilder } from "@/server/modules/proposals/queries";
+import { PresentationBuilder } from "@/components/portal/presentation-builder";
+
+export const dynamic = "force-dynamic";
+
+export default async function PresentationBuilderPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const user = await requireUser();
+  if (!can(user, "create", "Proposal") && !can(user, "update", "Proposal")) redirect(`/portal/leads/${id}`);
+
+  // Get-or-create the draft so the builder always has a record.
+  const ensured = await ensureProposalAction(id);
+  if (!ensured.ok) notFound();
+
+  const data = await getProposalForBuilder(user, id);
+  if (!data) notFound();
+
+  return (
+    <div className="mx-auto w-full max-w-4xl px-4 py-6">
+      <Link href={`/portal/leads/${id}`} className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="size-4" /> Back to deal
+      </Link>
+      <div className="mb-6">
+        <h1 className="font-serif text-2xl font-bold">Build Presentation</h1>
+        <p className="text-sm text-muted-foreground">{data.proposal.customerName} · {data.proposal.propertyAddress}</p>
+      </div>
+      <PresentationBuilder data={data} leadId={id} />
+    </div>
+  );
+}
