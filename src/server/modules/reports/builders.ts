@@ -194,6 +194,29 @@ export async function buildReport(user: ReportUser, type: ReportType, period: Pe
   return buildOperations(user, period, scope);
 }
 
+export type MasterReport = {
+  title: string;
+  periodLabel: string;
+  scopeLabel: string;
+  sections: ReportResult[];
+};
+
+/**
+ * One combined company report: every section the viewer is allowed to see
+ * (operations / financial / payroll), for the same period + scope. A sales rep
+ * gets operations only; finance roles get all three.
+ */
+export async function buildMasterReport(user: ReportUser, period: Period, scope: ResolvedScope): Promise<MasterReport> {
+  const types = allowedReportTypes(user.role);
+  const sections = await Promise.all(types.map((t) => buildReport(user, t, period, scope)));
+  return {
+    title: "Company Report",
+    periodLabel: period.label,
+    scopeLabel: scope.label,
+    sections,
+  };
+}
+
 async function buildOperations(user: ReportUser, period: Period, scope: ResolvedScope): Promise<ReportResult> {
   const inPeriod = { gte: period.from, lte: period.to };
   const leadWhere = scope.leadWhere;

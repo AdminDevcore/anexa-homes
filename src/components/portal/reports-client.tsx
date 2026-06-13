@@ -6,7 +6,6 @@ import { Download, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
-type ReportType = "operations" | "financial" | "payroll";
 type ScopeOption = { value: string; label: string };
 
 const PERIOD_PRESETS = [
@@ -16,36 +15,25 @@ const PERIOD_PRESETS = [
   { value: "ytd", label: "Year to date" },
 ] as const;
 
-const TYPE_LABELS: Record<ReportType, string> = {
-  operations: "Operations",
-  financial: "Financial",
-  payroll: "Payroll",
-};
-
 export function ReportsControls({
-  type,
   preset,
   from,
   to,
   scope,
-  allowedTypes,
   scopeOptions,
 }: {
-  type: ReportType;
   preset: string;
   from: string;
   to: string;
   scope: string;
-  allowedTypes: ReportType[];
   scopeOptions: ScopeOption[];
 }) {
   const router = useRouter();
   const [customFrom, setCustomFrom] = React.useState(from);
   const [customTo, setCustomTo] = React.useState(to);
 
-  function go(next: Partial<{ type: string; period: string; scope: string; from: string; to: string }>) {
+  function go(next: Partial<{ period: string; scope: string; from: string; to: string }>) {
     const params = new URLSearchParams();
-    params.set("type", next.type ?? type);
     params.set("period", next.period ?? preset);
     params.set("scope", next.scope ?? scope);
     const f = next.from ?? customFrom;
@@ -59,31 +47,16 @@ export function ReportsControls({
 
   return (
     <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-      {/* Report type */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-1 rounded-lg border border-border bg-background p-1">
-          {allowedTypes.map((t) => (
-            <button
-              key={t}
-              onClick={() => go({ type: t })}
-              className={cn(
-                "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors",
-                type === t ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted"
-              )}
-            >
-              {TYPE_LABELS[t]}
-            </button>
-          ))}
-        </div>
-
+        <p className="text-sm text-muted-foreground">One combined report — operations, financials &amp; payroll.</p>
         <div className="flex items-center gap-2">
           <Button asChild size="sm" variant="outline">
-            <a href={`/portal/reports/pdf?${query(type, preset, scope, customFrom, customTo)}`} target="_blank" rel="noreferrer">
+            <a href={`/portal/reports/pdf?${query(preset, scope, customFrom, customTo)}`} target="_blank" rel="noreferrer">
               <FileText className="size-4" /> Download PDF
             </a>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <a href={`/portal/reports/export?${query(type, preset, scope, customFrom, customTo)}`}>
+            <a href={`/portal/reports/export?${query(preset, scope, customFrom, customTo)}`}>
               <Download className="size-4" /> CSV
             </a>
           </Button>
@@ -99,7 +72,7 @@ export function ReportsControls({
               onClick={() => go({ period: p.value })}
               className={cn(
                 "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                preset === p.value ? "border-gold/50 bg-gold/10 text-gold-muted" : "border-border text-muted-foreground hover:bg-muted"
+                preset === p.value ? "border-gold/50 bg-gold/10 text-gold-muted" : "border-border text-muted-foreground hover:bg-muted",
               )}
             >
               {p.label}
@@ -108,7 +81,7 @@ export function ReportsControls({
           <span
             className={cn(
               "rounded-full border px-3 py-1 text-xs font-medium",
-              preset === "custom" ? "border-gold/50 bg-gold/10 text-gold-muted" : "border-border text-muted-foreground"
+              preset === "custom" ? "border-gold/50 bg-gold/10 text-gold-muted" : "border-border text-muted-foreground",
             )}
           >
             Custom
@@ -156,8 +129,8 @@ export function ReportsControls({
   );
 }
 
-function query(type: string, period: string, scope: string, from: string, to: string): string {
-  const p = new URLSearchParams({ type, period, scope });
+function query(period: string, scope: string, from: string, to: string): string {
+  const p = new URLSearchParams({ period, scope });
   if (period === "custom" && from && to) {
     p.set("from", from);
     p.set("to", to);
