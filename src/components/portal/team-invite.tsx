@@ -18,6 +18,8 @@ export function TeamInvite({ roles, isSuperAdmin }: { roles: { value: string; la
   const [role, setRole] = React.useState("sales_rep");
   const [busy, setBusy] = React.useState(false);
   const [link, setLink] = React.useState<string | null>(null);
+  const [emailed, setEmailed] = React.useState(false);
+  const [invitedEmail, setInvitedEmail] = React.useState("");
 
   const selectable = roles.filter((r) => isSuperAdmin || r.value !== "super_admin");
 
@@ -28,7 +30,9 @@ export function TeamInvite({ roles, isSuperAdmin }: { roles: { value: string; la
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     setLink(res.inviteLink ?? null);
-    toast.success("Invitation created");
+    setEmailed(res.emailed);
+    setInvitedEmail(email);
+    toast.success(res.emailed ? "Invite emailed" : "Invite link created");
     router.refresh();
   }
 
@@ -37,6 +41,8 @@ export function TeamInvite({ roles, isSuperAdmin }: { roles: { value: string; la
     setEmail("");
     setRole("sales_rep");
     setLink(null);
+    setEmailed(false);
+    setInvitedEmail("");
   }
 
   return (
@@ -47,10 +53,19 @@ export function TeamInvite({ roles, isSuperAdmin }: { roles: { value: string; la
       <DialogContent>
         <DialogHeader><DialogTitle>Invite a team member</DialogTitle></DialogHeader>
         {link ? (
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Invitation created. Share this link (valid 7 days):</p>
+          <div className="space-y-3">
+            {emailed ? (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                ✓ Invite emailed to <strong>{invitedEmail}</strong>. They&rsquo;ll get a link to set their password, then complete onboarding on first login.
+              </p>
+            ) : (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                ⚠ <strong>Email isn&rsquo;t set up</strong>, so this wasn&rsquo;t sent automatically. Copy the link below and send it to <strong>{invitedEmail}</strong> yourself (text, Slack, or email). To send invites automatically, add a <code className="rounded bg-amber-100 px-1">RESEND_API_KEY</code> in your environment.
+              </p>
+            )}
+            <p className="text-sm text-muted-foreground">Activation link (valid 7 days):</p>
             <div className="flex items-center gap-2">
-              <Input readOnly value={link} className="text-xs" />
+              <Input readOnly value={link} className="text-xs" onFocus={(e) => e.currentTarget.select()} />
               <Button size="icon" variant="outline" onClick={() => { navigator.clipboard?.writeText(link); toast.success("Copied"); }}>
                 <Copy className="size-4" />
               </Button>

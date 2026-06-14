@@ -1,6 +1,7 @@
 import type { NotificationChannel, NotificationEvent, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { brandingForCompany } from "@/server/branding/resolve";
+import { emailBrandFor } from "@/server/modules/notifications/brand";
+import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import type { RecipientConfig } from "./types";
 import { sendEmail, sendSms } from "./delivery";
 
@@ -90,9 +91,10 @@ async function run(args: FireArgs) {
 
   const link = buildLink(args, { leadId: lead?.id ?? leadForCtx?.id, projectId, documentId: doc?.id });
 
-  // --- Load branding for from-name override ---
-  const branding = await brandingForCompany(args.companyId);
-  const fromName = branding.emailFromName ?? branding.companyName;
+  // --- Load branding for the from-name + branded email template ---
+  const { brand, fromName } = await emailBrandFor(args.companyId);
+  const appUrl = (brand.appUrl ?? "http://localhost:3000").replace(/\/$/, "");
+  const absoluteLink = link.startsWith("http") ? link : `${appUrl}${link.startsWith("/") ? "" : "/"}${link}`;
 
   // --- Cache role lookups ---
   const roleCache = new Map<string, string[]>();
@@ -148,7 +150,16 @@ async function run(args: FireArgs) {
           data: { companyId: args.companyId, userId: r.id, ruleId: rule.id, event: args.event, title, body, link, channel: "in_app" },
         });
       }
-      if (channels.includes("email") && r.email) await sendEmail(r.email, title, body, { fromName });
+      if (channels.includes("email") && r.email) {
+        const tpl = brandedEmailTemplate({
+          brand,
+          subject: title,
+          heading: title,
+          paragraphs: body ? [body] : [],
+          cta: link ? { label: "View in portal", url: absoluteLink } : undefined,
+        });
+        await sendEmail(r.email, tpl.subject, tpl.text, { fromName, html: tpl.html });
+      }
       if (channels.includes("sms") && r.phone) await sendSms(r.phone, `${title}\n${body}`);
     }
   }

@@ -6,7 +6,8 @@ import { prisma } from "@/server/db/client";
 import { serviceTypeFromSlug } from "@/lib/service-types";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
-import { brandingForCompany } from "@/server/branding/resolve";
+import { emailBrandFor } from "@/server/modules/notifications/brand";
+import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { resolveStageForAppointment } from "./staging";
 import { COMPANY } from "@/lib/site";
 
@@ -171,35 +172,42 @@ export async function submitWebsiteLead(
 }
 
 async function sendHomeownerConfirmation(companyId: string, data: WebsiteLeadInput): Promise<void> {
-  const branding = await brandingForCompany(companyId);
-  const fromName = branding.emailFromName ?? branding.companyName;
+  const { brand, fromName } = await emailBrandFor(companyId);
+  const phone = brand.contact?.phone ?? COMPANY.phone;
 
   if (data.type === "careers") {
-    await sendEmail(
-      data.email,
-      "We received your application — Anexa Homes",
-      `Hi ${data.firstName},\n\nThanks for applying to join the Anexa Homes team. Our hiring team will review your application and reach out soon.\n\n— Anexa Homes\n${COMPANY.phone}`,
-      { fromName }
-    );
+    const tpl = brandedEmailTemplate({
+      brand,
+      subject: `We received your application — ${brand.companyName}`,
+      heading: "Thanks for applying",
+      paragraphs: [
+        `Hi ${data.firstName},`,
+        `Thanks for applying to join the ${brand.companyName} team. Our hiring team will review your application and reach out soon.`,
+      ],
+    });
+    await sendEmail(data.email, tpl.subject, tpl.text, { fromName, html: tpl.html });
     return;
   }
 
   const win = data.preferredTime ? TIME_WINDOWS[data.preferredTime] : undefined;
   const slot = data.preferredDate ? `${data.preferredDate}${win ? ` (${win.label})` : ""}` : "";
-  const subject = "We got your request — Anexa Homes";
-  const body =
-    `Hi ${data.firstName},\n\n` +
-    `Thanks for reaching out to Anexa Homes. We've received your ${
-      data.type === "claim" ? "insurance claim support" : "free inspection"
-    } request` +
-    (slot ? ` for ${slot}` : "") +
-    `, and a specialist will contact you shortly — usually within one business hour — to confirm${
-      slot ? " your appointment" : " a time"
-    }.\n\n` +
-    `Need us sooner? Call ${COMPANY.phone}.\n\n— The Anexa Homes Team`;
+  const tpl = brandedEmailTemplate({
+    brand,
+    subject: `We got your request — ${brand.companyName}`,
+    heading: "We've got your request",
+    paragraphs: [
+      `Hi ${data.firstName},`,
+      `Thanks for reaching out to ${brand.companyName}. We've received your ${
+        data.type === "claim" ? "insurance claim support" : "free inspection"
+      } request${slot ? ` for ${slot}` : ""}, and a specialist will contact you shortly — usually within one business hour — to confirm${
+        slot ? " your appointment" : " a time"
+      }.`,
+      `Need us sooner? Call ${phone}.`,
+    ],
+  });
 
   await Promise.allSettled([
-    sendEmail(data.email, subject, body, { fromName }),
+    sendEmail(data.email, tpl.subject, tpl.text, { fromName, html: tpl.html }),
     sendSms(
       data.phone,
       `Anexa Homes: Thanks ${data.firstName}! We received your request and will call you shortly. Questions? ${COMPANY.phone}`
