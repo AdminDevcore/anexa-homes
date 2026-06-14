@@ -41,8 +41,15 @@ let s3Client: import("@aws-sdk/client-s3").S3Client | null = null;
 async function s3() {
   const { S3Client } = await import("@aws-sdk/client-s3");
   if (!s3Client) {
-    // Credentials resolve from the standard AWS provider chain (env vars, IAM role).
-    s3Client = new S3Client({ region: process.env.AWS_REGION });
+    // A custom endpoint targets S3-compatible stores (Cloudflare R2, Backblaze
+    // B2, MinIO). R2 needs region "auto" and path-style addressing. Credentials
+    // resolve from the standard AWS provider chain (AWS_ACCESS_KEY_ID /
+    // AWS_SECRET_ACCESS_KEY env vars, or an IAM role on AWS).
+    const endpoint = process.env.STORAGE_S3_ENDPOINT ?? process.env.AWS_ENDPOINT_URL_S3;
+    s3Client = new S3Client({
+      region: process.env.AWS_REGION ?? (endpoint ? "auto" : undefined),
+      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
+    });
   }
   const bucket = process.env.STORAGE_S3_BUCKET;
   if (!bucket) throw new Error("STORAGE_S3_BUCKET is required when STORAGE_DRIVER=s3");
