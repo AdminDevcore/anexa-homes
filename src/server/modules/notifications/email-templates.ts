@@ -75,15 +75,15 @@ function layout(brand: EmailBrand, opts: { preheader: string; contentHtml: strin
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(opts.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pageBottom};background-image:linear-gradient(180deg,${C.pageTop} 0%,${C.pageBottom} 100%);padding:40px 16px;">
   <tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${C.card};border-radius:18px;overflow:hidden;border:1px solid ${C.cardBorder};box-shadow:0 18px 50px rgba(0,0,0,0.55);">
+    <table role="presentation" width="660" cellpadding="0" cellspacing="0" style="max-width:660px;width:100%;background:${C.card};border-radius:20px;overflow:hidden;border:1px solid ${C.cardBorder};box-shadow:0 20px 56px rgba(0,0,0,0.55);">
       <!-- orange accent strip -->
-      <tr><td style="height:5px;line-height:5px;font-size:0;background:${accent};background-image:linear-gradient(90deg,#FF8A4C 0%,${accent} 55%,#C64A12 100%);">&nbsp;</td></tr>
+      <tr><td style="height:6px;line-height:6px;font-size:0;background:${accent};background-image:linear-gradient(90deg,#FF8A4C 0%,${accent} 55%,#C64A12 100%);">&nbsp;</td></tr>
       <!-- logo header on dark, with a faint orange glow under the strip -->
-      <tr><td style="padding:26px 34px 20px;border-bottom:1px solid ${C.hairline};background-image:linear-gradient(180deg,${hexToRgba(accent, 0.14)} 0%,${hexToRgba(accent, 0)} 88%);">${header}</td></tr>
-      <tr><td style="padding:34px 34px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${C.body};">
+      <tr><td style="padding:32px 46px 26px;border-bottom:1px solid ${C.hairline};background-image:linear-gradient(180deg,${hexToRgba(accent, 0.14)} 0%,${hexToRgba(accent, 0)} 88%);">${header}</td></tr>
+      <tr><td style="padding:42px 46px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${C.body};">
         ${opts.contentHtml}
       </td></tr>
-      <tr><td style="padding:22px 34px 30px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+      <tr><td style="padding:26px 46px 38px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
         <hr style="border:none;border-top:1px solid ${C.hairline};margin:0 0 16px;" />
         <p style="margin:0;font-size:12px;line-height:1.6;color:${C.muted};">
           <strong style="color:${C.footerName};">${esc(brand.companyName)}</strong>${footerBits ? `<br/>${footerBits}` : ""}
