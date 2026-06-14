@@ -28,7 +28,7 @@ export type ListLead = {
   createdAt: string;
 };
 
-type Stage = { id: string; name: string; color: string };
+type Stage = { id: string; name: string; color: string; targetDays?: number };
 
 export function PipelineView({
   title,

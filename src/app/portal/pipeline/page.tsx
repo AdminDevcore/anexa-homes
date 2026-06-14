@@ -102,7 +102,7 @@ export default async function PipelinePage() {
       <PipelineView
         title={`${INDUSTRY_LABEL[industry]} Pipeline`}
         count={leads.length}
-        stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name, color: s.color }))}
+        stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name, color: s.color, targetDays: s.targetDays }))}
         initialLeadsByStage={leadsByStage}
         listLeads={listLeads}
         canMove={can(user, "update", "Lead")}

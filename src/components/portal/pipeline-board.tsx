@@ -34,7 +34,7 @@ export type BoardLead = {
   appointmentOutcome: string | null;
   inspectionOutcome: string | null;
 };
-type Stage = { id: string; name: string; color: string };
+type Stage = { id: string; name: string; color: string; targetDays?: number };
 
 // "3d" / "1d" / "today" — compact day count for the age badges.
 function fmtDays(d: number) {
@@ -168,7 +168,7 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
         )}
       >
         {leads.map((lead) => (
-          <Card key={lead.id} lead={lead} accent={stage.color} canMove={canMove} />
+          <Card key={lead.id} lead={lead} accent={stage.color} canMove={canMove} targetDays={stage.targetDays ?? 0} />
         ))}
         {leads.length === 0 && (
           <div className="m-1 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/70 px-2 py-10 text-center text-xs text-muted-foreground">
@@ -185,11 +185,13 @@ function Card({
   accent,
   canMove,
   overlay = false,
+  targetDays = 0,
 }: {
   lead: BoardLead;
   accent: string;
   canMove: boolean;
   overlay?: boolean;
+  targetDays?: number;
 }) {
   const fmt = useFormat();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -275,17 +277,23 @@ function Card({
           >
             <CalendarClock className="size-3" /> {fmtDays(lead.ageDays)}
           </span>
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5",
-              lead.stageDays >= 14
-                ? "bg-amber-100 font-medium text-amber-700"
-                : "bg-muted/70"
-            )}
-            title={`${lead.stageDays} day${lead.stageDays === 1 ? "" : "s"} in this status`}
-          >
-            <Timer className="size-3" /> {fmtDays(lead.stageDays)} here
-          </span>
+          {(() => {
+            const overdue = targetDays > 0 && lead.stageDays > targetDays;
+            const dueSoon = targetDays > 0 && !overdue && lead.stageDays >= targetDays - 1;
+            const cls = overdue ? "bg-red-100 font-medium text-red-700"
+              : dueSoon ? "bg-amber-100 font-medium text-amber-700"
+              : targetDays > 0 ? "bg-emerald-100 font-medium text-emerald-700"
+              : lead.stageDays >= 14 ? "bg-amber-100 font-medium text-amber-700" : "bg-muted/70";
+            const dot = overdue ? "🔴 " : dueSoon ? "🟡 " : targetDays > 0 ? "🟢 " : "";
+            const title = targetDays > 0
+              ? `${lead.stageDays}/${targetDays} days in stage${overdue ? ` · overdue by ${lead.stageDays - targetDays}` : ""}`
+              : `${lead.stageDays} day${lead.stageDays === 1 ? "" : "s"} in this status`;
+            return (
+              <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5", cls)} title={title}>
+                <Timer className="size-3" /> {dot}{fmtDays(lead.stageDays)}{targetDays > 0 ? `/${targetDays}d` : " here"}
+              </span>
+            );
+          })()}
         </div>
       </Link>
 

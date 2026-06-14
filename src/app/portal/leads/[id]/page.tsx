@@ -35,7 +35,9 @@ import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { FilesSection } from "@/components/portal/files-section";
 import { DealPhotos, type GroupPhoto } from "@/components/portal/deal-photos";
+import { DealCallRecordings, type CallRecording } from "@/components/portal/deal-call-recordings";
 import { PHOTO_GROUP_KEYS, type PhotoGroup } from "@/lib/photo-groups";
+import { CALL_GROUP_KEYS, type CallGroup } from "@/lib/call-groups";
 import { LeadTasks } from "@/components/portal/lead-tasks";
 import { ProjectPhotos } from "@/components/portal/project-photos";
 import { StartProductionButton } from "@/components/portal/start-production-button";
@@ -45,6 +47,7 @@ import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTabs } from "@/components/portal/deal-tabs";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
+import { stageTiming, STAGE_STATUS_META, stageStatusLabel } from "@/lib/stage-status";
 import { ScopeOfWorkPanel } from "@/components/portal/scope-of-work-panel";
 import {
   ProjectStatusControl,
@@ -225,6 +228,39 @@ export default async function LeadDetailPage({
           </div>
         }
       />
+
+      {/* Stage Timer (SLA) card */}
+      {lead.stage && (() => {
+        const t = stageTiming(lead.stageChangedAt, lead.createdAt, lead.stage.targetDays);
+        const meta = t.status === "none" ? null : STAGE_STATUS_META[t.status];
+        return (
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-2xl border border-border bg-card p-5">
+            <div className="flex items-center gap-2 text-sm font-semibold"><span>⏱</span> Stage Duration</div>
+            <div className="space-y-0.5">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Current stage</div>
+              <div className="text-sm font-medium">{lead.stage.name}</div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Days in stage</div>
+              <div className="text-sm font-medium tabular-nums">{t.daysInStage} day{t.daysInStage === 1 ? "" : "s"}</div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Target</div>
+              <div className="text-sm font-medium tabular-nums">{lead.stage.targetDays > 0 ? `${lead.stage.targetDays} days` : "No target set"}</div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</div>
+              {meta ? (
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${meta.classes}`}>
+                  {meta.dot} {stageStatusLabel(t)}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground">—</span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
@@ -425,7 +461,11 @@ export default async function LeadDetailPage({
           <FilesSection
             title="Documents & Files"
             files={lead.files
-              .filter((f) => !PHOTO_GROUP_KEYS.includes(f.category as PhotoGroup))
+              .filter(
+                (f) =>
+                  !PHOTO_GROUP_KEYS.includes(f.category as PhotoGroup) &&
+                  !CALL_GROUP_KEYS.includes(f.category as CallGroup)
+              )
               .map((f) => ({
                 id: f.id,
                 name: f.name,
@@ -472,6 +512,16 @@ export default async function LeadDetailPage({
                 </ul>
               )}
             </div>
+
+            {/* Dedicated Welcome Call / QC Call recording slots. */}
+            <DealCallRecordings
+              leadId={lead.id}
+              recordings={lead.files
+                .filter((f) => CALL_GROUP_KEYS.includes(f.category as CallGroup))
+                .map((f) => ({ id: f.id, name: f.name, group: f.category as CallGroup }) satisfies CallRecording)}
+              canUpload={can(user, "create", "File")}
+              canDelete={can(user, "create", "File")}
+            />
           </FilesSection>
             </div>
           </DealTabs>

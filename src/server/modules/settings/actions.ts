@@ -24,7 +24,25 @@ const stageSchema = z.object({
   color: z.string().min(1).max(20),
   isWon: z.boolean().optional(),
   isLost: z.boolean().optional(),
+  // SLA / stage-duration settings.
+  targetDays: z.number().int().min(0).max(3650).optional(),
+  escalationDays: z.number().int().min(0).max(3650).optional(),
+  notificationRecipient: z.enum(["none", "assigned_user", "team_manager", "project_owner", "department_manager", "everyone"]).optional(),
+  sendInApp: z.boolean().optional(),
+  sendEmail: z.boolean().optional(),
+  markOverdue: z.boolean().optional(),
 });
+
+function stageSlaData(d: z.infer<typeof stageSchema>) {
+  return {
+    targetDays: d.targetDays ?? 0,
+    escalationDays: d.escalationDays ?? 0,
+    notificationRecipient: d.notificationRecipient ?? "none",
+    sendInApp: d.sendInApp ?? true,
+    sendEmail: d.sendEmail ?? false,
+    markOverdue: d.markOverdue ?? false,
+  };
+}
 
 export async function addPipelineStageAction(pipelineId: string, input: z.infer<typeof stageSchema>) {
   const user = await requireUser();
@@ -48,6 +66,7 @@ export async function addPipelineStageAction(pipelineId: string, input: z.infer<
       position: nextPos,
       isWon: parsed.data.isWon ?? false,
       isLost: parsed.data.isLost ?? false,
+      ...stageSlaData(parsed.data),
     },
   });
   revalidatePath("/portal/settings/pipeline");
@@ -73,6 +92,7 @@ export async function updatePipelineStageAction(id: string, input: z.infer<typeo
       color: parsed.data.color,
       isWon: parsed.data.isWon ?? false,
       isLost: parsed.data.isLost ?? false,
+      ...stageSlaData(parsed.data),
     },
   });
   revalidatePath("/portal/settings/pipeline");

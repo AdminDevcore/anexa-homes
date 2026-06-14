@@ -118,6 +118,9 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
     data: {
       stageId: parsed.data.stageId,
       stageChangedAt: new Date(),
+      // New stage = fresh SLA clock: clear any fired alerts + overdue flag.
+      stageAlertLevel: 0,
+      stageOverdue: false,
       ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
     },
   });

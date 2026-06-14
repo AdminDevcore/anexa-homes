@@ -29,7 +29,11 @@ export default async function PipelineSettingsPage() {
       {pipeline ? (
         <PipelineStagesManager
           pipelineId={pipeline.id}
-          stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name, color: s.color, isWon: s.isWon, isLost: s.isLost }))}
+          stages={pipeline.stages.map((s) => ({
+            id: s.id, name: s.name, color: s.color, isWon: s.isWon, isLost: s.isLost,
+            targetDays: s.targetDays, escalationDays: s.escalationDays, notificationRecipient: s.notificationRecipient,
+            sendInApp: s.sendInApp, sendEmail: s.sendEmail, markOverdue: s.markOverdue,
+          }))}
         />
       ) : (
         <EmptyState icon={KanbanSquare} title="No pipeline found" />

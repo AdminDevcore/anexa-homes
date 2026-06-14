@@ -23,7 +23,21 @@ import {
   reorderPipelineStagesAction,
 } from "@/server/modules/settings/actions";
 
-type Stage = { id: string; name: string; color: string; isWon: boolean; isLost: boolean };
+type Recipient = "none" | "assigned_user" | "team_manager" | "project_owner" | "department_manager" | "everyone";
+type Stage = {
+  id: string; name: string; color: string; isWon: boolean; isLost: boolean;
+  targetDays: number; escalationDays: number; notificationRecipient: string;
+  sendInApp: boolean; sendEmail: boolean; markOverdue: boolean;
+};
+
+const RECIPIENTS: { value: Recipient; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "assigned_user", label: "Assigned User" },
+  { value: "team_manager", label: "Team Manager" },
+  { value: "project_owner", label: "Project Owner" },
+  { value: "department_manager", label: "Department Manager" },
+  { value: "everyone", label: "Everyone" },
+];
 
 const COLORS = ["#A1A1AA", "#60A5FA", "#A78BFA", "#F472B6", "#FB923C", "#FBBF24", "#A3E635", "#22C55E", "#2DD4BF", "#BFA15F"];
 
@@ -67,6 +81,11 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
               <span className="font-medium">{s.name}</span>
               {s.isWon && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Won</span>}
               {s.isLost && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">Lost</span>}
+              {s.targetDays > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground" title="SLA target days in stage">
+                  ⏱ {s.targetDays}d{s.escalationDays > 0 ? ` +${s.escalationDays}` : ""}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1">
               <Button variant="ghost" size="icon" disabled={busy || i === 0} onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
@@ -88,6 +107,12 @@ function StageDialog({ pipelineId, stage, trigger }: { pipelineId: string; stage
   const [color, setColor] = React.useState(stage?.color ?? COLORS[0]);
   const [isWon, setIsWon] = React.useState(stage?.isWon ?? false);
   const [isLost, setIsLost] = React.useState(stage?.isLost ?? false);
+  const [targetDays, setTargetDays] = React.useState(String(stage?.targetDays ?? 0));
+  const [escalationDays, setEscalationDays] = React.useState(String(stage?.escalationDays ?? 0));
+  const [recipient, setRecipient] = React.useState<Recipient>((stage?.notificationRecipient as Recipient) ?? "none");
+  const [sendInApp, setSendInApp] = React.useState(stage?.sendInApp ?? true);
+  const [sendEmail, setSendEmail] = React.useState(stage?.sendEmail ?? false);
+  const [markOverdue, setMarkOverdue] = React.useState(stage?.markOverdue ?? false);
   const [pending, setPending] = React.useState(false);
 
   async function save() {
@@ -96,7 +121,13 @@ function StageDialog({ pipelineId, stage, trigger }: { pipelineId: string; stage
       return;
     }
     setPending(true);
-    const payload = { name, color, isWon, isLost };
+    const payload = {
+      name, color, isWon, isLost,
+      targetDays: Math.max(0, parseInt(targetDays || "0", 10) || 0),
+      escalationDays: Math.max(0, parseInt(escalationDays || "0", 10) || 0),
+      notificationRecipient: recipient,
+      sendInApp, sendEmail, markOverdue,
+    };
     const res = stage
       ? await updatePipelineStageAction(stage.id, payload)
       : await addPipelineStageAction(pipelineId, payload);
@@ -148,6 +179,34 @@ function StageDialog({ pipelineId, stage, trigger }: { pipelineId: string; stage
             <label className="flex items-center gap-2 text-sm">
               <Switch checked={isLost} onCheckedChange={setIsLost} /> Lost stage
             </label>
+          </div>
+
+          {/* SLA / stage-duration tracking */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+            <p className="text-xs font-semibold text-muted-foreground">⏱ Stage duration tracking</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Target days in stage</Label>
+                <Input type="number" inputMode="numeric" value={targetDays} onChange={(e) => setTargetDays(e.target.value)} placeholder="0" />
+                <p className="text-[10px] text-muted-foreground">Max days before alerts trigger. 0 = no tracking.</p>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Escalation days</Label>
+                <Input type="number" inputMode="numeric" value={escalationDays} onChange={(e) => setEscalationDays(e.target.value)} placeholder="0" />
+                <p className="text-[10px] text-muted-foreground">Extra days after target before escalating.</p>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Notify</Label>
+              <select value={recipient} onChange={(e) => setRecipient(e.target.value as Recipient)} className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm">
+                {RECIPIENTS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm"><Switch checked={sendInApp} onCheckedChange={setSendInApp} /> Send in-app notification</label>
+              <label className="flex items-center gap-2 text-sm"><Switch checked={sendEmail} onCheckedChange={setSendEmail} /> Send email notification</label>
+              <label className="flex items-center gap-2 text-sm"><Switch checked={markOverdue} onCheckedChange={setMarkOverdue} /> Mark project as overdue</label>
+            </div>
           </div>
         </div>
         <DialogFooter>

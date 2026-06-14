@@ -512,6 +512,13 @@ model PipelineStage {
   color      String   @default("#A1A1AA")
   isWon      Boolean  @default(false)
   isLost     Boolean  @default(false)
+  // SLA / stage-duration tracking. targetDays 0 = no tracking on this stage.
+  targetDays            Int     @default(0)
+  escalationDays        Int     @default(0)
+  notificationRecipient String  @default("none") // none | assigned_user | team_manager | project_owner | department_manager | everyone
+  sendInApp             Boolean @default(true)
+  sendEmail             Boolean @default(false)
+  markOverdue           Boolean @default(false)
   createdAt  DateTime @default(now())
 
   leads Lead[]
@@ -585,6 +592,11 @@ model Lead {
   // When the deal last entered its current pipeline stage — drives the
   // "days in this status" age badge on pipeline cards. Null = use createdAt.
   stageChangedAt DateTime?
+  // SLA tracking: which alerts have fired this stage (0 none, 1 target, 2 escalation),
+  // reset to 0 on every stage move. stageOverdue is set by the alert job when a stage
+  // with markOverdue is exceeded.
+  stageAlertLevel Int     @default(0)
+  stageOverdue    Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
