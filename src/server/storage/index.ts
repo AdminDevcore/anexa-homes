@@ -1,10 +1,12 @@
 import fs from "fs/promises";
 import path from "path";
 
-// Storage abstraction with two drivers selected by STORAGE_DRIVER:
+// Storage abstraction with three drivers selected by STORAGE_DRIVER:
 //   - "local" (default): writes under ./storage on disk (dev).
-//   - "s3": writes to an S3 bucket (production).
-// Both expose the same put/get surface so call sites never change.
+//   - "s3": writes to an S3 / S3-compatible bucket (R2, Supabase, B2…).
+//   - "db": stores bytes in Postgres (no external account needed). Fine for
+//     PDFs/docs and modest photo volume; move to "s3" before heavy media use.
+// All expose the same put/get surface so call sites never change.
 
 const DRIVER = (process.env.STORAGE_DRIVER ?? "local").toLowerCase();
 
@@ -72,12 +74,37 @@ async function getS3(key: string): Promise<Buffer> {
   return Buffer.from(bytes);
 }
 
+// --- Database driver (Postgres bytea via Prisma) -------------------------
+
+async function putDb(key: string, data: Buffer): Promise<string> {
+  const { prisma } = await import("@/server/db/client");
+  // Prisma's Bytes field wants a Uint8Array backed by a plain ArrayBuffer.
+  const bytes = new Uint8Array(data);
+  await prisma.storedFile.upsert({
+    where: { key },
+    create: { key, data: bytes, size: bytes.length },
+    update: { data: bytes, size: bytes.length },
+  });
+  return key;
+}
+
+async function getDb(key: string): Promise<Buffer> {
+  const { prisma } = await import("@/server/db/client");
+  const row = await prisma.storedFile.findUnique({ where: { key }, select: { data: true } });
+  if (!row) throw new Error(`File not found: ${key}`);
+  return Buffer.from(row.data);
+}
+
 // --- Public surface ------------------------------------------------------
 
 export async function putObject(key: string, data: Buffer): Promise<string> {
-  return DRIVER === "s3" ? putS3(key, data) : putLocal(key, data);
+  if (DRIVER === "s3") return putS3(key, data);
+  if (DRIVER === "db") return putDb(key, data);
+  return putLocal(key, data);
 }
 
 export async function getObject(key: string): Promise<Buffer> {
-  return DRIVER === "s3" ? getS3(key) : getLocal(key);
+  if (DRIVER === "s3") return getS3(key);
+  if (DRIVER === "db") return getDb(key);
+  return getLocal(key);
 }

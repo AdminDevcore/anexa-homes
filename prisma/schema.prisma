@@ -2017,3 +2017,16 @@ model Proposal {
   @@index([companyId, leadId])
   @@map("proposals")
 }
+
+// Binary file storage when STORAGE_DRIVER=db: bytes live in Postgres so uploads
+// work with no external object store. Keyed by the same storage key the S3/local
+// drivers use, so switching drivers later needs no call-site changes.
+model StoredFile {
+  key         String   @id
+  data        Bytes
+  size        Int
+  contentType String?
+  createdAt   DateTime @default(now())
+
+  @@map("stored_files")
+}
