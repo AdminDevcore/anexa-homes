@@ -21,17 +21,29 @@ export type EmailBrand = {
 };
 
 // --- Dark palette -----------------------------------------------------------
+// The page field is a medium-dark gray so the (darker) card visibly lifts off
+// it instead of merging into one block.
 const C = {
-  pageTop: "#16161a",
-  pageBottom: "#0a0a0c",
-  card: "#161619",
-  cardBorder: "rgba(255,255,255,0.08)",
+  pageTop: "#2b2b31",
+  pageBottom: "#1b1b20",
+  card: "#141417",
+  cardBorder: "rgba(255,255,255,0.10)",
   hairline: "rgba(255,255,255,0.10)",
   heading: "#F7F3EC",
   body: "#C5BFB4",
   muted: "#8B867D",
   footerName: "#B9B3A8",
 };
+
+/** Convert a hex color to an rgba() string (for subtle orange glows/tints). */
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const r = parseInt(n.slice(0, 2), 16) || 0;
+  const g = parseInt(n.slice(2, 4), 16) || 0;
+  const b = parseInt(n.slice(4, 6), 16) || 0;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
 
 /** Resolve an absolute URL for an asset path given the brand's appUrl. */
 function absUrl(appUrl: string | undefined, pathOrUrl: string): string | null {
@@ -63,11 +75,11 @@ function layout(brand: EmailBrand, opts: { preheader: string; contentHtml: strin
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(opts.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pageBottom};background-image:linear-gradient(180deg,${C.pageTop} 0%,${C.pageBottom} 100%);padding:40px 16px;">
   <tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${C.card};border-radius:18px;overflow:hidden;border:1px solid ${C.cardBorder};box-shadow:0 14px 40px rgba(0,0,0,0.45);">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${C.card};border-radius:18px;overflow:hidden;border:1px solid ${C.cardBorder};box-shadow:0 18px 50px rgba(0,0,0,0.55);">
       <!-- orange accent strip -->
-      <tr><td style="height:4px;line-height:4px;font-size:0;background:${accent};background-image:linear-gradient(90deg,#FF8A4C 0%,${accent} 55%,#C64A12 100%);">&nbsp;</td></tr>
-      <!-- logo header on dark -->
-      <tr><td style="padding:26px 34px 20px;border-bottom:1px solid ${C.hairline};">${header}</td></tr>
+      <tr><td style="height:5px;line-height:5px;font-size:0;background:${accent};background-image:linear-gradient(90deg,#FF8A4C 0%,${accent} 55%,#C64A12 100%);">&nbsp;</td></tr>
+      <!-- logo header on dark, with a faint orange glow under the strip -->
+      <tr><td style="padding:26px 34px 20px;border-bottom:1px solid ${C.hairline};background-image:linear-gradient(180deg,${hexToRgba(accent, 0.14)} 0%,${hexToRgba(accent, 0)} 88%);">${header}</td></tr>
       <tr><td style="padding:34px 34px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${C.body};">
         ${opts.contentHtml}
       </td></tr>
