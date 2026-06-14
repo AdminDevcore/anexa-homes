@@ -9,8 +9,10 @@ import {
   Users,
   History,
 } from "lucide-react";
+import type { Prisma } from "@prisma/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { listScope } from "@/server/rbac/policies";
 import { prisma } from "@/server/db/client";
 import { verifyChain } from "@/server/modules/esign/audit";
 import { PageHeader } from "@/components/portal/ui";
@@ -31,8 +33,9 @@ export default async function DocumentDetailPage({
   const { id } = await params;
   const user = await requireUser();
 
+  // Scope by role, not just company: a rep must not open another rep's document by id.
   const pkg = await prisma.documentPackage.findFirst({
-    where: { id, companyId: user.companyId },
+    where: { id, ...(listScope(user, "Document") as Prisma.DocumentPackageWhereInput) },
     include: {
       signers: { orderBy: { order: "asc" } },
       events: { orderBy: { createdAt: "asc" } },

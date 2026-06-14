@@ -1,6 +1,5 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { AuthError } from "next-auth";
 import { z } from "zod";
 import { signIn, signOut } from "@/auth";
@@ -13,7 +12,10 @@ const loginSchema = z.object({
   next: z.string().optional(),
 });
 
-export type LoginState = { error?: string } | undefined;
+// `redirectTo` is returned (not server-redirected) so the client can perform a
+// FULL-PAGE navigation — that discards Next.js's client Router Cache, preventing
+// a previously-signed-in user's cached pages from showing for the new account.
+export type LoginState = { error?: string; redirectTo?: string } | undefined;
 
 export async function loginAction(
   _prev: LoginState,
@@ -51,9 +53,11 @@ export async function loginAction(
         ? dashboardPathForRole(user.role)
         : "/portal/dashboard";
 
-  redirect(dest);
+  return { redirectTo: dest };
 }
 
 export async function logoutAction() {
-  await signOut({ redirectTo: "/login" });
+  // Clear the session only; the client does a full-page redirect to /login so the
+  // Router Cache (and any cached portal pages) is fully discarded on sign-out.
+  await signOut({ redirect: false });
 }

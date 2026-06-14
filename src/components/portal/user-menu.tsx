@@ -46,8 +46,11 @@ export function UserMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onSelect={() => {
-            void logoutAction();
+          onSelect={async () => {
+            await logoutAction();
+            // Full-page load clears the client Router Cache so no portal page
+            // from this session lingers for the next user on this browser.
+            window.location.assign("/login");
           }}
           className="text-destructive focus:text-destructive"
         >

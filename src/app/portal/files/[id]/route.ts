@@ -1,6 +1,8 @@
+import type { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { requireUser } from "@/server/auth/session";
 import { prisma } from "@/server/db/client";
+import { listScope } from "@/server/rbac/policies";
 import { getObject } from "@/server/storage";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -27,6 +29,23 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const ownsLead = file.lead?.customerUserId === user.userId;
     const ownsProject = file.project?.lead?.customerUserId === user.userId;
     if (!ownsLead && !ownsProject) return new NextResponse("Forbidden", { status: 403 });
+  } else if (user.role !== "super_admin" && user.role !== "admin" && !file.conversationId) {
+    // Staff must own the file's deal: verify its lead/project is within their scope
+    // (a rep can't fetch another rep's file, an installer only their crew's jobs).
+    let allowed = false;
+    if (file.leadId) {
+      allowed = !!(await prisma.lead.findFirst({
+        where: { id: file.leadId, ...(listScope(user, "Lead") as Prisma.LeadWhereInput) },
+        select: { id: true },
+      }));
+    } else if (file.projectId) {
+      allowed = !!(await prisma.project.findFirst({
+        where: { id: file.projectId, ...(listScope(user, "Project") as Prisma.ProjectWhereInput) },
+        select: { id: true },
+      }));
+    }
+    // Files not tied to any deal/conversation aren't exposed to non-admin staff.
+    if (!allowed) return new NextResponse("Forbidden", { status: 403 });
   }
 
   let data: Buffer;
