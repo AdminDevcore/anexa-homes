@@ -21,13 +21,13 @@ export type EmailBrand = {
 };
 
 // --- Dark palette -----------------------------------------------------------
-// The page field is a medium-dark gray so the (darker) card visibly lifts off
-// it instead of merging into one block.
+// The CARD stays dark (the focal panel); the page FIELD behind it is a clearly
+// lighter gray so the dark card lifts off it instead of merging into one block.
 const C = {
-  pageTop: "#2b2b31",
-  pageBottom: "#1b1b20",
-  card: "#141417",
-  cardBorder: "rgba(255,255,255,0.10)",
+  pageTop: "#3c3c44",
+  pageBottom: "#2d2d34",
+  card: "#17171b",
+  cardBorder: "rgba(255,255,255,0.07)",
   hairline: "rgba(255,255,255,0.10)",
   heading: "#F7F3EC",
   body: "#C5BFB4",
