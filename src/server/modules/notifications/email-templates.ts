@@ -1,6 +1,12 @@
 // Branded, email-client-safe HTML templates (table layout + inline styles so they
 // render in Gmail, Apple Mail, Outlook, etc.). Each builder returns { html, text }
 // — always send both so plain-text clients still work.
+//
+// Theme: DARK to match the portal (near-black surfaces, warm light text, orange
+// accent). The header logo is referenced as `cid:anexa-logo` — the delivery layer
+// attaches public/anexa-lockup.png inline so it ALWAYS renders, even when the mail
+// client blocks external images. White-label tenants with their own absolute
+// `logoUrl` use that URL instead.
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -14,6 +20,19 @@ export type EmailBrand = {
   appUrl?: string; // to absolutize a relative logo
 };
 
+// --- Dark palette -----------------------------------------------------------
+const C = {
+  pageTop: "#16161a",
+  pageBottom: "#0a0a0c",
+  card: "#161619",
+  cardBorder: "rgba(255,255,255,0.08)",
+  hairline: "rgba(255,255,255,0.10)",
+  heading: "#F7F3EC",
+  body: "#C5BFB4",
+  muted: "#8B867D",
+  footerName: "#B9B3A8",
+};
+
 /** Resolve an absolute URL for an asset path given the brand's appUrl. */
 function absUrl(appUrl: string | undefined, pathOrUrl: string): string | null {
   if (pathOrUrl.startsWith("http")) return pathOrUrl;
@@ -22,62 +41,44 @@ function absUrl(appUrl: string | undefined, pathOrUrl: string): string | null {
   return `${base}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
 }
 
-/** Wrap content in the branded shell: gradient header w/ logo, white card, footer. */
+/** Wrap content in the branded dark shell: orange accent + logo header, footer. */
 function layout(brand: EmailBrand, opts: { preheader: string; contentHtml: string }): string {
   const accent = brand.accentColor || "#F4631E";
-  // Header gradient mirrors the website's brand orange (light → brand → deep).
-  const headerBg = `background:${accent};background-image:linear-gradient(135deg,#FF8A4C 0%,${accent} 52%,#C64A12 100%);`;
-
-  // The email header sits on a colored bar, so it needs a LIGHT (white) logo —
-  // distinct from branding.logoUrl, which is the dark logo used on light surfaces.
-  // Use a tenant-provided logo if present, else fall back to the white wordmark.
+  // Tenants with their own absolute logo use it; otherwise the inline cid image
+  // (public/anexa-lockup.png — the white wordmark, perfect on dark/orange).
   const customLogo = brand.logoUrl ? absUrl(brand.appUrl, brand.logoUrl) : null;
-  const headerLogo = customLogo ?? absUrl(brand.appUrl, "/anexa-lockup.png");
-  const usingDefaultBrand = !customLogo;
-  const markUrl = usingDefaultBrand ? absUrl(brand.appUrl, "/anexa-mark.png") : null;
-
-  const header = headerLogo
-    ? `<img src="${esc(headerLogo)}" alt="${esc(brand.companyName)}" height="30" style="height:30px;width:auto;display:block;border:0;" />`
-    : `<span style="font-size:20px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">${esc(brand.companyName)}</span>`;
-
-  // Small "letterhead" mark above the card fills the otherwise-blank top margin.
-  const letterhead = markUrl
-    ? `<tr><td align="center" style="padding:0 0 20px;"><img src="${esc(markUrl)}" alt="" width="42" height="45" style="width:42px;height:auto;display:block;border:0;" /></td></tr>`
-    : "";
+  const logoSrc = customLogo ?? "cid:anexa-logo";
+  const header = `<img src="${esc(logoSrc)}" alt="${esc(brand.companyName)}" height="30" style="height:30px;width:auto;display:block;border:0;outline:none;text-decoration:none;" />`;
 
   const c = brand.contact ?? {};
   const footerBits = [
     c.address ? esc(c.address) : null,
     c.phone ? esc(c.phone) : null,
-    c.email ? `<a href="mailto:${esc(c.email)}" style="color:#9ca3af;text-decoration:underline;">${esc(c.email)}</a>` : null,
+    c.email ? `<a href="mailto:${esc(c.email)}" style="color:${accent};text-decoration:none;">${esc(c.email)}</a>` : null,
   ].filter(Boolean).join(" &nbsp;·&nbsp; ");
 
   return `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
-<body style="margin:0;padding:0;background:#ece6db;-webkit-font-smoothing:antialiased;">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="supported-color-schemes" content="dark light"></head>
+<body style="margin:0;padding:0;background:${C.pageBottom};-webkit-font-smoothing:antialiased;">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(opts.preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ece6db;background-image:linear-gradient(180deg,#f4efe6 0%,#e7e0d3 100%);padding:36px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${C.pageBottom};background-image:linear-gradient(180deg,${C.pageTop} 0%,${C.pageBottom} 100%);padding:40px 16px;">
   <tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
-      ${letterhead}
-      <tr><td>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 6px 24px rgba(40,30,15,0.10);border:1px solid rgba(0,0,0,0.04);">
-          <tr><td style="${headerBg}padding:24px 34px;">${header}</td></tr>
-          <tr><td style="padding:36px 34px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111827;">
-            ${opts.contentHtml}
-          </td></tr>
-          <tr><td style="padding:22px 34px 30px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-            <hr style="border:none;border-top:1px solid #efece6;margin:0 0 16px;" />
-            <p style="margin:0;font-size:12px;line-height:1.6;color:#9ca3af;">
-              <strong style="color:#6b7280;">${esc(brand.companyName)}</strong>${footerBits ? `<br/>${footerBits}` : ""}
-            </p>
-          </td></tr>
-        </table>
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${C.card};border-radius:18px;overflow:hidden;border:1px solid ${C.cardBorder};box-shadow:0 14px 40px rgba(0,0,0,0.45);">
+      <!-- orange accent strip -->
+      <tr><td style="height:4px;line-height:4px;font-size:0;background:${accent};background-image:linear-gradient(90deg,#FF8A4C 0%,${accent} 55%,#C64A12 100%);">&nbsp;</td></tr>
+      <!-- logo header on dark -->
+      <tr><td style="padding:26px 34px 20px;border-bottom:1px solid ${C.hairline};">${header}</td></tr>
+      <tr><td style="padding:34px 34px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${C.body};">
+        ${opts.contentHtml}
       </td></tr>
-      <tr><td align="center" style="padding:18px 0 0;">
-        <p style="margin:0;font-family:-apple-system,sans-serif;font-size:11px;color:#b0a999;">This message was sent by ${esc(brand.companyName)}.</p>
+      <tr><td style="padding:22px 34px 30px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <hr style="border:none;border-top:1px solid ${C.hairline};margin:0 0 16px;" />
+        <p style="margin:0;font-size:12px;line-height:1.6;color:${C.muted};">
+          <strong style="color:${C.footerName};">${esc(brand.companyName)}</strong>${footerBits ? `<br/>${footerBits}` : ""}
+        </p>
       </td></tr>
     </table>
+    <p style="margin:18px 0 0;font-family:-apple-system,sans-serif;font-size:11px;color:#5f5b53;">This message was sent by ${esc(brand.companyName)}.</p>
   </td></tr>
 </table>
 </body></html>`;
@@ -85,8 +86,8 @@ function layout(brand: EmailBrand, opts: { preheader: string; contentHtml: strin
 
 /** A pill CTA button (bulletproof for Outlook via padding on the anchor). */
 function button(href: string, label: string, accent: string): string {
-  // Gradient matches the header; Outlook ignores the image and uses the solid bg.
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 4px;"><tr><td style="border-radius:12px;background:${accent};background-image:linear-gradient(135deg,#FF8A4C 0%,${accent} 55%,#C64A12 100%);box-shadow:0 4px 12px rgba(244,99,30,0.30);">
+  // Gradient matches the accent strip; Outlook ignores the image and uses the solid bg.
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 4px;"><tr><td style="border-radius:12px;background:${accent};background-image:linear-gradient(135deg,#FF8A4C 0%,${accent} 55%,#C64A12 100%);box-shadow:0 6px 18px rgba(244,99,30,0.40);">
     <a href="${esc(href)}" style="display:inline-block;padding:15px 30px;font-family:-apple-system,sans-serif;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px;">${esc(label)} &rarr;</a>
   </td></tr></table>`;
 }
@@ -102,21 +103,21 @@ export function brandedEmailTemplate(args: {
   heading: string;
   paragraphs: string[];
   cta?: { label: string; url: string };
-  note?: string; // small gray footer note (e.g. "This link is private to you")
+  note?: string; // small muted footer note (e.g. "This link is private to you")
 }): { subject: string; html: string; text: string } {
   const { brand, subject, heading, paragraphs, cta, note } = args;
   const accent = brand.accentColor || "#F4631E";
   const paras = paragraphs
-    .map((p) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#374151;">${esc(p)}</p>`)
+    .map((p) => `<p style="margin:0 0 14px;font-size:15px;line-height:1.65;color:${C.body};">${esc(p)}</p>`)
     .join("");
-  const ctaHtml = cta ? `<div style="margin:20px 0;">${button(cta.url, cta.label, accent)}</div>` : "";
-  const noteHtml = note ? `<p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:#9ca3af;">${esc(note)}</p>` : "";
+  const ctaHtml = cta ? `<div style="margin:22px 0 6px;">${button(cta.url, cta.label, accent)}</div>` : "";
+  const noteHtml = note ? `<p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:${C.muted};">${esc(note)}</p>` : "";
   const linkFallback = cta
-    ? `<p style="margin:14px 0 0;font-size:12px;line-height:1.6;color:#9ca3af;">Button not working? Copy this link:<br/><a href="${esc(cta.url)}" style="color:#6b7280;word-break:break-all;">${esc(cta.url)}</a></p>`
+    ? `<p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:${C.muted};">Button not working? Copy this link:<br/><a href="${esc(cta.url)}" style="color:${accent};word-break:break-all;">${esc(cta.url)}</a></p>`
     : "";
 
   const contentHtml = `
-    <h1 style="margin:0 0 14px;font-size:23px;line-height:1.25;font-weight:700;color:#111827;">${esc(heading)}</h1>
+    <h1 style="margin:0 0 14px;font-size:23px;line-height:1.25;font-weight:700;color:${C.heading};">${esc(heading)}</h1>
     ${paras}${ctaHtml}${linkFallback}${noteHtml}`;
 
   const html = layout(brand, { preheader: args.preheader ?? heading, contentHtml });
@@ -143,20 +144,20 @@ export function inviteEmailTemplate(args: {
     : `You're invited to join ${brand.companyName}`;
 
   const contentHtml = `
-    <h1 style="margin:0 0 12px;font-size:24px;line-height:1.25;font-weight:700;color:#111827;">
+    <h1 style="margin:0 0 12px;font-size:24px;line-height:1.25;font-weight:700;color:${C.heading};">
       ${reminder ? "Your invite is waiting" : `You're invited to join<br/>${esc(brand.companyName)}`}
     </h1>
-    <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#374151;">
-      You've been added to the <strong>${esc(brand.companyName)}</strong> team portal as a <strong>${esc(roleLabel)}</strong>.
+    <p style="margin:0 0 8px;font-size:15px;line-height:1.65;color:${C.body};">
+      You've been added to the <strong style="color:${C.heading};">${esc(brand.companyName)}</strong> team portal as a <strong style="color:${C.heading};">${esc(roleLabel)}</strong>.
       Set your password to get started — it takes about a minute.
     </p>
-    <div style="margin:20px 0;">${button(inviteLink, "Set up my account", accent)}</div>
-    <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
-      After you sign in, you'll complete a quick onboarding (your details for payroll &amp; tax). This link expires in <strong>7 days</strong>.
+    <div style="margin:22px 0 6px;">${button(inviteLink, "Set up my account", accent)}</div>
+    <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:${C.muted};">
+      After you sign in, you'll complete a quick onboarding (your details for payroll &amp; tax). This link expires in <strong style="color:${C.body};">7 days</strong>.
     </p>
-    <p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:#9ca3af;">
+    <p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:${C.muted};">
       Button not working? Copy and paste this link:<br/>
-      <a href="${esc(inviteLink)}" style="color:#6b7280;word-break:break-all;">${esc(inviteLink)}</a>
+      <a href="${esc(inviteLink)}" style="color:${accent};word-break:break-all;">${esc(inviteLink)}</a>
     </p>`;
 
   const html = layout(brand, {

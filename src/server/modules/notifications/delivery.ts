@@ -8,7 +8,37 @@
 //      verification needed — works to any recipient immediately.
 //   2. Resend — set RESEND_API_KEY (needs a verified sending domain).
 //   3. Neither — logged to the server console (dev), not delivered.
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import nodemailer from "nodemailer";
+
+// Brand images embedded inline (CID) so they render even when a client blocks
+// external images. Read from /public once, then cached for the process lifetime.
+const _assetCache = new Map<string, Buffer | null>();
+async function brandAsset(file: string): Promise<Buffer | null> {
+  if (_assetCache.has(file)) return _assetCache.get(file)!;
+  try {
+    const buf = await readFile(path.join(process.cwd(), "public", file));
+    _assetCache.set(file, buf);
+    return buf;
+  } catch {
+    _assetCache.set(file, null); // missing on disk — fall back to alt text
+    return null;
+  }
+}
+
+type InlineImage = { filename: string; content: Buffer; cid: string };
+
+/** Inline images referenced by `cid:` in the html (currently just the logo). */
+async function inlineImagesFor(html?: string): Promise<InlineImage[]> {
+  if (!html) return [];
+  const out: InlineImage[] = [];
+  if (html.includes("cid:anexa-logo")) {
+    const buf = await brandAsset("anexa-lockup.png");
+    if (buf) out.push({ filename: "anexa-lockup.png", content: buf, cid: "anexa-logo" });
+  }
+  return out;
+}
 
 function buildFrom(fromName?: string): string {
   if (fromName?.trim()) {
@@ -41,11 +71,19 @@ type Attachment = { filename: string; content: Buffer };
 /** Core sender: SMTP → Resend → dev-log. Returns true only if actually handed to a provider. */
 async function deliver(to: string, subject: string, body: string, fromName?: string, attachments?: Attachment[], html?: string): Promise<boolean> {
   const from = buildFrom(fromName);
+  const inline = await inlineImagesFor(html);
 
   // 1) SMTP (any mailbox; no domain verification).
   if (smtpConfigured()) {
     try {
-      await smtpTransport().sendMail({ from, to, subject, text: body, ...(html ? { html } : {}), attachments });
+      await smtpTransport().sendMail({
+        from, to, subject, text: body,
+        ...(html ? { html } : {}),
+        attachments: [
+          ...(attachments ?? []),
+          ...inline.map((i) => ({ filename: i.filename, content: i.content, cid: i.cid })),
+        ],
+      });
       return true;
     } catch (err) {
       console.error("[email:smtp] send failed", err);
@@ -53,17 +91,21 @@ async function deliver(to: string, subject: string, body: string, fromName?: str
     }
   }
 
-  // 2) Resend (needs a verified domain).
+  // 2) Resend (needs a verified domain). Inline images use `content_id`.
   const key = process.env.RESEND_API_KEY;
   if (key) {
     try {
+      const allAttachments = [
+        ...(attachments?.map((a) => ({ filename: a.filename, content: a.content.toString("base64") })) ?? []),
+        ...inline.map((i) => ({ filename: i.filename, content: i.content.toString("base64"), content_id: i.cid })),
+      ];
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           from, to, subject, text: body,
           ...(html ? { html } : {}),
-          ...(attachments?.length ? { attachments: attachments.map((a) => ({ filename: a.filename, content: a.content.toString("base64") })) } : {}),
+          ...(allAttachments.length ? { attachments: allAttachments } : {}),
         }),
       });
       if (!res.ok) {
