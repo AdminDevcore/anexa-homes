@@ -220,3 +220,54 @@ export async function inviteUserAction(input: z.infer<typeof inviteSchema>) {
   revalidatePath("/portal/team");
   return { ok: true as const, inviteLink };
 }
+
+/** Re-send a pending invitation: rotate the token, reset the 7-day expiry, email again. */
+export async function resendInvitationAction(invitationId: string) {
+  const me = await requireUser();
+  if (!can(me, "create", "User")) return fail("Not allowed.");
+  const inv = await prisma.invitation.findFirst({
+    where: { id: invitationId, companyId: me.companyId, acceptedAt: null },
+    select: { id: true, email: true },
+  });
+  if (!inv) return fail("Invitation not found.");
+
+  // Tokens are stored hashed and can't be recovered, so resending issues a fresh
+  // one (which also invalidates any older link for this invite).
+  const raw = crypto.randomBytes(32).toString("base64url");
+  const tokenHash = crypto.createHash("sha256").update(raw).digest("hex");
+  await prisma.invitation.update({
+    where: { id: inv.id },
+    data: { tokenHash, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), invitedById: me.userId },
+  });
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const inviteLink = `${appUrl}/invite/${raw}`;
+  const company = await prisma.company.findUnique({ where: { id: me.companyId }, select: { name: true } });
+  const branding = await brandingForCompany(me.companyId);
+  const fromName = branding.emailFromName ?? branding.companyName;
+  await sendEmail(
+    inv.email,
+    `Reminder: you're invited to join ${company?.name ?? "the team"} on Anexa Homes`,
+    `Hi,\n\nHere's your invitation to join ${company?.name ?? "the team"} on the Anexa Homes portal.\n\n` +
+      `Activate your account and set your password here:\n${inviteLink}\n\n` +
+      `This link expires in 7 days.\n\n— ${company?.name ?? "Anexa Homes"}`,
+    { fromName }
+  ).catch(() => { /* best-effort; the link is still returned for manual sharing */ });
+
+  revalidatePath("/portal/team");
+  return { ok: true as const, inviteLink };
+}
+
+/** Revoke (delete) a pending invitation so its link no longer works. */
+export async function revokeInvitationAction(invitationId: string) {
+  const me = await requireUser();
+  if (!can(me, "create", "User")) return fail("Not allowed.");
+  const inv = await prisma.invitation.findFirst({
+    where: { id: invitationId, companyId: me.companyId, acceptedAt: null },
+    select: { id: true },
+  });
+  if (!inv) return fail("Invitation not found.");
+  await prisma.invitation.delete({ where: { id: inv.id } });
+  revalidatePath("/portal/team");
+  return { ok: true as const };
+}

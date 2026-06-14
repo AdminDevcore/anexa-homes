@@ -77,6 +77,46 @@ export async function getTeamMembers(viewer: { companyId: string; userId: string
   }));
 }
 
+export type PendingInvite = {
+  id: string;
+  email: string;
+  role: string;
+  roleLabel: string;
+  invitedByName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  expired: boolean;
+};
+
+/**
+ * Pending (not-yet-accepted) invitations. These live in the Invitation table,
+ * separate from User, so they don't appear in getTeamMembers — surfaced here so
+ * the Team page can show who's been invited but hasn't joined. A manager sees
+ * only invites they sent; admins/leadership see all company invites.
+ */
+export async function getPendingInvitations(viewer: { companyId: string; userId: string; role: Role }): Promise<PendingInvite[]> {
+  const scope = viewer.role === "manager" ? { invitedById: viewer.userId } : {};
+  const invites = await prisma.invitation.findMany({
+    where: { companyId: viewer.companyId, acceptedAt: null, ...scope },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true, email: true, role: true, createdAt: true, expiresAt: true,
+      invitedBy: { select: { firstName: true, lastName: true } },
+    },
+  });
+  const now = Date.now();
+  return invites.map((i) => ({
+    id: i.id,
+    email: i.email,
+    role: i.role,
+    roleLabel: roleLabel(i.role),
+    invitedByName: i.invitedBy ? `${i.invitedBy.firstName} ${i.invitedBy.lastName}`.trim() : null,
+    createdAt: i.createdAt.toISOString(),
+    expiresAt: i.expiresAt.toISOString(),
+    expired: i.expiresAt.getTime() < now,
+  }));
+}
+
 export type RolePermission = { resource: string; actions: string[]; full: boolean };
 
 /** Human-readable "what this role can access" summary from the RBAC matrix. */
