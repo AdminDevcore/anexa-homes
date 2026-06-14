@@ -139,8 +139,10 @@ async function run(args: FireArgs) {
     const body = fillTokens(rule.bodyTemplate, tokens);
 
     // Validate recipients belong to the company (and grab contact info for email/sms).
+    // Only active, non-deleted users get notified — suspended/disabled/deleted
+    // people (e.g. a deal's former assigned rep) are skipped.
     const recipients = await prisma.user.findMany({
-      where: { id: { in: [...recipientIds] }, companyId: args.companyId },
+      where: { id: { in: [...recipientIds] }, companyId: args.companyId, status: "active", deletedAt: null },
       select: { id: true, email: true, phone: true },
     });
 

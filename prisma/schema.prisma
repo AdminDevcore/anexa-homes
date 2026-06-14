@@ -393,6 +393,9 @@ model User {
   permissions           Json       @default("{}") // per-user permission overrides
   sessionVersion        Int        @default(1)
   lastLoginAt           DateTime?
+  // Soft delete: set (with status=disabled) to remove from the roster while
+  // keeping the row so historical deals keep showing the rep's name.
+  deletedAt             DateTime?
   createdAt             DateTime   @default(now())
   updatedAt             DateTime   @updatedAt
 

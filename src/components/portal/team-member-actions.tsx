@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Industry } from "@prisma/client";
 import { INDUSTRIES, INDUSTRY_LABEL } from "@/lib/industry";
-import { updateTeamMemberAction } from "@/server/modules/team/actions";
+import { updateTeamMemberAction, deleteTeamMemberAction } from "@/server/modules/team/actions";
 
 // Roles that earn a split commission (profit pool × their %).
 const SPLIT_ROLES = ["sales_rep", "manager"];
@@ -132,6 +132,18 @@ export function TeamMemberActions({
     if (!res.ok) return toast.error(res.error);
     toast.success("Member updated");
     router.refresh();
+  }
+
+  async function remove() {
+    if (!window.confirm(
+      "Delete this team member?\n\nThey'll be removed from the team and can no longer log in or receive notifications. Their existing deals stay in the company and keep showing their name. Tip: suspend first if you only want to pause access."
+    )) return;
+    setBusy(true);
+    const res = await deleteTeamMemberAction(userId);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Member deleted");
+    router.push("/portal/team");
   }
 
   return (
@@ -256,9 +268,27 @@ export function TeamMemberActions({
         </div>
       )}
 
-      <Button size="sm" onClick={save} disabled={busy || !dirty} className="bg-gold text-gold-foreground hover:bg-gold/90">
-        {busy && <Loader2 className="size-4 animate-spin" />} Save changes
-      </Button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button size="sm" onClick={save} disabled={busy || !dirty} className="bg-gold text-gold-foreground hover:bg-gold/90">
+          {busy && <Loader2 className="size-4 animate-spin" />} Save changes
+        </Button>
+        {!isSelf && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={remove}
+            disabled={busy}
+            className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+          >
+            <Trash2 className="size-4" /> Delete user
+          </Button>
+        )}
+      </div>
+      {!isSelf && (
+        <p className="text-[11px] text-muted-foreground">
+          Deleting removes them from the team and stops their logins & notifications. Their deals stay in the pipeline under their name. To pause access temporarily, set Status to <strong>Suspended</strong> instead.
+        </p>
+      )}
     </div>
   );
 }

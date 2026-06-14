@@ -52,7 +52,7 @@ export async function getTeamMembers(viewer: { companyId: string; userId: string
         }
       : {};
   const users = await prisma.user.findMany({
-    where: { companyId, role: { not: "customer" as Role }, ...teamScope },
+    where: { companyId, role: { not: "customer" as Role }, deletedAt: null, ...teamScope },
     orderBy: [{ firstName: "asc" }],
     select: {
       id: true, firstName: true, lastName: true, email: true, phone: true,

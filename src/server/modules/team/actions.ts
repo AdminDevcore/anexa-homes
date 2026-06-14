@@ -176,6 +176,42 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
   return { ok: true as const };
 }
 
+/**
+ * Soft-delete a member: drop them from the roster (deletedAt + status disabled)
+ * while KEEPING the row, so their deals stay in the company and keep showing
+ * their original name. Login is blocked and their session invalidated; the
+ * notification engine skips non-active users, so they stop getting alerts.
+ */
+export async function deleteTeamMemberAction(userId: string) {
+  const me = await requireUser();
+  if (!can(me, "update", "User")) return fail("Not allowed.");
+  if (userId === me.userId) return fail("You can't delete your own account.");
+
+  const target = await prisma.user.findFirst({
+    where: { id: userId, companyId: me.companyId },
+    select: { id: true, role: true, deletedAt: true },
+  });
+  if (!target) return fail("User not found.");
+  if (target.deletedAt) return fail("User is already deleted.");
+  if (target.role === "super_admin" && me.role !== "super_admin") {
+    return fail("Only a Super Admin can delete a Super Admin.");
+  }
+  if (target.role === "super_admin") {
+    const others = await prisma.user.count({
+      where: { companyId: me.companyId, role: "super_admin", status: "active", deletedAt: null, id: { not: target.id } },
+    });
+    if (others === 0) return fail("Can't delete the last Super Admin.");
+  }
+
+  await prisma.user.update({
+    where: { id: target.id },
+    data: { deletedAt: new Date(), status: "disabled", sessionVersion: { increment: 1 } },
+  });
+  revalidatePath("/portal/team");
+  revalidatePath(`/portal/team/${target.id}`);
+  return { ok: true as const };
+}
+
 const inviteSchema = z.object({ email: z.string().email(), role: z.enum(ROLE_VALUES) });
 
 /** Invite a new user — creates a pending invitation + returns a shareable link. */
