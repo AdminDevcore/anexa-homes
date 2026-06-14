@@ -394,3 +394,24 @@
 @media print {
   .proposal-js [data-reveal] { opacity: 1 !important; transform: none !important; }
 }
+
+/* ── Public proposal: staggered item reveal ───────────────────────────────
+   Items inside a revealed section fade up one-by-one. Hidden only once the
+   client mounts (.proposal-js) AND motion is allowed; print shows everything. */
+@media (prefers-reduced-motion: no-preference) {
+  .proposal-js [data-stagger] {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  .proposal-js [data-reveal].is-in [data-stagger] {
+    animation: anexa-reveal-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+}
+@media print {
+  .proposal-js [data-stagger] { opacity: 1 !important; transform: none !important; }
+}
+
+/* Hide scrollbar (used by the proposal photo carousel). */
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }

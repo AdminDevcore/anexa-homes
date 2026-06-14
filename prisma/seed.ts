@@ -47,13 +47,13 @@ async function main() {
     data: {
       name: "Anexa Homes",
       slug: "anexa-homes",
-      phone: "(555) 200-7663",
-      email: "hello@anexahomes.com",
+      phone: "(866) 650-9996",
+      email: "support@anexahomes.com",
       website: "https://anexahomes.com",
-      address: "1200 Summit Ridge Blvd",
-      city: "Dallas",
+      address: "508 North Bowser Road",
+      city: "Richardson",
       state: "TX",
-      zip: "75201",
+      zip: "75081",
       timezone: "America/Chicago",
       settings: {
         create: {
@@ -61,7 +61,7 @@ async function main() {
           primaryColor: "#0B0B0C",
           accentColor: "#F4631E",
           recordPrefix: "AH-",
-          supportPhone: "(555) 200-7663",
+          supportPhone: "(866) 650-9996",
           supportEmail: "support@anexahomes.com",
           currencyCode: "USD",
           locale: "en-US",

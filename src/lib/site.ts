@@ -11,22 +11,22 @@ export const SITE_URL = "https://anexahomes.com";
 export const COMPANY = {
   name: "Anexa Homes",
   tagline: "Protecting Homes. Restoring Roofs. Powering Better Living.",
-  phone: "(555) 200-7663",
-  phoneHref: "tel:+15552007663",
+  phone: "(866) 650-9996",
+  phoneHref: "tel:+18666509996",
   // Internal/staff support line shown in the portal sidebar (can differ from the
   // public sales number). Override via env if you have a dedicated support line.
-  supportPhone: process.env.NEXT_PUBLIC_SUPPORT_PHONE || "(555) 200-7663",
-  supportPhoneHref: process.env.NEXT_PUBLIC_SUPPORT_PHONE_HREF || "tel:+15552007663",
-  email: "hello@anexahomes.com",
-  address: "1200 Summit Ridge Blvd, Dallas, TX 75201",
+  supportPhone: process.env.NEXT_PUBLIC_SUPPORT_PHONE || "(866) 650-9996",
+  supportPhoneHref: process.env.NEXT_PUBLIC_SUPPORT_PHONE_HREF || "tel:+18666509996",
+  email: "support@anexahomes.com",
+  address: "508 North Bowser Road, Richardson, TX 75081",
   // Structured address powers schema.org LocalBusiness markup.
-  street: "1200 Summit Ridge Blvd",
-  city: "Dallas",
+  street: "508 North Bowser Road",
+  city: "Richardson",
   state: "TX",
-  zip: "75201",
+  zip: "75081",
   country: "US",
-  // Approx. Dallas centroid; refine with the real storefront geo when available.
-  geo: { lat: 32.7831, lng: -96.8067 },
+  // Approx. Richardson, TX centroid (508 N Bowser Rd); refine with exact geo if needed.
+  geo: { lat: 32.9618, lng: -96.709 },
   priceRange: "$$",
   serviceAreas: [
     "Dallas",
