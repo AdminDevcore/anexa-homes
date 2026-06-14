@@ -8,7 +8,8 @@ import { requireUser } from "@/server/auth/session";
 import { requireCan, can } from "@/server/rbac/guards";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { sendEmailWithAttachments } from "@/server/modules/notifications/delivery";
-import { brandingForCompany } from "@/server/branding/resolve";
+import { emailBrandFor } from "@/server/modules/notifications/brand";
+import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { formatCents } from "@/lib/format";
 import { computeCommissionsForProject } from "./engine";
 import { getCommissionEligibleStageIds, COMMISSION_GATE_LABEL } from "./eligibility";
@@ -307,17 +308,26 @@ export async function emailPayStubAction(input: z.infer<typeof emailStubSchema>)
   if (!data) return fail("No pay stub for this employee in this run.");
   if (!data.employee.email) return fail("That employee has no email on file.");
 
-  const branding = await brandingForCompany(me.companyId);
-  const fromName = branding.emailFromName ?? branding.companyName;
+  const { brand, fromName } = await emailBrandFor(me.companyId);
 
   const pdf = await buildPayStubPdf(data);
   const gross = data.items.reduce((s, i) => s + i.amount, 0);
+  const tpl = brandedEmailTemplate({
+    brand,
+    subject: `Your pay stub — ${data.run.label}`,
+    heading: "Your pay stub is ready",
+    paragraphs: [
+      `Hi ${data.employee.firstName},`,
+      `Your pay stub for ${data.run.label} is attached as a PDF. Net pay: ${formatCents(gross)}.`,
+    ],
+    note: "This pay stub is confidential — please keep it for your records.",
+  });
   await sendEmailWithAttachments(
     data.employee.email,
-    `Your pay stub - ${data.run.label}`,
-    `Hi ${data.employee.firstName},\n\nAttached is your pay stub for ${data.run.label}. Net pay: ${formatCents(gross)}.\n\n- ${data.company.name}`,
+    tpl.subject,
+    tpl.text,
     [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }],
-    { fromName }
+    { fromName, html: tpl.html }
   );
   return { ok: true as const, email: data.employee.email, dev: !process.env.RESEND_API_KEY };
 }
@@ -329,8 +339,7 @@ export async function emailAllPayStubsAction(runId: string) {
   const list = await getRunStubList(me.companyId, runId);
   if (list.length === 0) return fail("No pay stubs in this run.");
 
-  const branding = await brandingForCompany(me.companyId);
-  const fromName = branding.emailFromName ?? branding.companyName;
+  const { brand, fromName } = await emailBrandFor(me.companyId);
 
   const results: { name: string; email: string | null; sent: boolean; error?: string }[] = [];
   for (const data of list) {
@@ -342,12 +351,22 @@ export async function emailAllPayStubsAction(runId: string) {
     try {
       const pdf = await buildPayStubPdf(data);
       const gross = data.items.reduce((s, i) => s + i.amount, 0);
+      const tpl = brandedEmailTemplate({
+        brand,
+        subject: `Your pay stub — ${data.run.label}`,
+        heading: "Your pay stub is ready",
+        paragraphs: [
+          `Hi ${data.employee.firstName},`,
+          `Your pay stub for ${data.run.label} is attached as a PDF. Net pay: ${formatCents(gross)}.`,
+        ],
+        note: "This pay stub is confidential — please keep it for your records.",
+      });
       await sendEmailWithAttachments(
         data.employee.email,
-        `Your pay stub - ${data.run.label}`,
-        `Hi ${data.employee.firstName},\n\nAttached is your pay stub for ${data.run.label}. Net pay: ${formatCents(gross)}.\n\n- ${data.company.name}`,
+        tpl.subject,
+        tpl.text,
         [{ filename: `paystub-${data.run.label.replace(/[^a-z0-9]+/gi, "-")}.pdf`, content: pdf }],
-        { fromName }
+        { fromName, html: tpl.html }
       );
       results.push({ name, email: data.employee.email, sent: true });
     } catch {

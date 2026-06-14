@@ -6,6 +6,8 @@ import { listScope } from "@/server/rbac/policies";
 import { putObject, getObject } from "@/server/storage";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { sendEmail } from "@/server/modules/notifications/delivery";
+import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
+import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { generateSignerToken, sha256 } from "./tokens";
 import { appendDocumentEvent } from "./audit";
 import { buildAutofillContext, type AutofillContext } from "./autofill";
@@ -34,28 +36,28 @@ export type SendInput = {
 async function emailSigningLink(opts: {
   to: string;
   signerName: string;
+  companyId: string;
   companyName: string;
   title: string;
   url: string;
   reminder: boolean;
 }): Promise<void> {
-  const subject = opts.reminder
-    ? `Reminder: please sign ${opts.title}`
-    : `Please sign ${opts.title}`;
-  const intro = opts.reminder
-    ? `This is a reminder to review and sign "${opts.title}" from ${opts.companyName}.`
-    : `${opts.companyName} has sent you "${opts.title}" to review and sign.`;
-  const body = [
-    `Hi ${opts.signerName},`,
-    "",
-    intro,
-    "",
-    "Open your secure signing link:",
-    opts.url,
-    "",
-    "This link is private to you — please don't forward it.",
-  ].join("\n");
-  await sendEmail(opts.to, subject, body, { fromName: opts.companyName });
+  const { brand, fromName } = await emailBrandFor(opts.companyId);
+  const tpl = brandedEmailTemplate({
+    brand,
+    subject: opts.reminder ? `Reminder: please sign ${opts.title}` : `Please sign ${opts.title}`,
+    preheader: `${opts.companyName} sent you a document to review and sign.`,
+    heading: opts.reminder ? "Your document is waiting" : "You have a document to sign",
+    paragraphs: [
+      `Hi ${opts.signerName},`,
+      opts.reminder
+        ? `This is a reminder to review and sign "${opts.title}" from ${opts.companyName}.`
+        : `${opts.companyName} has sent you "${opts.title}" to review and sign — it only takes a minute.`,
+    ],
+    cta: { label: "Review & sign", url: opts.url },
+    note: "This link is private to you — please don't forward it.",
+  });
+  await sendEmail(opts.to, tpl.subject, tpl.text, { fromName, html: tpl.html });
 }
 
 export async function sendForSignature(user: SessionUser, input: SendInput) {
@@ -161,6 +163,7 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
         await emailSigningLink({
           to: t.email,
           signerName: t.name,
+          companyId: user.companyId,
           companyName,
           title: pkg.title,
           url: `${base}/sign/${t.raw}`,
@@ -220,6 +223,7 @@ export async function resendSignatureRequest(user: SessionUser, packageId: strin
         await emailSigningLink({
           to: signer.email,
           signerName: signer.name,
+          companyId: pkg.companyId,
           companyName: pkg.company.name,
           title: pkg.title,
           url,

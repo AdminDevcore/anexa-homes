@@ -7,7 +7,9 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { sendEmail } from "@/server/modules/notifications/delivery";
-import { brandingForCompany } from "@/server/branding/resolve";
+import { inviteEmailTemplate } from "@/server/modules/notifications/email-templates";
+import { emailBrandFor } from "@/server/modules/notifications/brand";
+import { roleLabel } from "@/lib/roles";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -204,21 +206,13 @@ export async function inviteUserAction(input: z.infer<typeof inviteSchema>) {
   });
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const inviteLink = `${appUrl}/invite/${raw}`;
-  const company = await prisma.company.findUnique({ where: { id: me.companyId }, select: { name: true } });
-  const branding = await brandingForCompany(me.companyId);
-  const fromName = branding.emailFromName ?? branding.companyName;
-  // Activation email — set a password, then complete onboarding.
-  await sendEmail(
-    email,
-    `You're invited to join ${company?.name ?? "the team"} on Anexa Homes`,
-    `Hi,\n\nYou've been invited to join ${company?.name ?? "the team"} on the Anexa Homes portal.\n\n` +
-      `Activate your account and set your password here:\n${inviteLink}\n\n` +
-      `This link expires in 7 days. After signing in you'll complete a quick onboarding (your details for payroll/1099).\n\n— ${company?.name ?? "Anexa Homes"}`,
-    { fromName }
-  ).catch(() => { /* best-effort; the link is still returned for manual sharing */ });
+  const { brand, fromName } = await emailBrandFor(me.companyId);
+  const tpl = inviteEmailTemplate({ brand, roleLabel: roleLabel(parsed.data.role), inviteLink });
+  // Branded activation email — set a password, then complete onboarding.
+  const emailed = await sendEmail(email, tpl.subject, tpl.text, { fromName, html: tpl.html }).catch(() => false);
 
   revalidatePath("/portal/team");
-  return { ok: true as const, inviteLink };
+  return { ok: true as const, inviteLink, emailed };
 }
 
 /** Re-send a pending invitation: rotate the token, reset the 7-day expiry, email again. */
@@ -227,7 +221,7 @@ export async function resendInvitationAction(invitationId: string) {
   if (!can(me, "create", "User")) return fail("Not allowed.");
   const inv = await prisma.invitation.findFirst({
     where: { id: invitationId, companyId: me.companyId, acceptedAt: null },
-    select: { id: true, email: true },
+    select: { id: true, email: true, role: true },
   });
   if (!inv) return fail("Invitation not found.");
 
@@ -242,20 +236,12 @@ export async function resendInvitationAction(invitationId: string) {
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const inviteLink = `${appUrl}/invite/${raw}`;
-  const company = await prisma.company.findUnique({ where: { id: me.companyId }, select: { name: true } });
-  const branding = await brandingForCompany(me.companyId);
-  const fromName = branding.emailFromName ?? branding.companyName;
-  await sendEmail(
-    inv.email,
-    `Reminder: you're invited to join ${company?.name ?? "the team"} on Anexa Homes`,
-    `Hi,\n\nHere's your invitation to join ${company?.name ?? "the team"} on the Anexa Homes portal.\n\n` +
-      `Activate your account and set your password here:\n${inviteLink}\n\n` +
-      `This link expires in 7 days.\n\n— ${company?.name ?? "Anexa Homes"}`,
-    { fromName }
-  ).catch(() => { /* best-effort; the link is still returned for manual sharing */ });
+  const { brand, fromName } = await emailBrandFor(me.companyId);
+  const tpl = inviteEmailTemplate({ brand, roleLabel: roleLabel(inv.role), inviteLink, reminder: true });
+  const emailed = await sendEmail(inv.email, tpl.subject, tpl.text, { fromName, html: tpl.html }).catch(() => false);
 
   revalidatePath("/portal/team");
-  return { ok: true as const, inviteLink };
+  return { ok: true as const, inviteLink, emailed };
 }
 
 /** Revoke (delete) a pending invitation so its link no longer works. */

@@ -32,7 +32,7 @@ export function TeamPendingInvites({ invites }: { invites: PendingInvite[] }) {
     setBusy(null);
     if (!res.ok) return toast.error(res.error);
     if (res.inviteLink) navigator.clipboard?.writeText(res.inviteLink).catch(() => {});
-    toast.success("Invitation resent — link copied to clipboard");
+    toast.success(res.emailed ? "Invite re-emailed — link also copied" : "Email not configured — link copied, send it manually");
     router.refresh();
   }
 
