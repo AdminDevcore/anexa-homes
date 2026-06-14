@@ -130,8 +130,8 @@ async function run(args: FireArgs) {
       if (dyn === "all_managers") for (const x of await dynamicRoleUsers(["manager"])) recipientIds.add(x);
     }
 
-    // Don't notify the actor about their own action.
-    if (args.actorId) recipientIds.delete(args.actorId);
+    // Note: the person who performed the action IS notified if they're in the
+    // recipient list (owners/managers want visibility into their own moves).
     if (recipientIds.size === 0) continue;
 
     const channels = (rule.channels as NotificationChannel[]) ?? ["in_app"];
