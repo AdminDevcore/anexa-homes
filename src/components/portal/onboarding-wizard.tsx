@@ -19,13 +19,14 @@ const TAX_CLASSES = [
   ["partnership", "Partnership"],
 ];
 
-export function OnboardingWizard({ initial, firstName, lastName }: { initial: OnboardingView | null; firstName: string; lastName: string }) {
+export function OnboardingWizard({ initial, firstName, lastName, phone }: { initial: OnboardingView | null; firstName: string; lastName: string; phone?: string }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [f, setF] = React.useState({
     legalFirstName: initial?.legalFirstName ?? firstName,
     legalMiddleName: initial?.legalMiddleName ?? "",
     legalLastName: initial?.legalLastName ?? lastName,
+    phone: phone ?? "",
     dateOfBirth: initial?.dateOfBirth ? initial.dateOfBirth.slice(0, 10) : "",
     ssn: "",
     address: initial?.address ?? "", city: initial?.city ?? "", state: initial?.state ?? "", zip: initial?.zip ?? "",
@@ -63,14 +64,28 @@ export function OnboardingWizard({ initial, firstName, lastName }: { initial: On
   }
 
   async function submit() {
+    if (!f.phone.trim()) return toast.error("Phone number is required.");
+    if (!f.dateOfBirth) return toast.error("Date of birth is required.");
     if (!docs.id || !docs.id_back) return toast.error("Please upload the front and back of your driver's license / ID.");
-    if (!docs.ssn_card || !docs.ssn_back) return toast.error("Please upload the front and back of your Social Security card.");
+
+    // Tax ID: an individual needs an SSN; a business needs an SSN or an EIN.
+    const isBusiness = f.taxClassification !== "individual";
+    const hasSsn = !!f.ssn.trim() || !!initial?.ssnMasked;
+    const hasEin = !!f.ein.trim() || !!initial?.einMasked;
+    if (isBusiness) {
+      if (!hasSsn && !hasEin) return toast.error("Enter an EIN or SSN for your business.");
+    } else if (!hasSsn) {
+      return toast.error("SSN is required.");
+    }
+    // The SS card only applies when an SSN is on file (skip for EIN-only businesses).
+    if (hasSsn && (!docs.ssn_card || !docs.ssn_back)) return toast.error("Please upload the front and back of your Social Security card.");
+
     setBusy(true);
     const res = await saveOnboardingAction({ ...f, complete: true });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success("All set — welcome aboard!");
-    router.push("/portal");
+    router.push("/portal/dashboard");
   }
 
   return (
@@ -80,8 +95,9 @@ export function OnboardingWizard({ initial, firstName, lastName }: { initial: On
           <FieldI label="Legal first name" value={f.legalFirstName} onChange={set("legalFirstName")} />
           <FieldI label="Middle name" value={f.legalMiddleName} onChange={set("legalMiddleName")} />
           <FieldI label="Legal last name" value={f.legalLastName} onChange={set("legalLastName")} />
+          <FieldI label="Phone" type="tel" value={f.phone} onChange={set("phone")} />
           <FieldI label="Date of birth" type="date" value={f.dateOfBirth} onChange={set("dateOfBirth")} />
-          <Field label="Social Security Number" secure note={initial?.ssnMasked ? `On file: ${initial.ssnMasked}` : undefined}>
+          <Field label="Social Security Number" secure note={initial?.ssnMasked ? `On file: ${initial.ssnMasked}` : f.taxClassification !== "individual" ? "Optional if you provide an EIN below" : undefined}>
             <Input value={f.ssn} onChange={set("ssn")} placeholder={initial?.ssnMasked ?? "###-##-####"} inputMode="numeric" />
           </Field>
         </div>

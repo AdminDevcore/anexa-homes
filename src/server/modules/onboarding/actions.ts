@@ -19,6 +19,7 @@ const onboardingSchema = z.object({
   legalFirstName: z.string().max(80).optional().or(z.literal("")),
   legalMiddleName: z.string().max(80).optional().or(z.literal("")),
   legalLastName: z.string().max(80).optional().or(z.literal("")),
+  phone: z.string().max(40).optional().or(z.literal("")),
   dateOfBirth: z.string().optional().or(z.literal("")),
   ssn: z.string().max(20).optional().or(z.literal("")),
   address: z.string().max(160).optional().or(z.literal("")),
@@ -48,7 +49,22 @@ export async function saveOnboardingAction(input: z.infer<typeof onboardingSchem
   const d = parsed.data;
   if (d.complete) {
     if (!d.legalFirstName || !d.legalLastName) return fail("Legal first and last name are required.");
-    if (!d.ssn) return fail("SSN is required.");
+    if (!d.phone) return fail("Phone number is required.");
+    if (!d.dateOfBirth) return fail("Date of birth is required.");
+    // Tax ID: an individual needs an SSN; a business needs an SSN or an EIN.
+    // Honor values already on file (the form doesn't resend secure fields).
+    const existing = await prisma.userOnboarding.findUnique({
+      where: { userId: user.userId },
+      select: { ssnLast4: true, einLast4: true },
+    });
+    const hasSsn = !!d.ssn || !!existing?.ssnLast4;
+    const hasEin = !!d.ein || !!existing?.einLast4;
+    const isBusiness = (d.taxClassification || "individual") !== "individual";
+    if (isBusiness) {
+      if (!hasSsn && !hasEin) return fail("Enter an EIN or SSN for your business.");
+    } else if (!hasSsn) {
+      return fail("SSN is required.");
+    }
     if (!d.signatureName) return fail("Type your name to sign and submit.");
   }
   const dob = d.dateOfBirth ? new Date(`${d.dateOfBirth}T12:00:00`) : null;
@@ -81,6 +97,8 @@ export async function saveOnboardingAction(input: z.infer<typeof onboardingSchem
     update: data,
     create: { userId: user.userId, ...data },
   });
+  // Phone lives on the User (shown on the team profile), not the onboarding record.
+  if (d.phone) await prisma.user.update({ where: { id: user.userId }, data: { phone: d.phone } });
   revalidatePath("/portal/onboarding");
   revalidatePath(`/portal/team/${user.userId}`);
   return { ok: true as const, completed: !!d.complete };
