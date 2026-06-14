@@ -65,6 +65,15 @@ export type BkInvoice = {
   paidAt: string | null;
 };
 export type BkFile = { id: string; projectId: string; name: string; kind: string };
+export type BkReconciliation = {
+  id: string;
+  account: string;
+  statementDate: string;
+  endingBalanceCents: number;
+  beginningBalanceCents: number;
+  clearedCount: number;
+  createdAt: string;
+};
 
 export type BookkeepingData = {
   transactions: BkTxn[];
@@ -74,6 +83,7 @@ export type BookkeepingData = {
   jobs: BkJob[];
   invoices: BkInvoice[];
   jobFiles: BkFile[];
+  reconciliations: BkReconciliation[];
   connected: boolean;
   provider: string | null;
   summary: { moneyIn: number; moneyOut: number; net: number; uncategorized: number; outstanding: number };
@@ -89,7 +99,7 @@ export type BookkeepingData = {
 };
 
 export async function getBookkeepingData(companyId: string, period?: ReportPeriod): Promise<BookkeepingData> {
-  const [txns, categories, vendors, projects, settings] = await Promise.all([
+  const [txns, categories, vendors, projects, settings, recons] = await Promise.all([
     prisma.transaction.findMany({
       where: { companyId },
       orderBy: { date: "desc" },
@@ -108,6 +118,7 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
       select: { id: true, leadId: true, projectNumber: true, lead: { select: { id: true, firstName: true, lastName: true } } },
     }),
     prisma.companySettings.findUnique({ where: { companyId }, select: { bookkeepingProvider: true, bookkeepingApiKey: true } }),
+    prisma.reconciliation.findMany({ where: { companyId }, orderBy: { statementDate: "desc" }, take: 100 }),
   ]);
 
   const projMap = new Map(projects.map((p) => [p.id, `${p.projectNumber}${p.lead ? ` · ${p.lead.firstName} ${p.lead.lastName}` : ""}`]));
@@ -237,6 +248,15 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
     jobs,
     invoices,
     jobFiles,
+    reconciliations: recons.map((r) => ({
+      id: r.id,
+      account: r.account,
+      statementDate: r.statementDate.toISOString(),
+      endingBalanceCents: r.endingBalanceCents,
+      beginningBalanceCents: r.beginningBalanceCents,
+      clearedCount: r.clearedCount,
+      createdAt: r.createdAt.toISOString(),
+    })),
     connected: !!settings?.bookkeepingApiKey,
     provider: settings?.bookkeepingProvider ?? null,
     summary: {

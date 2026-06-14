@@ -91,6 +91,77 @@ export function buildPnlPdf(company: ReportCompany, pnl: { income: { name: strin
   );
 }
 
+export type ReconReportTxn = { date: string; description: string; amountCents: number };
+export async function buildReconciliationPdf(
+  company: ReportCompany,
+  recon: { account: string; statementDate: string; beginningBalanceCents: number; endingBalanceCents: number },
+  txns: ReconReportTxn[],
+): Promise<Uint8Array> {
+  const deposits = txns.filter((t) => t.amountCents >= 0);
+  const payments = txns.filter((t) => t.amountCents < 0);
+  const depositsSum = deposits.reduce((s, t) => s + t.amountCents, 0);
+  const paymentsSum = payments.reduce((s, t) => s + -t.amountCents, 0);
+  const clearedBalance = recon.beginningBalanceCents + depositsSum - paymentsSum;
+  const difference = recon.endingBalanceCents - clearedBalance;
+
+  const doc = await PDFDocument.create();
+  doc.setTitle(`${company.name} — Bank Reconciliation`);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const logo = await loadLogo(doc);
+  let page = doc.addPage([612, 792]);
+  const W = 612, H = 792, M = 56;
+  const INK = rgb(0.07, 0.07, 0.08), MUT = rgb(0.45, 0.45, 0.5), GOLD = rgb(0.75, 0.63, 0.37), POS = rgb(0.05, 0.5, 0.3), NEG = rgb(0.7, 0.15, 0.15);
+  const text = (t: string, x: number, y: number, s: number, f: PDFFont = font, c = INK) => page.drawText(safe(t), { x, y, size: s, font: f, color: c });
+  const right = (t: string, rx: number, y: number, s: number, f: PDFFont = font, c = INK) => page.drawText(safe(t), { x: rx - f.widthOfTextAtSize(safe(t), s), y, size: s, font: f, color: c });
+
+  // Header band
+  page.drawRectangle({ x: 0, y: H - 100, width: W, height: 100, color: INK });
+  let hx = M;
+  if (logo) { const lw = 30, lh = (logo.height / logo.width) * lw; page.drawImage(logo, { x: M, y: H - 58 - lh / 2, width: lw, height: lh }); hx = M + 42; }
+  text(company.name, hx, H - 50, 18, bold, rgb(1, 1, 1));
+  const addr = [company.address, [company.city, company.state].filter(Boolean).join(", "), company.zip].filter(Boolean).join("  ");
+  if (addr) text(addr, hx, H - 66, 8, font, rgb(0.82, 0.82, 0.86));
+  right("Bank Reconciliation", W - M, H - 52, 15, bold, GOLD);
+  right(`${recon.account}  ·  as of ${recon.statementDate}`, W - M, H - 68, 8.5, font, rgb(0.82, 0.82, 0.86));
+
+  // Summary block
+  let y = H - 140;
+  const sumRow = (label: string, amount: number, f: PDFFont = font, c = INK) => { text(label, M, y, 10, f, c); right(usd(amount), W - M, y, 10, f, c); y -= 18; };
+  text("SUMMARY", M, y, 10, bold, MUT); y -= 16;
+  sumRow("Beginning balance (prior reconciled)", recon.beginningBalanceCents);
+  sumRow(`Cleared deposits (${deposits.length})`, depositsSum, font, POS);
+  sumRow(`Cleared payments (${payments.length})`, -paymentsSum, font, NEG);
+  page.drawLine({ start: { x: M, y: y + 6 }, end: { x: W - M, y: y + 6 }, thickness: 0.6, color: rgb(0.86, 0.86, 0.89) });
+  sumRow("Cleared balance", clearedBalance, bold);
+  sumRow("Statement ending balance", recon.endingBalanceCents, bold);
+  y -= 2;
+  page.drawRectangle({ x: M, y: y - 8, width: W - 2 * M, height: 30, color: difference === 0 ? rgb(0.93, 0.98, 0.94) : rgb(0.99, 0.93, 0.93), borderColor: difference === 0 ? POS : NEG, borderWidth: 1 });
+  text(difference === 0 ? "Difference (reconciled)" : "Difference (out of balance)", M + 12, y + 2, 11, bold, INK);
+  right(usd(difference), W - M - 12, y + 1, 13, bold, difference === 0 ? POS : NEG);
+  y -= 40;
+
+  // Cleared transactions table
+  text("CLEARED TRANSACTIONS", M, y, 10, bold, MUT); y -= 8;
+  page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.6, color: rgb(0.86, 0.86, 0.89) }); y -= 16;
+  const newPageIfNeeded = () => {
+    if (y < 70) {
+      page = doc.addPage([612, 792]); y = H - 70;
+    }
+  };
+  if (txns.length === 0) { text("None", M + 10, y, 9.5, font, MUT); y -= 16; }
+  for (const t of [...txns].sort((a, b) => a.date.localeCompare(b.date))) {
+    newPageIfNeeded();
+    text(t.date.slice(0, 10), M, y, 9, font, MUT);
+    text(t.description.slice(0, 64), M + 78, y, 9.5, font, INK);
+    right(usd(t.amountCents), W - M, y, 9.5, font, t.amountCents >= 0 ? POS : NEG);
+    y -= 15;
+  }
+
+  text(`Generated ${recon.statementDate}  ·  ${company.name} — Confidential`, M, 42, 8, font, MUT);
+  return doc.save();
+}
+
 export function buildBalanceSheetPdf(company: ReportCompany, bs: { assets: { name: string; total: number }[]; liabilities: { name: string; total: number }[]; equity: { name: string; total: number }[]; totalAssets: number; totalLiabilities: number; totalEquity: number }, asOf: string) {
   return buildReport(
     company,

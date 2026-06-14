@@ -1697,12 +1697,35 @@ model Transaction {
   notes         String?
   createdById   String?
   attachments   FileAsset[] // receipts / invoices attached to this transaction
+  // Bank reconciliation: when cleared against a statement, status="reconciled"
+  // and these point at the reconciliation it was settled in.
+  reconciledAt     DateTime?
+  reconciliationId String?
+  reconciliation   Reconciliation? @relation(fields: [reconciliationId], references: [id], onDelete: SetNull)
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
   @@index([companyId, date])
   @@index([companyId, categoryId])
   @@map("transactions")
+}
+
+// A completed bank reconciliation: a statement (account + date + ending balance)
+// matched against cleared transactions. Kept for the audit trail + report PDF.
+model Reconciliation {
+  id                    String        @id @default(uuid())
+  companyId             String
+  account               String
+  statementDate         DateTime
+  endingBalanceCents    Int
+  beginningBalanceCents Int
+  clearedCount          Int           @default(0)
+  createdById           String?
+  createdAt             DateTime      @default(now())
+  transactions          Transaction[]
+
+  @@index([companyId, account])
+  @@map("reconciliations")
 }
 
 // ---------------------------------------------------------------------------

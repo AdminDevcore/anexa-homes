@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useFormat } from "@/components/portal/branding-provider";
-import type { BookkeepingData, BkTxn, BkVendor } from "@/server/modules/bookkeeping/queries";
+import type { BookkeepingData, BkTxn, BkVendor, BkReconciliation } from "@/server/modules/bookkeeping/queries";
 import { computeReports, resolvePeriod, type PeriodPreset } from "@/lib/bookkeeping-reports";
 import {
   createTransactionAction,
@@ -29,6 +29,8 @@ import {
   setBookkeepingConnectionAction,
   uploadTransactionAttachmentAction,
   deleteTransactionAttachmentAction,
+  finishReconciliationAction,
+  undoReconciliationAction,
 } from "@/server/modules/bookkeeping/actions";
 
 const ACCOUNT_TYPES = [
@@ -50,12 +52,16 @@ export function BookkeepingClient({
 }) {
   const fmt = useFormat();
   const router = useRouter();
-  const [view, setView] = React.useState<"transactions" | "reports" | "manage">("transactions");
+  const [view, setView] = React.useState<"transactions" | "reports" | "reconcile" | "manage">("transactions");
   const [reviewFilter, setReviewFilter] = React.useState<"review" | "booked">("review");
   const [addOpen, setAddOpen] = React.useState(false);
   const [detail, setDetail] = React.useState<BkTxn | null>(null);
   const [confirmBook, setConfirmBook] = React.useState<BkTxn | null>(null);
   const [suggesting, setSuggesting] = React.useState(false);
+  // Transactions-tab date filter (independent of the Reports period picker).
+  const [txnPreset, setTxnPreset] = React.useState<PeriodPreset>("all");
+  const [txnStart, setTxnStart] = React.useState("");
+  const [txnEnd, setTxnEnd] = React.useState("");
 
   async function inlineUpdate(id: string, patch: Record<string, string | null>) {
     const res = await updateTransactionAction({ id, ...patch });
@@ -79,7 +85,22 @@ export function BookkeepingClient({
   }
 
   const toReviewCount = data.transactions.filter((t) => !t.approved).length;
-  const visibleTxns = data.transactions.filter((t) => (reviewFilter === "review" ? !t.approved : t.approved));
+
+  // Resolve the date filter to epoch-ms bounds (reuses the Reports period logic
+  // so presets like "This month"/years/custom range behave identically).
+  const txnPeriod = React.useMemo(
+    () => resolvePeriod(txnPreset, new Date(), { start: txnStart || null, end: txnEnd || null }).period,
+    [txnPreset, txnStart, txnEnd]
+  );
+  const dateFilterActive = txnPeriod.startMs != null || txnPeriod.endMs != null;
+
+  const visibleTxns = data.transactions.filter((t) => {
+    if (reviewFilter === "review" ? t.approved : !t.approved) return false;
+    const tms = new Date(t.date).getTime();
+    if (txnPeriod.startMs != null && tms < txnPeriod.startMs) return false;
+    if (txnPeriod.endMs != null && tms > txnPeriod.endMs) return false;
+    return true;
+  });
 
   const { summary } = data;
   const refresh = () => router.refresh();
@@ -123,6 +144,7 @@ export function BookkeepingClient({
       <div className="flex w-fit gap-1 rounded-xl border border-border bg-card p-1">
         <TabBtn active={view === "transactions"} onClick={() => setView("transactions")}>Transactions</TabBtn>
         <TabBtn active={view === "reports"} onClick={() => setView("reports")}>Profit &amp; Loss · Balance Sheet</TabBtn>
+        <TabBtn active={view === "reconcile"} onClick={() => setView("reconcile")}>Reconcile</TabBtn>
         <TabBtn active={view === "manage"} onClick={() => setView("manage")}>Manage</TabBtn>
       </div>
 
@@ -146,6 +168,29 @@ export function BookkeepingClient({
               </FilterPill>
               <FilterPill active={reviewFilter === "booked"} onClick={() => setReviewFilter("booked")}>Booked</FilterPill>
             </div>
+            {/* Date filter */}
+            <select
+              value={txnPreset}
+              onChange={(e) => setTxnPreset(e.target.value)}
+              className="h-9 rounded-lg border border-border bg-card px-2 text-sm"
+            >
+              <option value="all">All dates</option>
+              <option value="month">This month</option>
+              <option value="quarter">This quarter</option>
+              {ledgerYears.map((y) => (
+                <option key={y} value={String(y)}>
+                  {y === new Date().getFullYear() ? `${y} (this year)` : y}
+                </option>
+              ))}
+              <option value="custom">Custom range…</option>
+            </select>
+            {txnPreset === "custom" && (
+              <>
+                <Input type="date" value={txnStart} onChange={(e) => setTxnStart(e.target.value)} className="h-9 w-40" />
+                <span className="text-sm text-muted-foreground">to</span>
+                <Input type="date" value={txnEnd} onChange={(e) => setTxnEnd(e.target.value)} className="h-9 w-40" />
+              </>
+            )}
             {canEdit && (
               <Button size="sm" onClick={() => setAddOpen(true)} className="bg-gold text-gold-foreground hover:bg-gold/90">
                 <Plus className="size-4" /> Add transaction
@@ -189,7 +234,9 @@ export function BookkeepingClient({
               <tbody className="divide-y divide-border">
                 {visibleTxns.length === 0 && (
                   <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">
-                    {reviewFilter === "review" ? "Nothing to review — all caught up." : "No booked transactions yet."}
+                    {dateFilterActive
+                      ? "No transactions in this date range."
+                      : reviewFilter === "review" ? "Nothing to review — all caught up." : "No booked transactions yet."}
                   </td></tr>
                 )}
                 {visibleTxns.map((t) => (
@@ -278,7 +325,7 @@ export function BookkeepingClient({
             Click a transaction to see details, tag a vendor &amp; deal, or delete it. Connect a bank or QuickBooks to auto-import new transactions (they arrive uncategorized for you to file).
           </p>
         </>
-      ) : (
+      ) : view === "reports" ? (
         /* Reports: P&L + Balance Sheet */
         <div className="space-y-4">
           {/* Period selector */}
@@ -343,6 +390,8 @@ export function BookkeepingClient({
             </div>
           </div>
         </div>
+      ) : (
+        <ReconcilePanel data={data} canEdit={canEdit} />
       )}
 
       {confirmBook && (
@@ -508,6 +557,203 @@ function ManagePanel({ data, canEdit, onChanged }: { data: BookkeepingData; canE
         <VendorDialog vendor={vendorDialog.vendor} onClose={() => setVendorDialog({ open: false })} onDone={() => { setVendorDialog({ open: false }); onChanged(); }} />
       )}
       {connOpen && <ConnectDialog provider={data.provider} onClose={() => setConnOpen(false)} onDone={() => { setConnOpen(false); onChanged(); }} />}
+    </div>
+  );
+}
+
+// ---- Reconcile tab: match transactions to a bank statement -------------------
+function ReconcilePanel({ data, canEdit }: { data: BookkeepingData; canEdit: boolean }) {
+  const fmt = useFormat();
+  const router = useRouter();
+
+  const accounts = React.useMemo(() => {
+    const s = new Set<string>();
+    for (const t of data.transactions) if (t.account) s.add(t.account);
+    return [...s].sort();
+  }, [data.transactions]);
+
+  const [account, setAccount] = React.useState<string>(accounts[0] ?? "");
+  const [statementDate, setStatementDate] = React.useState("");
+  const [endingBalance, setEndingBalance] = React.useState("");
+  const [cleared, setCleared] = React.useState<Set<string>>(new Set());
+  const [busy, setBusy] = React.useState(false);
+
+  // Beginning balance = everything already reconciled on this account.
+  const beginning = React.useMemo(
+    () => data.transactions.filter((t) => t.account === account && t.status === "reconciled").reduce((s, t) => s + t.amountCents, 0),
+    [data.transactions, account]
+  );
+
+  // Outstanding (not-yet-reconciled) transactions on this account, up to the statement date.
+  const outstanding = React.useMemo(() => {
+    const endMs = statementDate ? new Date(`${statementDate}T23:59:59`).getTime() : Infinity;
+    return data.transactions
+      .filter((t) => t.account === account && t.status !== "reconciled" && new Date(t.date).getTime() <= endMs)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [data.transactions, account, statementDate]);
+
+  // Keep the cleared set valid when the account/date filter changes.
+  React.useEffect(() => {
+    setCleared((prev) => new Set([...prev].filter((id) => outstanding.some((t) => t.id === id))));
+  }, [outstanding]);
+
+  const clearedTxns = outstanding.filter((t) => cleared.has(t.id));
+  const clearedDeposits = clearedTxns.filter((t) => t.amountCents >= 0).reduce((s, t) => s + t.amountCents, 0);
+  const clearedPayments = clearedTxns.filter((t) => t.amountCents < 0).reduce((s, t) => s + -t.amountCents, 0);
+  const clearedBalance = beginning + clearedDeposits - clearedPayments;
+  const endingCents = endingBalance.trim() === "" ? null : Math.round(parseFloat(endingBalance) * 100);
+  const difference = endingCents == null || Number.isNaN(endingCents) ? null : endingCents - clearedBalance;
+  const canFinish = canEdit && !!account && !!statementDate && endingCents != null && !Number.isNaN(endingCents) && cleared.size > 0 && difference === 0;
+
+  function toggle(id: string) {
+    setCleared((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+
+  async function finish() {
+    if (endingCents == null) return;
+    setBusy(true);
+    const res = await finishReconciliationAction({ account, statementDate, endingBalanceCents: endingCents, transactionIds: [...cleared] });
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Reconciled");
+    setCleared(new Set()); setEndingBalance("");
+    router.refresh();
+  }
+
+  async function undo(id: string) {
+    if (!window.confirm("Undo this reconciliation? Its transactions go back to unreconciled.")) return;
+    const res = await undoReconciliationAction(id);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Reconciliation undone");
+    router.refresh();
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">
+        No bank accounts to reconcile yet. Add transactions with an <strong>Account</strong> (e.g. &ldquo;Operating Checking&rdquo;), then come back to match them against your statement.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Statement inputs */}
+      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card px-4 py-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Account</Label>
+          <select value={account} onChange={(e) => setAccount(e.target.value)} className="h-9 rounded-md border border-border bg-background px-2 text-sm">
+            {accounts.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Statement ending date</Label>
+          <Input type="date" value={statementDate} onChange={(e) => setStatementDate(e.target.value)} className="h-9 w-44" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Statement ending balance</Label>
+          <Input type="number" inputMode="decimal" value={endingBalance} onChange={(e) => setEndingBalance(e.target.value)} placeholder="0.00" className="h-9 w-40" />
+        </div>
+      </div>
+
+      {/* Worksheet */}
+      <div className="grid gap-5 lg:grid-cols-3">
+        <div className="overflow-x-auto rounded-xl border border-border bg-card lg:col-span-2">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold">Cleared</th>
+                <th className="px-3 py-2 text-left font-semibold">Date</th>
+                <th className="px-3 py-2 text-left font-semibold">Description</th>
+                <th className="px-3 py-2 text-right font-semibold">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {outstanding.length === 0 && (
+                <tr><td colSpan={4} className="px-3 py-8 text-center text-muted-foreground">Nothing outstanding for this account{statementDate ? " up to that date" : ""}.</td></tr>
+              )}
+              {outstanding.map((t) => (
+                <tr key={t.id} className={cn("cursor-pointer hover:bg-muted/40", cleared.has(t.id) && "bg-emerald-50/60")} onClick={() => toggle(t.id)}>
+                  <td className="px-3 py-2"><input type="checkbox" checked={cleared.has(t.id)} onChange={() => toggle(t.id)} onClick={(e) => e.stopPropagation()} /></td>
+                  <td className="whitespace-nowrap px-3 py-2 text-muted-foreground tabular-nums">{fmtDate(t.date)}</td>
+                  <td className="px-3 py-2">{t.description}</td>
+                  <td className={cn("whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums", t.amountCents >= 0 ? "text-emerald-600" : "text-red-600")}>{fmt.money(t.amountCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Summary */}
+        <div className="space-y-3 rounded-xl border border-border bg-card p-5">
+          <h3 className="font-semibold">Reconciliation</h3>
+          <SumLine label="Beginning balance" value={fmt.money(beginning)} />
+          <SumLine label={`Cleared deposits (${clearedTxns.filter((t) => t.amountCents >= 0).length})`} value={fmt.money(clearedDeposits)} tone="emerald" />
+          <SumLine label={`Cleared payments (${clearedTxns.filter((t) => t.amountCents < 0).length})`} value={`-${fmt.money(clearedPayments)}`} tone="red" />
+          <div className="flex items-center justify-between border-t border-border pt-2 text-sm font-semibold">
+            <span>Cleared balance</span><span className="tabular-nums">{fmt.money(clearedBalance)}</span>
+          </div>
+          <SumLine label="Statement ending balance" value={endingCents != null && !Number.isNaN(endingCents) ? fmt.money(endingCents) : "—"} />
+          <div className={cn("flex items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold", difference === 0 ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-amber-300 bg-amber-50 text-amber-700")}>
+            <span>Difference</span><span className="tabular-nums">{difference == null ? "—" : fmt.money(difference)}</span>
+          </div>
+          <Button onClick={finish} disabled={!canFinish || busy} className="w-full bg-gold text-gold-foreground hover:bg-gold/90">
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Finish reconciliation
+          </Button>
+          {difference != null && difference !== 0 && (
+            <p className="text-[11px] text-muted-foreground">Clear transactions until the difference is $0 to finish.</p>
+          )}
+        </div>
+      </div>
+
+      {/* History */}
+      {data.reconciliations.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-border bg-card">
+          <div className="border-b border-border px-4 py-3 text-sm font-semibold">Past reconciliations</div>
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 text-left font-semibold">Statement date</th>
+                <th className="px-4 py-2 text-left font-semibold">Account</th>
+                <th className="px-4 py-2 text-right font-semibold">Ending balance</th>
+                <th className="px-4 py-2 text-right font-semibold">Cleared</th>
+                <th className="px-4 py-2 text-right font-semibold">Report</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {data.reconciliations.map((r) => (
+                <tr key={r.id} className="hover:bg-muted/40">
+                  <td className="px-4 py-2 tabular-nums">{fmtDate(r.statementDate)}</td>
+                  <td className="px-4 py-2">{r.account}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{fmt.money(r.endingBalanceCents)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{r.clearedCount}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center justify-end gap-2">
+                      <a href={`/api/bookkeeping/reconciliation?id=${r.id}`} className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
+                        <Download className="size-3.5" /> PDF
+                      </a>
+                      {canEdit && (
+                        <button onClick={() => undo(r.id)} className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
+                          <Trash2 className="size-3.5" /> Undo
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SumLine({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "red" }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn("tabular-nums", tone === "emerald" && "text-emerald-600", tone === "red" && "text-red-600")}>{value}</span>
     </div>
   );
 }

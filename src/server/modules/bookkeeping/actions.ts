@@ -368,3 +368,79 @@ export async function deleteTransactionAttachmentAction(fileId: string) {
   revalidatePath("/portal/bookkeeping");
   return { ok: true as const };
 }
+
+// ── Bank reconciliation ─────────────────────────────────────────────────────
+
+const finishReconcileSchema = z.object({
+  account: z.string().min(1).max(80),
+  statementDate: z.string().min(1),
+  endingBalanceCents: z.number().int(),
+  transactionIds: z.array(z.string().min(1)).min(1).max(2000),
+});
+
+/**
+ * Finish a reconciliation: mark the selected (cleared) transactions reconciled
+ * and record the statement. Validates the cleared balance equals the statement
+ * ending balance so the books can't be reconciled out of balance.
+ */
+export async function finishReconciliationAction(input: z.infer<typeof finishReconcileSchema>) {
+  const { user, denied } = await gate("update");
+  if (denied) return denied;
+  const parsed = finishReconcileSchema.safeParse(input);
+  if (!parsed.success) return fail("Check the reconciliation and try again.");
+  const { account, statementDate, endingBalanceCents, transactionIds } = parsed.data;
+  const stmtDate = new Date(`${statementDate}T12:00:00`);
+  if (Number.isNaN(stmtDate.getTime())) return fail("Enter a valid statement date.");
+
+  // The cleared transactions, scoped to this company + account, not already reconciled.
+  const cleared = await prisma.transaction.findMany({
+    where: { id: { in: transactionIds }, companyId: user.companyId, account, status: { not: "reconciled" } },
+    select: { id: true, amountCents: true },
+  });
+  if (cleared.length === 0) return fail("Select at least one transaction to clear.");
+
+  // Beginning balance = everything already reconciled on this account (authoritative).
+  const prior = await prisma.transaction.aggregate({
+    where: { companyId: user.companyId, account, status: "reconciled" },
+    _sum: { amountCents: true },
+  });
+  const beginning = prior._sum.amountCents ?? 0;
+  const clearedSum = cleared.reduce((s, t) => s + t.amountCents, 0);
+  if (beginning + clearedSum !== endingBalanceCents) {
+    return fail("Out of balance — cleared total doesn't match the statement ending balance.");
+  }
+
+  const recon = await prisma.reconciliation.create({
+    data: {
+      companyId: user.companyId,
+      account,
+      statementDate: stmtDate,
+      endingBalanceCents,
+      beginningBalanceCents: beginning,
+      clearedCount: cleared.length,
+      createdById: user.userId,
+    },
+    select: { id: true },
+  });
+  await prisma.transaction.updateMany({
+    where: { id: { in: cleared.map((t) => t.id) }, companyId: user.companyId },
+    data: { status: "reconciled", reconciledAt: new Date(), reconciliationId: recon.id },
+  });
+  revalidatePath("/portal/bookkeeping");
+  return { ok: true as const, id: recon.id };
+}
+
+/** Undo a reconciliation: release its transactions back to "categorized" and delete it. */
+export async function undoReconciliationAction(id: string) {
+  const { user, denied } = await gate("update");
+  if (denied) return denied;
+  const recon = await prisma.reconciliation.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!recon) return fail("Reconciliation not found.");
+  await prisma.transaction.updateMany({
+    where: { reconciliationId: recon.id, companyId: user.companyId },
+    data: { status: "categorized", reconciledAt: null, reconciliationId: null },
+  });
+  await prisma.reconciliation.delete({ where: { id: recon.id } });
+  revalidatePath("/portal/bookkeeping");
+  return { ok: true as const };
+}
