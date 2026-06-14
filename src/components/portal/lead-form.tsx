@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Paperclip, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createLeadAction, updateLeadAction, type LeadInput } from "@/server/modules/leads/manage";
+import { uploadFileAction } from "@/server/modules/files/actions";
 
 type Option = { id: string; name: string };
 type FieldDef = { id: string; key: string; label: string; type: string; options: string[]; required: boolean };
@@ -64,15 +65,41 @@ export function LeadForm({
   const [custom, setCustom] = React.useState<Record<string, string>>(
     (initial?.customFields as Record<string, string>) ?? {}
   );
+  // Files staged for upload — attached to the appointment after it's created.
+  const [files, setFiles] = React.useState<File[]>([]);
+  const fileRef = React.useRef<HTMLInputElement>(null);
 
   function set<K extends keyof typeof v>(k: K, val: (typeof v)[K]) {
     setV((s) => ({ ...s, [k]: val }));
+  }
+
+  function addFiles(list: FileList | null) {
+    if (!list) return;
+    setFiles((prev) => [...prev, ...Array.from(list)]);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+  async function uploadStaged(leadIdForUpload: string) {
+    let failed = 0;
+    for (const file of files) {
+      const fd = new FormData();
+      fd.set("file", file);
+      fd.set("leadId", leadIdForUpload);
+      const res = await uploadFileAction(fd);
+      if (!res.ok) failed += 1;
+    }
+    if (failed > 0) toast.error(`${failed} attachment${failed === 1 ? "" : "s"} failed to upload.`);
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!v.firstName.trim() || !v.lastName.trim()) {
       toast.error("First and last name are required.");
+      return;
+    }
+    // Enforce required custom fields.
+    const missing = fieldDefs.find((f) => f.required && !(custom[f.key] ?? "").trim());
+    if (missing) {
+      toast.error(`${missing.label} is required.`);
       return;
     }
     setPending(true);
@@ -98,14 +125,18 @@ export function LeadForm({
     const res = mode === "create"
       ? await createLeadAction(payload)
       : await updateLeadAction(leadId!, payload);
-    setPending(false);
-    if (res.ok) {
-      toast.success(mode === "create" ? "Appointment created" : "Appointment updated");
-      router.push(`/portal/leads/${res.id}`);
-      router.refresh();
-    } else {
+    if (!res.ok) {
+      setPending(false);
       toast.error(res.error);
+      return;
     }
+    // Attach any staged files to the (now-existing) appointment.
+    const targetId = mode === "create" ? res.id : leadId!;
+    if (files.length > 0) await uploadStaged(targetId);
+    setPending(false);
+    toast.success(mode === "create" ? "Appointment created" : "Appointment updated");
+    router.push(`/portal/leads/${res.id}`);
+    router.refresh();
   }
 
   return (
@@ -193,6 +224,43 @@ export function LeadForm({
           </Grid>
         </Section>
       )}
+
+      <Section title="Attachments">
+        <p className="-mt-2 mb-1 text-xs text-muted-foreground">
+          Photos, PDFs, or documents for this appointment. They&rsquo;ll show in its Photos &amp; Documents after it&rsquo;s created.
+        </p>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf"
+          className="hidden"
+          onChange={(e) => addFiles(e.target.files)}
+        />
+        <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+          <Upload className="size-4" /> Add files
+        </Button>
+        {files.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {files.map((f, i) => (
+              <li key={`${f.name}-${i}`} className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-1.5 text-sm">
+                <span className="flex min-w-0 items-center gap-2">
+                  <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{f.name}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="shrink-0 text-muted-foreground hover:text-destructive"
+                  aria-label="Remove"
+                >
+                  <X className="size-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
 
       <Section title="Notes">
         <Textarea rows={4} value={v.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Appointment notes, damage description, etc." />

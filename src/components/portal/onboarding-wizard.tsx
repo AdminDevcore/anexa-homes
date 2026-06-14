@@ -29,15 +29,23 @@ export function OnboardingWizard({ initial, firstName, lastName }: { initial: On
     dateOfBirth: initial?.dateOfBirth ? initial.dateOfBirth.slice(0, 10) : "",
     ssn: "",
     address: initial?.address ?? "", city: initial?.city ?? "", state: initial?.state ?? "", zip: initial?.zip ?? "",
+    accountHolderName: initial?.accountHolderName ?? "",
     bankName: initial?.bankName ?? "", routingNumber: initial?.routingNumber ?? "", account: "", accountType: initial?.accountType ?? "checking",
+    accountAddress: initial?.accountAddress ?? "",
     taxClassification: initial?.taxClassification ?? "individual", businessName: initial?.businessName ?? "", ein: "",
     signatureName: initial?.signatureName ?? "",
   });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
 
-  const [docs, setDocs] = React.useState({ id: !!initial?.idPhotoFileId, ssn_card: !!initial?.ssnCardFileId, voided_check: !!initial?.voidedCheckFileId });
+  const [docs, setDocs] = React.useState({
+    id: !!initial?.idPhotoFileId,
+    id_back: !!initial?.idPhotoBackFileId,
+    ssn_card: !!initial?.ssnCardFileId,
+    ssn_back: !!initial?.ssnCardBackFileId,
+    voided_check: !!initial?.voidedCheckFileId,
+  });
 
-  async function upload(kind: "id" | "ssn_card" | "voided_check", file: File) {
+  async function upload(kind: "id" | "id_back" | "ssn_card" | "ssn_back" | "voided_check", file: File) {
     const fd = new FormData();
     fd.set("kind", kind); fd.set("file", file);
     const res = await uploadOnboardingDocAction(fd);
@@ -55,8 +63,8 @@ export function OnboardingWizard({ initial, firstName, lastName }: { initial: On
   }
 
   async function submit() {
-    if (!docs.id) return toast.error("Please upload a photo of your government ID.");
-    if (!docs.ssn_card) return toast.error("Please upload a photo of your Social Security card.");
+    if (!docs.id || !docs.id_back) return toast.error("Please upload the front and back of your driver's license / ID.");
+    if (!docs.ssn_card || !docs.ssn_back) return toast.error("Please upload the front and back of your Social Security card.");
     setBusy(true);
     const res = await saveOnboardingAction({ ...f, complete: true });
     setBusy(false);
@@ -89,6 +97,7 @@ export function OnboardingWizard({ initial, firstName, lastName }: { initial: On
 
       <Section icon={Landmark} title="Direct deposit" subtitle="Where we send your pay. Encrypted at rest.">
         <div className="grid gap-4 sm:grid-cols-2">
+          <FieldI label="Name on account" value={f.accountHolderName} onChange={set("accountHolderName")} />
           <FieldI label="Bank name" value={f.bankName} onChange={set("bankName")} />
           <Field label="Account type">
             <select value={f.accountType} onChange={set("accountType")} className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm">
@@ -100,6 +109,7 @@ export function OnboardingWizard({ initial, firstName, lastName }: { initial: On
           <Field label="Account number" secure note={initial?.accountMasked ? `On file: ${initial.accountMasked}` : undefined}>
             <Input value={f.account} onChange={set("account")} placeholder={initial?.accountMasked ?? "Account number"} inputMode="numeric" />
           </Field>
+          <div className="sm:col-span-2"><FieldI label="Address on account" value={f.accountAddress} onChange={set("accountAddress")} /></div>
         </div>
       </Section>
 
@@ -117,10 +127,12 @@ export function OnboardingWizard({ initial, firstName, lastName }: { initial: On
         </div>
       </Section>
 
-      <Section icon={IdCard} title="Documents" subtitle="A clear photo of each. Stored privately on your profile.">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <DocUpload label="Government ID" hint="Driver's license or passport" done={docs.id} onFile={(file) => upload("id", file)} />
-          <DocUpload label="Social Security card" hint="Front of card" done={docs.ssn_card} onFile={(file) => upload("ssn_card", file)} />
+      <Section icon={IdCard} title="Documents" subtitle="A clear photo of each side. Stored privately & encrypted on your profile.">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <DocUpload label="Driver's license — Front" hint="Front of license / ID" done={docs.id} onFile={(file) => upload("id", file)} />
+          <DocUpload label="Driver's license — Back" hint="Back of license / ID" done={docs.id_back} onFile={(file) => upload("id_back", file)} />
+          <DocUpload label="Social Security — Front" hint="Front of SS card" done={docs.ssn_card} onFile={(file) => upload("ssn_card", file)} />
+          <DocUpload label="Social Security — Back" hint="Back of SS card" done={docs.ssn_back} onFile={(file) => upload("ssn_back", file)} />
           <DocUpload label="Voided check (optional)" hint="For direct deposit" done={docs.voided_check} onFile={(file) => upload("voided_check", file)} />
         </div>
       </Section>

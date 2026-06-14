@@ -22,12 +22,14 @@ test("manager sees Scope of Work with profit + margin on a scope-received deal",
 
   await page.getByRole("button", { name: "Scope of Work" }).click();
 
-  // Seeded totals: insurance $13,530.00, profit $3,570.00 (26.4%)
+  // Seeded insurance RCV $13,530.00. Profit pool = RCV − cost − 10% overhead.
+  // Old gross margin was $3,570 (26.4%); after the $1,353 overhead the pool is
+  // $2,217.00 (16.4%).
   await expect(page.getByText("$13,530.00").first()).toBeVisible();
   // Cost + profit visible to management
   await expect(page.getByRole("columnheader", { name: "Cost $/u" })).toBeVisible();
-  await expect(page.getByText("$3,570.00").first()).toBeVisible();
-  await expect(page.getByText(/26\.\d%/).first()).toBeVisible();
+  await expect(page.getByText("$2,217.00").first()).toBeVisible();
+  await expect(page.getByText(/16\.\d%/).first()).toBeVisible();
 
   await page.context().clearCookies();
 });
@@ -40,7 +42,7 @@ test("sales rep sees the scope but NOT cost or profit", async ({ page }) => {
 
   // Insurance side is visible (totals render as text)
   await expect(page.getByText("$13,530.00").first()).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: "Insurance", exact: true })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Insurance RCV" })).toBeVisible();
   // Cost & profit are stripped for reps
   await expect(page.getByRole("columnheader", { name: "Cost $/u" })).toHaveCount(0);
   await expect(page.getByText("Profit", { exact: true })).toHaveCount(0);
@@ -53,6 +55,26 @@ test("no Scope of Work tab before Scope Received", async ({ page }) => {
   await openDeal(page, "David"); // David Kim — appointment_set stage
 
   await expect(page.getByRole("button", { name: "Scope of Work" })).toHaveCount(0);
+
+  await page.context().clearCookies();
+});
+
+test("scope panel exposes cost/supplement template pickers + load-from-catalog", async ({ page }) => {
+  await login(page, "owner@anexahomes.com");
+  await openDeal(page, "Linda");
+  await page.getByRole("button", { name: "Scope of Work" }).click();
+
+  // New template-driven controls + columns are present.
+  await expect(page.getByText("Cost template").first()).toBeVisible();
+  await expect(page.getByText("Supplement template").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Load from catalog/i })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Insurance RCV" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Supplement" })).toBeVisible();
+
+  // Loading the catalog adds lines (catalog items become scope rows).
+  const rowsBefore = await page.locator("table tbody tr").count();
+  await page.getByRole("button", { name: /Load from catalog/i }).click();
+  await expect.poll(async () => page.locator("table tbody tr").count()).toBeGreaterThan(rowsBefore);
 
   await page.context().clearCookies();
 });

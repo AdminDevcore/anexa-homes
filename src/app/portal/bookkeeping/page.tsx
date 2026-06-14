@@ -12,6 +12,7 @@ export default async function BookkeepingPage() {
   if (!can(user, "read", "Bookkeeping")) redirect("/portal/dashboard");
   const data = await getBookkeepingData(user.companyId);
   const canEdit = can(user, "update", "Bookkeeping");
+
   return (
     <div className="space-y-6">
       <PageHeader

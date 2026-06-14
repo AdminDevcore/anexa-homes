@@ -25,10 +25,12 @@ const onboardingSchema = z.object({
   city: z.string().max(80).optional().or(z.literal("")),
   state: z.string().max(40).optional().or(z.literal("")),
   zip: z.string().max(12).optional().or(z.literal("")),
+  accountHolderName: z.string().max(120).optional().or(z.literal("")),
   bankName: z.string().max(120).optional().or(z.literal("")),
   routingNumber: z.string().max(20).optional().or(z.literal("")),
   account: z.string().max(30).optional().or(z.literal("")),
   accountType: z.string().max(20).optional().or(z.literal("")),
+  accountAddress: z.string().max(200).optional().or(z.literal("")),
   taxClassification: z.string().max(40).optional().or(z.literal("")),
   businessName: z.string().max(160).optional().or(z.literal("")),
   ein: z.string().max(20).optional().or(z.literal("")),
@@ -61,10 +63,12 @@ export async function saveOnboardingAction(input: z.infer<typeof onboardingSchem
     city: d.city || null,
     state: d.state || null,
     zip: d.zip || null,
+    accountHolderName: d.accountHolderName || null,
     bankName: d.bankName || null,
     routingNumber: d.routingNumber || null,
     ...(d.account ? { accountEnc: encryptField(d.account), accountLast4: last4(d.account) } : {}),
     accountType: d.accountType || null,
+    accountAddress: d.accountAddress || null,
     taxClassification: d.taxClassification || null,
     businessName: d.businessName || null,
     ...(d.ein ? { einEnc: encryptField(d.ein), einLast4: last4(d.ein) } : {}),
@@ -86,7 +90,13 @@ export async function saveOnboardingAction(input: z.infer<typeof onboardingSchem
 export async function uploadOnboardingDocAction(formData: FormData) {
   const user = await requireUser();
   const kind = String(formData.get("kind") || "");
-  const field = ({ id: "idPhotoFileId", ssn_card: "ssnCardFileId", voided_check: "voidedCheckFileId" } as Record<string, string>)[kind];
+  const field = ({
+    id: "idPhotoFileId",
+    id_back: "idPhotoBackFileId",
+    ssn_card: "ssnCardFileId",
+    ssn_back: "ssnCardBackFileId",
+    voided_check: "voidedCheckFileId",
+  } as Record<string, string>)[kind];
   if (!field) return fail("Unknown document type.");
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) return fail("No file provided.");

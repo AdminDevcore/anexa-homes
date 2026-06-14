@@ -4,15 +4,19 @@ import { prisma } from "@/server/db/client";
 import { getBookkeepingData } from "@/server/modules/bookkeeping/queries";
 import { buildPnlPdf } from "@/server/modules/bookkeeping/pdf";
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await getSessionUser();
   if (!user || !can(user, "read", "Bookkeeping")) return new Response("Forbidden", { status: 403 });
+  const url = new URL(req.url);
+  const startMs = url.searchParams.get("start");
+  const endMs = url.searchParams.get("end");
+  const period = startMs || endMs ? { startMs: startMs ? Number(startMs) : null, endMs: endMs ? Number(endMs) : null } : undefined;
   const [company, data] = await Promise.all([
     prisma.company.findUnique({ where: { id: user.companyId }, select: { name: true, address: true, city: true, state: true, zip: true, phone: true, email: true } }),
-    getBookkeepingData(user.companyId),
+    getBookkeepingData(user.companyId, period),
   ]);
   if (!company) return new Response("Not found", { status: 404 });
-  const asOf = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const asOf = url.searchParams.get("label") || new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const pdf = await buildPnlPdf(company, data.pnl, asOf);
   return new Response(Buffer.from(pdf), {
     headers: {

@@ -254,8 +254,12 @@ model Company {
   city        String?
   state       String?
   zip         String?
+  einTaxId    String? // payer EIN / Tax ID — used as the payer TIN on 1099-NEC filings
   // Company operations overhead (% of contract) removed before the profit split.
   overheadPct Float    @default(10)
+  // Public-adjuster fee (% of the supplement) removed from the pool when a deal
+  // is supplemented, before the rep/company split.
+  paFeePct    Float    @default(10)
   timezone    String   @default("America/Chicago")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -298,6 +302,10 @@ model Company {
   scopeOfWorks          ScopeOfWork[]
   scopeLines            ScopeLine[]
   scopeTemplateItems    ScopeTemplateItem[]
+  scopeCatalogItems     ScopeCatalogItem[]
+  scopeCostTemplates    ScopeCostTemplate[]
+  scopeSupplementTemplates ScopeSupplementTemplate[]
+  proposals             Proposal[]
 
   @@map("companies")
 }
@@ -327,6 +335,12 @@ model CompanySettings {
   // Customizable appointment outcomes ("dispositions") — JSON array of labels.
   // Empty/unset falls back to DEFAULT_APPOINTMENT_DISPOSITIONS in code.
   appointmentDispositions Json     @default("[]")
+  // Customizable inspection outcomes — JSON array of labels. Empty falls back to
+  // DEFAULT_INSPECTION_OUTCOMES in code.
+  inspectionOutcomes      Json     @default("[]")
+  // Default production QC checklist applied to new jobs — JSON array of labels.
+  // Empty falls back to DEFAULT_QC in code.
+  qcChecklistTemplate     Json     @default("[]")
   // Bookkeeping integration (bank / QuickBooks). Key stored for the connector.
   bookkeepingProvider     String? // "quickbooks" | "plaid" | "manual"
   bookkeepingApiKey       String?
@@ -348,6 +362,9 @@ model User {
   status                UserStatus @default(active)
   avatarUrl             String?
   title                 String?
+  // Sequential employee number per company (join order). Formatted on display as
+  // <recordPrefix><5-digit>, e.g. AH-00001. Lower = earlier hire = higher rank.
+  employeeNo            Int?
   // Rep's share (%) of the profit pool on a SELF-GENERATED lead (standard split).
   commissionSplitPct    Float?
   // Company-provided-lead comp is EITHER a percentage of the pool OR a flat lead
@@ -405,8 +422,10 @@ model User {
   territoriesAssigned  Territory[]          @relation("TerritoryRep")
   territoriesCreated   Territory[]          @relation("TerritoryCreator")
   onboarding           UserOnboarding?
+  proposalsCreated     Proposal[]           @relation("ProposalCreatedBy")
 
   @@unique([companyId, email])
+  @@unique([companyId, employeeNo])
   @@index([companyId, role, status])
   @@index([companyId, salesRepId])
   @@index([companyId, managerId])
@@ -578,6 +597,7 @@ model Lead {
   knocks           Knock[]           @relation("KnockLead")
   roofReport       RoofReport?
   scope            ScopeOfWork?
+  proposals        Proposal[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -938,6 +958,9 @@ model FileAsset {
   conversation        Conversation?      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   messageId           String?
   message             Message?           @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  // Bookkeeping: a receipt / invoice attached to a transaction.
+  transactionId       String?
+  transaction         Transaction?       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   uploadedById        String?
   uploadedBy          User?              @relation(fields: [uploadedById], references: [id])
   createdAt           DateTime           @default(now())
@@ -949,6 +972,7 @@ model FileAsset {
   @@index([photoTemplateItemId])
   @@index([conversationId])
   @@index([messageId])
+  @@index([transactionId])
   @@map("files")
 }
 
@@ -1623,11 +1647,23 @@ model BookkeepingCategory {
 
 // Vendors / contractors (one concept) — the managed list a transaction is tagged to.
 model BookkeepingVendor {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  name      String
-  createdAt DateTime @default(now())
+  id            String   @id @default(uuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String // display name
+  companyName   String? // legal / company name
+  contactName   String?
+  email         String?
+  phone         String?
+  einTaxId      String? // EIN / Tax ID (1099)
+  is1099        Boolean  @default(false)
+  address       String?
+  city          String?
+  state         String?
+  zip           String?
+  accountNumber String? // our account # with this vendor
+  notes         String?
+  createdAt     DateTime @default(now())
 
   @@index([companyId])
   @@map("bookkeeping_vendors")
@@ -1657,6 +1693,7 @@ model Transaction {
   externalId    String? // dedup key for imported/synced rows
   notes         String?
   createdById   String?
+  attachments   FileAsset[] // receipts / invoices attached to this transaction
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
@@ -1685,11 +1722,13 @@ model UserOnboarding {
   state             String?
   zip               String?
   // Direct deposit
+  accountHolderName String? // name as it appears on the bank account
   bankName          String?
   routingNumber     String?
   accountEnc        String?
   accountLast4      String?
   accountType       String? // "checking" | "savings"
+  accountAddress    String? // address on the bank account (may differ from home)
   // Tax / W-9 (for 1099)
   taxClassification String? // individual | sole_prop | llc | s_corp | c_corp | partnership
   businessName      String?
@@ -1697,9 +1736,11 @@ model UserOnboarding {
   einLast4          String?
   signatureName     String?
   signedAt          DateTime?
-  // Document uploads (FileAsset ids)
-  idPhotoFileId     String?
-  ssnCardFileId     String?
+  // Document uploads (FileAsset ids). ID + SS card are front & back.
+  idPhotoFileId     String? // driver's license / government ID — FRONT
+  idPhotoBackFileId String? // driver's license / government ID — BACK
+  ssnCardFileId     String? // Social Security card — FRONT
+  ssnCardBackFileId String? // Social Security card — BACK
   voidedCheckFileId String?
   completedAt       DateTime?
   createdAt         DateTime  @default(now())
@@ -1774,6 +1815,16 @@ model ScopeOfWork {
   // Public-adjuster fee, as a % of the supplement amount recovered (default 10%).
   // Used to net out the PA's cut when modeling "profit if we supplement".
   paFeePct  Float       @default(10)
+  // Estimated insurance deductible (cents). Informational only: of the RCV, the
+  // homeowner pays this and the carrier pays the rest — it does NOT change the
+  // profit pool. Used on the scope worksheet to show the insurance/homeowner split.
+  estDeductibleCents Int @default(0)
+  // Selected pricing templates: cost/supplement per unit come from these (by
+  // catalog item). Null = none selected. SetNull so deleting a template is safe.
+  costTemplateId       String?
+  costTemplate         ScopeCostTemplate? @relation(fields: [costTemplateId], references: [id], onDelete: SetNull)
+  supplementTemplateId String?
+  supplementTemplate   ScopeSupplementTemplate? @relation(fields: [supplementTemplateId], references: [id], onDelete: SetNull)
   lines     ScopeLine[]
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
@@ -1789,18 +1840,23 @@ model ScopeLine {
   scopeId            String
   scope              ScopeOfWork @relation(fields: [scopeId], references: [id], onDelete: Cascade)
   position           Int         @default(0)
+  // Catalog link: when set, cost & supplement per unit come from the scope's
+  // selected templates (matched by this id). Null = legacy free-text line that
+  // keeps its inline costUnitPrice.
+  catalogItemId      String?
+  catalogItem        ScopeCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
   category           String      @default("General")
   description        String      @default("")
   quantity           Float       @default(0)
   unit               String? // sq, sq ft, lf, ea
   insuranceUnitPrice Int         @default(0) // cents — what the carrier currently ALLOWS per unit
-  costUnitPrice      Int         @default(0) // cents — our cost per unit
-  // cents — supplemented carrier price per unit (with a public adjuster). 0 = not
-  // supplemented; the rollup then falls back to the allowed insurance price.
+  costUnitPrice      Int         @default(0) // cents — our cost per unit (legacy inline; templates override)
+  // cents — legacy inline supplemented price; superseded by supplement templates.
   supplementUnitPrice Int        @default(0)
   createdAt          DateTime    @default(now())
 
   @@index([scopeId])
+  @@index([catalogItemId])
   @@map("scope_lines")
 }
 
@@ -1821,4 +1877,143 @@ model ScopeTemplateItem {
 
   @@index([companyId, industry])
   @@map("scope_template_items")
+}
+
+// Master scope catalog — the company-wide list of possible insurance-restoration
+// line items. NO pricing (cost/supplement/insurance prices live in versioned
+// templates + the project scope). Organized by category → subcategory, filterable
+// by trade.
+model ScopeCatalogItem {
+  id                    String   @id @default(uuid())
+  companyId             String
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  position              Int      @default(0)
+  category              String   @default("General")
+  subcategory           String   @default("")
+  description           String   @default("")
+  unit                  String   @default("EA") // SQ | SF | LF | EA | DAY | SYSTEM | PERCENT | HR
+  trade                 String   @default("General")
+  isCommonInsuranceItem Boolean  @default(false)
+  isSupplementEligible  Boolean  @default(false)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  costTemplateItems       ScopeCostTemplateItem[]
+  supplementTemplateItems ScopeSupplementTemplateItem[]
+  scopeLines              ScopeLine[]
+
+  @@index([companyId, trade])
+  @@index([companyId, category])
+  @@map("scope_catalog_items")
+}
+
+// ── Versioned pricing templates over the master catalog ─────────────────────
+// Cost Templates and Supplement Templates are independent, dated price lists
+// that reference catalog items by id. Editing a template price never touches the
+// master catalog. A Project's Scope of Work (sub-project 2) selects one of each
+// to compute internal cost and supplement potential.
+
+model ScopeCostTemplate {
+  id            String                  @id @default(uuid())
+  companyId     String
+  company       Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  effectiveDate DateTime                @default(now())
+  isActive      Boolean                 @default(true)
+  items         ScopeCostTemplateItem[]
+  scopes        ScopeOfWork[]
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  @@index([companyId])
+  @@map("scope_cost_templates")
+}
+
+model ScopeCostTemplateItem {
+  id               String            @id @default(uuid())
+  companyId        String
+  templateId       String
+  template         ScopeCostTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  catalogItemId    String
+  catalogItem      ScopeCatalogItem  @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  costPerUnitCents Int               @default(0)
+  createdAt        DateTime          @default(now())
+
+  @@unique([templateId, catalogItemId])
+  @@index([templateId])
+  @@map("scope_cost_template_items")
+}
+
+model ScopeSupplementTemplate {
+  id            String                        @id @default(uuid())
+  companyId     String
+  company       Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  effectiveDate DateTime                      @default(now())
+  isActive      Boolean                       @default(true)
+  items         ScopeSupplementTemplateItem[]
+  scopes        ScopeOfWork[]
+  createdAt     DateTime                      @default(now())
+  updatedAt     DateTime                      @updatedAt
+
+  @@index([companyId])
+  @@map("scope_supplement_templates")
+}
+
+model ScopeSupplementTemplateItem {
+  id                     String                  @id @default(uuid())
+  companyId              String
+  templateId             String
+  template               ScopeSupplementTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  catalogItemId          String
+  catalogItem            ScopeCatalogItem        @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  supplementPerUnitCents Int                     @default(0)
+  reason                 String?
+  requiredEvidence       String?
+  notes                  String?
+  createdAt              DateTime                @default(now())
+
+  @@unique([templateId, catalogItemId])
+  @@index([templateId])
+  @@map("scope_supplement_template_items")
+}
+
+// Customer-facing roofing proposal / presentation (web-first, shareable link).
+enum ProposalStatus {
+  draft
+  generated
+  sent
+  viewed
+  signed
+}
+
+model Proposal {
+  id              String         @id @default(cuid())
+  companyId       String
+  company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId          String
+  lead            Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId       String? // set if production has started
+  status          ProposalStatus @default(draft)
+  // Unguessable public token = the shareable customer link (/present/[token]).
+  publicToken     String         @unique
+  theme           String         @default("anexa")
+  customerName    String // snapshot at create
+  propertyAddress String // snapshot at create
+  // Editable copy + selections live here: roofType, damageSummary,
+  // recommendedNextStep, dateOfLoss, conditionFlags{}, photoCaptions{},
+  // includedPhotoIds[], upgrades[], selectedSections[], faq[], whyAnexa[],
+  // financialNote. See src/lib/proposal.ts ProposalContent.
+  content         Json
+  createdById     String
+  createdBy       User           @relation("ProposalCreatedBy", fields: [createdById], references: [id])
+  viewedAt        DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([companyId, leadId])
+  @@map("proposals")
 }

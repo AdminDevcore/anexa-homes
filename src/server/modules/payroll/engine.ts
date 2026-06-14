@@ -34,30 +34,32 @@ export async function computeCommissionsForProject(
   const project = await db.project.findFirst({
     where: { id: projectId, companyId },
     include: {
-      company: { select: { overheadPct: true } },
+      company: { select: { overheadPct: true, paFeePct: true } },
       lead: { select: { assignedRep: { select: { id: true, firstName: true, lastName: true, commissionSplitPct: true, providedLeadType: true, providedLeadSplitPct: true, providedLeadFlatCents: true, deductiblePct: true } } } },
       crewAssignments: { include: { crew: { include: { members: true } } } },
     },
   });
   if (!project) return 0;
 
-  // Adjusted contract (company revenue) counts every piece; rules/overrides use it.
-  // Depreciation has been retired from the deal split.
+  // Total collectible (rules/overrides may reference it). The deductible is split
+  // with the rep separately — it is NOT part of the pool.
   const contract =
     project.contractValue + project.supplementCents + project.deductibleCents;
-  // The SPLIT pool excludes the deductible and any supplement the rep doesn't get
-  // on this deal (company keeps that share / pays the rep upfront).
-  const splitBaseContract =
-    project.contractValue +
-    (project.repGetsSupplement ? project.supplementCents : 0);
   // Job cost comes from bookkeeping: approved deal-tagged expenses, excluding
   // contractor/sales payouts (which are paid via this very split).
   const { totalCents: costTotal } = await getDealJobCost(companyId, projectId);
-  const { poolCents: pool } = computeDealSplit({
-    contractCents: splitBaseContract,
+  // Pool = (contract + supplement) − cost − overhead − PA fee. The deductible is
+  // excluded; overhead is 10% of (contract + supplement).
+  // `pool` here is the splittable basis: when the rep waives the supplement, its
+  // net share is removed and kept by the company (not split with rep or managers).
+  const { repPoolBasisCents: pool } = computeDealSplit({
+    baseCents: project.contractValue,
+    supplementCents: project.supplementCents,
     costCents: costTotal,
     overheadPct: project.company.overheadPct,
+    paFeePct: project.company.paFeePct,
     repSplitPct: 0,
+    repWaivesSupplement: !project.repGetsSupplement,
   });
 
   let created = 0;
@@ -122,7 +124,8 @@ export async function computeCommissionsForProject(
         created += 1;
       }
     }
-    // Rep's separate share of the customer-paid deductible (not part of the pool).
+    // Rep's separate share of the customer-paid deductible (not part of the pool),
+    // at the rep's OWN deductible % — independent of the pool split / lead source.
     if (rep && rep.deductiblePct && project.deductibleCents > 0) {
       const amount = Math.round((project.deductibleCents * rep.deductiblePct) / 100);
       if (amount > 0) {

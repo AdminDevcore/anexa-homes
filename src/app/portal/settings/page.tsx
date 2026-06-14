@@ -31,7 +31,9 @@ const SECTIONS: {
   { icon: DollarSign, title: "Commission Rules", body: "Set percentage, flat, and override rules.", href: "/portal/settings/commissions" },
   { icon: Bell, title: "Notification Rules", body: "Choose triggers, recipients, and channels.", href: "/portal/settings/notifications" },
   { icon: Camera, title: "Photo Templates", body: "Site & install photo checklists for projects.", href: "/portal/settings/photo-templates" },
-  { icon: Calculator, title: "Scope of Work Template", body: "Default job-cost line items with your standard cost rates.", href: "/portal/settings/scope-template" },
+  { icon: ListChecks, title: "Inspection Outcomes", body: "Customize the outcomes recorded after an inspection.", href: "/portal/settings/inspection-outcomes" },
+  { icon: ListChecks, title: "Production Checklist", body: "The QC checklist applied to every new job.", href: "/portal/settings/production-checklist" },
+  { icon: Calculator, title: "Scope of Work Catalog", body: "Master list of insurance-restoration line items (no pricing).", href: "/portal/settings/scope-template" },
   { icon: ShieldCheck, title: "Roles & Permissions", body: "Control what each role can see and do.", href: "/portal/settings/roles" },
   { icon: Palette, title: "Branding", body: "Company logo and brand colors.", href: "/portal/settings/branding" },
 ];

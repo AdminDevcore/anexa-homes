@@ -40,21 +40,21 @@ async function refreshDealSplitCommissions(companyId: string, projectId: string)
     select: {
       contractValue: true, supplementCents: true, deductibleCents: true,
       repGetsSupplement: true,
-      company: { select: { overheadPct: true } },
+      company: { select: { overheadPct: true, paFeePct: true } },
     },
   });
   if (!project) return;
   const { totalCents: costCents } = await getDealJobCost(companyId, projectId);
-  const { poolCents } = computeDealCommission({
+  const { repPoolBasisCents } = computeDealCommission({
     baseCents: project.contractValue, supplementCents: project.supplementCents, deductibleCents: project.deductibleCents,
-    depreciationCents: 0, repGetsSupplement: project.repGetsSupplement, repGetsDepreciation: false,
-    costCents, overheadPct: project.company.overheadPct, repSplitPct: 0, repDeductiblePct: 0,
+    costCents, overheadPct: project.company.overheadPct, paFeePct: project.company.paFeePct, repSplitPct: 0,
+    repWaivesSupplement: !project.repGetsSupplement,
   });
   await Promise.all(
     existing.map((c) =>
       prisma.commission.update({
         where: { id: c.id },
-        data: { baseAmount: poolCents, amount: applySplitSnapshot(poolCents, c.splitPct!, c.splitFlatCents) },
+        data: { baseAmount: repPoolBasisCents, amount: applySplitSnapshot(repPoolBasisCents, c.splitPct!, c.splitFlatCents) },
       })
     )
   );
@@ -129,7 +129,7 @@ export async function generateDealCommissionAction(projectId: string) {
       deductibleCents: true,
       repGetsSupplement: true,
       companyProvidedLead: true,
-      company: { select: { overheadPct: true } },
+      company: { select: { overheadPct: true, paFeePct: true } },
       lead: { select: { stageId: true, assignedRep: { select: { id: true, commissionSplitPct: true, providedLeadType: true, providedLeadSplitPct: true, providedLeadFlatCents: true, deductiblePct: true } } } },
     },
   });
@@ -144,18 +144,16 @@ export async function generateDealCommissionAction(projectId: string) {
   if (!rep) return { ok: false as const, error: "This project's lead has no assigned rep." };
 
   const { totalCents: costTotal } = await getDealJobCost(user.companyId, projectId);
-  // computeDealCommission for the pool + deductible share (split done via snapshot below).
+  // The pool (revenue − cost − overhead − PA fee); the rep gets one split % of it.
   const dc = computeDealCommission({
     baseCents: project.contractValue,
     supplementCents: project.supplementCents,
     deductibleCents: project.deductibleCents,
-    depreciationCents: 0, // depreciation retired from the deal split
-    repGetsSupplement: project.repGetsSupplement,
-    repGetsDepreciation: false,
     costCents: costTotal,
     overheadPct: project.company.overheadPct,
+    paFeePct: project.company.paFeePct,
     repSplitPct: 0,
-    repDeductiblePct: rep.deductiblePct ?? 0,
+    repWaivesSupplement: !project.repGetsSupplement,
   });
 
   // Keep the locked split if this deal already has one (snapshot); else snapshot the
@@ -181,25 +179,30 @@ export async function generateDealCommissionAction(projectId: string) {
         : "Set this rep's commission split % (Team → member) first.",
     };
   }
-  const splitAmount = applySplitSnapshot(dc.poolCents, snap.splitPct, snap.splitFlatCents);
+  const splitAmount = applySplitSnapshot(dc.repPoolBasisCents, snap.splitPct, snap.splitFlatCents);
   const splitLabel =
     snap.splitFlatCents > 0
       ? `Deal split (${snap.splitPct}% − ${(snap.splitFlatCents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })} lead fee · provided lead)`
       : `Deal split (${snap.splitPct}%${project.companyProvidedLead ? " · provided lead" : ""})`;
 
-  // Replace this rep's non-paid lines (split + deductible share) and rewrite them.
+  // The rep's deductible share = the rep's OWN deductible % (independent of the
+  // pool split / lead source). The deductible is collected on top of the pool.
+  const repDeductiblePct = rep.deductiblePct ?? 0;
+  const deductibleAmount = project.deductibleCents > 0 ? Math.round((project.deductibleCents * repDeductiblePct) / 100) : 0;
+
+  // Replace this rep's non-paid lines (pool split + deductible share) and rewrite them.
   await prisma.$transaction([
     prisma.commission.deleteMany({ where: { companyId: user.companyId, projectId, userId: rep.id, overrideId: null, status: { in: ["pending", "approved"] } } }),
     prisma.commission.create({
-      data: { companyId: user.companyId, projectId, userId: rep.id, label: splitLabel, baseAmount: dc.poolCents, amount: splitAmount, splitPct: snap.splitPct, splitFlatCents: snap.splitFlatCents, status: "pending" },
+      data: { companyId: user.companyId, projectId, userId: rep.id, label: splitLabel, baseAmount: dc.repPoolBasisCents, amount: splitAmount, splitPct: snap.splitPct, splitFlatCents: snap.splitFlatCents, status: "pending" },
     }),
-    ...(dc.deductibleCommissionCents > 0
+    ...(deductibleAmount > 0
       ? [
           prisma.commission.create({
             data: {
               companyId: user.companyId, projectId, userId: rep.id,
-              label: `Deductible share (${rep.deductiblePct}%)`,
-              baseAmount: project.deductibleCents, amount: dc.deductibleCommissionCents, status: "pending" as const,
+              label: `Deductible share (${repDeductiblePct}% of ${(project.deductibleCents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })})`,
+              baseAmount: project.deductibleCents, amount: deductibleAmount, status: "pending" as const,
             },
           }),
         ]
@@ -207,7 +210,7 @@ export async function generateDealCommissionAction(projectId: string) {
   ]);
   revalidatePath(`/portal/projects/${projectId}`);
   revalidatePath("/portal/commissions");
-  return { ok: true as const, amount: splitAmount + dc.deductibleCommissionCents };
+  return { ok: true as const, amount: splitAmount + deductibleAmount };
 }
 
 // --- Deal supplement / deductible (both increase the effective contract) -----
@@ -285,6 +288,15 @@ export async function setOverheadPctAction(pct: number) {
   if (!can(user, "update", "Settings")) return { ok: false as const, error: "Not allowed." };
   if (!Number.isFinite(pct) || pct < 0 || pct > 100) return { ok: false as const, error: "Enter a percent between 0 and 100." };
   await prisma.company.update({ where: { id: user.companyId }, data: { overheadPct: pct } });
+  revalidatePath("/portal/settings/commissions");
+  return { ok: true as const };
+}
+
+export async function setPaFeePctAction(pct: number) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return { ok: false as const, error: "Not allowed." };
+  if (!Number.isFinite(pct) || pct < 0 || pct > 100) return { ok: false as const, error: "Enter a percent between 0 and 100." };
+  await prisma.company.update({ where: { id: user.companyId }, data: { paFeePct: pct } });
   revalidatePath("/portal/settings/commissions");
   return { ok: true as const };
 }

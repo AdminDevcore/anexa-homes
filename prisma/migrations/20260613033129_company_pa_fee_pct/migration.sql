@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "companies" ADD COLUMN     "paFeePct" DOUBLE PRECISION NOT NULL DEFAULT 10;

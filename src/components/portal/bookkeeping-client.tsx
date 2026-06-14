@@ -3,14 +3,16 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Loader2, Trash2, Pencil, Plug, TrendingUp, TrendingDown, Scale, Download, BookOpen, Building2, CheckCircle2, Sparkles } from "lucide-react";
+import { Plus, Loader2, Trash2, Pencil, Plug, TrendingUp, TrendingDown, Scale, Download, BookOpen, Building2, CheckCircle2, Sparkles, Paperclip, Upload, FileText, Wallet } from "lucide-react";
+import { TransactionsExport } from "@/components/portal/transactions-export";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useFormat } from "@/components/portal/branding-provider";
-import type { BookkeepingData, BkTxn } from "@/server/modules/bookkeeping/queries";
+import type { BookkeepingData, BkTxn, BkVendor } from "@/server/modules/bookkeeping/queries";
+import { computeReports, resolvePeriod, type PeriodPreset } from "@/lib/bookkeeping-reports";
 import {
   createTransactionAction,
   updateTransactionAction,
@@ -22,9 +24,11 @@ import {
   updateCategoryAction,
   deleteCategoryAction,
   createVendorAction,
-  renameVendorAction,
+  updateVendorAction,
   deleteVendorAction,
   setBookkeepingConnectionAction,
+  uploadTransactionAttachmentAction,
+  deleteTransactionAttachmentAction,
 } from "@/server/modules/bookkeeping/actions";
 
 const ACCOUNT_TYPES = [
@@ -37,7 +41,13 @@ const ACCOUNT_TYPES = [
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 
-export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; canEdit: boolean }) {
+export function BookkeepingClient({
+  data,
+  canEdit,
+}: {
+  data: BookkeepingData;
+  canEdit: boolean;
+}) {
   const fmt = useFormat();
   const router = useRouter();
   const [view, setView] = React.useState<"transactions" | "reports" | "manage">("transactions");
@@ -71,8 +81,41 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
   const toReviewCount = data.transactions.filter((t) => !t.approved).length;
   const visibleTxns = data.transactions.filter((t) => (reviewFilter === "review" ? !t.approved : t.approved));
 
-  const { summary, pnl, balanceSheet } = data;
+  const { summary } = data;
   const refresh = () => router.refresh();
+
+  // ── Reports period (P&L is for a span; Balance Sheet is a snapshot as-of end).
+  const [periodPreset, setPeriodPreset] = React.useState<PeriodPreset>("all");
+  const [customStart, setCustomStart] = React.useState("");
+  const [customEnd, setCustomEnd] = React.useState("");
+
+  // Years present in the ledger (descending), for the preset list.
+  const ledgerYears = React.useMemo(() => {
+    const ys = new Set<number>();
+    for (const t of data.transactions) ys.add(new Date(t.date).getFullYear());
+    ys.add(new Date().getFullYear());
+    return [...ys].sort((a, b) => b - a);
+  }, [data.transactions]);
+
+  const resolved = React.useMemo(
+    () => resolvePeriod(periodPreset, new Date(), { start: customStart || null, end: customEnd || null }),
+    [periodPreset, customStart, customEnd]
+  );
+  const { pnl, balanceSheet } = React.useMemo(
+    () => computeReports(data.transactions, resolved.period),
+    [data.transactions, resolved.period]
+  );
+
+  // PDF links carry the selected period so the download matches the screen.
+  const pdfParams = (kind: "pnl" | "bs") => {
+    const p = new URLSearchParams();
+    if (resolved.period.startMs != null && kind === "pnl") p.set("start", String(resolved.period.startMs));
+    if (resolved.period.endMs != null) p.set("end", String(resolved.period.endMs));
+    if (kind === "pnl") p.set("label", resolved.pnlLabel);
+    else p.set("asOf", resolved.asOfLabel.replace(/^As of /, ""));
+    const qs = p.toString();
+    return qs ? `?${qs}` : "";
+  };
 
   return (
     <div className="space-y-6">
@@ -88,10 +131,11 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
       ) : view === "transactions" ? (
         <>
           {/* Summary */}
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Money in" value={fmt.money(summary.moneyIn)} icon={TrendingUp} tone="emerald" />
             <Stat label="Money out" value={fmt.money(summary.moneyOut)} icon={TrendingDown} tone="red" />
             <Stat label="Net profit" value={fmt.money(pnl.netProfit)} icon={Scale} tone={pnl.netProfit >= 0 ? "emerald" : "red"} accent />
+            <Stat label="Left to collect" value={fmt.money(summary.outstanding)} icon={Wallet} tone="emerald" />
           </div>
 
           {/* Toolbar: review filter + actions */}
@@ -117,6 +161,15 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
                 <BookOpen className="size-4" /> Manage
               </Button>
             )}
+            <div className="ml-auto flex items-center gap-2">
+              <a
+                href="/portal/bookkeeping/1099"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-sm font-medium hover:bg-muted"
+              >
+                1099s
+              </a>
+              <TransactionsExport categories={data.categories} />
+            </div>
           </div>
 
           {/* Transactions */}
@@ -189,18 +242,31 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
                     </td>
                     {canEdit && (
                       <td className="px-3 py-2 text-right">
-                        {reviewFilter === "review" ? (
+                        <div className="inline-flex items-center gap-2.5">
+                          {/* Notes & receipt attachment for this transaction. */}
                           <button
-                            onClick={() => setConfirmBook(t)}
-                            disabled={!t.categoryId}
-                            title={t.categoryId ? "Approve & book this transaction" : "Pick a category first"}
-                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            onClick={() => setDetail(t)}
+                            title="Notes & receipt"
+                            className="relative text-muted-foreground hover:text-foreground"
                           >
-                            <CheckCircle2 className="size-3.5" /> Book
+                            <Pencil className="size-4" />
+                            {t.attachments.length > 0 && (
+                              <Paperclip className="absolute -right-2 -top-1.5 size-2.5 text-gold" />
+                            )}
                           </button>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><CheckCircle2 className="size-3.5" /> Booked</span>
-                        )}
+                          {reviewFilter === "review" ? (
+                            <button
+                              onClick={() => setConfirmBook(t)}
+                              disabled={!t.categoryId}
+                              title={t.categoryId ? "Approve & book this transaction" : "Pick a category first"}
+                              className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <CheckCircle2 className="size-3.5" /> Book
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><CheckCircle2 className="size-3.5" /> Booked</span>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -214,36 +280,66 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
         </>
       ) : (
         /* Reports: P&L + Balance Sheet */
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold">Profit &amp; Loss</h3>
-              <a href="/api/bookkeeping/pnl" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
-                <Download className="size-3.5" /> Download PDF
-              </a>
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">All transactions · cash basis</p>
-            <PnlGroup title="Income" rows={pnl.income} total={pnl.totalIncome} tone="emerald" />
-            <PnlGroup title="Expenses" rows={pnl.expense} total={pnl.totalExpense} tone="red" />
-            <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-              <span className="font-semibold">Net profit</span>
-              <span className={cn("font-display text-lg font-semibold tabular-nums", pnl.netProfit >= 0 ? "text-emerald-600" : "text-red-600")}>{fmt.money(pnl.netProfit)}</span>
-            </div>
+        <div className="space-y-4">
+          {/* Period selector */}
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-4 py-3">
+            <span className="text-sm font-medium text-muted-foreground">Period</span>
+            <select
+              value={periodPreset}
+              onChange={(e) => setPeriodPreset(e.target.value)}
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+            >
+              <option value="all">All time</option>
+              <option value="month">This month</option>
+              <option value="quarter">This quarter</option>
+              {ledgerYears.map((y) => (
+                <option key={y} value={String(y)}>
+                  {y === new Date().getFullYear() ? `${y} (this year)` : y}
+                </option>
+              ))}
+              <option value="custom">Custom range…</option>
+            </select>
+            {periodPreset === "custom" && (
+              <>
+                <Input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-9 w-40" />
+                <span className="text-sm text-muted-foreground">to</span>
+                <Input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-9 w-40" />
+              </>
+            )}
+            <span className="ml-auto text-xs text-muted-foreground">{resolved.pnlLabel} · cash basis</span>
           </div>
-          <div className="rounded-xl border border-border bg-card p-5">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold">Balance Sheet</h3>
-              <a href="/api/bookkeeping/balance-sheet" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
-                <Download className="size-3.5" /> Download PDF
-              </a>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">Profit &amp; Loss</h3>
+                <a href={`/api/bookkeeping/pnl${pdfParams("pnl")}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
+                  <Download className="size-3.5" /> Download PDF
+                </a>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">{resolved.pnlLabel} · cash basis</p>
+              <PnlGroup title="Income" rows={pnl.income} total={pnl.totalIncome} tone="emerald" />
+              <PnlGroup title="Expenses" rows={pnl.expense} total={pnl.totalExpense} tone="red" />
+              <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+                <span className="font-semibold">Net profit</span>
+                <span className={cn("font-display text-lg font-semibold tabular-nums", pnl.netProfit >= 0 ? "text-emerald-600" : "text-red-600")}>{fmt.money(pnl.netProfit)}</span>
+              </div>
             </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">As of today · cash basis</p>
-            <PnlGroup title="Assets" rows={balanceSheet.assets} total={balanceSheet.totalAssets} tone="emerald" />
-            <PnlGroup title="Liabilities" rows={balanceSheet.liabilities} total={balanceSheet.totalLiabilities} tone="red" />
-            <PnlGroup title="Equity" rows={balanceSheet.equity} total={balanceSheet.totalEquity} tone="emerald" />
-            <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-              <span className="font-semibold">Assets = Liabilities + Equity</span>
-              <span className="font-display text-lg font-semibold tabular-nums">{fmt.money(balanceSheet.totalAssets)}</span>
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold">Balance Sheet</h3>
+                <a href={`/api/bookkeeping/balance-sheet${pdfParams("bs")}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
+                  <Download className="size-3.5" /> Download PDF
+                </a>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">{resolved.asOfLabel} · cash basis</p>
+              <PnlGroup title="Assets" rows={balanceSheet.assets} total={balanceSheet.totalAssets} tone="emerald" />
+              <PnlGroup title="Liabilities" rows={balanceSheet.liabilities} total={balanceSheet.totalLiabilities} tone="red" />
+              <PnlGroup title="Equity" rows={balanceSheet.equity} total={balanceSheet.totalEquity} tone="emerald" />
+              <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+                <span className="font-semibold">Assets = Liabilities + Equity</span>
+                <span className="font-display text-lg font-semibold tabular-nums">{fmt.money(balanceSheet.totalAssets)}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -281,7 +377,7 @@ export function BookkeepingClient({ data, canEdit }: { data: BookkeepingData; ca
 
 function ManagePanel({ data, canEdit, onChanged }: { data: BookkeepingData; canEdit: boolean; onChanged: () => void }) {
   const [catDialog, setCatDialog] = React.useState<{ open: boolean; cat?: { id: string; name: string; type: string } }>({ open: false });
-  const [vendorDialog, setVendorDialog] = React.useState<{ open: boolean; vendor?: { id: string; name: string } }>({ open: false });
+  const [vendorDialog, setVendorDialog] = React.useState<{ open: boolean; vendor?: BkVendor }>({ open: false });
   const [connOpen, setConnOpen] = React.useState(false);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
@@ -436,9 +532,33 @@ function TransactionDetail({ txn, data, canEdit, onClose, onChanged, onDeleted }
   const fmt = useFormat();
   const [busy, setBusy] = React.useState(false);
   const [notes, setNotes] = React.useState(txn.notes ?? "");
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = React.useState(false);
+  // The open dialog holds the txn it was opened with; after a refresh the fresh
+  // copy (e.g. with a new attachment) lives in `data`. Prefer it when present.
+  const live = data.transactions.find((t) => t.id === txn.id) ?? txn;
 
   async function patch(p: Record<string, string | null>) {
     const res = await updateTransactionAction({ id: txn.id, ...p });
+    if (!res.ok) return toast.error(res.error);
+    onChanged();
+  }
+  async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.set("transactionId", txn.id);
+    fd.set("file", file);
+    const res = await uploadTransactionAttachmentAction(fd);
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Receipt attached");
+    onChanged();
+  }
+  async function removeAttachment(fileId: string) {
+    const res = await deleteTransactionAttachmentAction(fileId);
     if (!res.ok) return toast.error(res.error);
     onChanged();
   }
@@ -496,6 +616,37 @@ function TransactionDetail({ txn, data, canEdit, onClose, onChanged, onDeleted }
           <Field label="Notes">
             <Input value={notes} disabled={!canEdit} onChange={(e) => setNotes(e.target.value)} onBlur={() => notes !== (txn.notes ?? "") && patch({ notes: notes || null })} placeholder="Add a note…" />
           </Field>
+          <Field label="Receipt / invoice">
+            <div className="space-y-1.5">
+              {live.attachments.length > 0 ? (
+                <ul className="space-y-1">
+                  {live.attachments.map((a) => (
+                    <li key={a.id} className="flex items-center justify-between rounded-md border border-border px-2 py-1.5">
+                      <a href={`/portal/files/${a.id}`} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 text-xs hover:text-gold-muted">
+                        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{a.name}</span>
+                      </a>
+                      {canEdit && (
+                        <button onClick={() => removeAttachment(a.id)} className="shrink-0 text-muted-foreground hover:text-destructive" aria-label="Remove">
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-muted-foreground">No receipt attached.</p>
+              )}
+              {canEdit && (
+                <>
+                  <input ref={fileRef} type="file" accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx,.csv" className="hidden" onChange={onUpload} />
+                  <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                    {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Upload receipt
+                  </Button>
+                </>
+              )}
+            </div>
+          </Field>
         </div>
         <DialogFooter className="sm:justify-between">
           {canEdit ? (
@@ -526,25 +677,74 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-function VendorDialog({ vendor, onClose, onDone }: { vendor?: { id: string; name: string }; onClose: () => void; onDone: () => void }) {
+function VendorDialog({ vendor, onClose, onDone }: { vendor?: BkVendor; onClose: () => void; onDone: () => void }) {
   const [busy, setBusy] = React.useState(false);
-  const [name, setName] = React.useState(vendor?.name ?? "");
+  const [f, setF] = React.useState({
+    name: vendor?.name ?? "",
+    companyName: vendor?.companyName ?? "",
+    contactName: vendor?.contactName ?? "",
+    email: vendor?.email ?? "",
+    phone: vendor?.phone ?? "",
+    einTaxId: vendor?.einTaxId ?? "",
+    is1099: vendor?.is1099 ?? false,
+    address: vendor?.address ?? "",
+    city: vendor?.city ?? "",
+    state: vendor?.state ?? "",
+    zip: vendor?.zip ?? "",
+    accountNumber: vendor?.accountNumber ?? "",
+    notes: vendor?.notes ?? "",
+  });
+  const upd = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setF((s) => ({ ...s, [k]: e.target.value }));
+
   async function save() {
-    if (!name.trim()) return toast.error("Enter a vendor name.");
+    if (!f.name.trim()) return toast.error("Enter a vendor name.");
     setBusy(true);
-    const res = vendor
-      ? await renameVendorAction({ id: vendor.id, name })
-      : await createVendorAction({ name });
+    const res = vendor ? await updateVendorAction({ id: vendor.id, ...f }) : await createVendorAction(f);
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success(vendor ? "Vendor updated" : "Vendor added");
     onDone();
   }
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle>{vendor ? "Edit vendor" : "New vendor / contractor"}</DialogTitle></DialogHeader>
-        <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ABC Supply, Diaz Crew" /></Field>
+      <DialogContent className="max-h-[88vh] max-w-lg overflow-y-auto">
+        <DialogHeader><DialogTitle>{vendor ? "Edit vendor / contractor" : "New vendor / contractor"}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <Field label="Display name"><Input value={f.name} onChange={upd("name")} placeholder="e.g. ABC Supply, Diaz Crew" /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Company / legal name"><Input value={f.companyName} onChange={upd("companyName")} placeholder="ABC Supply LLC" /></Field>
+            <Field label="Contact name"><Input value={f.contactName} onChange={upd("contactName")} placeholder="Jane Diaz" /></Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Email"><Input type="email" value={f.email} onChange={upd("email")} placeholder="ap@abcsupply.com" /></Field>
+            <Field label="Phone"><Input value={f.phone} onChange={upd("phone")} placeholder="(555) 123-4567" /></Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="EIN / Tax ID"><Input value={f.einTaxId} onChange={upd("einTaxId")} placeholder="12-3456789" /></Field>
+            <Field label="Account #"><Input value={f.accountNumber} onChange={upd("accountNumber")} placeholder="Your acct # with them" /></Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={f.is1099} onChange={(e) => setF((s) => ({ ...s, is1099: e.target.checked }))} className="size-4 rounded border-border" />
+            1099 contractor (issue a 1099 at year-end)
+          </label>
+          <Field label="Address"><Input value={f.address} onChange={upd("address")} placeholder="123 Main St" /></Field>
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="City"><Input value={f.city} onChange={upd("city")} placeholder="Dallas" /></Field>
+            <Field label="State"><Input value={f.state} onChange={upd("state")} placeholder="TX" /></Field>
+            <Field label="ZIP"><Input value={f.zip} onChange={upd("zip")} placeholder="75201" /></Field>
+          </div>
+          <Field label="Notes">
+            <textarea
+              value={f.notes}
+              onChange={upd("notes")}
+              rows={2}
+              placeholder="Payment terms, W-9 on file, etc."
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            />
+          </Field>
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={save} disabled={busy}>{busy && <Loader2 className="size-4 animate-spin" />} {vendor ? "Save" : "Add"}</Button>

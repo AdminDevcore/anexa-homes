@@ -8,6 +8,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
+import { getQcChecklistTemplate } from "@/server/modules/settings/queries";
 
 import { brandingForCompany } from "@/server/branding/resolve";
 function fail(error: string) {
@@ -133,15 +134,6 @@ export async function unassignCrewAction(projectCrewId: string) {
 
 // ------------------- Start production (deal -> production container) ---------
 
-const DEFAULT_QC = [
-  { label: "Pre-install site walkthrough", done: false },
-  { label: "Materials delivered & verified", done: false },
-  { label: "Magnetic nail sweep complete", done: false },
-  { label: "Gutters cleaned of debris", done: false },
-  { label: "Final photos uploaded", done: false },
-  { label: "Customer closeout walkthrough", done: false },
-];
-
 /**
  * Ensures a deal (lead) has its production container (Project). Creates one 1:1
  * from the lead if missing. This is what "Start production" calls — the deal
@@ -180,7 +172,8 @@ export async function ensureProjectForLeadAction(
       // The insurance-approved claim price is the real contract; fall back to the
       // rep's estimate if it hasn't been entered yet.
       contractValue: lead.claimPrice ?? lead.value,
-      qcChecklist: DEFAULT_QC,
+      // Seed the QC checklist from the company's customizable template.
+      qcChecklist: (await getQcChecklistTemplate(user.companyId)).map((label) => ({ label, done: false })),
     },
     select: { id: true },
   });

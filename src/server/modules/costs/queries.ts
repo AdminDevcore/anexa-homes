@@ -8,6 +8,7 @@ export type DealFinancials = {
   deductibleCents: number; // customer-paid deductible
   repGetsSupplement: boolean; // per-deal: supplement in the rep/manager split pool?
   overheadPct: number;
+  paFeePct: number; // public-adjuster fee % of the supplement, removed from the pool
   // Job cost is derived from bookkeeping (approved, deal-tagged expenses, minus
   // contractor/sales payouts) — not entered on the deal.
   jobCostCents: number;
@@ -29,7 +30,7 @@ export type DealFinancials = {
   commission: { id: string; amount: number; status: string } | null;
 };
 
-export type ProjectPayoutLine = { id: string; label: string | null; amount: number; status: string; recipient: string };
+export type ProjectPayoutLine = { id: string; userId: string; label: string | null; amount: number; status: string; recipient: string };
 export type ProjectPayout = { lines: ProjectPayoutLine[]; total: number; paid: number; outstanding: number };
 
 /** Every commission on a job (the payout breakdown): rep, crew, manager override, etc. */
@@ -37,10 +38,11 @@ export async function getProjectPayout(companyId: string, projectId: string): Pr
   const rows = await prisma.commission.findMany({
     where: { companyId, projectId, status: { not: "void" } },
     orderBy: { createdAt: "asc" },
-    select: { id: true, label: true, amount: true, status: true, user: { select: { firstName: true, lastName: true } } },
+    select: { id: true, userId: true, label: true, amount: true, status: true, user: { select: { firstName: true, lastName: true } } },
   });
   const lines: ProjectPayoutLine[] = rows.map((r) => ({
     id: r.id,
+    userId: r.userId,
     label: r.label,
     amount: r.amount,
     status: r.status,
@@ -61,7 +63,7 @@ export async function getDealFinancials(companyId: string, projectId: string): P
       deductibleCents: true,
       repGetsSupplement: true,
       companyProvidedLead: true,
-      company: { select: { overheadPct: true } },
+      company: { select: { overheadPct: true, paFeePct: true } },
       lead: { select: { assignedRep: { select: { id: true, firstName: true, lastName: true, commissionSplitPct: true, providedLeadSplitPct: true, deductiblePct: true } } } },
     },
   });
@@ -69,6 +71,7 @@ export async function getDealFinancials(companyId: string, projectId: string): P
 
   const rep = project.lead?.assignedRep ?? null;
   const overheadPct = project.company.overheadPct;
+  const paFeePct = project.company.paFeePct;
   // Job cost now comes from bookkeeping, not manual ProjectCost entries.
   const jobCost = await getDealJobCost(companyId, projectId);
   // Company-provided leads use the (usually lower) provided-lead split; otherwise
@@ -80,13 +83,12 @@ export async function getDealFinancials(companyId: string, projectId: string): P
     baseCents: project.contractValue,
     supplementCents: project.supplementCents,
     deductibleCents: project.deductibleCents,
-    depreciationCents: 0, // depreciation retired from the deal split
-    repGetsSupplement: project.repGetsSupplement,
-    repGetsDepreciation: false,
     costCents: jobCost.totalCents,
     overheadPct,
+    paFeePct,
     repSplitPct: activeSplit ?? 0,
     repDeductiblePct: rep?.deductiblePct ?? 0,
+    repWaivesSupplement: !project.repGetsSupplement,
   });
 
   const commission = rep
@@ -114,6 +116,7 @@ export async function getDealFinancials(companyId: string, projectId: string): P
     deductibleCents: project.deductibleCents,
     repGetsSupplement: project.repGetsSupplement,
     overheadPct,
+    paFeePct,
     jobCostCents: jobCost.totalCents,
     jobCostExpenses: jobCost.expenses,
     linkedTransactions,

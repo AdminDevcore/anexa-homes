@@ -34,20 +34,18 @@ export function DealFinancialsCard({
   const [editing, setEditing] = React.useState<null | AdjField>(null);
   const [adjAmount, setAdjAmount] = React.useState("");
 
-  const hasAdjustments = financials.supplementCents > 0 || financials.deductibleCents > 0;
 
-  // Live breakdown. Job cost comes from bookkeeping; depreciation is retired.
+  // Live breakdown: revenue − cost − overhead − PA fee = pool, split with the rep.
   const dc = computeDealCommission({
     baseCents: financials.contractValue,
     supplementCents: financials.supplementCents,
     deductibleCents: financials.deductibleCents,
-    depreciationCents: 0,
-    repGetsSupplement: financials.repGetsSupplement,
-    repGetsDepreciation: false,
     costCents: financials.jobCostCents,
     overheadPct: financials.overheadPct,
+    paFeePct: financials.paFeePct,
     repSplitPct: financials.rep?.splitPct ?? 0,
     repDeductiblePct: financials.rep?.deductiblePct ?? 0,
+    repWaivesSupplement: !financials.repGetsSupplement,
   });
   const ADJ_AMOUNT: Record<AdjField, number> = {
     supplement: financials.supplementCents,
@@ -74,13 +72,6 @@ export function DealFinancialsCard({
     setEditing(null);
     router.refresh();
   }
-  async function toggleRepGetsSupplement() {
-    setBusy(true);
-    const res = await setDealRepGetsAction({ projectId, field: "supplement", value: !financials.repGetsSupplement });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    router.refresh();
-  }
   async function generate() {
     setBusy(true);
     const res = await generateDealCommissionAction(projectId);
@@ -95,6 +86,14 @@ export function DealFinancialsCard({
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success(financials.companyProvidedLead ? "Switched to self-gen split" : "Using company-provided-lead split");
+    router.refresh();
+  }
+  async function toggleRepWaives() {
+    setBusy(true);
+    const res = await setDealRepGetsAction({ projectId, field: "supplement", value: !financials.repGetsSupplement });
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success(financials.repGetsSupplement ? "Rep waived the supplement — paid on base only" : "Rep gets the supplement in their split");
     router.refresh();
   }
 
@@ -149,15 +148,16 @@ export function DealFinancialsCard({
           <Button size="sm" variant="outline" onClick={() => openAdj("deductible")}>
             <Receipt className="size-3.5" /> Deductible{financials.deductibleCents > 0 ? `: ${fmt.money(financials.deductibleCents)}` : ""}
           </Button>
-          {/* Per-deal: does the rep get the supplement in their split? */}
+          {/* Rep waives the supplement — paid early on the base only; the company
+              keeps the whole supplement (minus the PA fee). Only when supplemented. */}
           {financials.supplementCents > 0 && (
             <Button
               size="sm"
               variant="outline"
-              onClick={toggleRepGetsSupplement}
+              onClick={toggleRepWaives}
               disabled={busy}
               className={cn(!financials.repGetsSupplement && "border-amber-400 bg-amber-50 text-amber-700")}
-              title="When off, the rep is paid upfront without the supplement; the company keeps that share."
+              title="When waived, the rep is paid early without the supplement; the company keeps that supplement (minus the PA fee)."
             >
               {financials.repGetsSupplement ? "Rep gets supplement ✓" : "Rep waived supplement"}
             </Button>
@@ -192,25 +192,20 @@ export function DealFinancialsCard({
         </div>
       )}
 
-      {/* Breakdown */}
+      {/* Breakdown — pool on (contract + supplement); the deductible is split apart. */}
       <div className="rounded-lg border border-border p-3">
-        {/* Revenue: every piece counts toward the company's adjusted contract. */}
         <Row label="Contract value" value={fmt.money(financials.contractValue)} />
         {financials.supplementCents > 0 && <Row label="+ Supplement" value={fmt.money(financials.supplementCents)} sub />}
-        {financials.deductibleCents > 0 && <Row label="+ Deductible (customer-paid)" value={fmt.money(financials.deductibleCents)} sub />}
-        {hasAdjustments && <Row label="= Adjusted contract value" value={fmt.money(dc.adjustedContractCents)} strong />}
-
-        {/* Rep split pool — excludes the deductible and any waived supplement. */}
-        {(financials.supplementCents > 0 && !financials.repGetsSupplement) && (
-          <Row label="− Supplement (rep waived)" value={`−${fmt.money(financials.supplementCents)}`} sub />
-        )}
-        {financials.deductibleCents > 0 && (
-          <Row label="− Deductible (paid as rep % below)" value={`−${fmt.money(financials.deductibleCents)}`} sub />
-        )}
-        <Row label="Split base" value={fmt.money(dc.splitBaseContractCents)} strong />
+        <Row label="= Pool revenue" value={fmt.money(dc.poolBaseCents)} strong />
         <Row label="− Job cost" value={`−${fmt.money(financials.jobCostCents)}`} />
-        <Row label={`− Company overhead (${financials.overheadPct}%)`} value={`−${fmt.money(dc.overheadCents)}`} />
+        <Row label={`− Company overhead (${financials.overheadPct}% of pool revenue)`} value={`−${fmt.money(dc.overheadCents)}`} />
+        {dc.paFeeCents > 0 && (
+          <Row label={`− PA fee (${financials.paFeePct}% of supplement)`} value={`−${fmt.money(dc.paFeeCents)}`} />
+        )}
         <Row label="= Profit pool" value={fmt.money(dc.poolCents)} strong />
+        {financials.supplementCents > 0 && !financials.repGetsSupplement && (
+          <Row label="− Supplement kept by company (rep waived)" value={`−${fmt.money(dc.poolCents - dc.repPoolBasisCents)}`} sub />
+        )}
         {financials.rep ? (
           financials.rep.splitPct == null ? (
             <p className="mt-2 text-xs text-amber-600">
@@ -219,31 +214,48 @@ export function DealFinancialsCard({
           ) : (
             <>
               <Row
-                label={`${financials.rep.name} — rep split (${financials.rep.splitPct}% · ${financials.companyProvidedLead ? "provided lead" : "self-gen"})`}
-                value={fmt.money(dc.splitCommissionCents)}
+                label={`${financials.rep.name} — pool share (${financials.rep.splitPct}% · ${financials.companyProvidedLead ? "provided lead" : "self-gen"})`}
+                value={fmt.money(dc.repPoolCommissionCents)}
                 sub
               />
-              <Row label="Company profit" value={fmt.money(dc.poolCents - dc.splitCommissionCents)} sub />
-              {dc.deductibleCommissionCents > 0 && (
+              {financials.deductibleCents > 0 && (financials.rep.deductiblePct ?? 0) > 0 && (
                 <Row
-                  label={`+ ${financials.rep.name} — deductible share (${financials.rep.deductiblePct}% of ${fmt.money(financials.deductibleCents)})`}
-                  value={fmt.money(dc.deductibleCommissionCents)}
+                  label={`${financials.rep.name} — deductible share (${financials.rep.deductiblePct}% of ${fmt.money(financials.deductibleCents)})`}
+                  value={fmt.money(dc.repDeductibleCommissionCents)}
                   sub
                 />
               )}
-              {dc.deductibleCommissionCents > 0 && (
-                <Row label={`= ${financials.rep.name} total commission`} value={fmt.money(dc.repTotalCents)} strong />
+              <Row label={`= ${financials.rep.name} total commission`} value={fmt.money(dc.repCommissionCents)} strong />
+              <Row label="= Company profit" value={fmt.money(dc.companyProfitCents)} strong />
+              {financials.deductibleCents > 0 && (
+                <p className="mt-1 pl-3 text-[11px] text-muted-foreground">
+                  Company keeps the rest of the pool, the {financials.overheadPct}% retained overhead, and the rest of the {fmt.money(financials.deductibleCents)} deductible.
+                </p>
               )}
               {financials.companyProvidedLead && financials.rep.providedLeadSplitPct == null && (
                 <p className="mt-1 pl-3 text-[11px] text-amber-600">
                   No provided-lead split set for {financials.rep.name} — using their self-gen split. Set it in Team → member.
                 </p>
               )}
-              {financials.deductibleCents > 0 && (financials.rep.deductiblePct ?? 0) === 0 && (
-                <p className="mt-1 pl-3 text-[11px] text-muted-foreground">
-                  {financials.rep.name} doesn&rsquo;t get the deductible (set a deductible % in Team → member to change).
-                </p>
-              )}
+              {/* Effective rate: the rep's take as a % of the deal. */}
+              {(() => {
+                const repTotal = dc.repCommissionCents;
+                const ofContract = financials.contractValue > 0 ? (repTotal / financials.contractValue) * 100 : 0;
+                const ofRevenue = dc.revenueCents > 0 ? (repTotal / dc.revenueCents) * 100 : 0;
+                const showAdj = financials.supplementCents > 0 || financials.deductibleCents > 0;
+                return (
+                  <div className="mt-2 flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
+                    <span className="font-medium">
+                      Effective rep rate
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">{fmt.money(repTotal)} take</span>
+                    </span>
+                    <span className="tabular-nums font-semibold">
+                      {ofContract.toFixed(1)}% of contract
+                      {showAdj && <span className="font-normal text-muted-foreground"> · {ofRevenue.toFixed(1)}% of revenue</span>}
+                    </span>
+                  </div>
+                );
+              })()}
             </>
           )
         ) : (

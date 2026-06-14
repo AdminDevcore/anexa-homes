@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Camera, Check, ExternalLink, Eye, Share2 } from "lucide-react";
+import { Loader2, Camera, Check, ExternalLink, Eye, Share2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,7 +13,7 @@ import {
   type ProposalContent,
   type ProposalSectionId,
 } from "@/lib/proposal";
-import { uploadFileAction } from "@/server/modules/files/actions";
+import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actions";
 import { updateProposalContentAction, generateProposalAction } from "@/server/modules/proposals/actions";
 import type { ProposalBuilderData } from "@/server/modules/proposals/queries";
 import { PresentationView } from "@/components/proposal/presentation-view";
@@ -75,6 +75,16 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
     setBusy(false);
     if (failed) toast.error(`${failed} photo(s) failed.`);
     else toast.success("Photo added");
+    router.refresh();
+  }
+
+  async function deletePhoto(id: string) {
+    if (!confirm("Delete this photo? This can't be undone.")) return;
+    setBusy(true);
+    const res = await deleteFileAction(id);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Photo deleted");
     router.refresh();
   }
 
@@ -150,19 +160,30 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
               );
             })}
           </div>
-          {/* Captions for uploaded photos */}
+          {/* Uploaded photos — caption or delete each */}
           {data.proposal.photoGroups.length > 0 && (
             <div className="space-y-2 pt-2">
-              <h4 className="text-sm font-medium">Captions (optional)</h4>
+              <h4 className="text-sm font-medium">Uploaded photos</h4>
+              <p className="text-xs text-muted-foreground">Add a caption, or delete a photo to replace it (re-upload from its tile above).</p>
               {data.proposal.photoGroups.flatMap((g) => g.photos).map((p) => (
                 <div key={p.id} className="flex items-center gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt="" className="size-12 rounded object-cover" />
+                  <img src={p.url} alt="" className="size-12 shrink-0 rounded object-cover" />
                   <Input
                     defaultValue={content.photoCaptions?.[p.id] ?? ""}
                     placeholder={`Caption for ${p.category}`}
                     onBlur={(e) => patch({ photoCaptions: { ...(content.photoCaptions ?? {}), [p.id]: e.target.value } })}
                   />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => deletePhoto(p.id)}
+                    aria-label="Delete photo"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
                 </div>
               ))}
             </div>

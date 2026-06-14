@@ -9,16 +9,20 @@ export type OnboardingView = {
   dateOfBirth: string | null;
   ssnMasked: string | null; // ••••1234 (never the full value)
   address: string | null; city: string | null; state: string | null; zip: string | null;
+  accountHolderName: string | null;
   bankName: string | null;
   routingNumber: string | null;
   accountMasked: string | null;
   accountType: string | null;
+  accountAddress: string | null;
   taxClassification: string | null;
   businessName: string | null;
   einMasked: string | null;
   signatureName: string | null;
   idPhotoFileId: string | null;
+  idPhotoBackFileId: string | null;
   ssnCardFileId: string | null;
+  ssnCardBackFileId: string | null;
   voidedCheckFileId: string | null;
 };
 
@@ -29,13 +33,17 @@ function toView(o: NonNullable<Awaited<ReturnType<typeof raw>>>): OnboardingView
     dateOfBirth: o.dateOfBirth ? o.dateOfBirth.toISOString() : null,
     ssnMasked: o.ssnLast4 ? maskTail(`*****${o.ssnLast4}`, 4) : null,
     address: o.address, city: o.city, state: o.state, zip: o.zip,
+    accountHolderName: o.accountHolderName,
     bankName: o.bankName, routingNumber: o.routingNumber,
     accountMasked: o.accountLast4 ? maskTail(`****${o.accountLast4}`, 4) : null,
     accountType: o.accountType,
+    accountAddress: o.accountAddress,
     taxClassification: o.taxClassification, businessName: o.businessName,
     einMasked: o.einLast4 ? maskTail(`*****${o.einLast4}`, 4) : null,
     signatureName: o.signatureName,
-    idPhotoFileId: o.idPhotoFileId, ssnCardFileId: o.ssnCardFileId, voidedCheckFileId: o.voidedCheckFileId,
+    idPhotoFileId: o.idPhotoFileId, idPhotoBackFileId: o.idPhotoBackFileId,
+    ssnCardFileId: o.ssnCardFileId, ssnCardBackFileId: o.ssnCardBackFileId,
+    voidedCheckFileId: o.voidedCheckFileId,
   };
 }
 

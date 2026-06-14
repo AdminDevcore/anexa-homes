@@ -1,65 +1,119 @@
-// Pure margin-split commission math, shared by the deal worksheet (client) and
+// Pure pool-split commission math, shared by the deal worksheet (client) and
 // server-side commission generation so both compute identically.
 //
-//   profit pool = contract − job cost − company overhead(% of contract)
-//   rep commission = pool × rep split %     (company keeps the remainder)
+//   pool base     = contract + supplement           (the deductible is NOT here)
+//   company OH    = overheadPct % of the POOL BASE   (retained by the company)
+//   PA fee        = paFeePct % of the SUPPLEMENT
+//   profit pool   = pool base − job cost − overhead − PA fee
+//   rep (pool)    = rep split % of the pool
+//   rep (deduct.) = rep split % of the customer-paid deductible  (handled apart)
+//   rep total     = rep pool share + rep deductible share
+//   company keeps = the rest of the pool + retained overhead + the rest of the deductible
+//
+// The deductible is split with the rep at the SAME % but sits OUTSIDE the pool,
+// so it's never double-counted and overhead never applies to it.
+
+/** Pool from the pool base (contract + supplement) and an already-computed PA fee. */
+function poolBreakdown(poolBaseCents: number, costCents: number, overheadPct: number, paFeeCents: number) {
+  const overheadCents = Math.round((poolBaseCents * overheadPct) / 100);
+  const poolCents = poolBaseCents - costCents - overheadCents - paFeeCents;
+  return { overheadCents, poolCents };
+}
+
+/** The pool the rep is actually paid their split on. When they waive the
+ *  supplement, its net contribution (supplement − its overhead − its PA fee) is
+ *  removed so the rep is paid only on the non-supplement pool. */
+function repPoolBasisCents(
+  poolCents: number,
+  supplementCents: number,
+  overheadPct: number,
+  paFeeCents: number,
+  repWaivesSupplement: boolean,
+): number {
+  if (!repWaivesSupplement) return Math.max(0, poolCents);
+  const supplementNetCents = Math.max(0, supplementCents - Math.round((supplementCents * overheadPct) / 100) - paFeeCents);
+  return Math.max(0, poolCents - supplementNetCents);
+}
+
+// --- Full deal commission ----------------------------------------------------
+
+export type DealCommissionInput = {
+  baseCents: number; // contract
+  supplementCents: number;
+  deductibleCents: number;
+  costCents: number; // job cost
+  overheadPct: number; // % of (contract + supplement)
+  paFeePct?: number; // % of the supplement (0 when not configured / no supplement)
+  repSplitPct: number; // rep's % of the pool
+  repDeductiblePct?: number; // rep's SEPARATE % of the customer-paid deductible (0 = none)
+  // When true, the rep waived the supplement (paid early, doesn't wait on it):
+  // the supplement's net pool contribution is excluded from the rep's basis and
+  // kept entirely by the company.
+  repWaivesSupplement?: boolean;
+};
+
+export type DealCommission = {
+  revenueCents: number; // contract + supplement + deductible (total collectible)
+  poolBaseCents: number; // contract + supplement (the pool's revenue, excl. deductible)
+  overheadCents: number; // overheadPct % of the pool base (retained)
+  paFeeCents: number; // public-adjuster cut of the supplement, removed from the pool
+  poolCents: number; // pool base − cost − overhead − PA fee
+  repPoolBasisCents: number; // the pool the rep is actually paid on (pool minus any waived supplement)
+  repPoolCommissionCents: number; // rep split % of the rep pool basis
+  repDeductibleCommissionCents: number; // rep split % of the deductible
+  repCommissionCents: number; // rep pool share + rep deductible share (total)
+  companyProfitCents: number; // revenue − cost − PA fee − rep total (overhead retained)
+};
+
+export function computeDealCommission(i: DealCommissionInput): DealCommission {
+  const revenueCents = i.baseCents + i.supplementCents + i.deductibleCents;
+  const poolBaseCents = i.baseCents + i.supplementCents;
+  const paFeeCents = Math.round((i.supplementCents * (i.paFeePct ?? 0)) / 100);
+  const { overheadCents, poolCents } = poolBreakdown(poolBaseCents, i.costCents, i.overheadPct, paFeeCents);
+  const repBasisCents = repPoolBasisCents(poolCents, i.supplementCents, i.overheadPct, paFeeCents, !!i.repWaivesSupplement);
+  const repPoolCommissionCents = repBasisCents > 0 ? Math.round((repBasisCents * i.repSplitPct) / 100) : 0;
+  // The deductible uses the rep's SEPARATE deductible % (not the pool split %).
+  const repDeductibleCommissionCents = Math.round((i.deductibleCents * (i.repDeductiblePct ?? 0)) / 100);
+  const repCommissionCents = repPoolCommissionCents + repDeductibleCommissionCents;
+  const companyProfitCents = revenueCents - i.costCents - paFeeCents - repCommissionCents;
+  return {
+    revenueCents, poolBaseCents, overheadCents, paFeeCents, poolCents, repPoolBasisCents: repBasisCents,
+    repPoolCommissionCents, repDeductibleCommissionCents, repCommissionCents, companyProfitCents,
+  };
+}
+
+// --- Deal split (server commission generation / payroll) ---------------------
+// Returns just the pool (and its pieces); the engine applies each person's
+// snapshot to the pool and adds the rep's deductible share separately.
 
 export type DealSplitInput = {
-  contractCents: number;
+  baseCents: number; // contract
+  supplementCents: number;
   costCents: number;
   overheadPct: number;
+  paFeePct?: number;
   repSplitPct: number;
+  repWaivesSupplement?: boolean;
 };
 
 export type DealSplit = {
   overheadCents: number;
+  paFeeCents: number;
   poolCents: number;
+  repPoolBasisCents: number; // pool the rep/split is paid on (minus any waived supplement)
   repCommissionCents: number;
   companyProfitCents: number;
 };
 
-export function computeDealSplit({ contractCents, costCents, overheadPct, repSplitPct }: DealSplitInput): DealSplit {
-  const overheadCents = Math.round((contractCents * overheadPct) / 100);
-  const poolCents = contractCents - costCents - overheadCents;
-  // A negative pool (cost overrun) yields no rep commission.
-  const repCommissionCents = poolCents > 0 ? Math.round((poolCents * repSplitPct) / 100) : 0;
-  const companyProfitCents = poolCents - repCommissionCents;
-  return { overheadCents, poolCents, repCommissionCents, companyProfitCents };
+export function computeDealSplit(i: DealSplitInput): DealSplit {
+  const poolBaseCents = i.baseCents + i.supplementCents;
+  const paFeeCents = Math.round((i.supplementCents * (i.paFeePct ?? 0)) / 100);
+  const { overheadCents, poolCents } = poolBreakdown(poolBaseCents, i.costCents, i.overheadPct, paFeeCents);
+  const repBasisCents = repPoolBasisCents(poolCents, i.supplementCents, i.overheadPct, paFeeCents, !!i.repWaivesSupplement);
+  const repCommissionCents = repBasisCents > 0 ? Math.round((repBasisCents * i.repSplitPct) / 100) : 0;
+  const companyProfitCents = poolCents - repCommissionCents + overheadCents;
+  return { overheadCents, paFeeCents, poolCents, repPoolBasisCents: repBasisCents, repCommissionCents, companyProfitCents };
 }
-
-// --- Full deal commission (split pool + separate deductible share) -----------
-//
-// Money rules captured here so the worksheet, getDealFinancials, and the
-// generation engine all agree:
-//  - Splittable pool = (base + supplement* + depreciation*) − cost − overhead,
-//    where supplement/depreciation are included only if the rep "gets" them on
-//    this deal (else the company keeps that share / pays the rep upfront).
-//  - The DEDUCTIBLE is never in the split pool. The rep is instead paid its own
-//    `deductiblePct` of the deductible as a separate line (0/unset = none).
-//  - Adjusted contract value (company revenue) still counts every piece.
-
-export type DealCommissionInput = {
-  baseCents: number;
-  supplementCents: number;
-  deductibleCents: number;
-  depreciationCents: number;
-  repGetsSupplement: boolean;
-  repGetsDepreciation: boolean;
-  costCents: number;
-  overheadPct: number;
-  repSplitPct: number;
-  repDeductiblePct: number;
-};
-
-export type DealCommission = {
-  adjustedContractCents: number; // company revenue: base + suppl + deductible + depr
-  splitBaseContractCents: number; // what the split pool is computed on (excl. deductible)
-  overheadCents: number;
-  poolCents: number;
-  splitCommissionCents: number; // rep split of the pool
-  deductibleCommissionCents: number; // rep's % of the deductible
-  repTotalCents: number; // split + deductible share
-};
 
 // --- Rep split snapshot (self-gen % vs provided-lead % OR flat fee) -----------
 //
@@ -94,23 +148,4 @@ export function resolveSplitSnapshot(provided: boolean, c: RepSplitConfig): Spli
 export function applySplitSnapshot(poolCents: number, splitPct: number, splitFlatCents: number): number {
   if (poolCents <= 0) return 0;
   return Math.max(0, Math.round((poolCents * splitPct) / 100) - Math.max(0, splitFlatCents));
-}
-
-export function computeDealCommission(i: DealCommissionInput): DealCommission {
-  const inclSuppl = i.repGetsSupplement ? i.supplementCents : 0;
-  const inclDepr = i.repGetsDepreciation ? i.depreciationCents : 0;
-  const splitBaseContractCents = i.baseCents + inclSuppl + inclDepr;
-  const overheadCents = Math.round((splitBaseContractCents * i.overheadPct) / 100);
-  const poolCents = splitBaseContractCents - i.costCents - overheadCents;
-  const splitCommissionCents = poolCents > 0 ? Math.round((poolCents * i.repSplitPct) / 100) : 0;
-  const deductibleCommissionCents = Math.round((i.deductibleCents * (i.repDeductiblePct || 0)) / 100);
-  return {
-    adjustedContractCents: i.baseCents + i.supplementCents + i.deductibleCents + i.depreciationCents,
-    splitBaseContractCents,
-    overheadCents,
-    poolCents,
-    splitCommissionCents,
-    deductibleCommissionCents,
-    repTotalCents: splitCommissionCents + deductibleCommissionCents,
-  };
 }

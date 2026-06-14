@@ -9,6 +9,7 @@ import {
 } from "@/lib/proposal";
 import type { ProposalView } from "@/server/modules/proposals/queries";
 import { NextStepActions } from "./next-step-actions";
+import { ProposalChrome, type ChromeNavItem } from "./proposal-chrome";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "";
@@ -18,7 +19,7 @@ function fmtDate(iso: string | null): string {
 
 function Section({ id, title, eyebrow, children }: { id: string; title?: string; eyebrow?: string; children: React.ReactNode }) {
   return (
-    <section data-section={id} className="break-inside-avoid border-b border-neutral-100 px-6 py-14 sm:px-10 print:py-8">
+    <section data-section={id} data-reveal className="break-inside-avoid border-b border-neutral-100 px-6 py-14 sm:px-10 print:py-8">
       <div className="mx-auto w-full max-w-3xl">
         {eyebrow && <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-[var(--proposal-accent)]">{eyebrow}</p>}
         {title && <h2 className="mb-6 font-serif text-3xl font-bold tracking-tight text-neutral-900 sm:text-4xl">{title}</h2>}
@@ -48,11 +49,36 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
   const upgrades = (c.upgrades ?? []).filter((u) => u.selected);
   const fin = data.financials;
 
+  // Wayfinding: one nav entry per section that actually renders (skip cover).
+  const navItems: ChromeNavItem[] = (
+    [
+      ["overview", "Overview", enabled("overview")],
+      ["photos", "Photos", enabled("photos") && data.photoGroups.length > 0],
+      ["condition", "Damage", enabled("condition") && (activeConditions.length > 0 || !!c.conditionNarrative)],
+      ["scope", "Scope", enabled("scope") && data.scopeLines.length > 0],
+      ["upgrades", "Upgrades", enabled("upgrades") && upgrades.length > 0],
+      ["timeline", "Timeline", enabled("timeline")],
+      ["financial", "Your cost", enabled("financial")],
+      ["why", "Why us", enabled("why")],
+      ["faq", "FAQ", enabled("faq")],
+      ["signature", "Sign", enabled("signature")],
+    ] as [string, string, boolean][]
+  )
+    .filter(([, , show]) => show)
+    .map(([id, label]) => ({ id, label }));
+
   return (
     <div
+      id="proposal-root"
       className="min-h-screen bg-white text-neutral-900"
       style={{ ["--proposal-accent" as string]: data.branding.accentColor || "#F4631E" }}
     >
+      <ProposalChrome
+        companyName={data.branding.companyName}
+        logoUrl={data.branding.logoUrl}
+        navItems={navItems}
+        hasSignature={enabled("signature")}
+      />
       {/* COVER */}
       {enabled("cover") && (
         <section data-section="cover" className="relative flex min-h-screen flex-col justify-end overflow-hidden bg-neutral-950 px-6 py-12 text-white sm:px-10 print:min-h-0 print:py-16">
@@ -61,7 +87,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
             <img src={data.heroPhotoUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-50" />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/70 to-neutral-950/20" />
-          <div className="relative mx-auto w-full max-w-3xl">
+          <div className="reveal-up relative mx-auto w-full max-w-3xl">
             {data.branding.logoUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={data.branding.logoUrl} alt={data.branding.companyName} className="mb-8 h-10 w-auto object-contain" />
@@ -78,6 +104,14 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
               {data.repName && <span>Prepared by <strong className="text-white">{data.repName}</strong></span>}
               <span>{fmtDate(data.createdAt)}</span>
             </div>
+          </div>
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center print:hidden">
+            <span className="flex flex-col items-center gap-1 text-[11px] uppercase tracking-widest text-neutral-400">
+              Scroll
+              <svg className="size-4 animate-bounce" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
           </div>
         </section>
       )}

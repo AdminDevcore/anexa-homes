@@ -1,4 +1,8 @@
 import { prisma } from "@/server/db/client";
+import { getDealFinancials, getProjectPayout } from "@/server/modules/costs/queries";
+import { getScopeEstimatedCostCents } from "@/server/modules/scope/queries";
+import { computeDealCommission } from "@/lib/commission";
+import { computeReports, type ReportPeriod } from "@/lib/bookkeeping-reports";
 
 export type BkTxn = {
   id: string;
@@ -16,20 +20,63 @@ export type BkTxn = {
   notes: string | null;
   projectId: string | null;
   projectLabel: string | null;
+  attachments: { id: string; name: string }[];
 };
 export type BkCategory = { id: string; name: string; type: string };
-export type BkVendor = { id: string; name: string };
+export type BkVendor = {
+  id: string;
+  name: string;
+  companyName: string | null;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  einTaxId: string | null;
+  is1099: boolean;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  accountNumber: string | null;
+  notes: string | null;
+};
 export type BkProject = { id: string; label: string };
 export type PnlRow = { name: string; total: number };
+
+// Per-job book: a project (deal) with its bookkeeping activity rolled up.
+export type BkJob = {
+  projectId: string;
+  leadId: string | null;
+  label: string;
+  moneyInCents: number;
+  moneyOutCents: number;
+  netCents: number;
+  txnCount: number;
+  invoiceCount: number;
+  fileCount: number;
+  lastActivity: string | null; // ISO — most recent txn/invoice date
+};
+export type BkInvoice = {
+  id: string;
+  projectId: string;
+  invoiceNumber: string;
+  status: string;
+  amountCents: number;
+  dueAt: string | null;
+  paidAt: string | null;
+};
+export type BkFile = { id: string; projectId: string; name: string; kind: string };
 
 export type BookkeepingData = {
   transactions: BkTxn[];
   categories: BkCategory[];
   vendors: BkVendor[];
   projects: BkProject[];
+  jobs: BkJob[];
+  invoices: BkInvoice[];
+  jobFiles: BkFile[];
   connected: boolean;
   provider: string | null;
-  summary: { moneyIn: number; moneyOut: number; net: number; uncategorized: number };
+  summary: { moneyIn: number; moneyOut: number; net: number; uncategorized: number; outstanding: number };
   pnl: { income: PnlRow[]; expense: PnlRow[]; totalIncome: number; totalExpense: number; netProfit: number };
   balanceSheet: {
     assets: PnlRow[];
@@ -41,13 +88,16 @@ export type BookkeepingData = {
   };
 };
 
-export async function getBookkeepingData(companyId: string): Promise<BookkeepingData> {
+export async function getBookkeepingData(companyId: string, period?: ReportPeriod): Promise<BookkeepingData> {
   const [txns, categories, vendors, projects, settings] = await Promise.all([
     prisma.transaction.findMany({
       where: { companyId },
       orderBy: { date: "desc" },
       take: 1000,
-      include: { category: { select: { id: true, name: true, type: true } } },
+      include: {
+        category: { select: { id: true, name: true, type: true } },
+        attachments: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
+      },
     }),
     prisma.bookkeepingCategory.findMany({ where: { companyId }, orderBy: [{ type: "asc" }, { name: "asc" }] }),
     prisma.bookkeepingVendor.findMany({ where: { companyId }, orderBy: { name: "asc" } }),
@@ -55,12 +105,54 @@ export async function getBookkeepingData(companyId: string): Promise<Bookkeeping
       where: { companyId },
       orderBy: { createdAt: "desc" },
       take: 300,
-      select: { id: true, projectNumber: true, lead: { select: { firstName: true, lastName: true } } },
+      select: { id: true, leadId: true, projectNumber: true, lead: { select: { id: true, firstName: true, lastName: true } } },
     }),
     prisma.companySettings.findUnique({ where: { companyId }, select: { bookkeepingProvider: true, bookkeepingApiKey: true } }),
   ]);
 
   const projMap = new Map(projects.map((p) => [p.id, `${p.projectNumber}${p.lead ? ` · ${p.lead.firstName} ${p.lead.lastName}` : ""}`]));
+
+  // Per-job book: invoices for these jobs + any file attached to the job or its deal.
+  const projectIds = projects.map((p) => p.id);
+  const leadIds = projects.map((p) => p.leadId).filter((id): id is string => !!id);
+  const [invoiceRows, fileRows] = await Promise.all([
+    projectIds.length
+      ? prisma.invoice.findMany({
+          where: { companyId, projectId: { in: projectIds } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, projectId: true, invoiceNumber: true, status: true, amount: true, dueAt: true, paidAt: true },
+        })
+      : Promise.resolve([]),
+    projectIds.length || leadIds.length
+      ? prisma.fileAsset.findMany({
+          where: {
+            companyId,
+            OR: [{ projectId: { in: projectIds } }, { leadId: { in: leadIds } }],
+          },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, name: true, kind: true, projectId: true, leadId: true },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  // Map a file to a job: prefer its projectId, else the project sharing its leadId.
+  const projectByLead = new Map(projects.filter((p) => p.leadId).map((p) => [p.leadId!, p.id]));
+  const jobFiles: BkFile[] = fileRows
+    .map((f): BkFile | null => {
+      const projectId = f.projectId ?? (f.leadId ? projectByLead.get(f.leadId) ?? null : null);
+      return projectId ? { id: f.id, projectId, name: f.name, kind: String(f.kind) } : null;
+    })
+    .filter((f): f is BkFile => !!f);
+
+  const invoices: BkInvoice[] = invoiceRows.map((iv) => ({
+    id: iv.id,
+    projectId: iv.projectId,
+    invoiceNumber: iv.invoiceNumber,
+    status: iv.status,
+    amountCents: iv.amount,
+    dueAt: iv.dueAt ? iv.dueAt.toISOString() : null,
+    paidAt: iv.paidAt ? iv.paidAt.toISOString() : null,
+  }));
 
   const transactions: BkTxn[] = txns.map((t) => ({
     id: t.id,
@@ -78,48 +170,204 @@ export async function getBookkeepingData(companyId: string): Promise<Bookkeeping
     notes: t.notes,
     projectId: t.projectId,
     projectLabel: t.projectId ? projMap.get(t.projectId) ?? "Deal" : null,
+    attachments: t.attachments.map((a) => ({ id: a.id, name: a.name })),
   }));
 
-  // Cash-basis totals + P&L grouped by category.
+  // Cash-basis summary totals (always all-time — these drive the top cards).
   let moneyIn = 0, moneyOut = 0, uncategorized = 0;
-  const incomeByCat = new Map<string, number>();
-  const expenseByCat = new Map<string, number>();
   for (const t of txns) {
     if (t.amountCents >= 0) moneyIn += t.amountCents;
     else moneyOut += -t.amountCents;
     if (!t.categoryId) uncategorized += 1;
-    const name = t.category?.name ?? "Uncategorized";
-    if (t.amountCents >= 0) incomeByCat.set(name, (incomeByCat.get(name) ?? 0) + t.amountCents);
-    else expenseByCat.set(name, (expenseByCat.get(name) ?? 0) + -t.amountCents);
   }
-  const toRows = (m: Map<string, number>) => [...m.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
-  const income = toRows(incomeByCat);
-  const expense = toRows(expenseByCat);
-  const totalIncome = moneyIn;
-  const totalExpense = moneyOut;
-  const netProfit = totalIncome - totalExpense;
 
-  // Simplified cash-basis balance sheet: Cash on hand = net of all transactions;
-  // retained earnings (equity) = net profit. Assets = Liabilities + Equity.
-  const cash = moneyIn - moneyOut;
-  const balanceSheet = {
-    assets: [{ name: "Cash on hand", total: cash }],
-    liabilities: [] as PnlRow[],
-    equity: [{ name: "Retained earnings", total: netProfit }],
-    totalAssets: cash,
-    totalLiabilities: 0,
-    totalEquity: netProfit,
-  };
+  // Period-aware P&L + Balance Sheet (no period = all time). Shared with the
+  // client picker and the PDF routes so all three agree.
+  const { pnl: pnlReport, balanceSheet } = computeReports(transactions, period);
+  const { income, expense, totalIncome, totalExpense, netProfit } = pnlReport;
+
+  // Roll up each job's bookkeeping activity. A job appears if it has any
+  // transaction, invoice, or attached file.
+  const invCountByJob = new Map<string, number>();
+  for (const iv of invoices) invCountByJob.set(iv.projectId, (invCountByJob.get(iv.projectId) ?? 0) + 1);
+  const fileCountByJob = new Map<string, number>();
+  for (const f of jobFiles) fileCountByJob.set(f.projectId, (fileCountByJob.get(f.projectId) ?? 0) + 1);
+
+  const jobAgg = new Map<string, { in: number; out: number; count: number; last: number }>();
+  for (const t of txns) {
+    if (!t.projectId) continue;
+    const a = jobAgg.get(t.projectId) ?? { in: 0, out: 0, count: 0, last: 0 };
+    if (t.amountCents >= 0) a.in += t.amountCents;
+    else a.out += -t.amountCents;
+    a.count += 1;
+    a.last = Math.max(a.last, t.date.getTime());
+    jobAgg.set(t.projectId, a);
+  }
+
+  const projectLeadId = new Map(projects.map((p) => [p.id, p.leadId]));
+  const jobIds = new Set<string>([...jobAgg.keys(), ...invCountByJob.keys(), ...fileCountByJob.keys()]);
+  const jobs: BkJob[] = [...jobIds]
+    .map((projectId) => {
+      const a = jobAgg.get(projectId);
+      return {
+        projectId,
+        leadId: projectLeadId.get(projectId) ?? null,
+        label: projMap.get(projectId) ?? "Deal",
+        moneyInCents: a?.in ?? 0,
+        moneyOutCents: a?.out ?? 0,
+        netCents: (a?.in ?? 0) - (a?.out ?? 0),
+        txnCount: a?.count ?? 0,
+        invoiceCount: invCountByJob.get(projectId) ?? 0,
+        fileCount: fileCountByJob.get(projectId) ?? 0,
+        lastActivity: a?.last ? new Date(a.last).toISOString() : null,
+      };
+    })
+    .sort((x, y) => (y.lastActivity ?? "").localeCompare(x.lastActivity ?? ""));
 
   return {
     transactions,
     categories: categories.map((c) => ({ id: c.id, name: c.name, type: c.type })),
-    vendors: vendors.map((v) => ({ id: v.id, name: v.name })),
+    vendors: vendors.map((v) => ({
+      id: v.id, name: v.name, companyName: v.companyName, contactName: v.contactName,
+      email: v.email, phone: v.phone, einTaxId: v.einTaxId, is1099: v.is1099,
+      address: v.address, city: v.city, state: v.state, zip: v.zip,
+      accountNumber: v.accountNumber, notes: v.notes,
+    })),
     projects: projects.map((p) => ({ id: p.id, label: projMap.get(p.id)! })),
+    jobs,
+    invoices,
+    jobFiles,
     connected: !!settings?.bookkeepingApiKey,
     provider: settings?.bookkeepingProvider ?? null,
-    summary: { moneyIn, moneyOut, net: moneyIn - moneyOut, uncategorized },
+    summary: {
+      moneyIn,
+      moneyOut,
+      net: moneyIn - moneyOut,
+      uncategorized,
+      // Money left to collect = issued (sent) invoices not yet paid.
+      outstanding: invoices.filter((iv) => iv.status === "sent").reduce((s, iv) => s + iv.amountCents, 0),
+    },
     pnl: { income, expense, totalIncome, totalExpense, netProfit },
     balanceSheet,
   };
+}
+
+// ── Per-job settlement: "what's left for us" ────────────────────────────────
+// Reuses the DEAL's own financials (getDealFinancials) so these numbers match the
+// deal page exactly: job cost comes from bookkeeping, overhead is removed, and the
+// rep commission is the same split the deal shows (estimate until real commission
+// records exist, then the actual lines + overrides). Also computes how much of the
+// collectible is still owed (left to collect) vs. already collected (money in).
+
+export type JobSettlementLine = { id: string; label: string | null; recipient: string; amountCents: number; status: string };
+export type JobSettlement = {
+  projectId: string;
+  contractCents: number;
+  supplementCents: number;
+  deductibleCents: number;
+  collectibleCents: number; // expected total to collect (contract + supplement + deductible)
+  jobCostCents: number; // ACTUAL job cost from bookkeeping (matches the deal)
+  estCostCents: number; // ESTIMATED job cost from the scope cost template (falls back to actual)
+  overheadCents: number;
+  paFeeCents: number; // public-adjuster fee on the supplement (matches the deal)
+  repName: string | null;
+  repSplitPct: number | null; // the rep's split % of the pool on this deal
+  repDeductiblePct: number | null; // the rep's separate % of the deductible
+  repWaivesSupplement: boolean; // rep waived the supplement (paid early, excluded from their pool)
+  supplementWaivedKeptCents: number; // supplement net the company keeps when waived (0 otherwise)
+  companyProvidedLead: boolean; // provided-lead vs self-gen split
+  commissionEstimateCents: number; // REP estimate from split rules (pre-generation)
+  commissionActualCents: number; // sum of ALL real commission records (rep + overrides + crew)
+  repCommissionActualCents: number; // just the assigned rep's generated commission
+  hasActualCommission: boolean;
+  commissionLines: JobSettlementLine[];
+  collectedCents: number; // money already collected (money-in transactions)
+  leftToCollectCents: number; // collectible − collected
+  companyProfitCents: number; // collectible − jobCost − overhead − paFee − commission
+};
+
+/**
+ * Settlements for the given jobs, keyed by projectId. Each reuses getDealFinancials
+ * + getProjectPayout so it matches the deal's Financials/Payout. `jobs` carries the
+ * money already collected (money-in) so we can show "left to collect".
+ */
+export async function getJobSettlements(
+  companyId: string,
+  jobs: { projectId: string; moneyInCents: number; leadId?: string | null }[]
+): Promise<Record<string, JobSettlement>> {
+  if (jobs.length === 0) return {};
+
+  const results = await Promise.all(
+    jobs.map(async (job) => {
+      const f = await getDealFinancials(companyId, job.projectId);
+      if (!f) return null;
+      const payout = await getProjectPayout(companyId, job.projectId);
+      // Estimated cost from the scope (falls back to the actual booked cost).
+      const estCostRaw = job.leadId ? await getScopeEstimatedCostCents(companyId, job.leadId) : null;
+      // `??` doesn't catch NaN — guard explicitly so a bad scope total can never poison profit.
+      const estCost = estCostRaw != null && Number.isFinite(estCostRaw) ? estCostRaw : f.jobCostCents;
+      const dc = f.breakdown;
+      const collectible = dc.revenueCents;
+      const hasActual = payout.lines.length > 0;
+      // The assigned rep's OWN generated commission (excludes overrides/crew).
+      const repCommissionActual = f.rep
+        ? payout.lines.filter((l) => l.userId === f.rep!.id).reduce((s, l) => s + l.amount, 0)
+        : 0;
+      // Estimated rep commission, recomputed on the ESTIMATED-cost pool (the
+      // report's estimate uses scope cost; the deal's own breakdown uses ACTUAL
+      // booked cost). Reuses the exact engine so it respects the supplement waiver
+      // and the rep's separate deductible %.
+      const estDc = computeDealCommission({
+        baseCents: f.contractValue,
+        supplementCents: f.supplementCents,
+        deductibleCents: f.deductibleCents,
+        costCents: estCost,
+        overheadPct: f.overheadPct,
+        paFeePct: f.paFeePct,
+        repSplitPct: f.rep?.splitPct ?? 0,
+        repDeductiblePct: f.rep?.deductiblePct ?? 0,
+        repWaivesSupplement: !f.repGetsSupplement,
+      });
+      const commissionEstimate = estDc.repCommissionCents;
+      // Amount the company keeps from a waived supplement (pool minus rep basis).
+      const supplementWaivedKept = estDc.poolCents - estDc.repPoolBasisCents;
+
+      const commission = hasActual ? payout.total : commissionEstimate;
+      // Company profit = revenue − cost − PA fee − commission. Overhead is RETAINED
+      // by the company (not an external cost), so it stays inside company profit
+      // (= company overhead + the company's share of the split).
+      const companyProfit = collectible - f.jobCostCents - dc.paFeeCents - commission;
+
+      const settlement: JobSettlement = {
+        projectId: job.projectId,
+        contractCents: f.contractValue,
+        supplementCents: f.supplementCents,
+        deductibleCents: f.deductibleCents,
+        collectibleCents: collectible,
+        jobCostCents: f.jobCostCents,
+        estCostCents: estCost,
+        overheadCents: dc.overheadCents,
+        paFeeCents: dc.paFeeCents,
+        repName: f.rep?.name ?? null,
+        repSplitPct: f.rep?.splitPct ?? null,
+        repDeductiblePct: f.rep?.deductiblePct ?? null,
+        repWaivesSupplement: !f.repGetsSupplement,
+        supplementWaivedKeptCents: supplementWaivedKept,
+        companyProvidedLead: f.companyProvidedLead,
+        commissionEstimateCents: commissionEstimate,
+        commissionActualCents: payout.total,
+        repCommissionActualCents: repCommissionActual,
+        hasActualCommission: hasActual,
+        commissionLines: payout.lines.map((l) => ({ id: l.id, label: l.label, recipient: l.recipient, amountCents: l.amount, status: l.status })),
+        collectedCents: job.moneyInCents,
+        leftToCollectCents: collectible - job.moneyInCents,
+        companyProfitCents: companyProfit,
+      };
+      return settlement;
+    })
+  );
+
+  const out: Record<string, JobSettlement> = {};
+  for (const s of results) if (s) out[s.projectId] = s;
+  return out;
 }

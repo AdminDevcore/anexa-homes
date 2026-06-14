@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { nanoid } from "nanoid";
+import { putObject } from "@/server/storage";
 import { suggestForTransaction } from "./suggest";
 
 function fail(error: string) {
@@ -159,32 +162,72 @@ export async function updateTransactionAction(input: z.infer<typeof updateSchema
   return { ok: true as const };
 }
 
-const vendorSchema = z.object({ name: z.string().min(1).max(120) });
-/** Add a vendor / contractor to the managed list. */
+// QuickBooks-style vendor/contractor profile. Empty strings save as NULL.
+const vendorFields = {
+  name: z.string().min(1).max(120),
+  companyName: z.string().max(160).optional().or(z.literal("")),
+  contactName: z.string().max(120).optional().or(z.literal("")),
+  email: z.string().max(160).optional().or(z.literal("")),
+  phone: z.string().max(60).optional().or(z.literal("")),
+  einTaxId: z.string().max(40).optional().or(z.literal("")),
+  is1099: z.boolean().optional(),
+  address: z.string().max(200).optional().or(z.literal("")),
+  city: z.string().max(80).optional().or(z.literal("")),
+  state: z.string().max(40).optional().or(z.literal("")),
+  zip: z.string().max(20).optional().or(z.literal("")),
+  accountNumber: z.string().max(80).optional().or(z.literal("")),
+  notes: z.string().max(2000).optional().or(z.literal("")),
+};
+const vendorSchema = z.object(vendorFields);
+const updateVendorSchema = z.object({ id: z.string().min(1), ...vendorFields });
+
+function vendorData(d: z.infer<typeof vendorSchema>) {
+  const s = (v?: string) => (v?.trim() ? v.trim() : null);
+  return {
+    name: d.name.trim(),
+    companyName: s(d.companyName),
+    contactName: s(d.contactName),
+    email: s(d.email),
+    phone: s(d.phone),
+    einTaxId: s(d.einTaxId),
+    is1099: d.is1099 ?? false,
+    address: s(d.address),
+    city: s(d.city),
+    state: s(d.state),
+    zip: s(d.zip),
+    accountNumber: s(d.accountNumber),
+    notes: s(d.notes),
+  };
+}
+
+/** Add a vendor / contractor (full profile) to the managed list. */
 export async function createVendorAction(input: z.infer<typeof vendorSchema>) {
   const { user, denied } = await gate("update");
   if (denied) return denied;
   const parsed = vendorSchema.safeParse(input);
   if (!parsed.success) return fail("Enter a vendor name.");
-  await prisma.bookkeepingVendor.create({ data: { companyId: user!.companyId, name: parsed.data.name.trim() } });
+  await prisma.bookkeepingVendor.create({ data: { companyId: user!.companyId, ...vendorData(parsed.data) } });
   revalidatePath("/portal/bookkeeping");
   return { ok: true as const };
 }
 
-const renameVendorSchema = z.object({ id: z.string().min(1), name: z.string().min(1).max(120) });
-/** Rename a vendor (and re-point any transactions tagged with the old name). */
-export async function renameVendorAction(input: z.infer<typeof renameVendorSchema>) {
+/** Update a vendor's full profile (and re-point transactions if the name changed). */
+export async function updateVendorAction(input: z.infer<typeof updateVendorSchema>) {
   const { user, denied } = await gate("update");
   if (denied) return denied;
-  const parsed = renameVendorSchema.safeParse(input);
+  const parsed = updateVendorSchema.safeParse(input);
   if (!parsed.success) return fail("Enter a vendor name.");
   const vendor = await prisma.bookkeepingVendor.findFirst({ where: { id: parsed.data.id, companyId: user!.companyId }, select: { id: true, name: true } });
   if (!vendor) return fail("Vendor not found.");
-  const name = parsed.data.name.trim();
-  await prisma.$transaction([
-    prisma.bookkeepingVendor.update({ where: { id: vendor.id }, data: { name } }),
-    prisma.transaction.updateMany({ where: { companyId: user!.companyId, vendor: vendor.name }, data: { vendor: name } }),
-  ]);
+  const data = vendorData(parsed.data);
+  const ops: Prisma.PrismaPromise<unknown>[] = [
+    prisma.bookkeepingVendor.update({ where: { id: vendor.id }, data }),
+  ];
+  // Renaming re-points any transactions tagged with the old free-text name.
+  if (data.name !== vendor.name) {
+    ops.push(prisma.transaction.updateMany({ where: { companyId: user!.companyId, vendor: vendor.name }, data: { vendor: data.name } }));
+  }
+  await prisma.$transaction(ops);
   revalidatePath("/portal/bookkeeping");
   return { ok: true as const };
 }
@@ -261,6 +304,67 @@ export async function setBookkeepingConnectionAction(input: z.infer<typeof connS
     where: { companyId: user!.companyId },
     data: { bookkeepingProvider: parsed.data.provider, bookkeepingApiKey: parsed.data.apiKey || null },
   });
+  revalidatePath("/portal/bookkeeping");
+  return { ok: true as const };
+}
+
+// ---- Transaction attachments (receipts / invoices) -------------------------
+
+const MAX_ATTACH_BYTES = 30 * 1024 * 1024;
+const ATTACH_ALLOWED = new Set([
+  "application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic",
+  "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv",
+]);
+function safeName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "receipt";
+}
+
+/** Attach a receipt / invoice file to a transaction. */
+export async function uploadTransactionAttachmentAction(formData: FormData) {
+  const { user, denied } = await gate("update");
+  if (denied) return denied;
+
+  const transactionId = String(formData.get("transactionId") ?? "");
+  const txn = await prisma.transaction.findFirst({ where: { id: transactionId, companyId: user!.companyId }, select: { id: true } });
+  if (!txn) return fail("Transaction not found.");
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return fail("No file provided.");
+  if (file.size > MAX_ATTACH_BYTES) return fail("File too large (max 30MB).");
+  if (!ATTACH_ALLOWED.has(file.type)) return fail("Unsupported file type.");
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const fid = nanoid();
+  const key = `companies/${user!.companyId}/transactions/${fid}-${safeName(file.name)}`;
+  await putObject(key, buffer);
+
+  await prisma.fileAsset.create({
+    data: {
+      companyId: user!.companyId,
+      kind: file.type.startsWith("image/") ? "photo" : "document",
+      name: file.name,
+      storageKey: key,
+      mimeType: file.type,
+      size: buffer.length,
+      transactionId,
+      uploadedById: user!.userId,
+    },
+  });
+  revalidatePath("/portal/bookkeeping");
+  return { ok: true as const };
+}
+
+/** Remove an attachment from a transaction. */
+export async function deleteTransactionAttachmentAction(fileId: string) {
+  const { user, denied } = await gate("update");
+  if (denied) return denied;
+  const file = await prisma.fileAsset.findFirst({
+    where: { id: fileId, companyId: user!.companyId, transactionId: { not: null } },
+    select: { id: true },
+  });
+  if (!file) return fail("Attachment not found.");
+  await prisma.fileAsset.delete({ where: { id: fileId } });
   revalidatePath("/portal/bookkeeping");
   return { ok: true as const };
 }

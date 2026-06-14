@@ -507,17 +507,27 @@ async function buildPayroll(user: ReportUser, period: Period, scope: ResolvedSco
   });
 
   const userFilter = scope.userIds ? new Set(scope.userIds) : null;
+  const visible = (uid: string) => !userFilter || userFilter.has(uid);
   let total = 0, paid = 0, pending = 0;
-  const byPerson = new Map<string, number>();
+  const byPerson = new Map<string, { paid: number; pending: number }>();
   for (const run of runs) {
     for (const it of run.items) {
-      if (userFilter && !userFilter.has(it.userId)) continue;
+      if (!visible(it.userId)) continue;
       total += it.amount;
       if (it.paid) paid += it.amount; else pending += it.amount;
       const name = `${it.user.firstName} ${it.user.lastName}`.trim();
-      byPerson.set(name, (byPerson.get(name) ?? 0) + it.amount);
+      const e = byPerson.get(name) ?? { paid: 0, pending: 0 };
+      if (it.paid) e.paid += it.amount; else e.pending += it.amount;
+      byPerson.set(name, e);
     }
   }
+
+  // Compact period label, e.g. "Jun 7 – Jun 19, 2026".
+  const fmtRange = (a: Date, b: Date) => {
+    const d = (x: Date) => x.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return `${d(a)} – ${d(b)}, ${b.getFullYear()}`;
+  };
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   const [commPaid, liability] = await Promise.all([
     prisma.commission.aggregate({
@@ -538,27 +548,35 @@ async function buildPayroll(user: ReportUser, period: Period, scope: ResolvedSco
       { label: "Total payroll", value: usd(total), hint: "in period" },
       { label: "Paid", value: usd(paid), tone: "pos" },
       { label: "Pending", value: usd(pending), tone: "neg" },
-      { label: "Commissions paid", value: usd(commPaid._sum.amount ?? 0), hint: "in period" },
-      { label: "Est. commissions remaining", value: usd(estRemaining), tone: "neg", hint: "generated + estimated" },
+      { label: "Commissions paid", value: usd(commPaid._sum.amount ?? 0), tone: "pos", hint: "in period" },
+      { label: "Upcoming commissions", value: usd(estRemaining), tone: "neg", hint: "generated + estimated" },
     ],
     tables: [
       {
-        title: "Estimated commissions by person",
-        columns: ["Person", "Locked-in", "Estimated", "Total"],
+        title: "This period's payroll · by person",
+        columns: ["Person", "Paid", "Pending", "Total"],
         rows: [
-          ...liability.byRep.map((r) => [r.name, usd(r.lockedInCents), usd(r.estimatedCents), usd(r.lockedInCents + r.estimatedCents)]),
-          ["Total", usd(liability.lockedInCents), usd(liability.estimatedCents), usd(estRemaining)],
+          ...[...byPerson.entries()]
+            .sort((a, b) => b[1].paid + b[1].pending - (a[1].paid + a[1].pending))
+            .map(([name, e]) => [name, usd(e.paid), usd(e.pending), usd(e.paid + e.pending)]),
+          ...(byPerson.size > 0 ? [["Total", usd(paid), usd(pending), usd(total)]] : []),
         ],
       },
       {
-        title: "By person",
-        columns: ["Person", "Amount"],
-        rows: [...byPerson.entries()].sort((a, b) => b[1] - a[1]).map(([name, amt]) => [name, usd(amt)]),
+        title: "Upcoming commissions · by person",
+        columns: ["Person", "Generated", "Estimated", "Total"],
+        rows: [
+          ...liability.byRep.map((r) => [r.name, usd(r.lockedInCents), usd(r.estimatedCents), usd(r.lockedInCents + r.estimatedCents)]),
+          ...(liability.byRep.length > 0 ? [["Total", usd(liability.lockedInCents), usd(liability.estimatedCents), usd(estRemaining)]] : []),
+        ],
       },
       {
         title: "Payroll runs",
-        columns: ["Run", "Period", "Status"],
-        rows: runs.map((r) => [r.label, `${r.periodStart.toLocaleDateString("en-US")} – ${r.periodEnd.toLocaleDateString("en-US")}`, r.status]),
+        columns: ["Run", "Period", "Total", "Status"],
+        rows: runs.map((r) => {
+          const runTotal = r.items.filter((it) => visible(it.userId)).reduce((s, it) => s + it.amount, 0);
+          return [r.label, fmtRange(r.periodStart, r.periodEnd), usd(runTotal), cap(r.status)];
+        }),
       },
     ],
   };

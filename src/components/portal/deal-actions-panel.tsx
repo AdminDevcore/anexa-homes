@@ -3,24 +3,17 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { PlayCircle, ShieldPlus, ShieldCheck, ClipboardCheck, Loader2, Pencil } from "lucide-react";
+import { PlayCircle, ShieldPlus, ShieldCheck, ClipboardCheck, Loader2, Pencil, Lock, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   setAppointmentDispositionAction,
   setInspectionOutcomeAction,
+  addOutcomeNoteAction,
   openClaimAction,
 } from "@/server/modules/leads/actions";
 import { DEFAULT_APPOINTMENT_DISPOSITIONS, groupDispositions, type Disposition } from "@/lib/dispositions";
 
-const INSPECTION_OUTCOMES = [
-  "Damage confirmed",
-  "Approved — full replacement",
-  "Approved — repair only",
-  "Partial approval",
-  "Denied",
-  "No damage found",
-  "Pending adjuster review",
-];
+export type OutcomeNote = { id: string; body: string; author: string; createdAt: string };
 
 export type ClaimInfo = {
   carrier: string | null;
@@ -40,56 +33,134 @@ export function DealActionsPanel({
   leadId,
   disposition,
   appointmentNote,
+  appointmentNotes,
   dispositions,
   claim,
   inspectionOutcome,
   inspectionNote,
+  inspectionNotes,
+  inspectionOutcomes,
   canEditLead,
   canEditClaim,
 }: {
   leadId: string;
   disposition: string | null;
   appointmentNote: string | null;
+  // Append-only, tamper-proof outcome notes (newest last). Legacy single-field
+  // note (appointmentNote) is shown as a locked "initial note" if present.
+  appointmentNotes: OutcomeNote[];
   // Customizable, grouped appointment outcomes (Settings → Appointment Outcomes).
   dispositions?: Disposition[];
   claim: ClaimInfo;
   inspectionOutcome: string | null;
   inspectionNote: string | null;
+  inspectionNotes: OutcomeNote[];
+  // Customizable inspection outcomes (Settings → Inspection Outcomes).
+  inspectionOutcomes: string[];
   canEditLead: boolean;
   canEditClaim: boolean;
 }) {
   const groups = groupDispositions(dispositions?.length ? dispositions : DEFAULT_APPOINTMENT_DISPOSITIONS);
   return (
     <div className="mt-4 space-y-3 border-t border-border pt-4">
-      <AppointmentRun leadId={leadId} disposition={disposition} note={appointmentNote} groups={groups} canEdit={canEditLead} />
+      <AppointmentRun leadId={leadId} disposition={disposition} legacyNote={appointmentNote} notes={appointmentNotes} groups={groups} canEdit={canEditLead} />
       <div className="border-t border-border pt-3">
         <ClaimSection leadId={leadId} claim={claim} canOpen={canEditLead} canEdit={canEditClaim} />
       </div>
       <div className="border-t border-border pt-3">
-        <InspectionOutcome leadId={leadId} outcome={inspectionOutcome} note={inspectionNote} canEdit={canEditLead} />
+        <InspectionOutcome leadId={leadId} outcome={inspectionOutcome} legacyNote={inspectionNote} notes={inspectionNotes} outcomes={inspectionOutcomes} canEdit={canEditLead} />
       </div>
     </div>
   );
 }
 
-/** A small autosaving note box used under an outcome. */
-function NoteField({ value, onSave, canEdit, placeholder }: { value: string | null; onSave: (n: string) => void | Promise<unknown>; canEdit: boolean; placeholder: string }) {
-  const [note, setNote] = React.useState(value ?? "");
-  React.useEffect(() => { setNote(value ?? ""); }, [value]);
+function fmtTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * Append-only outcome notes. Existing entries are read-only (locked) so the
+ * record can't be tampered with; users can only add new timestamped notes.
+ */
+function OutcomeNotes({
+  leadId,
+  context,
+  legacyNote,
+  notes,
+  canEdit,
+  placeholder,
+}: {
+  leadId: string;
+  context: "appointment_outcome" | "inspection_outcome";
+  legacyNote: string | null;
+  notes: OutcomeNote[];
+  canEdit: boolean;
+  placeholder: string;
+}) {
+  const router = useRouter();
+  const [draft, setDraft] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  async function add() {
+    const body = draft.trim();
+    if (!body) return;
+    setBusy(true);
+    const res = await addOutcomeNoteAction({ leadId, context, body });
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    setDraft("");
+    toast.success("Note added");
+    router.refresh();
+  }
+
+  const hasAny = !!legacyNote || notes.length > 0;
+
   return (
-    <textarea
-      value={note}
-      disabled={!canEdit}
-      onChange={(e) => setNote(e.target.value)}
-      onBlur={() => { if (note !== (value ?? "")) onSave(note); }}
-      placeholder={placeholder}
-      rows={2}
-      className="mt-1.5 w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-    />
+    <div className="mt-2 space-y-1.5">
+      {hasAny && (
+        <ul className="space-y-1.5">
+          {legacyNote && (
+            <li className="rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-xs">
+              <p className="whitespace-pre-wrap text-foreground">{legacyNote}</p>
+              <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Lock className="size-2.5" /> Initial note · locked
+              </p>
+            </li>
+          )}
+          {notes.map((n) => (
+            <li key={n.id} className="rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-xs">
+              <p className="whitespace-pre-wrap text-foreground">{n.body}</p>
+              <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Lock className="size-2.5" /> {n.author} · {fmtTimestamp(n.createdAt)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {canEdit && (
+        <div className="rounded-lg border border-border bg-background">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={placeholder}
+            rows={2}
+            className="w-full resize-none rounded-t-lg bg-transparent px-2.5 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <div className="flex items-center justify-between border-t border-border px-2 py-1">
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Lock className="size-2.5" /> Notes can&rsquo;t be edited once added
+            </span>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={busy || !draft.trim()} onClick={add}>
+              {busy ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />} Add note
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-function InspectionOutcome({ leadId, outcome, note, canEdit }: { leadId: string; outcome: string | null; note: string | null; canEdit: boolean }) {
+function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEdit }: { leadId: string; outcome: string | null; legacyNote: string | null; notes: OutcomeNote[]; outcomes: string[]; canEdit: boolean }) {
   const router = useRouter();
   const [picking, setPicking] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -103,12 +174,7 @@ function InspectionOutcome({ leadId, outcome, note, canEdit }: { leadId: string;
     toast.success(value ? "Inspection outcome saved" : "Cleared");
     router.refresh();
   }
-  async function saveNote(n: string) {
-    const res = await setInspectionOutcomeAction({ leadId, note: n });
-    if (!res.ok) return toast.error(res.error);
-    router.refresh();
-  }
-  const options = outcome && !INSPECTION_OUTCOMES.includes(outcome) ? [outcome, ...INSPECTION_OUTCOMES] : INSPECTION_OUTCOMES;
+  const options = outcome && !outcomes.includes(outcome) ? [outcome, ...outcomes] : outcomes;
 
   return (
     <div>
@@ -137,7 +203,7 @@ function InspectionOutcome({ leadId, outcome, note, canEdit }: { leadId: string;
           <ClipboardCheck className="size-4" /> Set inspection outcome
         </Button>
       )}
-      <NoteField value={note} onSave={saveNote} canEdit={canEdit} placeholder="Inspection notes…" />
+      <OutcomeNotes leadId={leadId} context="inspection_outcome" legacyNote={legacyNote} notes={notes} canEdit={canEdit} placeholder="Add an inspection note…" />
     </div>
   );
 }
@@ -145,13 +211,15 @@ function InspectionOutcome({ leadId, outcome, note, canEdit }: { leadId: string;
 function AppointmentRun({
   leadId,
   disposition,
-  note,
+  legacyNote,
+  notes,
   groups,
   canEdit,
 }: {
   leadId: string;
   disposition: string | null;
-  note: string | null;
+  legacyNote: string | null;
+  notes: OutcomeNote[];
   groups: { group: string | null; items: string[] }[];
   canEdit: boolean;
 }) {
@@ -167,11 +235,6 @@ function AppointmentRun({
     setPicking(false);
     if (!res.ok) return toast.error(res.error);
     toast.success(value ? "Appointment outcome saved" : "Outcome cleared");
-    router.refresh();
-  }
-  async function saveNote(n: string) {
-    const res = await setAppointmentDispositionAction({ leadId, note: n });
-    if (!res.ok) return toast.error(res.error);
     router.refresh();
   }
 
@@ -221,7 +284,7 @@ function AppointmentRun({
           <PlayCircle className="size-4" /> Run appointment
         </Button>
       )}
-      <NoteField value={note} onSave={saveNote} canEdit={canEdit} placeholder="Appointment notes…" />
+      <OutcomeNotes leadId={leadId} context="appointment_outcome" legacyNote={legacyNote} notes={notes} canEdit={canEdit} placeholder="Add an appointment note…" />
     </div>
   );
 }

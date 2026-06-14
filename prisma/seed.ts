@@ -1,5 +1,6 @@
 import { PrismaClient, type Role, type KnockDisposition as KnockDispo } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { DEFAULT_SCOPE_CATALOG } from "../src/lib/scope-catalog";
 
 const prisma = new PrismaClient();
 
@@ -728,6 +729,22 @@ async function main() {
     })),
   });
 
+  // Master scope catalog — the full insurance-restoration line-item list (no pricing).
+  await prisma.scopeCatalogItem.createMany({
+    data: DEFAULT_SCOPE_CATALOG.map((c, i) => ({
+      companyId: company.id,
+      position: i,
+      category: c.category,
+      subcategory: c.subcategory,
+      description: c.description,
+      unit: c.unit,
+      trade: c.trade,
+      isCommonInsuranceItem: c.common,
+      isSupplementEligible: c.supplement,
+      isActive: true,
+    })),
+  });
+
   // A demo scope on the Scope Received deal (Linda Davis) so the calculator has data.
   const scopeLead = await prisma.lead.findFirst({
     where: { companyId: company.id, firstName: "Linda", lastName: "Davis" },
@@ -879,6 +896,16 @@ async function main() {
       actorId: users.owner.id,
     },
   });
+
+  // Sequential employee numbers per company, by join (createdAt) order.
+  for (const co of await prisma.company.findMany({ select: { id: true } })) {
+    const team = await prisma.user.findMany({ where: { companyId: co.id }, orderBy: { createdAt: "asc" }, select: { id: true } });
+    let n = 0;
+    for (const u of team) {
+      n += 1;
+      await prisma.user.update({ where: { id: u.id }, data: { employeeNo: n } });
+    }
+  }
 
   console.log("✅ Seed complete.");
   console.log("   Company: Anexa Homes (slug: anexa-homes)");

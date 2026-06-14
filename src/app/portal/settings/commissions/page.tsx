@@ -15,7 +15,7 @@ export default async function CommissionRulesPage() {
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
   const [company, splitReps, rules] = await Promise.all([
-    prisma.company.findUnique({ where: { id: user.companyId }, select: { overheadPct: true } }),
+    prisma.company.findUnique({ where: { id: user.companyId }, select: { overheadPct: true, paFeePct: true } }),
     prisma.user.findMany({
       where: { companyId: user.companyId, status: "active", role: { in: ["sales_rep", "manager"] } },
       select: { id: true, firstName: true, lastName: true, role: true, commissionSplitPct: true },
@@ -41,6 +41,7 @@ export default async function CommissionRulesPage() {
       />
       <DealSplitSettings
         overheadPct={company?.overheadPct ?? 10}
+        paFeePct={company?.paFeePct ?? 10}
         reps={splitReps.map((r) => ({
           id: r.id,
           name: `${r.firstName} ${r.lastName}`.trim(),

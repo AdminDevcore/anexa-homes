@@ -59,7 +59,7 @@ export async function getCommissionLiability(
   // 2) Active deals (not cancelled) in scope, with the data computeDealCommission
   //    needs. Skip deals that already have a generated commission.
   const [company, activeProjects] = await Promise.all([
-    prisma.company.findUnique({ where: { id: companyId }, select: { overheadPct: true } }),
+    prisma.company.findUnique({ where: { id: companyId }, select: { overheadPct: true, paFeePct: true } }),
     prisma.project.findMany({
       where: { companyId, status: { notIn: ["cancelled"] }, lead: scope.leadWhere },
       select: {
@@ -80,6 +80,7 @@ export async function getCommissionLiability(
     }),
   ]);
   const overheadPct = company?.overheadPct ?? 0;
+  const paFeePct = company?.paFeePct ?? 0;
   const estimableProjects = activeProjects.filter((p) => !generatedProjectIds.has(p.id) && p.lead?.assignedRep);
 
   // 3) Batch the job-cost lookup across all estimable deals in one query.
@@ -108,16 +109,15 @@ export async function getCommissionLiability(
       baseCents: p.contractValue,
       supplementCents: p.supplementCents,
       deductibleCents: p.deductibleCents,
-      depreciationCents: 0,
-      repGetsSupplement: p.repGetsSupplement,
-      repGetsDepreciation: false,
       costCents: jobCostByProject.get(p.id) ?? 0,
       overheadPct,
+      paFeePct,
       repSplitPct: activeSplit ?? 0,
       repDeductiblePct: rep.deductiblePct ?? 0,
+      repWaivesSupplement: !p.repGetsSupplement,
     });
-    estimatedCents += breakdown.repTotalCents;
-    bump(rep.id, `${rep.firstName} ${rep.lastName}`.trim(), "estimatedCents", breakdown.repTotalCents);
+    estimatedCents += breakdown.repCommissionCents;
+    bump(rep.id, `${rep.firstName} ${rep.lastName}`.trim(), "estimatedCents", breakdown.repCommissionCents);
   }
 
   const byRep = [...rows.values()].sort(

@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { getPublicProposal } from "@/server/modules/proposals/queries";
 import { PresentationView } from "@/components/proposal/presentation-view";
-import { PrintButton } from "@/components/proposal/print-button";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +29,6 @@ export default async function PublicPresentationPage({ params }: { params: Promi
 
   return (
     <main className="bg-white">
-      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-200 bg-white/90 px-4 py-2.5 backdrop-blur print:hidden">
-        <span className="text-sm font-medium text-neutral-500">{data.branding.companyName}</span>
-        <PrintButton />
-      </div>
       <PresentationView data={data} mode="public" />
     </main>
   );

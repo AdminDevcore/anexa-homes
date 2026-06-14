@@ -155,6 +155,61 @@ export async function updateAppointmentDispositionsAction(input: z.infer<typeof 
   return ok();
 }
 
+// ---- Inspection outcomes + production checklist (simple label lists) --------
+
+const labelListSchema = z.object({
+  items: z.array(z.string().trim().min(1).max(80)).max(60),
+});
+
+/** De-dupe a label list (case-insensitive), preserving order. */
+function cleanLabels(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of items) {
+    const label = raw.trim();
+    if (!label || seen.has(label.toLowerCase())) continue;
+    seen.add(label.toLowerCase());
+    out.push(label);
+  }
+  return out;
+}
+
+/** Replace the company's customizable inspection outcomes (full list). */
+export async function updateInspectionOutcomesAction(input: z.infer<typeof labelListSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = labelListSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid outcomes.");
+  const items = cleanLabels(parsed.data.items);
+  if (items.length === 0) return fail("Keep at least one outcome.");
+
+  await prisma.companySettings.upsert({
+    where: { companyId: user.companyId },
+    create: { companyId: user.companyId, inspectionOutcomes: items },
+    update: { inspectionOutcomes: items },
+  });
+  revalidatePath("/portal/settings/inspection-outcomes");
+  return ok();
+}
+
+/** Replace the company's default production QC checklist (full list of labels). */
+export async function updateQcChecklistTemplateAction(input: z.infer<typeof labelListSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = labelListSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid checklist.");
+  const items = cleanLabels(parsed.data.items);
+  if (items.length === 0) return fail("Keep at least one checklist item.");
+
+  await prisma.companySettings.upsert({
+    where: { companyId: user.companyId },
+    create: { companyId: user.companyId, qcChecklistTemplate: items },
+    update: { qcChecklistTemplate: items },
+  });
+  revalidatePath("/portal/settings/production-checklist");
+  return ok();
+}
+
 // --------------------------- Custom fields ----------------------------------
 
 const fieldSchema = z.object({

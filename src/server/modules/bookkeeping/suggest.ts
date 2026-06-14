@@ -7,7 +7,7 @@ type Vend = { id: string; name: string };
 const CATEGORY_RULES: [RegExp, string][] = [
   [/insurance|state farm|allstate|farmers|claim|depreciation release/i, "Insurance Proceeds"],
   [/customer deposit|deposit from|payment received|invoice paid|zelle from|check from/i, "Job Revenue"],
-  [/supply|shingle|material|beacon|srs|home depot|lowe'?s|abc supply|underlayment/i, "Materials"],
+  [/suppl(y|ier|ies)|shingle|material|beacon|srs|home depot|lowe'?s|abc supply|underlayment|gutter|flashing|drip edge/i, "Materials"],
   [/crew|sub-?contractor|labor|install(er)?|diaz|payout/i, "Subcontractor Labor"],
   [/payroll|salary|wages|adp|gusto|direct deposit payroll/i, "Payroll"],
   [/facebook|meta|google ?ads|adwords|marketing|lead ?gen|ad spend|hubspot|angi/i, "Marketing / Leads"],
@@ -53,6 +53,23 @@ export async function suggestForTransaction(
   if (!vendor) {
     const v = vendors.find((vv) => vv.name && text.includes(vv.name.toLowerCase()));
     if (v) vendor = v.name;
+  }
+
+  // 2.5) Category from the vendor's history — the system "learns" each vendor's
+  // usual category (e.g. ABC Supplier → Materials) from past approved transactions.
+  if (!categoryId && vendor) {
+    const prior = await prisma.transaction.findMany({
+      where: { companyId, approved: true, vendor: { equals: vendor, mode: "insensitive" }, categoryId: { not: null } },
+      orderBy: { date: "desc" },
+      take: 200,
+      select: { categoryId: true },
+    });
+    const counts = new Map<string, number>();
+    for (const p of prior) if (p.categoryId) counts.set(p.categoryId, (counts.get(p.categoryId) ?? 0) + 1);
+    let best: string | null = null;
+    let bestN = 0;
+    for (const [id, n] of counts) if (n > bestN) { best = id; bestN = n; }
+    if (best) categoryId = best;
   }
 
   // 3) Category by keyword.

@@ -27,9 +27,10 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { STAFF_ROLES } from "@/server/rbac/matrix";
 import { getProjectPhotoChecklists } from "@/server/modules/photos/queries";
-import { getAppointmentDispositions } from "@/server/modules/settings/queries";
+import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modules/settings/queries";
 import { getRoofReport } from "@/server/modules/roof/queries";
 import { RoofReportButton } from "@/components/portal/roof-report";
+import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { FilesSection } from "@/components/portal/files-section";
@@ -133,6 +134,7 @@ export default async function LeadDetailPage({
 
   // Customizable appointment outcomes for the "Run appointment" picker.
   const appointmentDispositions = await getAppointmentDispositions(user.companyId);
+  const inspectionOutcomes = await getInspectionOutcomes(user.companyId);
 
   const roofReport = await getRoofReport(user.companyId, lead.id);
   const roofAddress = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
@@ -182,7 +184,6 @@ export default async function LeadDetailPage({
   const showFinancials = !!(project && (payout || dealFinancials));
   const dealTabs = [
     { id: "overview", label: "Overview" },
-    { id: "claim", label: "Claim" },
     ...(showScope ? [{ id: "scope", label: "Scope of Work" }] : []),
     { id: "production", label: "Production" },
     ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
@@ -211,14 +212,8 @@ export default async function LeadDetailPage({
                 {lead.stage.name}
               </span>
             )}
-            {can(user, "update", "Lead") && (
-              <RoofReportButton
-                leadId={lead.id}
-                address={roofAddress || `${lead.firstName} ${lead.lastName}`}
-                initialFacets={roofReport?.facets ?? []}
-                initialWaste={roofReport?.wastePct ?? 12}
-                hasReport={!!roofReport}
-              />
+            {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
+              <BuildPresentationButton leadId={lead.id} />
             )}
             {can(user, "update", "Lead") && (
               <Button asChild variant="outline" size="sm">
@@ -255,20 +250,6 @@ export default async function LeadDetailPage({
             )}
           </Card>
 
-          {/* Measurements */}
-          {measurement && (
-            <Card title="Roof Measurements" icon={Ruler}>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Detail label="Total Squares" value={`${measurement.totalSquares}`} />
-                <Detail label="Pitch" value={measurement.pitch ?? "—"} />
-                <Detail label="Waste %" value={`${measurement.wastePct}%`} />
-                <Detail label="Ridge (lf)" value={`${measurement.ridgeLf}`} />
-                <Detail label="Valley (lf)" value={`${measurement.valleyLf}`} />
-                <Detail label="Eave (lf)" value={`${measurement.eaveLf}`} />
-              </div>
-            </Card>
-          )}
-
           {/* Notes */}
           <Card title="Notes & Activity">
             {canNote && <NoteForm leadId={lead.id} />}
@@ -287,10 +268,8 @@ export default async function LeadDetailPage({
               ))}
             </ul>
           </Card>
-            </div>
-
-            {/* ── Claim ── */}
-            <div data-deal-tab="claim" className="space-y-6">
+          {/* Claim — folded into Overview. Roof info / line items / supplements
+              now live in Scope of Work; only claim tracking + amounts remain. */}
           {claim ? (
             <ClaimInfoCard
               leadId={lead.id}
@@ -306,20 +285,10 @@ export default async function LeadDetailPage({
                 adjusterPhone: claim.adjusterPhone,
                 adjusterEmail: claim.adjusterEmail,
                 adjusterMeetingAt: claim.adjusterMeetingAt ? claim.adjusterMeetingAt.toISOString() : null,
-                roofSquares: claim.roofSquares,
-                wasteFactorPct: claim.wasteFactorPct,
-                pitch: claim.pitch,
-                storyCount: claim.storyCount,
                 deductible: claim.deductible,
                 rcv: claim.rcv,
                 acv: claim.acv,
                 depreciation: claim.depreciation,
-                supplementOpportunities: Array.isArray(claim.supplementOpportunities)
-                  ? (claim.supplementOpportunities as string[])
-                  : [],
-                lineItems: claim.lineItems.map((li) => ({
-                  id: li.id, code: li.code, description: li.description, quantity: li.quantity, unit: li.unit, unitPrice: li.unitPrice,
-                })),
               }}
             />
           ) : (
@@ -354,6 +323,21 @@ export default async function LeadDetailPage({
             <div data-deal-tab="production" className="space-y-6">
           {/* Production (job): crew, QC, daily reports, site & install photos */}
           <Card title="Production" icon={Hammer}>
+            {can(user, "update", "Lead") && (
+              <div className="mb-6 flex items-center justify-between gap-2 border-b border-border pb-4">
+                <div>
+                  <p className="text-sm font-medium">Aerial roof measurements</p>
+                  <p className="text-xs text-muted-foreground">Trace the roof to estimate squares for the scope.</p>
+                </div>
+                <RoofReportButton
+                  leadId={lead.id}
+                  address={roofAddress || `${lead.firstName} ${lead.lastName}`}
+                  initialFacets={roofReport?.facets ?? []}
+                  initialWaste={roofReport?.wastePct ?? 12}
+                  hasReport={!!roofReport}
+                />
+              </div>
+            )}
             {!project ? (
               canManageProd ? (
                 <StartProductionButton leadId={lead.id} />
@@ -498,15 +482,8 @@ export default async function LeadDetailPage({
           <Card title="Summary">
             <div className="space-y-3">
               <Detail label="Project Type" value={serviceTypeLabel(lead.serviceType)} />
-              <Detail label="Estimated Value" value={fmt.money(lead.value)} />
               {propertyValueLine && <Detail label="Property Value" value={propertyValueLine} />}
               {lastSaleLine && <Detail label="Last Sale" value={lastSaleLine} />}
-              {roofReport && (
-                <Detail
-                  label="Roof"
-                  value={`${roofReport.squares.toFixed(1)} sq · ${roofReport.predominantPitch ?? "—"} pitch`}
-                />
-              )}
               <Detail
                 label="Assigned Rep"
                 value={
@@ -517,8 +494,8 @@ export default async function LeadDetailPage({
               />
               <Detail label="Claim Status" value={lead.claimStatus.replace(/_/g, " ")} />
               <Detail
-                label="Appointment"
-                value={lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not set"}
+                label="Appointment Date"
+                value={lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not scheduled"}
               />
               <Detail label="Created" value={fmt.date(lead.createdAt)} />
             </div>
@@ -528,9 +505,12 @@ export default async function LeadDetailPage({
               leadId={lead.id}
               disposition={lead.appointmentDisposition}
               appointmentNote={lead.appointmentNote}
+              appointmentNotes={appointmentNotes}
               dispositions={appointmentDispositions}
               inspectionOutcome={lead.inspectionOutcome}
               inspectionNote={lead.inspectionNote}
+              inspectionNotes={inspectionNotes}
+              inspectionOutcomes={inspectionOutcomes}
               claim={
                 claim
                   ? {

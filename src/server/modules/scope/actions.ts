@@ -185,6 +185,18 @@ export async function updateScopePaFeePctAction(input: {
   return { ok: true };
 }
 
+export async function updateScopeDeductibleAction(input: {
+  leadId: string;
+  estDeductibleCents: number;
+}): Promise<Result> {
+  const ensured = await ensureScope(input.leadId);
+  if (!ensured.ok) return ensured;
+  const cents = Number.isFinite(input.estDeductibleCents) ? Math.max(0, Math.round(input.estDeductibleCents)) : 0;
+  await prisma.scopeOfWork.update({ where: { id: ensured.scopeId }, data: { estDeductibleCents: cents } });
+  revalidatePath(`/portal/leads/${input.leadId}`);
+  return { ok: true };
+}
+
 export async function deleteScopeLineAction(input: { id: string; leadId: string }): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "update", "Scope")) return { ok: false, error: "Not allowed." };
@@ -261,6 +273,74 @@ export async function loadScopeTemplateAction(leadId: string): Promise<Result> {
     })),
   });
   revalidatePath(`/portal/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Load the master Scope of Work Catalog (active items) as catalog-linked lines.
+ *  Cost & supplement then come from the deal's selected templates. Skips catalog
+ *  items already on the sheet so it's safe to click more than once. */
+export async function loadFromCatalogAction(leadId: string): Promise<Result> {
+  const ensured = await ensureScope(leadId);
+  if (!ensured.ok) return ensured;
+
+  const items = await prisma.scopeCatalogItem.findMany({
+    where: { companyId: ensured.companyId, isActive: true },
+    orderBy: [{ category: "asc" }, { subcategory: "asc" }, { position: "asc" }],
+  });
+  if (items.length === 0) return { ok: false, error: "The Scope of Work catalog is empty. Add items in Settings → Scope of Work Catalog." };
+
+  const already = new Set(
+    (await prisma.scopeLine.findMany({ where: { scopeId: ensured.scopeId, catalogItemId: { not: null } }, select: { catalogItemId: true } }))
+      .map((l) => l.catalogItemId)
+  );
+  const toAdd = items.filter((i) => !already.has(i.id));
+  if (toAdd.length === 0) return { ok: false, error: "Every active catalog item is already on this scope." };
+
+  let position = await prisma.scopeLine.count({ where: { scopeId: ensured.scopeId } });
+  await prisma.scopeLine.createMany({
+    data: toAdd.map((i) => ({
+      companyId: ensured.companyId,
+      scopeId: ensured.scopeId,
+      position: position++,
+      catalogItemId: i.id,
+      category: i.category,
+      description: i.description,
+      quantity: 0,
+      unit: i.unit,
+      insuranceUnitPrice: 0,
+    })),
+  });
+  revalidatePath(`/portal/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Set the deal's selected cost / supplement pricing templates (or clear with null). */
+export async function updateScopeTemplatesAction(input: {
+  leadId: string;
+  costTemplateId?: string | null;
+  supplementTemplateId?: string | null;
+}): Promise<Result> {
+  const ensured = await ensureScope(input.leadId);
+  if (!ensured.ok) return ensured;
+
+  const data: { costTemplateId?: string | null; supplementTemplateId?: string | null } = {};
+  if (input.costTemplateId !== undefined) {
+    if (input.costTemplateId) {
+      const ok = await prisma.scopeCostTemplate.findFirst({ where: { id: input.costTemplateId, companyId: ensured.companyId }, select: { id: true } });
+      if (!ok) return { ok: false, error: "Cost template not found." };
+    }
+    data.costTemplateId = input.costTemplateId || null;
+  }
+  if (input.supplementTemplateId !== undefined) {
+    if (input.supplementTemplateId) {
+      const ok = await prisma.scopeSupplementTemplate.findFirst({ where: { id: input.supplementTemplateId, companyId: ensured.companyId }, select: { id: true } });
+      if (!ok) return { ok: false, error: "Supplement template not found." };
+    }
+    data.supplementTemplateId = input.supplementTemplateId || null;
+  }
+
+  await prisma.scopeOfWork.update({ where: { id: ensured.scopeId }, data });
+  revalidatePath(`/portal/leads/${input.leadId}`);
   return { ok: true };
 }
 
