@@ -24,8 +24,8 @@ export type EmailBrand = {
 // The CARD stays dark (the focal panel); the page FIELD behind it is a clearly
 // lighter gray so the dark card lifts off it instead of merging into one block.
 const C = {
-  pageTop: "#3c3c44",
-  pageBottom: "#2d2d34",
+  pageTop: "#2a2a30",
+  pageBottom: "#1f1f24",
   card: "#17171b",
   cardBorder: "rgba(255,255,255,0.07)",
   hairline: "rgba(255,255,255,0.10)",
