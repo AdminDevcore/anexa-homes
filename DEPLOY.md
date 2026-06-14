@@ -28,16 +28,18 @@ git push -u origin HEAD            # pushes the current branch
 | Var | Value |
 |---|---|
 | `DATABASE_URL` | Neon pooled connection string |
-| `AUTH_SECRET` (and/or `NEXTAUTH_SECRET`) | `openssl rand -base64 32` |
-| `NEXTAUTH_URL` / `NEXT_PUBLIC_APP_URL` | `https://<your-vercel-domain>` |
+| `AUTH_SECRET` | `openssl rand -base64 32` |
+| `AUTH_TRUST_HOST` | `true` (required behind Vercel's proxy) |
+| `NEXT_PUBLIC_APP_URL` | `https://<your-vercel-domain>` (used for reset/invite links) |
 | `STORAGE_DRIVER` | `s3` |
 | `STORAGE_S3_BUCKET` | your bucket name |
 | `AWS_REGION` | bucket region |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | S3 credentials (or R2 equivalents) |
-| `RESEND_API_KEY` | (optional) email — invites, pay stubs, 1099 |
-| `TWILIO_*` | (optional) SMS |
+| `RESEND_API_KEY` + `NOTIFY_EMAIL_FROM` | (optional) email — invites, pay stubs, 1099 |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | (optional) SMS |
 
-(Confirm the exact auth var names against `src/server/auth/*` + `.env.example`.)
+⚠️ **Do NOT set in prod:** `DEV_AUTH_BYPASS` and `NEXT_PUBLIC_DEMO_MODE` — these are
+dev-only and would be a security hole live.
 
 4. Deploy.
 
