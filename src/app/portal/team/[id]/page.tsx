@@ -13,6 +13,7 @@ import { initials } from "@/lib/format";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TeamMemberActions } from "@/components/portal/team-member-actions";
 import { CommissionOverrides } from "@/components/portal/commission-overrides";
+import { RepVendorLink } from "@/components/portal/rep-vendor-link";
 import { prisma } from "@/server/db/client";
 
 export const metadata = { title: "Team member" };
@@ -65,6 +66,15 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
         }),
       ])
     : [[], []];
+
+  // Sales reps are 1099 contractors — show their linked vendor + let admins reassign it.
+  const showRepVendor = canEdit && detail.role === "sales_rep";
+  const [companyVendors, linkedVendor] = showRepVendor
+    ? await Promise.all([
+        prisma.bookkeepingVendor.findMany({ where: { companyId: user.companyId }, orderBy: { name: "asc" }, select: { id: true, name: true, is1099: true } }),
+        prisma.bookkeepingVendor.findFirst({ where: { companyId: user.companyId, userId: detail.id }, select: { id: true } }),
+      ])
+    : [[], null];
 
   const links = [
     { label: "Assigned appointments", value: detail.activity.assignedLeads, href: "/portal/leads" },
@@ -278,6 +288,10 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
             <div className="rounded-xl border border-dashed border-border bg-card/50 p-5 text-sm text-muted-foreground">
               View only — editing roles and status is limited to admins.
             </div>
+          )}
+
+          {showRepVendor && (
+            <RepVendorLink userId={detail.id} vendors={companyVendors} currentVendorId={linkedVendor?.id ?? null} />
           )}
 
           {showOverrides && (

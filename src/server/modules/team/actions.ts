@@ -9,6 +9,7 @@ import { can } from "@/server/rbac/guards";
 import { sendEmail } from "@/server/modules/notifications/delivery";
 import { inviteEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
+import { ensureRepVendor } from "@/server/modules/bookkeeping/rep-vendor";
 import { roleLabel } from "@/lib/roles";
 
 function fail(error: string) {
@@ -171,8 +172,27 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
       ...(roleChanged || statusChanged ? { sessionVersion: { increment: 1 } } : {}),
     },
   });
+  // A sales rep is paid as a 1099 contractor — make sure they have a vendor.
+  if (effectiveRole === "sales_rep") await ensureRepVendor(me.companyId, target.id);
   revalidatePath("/portal/team");
   revalidatePath(`/portal/team/${target.id}`);
+  return { ok: true as const };
+}
+
+/** Link a member to a specific 1099 contractor vendor (or clear the link). */
+export async function setRepVendorAction(userId: string, vendorId: string | null) {
+  const me = await requireUser();
+  if (!can(me, "update", "User")) return fail("Not allowed.");
+  const target = await prisma.user.findFirst({ where: { id: userId, companyId: me.companyId }, select: { id: true } });
+  if (!target) return fail("User not found.");
+  // One vendor per user: release any current link, then attach the chosen one.
+  await prisma.bookkeepingVendor.updateMany({ where: { companyId: me.companyId, userId }, data: { userId: null } });
+  if (vendorId) {
+    const v = await prisma.bookkeepingVendor.findFirst({ where: { id: vendorId, companyId: me.companyId }, select: { id: true } });
+    if (!v) return fail("Vendor not found.");
+    await prisma.bookkeepingVendor.update({ where: { id: v.id }, data: { userId } });
+  }
+  revalidatePath(`/portal/team/${userId}`);
   return { ok: true as const };
 }
 

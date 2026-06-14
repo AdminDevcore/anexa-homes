@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { hashPassword } from "@/server/auth/password";
+import { ensureRepVendor } from "@/server/modules/bookkeeping/rep-vendor";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -47,11 +48,13 @@ export async function acceptInviteAction(input: z.infer<typeof acceptSchema>) {
   // Next sequential employee number for this company (join order = rank).
   const last = await prisma.user.aggregate({ where: { companyId: inv.companyId }, _max: { employeeNo: true } });
   const employeeNo = (last._max.employeeNo ?? 0) + 1;
-  await prisma.$transaction([
+  const [createdUser] = await prisma.$transaction([
     prisma.user.create({
       data: { companyId: inv.companyId, email: inv.email, firstName, lastName, role: inv.role, status: "active", passwordHash, employeeNo },
     }),
     prisma.invitation.update({ where: { id: inv.id }, data: { acceptedAt: new Date() } }),
   ]);
+  // A new sales rep automatically becomes a 1099 contractor vendor in bookkeeping.
+  if (inv.role === "sales_rep") await ensureRepVendor(inv.companyId, createdUser.id);
   return { ok: true as const, email: inv.email };
 }
