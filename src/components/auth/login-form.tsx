@@ -32,6 +32,12 @@ export function LoginForm({ next }: { next?: string }) {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
 
+  // Full-page navigation on success → discards the client Router Cache so no prior
+  // account's cached pages can show for the user who just signed in.
+  React.useEffect(() => {
+    if (state?.redirectTo) window.location.assign(state.redirectTo);
+  }, [state]);
+
   function fillDemo(demoEmail: string) {
     setEmail(demoEmail);
     setPassword("Passw0rd!");
@@ -85,10 +91,10 @@ export function LoginForm({ next }: { next?: string }) {
         <Button
           type="submit"
           size="lg"
-          disabled={pending}
+          disabled={pending || !!state?.redirectTo}
           className="glass-pill-gold w-full border-0 text-white hover:text-white"
         >
-          {pending ? (
+          {pending || state?.redirectTo ? (
             <>
               <Loader2 className="size-4 animate-spin" /> Signing in…
             </>

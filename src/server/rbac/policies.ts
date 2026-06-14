@@ -18,6 +18,14 @@ export function managerTeamUserFilter(managerId: string): Prisma.UserWhereInput 
 }
 
 /**
+ * A Prisma `Project` filter matching the jobs an installer is assigned to via
+ * their crew. Use against a Project relation, e.g. `{ project: installerProjectFilter(id) }`.
+ */
+export function installerProjectFilter(userId: string): Prisma.ProjectWhereInput {
+  return { crewAssignments: { some: { crew: { members: { some: { userId } } } } } };
+}
+
+/**
  * Returns a Prisma `where` fragment that scopes a list query to exactly the rows
  * the user is allowed to see. ALWAYS spread this into queries that read tenant data.
  *
@@ -53,7 +61,17 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
         const team = managerTeamUserFilter(user.userId);
         return { ...base, OR: [{ assignedRep: team }, { createdBy: team }] };
       }
-      return base;
+      if (role === "installer") {
+        // Installers only see leads whose job they're assigned to (via their crew).
+        return { ...base, project: installerProjectFilter(user.userId) };
+      }
+      if (role === "customer") {
+        // A customer only ever sees their own deal.
+        return { ...base, customerUserId: user.userId };
+      }
+      if (role === "accounting") return base; // financial role: company-wide read.
+      // Any other non-privileged role sees nothing by default (deny-by-default).
+      return { ...base, id: "__none__" };
     }
 
     case "Project": {
@@ -67,18 +85,17 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
         return { ...base, lead: { createdById: user.userId } };
       }
       if (role === "installer") {
-        return {
-          ...base,
-          crewAssignments: {
-            some: { crew: { members: { some: { userId: user.userId } } } },
-          },
-        };
+        return { ...base, ...installerProjectFilter(user.userId) };
+      }
+      if (role === "customer") {
+        return { ...base, lead: { customerUserId: user.userId } };
       }
       if (role === "manager") {
         const team = managerTeamUserFilter(user.userId);
         return { ...base, lead: { OR: [{ assignedRep: team }, { createdBy: team }] } };
       }
-      return base;
+      if (role === "accounting") return base; // financial role: company-wide read.
+      return { ...base, id: "__none__" };
     }
 
     case "Commission": {
@@ -104,11 +121,19 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
       if (role === "marketing") {
         return { ...base, lead: { createdById: user.userId } };
       }
+      if (role === "installer") {
+        // Documents on jobs the installer's crew is assigned to.
+        return { ...base, lead: { project: installerProjectFilter(user.userId) } };
+      }
+      if (role === "customer") {
+        return { ...base, lead: { customerUserId: user.userId } };
+      }
       if (role === "manager") {
         const team = managerTeamUserFilter(user.userId);
         return { ...base, lead: { OR: [{ assignedRep: team }, { createdBy: team }] } };
       }
-      return base;
+      if (role === "accounting") return base;
+      return { ...base, id: "__none__" };
     }
 
     case "Task": {
