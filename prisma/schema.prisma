@@ -1169,6 +1169,10 @@ model DocumentSigner {
   signedAt      DateTime?
   ip            String?
   userAgent     String?
+  // Geolocation captured at signing (only if the signer grants browser permission).
+  latitude      Float?
+  longitude     Float?
+  geoAccuracy   Float? // meters
   createdAt     DateTime           @default(now())
 
   values DocumentFieldValue[]

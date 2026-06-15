@@ -3,7 +3,7 @@
 import * as React from "react";
 import SignatureCanvas from "react-signature-canvas";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, PenLine, Type, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Loader2, PenLine, Type, ShieldCheck, MapPin, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,21 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
   const [sigOpen, setSigOpen] = React.useState(false);
   const [done, setDone] = React.useState(false);
   const [pending, setPending] = React.useState(false);
+  const [geo, setGeo] = React.useState<{ latitude: number; longitude: number; accuracy: number } | null>(null);
+  const [geoStatus, setGeoStatus] = React.useState<"idle" | "loading" | "granted" | "denied">("idle");
+
+  function captureLocation() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) { setGeoStatus("denied"); return; }
+    setGeoStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGeo({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy });
+        setGeoStatus("granted");
+      },
+      () => setGeoStatus("denied"),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }
 
   const pages = snapshot.pages?.length ? snapshot.pages : [{ width: 612, height: 792 }];
   const sigFields = signerFields.filter((f) => f.type === "signature" || f.type === "initials");
@@ -74,6 +89,7 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
       consent,
       signatureType: "drawn",
       values,
+      geo,
     });
     setPending(false);
     if (res.ok) {
@@ -231,6 +247,23 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
               I agree to use electronic records and signatures (ESIGN/UETA).
             </span>
           </label>
+          <div className="flex items-center gap-2">
+            {geoStatus === "granted" ? (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700" title={geo ? `${geo.latitude.toFixed(5)}, ${geo.longitude.toFixed(5)}` : ""}>
+                <Check className="size-3.5" /> Location added
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={captureLocation}
+                disabled={geoStatus === "loading"}
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                title="Optional: add your location to the signing record"
+              >
+                {geoStatus === "loading" ? <Loader2 className="size-3.5 animate-spin" /> : <MapPin className="size-3.5" />}
+                {geoStatus === "denied" ? "Location unavailable" : "Add my location"}
+              </button>
+            )}
           <Button
             onClick={submit}
             disabled={pending || !consent}
@@ -240,6 +273,7 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
             {pending ? <Loader2 className="size-4 animate-spin" /> : <PenLine className="size-4" />}
             Finish &amp; Sign
           </Button>
+          </div>
         </div>
       </div>
 

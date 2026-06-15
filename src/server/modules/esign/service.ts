@@ -381,6 +381,8 @@ export type SignSubmit = {
   consent: boolean;
   signatureType: "typed" | "drawn";
   values: Record<string, string>; // fieldId -> value
+  // Optional geolocation, only present if the signer granted browser permission.
+  geo?: { latitude: number; longitude: number; accuracy: number } | null;
 };
 
 export async function recordSignatureByToken(
@@ -454,6 +456,9 @@ export async function recordSignatureByToken(
         signedAt: new Date(),
         ip: meta.ip,
         userAgent: meta.userAgent,
+        latitude: input.geo?.latitude ?? null,
+        longitude: input.geo?.longitude ?? null,
+        geoAccuracy: input.geo?.accuracy ?? null,
       },
     });
 
@@ -524,7 +529,13 @@ async function finalizePackage(packageId: string) {
     ctx,
     values,
     sourcePdf,
-    signers: pkg.signers.map((s) => ({ name: s.name, email: s.email, signedAt: s.signedAt, ip: s.ip })),
+    documentId: pkg.id,
+    completedAt: new Date(),
+    signers: pkg.signers.map((s) => ({
+      name: s.name, email: s.email, signedAt: s.signedAt, ip: s.ip, role: s.role, status: s.status,
+      userAgent: s.userAgent, consentAt: s.consentAt, viewedAt: s.viewedAt,
+      latitude: s.latitude, longitude: s.longitude, geoAccuracy: s.geoAccuracy,
+    })),
     events: pkg.events.map((e) => ({
       type: e.type,
       actor: e.actor,

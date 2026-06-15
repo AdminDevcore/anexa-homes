@@ -30,12 +30,28 @@ export type SignedPdfArgs = {
   snapshot: Snapshot;
   ctx: AutofillContext;
   values: Record<string, FilledValue>;
-  signers: { name: string; email: string | null; signedAt: Date | null; ip: string | null }[];
+  signers: {
+    name: string;
+    email: string | null;
+    signedAt: Date | null;
+    ip: string | null;
+    role?: string | null;
+    status?: string | null;
+    userAgent?: string | null;
+    consentAt?: Date | null;
+    viewedAt?: Date | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    geoAccuracy?: number | null;
+  }[];
   events: { type: string; actor: string | null; ip: string | null; createdAt: Date; metadata: unknown }[];
   // When provided, fields are stamped onto this existing PDF instead of generated pages.
   sourcePdf?: Buffer | null;
   // Append the signer/audit certificate page (default true). Off for previews.
   certificate?: boolean;
+  // Metadata for the certificate of completion.
+  documentId?: string | null;
+  completedAt?: Date | null;
 };
 
 const GOLD = rgb(0.75, 0.63, 0.37);
@@ -117,62 +133,122 @@ export async function generateSignedPdf(args: SignedPdfArgs): Promise<Buffer> {
     }
   }
 
-  // Certificate of completion page (appended in both modes, unless previewing).
+  // Certificate of completion (appended in both modes, unless previewing).
   if (args.certificate !== false) {
-    drawCertificate(doc.addPage([612, 792]), { font, bold }, args);
+    const contentPages = doc.getPageCount();
+    renderCertificate(doc, { font, bold, oblique }, args, contentPages);
   }
 
   const bytes = await doc.save();
   return Buffer.from(bytes);
 }
 
-function drawCertificate(
-  page: PDFPage,
-  fonts: { font: PDFFont; bold: PDFFont },
-  args: SignedPdfArgs
+// WinAnsi-safe + compact device string from a user agent.
+function safe(s: string): string {
+  return (s ?? "").replace(/[^\x20-\x7E]/g, (c) => (({ "—": "-", "–": "-", "·": "-", "•": "*" } as Record<string, string>)[c] ?? ""));
+}
+function fmtTs(d: Date | null | undefined): string {
+  if (!d) return "—";
+  return `${d.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" })} UTC`;
+}
+function deviceFrom(ua: string | null | undefined): string {
+  if (!ua) return "Unknown device";
+  const os = /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /iPhone|iPad|iOS/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Linux/.test(ua) ? "Linux" : "Unknown OS";
+  const br = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : /Firefox\//.test(ua) ? "Firefox" : "Browser";
+  return `${br} on ${os}`;
+}
+
+function renderCertificate(
+  doc: PDFDocument,
+  fonts: { font: PDFFont; bold: PDFFont; oblique: PDFFont },
+  args: SignedPdfArgs,
+  contentPages: number,
 ) {
   const { font, bold } = fonts;
-  const W = page.getWidth();
-  let y = page.getHeight() - 60;
+  const W = 612, H = 792, M = 56;
+  const GREEN = rgb(0.05, 0.5, 0.3);
+  let page = doc.addPage([W, H]);
+  let y = H - 56;
 
-  page.drawRectangle({ x: 0, y: page.getHeight() - 6, width: W, height: 6, color: GOLD });
-  page.drawText("Certificate of Completion", { x: 56, y, size: 18, font: bold, color: INK });
-  y -= 22;
-  page.drawText(`Document: ${args.title}`, { x: 56, y, size: 10, font, color: GRAY });
-  y -= 30;
+  const head = (p: PDFPage) => {
+    p.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: GOLD });
+  };
+  head(page);
+  const ensure = (need: number) => { if (y - need < 56) { page = doc.addPage([W, H]); head(page); y = H - 56; } };
+  const txt = (t: string, x: number, size: number, f: PDFFont = font, c = INK) => page.drawText(safe(t), { x, y, size, font: f, color: c });
+  const right = (t: string, rx: number, size: number, f: PDFFont = font, c = INK) => page.drawText(safe(t), { x: rx - f.widthOfTextAtSize(safe(t), size), y, size, font: f, color: c });
 
-  page.drawText("Signers", { x: 56, y, size: 12, font: bold, color: INK });
+  // Title
+  txt("Certificate of Completion", M, 19, bold); y -= 16;
+  txt("Electronic Record & Signature Audit Trail", M, 9.5, font, GRAY); y -= 24;
+
+  // Document summary box
+  const docId = (args.documentId ?? "").slice(0, 8).toUpperCase();
+  const summary: [string, string][] = [
+    ["Document", args.title],
+    ["Document ID", docId ? `AH-DOC-${docId}` : "—"],
+    ["Status", "Completed - all parties signed"],
+    ["Completed", fmtTs(args.completedAt ?? args.signers.map((s) => s.signedAt).filter(Boolean).sort().at(-1) ?? null)],
+    ["Pages", `${contentPages} content page${contentPages === 1 ? "" : "s"} + this certificate`],
+    ["Signers", `${args.signers.length}`],
+  ];
+  const boxTop = y;
+  const boxH = summary.length * 16 + 14;
+  page.drawRectangle({ x: M, y: y - boxH + 6, width: W - 2 * M, height: boxH, color: rgb(0.975, 0.975, 0.98), borderColor: rgb(0.88, 0.88, 0.9), borderWidth: 0.6 });
+  y = boxTop - 8;
+  for (const [k, v] of summary) { txt(k, M + 12, 9, bold); txt(v, M + 130, 9, font, INK); y -= 16; }
   y -= 18;
+
+  // Signers
+  ensure(20);
+  txt("Signers", M, 12.5, bold); y -= 6;
+  page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.6, color: rgb(0.86, 0.86, 0.89) }); y -= 18;
+
   for (const s of args.signers) {
-    const line = `${s.name}${s.email ? ` <${s.email}>` : ""} — signed ${
-      s.signedAt ? s.signedAt.toISOString() : "—"
-    } — IP ${s.ip ?? "—"}`;
-    page.drawText(line, { x: 64, y, size: 9, font, color: INK });
+    ensure(108);
+    const cardTop = y + 6;
+    txt(s.name || "Signer", M + 12, 11, bold);
+    if (s.role) right(safe(s.role).replace(/_/g, " "), W - M - 12, 8.5, bold, GOLD);
+    y -= 15;
+    const rows: [string, string][] = [
+      ["Email", s.email || "—"],
+      ["Status", s.status === "signed" || s.signedAt ? "Signed" : (s.status ?? "—")],
+      ["Consented", fmtTs(s.consentAt)],
+      ["Viewed", fmtTs(s.viewedAt)],
+      ["Signed", fmtTs(s.signedAt)],
+      ["IP address", s.ip || "Not recorded"],
+      ["Device", deviceFrom(s.userAgent)],
+      ["Location", s.latitude != null && s.longitude != null
+        ? `${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}${s.geoAccuracy != null ? ` (+/- ${Math.round(s.geoAccuracy)} m)` : ""}`
+        : "Not shared by signer"],
+    ];
+    for (const [k, v] of rows) { txt(k, M + 18, 8.5, font, GRAY); txt(v, M + 120, 8.5, font, INK); y -= 12.5; }
+    // card border
+    page.drawRectangle({ x: M, y: y + 4, width: W - 2 * M, height: cardTop - (y + 4), borderColor: rgb(0.88, 0.88, 0.9), borderWidth: 0.6 });
     y -= 14;
   }
 
-  y -= 16;
-  page.drawText("Audit Trail (hash-chained, tamper-evident)", { x: 56, y, size: 12, font: bold, color: INK });
-  y -= 16;
+  // Audit trail
+  ensure(30);
+  y -= 4;
+  txt("Audit Trail", M, 12.5, bold);
+  right("hash-chained - tamper-evident", W - M, 8, font, GRAY); y -= 6;
+  page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.6, color: rgb(0.86, 0.86, 0.89) }); y -= 16;
   for (const e of args.events) {
+    ensure(22);
     const hash = ((e.metadata as { hash?: string }) ?? {}).hash ?? "";
-    const line = `${e.createdAt.toISOString()}  ${e.type}  ${e.actor ?? "system"}  ${e.ip ?? ""}`;
-    page.drawText(line, { x: 64, y, size: 8, font, color: INK });
-    y -= 11;
-    page.drawText(`   sha256: ${hash.slice(0, 64)}`, { x: 64, y, size: 7, font, color: GRAY });
-    y -= 13;
-    if (y < 90) break;
+    txt(fmtTs(e.createdAt), M + 4, 8, font, GRAY);
+    txt(`${safe(e.type).replace(/_/g, " ")}  -  ${e.actor ?? "system"}${e.ip ? `  -  ${e.ip}` : ""}`, M + 150, 8, font, INK);
+    y -= 10;
+    if (hash) { txt(`sha256: ${hash.slice(0, 64)}`, M + 150, 6.5, font, GRAY); y -= 12; } else y -= 2;
   }
 
-  page.drawText(
-    "Electronically signed under the U.S. ESIGN Act and UETA. Signers consented to use",
-    { x: 56, y: 60, size: 8, font, color: GRAY }
-  );
-  page.drawText("electronic records and signatures. This certificate is part of the legal record.", {
-    x: 56,
-    y: 50,
-    size: 8,
-    font,
-    color: GRAY,
-  });
+  // Legal footer (on the current/last cert page)
+  ensure(40);
+  y = Math.max(y, 70);
+  page.drawLine({ start: { x: M, y: 64 }, end: { x: W - M, y: 64 }, thickness: 0.6, color: rgb(0.86, 0.86, 0.89) });
+  page.drawText(safe("This document was executed electronically under the U.S. ESIGN Act and UETA. Each signer affirmatively"), { x: M, y: 52, size: 7.5, font, color: GRAY });
+  page.drawText(safe("consented to use electronic records and signatures. The audit trail above - including timestamps, IP addresses,"), { x: M, y: 43, size: 7.5, font, color: GRAY });
+  page.drawText(safe("device, and (where shared) geolocation - is hash-chained and forms part of the legal record."), { x: M, y: 34, size: 7.5, font, color: GRAY });
+  void GREEN;
 }
