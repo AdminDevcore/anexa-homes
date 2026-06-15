@@ -70,7 +70,11 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Set a <strong className="font-medium text-foreground">day limit</strong> on a stage to track how long deals sit there. Deals past the limit show in the{" "}
+          <a href="/portal/reports/delinquency" className="underline underline-offset-2 hover:text-foreground">Delinquency report</a> and trigger overdue alerts.
+        </p>
         <StageDialog pipelineId={pipelineId} />
       </div>
       <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
@@ -81,13 +85,14 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
               <span className="font-medium">{s.name}</span>
               {s.isWon && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Won</span>}
               {s.isLost && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">Lost</span>}
-              {s.targetDays > 0 && (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground" title="SLA target days in stage">
-                  ⏱ {s.targetDays}d{s.escalationDays > 0 ? ` +${s.escalationDays}` : ""}
+              {s.escalationDays > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground" title="Extra days after the limit before the deal escalates">
+                  +{s.escalationDays}d escalate
                 </span>
               )}
             </div>
             <div className="flex items-center gap-1">
+              <InlineDayLimit stage={s} />
               <Button variant="ghost" size="icon" disabled={busy || i === 0} onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
               <Button variant="ghost" size="icon" disabled={busy || i === stages.length - 1} onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
               <StageDialog pipelineId={pipelineId} stage={s} trigger={<Button variant="ghost" size="icon"><Pencil className="size-4" /></Button>} />
@@ -96,6 +101,46 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// Quick inline day-limit box on each stage row — type a number, blur/Enter to save.
+function InlineDayLimit({ stage }: { stage: Stage }) {
+  const router = useRouter();
+  const [val, setVal] = React.useState(stage.targetDays > 0 ? String(stage.targetDays) : "");
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => { setVal(stage.targetDays > 0 ? String(stage.targetDays) : ""); }, [stage.targetDays]);
+
+  async function save() {
+    const n = Math.max(0, parseInt(val || "0", 10) || 0);
+    if (n === (stage.targetDays || 0)) return;
+    setSaving(true);
+    const res = await updatePipelineStageAction(stage.id, {
+      name: stage.name, color: stage.color, isWon: stage.isWon, isLost: stage.isLost,
+      targetDays: n, escalationDays: stage.escalationDays, notificationRecipient: stage.notificationRecipient as never,
+      sendInApp: stage.sendInApp, sendEmail: stage.sendEmail, markOverdue: stage.markOverdue,
+    });
+    setSaving(false);
+    if (res.ok) { toast.success(n > 0 ? `Day limit set to ${n}` : "Day limit removed"); router.refresh(); }
+    else toast.error(res.error);
+  }
+
+  return (
+    <div className="mr-1 flex items-center gap-1.5" title="Max days a deal should stay in this stage before it's flagged delinquent. Blank = no limit.">
+      <Input
+        type="number"
+        inputMode="numeric"
+        min={0}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        placeholder="—"
+        className="h-8 w-14 text-center text-sm"
+      />
+      <span className="w-12 text-xs text-muted-foreground">{saving ? "saving…" : "day limit"}</span>
     </div>
   );
 }
@@ -186,9 +231,9 @@ function StageDialog({ pipelineId, stage, trigger }: { pipelineId: string; stage
             <p className="text-xs font-semibold text-muted-foreground">⏱ Stage duration tracking</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label className="text-xs">Target days in stage</Label>
+                <Label className="text-xs">Day limit in stage</Label>
                 <Input type="number" inputMode="numeric" value={targetDays} onChange={(e) => setTargetDays(e.target.value)} placeholder="0" />
-                <p className="text-[10px] text-muted-foreground">Max days before alerts trigger. 0 = no tracking.</p>
+                <p className="text-[10px] text-muted-foreground">Days a deal may sit here before it&apos;s flagged delinquent. 0 = no tracking.</p>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Escalation days</Label>
