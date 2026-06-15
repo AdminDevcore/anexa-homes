@@ -82,11 +82,23 @@ export async function runTaskReminders(now: number = Date.now()) {
     co.byRep.set(t.assignee.id, rep);
   }
 
+  // Companies that turned the weekly reminder off in Settings → Notifications.
+  const settings = await prisma.companySettings.findMany({
+    where: { companyId: { in: [...byCompany.keys()] } },
+    select: { companyId: true, weeklyTaskRemindersEnabled: true },
+  });
+  const disabled = new Set(settings.filter((s) => !s.weeklyTaskRemindersEnabled).map((s) => s.companyId));
+
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
   let repDigests = 0;
   let managerDigests = 0;
+  let skippedCompanies = 0;
 
   for (const [companyId, { byRep }] of byCompany) {
+    if (disabled.has(companyId)) {
+      skippedCompanies++;
+      continue;
+    }
     const brand = await emailBrandFor(companyId);
     const send = async (userId: string, email: string | null, subject: string, heading: string, lines: string[]) => {
       if (alreadyNotified.has(userId)) return false;
@@ -133,5 +145,5 @@ export async function runTaskReminders(now: number = Date.now()) {
     }
   }
 
-  return { companies: byCompany.size, repDigests, managerDigests };
+  return { companies: byCompany.size, skippedCompanies, repDigests, managerDigests };
 }

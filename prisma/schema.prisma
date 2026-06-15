@@ -345,6 +345,8 @@ model CompanySettings {
   // Bookkeeping integration (bank / QuickBooks). Key stored for the connector.
   bookkeepingProvider     String? // "quickbooks" | "plaid" | "manual"
   bookkeepingApiKey       String?
+  // Weekly open-task reminder digest (cron). On by default; toggled in Settings.
+  weeklyTaskRemindersEnabled Boolean @default(true)
   updatedAt               DateTime @updatedAt
 
   @@map("company_settings")

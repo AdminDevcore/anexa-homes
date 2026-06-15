@@ -8,6 +8,7 @@ import { ROLES } from "@/server/rbac/matrix";
 import { roleLabel } from "@/lib/roles";
 import { PageHeader } from "@/components/portal/ui";
 import { NotificationRulesManager } from "@/components/portal/notification-rules-manager";
+import { ScheduledRemindersSettings } from "@/components/portal/scheduled-reminders-settings";
 
 const STATUSES = ["not_started", "in_production", "on_hold", "qc", "completed", "closed", "cancelled"];
 
@@ -17,10 +18,11 @@ export default async function NotificationSettingsPage() {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
-  const [rules, pipeline, users] = await Promise.all([
+  const [rules, pipeline, users, settings] = await Promise.all([
     prisma.notificationRule.findMany({ where: { companyId: user.companyId }, orderBy: { createdAt: "desc" } }),
     prisma.pipeline.findFirst({ where: { companyId: user.companyId }, orderBy: { isDefault: "desc" }, include: { stages: { orderBy: { position: "asc" } } } }),
     prisma.user.findMany({ where: { companyId: user.companyId, status: "active" }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
+    prisma.companySettings.findUnique({ where: { companyId: user.companyId }, select: { weeklyTaskRemindersEnabled: true } }),
   ]);
 
   return (
@@ -32,6 +34,7 @@ export default async function NotificationSettingsPage() {
         title="Notification Rules"
         description="Define what triggers a notification, who receives it, and how it's delivered."
       />
+      <ScheduledRemindersSettings weeklyTaskReminders={settings?.weeklyTaskRemindersEnabled ?? true} />
       <NotificationRulesManager
         rules={rules.map((r) => ({
           id: r.id,

@@ -404,6 +404,19 @@ export async function uploadBrandingLogoAction(
   return { ok: true, logoUrl };
 }
 
+/** Toggle the weekly open-task reminder digest (read by the task-reminders cron). */
+export async function setWeeklyTaskRemindersAction(enabled: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  await prisma.companySettings.upsert({
+    where: { companyId: user.companyId },
+    update: { weeklyTaskRemindersEnabled: enabled },
+    create: { companyId: user.companyId, weeklyTaskRemindersEnabled: enabled },
+  });
+  revalidatePath("/portal/settings/notifications");
+  return ok();
+}
+
 const companyIdentitySchema = z.object({
   name: z.string().min(1).max(120),
   address: z.string().max(200).optional().or(z.literal("")),
