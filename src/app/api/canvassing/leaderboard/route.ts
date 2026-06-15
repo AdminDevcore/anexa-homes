@@ -13,6 +13,6 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const raw = searchParams.get("period");
   const period: LeaderboardPeriod = PERIODS.includes(raw as LeaderboardPeriod) ? (raw as LeaderboardPeriod) : "week";
-  const rows = await getLeaderboard(user.companyId, period);
+  const rows = await getLeaderboard(user, period);
   return NextResponse.json({ rows, meId: user.userId });
 }

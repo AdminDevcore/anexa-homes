@@ -237,11 +237,21 @@ function periodStart(period: LeaderboardPeriod): Date | null {
   return d;
 }
 
-export async function getLeaderboard(companyId: string, period: LeaderboardPeriod): Promise<LeaderboardRow[]> {
+export async function getLeaderboard(
+  user: { companyId: string; userId: string; role: Role },
+  period: LeaderboardPeriod
+): Promise<LeaderboardRow[]> {
   const since = periodStart(period);
   const rows = await prisma.knock.findMany({
-    // Only real knocks by a rep count toward the leaderboard.
-    where: { companyId, disposition: { not: "not_knocked" }, repId: { not: null }, ...(since ? { knockedAt: { gte: since } } : {}) },
+    // Role-scoped: admins see the whole company, a manager sees their team, and
+    // a rep sees only their own (and their canvassers') knocks — reps can't view
+    // each other's numbers. Only real knocks by a rep count toward the board.
+    where: {
+      AND: [
+        knockScope(user.companyId, user.userId, user.role),
+        { disposition: { not: "not_knocked" }, repId: { not: null }, ...(since ? { knockedAt: { gte: since } } : {}) },
+      ],
+    },
     select: { repId: true, disposition: true, leadId: true, rep: { select: { firstName: true, lastName: true } } },
   });
 
