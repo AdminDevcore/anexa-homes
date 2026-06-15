@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import {
   Users,
@@ -27,7 +26,6 @@ export const metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const fmt = await currentFormatters();
   const user = await requireUser();
-  if (user.role === "customer") redirect("/portal/customer");
 
   const industry = await getActiveIndustry(user);
   const [stats, leads, projects] = await Promise.all([

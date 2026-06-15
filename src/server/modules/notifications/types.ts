@@ -114,7 +114,6 @@ export const EVENT_DEFS: EventDef[] = [
 export const DYNAMIC_TARGETS = [
   { value: "assigned_rep", label: "Assigned sales rep" },
   { value: "project_manager", label: "Project manager" },
-  { value: "customer", label: "Customer" },
   { value: "lead_creator", label: "Lead creator" },
   { value: "task_assignee", label: "Task assignee" },
   { value: "all_admins", label: "All admins" },

@@ -45,7 +45,8 @@ export const authConfig: NextAuthConfig = {
           where: { email: email.toLowerCase().trim() },
           include: { company: { select: { slug: true } } },
         });
-        if (!user || user.status === "disabled" || user.status === "suspended") {
+        // The customer role is retired — no customer may sign in or access the app.
+        if (!user || user.status === "disabled" || user.status === "suspended" || user.role === "customer") {
           recordFailedLogin(email);
           return null;
         }

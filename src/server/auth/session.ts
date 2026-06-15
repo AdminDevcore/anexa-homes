@@ -53,7 +53,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     },
   });
 
-  if (!live || live.status === "disabled" || live.status === "suspended") {
+  if (!live || live.status === "disabled" || live.status === "suspended" || live.role === "customer") {
     return null;
   }
   if (live.sessionVersion !== session.user.sessionVersion) {
@@ -86,8 +86,7 @@ export async function requireUser(nextPath?: string): Promise<SessionUser> {
   return user;
 }
 
-/** Default landing path for a role after login. */
-export function dashboardPathForRole(role: Role): string {
-  if (role === "customer") return "/portal/customer";
+/** Default landing path for a role after login. (Customer role is retired.) */
+export function dashboardPathForRole(_role: Role): string {
   return "/portal/dashboard";
 }
