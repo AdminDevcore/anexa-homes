@@ -21,13 +21,16 @@ export type Metric = {
   lowerIsBetter?: boolean;
 };
 export type ReportTable = { title: string; columns: string[]; rows: (string | number)[][] };
-export type ReportResult = {
-  type: ReportType;
+/** A report's renderable payload — what PDF/CSV exporters consume. */
+export type RenderableReport = {
   title: string;
   periodLabel: string;
   scopeLabel: string;
   metrics: Metric[];
   tables: ReportTable[];
+};
+export type ReportResult = RenderableReport & {
+  type: ReportType;
 };
 
 export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
@@ -45,6 +48,16 @@ export function allowedReportTypes(role: Role): ReportType[] {
   if (["super_admin", "admin", "accounting", "manager"].includes(role)) types.push("financial");
   if (FINANCE_ROLES.includes(role)) types.push("payroll");
   return types;
+}
+
+/**
+ * Standalone report sections this role may open as its own page — the same set
+ * as {@link allowedReportTypes} plus the Executive Summary scorecard for
+ * finance-capable roles. Order here is the hub display order.
+ */
+export function allowedSections(role: Role): ReportType[] {
+  const types = allowedReportTypes(role);
+  return [...(types.includes("financial") ? (["executive"] as ReportType[]) : []), ...types];
 }
 
 type ReportUser = { companyId: string; userId: string; role: Role };
@@ -204,6 +217,12 @@ export async function buildReport(user: ReportUser, type: ReportType, period: Pe
   if (type === "financial") return buildFinancial(user, period, scope);
   if (type === "payroll") return buildPayroll(user, period, scope);
   return buildOperations(user, period, scope);
+}
+
+/** Build a single standalone section, including the Executive Summary scorecard. */
+export async function buildReportSection(user: ReportUser, type: ReportType, period: Period, scope: ResolvedScope): Promise<ReportResult> {
+  if (type === "executive") return buildExecutive(user, period, scope);
+  return buildReport(user, type, period, scope);
 }
 
 export type MasterReport = {

@@ -135,7 +135,8 @@ const GRANTS: Record<Role, Grant> = {
   manager: {
     Chat: ["create", "read"],
     Canvassing: ALL,
-    User: ["read"],
+    // Sales managers can invite staff (create) but not edit roles (no update/assign).
+    User: ["create", "read"],
     Lead: ["create", "read", "update", "assign"],
     Pipeline: ["read", "update"],
     Project: ["create", "read", "update", "assign"],

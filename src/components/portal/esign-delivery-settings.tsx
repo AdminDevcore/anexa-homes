@@ -3,24 +3,24 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarClock } from "lucide-react";
+import { FileCheck2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { setWeeklyTaskRemindersAction } from "@/server/modules/settings/actions";
+import { setEmailSignedCopyToSignersAction } from "@/server/modules/settings/actions";
 
-/** Scheduled (time-based) reminders — distinct from the event-driven rules below. */
-export function ScheduledRemindersSettings({ weeklyTaskReminders }: { weeklyTaskReminders: boolean }) {
+/** Document delivery — what gets sent to signers when an envelope completes. */
+export function EsignDeliverySettings({ emailSignedCopyToSigners }: { emailSignedCopyToSigners: boolean }) {
   const router = useRouter();
-  const [enabled, setEnabled] = React.useState(weeklyTaskReminders);
+  const [enabled, setEnabled] = React.useState(emailSignedCopyToSigners);
   const [pending, setPending] = React.useState(false);
 
   async function toggle(next: boolean) {
     setEnabled(next); // optimistic
     setPending(true);
-    const res = await setWeeklyTaskRemindersAction(next);
+    const res = await setEmailSignedCopyToSignersAction(next);
     setPending(false);
     if (res.ok) {
-      toast.success(next ? "Weekly task reminders on" : "Weekly task reminders off");
+      toast.success(next ? "Signers will receive a signed copy" : "Signed-copy email turned off");
       router.refresh();
     } else {
       setEnabled(!next); // revert
@@ -32,18 +32,18 @@ export function ScheduledRemindersSettings({ weeklyTaskReminders }: { weeklyTask
     <div className="space-y-3 rounded-xl border border-border bg-card p-6">
       <div>
         <h3 className="flex items-center gap-2 font-medium">
-          <CalendarClock className="size-4 text-gold" /> Scheduled reminders
+          <FileCheck2 className="size-4 text-gold" /> Document delivery
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          Time-based digests sent on a schedule (separate from the event rules below).
+          What signers receive once every party has signed.
         </p>
       </div>
       <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
         <div className="pr-4">
-          <Label className="font-normal">Weekly open-task reminder</Label>
+          <Label className="font-normal">Email signers a copy of the signed document</Label>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Every Monday: each rep gets their open follow-ups (overdue flagged), managers get a rollup of
-            their team, and admins get a company-wide rollup. Anyone who has their own tasks plus a team gets both in one email.
+            When a document is fully executed, email each signer the completed PDF — including the
+            signature audit trail — as an attachment for their records.
           </p>
         </div>
         <Switch checked={enabled} disabled={pending} onCheckedChange={toggle} />

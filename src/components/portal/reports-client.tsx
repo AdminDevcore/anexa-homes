@@ -21,12 +21,15 @@ export function ReportsControls({
   to,
   scope,
   scopeOptions,
+  basePath,
 }: {
   preset: string;
   from: string;
   to: string;
   scope: string;
   scopeOptions: ScopeOption[];
+  /** Where period/scope nav and the PDF/CSV links point, e.g. "/portal/reports/financial". */
+  basePath: string;
 }) {
   const router = useRouter();
   const [customFrom, setCustomFrom] = React.useState(from);
@@ -42,7 +45,7 @@ export function ReportsControls({
       params.set("from", f);
       params.set("to", t);
     }
-    router.push(`/portal/reports?${params.toString()}`);
+    router.push(`${basePath}?${params.toString()}`);
   }
 
   return (
@@ -51,12 +54,12 @@ export function ReportsControls({
         <p className="text-sm text-muted-foreground">One combined report — operations, financials &amp; payroll.</p>
         <div className="flex items-center gap-2">
           <Button asChild size="sm" variant="outline">
-            <a href={`/portal/reports/pdf?${query(preset, scope, customFrom, customTo)}`} target="_blank" rel="noreferrer">
+            <a href={`${basePath}/pdf?${query(preset, scope, customFrom, customTo)}`} target="_blank" rel="noreferrer">
               <FileText className="size-4" /> Download PDF
             </a>
           </Button>
           <Button asChild size="sm" variant="outline">
-            <a href={`/portal/reports/export?${query(preset, scope, customFrom, customTo)}`}>
+            <a href={`${basePath}/export?${query(preset, scope, customFrom, customTo)}`}>
               <Download className="size-4" /> CSV
             </a>
           </Button>

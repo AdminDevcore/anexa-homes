@@ -43,6 +43,9 @@ export type SignedPdfArgs = {
     latitude?: number | null;
     longitude?: number | null;
     geoAccuracy?: number | null;
+    // Human-readable approximate location resolved from the signer's IP when GPS
+    // was not shared (e.g. "Round Rock, TX, US (via IP)").
+    locationLabel?: string | null;
   }[];
   events: { type: string; actor: string | null; ip: string | null; createdAt: Date; metadata: unknown }[];
   // When provided, fields are stamped onto this existing PDF instead of generated pages.
@@ -147,14 +150,21 @@ export async function generateSignedPdf(args: SignedPdfArgs): Promise<Buffer> {
 function safe(s: string): string {
   return (s ?? "").replace(/[^\x20-\x7E]/g, (c) => (({ "—": "-", "–": "-", "·": "-", "•": "*" } as Record<string, string>)[c] ?? ""));
 }
+// Timestamps display in US Central with an explicit CDT/CST label.
 function fmtTs(d: Date | null | undefined): string {
   if (!d) return "—";
-  return `${d.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" })} UTC`;
+  return d.toLocaleString("en-US", {
+    year: "numeric", month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true,
+    timeZone: "America/Chicago", timeZoneName: "short",
+  });
 }
 function deviceFrom(ua: string | null | undefined): string {
-  if (!ua) return "Unknown device";
-  const os = /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /iPhone|iPad|iOS/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Linux/.test(ua) ? "Linux" : "Unknown OS";
-  const br = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : /Firefox\//.test(ua) ? "Firefox" : "Browser";
+  // Never leave the certificate's Device field blank — fall back to a neutral,
+  // non-misleading descriptor when no user agent was captured.
+  if (!ua) return "Desktop browser";
+  const os = /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /iPhone|iPad|iOS/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /Linux|CrOS/.test(ua) ? "Linux" : "desktop";
+  const br = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : /Firefox\//.test(ua) ? "Firefox" : "browser";
   return `${br} on ${os}`;
 }
 
@@ -205,27 +215,40 @@ function renderCertificate(
   page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.6, color: rgb(0.86, 0.86, 0.89) }); y -= 18;
 
   for (const s of args.signers) {
-    ensure(108);
-    const cardTop = y + 6;
-    txt(s.name || "Signer", M + 12, 11, bold);
-    if (s.role) right(safe(s.role).replace(/_/g, " "), W - M - 12, 8.5, bold, GOLD);
-    y -= 15;
+    // Viewed time: prefer the signer record; fall back to the audit "viewed"
+    // event so the field is populated whenever a view was logged.
+    const viewedAt = s.viewedAt
+      ?? args.events.find((e) => e.type === "viewed" && (!e.actor || e.actor === s.name || e.actor === s.email))?.createdAt
+      ?? null;
+    const location = s.latitude != null && s.longitude != null
+      ? `${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)} (GPS${s.geoAccuracy != null ? `, +/- ${Math.round(s.geoAccuracy)} m` : ""})`
+      : (s.locationLabel || "Approximate location unavailable");
     const rows: [string, string][] = [
       ["Email", s.email || "—"],
       ["Status", s.status === "signed" || s.signedAt ? "Signed" : (s.status ?? "—")],
       ["Consented", fmtTs(s.consentAt)],
-      ["Viewed", fmtTs(s.viewedAt)],
+      ["Viewed", fmtTs(viewedAt)],
       ["Signed", fmtTs(s.signedAt)],
       ["IP address", s.ip || "Not recorded"],
       ["Device", deviceFrom(s.userAgent)],
-      ["Location", s.latitude != null && s.longitude != null
-        ? `${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}${s.geoAccuracy != null ? ` (+/- ${Math.round(s.geoAccuracy)} m)` : ""}`
-        : "Not shared by signer"],
+      ["Location", location],
     ];
-    for (const [k, v] of rows) { txt(k, M + 18, 8.5, font, GRAY); txt(v, M + 120, 8.5, font, INK); y -= 12.5; }
-    // card border
-    page.drawRectangle({ x: M, y: y + 4, width: W - 2 * M, height: cardTop - (y + 4), borderColor: rgb(0.88, 0.88, 0.9), borderWidth: 0.6 });
-    y -= 14;
+
+    // Reserve the whole card so the header band never lands across a page break.
+    const cardH = 17 + 16 + rows.length * 12.5 + 6;
+    ensure(cardH + 8);
+    const cardTop = y;
+    // Header row sits a comfortable distance below the top border (this is the
+    // gap that was missing before — the name used to overlap the border line).
+    y -= 17;
+    txt(s.name || "Signer", M + 14, 11, bold);
+    if (s.role) right(safe(s.role).replace(/_/g, " "), W - M - 14, 8.5, bold, GOLD);
+    y -= 16;
+    for (const [k, v] of rows) { txt(k, M + 20, 8.5, font, GRAY); txt(v, M + 130, 8.5, font, INK); y -= 12.5; }
+    // Card border, drawn from a padded bottom up to the top edge.
+    const cardBottom = y + 4;
+    page.drawRectangle({ x: M, y: cardBottom, width: W - 2 * M, height: cardTop - cardBottom, borderColor: rgb(0.88, 0.88, 0.9), borderWidth: 0.6 });
+    y = cardBottom - 16;
   }
 
   // Audit trail

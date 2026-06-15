@@ -5,7 +5,7 @@ import { requireCan } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { putObject, getObject } from "@/server/storage";
 import { fireEvent } from "@/server/modules/notifications/engine";
-import { sendEmail } from "@/server/modules/notifications/delivery";
+import { sendEmail, sendEmailWithAttachments } from "@/server/modules/notifications/delivery";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { generateSignerToken, sha256 } from "./tokens";
@@ -58,6 +58,52 @@ async function emailSigningLink(opts: {
     note: "This link is private to you — please don't forward it.",
   });
   await sendEmail(opts.to, tpl.subject, tpl.text, { fromName, html: tpl.html });
+}
+
+/**
+ * Email each signer a copy of the fully-executed PDF once everyone has signed.
+ * Best-effort per recipient — a failed send never aborts completion. Sent to
+ * every signer with an email (the customer always gets their own copy back).
+ */
+async function emailSignedCopies(opts: {
+  companyId: string;
+  title: string;
+  pdf: Buffer;
+  signers: { name: string; email: string | null }[];
+}): Promise<void> {
+  const recipients = opts.signers.filter((s) => s.email?.includes("@"));
+  if (recipients.length === 0) return;
+
+  const { brand, fromName } = await emailBrandFor(opts.companyId);
+  const filename = `${opts.title.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "document"}.pdf`;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+
+  for (const signer of recipients) {
+    try {
+      const tpl = brandedEmailTemplate({
+        brand,
+        subject: `Signed & complete: ${opts.title}`,
+        preheader: `Your signed copy of "${opts.title}" is attached for your records.`,
+        heading: "Your document is signed and complete",
+        paragraphs: [
+          `Hi ${signer.name},`,
+          `Thanks for signing "${opts.title}". All parties have now signed, so the document is fully executed.`,
+          `A copy of the completed document — including the signature audit trail — is attached to this email for your records.`,
+        ],
+        ...(appUrl ? { cta: { label: "View in your portal", url: `${appUrl}/portal/documents` } } : {}),
+        note: "Please keep this copy for your records.",
+      });
+      await sendEmailWithAttachments(
+        signer.email as string,
+        tpl.subject,
+        tpl.text,
+        [{ filename, content: opts.pdf }],
+        { fromName, html: tpl.html },
+      );
+    } catch (err) {
+      console.error(`[esign] failed to email signed copy to ${signer.email}:`, err);
+    }
+  }
 }
 
 export async function sendForSignature(user: SessionUser, input: SendInput) {
@@ -493,6 +539,62 @@ export async function recordSignatureByToken(
   return { ok: true, completed: false };
 }
 
+// ---------------------------------------------------------------------------
+// Certificate-of-completion signer data
+// ---------------------------------------------------------------------------
+
+/**
+ * Best-effort "City, Region, Country (via IP)" for the certificate when the
+ * signer did not share precise GPS. Returns null on any failure (private IP,
+ * lookup error, or timeout) so PDF generation never blocks on the network.
+ */
+async function locationLabelFromIp(ip: string | null | undefined): Promise<string | null> {
+  if (!ip) return null;
+  // Skip private / loopback / link-local ranges — they don't geolocate.
+  if (/^(10\.|127\.|0\.|192\.168\.|169\.254\.|::1|fe80:|fc00:|172\.(1[6-9]|2\d|3[01])\.)/i.test(ip)) return null;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2500);
+    const res = await fetch(`https://ipapi.co/${encodeURIComponent(ip)}/json/`, {
+      signal: ctrl.signal,
+      headers: { "User-Agent": "AnexaHomes-eSign/1.0" },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const j = (await res.json()) as {
+      city?: string; region?: string; region_code?: string; country_code?: string; error?: boolean;
+    };
+    if (!j || j.error) return null;
+    const parts = [j.city, j.region_code || j.region, j.country_code].filter(Boolean);
+    return parts.length ? `${parts.join(", ")} (via IP)` : null;
+  } catch {
+    return null;
+  }
+}
+
+type SignerRecordForCert = {
+  name: string; email: string | null; signedAt: Date | null; ip: string | null;
+  role: string | null; status: string | null; userAgent: string | null;
+  consentAt: Date | null; viewedAt: Date | null;
+  latitude: number | null; longitude: number | null; geoAccuracy: number | null;
+};
+
+/**
+ * Map DB signers to the certificate payload, resolving an IP-based location
+ * label when precise GPS was not captured. Passing the full field set is what
+ * makes Device / Viewed / Consented / Location render instead of placeholders.
+ */
+async function toCertSigners(signers: SignerRecordForCert[]) {
+  return Promise.all(
+    signers.map(async (s) => ({
+      name: s.name, email: s.email, signedAt: s.signedAt, ip: s.ip, role: s.role, status: s.status,
+      userAgent: s.userAgent, consentAt: s.consentAt, viewedAt: s.viewedAt,
+      latitude: s.latitude, longitude: s.longitude, geoAccuracy: s.geoAccuracy,
+      locationLabel: s.latitude != null && s.longitude != null ? null : await locationLabelFromIp(s.ip),
+    }))
+  );
+}
+
 async function finalizePackage(packageId: string) {
   const pkg = await prisma.documentPackage.findUnique({
     where: { id: packageId },
@@ -531,11 +633,7 @@ async function finalizePackage(packageId: string) {
     sourcePdf,
     documentId: pkg.id,
     completedAt: new Date(),
-    signers: pkg.signers.map((s) => ({
-      name: s.name, email: s.email, signedAt: s.signedAt, ip: s.ip, role: s.role, status: s.status,
-      userAgent: s.userAgent, consentAt: s.consentAt, viewedAt: s.viewedAt,
-      latitude: s.latitude, longitude: s.longitude, geoAccuracy: s.geoAccuracy,
-    })),
+    signers: await toCertSigners(pkg.signers),
     events: pkg.events.map((e) => ({
       type: e.type,
       actor: e.actor,
@@ -573,6 +671,21 @@ async function finalizePackage(packageId: string) {
       data: { fileId: file.id, sha256: sha256(buffer.toString("base64")) },
     });
   });
+
+  // Send every signer their own copy of the fully-executed PDF (best-effort).
+  // Gated by a per-company setting (default on for backwards compatibility).
+  const settings = await prisma.companySettings.findUnique({
+    where: { companyId: pkg.companyId },
+    select: { emailSignedCopyToSigners: true },
+  });
+  if (settings?.emailSignedCopyToSigners ?? true) {
+    await emailSignedCopies({
+      companyId: pkg.companyId,
+      title: pkg.title,
+      pdf: buffer,
+      signers: pkg.signers.map((s) => ({ name: s.name, email: s.email })),
+    });
+  }
 
   await fireEvent({ companyId: pkg.companyId, event: "document_completed", documentId: pkg.id, leadId: pkg.leadId });
 }
@@ -663,7 +776,9 @@ export async function generatePackagePdf(
     ctx,
     values,
     sourcePdf,
-    signers: pkg.signers.map((s) => ({ name: s.name, email: s.email, signedAt: s.signedAt, ip: s.ip })),
+    signers: await toCertSigners(pkg.signers),
+    documentId: pkg.id,
+    completedAt: pkg.completedAt,
     events: pkg.events.map((e) => ({ type: e.type, actor: e.actor, ip: e.ip, createdAt: e.createdAt, metadata: e.metadata })),
   });
   return { buffer, filename: `${pkg.title.replace(/[^a-z0-9]+/gi, "_")}.pdf` };

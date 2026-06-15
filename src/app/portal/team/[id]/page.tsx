@@ -5,7 +5,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getUserDetail, getAssignableReps, getAssignableManagers, ROLE_ORDER } from "@/server/modules/team/queries";
 import { getUserOnboarding } from "@/server/modules/onboarding/queries";
-import { roleLabel } from "@/lib/roles";
+import { roleLabel, assignableRolesFor } from "@/lib/roles";
 import { currentFormatters } from "@/lib/format-server";
 import { currentBranding } from "@/server/branding/resolve";
 import { formatEmployeeNo } from "@/lib/employee";
@@ -42,6 +42,8 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
   const isSelf = detail.id === user.userId;
   const showFull = isPrivileged || isSelf;
   const roles = ROLE_ORDER.map((r) => ({ value: r, label: roleLabel(r) }));
+  // Roles this editor may assign (privileged roles are Super Admin-only).
+  const assignableRoles = assignableRolesFor(user.role) as string[];
   // Sales reps a canvasser can be assigned to (only needed by the editor).
   const assignableReps = canEdit ? await getAssignableReps(user.companyId, detail.id) : [];
   const assignableManagers = canEdit ? await getAssignableManagers(user.companyId, detail.id) : [];
@@ -281,6 +283,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               currentManagerId={detail.managerId}
               managers={assignableManagers}
               roles={roles}
+              assignableRoles={assignableRoles}
               isSuperAdmin={user.role === "super_admin"}
               isSelf={isSelf}
             />

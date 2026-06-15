@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { inviteUserAction } from "@/server/modules/team/actions";
 
-export function TeamInvite({ roles, isSuperAdmin }: { roles: { value: string; label: string }[]; isSuperAdmin: boolean }) {
+export function TeamInvite({ roles }: { roles: { value: string; label: string }[] }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [email, setEmail] = React.useState("");
@@ -20,8 +20,6 @@ export function TeamInvite({ roles, isSuperAdmin }: { roles: { value: string; la
   const [link, setLink] = React.useState<string | null>(null);
   const [emailed, setEmailed] = React.useState(false);
   const [invitedEmail, setInvitedEmail] = React.useState("");
-
-  const selectable = roles.filter((r) => isSuperAdmin || r.value !== "super_admin");
 
   async function invite() {
     if (!email.trim()) return toast.error("Enter an email.");
@@ -81,7 +79,7 @@ export function TeamInvite({ roles, isSuperAdmin }: { roles: { value: string; la
               <Label className="text-xs">Role</Label>
               <Select value={role} onValueChange={setRole}>
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>{selectable.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
+                <SelectContent>{roles.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>

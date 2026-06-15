@@ -417,6 +417,19 @@ export async function setWeeklyTaskRemindersAction(enabled: boolean) {
   return ok();
 }
 
+/** Toggle emailing each signer a copy of the executed PDF on document completion. */
+export async function setEmailSignedCopyToSignersAction(enabled: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  await prisma.companySettings.upsert({
+    where: { companyId: user.companyId },
+    update: { emailSignedCopyToSigners: enabled },
+    create: { companyId: user.companyId, emailSignedCopyToSigners: enabled },
+  });
+  revalidatePath("/portal/settings/notifications");
+  return ok();
+}
+
 const companyIdentitySchema = z.object({
   name: z.string().min(1).max(120),
   address: z.string().max(200).optional().or(z.literal("")),

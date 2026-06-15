@@ -9,6 +9,7 @@ import { roleLabel } from "@/lib/roles";
 import { PageHeader } from "@/components/portal/ui";
 import { NotificationRulesManager } from "@/components/portal/notification-rules-manager";
 import { ScheduledRemindersSettings } from "@/components/portal/scheduled-reminders-settings";
+import { EsignDeliverySettings } from "@/components/portal/esign-delivery-settings";
 
 const STATUSES = ["not_started", "in_production", "on_hold", "qc", "completed", "closed", "cancelled"];
 
@@ -22,7 +23,7 @@ export default async function NotificationSettingsPage() {
     prisma.notificationRule.findMany({ where: { companyId: user.companyId }, orderBy: { createdAt: "desc" } }),
     prisma.pipeline.findFirst({ where: { companyId: user.companyId }, orderBy: { isDefault: "desc" }, include: { stages: { orderBy: { position: "asc" } } } }),
     prisma.user.findMany({ where: { companyId: user.companyId, status: "active" }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
-    prisma.companySettings.findUnique({ where: { companyId: user.companyId }, select: { weeklyTaskRemindersEnabled: true } }),
+    prisma.companySettings.findUnique({ where: { companyId: user.companyId }, select: { weeklyTaskRemindersEnabled: true, emailSignedCopyToSigners: true } }),
   ]);
 
   return (
@@ -35,6 +36,7 @@ export default async function NotificationSettingsPage() {
         description="Define what triggers a notification, who receives it, and how it's delivered."
       />
       <ScheduledRemindersSettings weeklyTaskReminders={settings?.weeklyTaskRemindersEnabled ?? true} />
+      <EsignDeliverySettings emailSignedCopyToSigners={settings?.emailSignedCopyToSigners ?? true} />
       <NotificationRulesManager
         rules={rules.map((r) => ({
           id: r.id,

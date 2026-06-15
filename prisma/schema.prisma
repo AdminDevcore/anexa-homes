@@ -347,6 +347,9 @@ model CompanySettings {
   bookkeepingApiKey       String?
   // Weekly open-task reminder digest (cron). On by default; toggled in Settings.
   weeklyTaskRemindersEnabled Boolean @default(true)
+  // Email each signer a copy of the executed PDF when a document is fully signed.
+  // On by default; toggled in Settings → Notification Rules.
+  emailSignedCopyToSigners   Boolean @default(true)
   updatedAt               DateTime @updatedAt
 
   @@map("company_settings")

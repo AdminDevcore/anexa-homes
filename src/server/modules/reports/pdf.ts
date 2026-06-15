@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
 import { readFile } from "fs/promises";
 import path from "path";
-import type { ReportResult, MasterReport } from "./builders";
+import type { RenderableReport, MasterReport } from "./builders";
 
 // Strip non-WinAnsi chars so drawText never throws.
 function safe(s: string): string {
@@ -10,7 +10,7 @@ function safe(s: string): string {
 
 export type ReportCompany = { name: string; address: string | null; city: string | null; state: string | null; zip: string | null };
 
-export async function buildReportPdf(company: ReportCompany, report: ReportResult): Promise<Uint8Array> {
+export async function buildReportPdf(company: ReportCompany, report: RenderableReport): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);

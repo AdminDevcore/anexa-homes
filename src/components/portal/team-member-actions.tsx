@@ -32,6 +32,7 @@ export function TeamMemberActions({
   currentManagerId,
   managers,
   roles,
+  assignableRoles,
   isSuperAdmin,
   isSelf,
 }: {
@@ -50,6 +51,7 @@ export function TeamMemberActions({
   currentManagerId: string | null;
   managers: { id: string; name: string }[];
   roles: { value: string; label: string }[];
+  assignableRoles: string[];
   isSuperAdmin: boolean;
   isSelf: boolean;
 }) {
@@ -74,7 +76,9 @@ export function TeamMemberActions({
   }
   const industriesKey = (a: Industry[]) => [...a].sort().join(",");
 
-  const selectableRoles = roles.filter((r) => isSuperAdmin || r.value !== "super_admin");
+  // Show roles this editor may assign, plus the member's current role so saving
+  // other fields (title/status) on a privileged member still works.
+  const selectableRoles = roles.filter((r) => assignableRoles.includes(r.value) || r.value === currentRole);
   const showSplit = SPLIT_ROLES.includes(role);
   const showCanvasserRep = role === "canvasser";
   const showRepManager = role === "sales_rep";
