@@ -207,6 +207,21 @@ export function TemplateBuilder({
           )}
         </div>
 
+        {unmappedCount > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+            <AlertCircle className="size-4 shrink-0" />
+            <span>
+              <strong>{unmappedCount}</strong> of {fillable.length} fillable field{fillable.length === 1 ? "" : "s"} {unmappedCount === 1 ? "isn't" : "aren't"} mapped to CRM data — {unmappedCount === 1 ? "it" : "they"} will print <strong>blank</strong> unless the signer fills {unmappedCount === 1 ? "it" : "them"} in.
+            </span>
+            <button
+              onClick={() => setView("mapping")}
+              className="ml-auto inline-flex items-center gap-1 rounded-md border border-amber-400 bg-white px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+            >
+              <ListChecks className="size-3.5" /> Map fields
+            </button>
+          </div>
+        )}
+
         {view === "mapping" ? (
           <MappingOverview fields={fields} labelMap={labelMap} onPick={jumpTo} />
         ) : (
