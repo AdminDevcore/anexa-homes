@@ -100,16 +100,18 @@ export function PortalShell({
           <Link href="/portal/dashboard" className="group inline-flex items-center">
             <div className="flex items-center gap-2">
               {branding.logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={branding.logoUrl} alt={branding.companyName} className="h-7 w-auto" />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={branding.logoUrl} alt={branding.companyName} className="h-7 w-auto" />
+                  <span className="font-display text-base font-semibold tracking-tight">
+                    {branding.companyName}
+                  </span>
+                </>
               ) : (
-                <span className="grid size-7 place-items-center rounded-md bg-foreground text-background text-xs font-bold">
-                  {branding.companyName.slice(0, 2).toUpperCase()}
-                </span>
+                // Default brand: full Anexa lockup (mark + wordmark), dark for the light sidebar.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src="/anexa-lockup-dark.png" alt={branding.companyName} className="h-8 w-auto" />
               )}
-              <span className="font-display text-base font-semibold tracking-tight">
-                {branding.companyName}
-              </span>
             </div>
           </Link>
         </div>
