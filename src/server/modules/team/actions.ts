@@ -10,7 +10,7 @@ import { sendEmail } from "@/server/modules/notifications/delivery";
 import { inviteEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { ensureRepVendor } from "@/server/modules/bookkeeping/rep-vendor";
-import { roleLabel } from "@/lib/roles";
+import { roleLabel, canAssignRole } from "@/lib/roles";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -147,9 +147,10 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
       return fail("You can't change your own role or status.");
     }
   }
-  // Only a Super Admin can grant Super Admin.
-  if (role === "super_admin" && me.role !== "super_admin") {
-    return fail("Only a Super Admin can grant the Super Admin role.");
+  // Only a Super Admin can move someone INTO a privileged role (Super Admin,
+  // Admin, Sales Manager, Accounting). Changing other fields is unaffected.
+  if (role && role !== target.role && !canAssignRole(me.role, role)) {
+    return fail("Only a Super Admin can assign that role.");
   }
 
   const roleChanged = role != null && role !== target.role;
@@ -197,10 +198,15 @@ export async function setRepVendorAction(userId: string, vendorId: string | null
 }
 
 /**
- * Soft-delete a member: drop them from the roster (deletedAt + status disabled)
- * while KEEPING the row, so their deals stay in the company and keep showing
- * their original name. Login is blocked and their session invalidated; the
- * notification engine skips non-active users, so they stop getting alerts.
+ * Delete a member. Default is a HARD delete so the email is fully freed and a
+ * future re-invite starts clean. References that can survive without them are
+ * auto-nulled by the schema (their deals become unassigned); rows they own
+ * (notifications, onboarding, chat membership, overrides) cascade away.
+ *
+ * If they have protected financial history (commissions / proposals / payroll
+ * lines — required FKs that block a hard delete), we fall back to a soft delete:
+ * keep the row for that history but tombstone the email + disable the account,
+ * so re-inviting the same email still works.
  */
 export async function deleteTeamMemberAction(userId: string) {
   const me = await requireUser();
@@ -209,10 +215,9 @@ export async function deleteTeamMemberAction(userId: string) {
 
   const target = await prisma.user.findFirst({
     where: { id: userId, companyId: me.companyId },
-    select: { id: true, role: true, deletedAt: true },
+    select: { id: true, role: true, email: true },
   });
   if (!target) return fail("User not found.");
-  if (target.deletedAt) return fail("User is already deleted.");
   if (target.role === "super_admin" && me.role !== "super_admin") {
     return fail("Only a Super Admin can delete a Super Admin.");
   }
@@ -223,10 +228,19 @@ export async function deleteTeamMemberAction(userId: string) {
     if (others === 0) return fail("Can't delete the last Super Admin.");
   }
 
-  await prisma.user.update({
-    where: { id: target.id },
-    data: { deletedAt: new Date(), status: "disabled", sessionVersion: { increment: 1 } },
-  });
+  // Free anything that would block the hard delete or dangle afterward.
+  await prisma.invitation.deleteMany({ where: { companyId: me.companyId, email: target.email } });
+  await prisma.bookkeepingVendor.updateMany({ where: { companyId: me.companyId, userId: target.id }, data: { userId: null } });
+
+  try {
+    await prisma.user.delete({ where: { id: target.id } });
+  } catch {
+    // Has protected history — keep the row but tombstone the email so re-invite works.
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { deletedAt: new Date(), status: "disabled", sessionVersion: { increment: 1 }, email: `deleted+${target.id}@anexa.invalid` },
+    });
+  }
   revalidatePath("/portal/team");
   revalidatePath(`/portal/team/${target.id}`);
   return { ok: true as const };
@@ -240,12 +254,14 @@ export async function inviteUserAction(input: z.infer<typeof inviteSchema>) {
   if (!can(me, "create", "User")) return fail("Not allowed.");
   const parsed = inviteSchema.safeParse(input);
   if (!parsed.success) return fail("Enter a valid email and role.");
-  if (parsed.data.role === "super_admin" && me.role !== "super_admin") {
-    return fail("Only a Super Admin can invite a Super Admin.");
+  // Only a Super Admin can invite into a privileged role (Super Admin, Admin,
+  // Sales Manager, Accounting). Admins & sales managers invite staff only.
+  if (!canAssignRole(me.role, parsed.data.role)) {
+    return fail("Only a Super Admin can invite that role.");
   }
 
   const email = parsed.data.email.toLowerCase();
-  const existing = await prisma.user.findFirst({ where: { companyId: me.companyId, email }, select: { id: true } });
+  const existing = await prisma.user.findFirst({ where: { companyId: me.companyId, email, deletedAt: null }, select: { id: true } });
   if (existing) return fail("A user with that email already exists.");
 
   const raw = crypto.randomBytes(32).toString("base64url");

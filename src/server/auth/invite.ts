@@ -41,7 +41,7 @@ export async function acceptInviteAction(input: z.infer<typeof acceptSchema>) {
   if (inv.acceptedAt) return fail("This invite has already been used.");
   if (inv.expiresAt < new Date()) return fail("This invite link has expired.");
 
-  const existing = await prisma.user.findFirst({ where: { companyId: inv.companyId, email: inv.email }, select: { id: true } });
+  const existing = await prisma.user.findFirst({ where: { companyId: inv.companyId, email: inv.email, deletedAt: null }, select: { id: true } });
   if (existing) return fail("An account with that email already exists. Please sign in.");
 
   const passwordHash = await hashPassword(password);
