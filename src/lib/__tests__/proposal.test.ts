@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   computeProposalFinancials,
+  financingOptions,
   requiredPhotosMet,
   defaultSections,
   defaultUpgrades,
@@ -39,6 +40,49 @@ describe("computeProposalFinancials", () => {
     expect(r.customerUpgradesCents).toBe(0);
     expect(r.estimatedOutOfPocketCents).toBe(100_000);
     expect(r.totalProjectValueCents).toBe(1_000_000);
+  });
+
+  it("project discount reduces out-of-pocket but not the deductible", () => {
+    const r = computeProposalFinancials({
+      rcvCents: 2_400_000,
+      acvCents: 0,
+      deductibleCents: 500_000,
+      depreciationCents: 0,
+      approvedSupplementsCents: 0,
+      upgrades: [],
+      projectDiscountCents: 200_000,
+    });
+    expect(r.projectDiscountCents).toBe(200_000);
+    expect(r.estimatedOutOfPocketCents).toBe(300_000);
+  });
+
+  it("clamps the discount to the gross out-of-pocket (never negative)", () => {
+    const r = computeProposalFinancials({
+      rcvCents: 0,
+      acvCents: 0,
+      deductibleCents: 100_000,
+      depreciationCents: 0,
+      approvedSupplementsCents: 0,
+      upgrades: [],
+      projectDiscountCents: 999_999,
+    });
+    expect(r.projectDiscountCents).toBe(100_000);
+    expect(r.estimatedOutOfPocketCents).toBe(0);
+  });
+});
+
+describe("financingOptions", () => {
+  it("splits the amount across each term at 0% interest, sorted ascending", () => {
+    const opts = financingOptions(300_000, [60, 12, 24]);
+    expect(opts.map((o) => o.months)).toEqual([12, 24, 60]);
+    expect(opts[0].monthlyCents).toBe(25_000); // 3000 / 12
+    expect(opts[2].monthlyCents).toBe(5_000); // 3000 / 60
+  });
+
+  it("rounds the monthly up so the schedule never under-collects", () => {
+    const [opt] = financingOptions(100_000, [12]);
+    expect(opt.monthlyCents).toBe(Math.ceil(100_000 / 12));
+    expect(opt.monthlyCents * 12).toBeGreaterThanOrEqual(100_000);
   });
 });
 

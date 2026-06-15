@@ -37,6 +37,7 @@ export type ProposalFinancialsView = {
   approvedSupplementsCents: number;
   customerUpgradesCents: number;
   totalProjectValueCents: number;
+  projectDiscountCents: number;
   estimatedOutOfPocketCents: number;
 };
 
@@ -143,13 +144,16 @@ async function assembleView(
   const rcvCents = claim?.rcv ?? 0;
   const approvedSupplementsCents = lead?.project?.supplementCents ?? 0;
   const upgrades: ProposalUpgrade[] = content.upgrades ?? [];
+  // The rep can override the deductible in the presentation; fall back to the claim.
+  const deductibleCents = content.deductibleCents ?? claim?.deductible ?? 0;
   const fin = computeProposalFinancials({
     rcvCents,
     acvCents: claim?.acv ?? 0,
-    deductibleCents: claim?.deductible ?? 0,
+    deductibleCents,
     depreciationCents: claim?.depreciation ?? 0,
     approvedSupplementsCents,
     upgrades,
+    projectDiscountCents: content.projectDiscountCents,
   });
 
   const repName = lead?.assignedRep ? `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`.trim() : null;
@@ -179,11 +183,12 @@ async function assembleView(
     financials: {
       rcvCents,
       acvCents: claim?.acv ?? 0,
-      deductibleCents: claim?.deductible ?? 0,
+      deductibleCents,
       depreciationCents: claim?.depreciation ?? 0,
       approvedSupplementsCents,
       customerUpgradesCents: fin.customerUpgradesCents,
       totalProjectValueCents: fin.totalProjectValueCents,
+      projectDiscountCents: fin.projectDiscountCents,
       estimatedOutOfPocketCents: fin.estimatedOutOfPocketCents,
     },
     signUrl: null, // wired in Phase 4 (deep-link to esign) — null = rep will send docs

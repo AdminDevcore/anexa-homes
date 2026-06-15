@@ -3,7 +3,9 @@ import { cn } from "@/lib/utils";
 import { formatScopeCents } from "@/lib/scope";
 import {
   roofingTimeline,
+  DAMAGE_TYPE_ITEMS,
   ROOF_CONDITION_ITEMS,
+  financingOptions,
   defaultFaq,
   defaultWhyAnexa,
   type ProposalSectionId,
@@ -67,7 +69,8 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
   const faq = c.faq && c.faq.length > 0 ? c.faq : defaultFaq();
   const why = c.whyAnexa && c.whyAnexa.length > 0 ? c.whyAnexa : defaultWhyAnexa();
   const conditionFlags = c.conditionFlags ?? {};
-  const activeConditions = ROOF_CONDITION_ITEMS.filter((i) => conditionFlags[i.key]);
+  const activeDamageTypes = DAMAGE_TYPE_ITEMS.filter((i) => conditionFlags[i.key]);
+  const activeConditions = [...activeDamageTypes, ...ROOF_CONDITION_ITEMS.filter((i) => conditionFlags[i.key])];
   const upgrades = (c.upgrades ?? []).filter((u) => u.selected);
   const fin = data.financials;
 
@@ -305,7 +308,41 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
               <dt className="font-semibold text-white">Your deductible</dt>
               <dd className="font-medium text-white"><Money cents={fin.deductibleCents} /></dd>
             </div>
+            {fin.projectDiscountCents > 0 && (
+              <div className="flex items-center justify-between px-5 py-3.5">
+                <dt className="font-semibold text-emerald-300">Project discount</dt>
+                <dd className="font-medium text-emerald-300">−<Money cents={fin.projectDiscountCents} /></dd>
+              </div>
+            )}
+            <div className="flex items-center justify-between bg-white/[0.06] px-5 py-4">
+              <dt className="font-semibold text-white">Your out-of-pocket</dt>
+              <dd className="text-lg font-bold text-white"><Money cents={fin.estimatedOutOfPocketCents} /></dd>
+            </div>
           </dl>
+
+          {c.financing?.enabled && (c.financing.termsMonths?.length ?? 0) > 0 && fin.estimatedOutOfPocketCents > 0 && (
+            <div className="mt-10">
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">Flexible monthly payments</p>
+              <p className="mt-2 max-w-md text-white/85">
+                Prefer not to pay it all at once? Spread your <Money cents={fin.estimatedOutOfPocketCents} /> out-of-pocket into
+                interest-free monthly payments.
+              </p>
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {financingOptions(fin.estimatedOutOfPocketCents, c.financing.termsMonths).map((o, idx) => (
+                  <div
+                    key={o.months}
+                    data-stagger
+                    style={{ ["--i" as string]: idx } as React.CSSProperties}
+                    className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-300 hover:-translate-y-1 hover:border-[var(--proposal-accent)]/50 hover:bg-white/[0.07]"
+                  >
+                    <p className="font-display text-3xl font-bold tracking-tight text-white"><Money cents={o.monthlyCents} /><span className="text-base font-medium text-white/60">/mo</span></p>
+                    <p className="mt-1 text-sm text-neutral-300">{o.months} months · 0% interest</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-white/50">Estimated payments shown at 0% interest. Final financing terms are subject to approval.</p>
+            </div>
+          )}
 
           <p className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-200">
             <strong className="text-amber-100">Texas law:</strong> your insurance deductible is your responsibility and cannot be waived, rebated, or absorbed by the contractor. Recoverable depreciation is released by your carrier after the work is completed.

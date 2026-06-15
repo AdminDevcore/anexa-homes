@@ -12,7 +12,16 @@ export type ProposalContent = {
   damageSummary?: string;
   recommendedNextStep?: string;
   dateOfLoss?: string | null;
-  // Roof-condition checkboxes (e.g. missing_shingles, creased_shingles, …).
+  // Customer-paid deductible (cents). When set, overrides the claim's deductible
+  // in the customer-facing financial summary; falls back to the claim if unset.
+  deductibleCents?: number;
+  // General project discount (cents) applied to the customer's out-of-pocket.
+  // This is NOT a deductible rebate — the deductible figure is shown intact so the
+  // Texas §707 disclaimer stays accurate. The discount reduces the out-of-pocket total.
+  projectDiscountCents?: number;
+  // Optional 0%-interest financing of the out-of-pocket, presented as monthly options.
+  financing?: { enabled: boolean; termsMonths: number[] };
+  // Damage-type + roof-condition checkboxes (e.g. hail_damage, missing_shingles, …).
   conditionFlags?: Record<string, boolean>;
   // Editable hail/wind explanation paragraph for the condition section.
   conditionNarrative?: string;
@@ -57,6 +66,12 @@ export const SECTION_LABELS: Record<ProposalSectionId, string> = {
   signature: "Next Steps",
 };
 
+// Cause-of-loss checkpoints shown next to the affected areas in the builder + condition section.
+export const DAMAGE_TYPE_ITEMS: { key: string; label: string }[] = [
+  { key: "hail_damage", label: "Hail damage" },
+  { key: "wind_damage", label: "Wind damage" },
+];
+
 // Roof-condition checkboxes shown in the builder + condition section.
 export const ROOF_CONDITION_ITEMS: { key: string; label: string }[] = [
   { key: "missing_shingles", label: "Missing shingles" },
@@ -70,12 +85,14 @@ export const ROOF_CONDITION_ITEMS: { key: string; label: string }[] = [
 export type ProposalFinancials = {
   customerUpgradesCents: number;
   totalProjectValueCents: number;
+  projectDiscountCents: number;
   estimatedOutOfPocketCents: number;
 };
 
-/** Customer-facing money summary. Out-of-pocket = deductible + upgrades (upgrades
- *  are above the insurance scope). Recoverable depreciation is shown/noted but is
- *  NOT out-of-pocket (the carrier releases it after completion). */
+/** Customer-facing money summary. Out-of-pocket = deductible + upgrades − discount
+ *  (upgrades are above the insurance scope; the discount is a general project
+ *  discount, never a deductible rebate). Recoverable depreciation is shown/noted
+ *  but is NOT out-of-pocket (the carrier releases it after completion). */
 export function computeProposalFinancials(i: {
   rcvCents: number;
   acvCents: number;
@@ -83,13 +100,32 @@ export function computeProposalFinancials(i: {
   depreciationCents: number;
   approvedSupplementsCents: number;
   upgrades: ProposalUpgrade[];
+  projectDiscountCents?: number;
 }): ProposalFinancials {
   const customerUpgradesCents = i.upgrades
     .filter((u) => u.selected)
     .reduce((s, u) => s + Math.max(0, u.priceCents || 0), 0);
   const totalProjectValueCents = i.rcvCents + i.approvedSupplementsCents + customerUpgradesCents;
-  const estimatedOutOfPocketCents = i.deductibleCents + customerUpgradesCents;
-  return { customerUpgradesCents, totalProjectValueCents, estimatedOutOfPocketCents };
+  // The discount can't exceed the gross out-of-pocket (no negative cost shown).
+  const grossOutOfPocketCents = i.deductibleCents + customerUpgradesCents;
+  const projectDiscountCents = Math.min(grossOutOfPocketCents, Math.max(0, i.projectDiscountCents || 0));
+  const estimatedOutOfPocketCents = grossOutOfPocketCents - projectDiscountCents;
+  return { customerUpgradesCents, totalProjectValueCents, projectDiscountCents, estimatedOutOfPocketCents };
+}
+
+// Standard 0%-interest financing terms (months) offered on the out-of-pocket.
+export const FINANCING_TERMS = [12, 18, 24, 36, 48, 60] as const;
+
+export type FinancingOption = { months: number; monthlyCents: number };
+
+/** 0%-interest monthly options for a given amount. Last payment may differ by a
+ *  cent or two; monthly is rounded up so the schedule never under-collects. */
+export function financingOptions(amountCents: number, termsMonths: number[]): FinancingOption[] {
+  return termsMonths
+    .filter((m) => m > 0)
+    .slice()
+    .sort((a, b) => a - b)
+    .map((months) => ({ months, monthlyCents: Math.ceil(amountCents / months) }));
 }
 
 /** True once every REQUIRED checklist slot has at least one uploaded photo.

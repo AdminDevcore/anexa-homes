@@ -8,8 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   requiredPhotosMet,
+  DAMAGE_TYPE_ITEMS,
   ROOF_CONDITION_ITEMS,
   SECTION_LABELS,
+  FINANCING_TERMS,
+  financingOptions,
   type ProposalContent,
   type ProposalSectionId,
 } from "@/lib/proposal";
@@ -46,6 +49,28 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
   function patch(p: Partial<ProposalContent>) {
     setContent((c) => ({ ...c, ...p }));
   }
+
+  // Live out-of-pocket preview for the financing calculator. Mirrors
+  // computeProposalFinancials: deductible (content override, else the saved claim
+  // value) + selected upgrades − project discount, never negative.
+  const liveDeductibleCents = content.deductibleCents ?? data.proposal.financials.deductibleCents;
+  const liveUpgradesCents = (content.upgrades ?? [])
+    .filter((u) => u.selected)
+    .reduce((s, u) => s + Math.max(0, u.priceCents || 0), 0);
+  const liveDiscountCents = Math.max(0, content.projectDiscountCents || 0);
+  const liveOutOfPocketCents = Math.max(0, liveDeductibleCents + liveUpgradesCents - liveDiscountCents);
+  const financingEnabled = content.financing?.enabled ?? false;
+  const selectedTerms = content.financing?.termsMonths ?? [];
+
+  function toggleTerm(months: number, on: boolean) {
+    const next = on
+      ? Array.from(new Set([...selectedTerms, months]))
+      : selectedTerms.filter((m) => m !== months);
+    patch({ financing: { enabled: financingEnabled, termsMonths: next } });
+  }
+
+  const fmtMoney = (cents: number) =>
+    (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
   async function save(): Promise<boolean> {
     setBusy(true);
@@ -198,12 +223,52 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
       {step === "details" && (
         <div className="space-y-4">
           <Field label="Roof type"><Input defaultValue={content.roofType ?? ""} placeholder="e.g. Asphalt shingle" onBlur={(e) => patch({ roofType: e.target.value })} /></Field>
+          <Field label="Deductible ($)">
+            <Input
+              inputMode="decimal"
+              defaultValue={content.deductibleCents != null ? String(content.deductibleCents / 100) : ""}
+              placeholder="e.g. 2500"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                patch({ deductibleCents: v === "" ? undefined : Math.round((Number(v) || 0) * 100) });
+              }}
+            />
+            <p className="text-xs text-muted-foreground">Customer&rsquo;s out-of-pocket deductible. Leave blank to use the claim&rsquo;s deductible.</p>
+          </Field>
+          <Field label="Project discount ($)">
+            <Input
+              inputMode="decimal"
+              defaultValue={content.projectDiscountCents != null ? String(content.projectDiscountCents / 100) : ""}
+              placeholder="e.g. 2000"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                patch({ projectDiscountCents: v === "" ? undefined : Math.round((Number(v) || 0) * 100) });
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              A general discount on the project — lowers the customer&rsquo;s out-of-pocket. This is <strong>not</strong> a deductible
+              rebate; the deductible is still shown in full (Texas law prohibits waiving or rebating it).
+            </p>
+          </Field>
           <Field label="Damage summary">
             <textarea className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" defaultValue={content.damageSummary ?? ""} placeholder="Hail and wind damage on the north and west slopes…" onBlur={(e) => patch({ damageSummary: e.target.value })} />
           </Field>
           <Field label="Recommended next step"><Input defaultValue={content.recommendedNextStep ?? ""} placeholder="Schedule the adjuster meeting" onBlur={(e) => patch({ recommendedNextStep: e.target.value })} /></Field>
           <Field label="Roof condition explanation">
             <textarea className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" defaultValue={content.conditionNarrative ?? ""} placeholder="Explain hail/wind damage in plain language…" onBlur={(e) => patch({ conditionNarrative: e.target.value })} />
+          </Field>
+          <Field label="Damage type">
+            <div className="grid grid-cols-2 gap-2">
+              {DAMAGE_TYPE_ITEMS.map((i) => {
+                const on = content.conditionFlags?.[i.key] ?? false;
+                return (
+                  <label key={i.key} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={on} onChange={(e) => patch({ conditionFlags: { ...(content.conditionFlags ?? {}), [i.key]: e.target.checked } })} />
+                    {i.label}
+                  </label>
+                );
+              })}
+            </div>
           </Field>
           <Field label="Affected areas">
             <div className="grid grid-cols-2 gap-2">
@@ -218,6 +283,53 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
               })}
             </div>
           </Field>
+          {/* FINANCING — optional 0% monthly options on the out-of-pocket */}
+          <div className="space-y-3 rounded-lg border border-border p-4">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={financingEnabled}
+                onChange={(e) =>
+                  patch({
+                    financing: {
+                      enabled: e.target.checked,
+                      termsMonths: selectedTerms.length > 0 ? selectedTerms : [...FINANCING_TERMS],
+                    },
+                  })
+                }
+              />
+              Offer 0% financing on the out-of-pocket
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Optional. Splits the {fmtMoney(liveOutOfPocketCents)} out-of-pocket into interest-free monthly payments
+              (max 60 months). Pick the terms to show the customer.
+            </p>
+            {financingEnabled && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {FINANCING_TERMS.map((m) => {
+                    const on = selectedTerms.includes(m);
+                    const [opt] = financingOptions(liveOutOfPocketCents, [m]);
+                    return (
+                      <label
+                        key={m}
+                        className={`flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm ${on ? "border-[#F4631E] bg-[#F4631E]/5" : "border-border"}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <input type="checkbox" checked={on} onChange={(e) => toggleTerm(m, e.target.checked)} />
+                          {m} mo
+                        </span>
+                        <span className="font-medium tabular-nums">{fmtMoney(opt.monthlyCents)}/mo</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {selectedTerms.length === 0 && (
+                  <p className="text-xs text-amber-600">Select at least one term, or the financing section won&rsquo;t show.</p>
+                )}
+              </div>
+            )}
+          </div>
           <div className="flex justify-between"><Button variant="outline" onClick={saveAndRefresh} disabled={busy}>{busy && <Loader2 className="size-4 animate-spin" />} Save</Button><Button onClick={() => setStep("upgrades")}>Next: Upgrades</Button></div>
         </div>
       )}
