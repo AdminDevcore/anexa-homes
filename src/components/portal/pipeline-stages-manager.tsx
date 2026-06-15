@@ -73,7 +73,7 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
           Set a <strong className="font-medium text-foreground">day limit</strong> on a stage to track how long deals sit there. Deals past the limit show in the{" "}
-          <a href="/portal/reports/delinquency" className="underline underline-offset-2 hover:text-foreground">Delinquency report</a> and trigger overdue alerts.
+          <a href="/portal/reports/delinquency" className="underline underline-offset-2 hover:text-foreground">Overdue Jobs report</a> and trigger overdue alerts.
         </p>
         <StageDialog pipelineId={pipelineId} />
       </div>

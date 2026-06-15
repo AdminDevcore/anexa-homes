@@ -9,7 +9,7 @@ import { resolveScope, getScopeOptions } from "@/server/modules/reports/builders
 import { buildDelinquencyReport, type DelinquencyRow } from "@/server/modules/reports/delinquency";
 import { cn } from "@/lib/utils";
 
-export const metadata = { title: "Delinquency / Follow-up" };
+export const metadata = { title: "Overdue Jobs" };
 
 export default async function DelinquencyReportPage({
   searchParams,
@@ -36,8 +36,8 @@ export default async function DelinquencyReportPage({
       </Link>
 
       <PageHeader
-        title="Delinquency / Follow-up"
-        description="Deals sitting in a pipeline stage past its day limit. Set each stage's limit in Settings → Pipeline."
+        title="Overdue Jobs"
+        description="Every job past its stage day-limit, grouped by the stage it's stuck in. Set each stage's limit in Settings → Pipeline."
       />
 
       <DelinquencyControls scope={scope.value} scopeOptions={scopeOptions} includeDueSoon={includeDueSoon} />

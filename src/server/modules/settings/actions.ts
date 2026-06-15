@@ -417,6 +417,107 @@ export async function setWeeklyTaskRemindersAction(enabled: boolean) {
   return ok();
 }
 
+// --------------------------- Lead sources -----------------------------------
+
+const sourceNameSchema = z.string().trim().min(1, "Enter a source name.").max(60, "Name is too long.");
+const LEAD_SOURCES_PATH = "/portal/settings/lead-sources";
+
+export async function createLeadSourceAction(name: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = sourceNameSchema.safeParse(name);
+  if (!parsed.success) return fail(parsed.error.issues[0].message);
+  const clean = parsed.data;
+  const dup = await prisma.leadSource.findFirst({
+    where: { companyId: user.companyId, name: { equals: clean, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (dup) return fail("That source already exists.");
+  const last = await prisma.leadSource.findFirst({
+    where: { companyId: user.companyId },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+  await prisma.leadSource.create({ data: { companyId: user.companyId, name: clean, position: (last?.position ?? -1) + 1 } });
+  revalidatePath(LEAD_SOURCES_PATH);
+  return ok();
+}
+
+export async function renameLeadSourceAction(id: string, name: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = sourceNameSchema.safeParse(name);
+  if (!parsed.success) return fail(parsed.error.issues[0].message);
+  const clean = parsed.data;
+  const src = await prisma.leadSource.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!src) return fail("Source not found.");
+  const dup = await prisma.leadSource.findFirst({
+    where: { companyId: user.companyId, name: { equals: clean, mode: "insensitive" }, id: { not: id } },
+    select: { id: true },
+  });
+  if (dup) return fail("That source already exists.");
+  await prisma.leadSource.update({ where: { id }, data: { name: clean } });
+  revalidatePath(LEAD_SOURCES_PATH);
+  return ok();
+}
+
+export async function setLeadSourceActiveAction(id: string, active: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const src = await prisma.leadSource.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!src) return fail("Source not found.");
+  await prisma.leadSource.update({ where: { id }, data: { active } });
+  revalidatePath(LEAD_SOURCES_PATH);
+  return ok();
+}
+
+export async function moveLeadSourceAction(id: string, dir: "up" | "down") {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  // Reindex to clean 0..n-1 positions on every move so ties (legacy rows all at 0) sort reliably.
+  const all = await prisma.leadSource.findMany({
+    where: { companyId: user.companyId },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+  const idx = all.findIndex((s) => s.id === id);
+  if (idx === -1) return fail("Source not found.");
+  const target = dir === "up" ? idx - 1 : idx + 1;
+  if (target < 0 || target >= all.length) return ok(); // already at the end
+  const order = all.map((s) => s.id);
+  [order[idx], order[target]] = [order[target], order[idx]];
+  await prisma.$transaction(order.map((sid, i) => prisma.leadSource.update({ where: { id: sid }, data: { position: i } })));
+  revalidatePath(LEAD_SOURCES_PATH);
+  return ok();
+}
+
+export async function deleteLeadSourceAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const src = await prisma.leadSource.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true, _count: { select: { leads: true } } },
+  });
+  if (!src) return fail("Source not found.");
+  if (src._count.leads > 0) return fail("This source is used by existing leads — deactivate it instead.");
+  await prisma.leadSource.delete({ where: { id } });
+  revalidatePath(LEAD_SOURCES_PATH);
+  return ok();
+}
+
+/** Toggle the weekly "overdue jobs" digest to managers/admins (read by the overdue-digest cron). */
+export async function setOverdueDigestAction(enabled: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  await prisma.companySettings.upsert({
+    where: { companyId: user.companyId },
+    update: { overdueDigestEnabled: enabled },
+    create: { companyId: user.companyId, overdueDigestEnabled: enabled },
+  });
+  revalidatePath("/portal/settings/notifications");
+  return ok();
+}
+
 /** Toggle emailing each signer a copy of the executed PDF on document completion. */
 export async function setEmailSignedCopyToSignersAction(enabled: boolean) {
   const user = await requireUser();

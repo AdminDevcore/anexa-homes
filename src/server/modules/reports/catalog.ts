@@ -123,8 +123,8 @@ const STATIC_CARDS: ReportCard[] = [
   },
   {
     id: "delinquency",
-    title: "Delinquency / Follow-up",
-    description: "Every deal sitting in a pipeline stage past its day limit, grouped by stage.",
+    title: "Overdue Jobs",
+    description: "Every job past its stage day-limit, grouped by the stage it's stuck in.",
     href: "/portal/reports/delinquency",
     icon: "delinquency",
     group: "ops_finance",

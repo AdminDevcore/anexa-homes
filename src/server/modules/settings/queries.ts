@@ -6,6 +6,15 @@ import {
   DEFAULT_QC_CHECKLIST,
 } from "@/lib/job-settings";
 
+/** All lead sources (active + inactive) for the settings manager, with usage counts. */
+export async function getLeadSourcesForSettings(companyId: string) {
+  return prisma.leadSource.findMany({
+    where: { companyId },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    select: { id: true, name: true, active: true, position: true, _count: { select: { leads: true } } },
+  });
+}
+
 /** The company's customizable, grouped appointment outcomes, or the defaults if unset. */
 export async function getAppointmentDispositions(companyId: string): Promise<Disposition[]> {
   const settings = await prisma.companySettings.findUnique({

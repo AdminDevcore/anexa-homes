@@ -2,7 +2,6 @@ import Link from "next/link";
 import Image from "next/image";
 import { Star } from "lucide-react";
 import { headers } from "next/headers";
-import { Logo } from "@/components/marketing/logo";
 import { COMPANY } from "@/lib/site";
 import { brandingForHost } from "@/server/branding/resolve";
 
@@ -14,14 +13,29 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
   const removePoweredBy = branding?.removePoweredBy ?? false;
 
   return (
-    <div className="dark grid min-h-screen bg-background text-foreground lg:grid-cols-2">
+    <div className="dark relative grid min-h-screen bg-background text-foreground lg:grid-cols-2">
+      {/* Unified brand logo (desktop): floats at the EXACT marketing-header position
+          — same `container-anexa` + same size — so the logo never jumps between the
+          public site and the portal. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 hidden lg:block">
+        <div className="container-anexa flex h-24 items-center py-3">
+          <Link href="/" aria-label="Anexa Homes home" className="pointer-events-auto inline-flex items-center">
+            <Image
+              src="/anexa-lockup.png"
+              alt="Anexa Homes"
+              width={1454}
+              height={329}
+              priority
+              className="h-12 w-auto object-contain"
+            />
+          </Link>
+        </div>
+      </div>
+
       {/* Brand panel */}
       <div className="relative hidden overflow-hidden bg-[#0B0B0C] text-white lg:flex lg:flex-col">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-32 left-1/3 size-[36rem] rounded-full bg-gold/10 blur-[120px]" />
-        </div>
-        <div className="relative flex items-center p-10">
-          <Logo invert />
         </div>
         {/* Hero emblem — the "A" mark, with the wordmark stacked underneath. */}
         <div className="relative flex flex-1 flex-col items-center justify-center gap-6 px-10">
@@ -74,8 +88,18 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
 
       {/* Form panel */}
       <div className="flex flex-col">
-        <div className="flex items-center justify-between p-6 lg:hidden">
-          <Logo />
+        {/* Mobile logo — matches the marketing header's mobile position/size. */}
+        <div className="container-anexa flex h-20 items-center lg:hidden">
+          <Link href="/" aria-label="Anexa Homes home" className="inline-flex items-center">
+            <Image
+              src="/anexa-lockup.png"
+              alt="Anexa Homes"
+              width={1454}
+              height={329}
+              priority
+              className="h-9 w-auto object-contain sm:h-11"
+            />
+          </Link>
         </div>
         <div className="flex flex-1 items-center justify-center p-6 sm:p-10">
           <div className="w-full max-w-md">{children}</div>

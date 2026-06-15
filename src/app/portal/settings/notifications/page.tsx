@@ -23,7 +23,7 @@ export default async function NotificationSettingsPage() {
     prisma.notificationRule.findMany({ where: { companyId: user.companyId }, orderBy: { createdAt: "desc" } }),
     prisma.pipeline.findFirst({ where: { companyId: user.companyId }, orderBy: { isDefault: "desc" }, include: { stages: { orderBy: { position: "asc" } } } }),
     prisma.user.findMany({ where: { companyId: user.companyId, status: "active" }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
-    prisma.companySettings.findUnique({ where: { companyId: user.companyId }, select: { weeklyTaskRemindersEnabled: true, emailSignedCopyToSigners: true } }),
+    prisma.companySettings.findUnique({ where: { companyId: user.companyId }, select: { weeklyTaskRemindersEnabled: true, emailSignedCopyToSigners: true, overdueDigestEnabled: true } }),
   ]);
 
   return (
@@ -35,7 +35,10 @@ export default async function NotificationSettingsPage() {
         title="Notification Rules"
         description="Define what triggers a notification, who receives it, and how it's delivered."
       />
-      <ScheduledRemindersSettings weeklyTaskReminders={settings?.weeklyTaskRemindersEnabled ?? true} />
+      <ScheduledRemindersSettings
+        weeklyTaskReminders={settings?.weeklyTaskRemindersEnabled ?? true}
+        overdueDigest={settings?.overdueDigestEnabled ?? true}
+      />
       <EsignDeliverySettings emailSignedCopyToSigners={settings?.emailSignedCopyToSigners ?? true} />
       <NotificationRulesManager
         rules={rules.map((r) => ({
