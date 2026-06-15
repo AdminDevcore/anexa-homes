@@ -3,8 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, User, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type EventType = "appointment" | "adjuster" | "install";
 type Ev = { id: string; type: EventType; date: string; title: string; subtitle: string | null; rep: string | null; href: string };
@@ -24,10 +26,13 @@ const startOfWeek = (d: Date) => { const x = startOfDay(d); x.setDate(x.getDate(
 const dayKey = (d: Date | string) => startOfDay(new Date(d)).toDateString();
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
+const fmtDateTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
 export function WorkCalendar() {
   const router = useRouter();
   const [anchor, setAnchor] = React.useState<Date>(() => startOfMonth(new Date()));
   const [on, setOn] = React.useState<Record<EventType, boolean>>({ appointment: true, adjuster: true, install: true });
+  const [selected, setSelected] = React.useState<Ev | null>(null);
 
   const gridStart = startOfWeek(startOfMonth(anchor));
   const gridEnd = addDays(gridStart, 42);
@@ -121,7 +126,7 @@ export function WorkCalendar() {
                   {list.slice(0, 3).map((e) => (
                     <button
                       key={e.id}
-                      onClick={() => router.push(e.href)}
+                      onClick={() => setSelected(e)}
                       title={`${TYPE_META[e.type].label.replace(/s$/, "")} · ${e.title}${e.rep ? ` · ${e.rep}` : ""}`}
                       className={cn("flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-[11px] font-medium leading-tight hover:opacity-90", TYPE_META[e.type].pill)}
                     >
@@ -136,6 +141,42 @@ export function WorkCalendar() {
           })}
         </div>
       </div>
+
+      {/* Event detail popup */}
+      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent className="sm:max-w-sm">
+          {selected && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <span className={cn("size-2.5 rounded-full", TYPE_META[selected.type].dot)} />
+                  {selected.title}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <span className={cn("inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-medium", TYPE_META[selected.type].pill)}>
+                  {TYPE_META[selected.type].label.replace(/s$/, "")}
+                </span>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="size-4 shrink-0" /> {fmtDateTime(selected.date)}
+                </div>
+                {selected.subtitle && <div className="text-muted-foreground">{selected.subtitle}</div>}
+                {selected.rep && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <User className="size-4 shrink-0" /> {selected.rep}
+                  </div>
+                )}
+              </div>
+              <Button
+                onClick={() => { const href = selected.href; setSelected(null); router.push(href); }}
+                className="mt-2 w-full bg-gold text-gold-foreground hover:bg-gold/90"
+              >
+                Open details <ArrowRight className="size-4" />
+              </Button>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
