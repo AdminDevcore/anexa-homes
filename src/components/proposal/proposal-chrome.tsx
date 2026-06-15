@@ -104,7 +104,7 @@ export function ProposalChrome({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoUrl} alt={companyName} className="h-6 w-auto object-contain" />
           ) : (
-            <span className="font-serif text-base font-bold text-neutral-900">{companyName}</span>
+            <span className="font-display text-base font-bold text-neutral-900">{companyName}</span>
           )}
         </button>
 

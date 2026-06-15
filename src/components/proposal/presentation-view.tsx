@@ -41,7 +41,7 @@ function Section({
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-[var(--proposal-accent)]">{eyebrow}</p>
         )}
         {title && (
-          <h2 className={cn("mb-10 font-serif text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl", dark ? "text-white" : "text-neutral-900")}>
+          <h2 className={cn("mb-10 font-display text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl", dark ? "text-white" : "text-neutral-900")}>
             {title}
           </h2>
         )}
@@ -110,7 +110,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
           <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-neutral-950/20" />
           <div className="reveal-up relative mx-auto w-full max-w-5xl">
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[var(--proposal-accent)]">{data.projectType}</p>
-            <h1 className="mt-4 font-serif text-5xl font-bold leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl">
+            <h1 className="mt-4 font-display text-5xl font-bold leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl">
               Your new roof,<br />done right.
             </h1>
             <div className="mt-8 space-y-1 text-lg text-neutral-200">
@@ -280,7 +280,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
         <Section id="financial" eyebrow="Your Investment" title="What this project costs you" tone="dark">
           <div className="rounded-3xl bg-[var(--proposal-accent)] p-8 text-white sm:p-10">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">Your estimated out-of-pocket</p>
-            <p className="mt-3 font-serif text-6xl font-bold leading-none tracking-tight sm:text-8xl"><Money cents={fin.estimatedOutOfPocketCents} /></p>
+            <p className="mt-3 font-display text-6xl font-bold leading-none tracking-tight sm:text-8xl"><Money cents={fin.estimatedOutOfPocketCents} /></p>
             <p className="mt-4 max-w-md text-white/85">That&rsquo;s your deductible — the rest of the project is covered by your insurance claim.</p>
           </div>
 
@@ -344,7 +344,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
                 style={{ ["--i" as string]: i } as React.CSSProperties}
                 className="break-inside-avoid rounded-2xl bg-white p-6 shadow-sm ring-1 ring-neutral-200/60"
               >
-                <p className="font-serif text-xl font-semibold text-neutral-900">{f.q}</p>
+                <p className="font-display text-xl font-semibold text-neutral-900">{f.q}</p>
                 <p className="mt-2 leading-relaxed text-neutral-600">{f.a}</p>
               </div>
             ))}
@@ -357,7 +357,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
         <section data-section="signature" className="relative overflow-hidden bg-neutral-950 px-6 py-24 text-center text-white sm:px-10">
           <div className="mx-auto w-full max-w-3xl">
             <p className="text-sm font-semibold uppercase tracking-[0.25em] text-[var(--proposal-accent)]">Let&rsquo;s get started</p>
-            <h2 className="mt-3 font-serif text-4xl font-bold leading-tight sm:text-6xl">Ready for the next step?</h2>
+            <h2 className="mt-3 font-display text-4xl font-bold leading-tight sm:text-6xl">Ready for the next step?</h2>
             <p className="mx-auto mt-4 max-w-md text-lg text-neutral-300">Review and sign your documents, request a change, or ask us anything.</p>
             <div className="mt-10">
               <NextStepActions token={data.token} mode={mode} signUrl={data.signUrl} />
