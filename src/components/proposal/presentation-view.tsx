@@ -104,18 +104,11 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
       {/* COVER — full-bleed editorial hero on the customer's house */}
       {enabled("cover") && (
         <section data-section="cover" className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden bg-neutral-950 px-6 py-14 text-white sm:px-10 print:min-h-0 print:py-16">
-          {data.heroPhotoUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={data.heroPhotoUrl} alt="" className="absolute inset-0 h-full w-full scale-105 object-cover opacity-60" />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/75 to-neutral-950/25" />
+          {/* ANEXA brand cover — the same striking, on-brand opener on every proposal */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/anexa-proposal-cover.png" alt={data.branding.companyName} className="absolute inset-0 h-full w-full object-cover [print-color-adjust:exact] [-webkit-print-color-adjust:exact]" />
+          <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/80 to-neutral-950/20" />
           <div className="reveal-up relative mx-auto w-full max-w-5xl">
-            {data.branding.logoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={data.branding.logoUrl} alt={data.branding.companyName} className="mb-10 h-11 w-auto object-contain" />
-            ) : (
-              <p className="mb-10 font-serif text-2xl font-bold">{data.branding.companyName}</p>
-            )}
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-[var(--proposal-accent)]">{data.projectType}</p>
             <h1 className="mt-4 font-serif text-5xl font-bold leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl">
               Your new roof,<br />done right.

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Gauge, Activity, DollarSign, Wallet, Briefcase, AlarmClock, HardHat, ArrowRight, type LucideIcon } from "lucide-react";
+import { Gauge, Activity, DollarSign, Wallet, Briefcase, AlarmClock, HardHat, Filter, Megaphone, DoorOpen, Trophy, Umbrella, Receipt, Hammer, ArrowRight, type LucideIcon } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { PageHeader } from "@/components/portal/ui";
@@ -16,6 +16,13 @@ const ICONS: Record<ReportIcon, LucideIcon> = {
   jobs: Briefcase,
   delinquency: AlarmClock,
   contractorPay: HardHat,
+  funnel: Filter,
+  leadSources: Megaphone,
+  canvassing: DoorOpen,
+  scorecard: Trophy,
+  claims: Umbrella,
+  arAging: Receipt,
+  production: Hammer,
 };
 
 export default async function ReportsPage() {

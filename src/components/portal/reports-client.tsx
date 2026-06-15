@@ -22,6 +22,7 @@ export function ReportsControls({
   scope,
   scopeOptions,
   basePath,
+  blurb,
 }: {
   preset: string;
   from: string;
@@ -30,6 +31,8 @@ export function ReportsControls({
   scopeOptions: ScopeOption[];
   /** Where period/scope nav and the PDF/CSV links point, e.g. "/portal/reports/financial". */
   basePath: string;
+  /** Short description shown next to the export buttons. */
+  blurb?: string;
 }) {
   const router = useRouter();
   const [customFrom, setCustomFrom] = React.useState(from);
@@ -51,7 +54,7 @@ export function ReportsControls({
   return (
     <div className="space-y-3 rounded-xl border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">One combined report — operations, financials &amp; payroll.</p>
+        <p className="text-sm text-muted-foreground">{blurb ?? "One combined report — operations, financials & payroll."}</p>
         <div className="flex items-center gap-2">
           <Button asChild size="sm" variant="outline">
             <a href={`${basePath}/pdf?${query(preset, scope, customFrom, customTo)}`} target="_blank" rel="noreferrer">

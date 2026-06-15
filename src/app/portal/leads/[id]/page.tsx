@@ -47,7 +47,6 @@ import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTabs } from "@/components/portal/deal-tabs";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
-import { stageTiming, STAGE_STATUS_META, stageStatusLabel } from "@/lib/stage-status";
 import { ScopeOfWorkPanel } from "@/components/portal/scope-of-work-panel";
 import {
   ProjectStatusControl,
@@ -228,39 +227,6 @@ export default async function LeadDetailPage({
           </div>
         }
       />
-
-      {/* Stage Timer (SLA) card */}
-      {lead.stage && (() => {
-        const t = stageTiming(lead.stageChangedAt, lead.createdAt, lead.stage.targetDays);
-        const meta = t.status === "none" ? null : STAGE_STATUS_META[t.status];
-        return (
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-2xl border border-border bg-card p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold"><span>⏱</span> Stage Duration</div>
-            <div className="space-y-0.5">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Current stage</div>
-              <div className="text-sm font-medium">{lead.stage.name}</div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Days in stage</div>
-              <div className="text-sm font-medium tabular-nums">{t.daysInStage} day{t.daysInStage === 1 ? "" : "s"}</div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Target</div>
-              <div className="text-sm font-medium tabular-nums">{lead.stage.targetDays > 0 ? `${lead.stage.targetDays} days` : "No target set"}</div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</div>
-              {meta ? (
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${meta.classes}`}>
-                  {meta.dot} {stageStatusLabel(t)}
-                </span>
-              ) : (
-                <span className="text-sm text-muted-foreground">—</span>
-              )}
-            </div>
-          </div>
-        );
-      })()}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">

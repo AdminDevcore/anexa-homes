@@ -10,17 +10,26 @@ export type ReportIcon =
   | "payroll"
   | "jobs"
   | "delinquency"
-  | "contractorPay";
+  | "contractorPay"
+  | "funnel"
+  | "leadSources"
+  | "canvassing"
+  | "scorecard"
+  | "claims"
+  | "arAging"
+  | "production";
 
 /** Cards are shown under labeled groups on the hub for hierarchy. */
-export type ReportGroup = "company" | "ops_finance";
+export type ReportGroup = "company" | "sales" | "ops_finance" | "production";
 
 export const GROUP_LABELS: Record<ReportGroup, string> = {
   company: "Company report",
+  sales: "Sales & marketing",
   ops_finance: "Operations & finance",
+  production: "Production",
 };
 
-const GROUP_ORDER: ReportGroup[] = ["company", "ops_finance"];
+const GROUP_ORDER: ReportGroup[] = ["company", "sales", "ops_finance", "production"];
 
 export type ReportCard = {
   id: string;
@@ -63,6 +72,46 @@ export const SECTION_META: Record<ReportType, { title: string; description: stri
 /** Reports that aren't a Company-Report section. */
 const STATIC_CARDS: ReportCard[] = [
   {
+    id: "funnel",
+    title: "Sales Funnel & Velocity",
+    description: "Stage-by-stage pipeline waterfall, time-in-stage, and where deals stall.",
+    href: "/portal/reports/funnel",
+    icon: "funnel",
+    group: "sales",
+    action: "read",
+    resource: "Report",
+  },
+  {
+    id: "lead-sources",
+    title: "Lead Source ROI",
+    description: "Leads, wins, close rate, and revenue by marketing channel.",
+    href: "/portal/reports/lead-sources",
+    icon: "leadSources",
+    group: "sales",
+    action: "read",
+    resource: "Report",
+  },
+  {
+    id: "canvassing",
+    title: "Canvassing Productivity",
+    description: "Knock → contact → appointment → lead funnel, by canvasser and territory.",
+    href: "/portal/reports/canvassing",
+    icon: "canvassing",
+    group: "sales",
+    action: "read",
+    resource: "Report",
+  },
+  {
+    id: "rep-scorecard",
+    title: "Rep Scorecard",
+    description: "Per-rep appointments, close rate, jobs, revenue, commission, and open tasks.",
+    href: "/portal/reports/rep-scorecard",
+    icon: "scorecard",
+    group: "sales",
+    action: "read",
+    resource: "Report",
+  },
+  {
     id: "jobs",
     title: "Job Profitability",
     description: "Per-job contract, supplement, cost, commission, and profit — estimated vs. actual.",
@@ -91,6 +140,36 @@ const STATIC_CARDS: ReportCard[] = [
     group: "ops_finance",
     action: "read",
     resource: "Commission",
+  },
+  {
+    id: "claims",
+    title: "Claims & Supplement Capture",
+    description: "RCV/ACV exposure, recoverable depreciation, and supplement approval rate.",
+    href: "/portal/reports/claims",
+    icon: "claims",
+    group: "ops_finance",
+    action: "read",
+    resource: "Report",
+  },
+  {
+    id: "ar-aging",
+    title: "A/R Collections Aging",
+    description: "Every unpaid invoice bucketed by how far past due — who owes you and how late.",
+    href: "/portal/reports/ar-aging",
+    icon: "arAging",
+    group: "ops_finance",
+    action: "read",
+    resource: "Report",
+  },
+  {
+    id: "production",
+    title: "Production & Throughput",
+    description: "Jobs by production status, squares completed, and installs scheduled.",
+    href: "/portal/reports/production",
+    icon: "production",
+    group: "production",
+    action: "read",
+    resource: "Report",
   },
 ];
 
