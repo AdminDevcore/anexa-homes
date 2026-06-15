@@ -12,6 +12,25 @@ import { getMembership } from "@/server/modules/chat/queries";
 import sharp from "sharp";
 
 const MAX_BYTES = 30 * 1024 * 1024; // 30MB (phone photos); compressed after upload
+const CALL_MAX_BYTES = 100 * 1024 * 1024; // 100MB — call recordings (audio, uncompressed)
+
+// Dedicated call-recording slots on a deal (Welcome Call, QC Call). Kept in
+// sync with src/lib/call-groups.ts.
+const CALL_GROUPS = new Set(["welcome_call", "qc_call"]);
+
+// Audio formats accepted for call recordings. Browsers report m4a/aac
+// inconsistently, so we accept the common spellings.
+const AUDIO_ALLOWED = new Set([
+  "audio/mpeg", // mp3
+  "audio/mp4", // m4a (some browsers)
+  "audio/x-m4a", // m4a (others)
+  "audio/m4a",
+  "audio/aac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/webm",
+  "audio/ogg",
+]);
 
 /**
  * Downscale + re-encode photos so stored files are small and fast to serve.
@@ -118,8 +137,18 @@ export async function uploadFileAction(formData: FormData) {
   const photoTemplateItemId = (formData.get("photoTemplateItemId") as string) || null;
 
   if (!(file instanceof File)) return { ok: false as const, error: "No file provided." };
-  if (file.size > MAX_BYTES) return { ok: false as const, error: "File too large (max 15MB)." };
-  if (!ALLOWED.has(file.type)) return { ok: false as const, error: "Unsupported file type." };
+
+  // Call recordings get audio mime types + a higher size cap; everything else
+  // keeps the image/PDF rules.
+  const isCall = !!category && CALL_GROUPS.has(category);
+  const maxBytes = isCall ? CALL_MAX_BYTES : MAX_BYTES;
+  const allowed = isCall ? AUDIO_ALLOWED : ALLOWED;
+  if (file.size > maxBytes) {
+    return { ok: false as const, error: `File too large (max ${Math.round(maxBytes / 1024 / 1024)}MB).` };
+  }
+  if (!allowed.has(file.type)) {
+    return { ok: false as const, error: isCall ? "Unsupported audio type." : "Unsupported file type." };
+  }
 
   // Scope check: the target project/lead must be visible to this user.
   if (projectId) {
@@ -139,6 +168,11 @@ export async function uploadFileAction(formData: FormData) {
   const id = nanoid();
   const key = `companies/${user.companyId}/uploads/${id}-${safeName(file.name)}`;
   await putObject(key, buffer);
+
+  // One recording per call slot: replace any existing file in this slot.
+  if (isCall && leadId) {
+    await prisma.fileAsset.deleteMany({ where: { companyId: user.companyId, leadId, category } });
+  }
 
   await prisma.fileAsset.create({
     data: {
