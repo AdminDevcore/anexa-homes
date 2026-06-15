@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { makeMoney, makeDate } from "@/lib/format-core";
-import { updateBrandingAction } from "@/server/modules/settings/actions";
+import { updateBrandingAction, uploadBrandingLogoAction } from "@/server/modules/settings/actions";
 
 // Radix <SelectItem> forbids an empty-string value, so the default option uses a
 // "system" sentinel that maps to "" (no custom font) on save.
@@ -75,6 +75,26 @@ export function BrandingForm({
   const [customDomain, setCustomDomain] = React.useState(initial.customDomain);
   const [removePoweredBy, setRemovePoweredBy] = React.useState(initial.removePoweredBy);
   const [pending, setPending] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
+  const logoInputRef = React.useRef<HTMLInputElement>(null);
+
+  async function onLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.set("file", file);
+    const res = await uploadBrandingLogoAction(fd);
+    setUploading(false);
+    if (logoInputRef.current) logoInputRef.current.value = "";
+    if (res.ok) {
+      setLogoUrl(res.logoUrl);
+      toast.success("Logo uploaded");
+      router.refresh();
+    } else {
+      toast.error(res.error);
+    }
+  }
 
   async function save() {
     setPending(true);
@@ -110,8 +130,27 @@ export function BrandingForm({
         <h3 className="font-medium">Branding</h3>
 
         <div className="space-y-1.5">
-          <Label>Logo URL</Label>
-          <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
+          <Label>Logo</Label>
+          <div className="flex items-center gap-2">
+            <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={onLogoFile}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={uploading}
+              onClick={() => logoInputRef.current?.click()}
+              className="shrink-0"
+            >
+              {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Upload
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Upload a PNG, JPG, or WebP — or paste a hosted image URL. Updates the sidebar logo on save.</p>
         </div>
 
         <div className="space-y-1.5">
@@ -252,7 +291,7 @@ export function BrandingForm({
         </div>
 
         <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
-          <Label className="font-normal cursor-pointer">Remove "Powered by Anexa" branding</Label>
+          <Label className="font-normal cursor-pointer">Remove &quot;Powered by Anexa&quot; branding</Label>
           <Switch checked={removePoweredBy} onCheckedChange={setRemovePoweredBy} />
         </div>
 

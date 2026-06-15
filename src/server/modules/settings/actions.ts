@@ -2,9 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { nanoid } from "nanoid";
+import sharp from "sharp";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { putObject } from "@/server/storage";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -331,6 +334,74 @@ export async function updateBrandingAction(input: z.infer<typeof brandingSchema>
   revalidatePath("/portal/settings/branding");
   revalidatePath("/portal", "layout");
   return ok();
+}
+
+/** Category tag for the company's branding logo FileAsset (one per company). */
+const BRANDING_LOGO_CATEGORY = "branding_logo";
+const LOGO_MAX_BYTES = 5 * 1024 * 1024; // 5MB — logos are small
+const LOGO_ALLOWED = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+/**
+ * Upload a logo file. Stores it, replaces any prior logo, and points the
+ * company's `logoUrl` at the public serving route so the sidebar (and login,
+ * emails, proposals) pick it up immediately. SVG is intentionally not accepted
+ * (serving user SVG is an XSS surface) — export a PNG instead.
+ */
+export async function uploadBrandingLogoAction(
+  formData: FormData
+): Promise<{ ok: true; logoUrl: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+
+  const file = formData.get("file");
+  if (!(file instanceof File)) return fail("No file provided.");
+  if (file.size > LOGO_MAX_BYTES) return fail("Logo too large (max 5MB).");
+  if (!LOGO_ALLOWED.has(file.type)) return fail("Use a PNG, JPG, or WebP image.");
+
+  // Resize within 512×512 and output PNG to keep transparency for logos.
+  const raw = Buffer.from(await file.arrayBuffer());
+  let png: Buffer;
+  try {
+    png = await sharp(raw)
+      .rotate()
+      .resize({ width: 512, height: 512, fit: "inside", withoutEnlargement: true })
+      .png()
+      .toBuffer();
+  } catch {
+    return fail("Could not process that image.");
+  }
+
+  const key = `companies/${user.companyId}/branding/${nanoid()}.png`;
+  await putObject(key, png);
+
+  // One logo per company: drop prior branding-logo rows, then record the new one.
+  await prisma.fileAsset.deleteMany({
+    where: { companyId: user.companyId, category: BRANDING_LOGO_CATEGORY },
+  });
+  await prisma.fileAsset.create({
+    data: {
+      companyId: user.companyId,
+      kind: "photo",
+      name: file.name,
+      storageKey: key,
+      mimeType: "image/png",
+      size: png.length,
+      category: BRANDING_LOGO_CATEGORY,
+      uploadedById: user.userId,
+    },
+  });
+
+  // Relative URL with a cache-busting version. Emails absolutize it via appUrl.
+  const logoUrl = `/api/branding/logo?company=${user.companyId}&v=${Date.now()}`;
+  await prisma.companySettings.upsert({
+    where: { companyId: user.companyId },
+    update: { logoUrl },
+    create: { companyId: user.companyId, logoUrl },
+  });
+
+  revalidatePath("/portal/settings/branding");
+  revalidatePath("/portal", "layout");
+  return { ok: true, logoUrl };
 }
 
 const companyIdentitySchema = z.object({
