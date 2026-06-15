@@ -213,7 +213,7 @@ export function BookkeepingClient({
               >
                 1099s
               </a>
-              <TransactionsExport categories={data.categories} />
+              <TransactionsExport categories={data.categories} vendors={data.vendors} />
             </div>
           </div>
 

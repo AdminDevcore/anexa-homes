@@ -5,21 +5,26 @@ import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Cat = { id: string; name: string };
+type Vendor = { id: string; name: string };
 
-/** Flexible CSV export of BOOKED transactions: date range + category + income/expense. */
-export function TransactionsExport({ categories }: { categories: Cat[] }) {
+/** Flexible export of BOOKED transactions: date range + category + vendor + income/expense, as CSV or PDF. */
+export function TransactionsExport({ categories, vendors = [] }: { categories: Cat[]; vendors?: Vendor[] }) {
   const [open, setOpen] = React.useState(false);
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
   const [category, setCategory] = React.useState("all");
+  const [vendor, setVendor] = React.useState("all");
   const [direction, setDirection] = React.useState("all");
+  const [format, setFormat] = React.useState<"csv" | "pdf">("csv");
 
   function download() {
     const p = new URLSearchParams();
     if (from) p.set("from", from);
     if (to) p.set("to", to);
     if (category !== "all") p.set("category", category);
+    if (vendor !== "all") p.set("vendor", vendor);
     if (direction !== "all") p.set("direction", direction);
+    if (format !== "csv") p.set("format", format);
     window.location.href = `/portal/bookkeeping/export?${p.toString()}`;
     setOpen(false);
   }
@@ -57,6 +62,14 @@ export function TransactionsExport({ categories }: { categories: Cat[] }) {
             </label>
 
             <label className="block space-y-1 text-xs text-muted-foreground">
+              Vendor
+              <select value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground">
+                <option value="all">All vendors</option>
+                {vendors.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+              </select>
+            </label>
+
+            <label className="block space-y-1 text-xs text-muted-foreground">
               Type
               <select value={direction} onChange={(e) => setDirection(e.target.value)} className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground">
                 <option value="all">Income &amp; expenses</option>
@@ -65,10 +78,18 @@ export function TransactionsExport({ categories }: { categories: Cat[] }) {
               </select>
             </label>
 
+            <label className="block space-y-1 text-xs text-muted-foreground">
+              Format
+              <select value={format} onChange={(e) => setFormat(e.target.value as "csv" | "pdf")} className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground">
+                <option value="csv">CSV (spreadsheet)</option>
+                <option value="pdf">PDF (printable)</option>
+              </select>
+            </label>
+
             <p className="text-[11px] text-muted-foreground">Leave dates blank to export all booked transactions.</p>
 
             <Button size="sm" className="w-full" onClick={download}>
-              <Download className="size-4" /> Download CSV
+              <Download className="size-4" /> Download {format.toUpperCase()}
             </Button>
           </div>
         </>
