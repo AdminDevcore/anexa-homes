@@ -12,6 +12,7 @@ import { Logo } from "@/components/marketing/logo";
 import { submitSignatureByTokenAction } from "@/server/modules/esign/actions";
 import { fillTokens, type AutofillContext } from "@/server/modules/esign/autofill";
 import type { Snapshot, SnapshotField } from "@/server/modules/esign/pdf";
+import { deriveInitials, mapAdoptedToFields, type AdoptedSignature } from "@/lib/esign-signature";
 import { PdfCanvas } from "./pdf-canvas";
 
 type Props = {
@@ -43,19 +44,18 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
 
   const pages = snapshot.pages?.length ? snapshot.pages : [{ width: 612, height: 792 }];
   const sigFields = signerFields.filter((f) => f.type === "signature" || f.type === "initials");
-  const fieldById = (id: string) => signerFields.find((f) => f.id === id);
+  const needSignature = sigFields.some((f) => f.type === "signature");
+  const needInitials = sigFields.some((f) => f.type === "initials");
 
   function setValue(id: string, v: string) {
     setValues((s) => ({ ...s, [id]: v }));
   }
 
-  function adoptSignature(url: string) {
-    setSignatureUrl(url);
-    setValues((s) => {
-      const next = { ...s };
-      for (const f of sigFields) next[f.id] = url;
-      return next;
-    });
+  function adoptSignature(adopted: AdoptedSignature) {
+    // The signature image fills signature fields; the initials image fills
+    // initials fields — never the full signature in an initials box.
+    setSignatureUrl(adopted.signature ?? adopted.initials ?? null);
+    setValues((s) => ({ ...s, ...mapAdoptedToFields(sigFields, adopted) }));
     setSigOpen(false);
   }
 
@@ -246,6 +246,8 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
       {sigOpen && (
         <SignaturePad
           name={signerName}
+          needSignature={needSignature}
+          needInitials={needInitials}
           onClose={() => setSigOpen(false)}
           onAdopt={adoptSignature}
         />
@@ -254,69 +256,125 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
   );
 }
 
+/** Render text in the signature cursive font to a PNG data URL. */
+function cursiveImage(text: string, width = 600, height = 200): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const c = canvas.getContext("2d")!;
+  c.fillStyle = "#0B0B0C";
+  c.font = `${Math.round(height * 0.32)}px 'Brush Script MT', cursive`;
+  c.textBaseline = "middle";
+  c.fillText(text, 20, height / 2);
+  return canvas.toDataURL("image/png");
+}
+
 function SignaturePad({
   name,
+  needSignature,
+  needInitials,
   onClose,
   onAdopt,
 }: {
   name: string;
+  needSignature: boolean;
+  needInitials: boolean;
   onClose: () => void;
-  onAdopt: (dataUrl: string) => void;
+  onAdopt: (adopted: AdoptedSignature) => void;
 }) {
   const [tab, setTab] = React.useState<"draw" | "type">("draw");
   const [typed, setTyped] = React.useState(name);
-  const padRef = React.useRef<SignatureCanvas | null>(null);
+  const sigPadRef = React.useRef<SignatureCanvas | null>(null);
+  const iniPadRef = React.useRef<SignatureCanvas | null>(null);
+  const initialsPreview = deriveInitials(typed) || "—";
 
   function adopt() {
     if (tab === "draw") {
-      const pad = padRef.current;
-      if (!pad || pad.isEmpty()) {
-        toast.error("Please draw your signature.");
-        return;
+      const adopted: AdoptedSignature = {};
+      if (needSignature) {
+        const pad = sigPadRef.current;
+        if (!pad || pad.isEmpty()) {
+          toast.error("Please draw your signature.");
+          return;
+        }
+        adopted.signature = pad.getCanvas().toDataURL("image/png");
       }
-      onAdopt(pad.getCanvas().toDataURL("image/png"));
+      if (needInitials) {
+        const pad = iniPadRef.current;
+        if (!pad || pad.isEmpty()) {
+          toast.error("Please draw your initials.");
+          return;
+        }
+        adopted.initials = pad.getCanvas().toDataURL("image/png");
+      }
+      onAdopt(adopted);
     } else {
       if (!typed.trim()) {
         toast.error("Please type your name.");
         return;
       }
-      const canvas = document.createElement("canvas");
-      canvas.width = 600;
-      canvas.height = 200;
-      const c = canvas.getContext("2d")!;
-      c.fillStyle = "#0B0B0C";
-      c.font = "64px 'Brush Script MT', cursive";
-      c.textBaseline = "middle";
-      c.fillText(typed, 20, 110);
-      onAdopt(canvas.toDataURL("image/png"));
+      const adopted: AdoptedSignature = {};
+      if (needSignature) adopted.signature = cursiveImage(typed);
+      if (needInitials) adopted.initials = cursiveImage(deriveInitials(typed), 240, 200);
+      onAdopt(adopted);
     }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center">
       <div className="w-full max-w-lg rounded-2xl border border-border bg-background p-5 shadow-xl">
-        <h3 className="font-display text-lg font-semibold">Adopt your signature</h3>
+        <h3 className="font-display text-lg font-semibold">
+          {needSignature ? "Adopt your signature" : "Adopt your initials"}
+        </h3>
         <div className="mt-4 flex gap-2">
           <TabBtn active={tab === "draw"} onClick={() => setTab("draw")} icon={PenLine} label="Draw" />
           <TabBtn active={tab === "type"} onClick={() => setTab("type")} icon={Type} label="Type" />
         </div>
 
-        <div className="mt-4">
+        <div className="mt-4 space-y-4">
           {tab === "draw" ? (
-            <div className="overflow-hidden rounded-lg border border-border bg-white">
-              <SignatureCanvas
-                ref={padRef}
-                penColor="#0B0B0C"
-                canvasProps={{ className: "w-full", height: 200 }}
-              />
-            </div>
+            <>
+              {needSignature && (
+                <div>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Signature</p>
+                  <div className="overflow-hidden rounded-lg border border-border bg-white">
+                    <SignatureCanvas ref={sigPadRef} penColor="#0B0B0C" canvasProps={{ className: "w-full", height: 200 }} />
+                  </div>
+                </div>
+              )}
+              {needInitials && (
+                <div>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Initials</p>
+                  <div className="overflow-hidden rounded-lg border border-border bg-white">
+                    <SignatureCanvas ref={iniPadRef} penColor="#0B0B0C" canvasProps={{ className: "w-full", height: 120 }} />
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
-            <div>
+            <div className="space-y-3">
               <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type your full name" />
-              <div className="mt-3 grid h-28 place-items-center rounded-lg border border-border bg-white">
-                <span className="text-4xl text-black" style={{ fontFamily: "'Brush Script MT', cursive" }}>
-                  {typed || "Your signature"}
-                </span>
+              <div className="flex gap-3">
+                {needSignature && (
+                  <div className="flex-1">
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Signature</p>
+                    <div className="grid h-28 place-items-center rounded-lg border border-border bg-white">
+                      <span className="text-4xl text-black" style={{ fontFamily: "'Brush Script MT', cursive" }}>
+                        {typed || "Your signature"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {needInitials && (
+                  <div className={needSignature ? "w-28" : "flex-1"}>
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Initials</p>
+                    <div className="grid h-28 place-items-center rounded-lg border border-border bg-white">
+                      <span className="text-4xl text-black" style={{ fontFamily: "'Brush Script MT', cursive" }}>
+                        {initialsPreview}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -326,8 +384,12 @@ function SignaturePad({
           <Button
             variant="ghost"
             onClick={() => {
-              if (tab === "draw") padRef.current?.clear();
-              else setTyped("");
+              if (tab === "draw") {
+                sigPadRef.current?.clear();
+                iniPadRef.current?.clear();
+              } else {
+                setTyped("");
+              }
             }}
           >
             Clear
