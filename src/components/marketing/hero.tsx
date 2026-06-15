@@ -23,9 +23,18 @@ export function Hero() {
       {/* Background parallax layers */}
       <div className="pointer-events-none absolute inset-0">
         <motion.div style={{ y: yGlow }} className="absolute inset-0">
-          <div className="absolute -top-40 left-1/4 size-[40rem] -translate-x-1/2 rounded-full bg-gold/10 blur-[130px]" />
-          <div className="absolute bottom-0 right-0 size-[28rem] rounded-full bg-gold/5 blur-[110px]" />
+          <div className="absolute -top-40 left-1/4 size-[40rem] -translate-x-1/2 rounded-full bg-white/[0.06] blur-[130px]" />
+          <div className="absolute bottom-0 right-0 size-[28rem] rounded-full bg-[var(--metal)]/[0.05] blur-[110px]" />
         </motion.div>
+        {/* Faint brushed-metal brand watermark */}
+        <Image
+          src="/anexa-metal.png"
+          alt=""
+          aria-hidden
+          width={760}
+          height={760}
+          className="pointer-events-none absolute left-1/2 top-1/2 w-[34rem] max-w-none -translate-x-1/2 -translate-y-1/2 opacity-[0.16] mix-blend-screen sm:w-[44rem]"
+        />
         <div
           className="absolute inset-0 opacity-[0.035]"
           style={{
@@ -34,6 +43,8 @@ export function Hero() {
             backgroundSize: "64px 64px",
           }}
         />
+        {/* Keep text legible over the watermark */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0B0B0C] via-[#0B0B0C]/70 to-transparent" />
       </div>
 
       <div className="container-anexa relative">
@@ -44,7 +55,7 @@ export function Hero() {
                 className="reveal-up inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-medium text-white/80 backdrop-blur"
                 style={{ animationDelay: "0.05s" }}
               >
-                <ShieldCheck className="size-3.5 text-gold" />
+                <ShieldCheck className="size-3.5 text-metal" />
                 Insurance Claim Specialists · Licensed &amp; Insured
               </span>
 
@@ -85,13 +96,13 @@ export function Hero() {
                 <span className="flex items-center gap-1.5">
                   <span className="flex">
                     {Array.from({ length: 5 }).map((_, i) => (
-                      <Star key={i} className="size-4 fill-gold text-gold" />
+                      <Star key={i} className="size-4 fill-[var(--metal-bright)] text-[var(--metal-bright)]" />
                     ))}
                   </span>
                   4.9/5 · 600+ homeowners
                 </span>
                 <a href={COMPANY.phoneHref} className="inline-flex items-center gap-1.5 hover:text-white">
-                  <Phone className="size-4 text-gold" />
+                  <Phone className="size-4 text-metal" />
                   {COMPANY.phone}
                 </a>
                 <Link href="/login" className="font-medium text-white/70 hover:text-white">
@@ -104,7 +115,7 @@ export function Hero() {
           {/* Hero image (parallax + entrance + tilt) */}
           <motion.div style={{ y: yImage }} className="relative hidden lg:block">
             <div className="reveal-scale relative">
-              <div className="absolute -inset-6 rounded-[2rem] bg-gold/10 blur-2xl" />
+              <div className="absolute -inset-6 rounded-[2rem] bg-white/[0.07] blur-2xl" />
               <TiltCard max={7} radius="rounded-[1.75rem]">
                 <div className="relative aspect-[4/5] overflow-hidden rounded-[1.75rem] border border-white/15 shadow-2xl shadow-black/50">
                   <Image
@@ -121,7 +132,7 @@ export function Hero() {
                       <div className="font-display text-2xl font-semibold">1,200+</div>
                       <div className="text-xs text-white/60">Home projects completed in North Texas</div>
                     </div>
-                    <ShieldCheck className="size-8 text-gold" />
+                    <ShieldCheck className="size-8 text-metal" />
                   </div>
                 </div>
               </TiltCard>

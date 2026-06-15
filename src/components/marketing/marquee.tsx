@@ -23,9 +23,9 @@ export function Marquee() {
         <div className="animate-marquee flex w-max items-center gap-10 pr-10">
           {loop.map((it, i) => (
             <div key={i} className="flex shrink-0 items-center gap-2.5 text-sm font-medium text-white/55">
-              <it.icon className="size-4 text-gold" />
+              <it.icon className="size-4 text-metal" />
               <span>{it.label}</span>
-              <span className="ml-8 size-1 rounded-full bg-gold/50" />
+              <span className="ml-8 size-1 rounded-full bg-white/[0.05]0" />
             </div>
           ))}
         </div>

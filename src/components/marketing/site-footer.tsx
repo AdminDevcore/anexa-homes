@@ -18,7 +18,7 @@ export function SiteFooter() {
         </div>
 
         <div>
-          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
+          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-metal">
             Services
           </h4>
           <ul className="space-y-2.5 text-sm">
@@ -33,7 +33,7 @@ export function SiteFooter() {
         </div>
 
         <div>
-          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
+          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-metal">
             Company
           </h4>
           <ul className="space-y-2.5 text-sm">
@@ -60,24 +60,24 @@ export function SiteFooter() {
         </div>
 
         <div>
-          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
+          <h4 className="mb-4 text-sm font-semibold uppercase tracking-wider text-metal">
             Contact
           </h4>
           <ul className="space-y-3 text-sm text-white/65">
             <li className="flex items-center gap-2.5">
-              <Phone className="size-4 text-gold" />
+              <Phone className="size-4 text-metal" />
               <a href={COMPANY.phoneHref} className="hover:text-white">
                 {COMPANY.phone}
               </a>
             </li>
             <li className="flex items-center gap-2.5">
-              <Mail className="size-4 text-gold" />
+              <Mail className="size-4 text-metal" />
               <a href={`mailto:${COMPANY.email}`} className="hover:text-white">
                 {COMPANY.email}
               </a>
             </li>
             <li className="flex items-start gap-2.5">
-              <MapPin className="mt-0.5 size-4 text-gold" />
+              <MapPin className="mt-0.5 size-4 text-metal" />
               <span>{COMPANY.address}</span>
             </li>
           </ul>

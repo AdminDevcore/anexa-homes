@@ -62,8 +62,8 @@ export default async function ContactPage({
               <ContactRow icon={MapPin} label="Office" value={COMPANY.address} />
               <ContactRow icon={Clock} label="Hours" value="Mon–Sat, 8am – 7pm" />
             </ul>
-            <div className="rounded-2xl border border-gold/30 bg-gold/5 p-5 text-sm">
-              <p className="font-semibold text-gold-muted">Emergency storm damage?</p>
+            <div className="rounded-2xl border border-[var(--metal)]/30 bg-white/[0.05] p-5 text-sm">
+              <p className="font-semibold text-metal-dim">Emergency storm damage?</p>
               <p className="mt-1 text-muted-foreground">
                 Call us now at{" "}
                 <a href={COMPANY.phoneHref} className="font-medium text-foreground underline">
@@ -110,7 +110,7 @@ function ContactRow({
 }) {
   const content = (
     <div className="flex items-start gap-3">
-      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-foreground/5 text-gold">
+      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-foreground/5 text-metal">
         <Icon className="size-5" />
       </span>
       <div>

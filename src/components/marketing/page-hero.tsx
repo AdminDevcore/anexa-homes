@@ -36,7 +36,7 @@ export function PageHero({
         </>
       ) : (
         <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-32 right-0 size-[36rem] rounded-full bg-gold/10 blur-[120px]" />
+          <div className="absolute -top-32 right-0 size-[36rem] rounded-full bg-white/[0.06] blur-[120px]" />
         </div>
       )}
       <div className="container-anexa relative py-24 sm:py-32">

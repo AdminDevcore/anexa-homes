@@ -39,7 +39,7 @@ export function TestimonialsCarousel() {
           >
             <div className="flex gap-0.5">
               {Array.from({ length: t.rating }).map((_, j) => (
-                <Star key={j} className="size-4 fill-gold text-gold" />
+                <Star key={j} className="size-4 fill-[var(--metal-bright)] text-metal" />
               ))}
             </div>
             <blockquote className="mt-4 flex-1 text-[15px] leading-relaxed text-foreground/85">

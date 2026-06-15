@@ -14,6 +14,9 @@
   --color-gold: var(--gold);
   --color-gold-foreground: var(--gold-foreground);
   --color-gold-muted: var(--gold-muted);
+  --color-metal: var(--metal);
+  --color-metal-bright: var(--metal-bright);
+  --color-metal-dim: var(--metal-dim);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -77,10 +80,14 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.75rem;
-  /* Brand accent — vibrant orange (~#F4631E) */
+  /* Brand accent — vibrant orange (~#F4631E), reserved for primary CTAs */
   --gold: oklch(0.665 0.2 41);
   --gold-foreground: oklch(0.99 0 0);
   --gold-muted: oklch(0.6 0.19 40);
+  /* Brushed-metal palette — the dominant marketing accent */
+  --metal: #c7ccd1;
+  --metal-bright: #eef1f4;
+  --metal-dim: #8a9096;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -155,14 +162,32 @@
   .bg-gold {
     background-color: var(--gold);
   }
-  .gold-gradient-text {
-    background: linear-gradient(100deg, var(--gold) 0%, color-mix(in oklch, var(--gold) 55%, white) 50%, var(--gold) 100%);
+  /* Brushed-silver sheen text — used for highlighted headline words. Kept the
+     old class name so existing markup picks up the new metal look. */
+  .gold-gradient-text,
+  .metal-gradient-text {
+    background: linear-gradient(
+      100deg,
+      var(--metal-dim) 0%,
+      var(--metal-bright) 28%,
+      #ffffff 50%,
+      var(--metal) 72%,
+      var(--metal-dim) 100%
+    );
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
+  .text-metal { color: var(--metal); }
+  .text-metal-bright { color: var(--metal-bright); }
+  /* Brushed-metal fill (e.g. icon chips) */
+  .metal-fill {
+    background: linear-gradient(150deg, var(--metal-bright) 0%, var(--metal) 45%, var(--metal-dim) 100%);
+    color: #0b0b0c;
+  }
   .eyebrow {
-    @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-gold;
+    @apply inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em];
+    color: var(--metal-bright);
   }
   .section-px {
     @apply px-5 sm:px-8 lg:px-12;
@@ -172,8 +197,8 @@
   }
   .hairline {
     height: 1px;
-    background: linear-gradient(to right, transparent, var(--gold), transparent);
-    opacity: 0.5;
+    background: linear-gradient(to right, transparent, var(--metal), transparent);
+    opacity: 0.45;
   }
 }
 
@@ -209,10 +234,10 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
     inset 0 -1px 0 rgba(0, 0, 0, 0.55),
     0 22px 48px -24px rgba(0, 0, 0, 0.6),
-    0 10px 36px -16px rgba(244, 99, 30, 0.16);
+    0 10px 36px -16px rgba(199, 204, 209, 0.12);
 }
 .glass-card::after {
-  /* gold iridescent rim, drawn only on the border via mask */
+  /* brushed-chrome iridescent rim, drawn only on the border via mask */
   content: "";
   position: absolute;
   inset: 0;
@@ -221,16 +246,16 @@
   pointer-events: none;
   background: conic-gradient(
     from 210deg,
-    rgba(244, 99, 30, 0.9),
-    rgba(255, 170, 110, 0.95),
-    rgba(255, 120, 50, 0.6),
-    rgba(244, 99, 30, 0.9),
-    rgba(255, 150, 90, 0.95)
+    rgba(238, 241, 244, 0.95),
+    rgba(138, 144, 150, 0.35),
+    rgba(199, 204, 209, 0.85),
+    rgba(120, 126, 132, 0.3),
+    rgba(238, 241, 244, 0.95)
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity: 0.5;
+  opacity: 0.55;
 }
 .glass-card:hover {
   transform: translateY(-5px);
@@ -238,7 +263,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
     inset 0 -1px 0 rgba(0, 0, 0, 0.55),
     0 30px 60px -24px rgba(0, 0, 0, 0.65),
-    0 16px 44px -14px rgba(244, 99, 30, 0.4);
+    0 16px 44px -14px rgba(199, 204, 209, 0.3);
 }
 .glass-card:hover::after {
   opacity: 0.85;
@@ -276,15 +301,15 @@
   pointer-events: none;
   background: conic-gradient(
     from 210deg,
-    rgba(244, 99, 30, 0.95),
-    rgba(255, 170, 110, 0.95),
-    rgba(255, 120, 50, 0.6),
-    rgba(244, 99, 30, 0.95)
+    rgba(238, 241, 244, 0.95),
+    rgba(138, 144, 150, 0.4),
+    rgba(199, 204, 209, 0.85),
+    rgba(238, 241, 244, 0.95)
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity: 0.55;
+  opacity: 0.6;
 }
 .glass-pill:hover {
   transform: translateY(-2px);
@@ -292,7 +317,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
     inset 0 -2px 6px rgba(0, 0, 0, 0.5),
     0 16px 36px -14px rgba(0, 0, 0, 0.7),
-    0 0 28px -6px rgba(244, 99, 30, 0.45);
+    0 0 28px -6px rgba(199, 204, 209, 0.4);
 }
 
 /* Glass pill button — gold variant (primary) */

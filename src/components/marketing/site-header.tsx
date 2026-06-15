@@ -169,7 +169,7 @@ export function SiteHeader() {
                         href={s.href}
                         className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium hover:bg-muted"
                       >
-                        <s.icon className="size-4 text-gold" />
+                        <s.icon className="size-4 text-metal" />
                         {s.title}
                       </Link>
                     </SheetClose>
@@ -188,7 +188,7 @@ export function SiteHeader() {
               <div className="mt-2 border-t px-4 pt-4">
                 <SheetClose asChild>
                   <Link href="/login" className="flex items-center gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium hover:bg-muted">
-                    <LogIn className="size-4 text-gold" />
+                    <LogIn className="size-4 text-metal" />
                     Login
                   </Link>
                 </SheetClose>

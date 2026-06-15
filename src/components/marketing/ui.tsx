@@ -10,7 +10,7 @@ export function Eyebrow({
 }) {
   return (
     <span className={cn("eyebrow", className)}>
-      <span className="h-px w-6 bg-gold" aria-hidden />
+      <span className="h-px w-6 bg-[var(--metal)]" aria-hidden />
       {children}
     </span>
   );

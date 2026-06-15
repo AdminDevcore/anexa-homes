@@ -36,7 +36,7 @@ export function ServicesSection() {
             <TiltCard className="h-full">
             <Link
               href={s.href}
-              className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-colors hover:border-gold/40 hover:shadow-xl hover:shadow-black/10"
+              className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-colors hover:border-[var(--metal)]/40 hover:shadow-xl hover:shadow-black/10"
             >
               <div className="relative aspect-[16/10] overflow-hidden">
                 <Image
@@ -47,11 +47,11 @@ export function ServicesSection() {
                   className="object-cover transition-transform duration-500 group-hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
-                <span className="absolute left-4 top-4 grid size-11 place-items-center rounded-xl bg-background/90 text-gold-muted shadow-sm backdrop-blur">
+                <span className="absolute left-4 top-4 grid size-11 place-items-center rounded-xl bg-background/90 text-metal-dim shadow-sm backdrop-blur">
                   <s.icon className="size-5" />
                 </span>
                 {s.primary && (
-                  <span className="absolute right-4 top-4 rounded-full bg-gold px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-gold-foreground">
+                  <span className="metal-fill absolute right-4 top-4 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider">
                     Core
                   </span>
                 )}
@@ -61,7 +61,7 @@ export function ServicesSection() {
               </div>
               <div className="flex flex-1 flex-col p-6">
                 <p className="flex-1 text-sm leading-relaxed text-muted-foreground">{s.description}</p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-gold-muted">
+                <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-metal-dim">
                   Learn more
                   <ArrowUpRight className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </span>
@@ -88,7 +88,7 @@ export function ProcessSection() {
           <Reveal key={p.step} delay={i % 3}>
             <div className="group h-full bg-card p-7 transition-colors hover:bg-card/60">
               <div className="flex items-center gap-3">
-                <span className="font-display text-3xl font-semibold text-gold">{p.step}</span>
+                <span className="font-display text-3xl font-semibold text-metal">{p.step}</span>
                 <span className="h-px flex-1 bg-border" />
               </div>
               <h3 className="mt-4 font-display text-lg font-semibold">{p.title}</h3>
@@ -112,7 +112,7 @@ export function InsuranceHelpSection() {
       <div className="grid items-center gap-12 lg:grid-cols-2">
         <Reveal>
           <div className="relative">
-            <div className="absolute -inset-4 rounded-[2rem] bg-gold/10 blur-2xl" />
+            <div className="absolute -inset-4 rounded-[2rem] bg-white/[0.06] blur-2xl" />
             <div className="relative aspect-[5/4] overflow-hidden rounded-3xl border border-border shadow-xl shadow-black/10">
               <Image
                 src="/img/storm.jpg"
@@ -139,7 +139,7 @@ export function InsuranceHelpSection() {
             {points.map((p, i) => (
               <Reveal key={p.title} delay={i}>
                 <div className="flex gap-4 rounded-2xl border border-border bg-card p-5">
-                  <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold/12 text-gold-muted">
+                  <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-[var(--metal)]/[0.12] text-metal-dim">
                     <p.icon className="size-5" />
                   </span>
                   <div>
@@ -172,8 +172,8 @@ export function WhyAnexaSection() {
         {WHY_ANEXA.map((w, i) => (
           <Reveal key={w.title} delay={i % 3}>
             <TiltCard className="h-full" max={7}>
-              <div className="h-full rounded-2xl border border-white/10 bg-white/[0.03] p-7 transition-colors hover:border-gold/40">
-                <span className="grid size-10 place-items-center rounded-lg bg-gold/15 text-gold">
+              <div className="h-full rounded-2xl border border-white/10 bg-white/[0.03] p-7 transition-colors hover:border-[var(--metal)]/40">
+                <span className="grid size-10 place-items-center rounded-lg bg-[var(--metal)]/[0.15] text-metal">
                   <Check className="size-5" />
                 </span>
                 <h3 className="mt-5 font-display text-lg font-semibold text-white">{w.title}</h3>
@@ -219,13 +219,13 @@ export function ServiceAreaSection() {
                   key={city}
                   className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-1.5 text-sm font-medium"
                 >
-                  <MapPin className="size-3.5 text-gold" />
+                  <MapPin className="size-3.5 text-metal" />
                   {city}
                 </span>
               ))}
             </div>
             <div className="mt-6 flex items-center gap-3 rounded-xl bg-foreground/5 p-4">
-              <Phone className="size-5 text-gold" />
+              <Phone className="size-5 text-metal" />
               <div>
                 <div className="text-sm text-muted-foreground">Talk to a specialist</div>
                 <a href={COMPANY.phoneHref} className="font-display text-lg font-semibold">

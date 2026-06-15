@@ -55,7 +55,7 @@ export default function AboutPage() {
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 md:grid-cols-4">
           {STATS.map((s) => (
             <div key={s.label} className="bg-[#0B0B0C] p-8 text-center">
-              <div className="font-display text-3xl font-semibold text-gold">{s.value}</div>
+              <div className="font-display text-3xl font-semibold text-metal">{s.value}</div>
               <div className="mt-1 text-xs uppercase tracking-wider text-white/50">{s.label}</div>
             </div>
           ))}

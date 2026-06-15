@@ -49,7 +49,7 @@ export default function CareersPage() {
           {PERKS.map((p, i) => (
             <Reveal key={p.title} delay={i}>
               <div className="h-full rounded-2xl border border-border bg-card p-7 text-center">
-                <span className="mx-auto grid size-12 place-items-center rounded-xl bg-gold/12 text-gold-muted">
+                <span className="mx-auto grid size-12 place-items-center rounded-xl bg-[var(--metal)]/[0.12] text-metal-dim">
                   <p.icon className="size-6" />
                 </span>
                 <h3 className="mt-5 font-display text-lg font-semibold">{p.title}</h3>
@@ -71,7 +71,7 @@ export default function CareersPage() {
                 </span>
                 <div>
                   <h3 className="font-display text-lg font-semibold">{r.title}</h3>
-                  <p className="text-xs font-medium uppercase tracking-wider text-gold-muted">{r.type}</p>
+                  <p className="text-xs font-medium uppercase tracking-wider text-metal-dim">{r.type}</p>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{r.desc}</p>
                 </div>
               </div>

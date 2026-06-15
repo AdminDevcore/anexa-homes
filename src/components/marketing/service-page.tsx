@@ -45,7 +45,7 @@ export function ServicePage({
             <ul className="mt-7 grid gap-3 sm:grid-cols-2">
               {service.features.map((f) => (
                 <li key={f} className="flex items-center gap-2.5 text-sm font-medium">
-                  <span className="grid size-6 shrink-0 place-items-center rounded-full bg-gold/15 text-gold-muted">
+                  <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[var(--metal)]/[0.15] text-metal-dim">
                     <Check className="size-3.5" />
                   </span>
                   {f}

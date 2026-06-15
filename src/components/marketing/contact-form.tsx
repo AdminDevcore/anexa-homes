@@ -104,7 +104,7 @@ export function ContactForm({
   if (submitted) {
     return (
       <div className="flex flex-col items-center gap-4 rounded-2xl border border-border bg-card p-10 text-center">
-        <CheckCircle2 className="size-12 text-gold" />
+        <CheckCircle2 className="size-12 text-metal" />
         <h3 className="font-display text-2xl font-semibold">Thank you!</h3>
         <p className="max-w-sm text-muted-foreground">{successText}</p>
       </div>
@@ -149,7 +149,7 @@ export function ContactForm({
       )}
       {showScheduling && (
         <>
-          <div className="space-y-4 rounded-xl border border-gold/30 bg-gold/[0.04] p-4">
+          <div className="space-y-4 rounded-xl border border-[var(--metal)]/30 bg-[var(--metal)]/[0.06] p-4">
             <p className="text-sm font-semibold">Pick a time for your free inspection</p>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Preferred date" error={errors.preferredDate?.message}>
