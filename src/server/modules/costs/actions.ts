@@ -301,19 +301,9 @@ export async function setPaFeePctAction(pct: number) {
   return { ok: true as const };
 }
 
-const splitSchema = z.object({ userId: z.string().min(1), pct: z.number().min(0).max(100).nullable() });
-
-export async function setRepSplitAction(input: z.infer<typeof splitSchema>) {
-  const user = await requireUser();
-  if (!can(user, "update", "Settings")) return { ok: false as const, error: "Not allowed." };
-  const parsed = splitSchema.safeParse(input);
-  if (!parsed.success) return { ok: false as const, error: "Invalid split." };
-  const target = await prisma.user.findFirst({ where: { id: parsed.data.userId, companyId: user.companyId }, select: { id: true } });
-  if (!target) return { ok: false as const, error: "User not found." };
-  await prisma.user.update({ where: { id: target.id }, data: { commissionSplitPct: parsed.data.pct } });
-  revalidatePath("/portal/settings/commissions");
-  return { ok: true as const };
-}
+// Rep splits are edited per-rep on each Team member's profile
+// (updateTeamMemberAction → User.commissionSplitPct). The duplicate bulk editor
+// that lived in Commission settings was removed, so there's no setRepSplitAction.
 
 const scheduleSchema = z.object({
   projectId: z.string().min(1),
