@@ -3,7 +3,7 @@ import { getWelcomeCallByToken } from "@/server/modules/welcome-call/service";
 import { WelcomeCallExperience } from "@/components/welcome-call/welcome-call-experience";
 import { Logo } from "@/components/marketing/logo";
 
-export const metadata = { title: "Welcome — confirm your details" };
+export const metadata = { title: "Confirm your details" };
 export const dynamic = "force-dynamic";
 
 export default async function WelcomePage({ params }: { params: Promise<{ token: string }> }) {
@@ -11,9 +11,9 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
   const view = await getWelcomeCallByToken(token);
 
   if (view.state === "invalid")
-    return <Status icon={XCircle} title="Link not found" body="This welcome-call link isn't valid. Please request a new one." />;
+    return <Status icon={XCircle} title="Link not found" body="This confirmation link isn't valid. Please request a new one." />;
   if (view.state === "voided")
-    return <Status icon={XCircle} title="Link no longer active" body="This welcome-call link has been turned off. Please contact us for a new one." />;
+    return <Status icon={XCircle} title="Link no longer active" body="This confirmation link has been turned off. Please contact us for a new one." />;
   if (view.state === "completed")
     return (
       <Status
@@ -27,6 +27,7 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
     <WelcomeCallExperience
       token={token}
       customerName={view.customerName}
+      kind={view.kind}
       snapshot={view.snapshot}
       initialAcked={view.acknowledged}
     />

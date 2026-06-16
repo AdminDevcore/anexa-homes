@@ -7,9 +7,9 @@ import { getWelcomeCallTemplates } from "@/server/modules/welcome-call/queries";
 import { PageHeader } from "@/components/portal/ui";
 import { WelcomeCallTemplatesManager } from "@/components/portal/welcome-call-templates-manager";
 
-export const metadata = { title: "Welcome Call Templates" };
+export const metadata = { title: "Call Templates" };
 
-export default async function WelcomeCallTemplatesPage() {
+export default async function CallTemplatesPage() {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
@@ -21,8 +21,8 @@ export default async function WelcomeCallTemplatesPage() {
         <ArrowLeft className="size-4" /> Back to settings
       </Link>
       <PageHeader
-        title="Welcome Call Templates"
-        description="Author reusable welcome-call scripts — confirmation items that pull in live deal data — for reps to send customers."
+        title="Call Templates"
+        description="Author reusable call scripts — Welcome Calls (after the sale) and Completion Calls (after the install) — confirmation items that pull in live deal data for reps to send customers."
       />
       <WelcomeCallTemplatesManager items={items} />
     </div>

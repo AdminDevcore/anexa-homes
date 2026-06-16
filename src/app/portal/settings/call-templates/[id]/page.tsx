@@ -8,10 +8,11 @@ import { getWelcomeCallTemplate } from "@/server/modules/welcome-call/queries";
 import { buildFieldCatalog } from "@/server/modules/esign/autofill";
 import { PageHeader } from "@/components/portal/ui";
 import { WelcomeCallTemplateEditor } from "@/components/portal/welcome-call-template-editor";
+import { CALL_KIND_LABELS } from "@/server/modules/welcome-call/types";
 
-export const metadata = { title: "Edit Welcome Call Template" };
+export const metadata = { title: "Edit Call Template" };
 
-export default async function WelcomeCallTemplateEditPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CallTemplateEditPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
@@ -26,10 +27,10 @@ export default async function WelcomeCallTemplateEditPage({ params }: { params: 
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings/welcome-call-templates" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/portal/settings/call-templates" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> Back to templates
       </Link>
-      <PageHeader title={tpl.name} description="Write the intro, the items the customer confirms, and a closing message. Use merge fields for live deal data." />
+      <PageHeader title={tpl.name} description={`${CALL_KIND_LABELS[tpl.kind]} script — write the intro, the items the customer confirms, and a closing message. Use merge fields for live deal data.`} />
       <WelcomeCallTemplateEditor
         templateId={tpl.id}
         initial={{ intro: tpl.intro, closing: tpl.closing, items: tpl.items }}

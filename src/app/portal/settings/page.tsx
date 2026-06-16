@@ -31,7 +31,7 @@ const SECTIONS: {
   { icon: SlidersHorizontal, title: "Custom Fields", body: "Add custom fields to appointments and projects.", href: "/portal/settings/fields" },
   { icon: Megaphone, title: "Lead Sources", body: "Customize where leads come from (Door Knock, Referral, Ads…).", href: "/portal/settings/lead-sources" },
   { icon: FileSignature, title: "Document Templates", body: "Build and edit contract templates.", href: "/portal/documents" },
-  { icon: PhoneCall, title: "Welcome Call Templates", body: "Scripts customers confirm via a link after the sale.", href: "/portal/settings/welcome-call-templates" },
+  { icon: PhoneCall, title: "Call Templates", body: "Welcome & completion call scripts customers confirm via a link.", href: "/portal/settings/call-templates" },
   { icon: DollarSign, title: "Commission Rules", body: "Set percentage, flat, and override rules.", href: "/portal/settings/commissions" },
   { icon: Bell, title: "Notification Rules", body: "Choose triggers, recipients, and channels.", href: "/portal/settings/notifications" },
   { icon: Camera, title: "Photo Templates", body: "Site & install photo checklists for projects.", href: "/portal/settings/photo-templates" },

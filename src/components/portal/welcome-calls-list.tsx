@@ -7,9 +7,15 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { resendWelcomeCallAction, voidWelcomeCallAction } from "@/server/modules/welcome-call/actions";
+import { CALL_KIND_LABELS, type CallKind } from "@/server/modules/welcome-call/types";
 
 type Status = "sent" | "viewed" | "completed" | "voided";
-type Row = { id: string; customerName: string; templateName: string; status: Status; when: string; leadId: string };
+type Row = { id: string; customerName: string; kind: CallKind; templateName: string; status: Status; when: string; leadId: string };
+
+const KIND_BADGE: Record<CallKind, string> = {
+  welcome: "bg-sky-100 text-sky-700",
+  completion: "bg-violet-100 text-violet-700",
+};
 
 const STATUS: Record<Status, { label: string; cls: string }> = {
   sent: { label: "Sent", cls: "bg-blue-100 text-blue-700" },
@@ -31,7 +37,7 @@ export function WelcomeCallsList({ rows, canSend }: { rows: Row[]; canSend: bool
     router.refresh();
   }
   async function voidCall(id: string) {
-    if (!confirm("Turn off this welcome-call link? The customer won't be able to use it.")) return;
+    if (!confirm("Turn off this call link? The customer won't be able to use it.")) return;
     setBusy(id);
     const res = await voidWelcomeCallAction(id);
     setBusy(null);
@@ -48,7 +54,10 @@ export function WelcomeCallsList({ rows, canSend }: { rows: Row[]; canSend: bool
         return (
           <li key={r.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <Link href={`/portal/leads/${r.leadId}`} className="font-medium hover:text-gold-muted">{r.customerName}</Link>
+              <div className="flex items-center gap-2">
+                <Link href={`/portal/leads/${r.leadId}`} className="font-medium hover:text-gold-muted">{r.customerName}</Link>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${KIND_BADGE[r.kind]}`}>{CALL_KIND_LABELS[r.kind]}</span>
+              </div>
               <div className="text-xs text-muted-foreground">{r.templateName} · {r.when}</div>
             </div>
             <div className="flex items-center gap-2 sm:flex-col sm:items-end">

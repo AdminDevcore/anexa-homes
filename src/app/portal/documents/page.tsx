@@ -16,6 +16,7 @@ import { ResendButton } from "@/components/esign/resend-button";
 import { NewTemplateButton } from "@/components/portal/new-template-button";
 import { WelcomeCallsList } from "@/components/portal/welcome-calls-list";
 import { listWelcomeCalls } from "@/server/modules/welcome-call/queries";
+import { CALL_KIND_LABELS } from "@/server/modules/welcome-call/types";
 import { currentFormatters } from "@/lib/format-server";
 
 export const metadata = { title: "Documents" };
@@ -58,7 +59,8 @@ export default async function DocumentsPage() {
   const welcomeRows = welcomeCalls.map((w) => ({
     id: w.id,
     customerName: w.customerName,
-    templateName: w.template?.name ?? "Welcome Call",
+    kind: w.kind,
+    templateName: w.template?.name ?? CALL_KIND_LABELS[w.kind],
     status: w.status as "sent" | "viewed" | "completed" | "voided",
     when: fmt.date(w.completedAt ?? w.viewedAt ?? w.sentAt),
     leadId: w.leadId,
@@ -207,17 +209,17 @@ export default async function DocumentsPage() {
         <div className="rounded-xl border border-border bg-card">
           <div className="flex items-center gap-2 border-b border-border px-5 py-3.5">
             <PhoneCall className="size-4 text-gold" />
-            <h2 className="font-semibold">Welcome Calls</h2>
+            <h2 className="font-semibold">Confirmation Calls</h2>
           </div>
           {welcomeRows.length === 0 ? (
             <div className="p-5">
               <EmptyState
                 icon={PhoneCall}
-                title="No welcome calls sent yet"
+                title="No calls sent yet"
                 description={
                   canSend
-                    ? "Open a lead and click “Welcome Call” to send a customer a confirmation link. Build scripts in Settings → Welcome Call Templates."
-                    : "Sent welcome calls will appear here."
+                    ? "Open a lead and click “Send Call” to send a customer a welcome or completion confirmation link. Build scripts in Settings → Call Templates."
+                    : "Sent welcome and completion calls will appear here."
                 }
               />
             </div>

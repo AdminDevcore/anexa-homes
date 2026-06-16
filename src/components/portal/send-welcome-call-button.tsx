@@ -9,8 +9,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { sendWelcomeCallAction } from "@/server/modules/welcome-call/actions";
+import { CALL_KINDS, CALL_KIND_LABELS, type CallKind } from "@/server/modules/welcome-call/types";
 
-type Template = { id: string; name: string };
+type Template = { id: string; name: string; kind: CallKind };
 
 export function SendWelcomeCallButton({ leadId, templates }: { leadId: string; templates: Template[] }) {
   const router = useRouter();
@@ -26,7 +27,7 @@ export function SendWelcomeCallButton({ leadId, templates }: { leadId: string; t
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     setResult({ url: res.url!, emailed: !!res.emailed });
-    toast.success(res.emailed ? "Welcome call sent to the customer" : "Welcome call link ready");
+    toast.success(res.emailed ? "Call sent to the customer" : "Call link ready");
     router.refresh();
   }
 
@@ -39,12 +40,12 @@ export function SendWelcomeCallButton({ leadId, templates }: { leadId: string; t
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setResult(null); }}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          <PhoneCall className="size-4" /> Welcome Call
+          <PhoneCall className="size-4" /> Send Call
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Send Welcome Call</DialogTitle>
+          <DialogTitle>Send Call</DialogTitle>
           <DialogDescription>
             The customer gets a link to review and confirm their project details.
           </DialogDescription>
@@ -69,7 +70,7 @@ export function SendWelcomeCallButton({ leadId, templates }: { leadId: string; t
         ) : templates.length === 0 ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              No welcome-call templates yet. Create one in Settings → Welcome Call Templates first.
+              No call templates yet. Create one in Settings → Call Templates first.
             </p>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>Close</Button>
@@ -83,7 +84,11 @@ export function SendWelcomeCallButton({ leadId, templates }: { leadId: string; t
               onChange={(e) => setTemplateId(e.target.value)}
               className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
             >
-              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {CALL_KINDS.filter((k) => templates.some((t) => t.kind === k)).map((k) => (
+                <optgroup key={k} label={CALL_KIND_LABELS[k]}>
+                  {templates.filter((t) => t.kind === k).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </optgroup>
+              ))}
             </select>
             <DialogFooter>
               <Button onClick={send} disabled={busy} className="bg-gold text-gold-foreground hover:bg-gold/90">

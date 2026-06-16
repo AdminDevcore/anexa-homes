@@ -2088,17 +2088,26 @@ model StoredFile {
 }
 
 // ---------------------------------------------------------------------------
-// Welcome Call — self-service customer confirmation flow (post-sale).
-// An admin authors a reusable script (ordered confirmation items w/ merge
-// tokens); a rep sends a deal-specific link; the customer acknowledges each
-// item and confirms. See docs/superpowers/specs/2026-06-16-welcome-call-design.md
+// Call Templates — self-service customer confirmation flows. Two kinds:
+// `welcome` (post-sale) and `completion` (post-install). An admin authors a
+// reusable script (ordered confirmation items w/ merge tokens); a rep sends a
+// deal-specific link; the customer acknowledges each item and confirms.
+// See docs/superpowers/specs/2026-06-16-welcome-call-design.md
 // ---------------------------------------------------------------------------
+
+// Which kind of confirmation call a template/session is.
+enum CallKind {
+  welcome
+  completion
+}
 
 model WelcomeCallTemplate {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name      String
+  // welcome (post-sale) vs completion (post-install) — both are confirmation scripts.
+  kind      CallKind @default(welcome)
   intro     String? // shown above the items
   closing   String? // thank-you message after confirm
   // Ordered confirmation items: [{ id, title, body }] — body may contain merge tokens.
@@ -2133,6 +2142,7 @@ model WelcomeCallSession {
 
   customerName  String
   customerEmail String?
+  kind          CallKind          @default(welcome)
   status        WelcomeCallStatus @default(sent)
   tokenHash     String            @unique
   // Frozen at send time: { intro, closing, items: [{ id, title, body }] } with all merge

@@ -8,6 +8,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { createWelcomeCall, resendWelcomeCall, voidWelcomeCall, confirmWelcomeCall } from "./service";
+import { asCallKind, type CallKind } from "./types";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -23,22 +24,33 @@ const contentSchema = z.object({
   closing: z.string().max(4000),
   items: z.array(itemSchema).max(50),
 });
-const TPL_PATH = "/portal/settings/welcome-call-templates";
+const TPL_PATH = "/portal/settings/call-templates";
 
 // --------------------------- Template CRUD (admins) -------------------------
 
-export async function createWelcomeCallTemplateAction(name: string) {
+export async function createWelcomeCallTemplateAction(name: string, kind: CallKind = "welcome") {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const parsed = nameSchema.safeParse(name);
   if (!parsed.success) return fail(parsed.error.issues[0].message);
   const last = await prisma.welcomeCallTemplate.findFirst({ where: { companyId: user.companyId }, orderBy: { position: "desc" }, select: { position: true } });
   const created = await prisma.welcomeCallTemplate.create({
-    data: { companyId: user.companyId, name: parsed.data, position: (last?.position ?? -1) + 1 },
+    data: { companyId: user.companyId, name: parsed.data, kind: asCallKind(kind), position: (last?.position ?? -1) + 1 },
     select: { id: true },
   });
   revalidatePath(TPL_PATH);
   return ok({ id: created.id });
+}
+
+export async function setWelcomeCallTemplateKindAction(id: string, kind: CallKind) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const t = await prisma.welcomeCallTemplate.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!t) return fail("Template not found.");
+  await prisma.welcomeCallTemplate.update({ where: { id }, data: { kind: asCallKind(kind) } });
+  revalidatePath(TPL_PATH);
+  revalidatePath(`${TPL_PATH}/${id}`);
+  return ok();
 }
 
 export async function renameWelcomeCallTemplateAction(id: string, name: string) {

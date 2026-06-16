@@ -4,7 +4,7 @@ import { brandedEmailTemplate } from "@/server/modules/notifications/email-templ
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { buildAutofillContext, fillTokens, type AutofillContext } from "@/server/modules/esign/autofill";
 import { sha256, generateSignerToken } from "@/server/modules/esign/tokens";
-import { parseItems, type WelcomeCallContent } from "./types";
+import { parseItems, CALL_KIND_LABELS, type WelcomeCallContent, type CallKind } from "./types";
 
 // Lead fields needed to resolve merge tokens for a welcome call.
 const LEAD_SELECT = {
@@ -82,7 +82,7 @@ const appUrl = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 export async function createWelcomeCall(companyId: string, userId: string, leadId: string, templateId: string) {
   const [lead, tpl, company] = await Promise.all([
     loadLead(leadId, companyId),
-    prisma.welcomeCallTemplate.findFirst({ where: { id: templateId, companyId }, select: { id: true, intro: true, closing: true, items: true } }),
+    prisma.welcomeCallTemplate.findFirst({ where: { id: templateId, companyId }, select: { id: true, kind: true, intro: true, closing: true, items: true } }),
     prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }),
   ]);
   if (!lead) return { ok: false as const, error: "Lead not found." };
@@ -97,6 +97,7 @@ export async function createWelcomeCall(companyId: string, userId: string, leadI
     data: {
       companyId,
       templateId: tpl.id,
+      kind: tpl.kind,
       leadId,
       projectId: lead.project?.id ?? null,
       customerName: ctx.customer.fullName || "Customer",
@@ -112,12 +113,18 @@ export async function createWelcomeCall(companyId: string, userId: string, leadI
   const url = `${appUrl()}/welcome/${token.raw}`;
   if (lead.email) {
     const brand = await emailBrandFor(companyId);
+    const isCompletion = tpl.kind === "completion";
     const tpl2 = brandedEmailTemplate({
       brand: brand.brand,
-      subject: `Welcome to ${company?.name ?? "your project"} — please confirm your details`,
-      heading: `Welcome, ${ctx.customer.firstName || "there"}!`,
+      subject: isCompletion
+        ? `Your project with ${company?.name ?? "us"} is complete — please confirm`
+        : `Welcome to ${company?.name ?? "your project"} — please confirm your details`,
+      heading: isCompletion ? `Thank you, ${ctx.customer.firstName || "there"}!` : `Welcome, ${ctx.customer.firstName || "there"}!`,
       paragraphs: [
-        snapshot.intro || "Please take a moment to review and confirm the details of your project.",
+        snapshot.intro ||
+          (isCompletion
+            ? "Your project is complete. Please take a moment to review and confirm everything looks right."
+            : "Please take a moment to review and confirm the details of your project."),
         "Click below to review everything and confirm it's correct — it only takes a minute.",
       ],
       cta: { label: "Review & confirm", url },
@@ -166,31 +173,31 @@ export async function voidWelcomeCall(companyId: string, sessionId: string) {
 export type WelcomeCallView =
   | { state: "invalid" }
   | { state: "voided" }
-  | { state: "completed"; customerName: string; snapshot: WelcomeCallContent }
-  | { state: "active"; sessionId: string; customerName: string; snapshot: WelcomeCallContent; acknowledged: string[] };
+  | { state: "completed"; customerName: string; kind: CallKind; snapshot: WelcomeCallContent }
+  | { state: "active"; sessionId: string; customerName: string; kind: CallKind; snapshot: WelcomeCallContent; acknowledged: string[] };
 
 /** Public lookup by raw token. Records the first view. Used by the /welcome/[token] page. */
 export async function getWelcomeCallByToken(rawToken: string): Promise<WelcomeCallView> {
   const session = await prisma.welcomeCallSession.findUnique({
     where: { tokenHash: sha256(rawToken) },
-    select: { id: true, status: true, customerName: true, snapshot: true, acknowledged: true },
+    select: { id: true, kind: true, status: true, customerName: true, snapshot: true, acknowledged: true },
   });
   if (!session) return { state: "invalid" };
   const snapshot = session.snapshot as WelcomeCallContent;
   if (session.status === "voided") return { state: "voided" };
-  if (session.status === "completed") return { state: "completed", customerName: session.customerName, snapshot };
+  if (session.status === "completed") return { state: "completed", customerName: session.customerName, kind: session.kind, snapshot };
   if (session.status === "sent") {
     await prisma.welcomeCallSession.update({ where: { id: session.id }, data: { status: "viewed", viewedAt: new Date() } });
   }
   const acknowledged = Array.isArray(session.acknowledged) ? (session.acknowledged as string[]) : [];
-  return { state: "active", sessionId: session.id, customerName: session.customerName, snapshot, acknowledged };
+  return { state: "active", sessionId: session.id, customerName: session.customerName, kind: session.kind, snapshot, acknowledged };
 }
 
 /** Customer confirmation. Validates every snapshot item was acknowledged, then completes + notifies the rep. */
 export async function confirmWelcomeCall(rawToken: string, ackedIds: string[], ip: string | null) {
   const session = await prisma.welcomeCallSession.findUnique({
     where: { tokenHash: sha256(rawToken) },
-    select: { id: true, companyId: true, status: true, customerName: true, snapshot: true, leadId: true },
+    select: { id: true, companyId: true, kind: true, status: true, customerName: true, snapshot: true, leadId: true },
   });
   if (!session) return { ok: false as const, error: "This link is no longer valid." };
   if (session.status === "voided") return { ok: false as const, error: "This link is no longer active." };
@@ -212,7 +219,7 @@ export async function confirmWelcomeCall(rawToken: string, ackedIds: string[], i
     select: { assignedRepId: true, assignedRep: { select: { email: true, firstName: true } } },
   });
   if (lead?.assignedRepId) {
-    const title = `✅ Welcome call confirmed — ${session.customerName}`;
+    const title = `✅ ${CALL_KIND_LABELS[session.kind]} confirmed — ${session.customerName}`;
     const body = `${session.customerName} reviewed and confirmed their project details.`;
     const link = `/portal/leads/${session.leadId}`;
     await prisma.notification.create({

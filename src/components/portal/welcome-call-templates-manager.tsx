@@ -12,15 +12,18 @@ import {
   renameWelcomeCallTemplateAction,
   moveWelcomeCallTemplateAction,
   setWelcomeCallTemplateActiveAction,
+  setWelcomeCallTemplateKindAction,
   deleteWelcomeCallTemplateAction,
 } from "@/server/modules/welcome-call/actions";
+import { CALL_KIND_LABELS, CALL_KINDS, type CallKind } from "@/server/modules/welcome-call/types";
 
-type Template = { id: string; name: string; active: boolean; position: number; itemCount: number; sessionCount: number };
+type Template = { id: string; name: string; kind: CallKind; active: boolean; position: number; itemCount: number; sessionCount: number };
 
 export function WelcomeCallTemplatesManager({ items }: { items: Template[] }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [addName, setAddName] = React.useState("");
+  const [addKind, setAddKind] = React.useState<CallKind>("welcome");
   const [editId, setEditId] = React.useState<string | null>(null);
   const [editName, setEditName] = React.useState("");
 
@@ -37,9 +40,9 @@ export function WelcomeCallTemplatesManager({ items }: { items: Template[] }) {
   async function add() {
     const name = addName.trim();
     if (!name) return toast.error("Enter a template name.");
-    const res = await run(createWelcomeCallTemplateAction(name), "Template created");
+    const res = await run(createWelcomeCallTemplateAction(name, addKind), "Template created");
     const id = (res as { id?: string } | null)?.id;
-    if (res) { setAddName(""); if (id) router.push(`/portal/settings/welcome-call-templates/${id}`); }
+    if (res) { setAddName(""); if (id) router.push(`/portal/settings/call-templates/${id}`); }
   }
   async function saveEdit(id: string) {
     const name = editName.trim();
@@ -47,15 +50,21 @@ export function WelcomeCallTemplatesManager({ items }: { items: Template[] }) {
     if (await run(renameWelcomeCallTemplateAction(id, name), "Renamed")) setEditId(null);
   }
   async function remove(t: Template) {
-    if (!confirm(`Delete "${t.name}"? Already-sent welcome calls keep their saved copy.`)) return;
+    if (!confirm(`Delete "${t.name}"? Already-sent calls keep their saved copy.`)) return;
     await run(deleteWelcomeCallTemplateAction(t.id), "Template deleted");
   }
+
+  const KIND_BADGE: Record<CallKind, string> = {
+    welcome: "bg-sky-100 text-sky-700",
+    completion: "bg-violet-100 text-violet-700",
+  };
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Each template is a reusable welcome-call script. Reps send it to a customer from a lead; the customer reviews
-        their details and confirms. Click a template to edit its intro, items, and closing message.
+        Each template is a reusable call script — a <strong>Welcome Call</strong> (after the sale) or a{" "}
+        <strong>Completion Call</strong> (after the install). Reps send it to a customer from a lead; the customer
+        reviews their details and confirms. Click a template to edit its intro, items, and closing message.
       </p>
 
       <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
@@ -82,19 +91,29 @@ export function WelcomeCallTemplatesManager({ items }: { items: Template[] }) {
               <>
                 <button
                   type="button"
-                  onClick={() => router.push(`/portal/settings/welcome-call-templates/${t.id}`)}
+                  onClick={() => router.push(`/portal/settings/call-templates/${t.id}`)}
                   className="flex min-w-0 items-center gap-3 text-left"
                 >
                   <span className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">{i + 1}</span>
                   <span className={`truncate font-medium ${t.active ? "" : "text-muted-foreground line-through"}`}>{t.name}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${KIND_BADGE[t.kind]}`}>{CALL_KIND_LABELS[t.kind]}</span>
                   {!t.active && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Inactive</span>}
                   <span className="shrink-0 text-xs text-muted-foreground">{t.itemCount} item{t.itemCount === 1 ? "" : "s"} · {t.sessionCount} sent</span>
                 </button>
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="icon" disabled={busy || i === 0} onClick={() => run(moveWelcomeCallTemplateAction(t.id, "up"))}><ArrowUp className="size-4" /></Button>
                   <Button variant="ghost" size="icon" disabled={busy || i === items.length - 1} onClick={() => run(moveWelcomeCallTemplateAction(t.id, "down"))}><ArrowDown className="size-4" /></Button>
-                  <Button variant="ghost" size="icon" title="Edit script" onClick={() => router.push(`/portal/settings/welcome-call-templates/${t.id}`)}><SquarePen className="size-4" /></Button>
+                  <Button variant="ghost" size="icon" title="Edit script" onClick={() => router.push(`/portal/settings/call-templates/${t.id}`)}><SquarePen className="size-4" /></Button>
                   <Button variant="ghost" size="icon" disabled={busy} title="Rename" onClick={() => { setEditId(t.id); setEditName(t.name); }}><Pencil className="size-4" /></Button>
+                  <select
+                    value={t.kind}
+                    disabled={busy}
+                    title="Call kind"
+                    onChange={(e) => run(setWelcomeCallTemplateKindAction(t.id, e.target.value as CallKind), "Kind updated")}
+                    className="h-8 rounded-md border border-border bg-background px-1.5 text-xs"
+                  >
+                    {CALL_KINDS.map((k) => <option key={k} value={k}>{CALL_KIND_LABELS[k]}</option>)}
+                  </select>
                   <span className="mx-1 inline-flex items-center" title={t.active ? "Active" : "Inactive — hidden from the send picker"}>
                     <Switch checked={t.active} disabled={busy} onCheckedChange={(v) => run(setWelcomeCallTemplateActiveAction(t.id, v), v ? "Activated" : "Deactivated")} />
                   </span>
@@ -115,6 +134,14 @@ export function WelcomeCallTemplatesManager({ items }: { items: Template[] }) {
           onKeyDown={(e) => e.key === "Enter" && add()}
           className="w-72"
         />
+        <select
+          value={addKind}
+          disabled={busy}
+          onChange={(e) => setAddKind(e.target.value as CallKind)}
+          className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+        >
+          {CALL_KINDS.map((k) => <option key={k} value={k}>{CALL_KIND_LABELS[k]}</option>)}
+        </select>
         <Button onClick={add} disabled={busy} className="bg-gold text-gold-foreground hover:bg-gold/90">
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} New template
         </Button>

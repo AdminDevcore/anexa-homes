@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2 } from "lucide-react";
 import { Logo } from "@/components/marketing/logo";
 import { Button } from "@/components/ui/button";
 import { confirmWelcomeCallAction } from "@/server/modules/welcome-call/actions";
+import { CALL_KIND_LABELS, type CallKind } from "@/server/modules/welcome-call/types";
 
 type Item = { id: string; title: string; body: string };
 type Snapshot = { intro: string; closing: string; items: Item[] };
@@ -13,14 +14,18 @@ type Snapshot = { intro: string; closing: string; items: Item[] };
 export function WelcomeCallExperience({
   token,
   customerName,
+  kind,
   snapshot,
   initialAcked,
 }: {
   token: string;
   customerName: string;
+  kind: CallKind;
   snapshot: Snapshot;
   initialAcked: string[];
 }) {
+  const firstName = customerName.split(" ")[0] || "there";
+  const heading = kind === "completion" ? `Thank you, ${firstName}!` : `Welcome, ${firstName}!`;
   const [checked, setChecked] = React.useState<Set<string>>(new Set(initialAcked));
   const [submitting, setSubmitting] = React.useState(false);
   const [done, setDone] = React.useState(false);
@@ -64,9 +69,9 @@ export function WelcomeCallExperience({
       <header className="border-b border-border bg-white px-6 py-4"><Logo /></header>
 
       <div className="mx-auto w-full max-w-2xl px-5 py-10 sm:py-14">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-gold-muted">Welcome Call</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-gold-muted">{CALL_KIND_LABELS[kind]}</p>
         <h1 className="mt-3 font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
-          Welcome, {customerName.split(" ")[0] || "there"}!
+          {heading}
         </h1>
         {snapshot.intro && <p className="mt-4 text-lg leading-relaxed text-neutral-700">{snapshot.intro}</p>}
         <p className="mt-4 text-sm text-neutral-500">Please review each item below and check it to confirm it&apos;s correct.</p>
