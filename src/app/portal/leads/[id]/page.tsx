@@ -31,6 +31,8 @@ import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modu
 import { getRoofReport } from "@/server/modules/roof/queries";
 import { RoofReportButton } from "@/components/portal/roof-report";
 import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
+import { SendWelcomeCallButton } from "@/components/portal/send-welcome-call-button";
+import { getActiveWelcomeCallTemplates } from "@/server/modules/welcome-call/queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { FilesSection } from "@/components/portal/files-section";
@@ -137,6 +139,7 @@ export default async function LeadDetailPage({
   // Customizable appointment outcomes for the "Run appointment" picker.
   const appointmentDispositions = await getAppointmentDispositions(user.companyId);
   const inspectionOutcomes = await getInspectionOutcomes(user.companyId);
+  const welcomeCallTemplates = can(user, "create", "Document") ? await getActiveWelcomeCallTemplates(user.companyId) : [];
 
   const roofReport = await getRoofReport(user.companyId, lead.id);
   const roofAddress = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
@@ -216,6 +219,9 @@ export default async function LeadDetailPage({
             )}
             {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <BuildPresentationButton leadId={lead.id} />
+            )}
+            {can(user, "create", "Document") && (
+              <SendWelcomeCallButton leadId={lead.id} templates={welcomeCallTemplates} />
             )}
             {can(user, "update", "Lead") && (
               <Button asChild variant="outline" size="sm">

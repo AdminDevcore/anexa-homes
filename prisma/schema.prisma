@@ -307,6 +307,8 @@ model Company {
   scopeCostTemplates    ScopeCostTemplate[]
   scopeSupplementTemplates ScopeSupplementTemplate[]
   proposals             Proposal[]
+  welcomeCallTemplates  WelcomeCallTemplate[]
+  welcomeCallSessions   WelcomeCallSession[]
 
   @@map("companies")
 }
@@ -621,6 +623,7 @@ model Lead {
   roofReport       RoofReport?
   scope            ScopeOfWork?
   proposals        Proposal[]
+  welcomeCalls     WelcomeCallSession[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -2082,4 +2085,69 @@ model StoredFile {
   createdAt   DateTime @default(now())
 
   @@map("stored_files")
+}
+
+// ---------------------------------------------------------------------------
+// Welcome Call — self-service customer confirmation flow (post-sale).
+// An admin authors a reusable script (ordered confirmation items w/ merge
+// tokens); a rep sends a deal-specific link; the customer acknowledges each
+// item and confirms. See docs/superpowers/specs/2026-06-16-welcome-call-design.md
+// ---------------------------------------------------------------------------
+
+model WelcomeCallTemplate {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  intro     String? // shown above the items
+  closing   String? // thank-you message after confirm
+  // Ordered confirmation items: [{ id, title, body }] — body may contain merge tokens.
+  items     Json     @default("[]")
+  active    Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions WelcomeCallSession[]
+
+  @@index([companyId])
+  @@map("welcome_call_templates")
+}
+
+enum WelcomeCallStatus {
+  sent
+  viewed
+  completed
+  voided
+}
+
+model WelcomeCallSession {
+  id         String               @id @default(uuid())
+  companyId  String
+  company    Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  templateId String?
+  template   WelcomeCallTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  leadId     String
+  lead       Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId  String?
+
+  customerName  String
+  customerEmail String?
+  status        WelcomeCallStatus @default(sent)
+  tokenHash     String            @unique
+  // Frozen at send time: { intro, closing, items: [{ id, title, body }] } with all merge
+  // tokens already resolved against the deal. The customer confirms THIS snapshot.
+  snapshot      Json
+  // Item ids the customer acknowledged.
+  acknowledged  Json              @default("[]")
+  sentAt        DateTime          @default(now())
+  viewedAt      DateTime?
+  completedAt   DateTime?
+  voidedAt      DateTime?
+  confirmedIp   String?
+  createdById   String?
+
+  @@index([companyId, leadId])
+  @@index([companyId, status])
+  @@map("welcome_call_sessions")
 }
