@@ -8,11 +8,11 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Map as LeafletMap } from "leaflet";
-import { Crosshair, Pencil, MapPin, Check, X, Trash2, Loader2, UserPlus, Sparkles } from "lucide-react";
+import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DISPOSITIONS, KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO } from "@/server/modules/canvassing/queries";
-import type { Viewport } from "./canvassing-map";
+import type { Viewport, ZipFeature } from "./canvassing-map";
 import { DateRangeFilter, resolveRange, type RangePreset } from "./canvassing-filters";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,8 +79,10 @@ export function CanvassingClient() {
   const [remainingOnly, setRemainingOnly] = React.useState(false);
   const [viewport, setViewport] = React.useState<Viewport | null>(null);
   const [generating, setGenerating] = React.useState(false);
+  const [showZips, setShowZips] = React.useState(false);
 
   const [pendingTerritory, setPendingTerritory] = React.useState<LatLng[] | null>(null);
+  const [pendingTerritoryName, setPendingTerritoryName] = React.useState("");
   const [convertTarget, setConvertTarget] = React.useState<KnockDTO | null>(null);
   const [detailId, setDetailId] = React.useState<string | null>(null);
 
@@ -126,6 +128,37 @@ export function CanvassingClient() {
     () => (zoomOK ? knockData?.knocks ?? [] : []),
     [zoomOK, knockData]
   );
+
+  // ZIP (ZCTA) boundary overlay — fetched on-demand for the viewport from Census.
+  // Enabled only when the toggle is on and the view isn't zoomed all the way out.
+  const zipsZoomOK = (viewport?.zoom ?? 0) >= 9;
+  const { data: zipData, isFetching: zipsLoading } = useQuery<{ zips: ZipFeature[]; tooBig?: boolean }>({
+    queryKey: ["canvassing-zips", bKey, showZips && zipsZoomOK],
+    queryFn: async () => {
+      if (!viewport || !showZips || !zipsZoomOK) return { zips: [] };
+      const p = new URLSearchParams({
+        minLat: String(viewport.minLat),
+        minLng: String(viewport.minLng),
+        maxLat: String(viewport.maxLat),
+        maxLng: String(viewport.maxLng),
+      });
+      const res = await fetch(`/api/canvassing/zips?${p.toString()}`);
+      if (!res.ok) return { zips: [] };
+      return res.json();
+    },
+    enabled: !!viewport && showZips && zipsZoomOK,
+    placeholderData: (prev) => prev,
+    refetchOnWindowFocus: false,
+  });
+  const zips = React.useMemo(() => (showZips && zipsZoomOK ? zipData?.zips ?? [] : []), [showZips, zipsZoomOK, zipData]);
+  const zipsTooBig = !!(showZips && zipsZoomOK && zipData?.tooBig);
+
+  // Managers can click a ZIP outline to turn the whole ZIP into a territory.
+  function onZipClick(zcta: string, ring: LatLng[]) {
+    if (!canManage || ring.length < 3) return;
+    setPendingTerritoryName(`ZIP ${zcta}`);
+    setPendingTerritory(ring);
+  }
 
   // Auto-load a dot on EVERY house in the current view (from OSM footprints), so
   // the rep never has to draw a zone first to see houses. These synthetic dots are
@@ -237,6 +270,7 @@ export function CanvassingClient() {
 
   function finishDrawing() {
     if (drawPoints.length < 3) return toast.error("Add at least 3 points to form a territory.");
+    setPendingTerritoryName("");
     setPendingTerritory(drawPoints);
   }
   function cancelDrawing() {
@@ -460,6 +494,15 @@ export function CanvassingClient() {
           <Button variant="outline" size="sm" onClick={locate} className="gap-1.5">
             <Crosshair className="size-4" /> Locate me
           </Button>
+          <Button
+            variant={showZips ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowZips((v) => !v)}
+            className="gap-1.5"
+            title={canManage ? "Show ZIP code boundaries — click a ZIP to make it a territory" : "Show ZIP code boundaries"}
+          >
+            <Map className="size-4" /> ZIP codes
+          </Button>
           <Button variant={mode === "knock" ? "default" : "outline"} size="sm" onClick={() => setMode("knock")} className="gap-1.5">
             <MapPin className="size-4" /> Knock
           </Button>
@@ -552,10 +595,15 @@ export function CanvassingClient() {
         className="relative w-full overflow-hidden rounded-xl border border-border bg-muted"
         style={{ height: "min(75vh, 800px)", minHeight: 480, isolation: "isolate" }}
       >
-        {(generating || knocksLoading || housesLoading) && (
+        {(generating || knocksLoading || housesLoading || zipsLoading) && (
           <div className="absolute right-3 top-3 z-[1000] inline-flex items-center gap-1.5 rounded-full bg-foreground/90 px-3 py-1.5 text-xs font-medium text-background shadow">
             <Loader2 className="size-3.5 animate-spin" />
-            {generating ? "Finding houses…" : housesLoading && !knocksLoading ? "Loading houses…" : "Loading pins…"}
+            {generating ? "Finding houses…" : zipsLoading && !knocksLoading && !housesLoading ? "Loading ZIP codes…" : housesLoading && !knocksLoading ? "Loading houses…" : "Loading pins…"}
+          </div>
+        )}
+        {showZips && zipsTooBig && (
+          <div className="absolute left-1/2 top-3 z-[1000] -translate-x-1/2 rounded-full bg-foreground/90 px-3 py-1.5 text-xs font-medium text-background shadow">
+            Zoom in to load ZIP code boundaries
           </div>
         )}
         <CanvassingMap
@@ -570,11 +618,15 @@ export function CanvassingClient() {
           renderKnockPopup={renderKnockPopup}
           renderTerritoryPopup={renderTerritoryPopup}
           highlightTerritoryIds={highlightTerritoryIds}
+          zips={zips}
+          showZips={showZips}
+          onZipClick={canManage ? onZipClick : undefined}
         />
       </div>
 
       <TerritoryDialog
         points={pendingTerritory}
+        defaultName={pendingTerritoryName}
         reps={reps}
         onClose={() => setPendingTerritory(null)}
         onSaved={(id) => {
@@ -737,11 +789,13 @@ function StatPill({ label, value }: { label: string; value: number }) {
 
 function TerritoryDialog({
   points,
+  defaultName = "",
   reps,
   onClose,
   onSaved,
 }: {
   points: LatLng[] | null;
+  defaultName?: string;
   reps: { id: string; name: string }[];
   onClose: () => void;
   onSaved: (territoryId: string) => void;
@@ -753,11 +807,11 @@ function TerritoryDialog({
 
   React.useEffect(() => {
     if (points) {
-      setName("");
+      setName(defaultName);
       setColor("#F4631E");
       setRepId("");
     }
-  }, [points]);
+  }, [points, defaultName]);
 
   async function save() {
     if (!points) return;

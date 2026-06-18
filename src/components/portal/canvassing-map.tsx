@@ -12,6 +12,10 @@ export type Basemap = "satellite" | "street";
 
 export type Viewport = { minLat: number; minLng: number; maxLat: number; maxLng: number; zoom: number };
 
+// ZIP (ZCTA) boundary for the overlay. Mirrors the server's ZipFeature shape but
+// declared here so this client component never imports the server-only module.
+export type ZipFeature = { zcta: string; centroid: [number, number]; rings: LatLng[][] };
+
 function MapController({
   onReady,
   onMapClick,
@@ -50,8 +54,9 @@ function MapController({
     // controls so those keep opening their own popups.
     const handleClick = (ev: MouseEvent) => {
       const t = ev.target as Element | null;
-      // Let pins, territory labels, popups, and controls handle their own clicks.
-      if (t && typeof t.closest === "function" && t.closest(".leaflet-marker-icon, .leaflet-popup, .leaflet-control")) {
+      // Let pins, territory labels, popups, controls, and interactive vectors
+      // (e.g. ZIP outlines) handle their own clicks — don't also fire a map click.
+      if (t && typeof t.closest === "function" && t.closest(".leaflet-marker-icon, .leaflet-popup, .leaflet-control, .leaflet-interactive")) {
         return;
       }
       const ll = map.mouseEventToLatLng(ev);
@@ -125,6 +130,12 @@ function territoryLabelIcon(name: string, color: string, progress: string): L.Di
   return L.divIcon({ html, className: "anexa-territory-label", iconSize: [0, 0], iconAnchor: [0, 0] });
 }
 
+const ZIP_COLOR = "#2563eb";
+function zipLabelIcon(zcta: string): L.DivIcon {
+  const html = `<div style="white-space:nowrap;transform:translate(-50%,-50%);background:rgba(255,255,255,0.92);color:${ZIP_COLOR};font-weight:700;font-size:11px;letter-spacing:0.02em;padding:2px 7px;border-radius:9999px;border:1.5px solid ${ZIP_COLOR};box-shadow:0 1px 3px rgba(0,0,0,.25);font-family:system-ui,sans-serif;">${zcta}</div>`;
+  return L.divIcon({ html, className: "anexa-zip-label", iconSize: [0, 0], iconAnchor: [0, 0] });
+}
+
 export type CanvassingMapProps = {
   center: LatLng;
   basemap: Basemap;
@@ -138,6 +149,10 @@ export type CanvassingMapProps = {
   renderTerritoryPopup: (t: TerritoryDTO) => React.ReactNode;
   // When a rep is selected, the IDs of that rep's territories (emphasized; others dimmed).
   highlightTerritoryIds?: Set<string> | null;
+  // ZIP-code boundary overlay (toggle). onZipClick is provided for managers only.
+  zips?: ZipFeature[];
+  showZips?: boolean;
+  onZipClick?: (zcta: string, ring: LatLng[]) => void;
 };
 
 export function CanvassingMap({
@@ -152,6 +167,9 @@ export function CanvassingMap({
   renderKnockPopup,
   renderTerritoryPopup,
   highlightTerritoryIds,
+  zips,
+  showZips,
+  onZipClick,
 }: CanvassingMapProps) {
   return (
     <MapContainer center={center} zoom={16} scrollWheelZoom className="h-full w-full">
@@ -176,6 +194,33 @@ export function CanvassingMap({
       )}
 
       <MapController onReady={onMapReady} onMapClick={onMapClick} onViewport={onViewport} />
+
+      {/* ZIP (ZCTA) boundary overlay — click a ZIP (managers) to make it a territory */}
+      {showZips &&
+        (zips ?? []).map((z) =>
+          z.rings.map((ring, ri) => {
+            if (ring.length < 3) return null;
+            return (
+              <Polygon
+                key={`zip-${z.zcta}-${ri}`}
+                positions={ring}
+                pathOptions={{
+                  color: ZIP_COLOR,
+                  weight: 1.5,
+                  opacity: 0.9,
+                  dashArray: "5 4",
+                  fillColor: ZIP_COLOR,
+                  fillOpacity: onZipClick ? 0.05 : 0.02,
+                }}
+                eventHandlers={onZipClick ? { click: () => onZipClick(z.zcta, ring) } : undefined}
+              />
+            );
+          }),
+        )}
+      {showZips &&
+        (zips ?? []).map((z) => (
+          <Marker key={`ziplbl-${z.zcta}`} position={z.centroid} icon={zipLabelIcon(z.zcta)} interactive={false} />
+        ))}
 
       {territories.map((t) => {
         if (t.polygon.length < 3) return null;
