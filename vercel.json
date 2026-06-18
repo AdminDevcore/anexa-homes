@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/cron/stage-alerts", "schedule": "0 13 * * *" },
     { "path": "/api/cron/task-reminders", "schedule": "0 14 * * 1" },
-    { "path": "/api/cron/overdue-digest", "schedule": "30 13 * * 1" }
+    { "path": "/api/cron/overdue-digest", "schedule": "30 13 * * 1" },
+    { "path": "/api/cron/geocode-leads", "schedule": "*/15 * * * *" }
   ]
 }

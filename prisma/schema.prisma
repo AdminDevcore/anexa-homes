@@ -551,6 +551,11 @@ model Lead {
   city      String?
   state     String?
   zip       String?
+  // Geocoded coordinates for the canvassing map (filled from the address by the
+  // geocode-leads cron). geocodedAt marks the attempt so it isn't retried forever.
+  lat        Float?
+  lng        Float?
+  geocodedAt DateTime?
 
   // Pipeline
   pipelineId String?
@@ -2101,6 +2106,21 @@ enum CallKind {
   completion
 }
 
+// How a call template is delivered: a text confirmation page, or a recorded
+// AI-avatar video call.
+enum CallMode {
+  confirm
+  avatar
+}
+
+// Lifecycle of the generated HeyGen avatar clips for an avatar-mode session.
+enum AvatarStatus {
+  none
+  generating
+  ready
+  failed
+}
+
 model WelcomeCallTemplate {
   id        String   @id @default(uuid())
   companyId String
@@ -2108,6 +2128,8 @@ model WelcomeCallTemplate {
   name      String
   // welcome (post-sale) vs completion (post-install) — both are confirmation scripts.
   kind      CallKind @default(welcome)
+  // confirm = text confirmation page; avatar = recorded AI-avatar video call.
+  mode      CallMode @default(confirm)
   intro     String? // shown above the items
   closing   String? // thank-you message after confirm
   // Ordered confirmation items: [{ id, title, body }] — body may contain merge tokens.
@@ -2143,13 +2165,21 @@ model WelcomeCallSession {
   customerName  String
   customerEmail String?
   kind          CallKind          @default(welcome)
+  mode          CallMode          @default(confirm)
   status        WelcomeCallStatus @default(sent)
   tokenHash     String            @unique
   // Frozen at send time: { intro, closing, items: [{ id, title, body }] } with all merge
   // tokens already resolved against the deal. The customer confirms THIS snapshot.
   snapshot      Json
-  // Item ids the customer acknowledged.
+  // Item ids the customer acknowledged (confirm mode).
   acknowledged  Json              @default("[]")
+  // Avatar mode: clip generation lifecycle + ordered clips.
+  avatarStatus  AvatarStatus      @default(none)
+  // [{ key: "intro"|"closing"|itemId, text, heygenVideoId, storageKey, status }]
+  segments      Json              @default("[]")
+  // Avatar mode: the final composited call recording.
+  recordingStorageKey String?
+  recordedAt          DateTime?
   sentAt        DateTime          @default(now())
   viewedAt      DateTime?
   completedAt   DateTime?
