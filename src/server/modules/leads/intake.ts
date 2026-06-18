@@ -9,6 +9,7 @@ import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { resolveStageForAppointment } from "./staging";
+import { zonedWallClockToUtc } from "@/lib/tz";
 import { COMPANY } from "@/lib/site";
 
 /**
@@ -98,7 +99,9 @@ export async function submitWebsiteLead(
   if (data.preferredDate) {
     const win = data.preferredTime ? TIME_WINDOWS[data.preferredTime] : undefined;
     const hour = win?.hour ?? 9;
-    const dt = new Date(`${data.preferredDate}T${String(hour).padStart(2, "0")}:00:00`);
+    // Interpret the chosen date + window as the company's LOCAL time, not the
+    // server's UTC — otherwise a 2 PM pick is stored as 14:00Z and shows as 9 AM.
+    const dt = zonedWallClockToUtc(`${data.preferredDate}T${String(hour).padStart(2, "0")}:00:00`, company.timezone);
     if (!Number.isNaN(dt.getTime())) {
       appointmentAt = dt;
       apptLabel = `${data.preferredDate}${win ? ` · ${win.label}` : ""}`;

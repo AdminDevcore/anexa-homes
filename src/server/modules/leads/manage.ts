@@ -12,6 +12,13 @@ import { getActiveIndustry } from "@/server/auth/industry";
 import { INDUSTRY_SERVICE_TYPE } from "@/lib/industry";
 import { resolveStageForAppointment } from "./staging";
 import { resolveOwningRepId } from "./owning-rep";
+import { zonedWallClockToUtc } from "@/lib/tz";
+
+/** The company's appointment timezone (defaults to Central if unset). */
+async function companyTimeZone(companyId: string): Promise<string> {
+  const c = await prisma.company.findUnique({ where: { id: companyId }, select: { timezone: true } });
+  return c?.timezone || "America/Chicago";
+}
 
 const leadInput = z.object({
   firstName: z.string().min(1).max(80),
@@ -70,6 +77,7 @@ export async function createLeadAction(input: LeadInput) {
     hasAppointment,
   });
 
+  const tz = await companyTimeZone(user.companyId);
   const lead = await prisma.lead.create({
     data: {
       companyId: user.companyId,
@@ -91,7 +99,7 @@ export async function createLeadAction(input: LeadInput) {
       serviceType: INDUSTRY_SERVICE_TYPE[industry],
       value: d.valueCents,
       priority: d.priority,
-      appointmentAt: d.appointmentAt ? new Date(d.appointmentAt) : null,
+      appointmentAt: d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null,
       notes: d.notes || null,
       customFields: d.customFields as Prisma.InputJsonValue,
     },
@@ -138,6 +146,7 @@ export async function updateLeadAction(id: string, input: LeadInput) {
   });
   const stageChanged = stageId !== existing.stageId;
 
+  const tz = await companyTimeZone(user.companyId);
   await prisma.lead.update({
     where: { id },
     data: {
@@ -156,7 +165,7 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       serviceType: d.serviceType,
       value: d.valueCents,
       priority: d.priority,
-      appointmentAt: d.appointmentAt ? new Date(d.appointmentAt) : null,
+      appointmentAt: d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null,
       notes: d.notes || null,
       customFields: d.customFields as Prisma.InputJsonValue,
     },
