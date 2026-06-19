@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/client";
-import { geocode, addressQuery } from "@/server/modules/geo/geocode";
+import { geocodeParts } from "@/server/modules/geo/geocode";
 
 // Backfills lead map coordinates from their address (free OSM Nominatim).
 // Picks leads that have an address but haven't been geocoded yet, one batch per
@@ -47,7 +47,7 @@ export async function GET(req: Request) {
     let geocoded = 0;
     for (let i = 0; i < leads.length; i++) {
       if (i > 0) await sleep(DELAY_MS);
-      const g = await geocode(addressQuery(leads[i]));
+      const g = await geocodeParts(leads[i]);
       // Stamp geocodedAt either way so a permanently-unfindable address isn't retried forever.
       await prisma.lead.update({
         where: { id: leads[i].id },

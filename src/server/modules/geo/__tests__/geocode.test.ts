@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addressQuery, parseNominatim } from "../geocode";
+import { addressQuery, parseNominatim, cleanAddressLine } from "../geocode";
 
 describe("addressQuery", () => {
   it("joins present parts, skipping blanks", () => {
@@ -12,6 +12,25 @@ describe("addressQuery", () => {
   });
   it("returns empty when nothing present", () => {
     expect(addressQuery({})).toBe("");
+  });
+});
+
+describe("cleanAddressLine", () => {
+  it("strips a 'lot N' unit suffix (the real Barbara-savage case)", () => {
+    expect(cleanAddressLine("5551 parker henderson rd lot 143")).toBe("5551 parker henderson rd");
+  });
+  it("strips apt / unit / suite / # designators", () => {
+    expect(cleanAddressLine("100 Oak Ave Apt 5B")).toBe("100 Oak Ave");
+    expect(cleanAddressLine("12 Elm St Unit 7")).toBe("12 Elm St");
+    expect(cleanAddressLine("9 Pine Blvd Ste 200")).toBe("9 Pine Blvd");
+    expect(cleanAddressLine("44 Maple Dr # 12")).toBe("44 Maple Dr");
+  });
+  it("leaves a clean street address unchanged", () => {
+    expect(cleanAddressLine("404 Shoreline St")).toBe("404 Shoreline St");
+  });
+  it("handles null/empty", () => {
+    expect(cleanAddressLine(null)).toBe("");
+    expect(cleanAddressLine("")).toBe("");
   });
 });
 
