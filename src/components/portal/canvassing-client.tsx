@@ -806,13 +806,25 @@ function TerritoryDialog({
   const [color, setColor] = React.useState("#F4631E");
   const [repId, setRepId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  // undefined = still counting, null = count unavailable, number = home count
+  const [houseCount, setHouseCount] = React.useState<number | null | undefined>(undefined);
 
   React.useEffect(() => {
-    if (points) {
-      setName(defaultName);
-      setColor("#F4631E");
-      setRepId("");
-    }
+    if (!points) return;
+    setName(defaultName);
+    setColor("#F4631E");
+    setRepId("");
+    setHouseCount(undefined);
+    let cancelled = false;
+    fetch("/api/canvassing/house-count", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ring: points }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setHouseCount(typeof d?.count === "number" ? d.count : null); })
+      .catch(() => { if (!cancelled) setHouseCount(null); });
+    return () => { cancelled = true; };
   }, [points, defaultName]);
 
   async function save() {
@@ -855,7 +867,13 @@ function TerritoryDialog({
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            {points?.length ?? 0} boundary points · houses inside will be added automatically.
+            {houseCount === undefined
+              ? "Counting homes in this area…"
+              : houseCount === null
+                ? `${points?.length ?? 0} boundary points · houses inside will be added automatically.`
+                : `≈ ${houseCount.toLocaleString()} home${houseCount === 1 ? "" : "s"} in this area · ${
+                    houseCount > 1500 ? "first 1,500 will be added as pins" : "all will be added automatically"
+                  }.`}
           </p>
         </div>
         <DialogFooter>

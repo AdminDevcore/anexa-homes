@@ -38,6 +38,39 @@ export function coordKey(lat: number, lng: number): string {
 }
 
 /**
+ * Fast, approximate count of addressed buildings / address points inside the
+ * polygon (same OSM union as fetchAddressesInPolygon, via Overpass `out count;`
+ * so it returns just a number, not geometry). Returns null if upstream fails.
+ */
+export async function countAddressesInPolygon(polygon: LatLng[]): Promise<number | null> {
+  if (polygon.length < 3) return 0;
+  const poly = polygon.map(([lat, lng]) => `${lat} ${lng}`).join(" ");
+  const query = `[out:json][timeout:25];
+(
+  node["addr:housenumber"](poly:"${poly}");
+  way["building"](poly:"${poly}");
+);
+out count;`;
+  for (const url of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "AnexaHomesCRM/1.0 (canvassing)" },
+        body: "data=" + encodeURIComponent(query),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as { elements?: Array<{ tags?: Record<string, string> }> };
+      // Overpass `out count;` returns a single element with tags.total.
+      const total = Number(data.elements?.[0]?.tags?.total ?? NaN);
+      if (Number.isFinite(total)) return total;
+    } catch {
+      // try the next endpoint
+    }
+  }
+  return null;
+}
+
+/**
  * Returns address points whose coordinates fall inside the polygon, sourced from
  * OpenStreetMap via the Overpass API (free, no API key — matches the OSM tiles).
  * Queries address nodes plus addressed building footprints (centroids). Capped.
