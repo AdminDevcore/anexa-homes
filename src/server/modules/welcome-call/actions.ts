@@ -7,8 +7,8 @@ import { nanoid } from "nanoid";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { createWelcomeCall, resendWelcomeCall, voidWelcomeCall, confirmWelcomeCall } from "./service";
-import { asCallKind, type CallKind } from "./types";
+import { createWelcomeCall, resendWelcomeCall, voidWelcomeCall, confirmWelcomeCall, pollAvatarCall } from "./service";
+import { asCallKind, asCallMode, type CallKind, type CallMode } from "./types";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -48,6 +48,17 @@ export async function setWelcomeCallTemplateKindAction(id: string, kind: CallKin
   const t = await prisma.welcomeCallTemplate.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
   if (!t) return fail("Template not found.");
   await prisma.welcomeCallTemplate.update({ where: { id }, data: { kind: asCallKind(kind) } });
+  revalidatePath(TPL_PATH);
+  revalidatePath(`${TPL_PATH}/${id}`);
+  return ok();
+}
+
+export async function setWelcomeCallTemplateModeAction(id: string, mode: CallMode) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const t = await prisma.welcomeCallTemplate.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
+  if (!t) return fail("Template not found.");
+  await prisma.welcomeCallTemplate.update({ where: { id }, data: { mode: asCallMode(mode) } });
   revalidatePath(TPL_PATH);
   revalidatePath(`${TPL_PATH}/${id}`);
   return ok();
@@ -151,4 +162,9 @@ export async function confirmWelcomeCallAction(token: string, ackedIds: string[]
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || null;
   return confirmWelcomeCall(token, ackedIds, ip);
+}
+
+/** Public: the avatar-call page polls this while clips are still generating. */
+export async function pollAvatarCallAction(token: string) {
+  return pollAvatarCall(token);
 }

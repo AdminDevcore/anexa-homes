@@ -64,6 +64,7 @@ export default async function DocumentsPage() {
     status: w.status as "sent" | "viewed" | "completed" | "voided",
     when: fmt.date(w.completedAt ?? w.viewedAt ?? w.sentAt),
     leadId: w.leadId,
+    hasRecording: w.mode === "avatar" && !!w.recordingStorageKey,
   }));
 
   return (

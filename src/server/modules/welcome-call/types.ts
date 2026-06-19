@@ -1,6 +1,20 @@
-import type { CallKind } from "@prisma/client";
+import type { CallKind, CallMode } from "@prisma/client";
 
-export type { CallKind };
+export type { CallKind, CallMode };
+
+/** Delivery modes, in display order. */
+export const CALL_MODES = ["confirm", "avatar"] as const;
+
+/** Human label for each delivery mode. */
+export const CALL_MODE_LABELS: Record<CallMode, string> = {
+  confirm: "Text confirmation",
+  avatar: "AI avatar call",
+};
+
+/** Coerce arbitrary input to a valid CallMode (defaults to confirm). */
+export function asCallMode(v: unknown): CallMode {
+  return v === "avatar" ? "avatar" : "confirm";
+}
 
 /** All call kinds, in display order — drives the Settings list + send picker. */
 export const CALL_KINDS = ["welcome", "completion"] as const;

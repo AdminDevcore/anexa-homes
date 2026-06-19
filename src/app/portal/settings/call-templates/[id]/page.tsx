@@ -35,6 +35,7 @@ export default async function CallTemplateEditPage({ params }: { params: Promise
         templateId={tpl.id}
         initial={{ intro: tpl.intro, closing: tpl.closing, items: tpl.items }}
         catalog={catalog}
+        mode={tpl.mode}
       />
     </div>
   );

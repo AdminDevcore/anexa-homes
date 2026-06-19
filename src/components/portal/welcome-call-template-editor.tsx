@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Plus, Trash2, ArrowUp, ArrowDown, Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { updateWelcomeCallTemplateContentAction } from "@/server/modules/welcome-call/actions";
+import { updateWelcomeCallTemplateContentAction, setWelcomeCallTemplateModeAction } from "@/server/modules/welcome-call/actions";
+import { CALL_MODES, CALL_MODE_LABELS, type CallMode } from "@/server/modules/welcome-call/types";
 
 type Item = { id: string; title: string; body: string };
 type CatalogEntry = { token: string; label: string; group: string };
@@ -21,12 +22,28 @@ export function WelcomeCallTemplateEditor({
   templateId,
   initial,
   catalog,
+  mode,
 }: {
   templateId: string;
   initial: { intro: string; closing: string; items: Item[] };
   catalog: CatalogEntry[];
+  mode: CallMode;
 }) {
   const router = useRouter();
+  const [callMode, setCallMode] = React.useState<CallMode>(mode);
+  const [modeBusy, setModeBusy] = React.useState(false);
+
+  async function changeMode(next: CallMode) {
+    if (next === callMode) return;
+    setCallMode(next); // optimistic
+    setModeBusy(true);
+    const res = await setWelcomeCallTemplateModeAction(templateId, next);
+    setModeBusy(false);
+    if (!res.ok) { setCallMode(callMode); toast.error(res.error); return; }
+    toast.success(`Switched to ${CALL_MODE_LABELS[next]}`);
+    router.refresh();
+  }
+
   const [intro, setIntro] = React.useState(initial.intro);
   const [closing, setClosing] = React.useState(initial.closing);
   const [items, setItems] = React.useState<Item[]>(initial.items);
@@ -107,6 +124,35 @@ export function WelcomeCallTemplateEditor({
   const fieldCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-gold/50 focus:outline-none";
 
   return (
+    <div className="space-y-6">
+    {/* Delivery mode */}
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium">Delivery</span>
+        <div className="inline-flex rounded-lg border border-border p-0.5">
+          {CALL_MODES.map((m) => (
+            <button
+              key={m}
+              type="button"
+              disabled={modeBusy}
+              onClick={() => changeMode(m)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${callMode === m ? "bg-gold text-gold-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {CALL_MODE_LABELS[m]}
+            </button>
+          ))}
+        </div>
+        {modeBusy && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+      </div>
+      {callMode === "avatar" && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          AI avatar call: an avatar reads each item aloud as a question; the customer answers on camera and the
+          session is recorded. Needs a HeyGen key in the environment — without it, items are read by the browser
+          voice so you can still test the flow.
+        </p>
+      )}
+    </div>
+
     <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">
       {/* Editor */}
       <div className="space-y-6">
@@ -202,6 +248,7 @@ export function WelcomeCallTemplateEditor({
           </div>
         </div>
       </aside>
+    </div>
     </div>
   );
 }

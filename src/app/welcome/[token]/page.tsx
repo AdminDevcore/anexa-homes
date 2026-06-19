@@ -1,6 +1,7 @@
 import { CheckCircle2, XCircle } from "lucide-react";
 import { getWelcomeCallByToken } from "@/server/modules/welcome-call/service";
 import { WelcomeCallExperience } from "@/components/welcome-call/welcome-call-experience";
+import { AvatarCallExperience } from "@/components/welcome-call/avatar-call-experience";
 import { Logo } from "@/components/marketing/logo";
 
 export const metadata = { title: "Confirm your details" };
@@ -22,6 +23,18 @@ export default async function WelcomePage({ params }: { params: Promise<{ token:
         body={view.snapshot.closing || "You've confirmed your project details. We'll be in touch shortly."}
       />
     );
+
+  if (view.mode === "avatar") {
+    return (
+      <AvatarCallExperience
+        token={token}
+        customerName={view.customerName}
+        snapshot={view.snapshot}
+        avatarStatus={view.avatarStatus}
+        segments={view.segments}
+      />
+    );
+  }
 
   return (
     <WelcomeCallExperience

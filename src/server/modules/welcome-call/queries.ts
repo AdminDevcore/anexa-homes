@@ -6,12 +6,13 @@ export async function getWelcomeCallTemplates(companyId: string) {
   const rows = await prisma.welcomeCallTemplate.findMany({
     where: { companyId },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: { id: true, name: true, kind: true, active: true, position: true, items: true, _count: { select: { sessions: true } } },
+    select: { id: true, name: true, kind: true, mode: true, active: true, position: true, items: true, _count: { select: { sessions: true } } },
   });
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     kind: r.kind,
+    mode: r.mode,
     active: r.active,
     position: r.position,
     itemCount: parseItems(r.items).length,
@@ -23,10 +24,10 @@ export async function getWelcomeCallTemplates(companyId: string) {
 export async function getWelcomeCallTemplate(companyId: string, id: string) {
   const t = await prisma.welcomeCallTemplate.findFirst({
     where: { id, companyId },
-    select: { id: true, name: true, kind: true, intro: true, closing: true, items: true },
+    select: { id: true, name: true, kind: true, mode: true, intro: true, closing: true, items: true },
   });
   if (!t) return null;
-  return { id: t.id, name: t.name, kind: t.kind, intro: t.intro ?? "", closing: t.closing ?? "", items: parseItems(t.items) };
+  return { id: t.id, name: t.name, kind: t.kind, mode: t.mode, intro: t.intro ?? "", closing: t.closing ?? "", items: parseItems(t.items) };
 }
 
 /** Active templates for the "send" picker on a lead. */
@@ -48,11 +49,13 @@ export async function listWelcomeCalls(companyId: string) {
       id: true,
       customerName: true,
       kind: true,
+      mode: true,
       status: true,
       sentAt: true,
       viewedAt: true,
       completedAt: true,
       leadId: true,
+      recordingStorageKey: true,
       template: { select: { name: true } },
     },
   });

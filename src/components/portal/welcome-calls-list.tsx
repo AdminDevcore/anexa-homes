@@ -10,7 +10,7 @@ import { resendWelcomeCallAction, voidWelcomeCallAction } from "@/server/modules
 import { CALL_KIND_LABELS, type CallKind } from "@/server/modules/welcome-call/types";
 
 type Status = "sent" | "viewed" | "completed" | "voided";
-type Row = { id: string; customerName: string; kind: CallKind; templateName: string; status: Status; when: string; leadId: string };
+type Row = { id: string; customerName: string; kind: CallKind; templateName: string; status: Status; when: string; leadId: string; hasRecording: boolean };
 
 const KIND_BADGE: Record<CallKind, string> = {
   welcome: "bg-sky-100 text-sky-700",
@@ -62,6 +62,11 @@ export function WelcomeCallsList({ rows, canSend }: { rows: Row[]; canSend: bool
             </div>
             <div className="flex items-center gap-2 sm:flex-col sm:items-end">
               <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{s.label}</span>
+              {r.hasRecording && (
+                <Button asChild size="sm" variant="outline">
+                  <a href={`/api/welcome-call/recording/${r.id}`} target="_blank" rel="noreferrer">▶ Recording</a>
+                </Button>
+              )}
               {canAct && (
                 <div className="flex items-center gap-1.5">
                   <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => resend(r.id)}>
