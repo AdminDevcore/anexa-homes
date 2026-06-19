@@ -307,6 +307,7 @@ const LEAD_CTX_INCLUDE = {
 type LeadForCtx = {
   firstName: string;
   lastName: string;
+  coOwnerName: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
@@ -342,6 +343,7 @@ function ctxForLead(lead: LeadForCtx, companyName: string): AutofillContext {
   return buildAutofillContext({
     firstName: lead.firstName,
     lastName: lead.lastName,
+    coOwnerName: lead.coOwnerName,
     email: lead.email,
     phone: lead.phone,
     street: lead.address,
@@ -790,6 +792,7 @@ function sampleCtx(companyName: string): AutofillContext {
   return buildAutofillContext({
     firstName: "Nancy",
     lastName: "Moore",
+    coOwnerName: "John Moore",
     email: "nancy@example.com",
     phone: "(555) 123-4567",
     street: "107 Oak Street",

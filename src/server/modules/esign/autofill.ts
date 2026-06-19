@@ -2,7 +2,7 @@ import { formatCents, formatDate } from "@/lib/format";
 
 /** Resolved values for every mappable token, for a specific lead/project record. */
 export type AutofillContext = {
-  customer: { fullName: string; firstName: string; lastName: string; email: string; phone: string };
+  customer: { fullName: string; firstName: string; lastName: string; coOwner: string; email: string; phone: string };
   property: { street: string; city: string; state: string; zip: string; full: string };
   // `address` kept as an alias of property.full for backward-compatible templates.
   project: { number: string; address: string; type: string; stage: string; value: string; rep: string; pm: string };
@@ -19,6 +19,7 @@ function titleCase(s: string): string {
 export function buildAutofillContext(a: {
   firstName: string;
   lastName: string;
+  coOwnerName?: string | null;
   email?: string | null;
   phone?: string | null;
   street?: string | null;
@@ -44,6 +45,7 @@ export function buildAutofillContext(a: {
       fullName: `${a.firstName} ${a.lastName}`.trim(),
       firstName: a.firstName,
       lastName: a.lastName,
+      coOwner: a.coOwnerName ?? "",
       email: a.email ?? "",
       phone: a.phone ?? "",
     },
@@ -98,6 +100,7 @@ export const BASE_CATALOG: CatalogEntry[] = [
   { group: "Customer", token: "{{customer.fullName}}", label: "Full name", sample: "Nancy Moore" },
   { group: "Customer", token: "{{customer.firstName}}", label: "First name", sample: "Nancy" },
   { group: "Customer", token: "{{customer.lastName}}", label: "Last name", sample: "Moore" },
+  { group: "Customer", token: "{{customer.coOwner}}", label: "Co-owner", sample: "John Moore" },
   { group: "Customer", token: "{{customer.email}}", label: "Email", sample: "nancy@example.com" },
   { group: "Customer", token: "{{customer.phone}}", label: "Phone", sample: "(555) 123-4567" },
   { group: "Property", token: "{{property.street}}", label: "Street", sample: "107 Oak Street" },

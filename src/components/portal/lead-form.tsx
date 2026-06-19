@@ -47,6 +47,7 @@ export function LeadForm({
   const [v, setV] = React.useState({
     firstName: initial?.firstName ?? "",
     lastName: initial?.lastName ?? "",
+    coOwnerName: initial?.coOwnerName ?? "",
     email: initial?.email ?? "",
     phone: initial?.phone ?? "",
     address: initial?.address ?? "",
@@ -106,6 +107,7 @@ export function LeadForm({
     const payload: LeadInput = {
       firstName: v.firstName,
       lastName: v.lastName,
+      coOwnerName: v.coOwnerName,
       email: v.email,
       phone: v.phone,
       address: v.address,
@@ -145,6 +147,7 @@ export function LeadForm({
         <Grid>
           <Field label="First name" required><Input value={v.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
           <Field label="Last name" required><Input value={v.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
+          <Field label="Co-owner name (if applicable)"><Input value={v.coOwnerName} onChange={(e) => set("coOwnerName", e.target.value)} /></Field>
           <Field label="Email"><Input type="email" value={v.email} onChange={(e) => set("email", e.target.value)} /></Field>
           <Field label="Phone"><Input value={v.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
         </Grid>

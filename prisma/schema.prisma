@@ -545,6 +545,9 @@ model Lead {
   // Contact
   firstName String
   lastName  String
+  // Optional co-owner / co-signer on the deal (e.g. spouse). Maps to the
+  // "Co-owner" autofill token + co-homeowner slots on document templates.
+  coOwnerName String?
   email     String?
   phone     String?
   address   String?

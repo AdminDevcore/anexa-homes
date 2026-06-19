@@ -23,6 +23,7 @@ async function companyTimeZone(companyId: string): Promise<string> {
 const leadInput = z.object({
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
+  coOwnerName: z.string().max(80).optional().or(z.literal("")),
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().max(30).optional().or(z.literal("")),
   address: z.string().max(160).optional().or(z.literal("")),
@@ -83,6 +84,7 @@ export async function createLeadAction(input: LeadInput) {
       companyId: user.companyId,
       firstName: d.firstName,
       lastName: d.lastName,
+      coOwnerName: d.coOwnerName || null,
       email: d.email || null,
       phone: d.phone || null,
       address: d.address || null,
@@ -152,6 +154,7 @@ export async function updateLeadAction(id: string, input: LeadInput) {
     data: {
       firstName: d.firstName,
       lastName: d.lastName,
+      coOwnerName: d.coOwnerName || null,
       email: d.email || null,
       phone: d.phone || null,
       address: d.address || null,
