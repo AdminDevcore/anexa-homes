@@ -18,6 +18,22 @@ export type KnockDTO = {
   knockedAt: string;
 };
 
+export type DealDTO = {
+  id: string;
+  lat: number;
+  lng: number;
+  name: string;
+  address: string | null;
+  phone: string | null;
+  stageName: string | null;
+  stageColor: string | null;
+  status: string;
+  repName: string | null;
+  value: number | null; // cents (estimated job value)
+  appointmentAt: string | null;
+  note: string | null;
+};
+
 export type TerritoryDTO = {
   id: string;
   name: string;
@@ -209,6 +225,49 @@ export async function getKnocksInBounds(
     propertyValue: k.propertyValue,
     propertyValueSource: k.propertyValueSource,
     knockedAt: k.knockedAt.toISOString(),
+  }));
+}
+
+/** Pipeline deals (geocoded leads) within the viewport — plotted on the
+ *  canvassing map so reps see the whole pipeline geographically. Company-wide
+ *  by design: the map is the shared geographic source of truth, so every door
+ *  knocker can see which homes are already deals/appointments. Capped. */
+export async function getDealsInBounds(
+  companyId: string,
+  bounds: Bounds,
+  cap = 500
+): Promise<DealDTO[]> {
+  const rows = await prisma.lead.findMany({
+    where: {
+      companyId,
+      lat: { not: null, gte: bounds.minLat, lte: bounds.maxLat },
+      lng: { not: null, gte: bounds.minLng, lte: bounds.maxLng },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: cap,
+    select: {
+      id: true, firstName: true, lastName: true, lat: true, lng: true,
+      address: true, phone: true, status: true, value: true,
+      appointmentAt: true, notes: true,
+      stage: { select: { name: true, color: true } },
+      assignedRep: { select: { firstName: true, lastName: true } },
+    },
+  });
+
+  return rows.map((l) => ({
+    id: l.id,
+    lat: l.lat as number,
+    lng: l.lng as number,
+    name: `${l.firstName} ${l.lastName}`.trim(),
+    address: l.address,
+    phone: l.phone,
+    stageName: l.stage?.name ?? null,
+    stageColor: l.stage?.color ?? null,
+    status: l.status,
+    repName: name(l.assignedRep),
+    value: l.value,
+    appointmentAt: l.appointmentAt ? l.appointmentAt.toISOString() : null,
+    note: l.notes,
   }));
 }
 

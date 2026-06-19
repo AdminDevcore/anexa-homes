@@ -8,10 +8,10 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Map as LeafletMap } from "leaflet";
-import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles } from "lucide-react";
+import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DISPOSITIONS, KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from "@/lib/canvassing";
-import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO } from "@/server/modules/canvassing/queries";
+import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
 import type { Viewport, ZipFeature } from "./canvassing-map";
 import { DateRangeFilter, resolveRange, type RangePreset } from "./canvassing-filters";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,7 @@ const CanvassingMap = dynamic(() => import("./canvassing-map").then((m) => m.Can
 
 const DEFAULT_CENTER: LatLng = [32.7831, -96.8067];
 const MIN_PIN_ZOOM = 16; // below this we show territory summaries, not individual pins
+const MIN_DEAL_ZOOM = 11; // deal/appointment pins load at neighborhood/city zoom (fewer, capped)
 
 export function CanvassingClient() {
   const qc = useQueryClient();
@@ -77,6 +78,7 @@ export function CanvassingClient() {
   const [dateFrom, setDateFrom] = React.useState("");
   const [dateTo, setDateTo] = React.useState("");
   const [remainingOnly, setRemainingOnly] = React.useState(false);
+  const [showDeals, setShowDeals] = React.useState(true);
   const [viewport, setViewport] = React.useState<Viewport | null>(null);
   const [generating, setGenerating] = React.useState(false);
   // ZIP boundaries are shown by default (the map is "divided into ZIP zones");
@@ -129,6 +131,33 @@ export function CanvassingClient() {
   const persistedKnocks = React.useMemo(
     () => (zoomOK ? knockData?.knocks ?? [] : []),
     [zoomOK, knockData]
+  );
+
+  // Lazy-load pipeline deals/appointments for the viewport. Company-wide (the
+  // map is the shared geographic source of truth) and loaded at a wider zoom
+  // than individual knocks since there are far fewer of them.
+  const dealZoomOK = (viewport?.zoom ?? 0) >= MIN_DEAL_ZOOM;
+  const { data: dealData } = useQuery<{ deals: DealDTO[] }>({
+    queryKey: ["canvassing-deals", bKey, dealZoomOK],
+    queryFn: async () => {
+      if (!viewport || !dealZoomOK) return { deals: [] };
+      const p = new URLSearchParams({
+        minLat: String(viewport.minLat),
+        minLng: String(viewport.minLng),
+        maxLat: String(viewport.maxLat),
+        maxLng: String(viewport.maxLng),
+      });
+      const res = await fetch(`/api/canvassing/deals?${p.toString()}`);
+      if (!res.ok) return { deals: [] };
+      return res.json();
+    },
+    enabled: !!viewport && dealZoomOK,
+    placeholderData: (prev) => prev,
+    refetchOnWindowFocus: false,
+  });
+  const deals = React.useMemo(
+    () => (dealZoomOK ? dealData?.deals ?? [] : []),
+    [dealZoomOK, dealData]
   );
 
   // ZIP (ZCTA) boundary overlay — fetched on-demand for the viewport from Census.
@@ -223,6 +252,7 @@ export function CanvassingClient() {
   const refresh = React.useCallback(() => {
     qc.invalidateQueries({ queryKey: ["canvassing-meta"] });
     qc.invalidateQueries({ queryKey: ["canvassing-knocks"] });
+    qc.invalidateQueries({ queryKey: ["canvassing-deals"] });
   }, [qc]);
 
   // Center on the first territory's centroid so its house dots are in view.
@@ -410,6 +440,42 @@ export function CanvassingClient() {
     );
   }
 
+  function renderDealPopup(d: DealDTO) {
+    return (
+      <div className="min-w-56 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="font-semibold">{d.name}</div>
+          {d.stageName && (
+            <span
+              className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
+              style={{ background: d.stageColor ?? "#6366f1" }}
+            >
+              {d.stageName}
+            </span>
+          )}
+        </div>
+        {d.address && <div className="text-xs text-muted-foreground">{d.address}</div>}
+        <div className="text-xs text-muted-foreground">
+          {d.repName ? `Rep: ${d.repName}` : "Unassigned"}
+          {d.value ? ` · ${usd(d.value)}` : ""}
+        </div>
+        {d.appointmentAt && (
+          <div className="text-xs font-medium text-gold">
+            Appointment: {new Date(d.appointmentAt).toLocaleString()}
+          </div>
+        )}
+        {d.phone && <div className="text-xs text-muted-foreground">{d.phone}</div>}
+        {d.note && <p className="text-sm text-muted-foreground line-clamp-3">{d.note}</p>}
+        <button
+          onClick={() => router.push(`/portal/leads/${d.id}`)}
+          className="inline-flex items-center gap-1 text-sm font-medium text-gold hover:underline"
+        >
+          <Check className="size-3.5" /> Open deal
+        </button>
+      </div>
+    );
+  }
+
   function renderTerritoryPopup(t: TerritoryDTO) {
     const pct = t.total ? Math.round((t.knocked / t.total) * 100) : 0;
     return (
@@ -550,6 +616,17 @@ export function CanvassingClient() {
         >
           Remaining only
         </button>
+        <button
+          type="button"
+          onClick={() => setShowDeals((v) => !v)}
+          title="Show pipeline deals & appointments on the map"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+            showDeals ? "border-foreground bg-foreground text-background" : "border-border hover:bg-muted"
+          )}
+        >
+          <Home className="size-3.5" /> Deals{deals.length ? ` (${deals.length})` : ""}
+        </button>
         <div className="mx-1 h-6 w-px bg-border" />
         {DISPOSITIONS.map((d) => {
           const active = dispFilter.has(d.value);
@@ -612,12 +689,14 @@ export function CanvassingClient() {
           center={center}
           basemap={basemap}
           knocks={knocks}
+          deals={showDeals ? deals : []}
           territories={territories}
           drawPoints={drawPoints}
           onMapClick={onMapClick}
           onMapReady={handleMapReady}
           onViewport={setViewport}
           renderKnockPopup={renderKnockPopup}
+          renderDealPopup={renderDealPopup}
           renderTerritoryPopup={renderTerritoryPopup}
           highlightTerritoryIds={highlightTerritoryIds}
           zips={zips}

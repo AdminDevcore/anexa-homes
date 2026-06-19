@@ -6,7 +6,7 @@ import L from "leaflet";
 import { MapContainer, TileLayer, Marker, Polygon, Popup, useMap } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
 import { dispositionMeta, type LatLng } from "@/lib/canvassing";
-import type { KnockDTO, TerritoryDTO } from "@/server/modules/canvassing/queries";
+import type { KnockDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
 
 export type Basemap = "satellite" | "street";
 
@@ -118,6 +118,32 @@ function knockIcon(disposition: string): L.DivIcon {
   return icon;
 }
 
+/** A circular "home" badge for a pipeline deal/appointment — colored by its
+ *  pipeline stage. Deliberately a different shape from the teardrop knock pin so
+ *  reps can tell at a glance which homes are already in the pipeline. */
+const dealIconCache = new Map<string, L.DivIcon>();
+function dealIcon(color: string | null): L.DivIcon {
+  const c = color || "#6366f1";
+  const cached = dealIconCache.get(c);
+  if (cached) return cached;
+  const html = `
+    <div style="width:30px;height:30px;border-radius:9999px;background:${c};border:3px solid #fff;box-shadow:0 2px 5px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3 11.5 12 4l9 7.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M5 10.5V20h14v-9.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>`;
+  const icon = L.divIcon({
+    html,
+    className: "anexa-deal-pin",
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -16],
+  });
+  dealIconCache.set(c, icon);
+  return icon;
+}
+
 function centroid(points: LatLng[]): LatLng {
   const n = points.length;
   const sum = points.reduce((a, p) => [a[0] + p[0], a[1] + p[1]] as LatLng, [0, 0] as LatLng);
@@ -140,12 +166,14 @@ export type CanvassingMapProps = {
   center: LatLng;
   basemap: Basemap;
   knocks: KnockDTO[];
+  deals?: DealDTO[];
   territories: TerritoryDTO[];
   drawPoints: LatLng[];
   onMapClick: (lat: number, lng: number) => void;
   onMapReady: (map: LeafletMap) => void;
   onViewport: (v: Viewport) => void;
   renderKnockPopup: (k: KnockDTO) => React.ReactNode;
+  renderDealPopup?: (d: DealDTO) => React.ReactNode;
   renderTerritoryPopup: (t: TerritoryDTO) => React.ReactNode;
   // When a rep is selected, the IDs of that rep's territories (emphasized; others dimmed).
   highlightTerritoryIds?: Set<string> | null;
@@ -159,12 +187,14 @@ export function CanvassingMap({
   center,
   basemap,
   knocks,
+  deals,
   territories,
   drawPoints,
   onMapClick,
   onMapReady,
   onViewport,
   renderKnockPopup,
+  renderDealPopup,
   renderTerritoryPopup,
   highlightTerritoryIds,
   zips,
@@ -253,6 +283,13 @@ export function CanvassingMap({
       {knocks.map((k) => (
         <Marker key={k.id} position={[k.lat, k.lng]} icon={knockIcon(k.disposition)}>
           <Popup>{renderKnockPopup(k)}</Popup>
+        </Marker>
+      ))}
+
+      {/* Pipeline deals / appointments — rendered on top of knock pins */}
+      {(deals ?? []).map((d) => (
+        <Marker key={`deal-${d.id}`} position={[d.lat, d.lng]} icon={dealIcon(d.stageColor)} zIndexOffset={1000}>
+          <Popup>{renderDealPopup ? renderDealPopup(d) : d.name}</Popup>
         </Marker>
       ))}
 

@@ -281,6 +281,11 @@ export async function convertKnockToLeadAction(
       city: knock.city,
       state: knock.state,
       zip: knock.zip,
+      // Inherit the knock's map coordinates so the deal plots on the canvassing
+      // map immediately — even when there's no geocodable street address.
+      lat: knock.lat,
+      lng: knock.lng,
+      geocodedAt: new Date(),
       pipelineId: pipeline?.id ?? null,
       stageId: pipeline?.stages[0]?.id ?? null,
       sourceId: source.id,

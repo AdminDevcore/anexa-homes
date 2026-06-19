@@ -18,6 +18,25 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
   try {
+    // First pass (free, DB-only): inherit coordinates from a linked canvassing
+    // knock. Covers deals converted from door-knocks — including ones with no
+    // geocodable street address — so they plot on the canvassing map.
+    let inherited = 0;
+    const fromKnocks = await prisma.lead.findMany({
+      where: { lat: null, knocks: { some: {} } },
+      select: { id: true, knocks: { select: { lat: true, lng: true }, take: 1 } },
+      take: 200,
+    });
+    for (const l of fromKnocks) {
+      const k = l.knocks[0];
+      if (!k) continue;
+      await prisma.lead.update({
+        where: { id: l.id },
+        data: { lat: k.lat, lng: k.lng, geocodedAt: new Date() },
+      });
+      inherited++;
+    }
+
     const leads = await prisma.lead.findMany({
       where: { geocodedAt: null, address: { not: null } },
       select: { id: true, address: true, city: true, state: true, zip: true },
@@ -37,7 +56,7 @@ export async function GET(req: Request) {
       if (g) geocoded++;
     }
 
-    return Response.json({ ok: true, processed: leads.length, geocoded });
+    return Response.json({ ok: true, inherited, processed: leads.length, geocoded });
   } catch (err) {
     console.error("[cron:geocode-leads] failed", err);
     return new Response("Error", { status: 500 });
