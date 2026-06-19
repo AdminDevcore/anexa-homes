@@ -79,7 +79,9 @@ export function CanvassingClient() {
   const [remainingOnly, setRemainingOnly] = React.useState(false);
   const [viewport, setViewport] = React.useState<Viewport | null>(null);
   const [generating, setGenerating] = React.useState(false);
-  const [showZips, setShowZips] = React.useState(false);
+  // ZIP boundaries are shown by default (the map is "divided into ZIP zones");
+  // the "ZIP codes" button can still hide them. Only loads at city zoom (>=9).
+  const [showZips, setShowZips] = React.useState(true);
 
   const [pendingTerritory, setPendingTerritory] = React.useState<LatLng[] | null>(null);
   const [pendingTerritoryName, setPendingTerritoryName] = React.useState("");
