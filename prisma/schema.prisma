@@ -69,6 +69,13 @@ enum ClaimStatus {
   closed
 }
 
+// How a deal is paid for. `insurance` = filed claim (RCV/ACV/depreciation/deductible,
+// scope of work). `cash` = customer pays out of pocket / financing — no insurance.
+enum DealType {
+  insurance
+  cash
+}
+
 enum CustomFieldEntity {
   lead
   project
@@ -571,6 +578,9 @@ model Lead {
   industry    Industry    @default(roofing)
   status      LeadStatus  @default(open)
   serviceType ServiceType @default(roofing)
+  // Cash (out-of-pocket / financing) vs insurance (filed claim). Drives whether the
+  // claim section, scope of work, and the insurance proposal financials apply.
+  dealType    DealType    @default(insurance)
   priority    Priority    @default(medium)
   value       Int         @default(0) // estimated job value (rep's estimate), cents
   // The CONTRACT price from the insurance scope, set after the Scope Received

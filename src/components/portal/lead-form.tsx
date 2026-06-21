@@ -58,6 +58,7 @@ export function LeadForm({
     stageId: initial?.stageId ?? "",
     assignedRepId: initial?.assignedRepId ?? "",
     serviceType: (initial?.serviceType ?? "roofing") as LeadInput["serviceType"],
+    dealType: (initial?.dealType ?? "insurance") as LeadInput["dealType"],
     valueDollars: initial?.valueDollars ?? "",
     priority: (initial?.priority ?? "medium") as LeadInput["priority"],
     appointmentDate: initial?.appointmentDate ?? "",
@@ -118,6 +119,7 @@ export function LeadForm({
       stageId: v.stageId,
       assignedRepId: v.assignedRepId,
       serviceType: v.serviceType,
+      dealType: v.dealType,
       valueCents: Math.round((Number(v.valueDollars) || 0) * 100),
       priority: v.priority,
       appointmentAt: v.appointmentDate,
@@ -174,6 +176,16 @@ export function LeadForm({
               <Picker value={v.assignedRepId} onChange={(val) => set("assignedRepId", val)} options={reps} placeholder="Unassigned" />
             </Field>
           )}
+          <Field label="Deal type">
+            <Select value={v.dealType} onValueChange={(val) => set("dealType", val as LeadInput["dealType"])}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="insurance">Insurance claim</SelectItem>
+                <SelectItem value="cash">Cash / financed</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Insurance = filed claim (deductible, depreciation, scope). Cash = customer pays out of pocket or finances.</p>
+          </Field>
           <Field label="Estimated value (USD)">
             <Input type="number" value={v.valueDollars} onChange={(e) => set("valueDollars", e.target.value)} placeholder="0" />
           </Field>

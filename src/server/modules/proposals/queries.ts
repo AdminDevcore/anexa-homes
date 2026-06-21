@@ -30,12 +30,14 @@ export type ProposalScopeLine = {
 };
 
 export type ProposalFinancialsView = {
+  dealType: "cash" | "insurance";
   rcvCents: number;
   acvCents: number;
   deductibleCents: number;
   depreciationCents: number;
   approvedSupplementsCents: number;
   customerUpgradesCents: number;
+  projectPriceCents: number;
   totalProjectValueCents: number;
   projectDiscountCents: number;
   estimatedOutOfPocketCents: number;
@@ -50,6 +52,7 @@ export type ProposalView = {
   customerName: string;
   propertyAddress: string;
   projectType: string;
+  dealType: "cash" | "insurance";
   repName: string | null;
   createdAt: string;
   branding: { companyName: string; logoUrl: string | null; primaryColor: string; accentColor: string };
@@ -101,6 +104,7 @@ async function assembleView(
     prisma.lead.findUnique({
       where: { id: proposal.leadId },
       select: {
+        dealType: true,
         assignedRep: { select: { firstName: true, lastName: true } },
         project: { select: { supplementCents: true } },
       },
@@ -133,27 +137,38 @@ async function assembleView(
   }
   const photoGroups: ProposalPhotoGroup[] = Array.from(byCategory.entries()).map(([category, photos]) => ({ category, photos }));
 
-  const scopeLines: ProposalScopeLine[] = (scope?.lines ?? []).map((l) => ({
-    description: l.description,
-    quantity: l.quantity,
-    unit: l.unit,
-    insuranceUnitPriceCents: l.insuranceUnitPrice,
-    rcvCents: Math.round(l.quantity * l.insuranceUnitPrice),
-  }));
+  const dealType: "cash" | "insurance" = lead?.dealType === "cash" ? "cash" : "insurance";
+  const cash = dealType === "cash";
 
-  const rcvCents = claim?.rcv ?? 0;
-  const approvedSupplementsCents = lead?.project?.supplementCents ?? 0;
+  // The scope of work is the insurance line-item breakdown — never shown on a cash proposal.
+  const scopeLines: ProposalScopeLine[] = cash
+    ? []
+    : (scope?.lines ?? []).map((l) => ({
+        description: l.description,
+        quantity: l.quantity,
+        unit: l.unit,
+        insuranceUnitPriceCents: l.insuranceUnitPrice,
+        rcvCents: Math.round(l.quantity * l.insuranceUnitPrice),
+      }));
+  // Cash deals ignore all insurance figures; the customer pays the entered project price.
+  const rcvCents = cash ? 0 : claim?.rcv ?? 0;
+  const acvCents = cash ? 0 : claim?.acv ?? 0;
+  const depreciationCents = cash ? 0 : claim?.depreciation ?? 0;
+  const approvedSupplementsCents = cash ? 0 : lead?.project?.supplementCents ?? 0;
   const upgrades: ProposalUpgrade[] = content.upgrades ?? [];
   // The rep can override the deductible in the presentation; fall back to the claim.
-  const deductibleCents = content.deductibleCents ?? claim?.deductible ?? 0;
+  const deductibleCents = cash ? 0 : content.deductibleCents ?? claim?.deductible ?? 0;
+  const projectPriceCents = cash ? Math.max(0, content.projectPriceCents ?? 0) : 0;
   const fin = computeProposalFinancials({
+    dealType,
     rcvCents,
-    acvCents: claim?.acv ?? 0,
+    acvCents,
     deductibleCents,
-    depreciationCents: claim?.depreciation ?? 0,
+    depreciationCents,
     approvedSupplementsCents,
     upgrades,
     projectDiscountCents: content.projectDiscountCents,
+    projectPriceCents,
   });
 
   const repName = lead?.assignedRep ? `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`.trim() : null;
@@ -165,7 +180,8 @@ async function assembleView(
     token: proposal.publicToken,
     customerName: proposal.customerName,
     propertyAddress: proposal.propertyAddress,
-    projectType: "Roofing / Insurance Restoration",
+    projectType: cash ? "Roofing" : "Roofing / Insurance Restoration",
+    dealType,
     repName,
     createdAt: proposal.createdAt.toISOString(),
     branding: { companyName: branding.companyName, logoUrl: branding.logoUrl ?? null, primaryColor: branding.primaryColor, accentColor: branding.accentColor },
@@ -181,12 +197,14 @@ async function assembleView(
     photoGroups,
     scopeLines,
     financials: {
+      dealType,
       rcvCents,
-      acvCents: claim?.acv ?? 0,
+      acvCents,
       deductibleCents,
-      depreciationCents: claim?.depreciation ?? 0,
+      depreciationCents,
       approvedSupplementsCents,
       customerUpgradesCents: fin.customerUpgradesCents,
+      projectPriceCents: fin.projectPriceCents,
       totalProjectValueCents: fin.totalProjectValueCents,
       projectDiscountCents: fin.projectDiscountCents,
       estimatedOutOfPocketCents: fin.estimatedOutOfPocketCents,

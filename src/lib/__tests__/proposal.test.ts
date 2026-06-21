@@ -56,6 +56,35 @@ describe("computeProposalFinancials", () => {
     expect(r.estimatedOutOfPocketCents).toBe(300_000);
   });
 
+  it("CASH: out-of-pocket = project price + upgrades − discount; no insurance figures", () => {
+    const r = computeProposalFinancials({
+      dealType: "cash",
+      rcvCents: 9_999_999, // insurance figures must be ignored for cash
+      acvCents: 9_999_999,
+      deductibleCents: 9_999_999,
+      depreciationCents: 9_999_999,
+      approvedSupplementsCents: 9_999_999,
+      upgrades: [{ label: "Ridge vent", priceCents: 50_000, selected: true }],
+      projectPriceCents: 1_800_000,
+      projectDiscountCents: 100_000,
+    });
+    expect(r.dealType).toBe("cash");
+    expect(r.projectPriceCents).toBe(1_800_000);
+    expect(r.customerUpgradesCents).toBe(50_000);
+    expect(r.totalProjectValueCents).toBe(1_850_000);
+    expect(r.estimatedOutOfPocketCents).toBe(1_800_000 + 50_000 - 100_000);
+  });
+
+  it("defaults to insurance when dealType is omitted", () => {
+    const r = computeProposalFinancials({
+      rcvCents: 1_000_000, acvCents: 0, deductibleCents: 100_000, depreciationCents: 0,
+      approvedSupplementsCents: 0, upgrades: [], projectPriceCents: 5_000_000,
+    });
+    expect(r.dealType).toBe("insurance");
+    expect(r.projectPriceCents).toBe(0); // project price ignored for insurance
+    expect(r.estimatedOutOfPocketCents).toBe(100_000); // deductible-driven
+  });
+
   it("clamps the discount to the gross out-of-pocket (never negative)", () => {
     const r = computeProposalFinancials({
       rcvCents: 0,

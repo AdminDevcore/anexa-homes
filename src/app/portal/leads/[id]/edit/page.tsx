@@ -42,6 +42,7 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
           stageId: lead.stageId ?? "",
           assignedRepId: lead.assignedRepId ?? "",
           serviceType: lead.serviceType,
+          dealType: lead.dealType,
           priority: lead.priority,
           valueDollars: lead.value ? String(lead.value / 100) : "",
           appointmentDate: lead.appointmentAt ? lead.appointmentAt.toISOString().slice(0, 16) : "",

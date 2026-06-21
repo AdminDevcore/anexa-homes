@@ -73,6 +73,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
   const activeConditions = [...activeDamageTypes, ...ROOF_CONDITION_ITEMS.filter((i) => conditionFlags[i.key])];
   const upgrades = (c.upgrades ?? []).filter((u) => u.selected);
   const fin = data.financials;
+  const cashDeal = fin.dealType === "cash";
 
   const navItems: ChromeNavItem[] = (
     [
@@ -140,13 +141,19 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
       {enabled("overview") && (
         <Section id="overview" eyebrow="Project Overview" title="Where things stand">
           <dl className="grid grid-cols-1 gap-x-10 gap-y-6 sm:grid-cols-2">
-            {[
-              ["Claim status", data.claim.status],
-              ["Insurance carrier", data.claim.carrier],
-              ["Claim number", data.claim.claimNumber],
-              ["Date of loss", data.claim.lossDate ? fmtDate(data.claim.lossDate) : null],
-              ["Roof type", data.claim.roofType],
-            ].filter(([, v]) => v).map(([k, v], idx) => (
+            {(cashDeal
+              ? ([
+                  ["Project type", data.projectType],
+                  ["Roof type", data.claim.roofType],
+                ] as [string, string | null][])
+              : ([
+                  ["Claim status", data.claim.status],
+                  ["Insurance carrier", data.claim.carrier],
+                  ["Claim number", data.claim.claimNumber],
+                  ["Date of loss", data.claim.lossDate ? fmtDate(data.claim.lossDate) : null],
+                  ["Roof type", data.claim.roofType],
+                ] as [string, string | null][])
+            ).filter(([, v]) => v).map(([k, v], idx) => (
               <div key={k as string} data-stagger style={{ ["--i" as string]: idx } as React.CSSProperties}>
                 <dt className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">{k}</dt>
                 <dd className="mt-1.5 text-xl font-medium capitalize text-neutral-900">{String(v).replace(/_/g, " ")}</dd>
@@ -282,40 +289,48 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
       {enabled("financial") && (
         <Section id="financial" eyebrow="Your Investment" title="What this project costs you" tone="dark">
           <div className="rounded-3xl bg-[var(--proposal-accent)] p-8 text-white sm:p-10">
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">Your estimated out-of-pocket</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{cashDeal ? "Your project total" : "Your estimated out-of-pocket"}</p>
             <p className="mt-3 font-display text-6xl font-bold leading-none tracking-tight sm:text-8xl"><Money cents={fin.estimatedOutOfPocketCents} /></p>
-            <p className="mt-4 max-w-md text-white/85">That&rsquo;s your deductible — the rest of the project is covered by your insurance claim.</p>
+            <p className="mt-4 max-w-md text-white/85">{cashDeal ? "That’s your all-in price. Pay in full, or spread it into easy monthly payments below." : "That’s your deductible — the rest of the project is covered by your insurance claim."}</p>
           </div>
 
           <dl className="mt-8 divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
-            {[
-              ["Insurance RCV", fin.rcvCents],
-              ["Actual cash value (ACV)", fin.acvCents],
-              ["Recoverable depreciation", fin.depreciationCents],
-              ["Approved supplements", fin.approvedSupplementsCents],
-              ["Customer upgrades", fin.customerUpgradesCents],
-            ].filter(([, v]) => (v as number) > 0).map(([k, v], idx) => (
-              <div key={k as string} data-stagger style={{ ["--i" as string]: idx } as React.CSSProperties} className="flex items-center justify-between px-5 py-3.5">
+            {(cashDeal
+              ? ([
+                  ["Project price", fin.projectPriceCents],
+                  ["Upgrades", fin.customerUpgradesCents],
+                ] as [string, number][])
+              : ([
+                  ["Insurance RCV", fin.rcvCents],
+                  ["Actual cash value (ACV)", fin.acvCents],
+                  ["Recoverable depreciation", fin.depreciationCents],
+                  ["Approved supplements", fin.approvedSupplementsCents],
+                  ["Customer upgrades", fin.customerUpgradesCents],
+                ] as [string, number][])
+            ).filter(([, v]) => v > 0).map(([k, v], idx) => (
+              <div key={k} data-stagger style={{ ["--i" as string]: idx } as React.CSSProperties} className="flex items-center justify-between px-5 py-3.5">
                 <dt className="text-neutral-300">{k}</dt>
-                <dd className="font-medium text-white"><Money cents={v as number} /></dd>
+                <dd className="font-medium text-white"><Money cents={v} /></dd>
               </div>
             ))}
             <div className="flex items-center justify-between bg-white/[0.06] px-5 py-4">
               <dt className="font-semibold text-white">Total project value</dt>
               <dd className="text-lg font-bold text-white"><Money cents={fin.totalProjectValueCents} /></dd>
             </div>
-            <div className="flex items-center justify-between px-5 py-3.5">
-              <dt className="font-semibold text-white">Your deductible</dt>
-              <dd className="font-medium text-white"><Money cents={fin.deductibleCents} /></dd>
-            </div>
+            {!cashDeal && (
+              <div className="flex items-center justify-between px-5 py-3.5">
+                <dt className="font-semibold text-white">Your deductible</dt>
+                <dd className="font-medium text-white"><Money cents={fin.deductibleCents} /></dd>
+              </div>
+            )}
             {fin.projectDiscountCents > 0 && (
               <div className="flex items-center justify-between px-5 py-3.5">
-                <dt className="font-semibold text-emerald-300">Project discount</dt>
+                <dt className="font-semibold text-emerald-300">{cashDeal ? "Discount" : "Project discount"}</dt>
                 <dd className="font-medium text-emerald-300">−<Money cents={fin.projectDiscountCents} /></dd>
               </div>
             )}
             <div className="flex items-center justify-between bg-white/[0.06] px-5 py-4">
-              <dt className="font-semibold text-white">Your out-of-pocket</dt>
+              <dt className="font-semibold text-white">{cashDeal ? "Your total" : "Your out-of-pocket"}</dt>
               <dd className="text-lg font-bold text-white"><Money cents={fin.estimatedOutOfPocketCents} /></dd>
             </div>
           </dl>
@@ -344,9 +359,11 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
             </div>
           )}
 
-          <p className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-200">
-            <strong className="text-amber-100">Texas law:</strong> your insurance deductible is your responsibility and cannot be waived, rebated, or absorbed by the contractor. Recoverable depreciation is released by your carrier after the work is completed.
-          </p>
+          {!cashDeal && (
+            <p className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-200">
+              <strong className="text-amber-100">Texas law:</strong> your insurance deductible is your responsibility and cannot be waived, rebated, or absorbed by the contractor. Recoverable depreciation is released by your carrier after the work is completed.
+            </p>
+          )}
           {c.financialNote && <p className="mt-3 text-sm text-neutral-400">{c.financialNote}</p>}
         </Section>
       )}

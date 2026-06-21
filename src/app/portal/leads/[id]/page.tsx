@@ -46,6 +46,7 @@ import { StartProductionButton } from "@/components/portal/start-production-butt
 import { ProjectSchedule } from "@/components/portal/project-schedule";
 import { DealActionsPanel } from "@/components/portal/deal-actions-panel";
 import { ClaimInfoCard } from "@/components/portal/claim-info-card";
+import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
 import { DealTabs } from "@/components/portal/deal-tabs";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
@@ -71,6 +72,10 @@ export default async function LeadDetailPage({
   const user = await requireUser();
   const lead = await getLeadDetail(user, id);
   if (!lead) notFound();
+
+  // Cash deals (customer pays out of pocket / financing) hide the insurance UI:
+  // no claim worksheet, no scope of work, and "Status" instead of "Claim Status".
+  const isInsurance = lead.dealType !== "cash";
 
   const claim = lead.claims[0];
   const measurement = lead.roofMeasurements[0];
@@ -149,7 +154,8 @@ export default async function LeadDetailPage({
   const scopeReady =
     isScopeReady(lead.claimStatus) ||
     stageAtOrAfterScope(lead.pipeline?.stages ?? [], lead.stage?.id ?? null);
-  const showScope = scopeReady && can(user, "read", "Scope");
+  // Scope of Work is an insurance-claim concept — hidden entirely for cash deals.
+  const showScope = isInsurance && scopeReady && can(user, "read", "Scope");
   const scopeData = showScope ? await getScopeForLead(user, lead.id) : null;
   const scopeTemplate =
     showScope && canSeeScopeCosts(user.role) ? await listScopeTemplate(user.companyId, lead.industry) : [];
@@ -276,9 +282,17 @@ export default async function LeadDetailPage({
               ))}
             </ul>
           </Card>
-          {/* Claim — folded into Overview. Roof info / line items / supplements
-              now live in Scope of Work; only claim tracking + amounts remain. */}
-          {claim ? (
+          {/* Claim — insurance deals only. Roof info / line items / supplements
+              live in Scope of Work; only claim tracking + amounts remain here.
+              Cash deals show a plain cash card instead (no insurance fields). */}
+          {!isInsurance ? (
+            <Card title="Cash Deal" icon={ShieldCheck}>
+              <p className="text-sm text-muted-foreground">
+                This is a <strong>cash deal</strong> — the customer pays out of pocket or finances it; there&rsquo;s no
+                insurance claim, deductible, or depreciation. Set the price in the proposal (<strong>Build Presentation</strong>).
+              </p>
+            </Card>
+          ) : claim ? (
             <ClaimInfoCard
               leadId={lead.id}
               canEdit={can(user, "update", "Claim")}
@@ -504,6 +518,10 @@ export default async function LeadDetailPage({
           <Card title="Summary">
             <div className="space-y-3">
               <Detail label="Project Type" value={serviceTypeLabel(lead.serviceType)} />
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deal Type</span>
+                <DealTypeToggle leadId={lead.id} value={isInsurance ? "insurance" : "cash"} canEdit={can(user, "update", "Lead")} />
+              </div>
               {propertyValueLine && <Detail label="Property Value" value={propertyValueLine} />}
               {lastSaleLine && <Detail label="Last Sale" value={lastSaleLine} />}
               <Detail
@@ -514,7 +532,7 @@ export default async function LeadDetailPage({
                     : "Unassigned"
                 }
               />
-              <Detail label="Claim Status" value={lead.claimStatus.replace(/_/g, " ")} />
+              {isInsurance && <Detail label="Claim Status" value={lead.claimStatus.replace(/_/g, " ")} />}
               <Detail
                 label="Appointment Date"
                 value={lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not scheduled"}

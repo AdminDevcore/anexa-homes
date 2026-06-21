@@ -18,6 +18,7 @@ import {
 } from "@/lib/proposal";
 import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actions";
 import { updateProposalContentAction, generateProposalAction } from "@/server/modules/proposals/actions";
+import { setDealTypeAction } from "@/server/modules/leads/manage";
 import type { ProposalBuilderData } from "@/server/modules/proposals/queries";
 import { PresentationView } from "@/components/proposal/presentation-view";
 
@@ -50,15 +51,31 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
     setContent((c) => ({ ...c, ...p }));
   }
 
+  const dealType = data.proposal.dealType;
+  const isCash = dealType === "cash";
+
+  async function switchDealType(next: "cash" | "insurance") {
+    if (next === dealType) return;
+    setBusy(true);
+    // Persist any in-progress edits first so they survive the refresh.
+    await updateProposalContentAction({ proposalId: data.proposal.id, content: content as Record<string, unknown> });
+    const res = await setDealTypeAction({ leadId, dealType: next });
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success(next === "cash" ? "Now a cash deal" : "Now an insurance claim");
+    router.refresh();
+  }
+
   // Live out-of-pocket preview for the financing calculator. Mirrors
-  // computeProposalFinancials: deductible (content override, else the saved claim
-  // value) + selected upgrades − project discount, never negative.
+  // computeProposalFinancials: cash base = project price; insurance base = deductible
+  // (content override, else the saved claim value) + selected upgrades − discount.
   const liveDeductibleCents = content.deductibleCents ?? data.proposal.financials.deductibleCents;
+  const liveBaseCents = isCash ? Math.max(0, content.projectPriceCents || 0) : liveDeductibleCents;
   const liveUpgradesCents = (content.upgrades ?? [])
     .filter((u) => u.selected)
     .reduce((s, u) => s + Math.max(0, u.priceCents || 0), 0);
   const liveDiscountCents = Math.max(0, content.projectDiscountCents || 0);
-  const liveOutOfPocketCents = Math.max(0, liveDeductibleCents + liveUpgradesCents - liveDiscountCents);
+  const liveOutOfPocketCents = Math.max(0, liveBaseCents + liveUpgradesCents - liveDiscountCents);
   const financingEnabled = content.financing?.enabled ?? false;
   const selectedTerms = content.financing?.termsMonths ?? [];
 
@@ -140,6 +157,27 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
 
   return (
     <div className="space-y-6">
+      {/* Deal type — drives the whole proposal: cash (project price) vs insurance (claim). */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-2.5">
+        <div className="text-sm">
+          <span className="font-medium">Deal type:</span>{" "}
+          <span className="text-muted-foreground">{isCash ? "Cash — customer pays out of pocket / financing (no insurance)." : "Insurance claim — deductible, depreciation, scope."}</span>
+        </div>
+        <div className="inline-flex overflow-hidden rounded-lg border border-border text-sm font-medium">
+          {(["insurance", "cash"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              disabled={busy}
+              onClick={() => switchDealType(t)}
+              className={`px-3 py-1 transition-colors disabled:opacity-60 ${dealType === t ? "bg-neutral-900 text-white" : "hover:bg-muted"}`}
+            >
+              {t === "insurance" ? "Insurance" : "Cash"}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Step nav */}
       <div className="flex flex-wrap gap-2">
         {STEPS.map((s) => (
@@ -223,18 +261,35 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
       {step === "details" && (
         <div className="space-y-4">
           <Field label="Roof type"><Input defaultValue={content.roofType ?? ""} placeholder="e.g. Asphalt shingle" onBlur={(e) => patch({ roofType: e.target.value })} /></Field>
-          <Field label="Deductible ($)">
-            <Input
-              inputMode="decimal"
-              defaultValue={content.deductibleCents != null ? String(content.deductibleCents / 100) : ""}
-              placeholder="e.g. 2500"
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                patch({ deductibleCents: v === "" ? undefined : Math.round((Number(v) || 0) * 100) });
-              }}
-            />
-            <p className="text-xs text-muted-foreground">Customer&rsquo;s out-of-pocket deductible. Leave blank to use the claim&rsquo;s deductible.</p>
-          </Field>
+          {isCash ? (
+            <Field label="Project price ($)">
+              <Input
+                key="cash-price"
+                inputMode="decimal"
+                defaultValue={content.projectPriceCents != null ? String(content.projectPriceCents / 100) : ""}
+                placeholder="e.g. 18000"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  patch({ projectPriceCents: v === "" ? undefined : Math.round((Number(v) || 0) * 100) });
+                }}
+              />
+              <p className="text-xs text-muted-foreground">The total cash price the customer pays. Their total = project price + upgrades − discount (optionally financed).</p>
+            </Field>
+          ) : (
+            <Field label="Deductible ($)">
+              <Input
+                key="ins-deductible"
+                inputMode="decimal"
+                defaultValue={content.deductibleCents != null ? String(content.deductibleCents / 100) : ""}
+                placeholder="e.g. 2500"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  patch({ deductibleCents: v === "" ? undefined : Math.round((Number(v) || 0) * 100) });
+                }}
+              />
+              <p className="text-xs text-muted-foreground">Customer&rsquo;s out-of-pocket deductible. Leave blank to use the claim&rsquo;s deductible.</p>
+            </Field>
+          )}
           <Field label="Project discount ($)">
             <Input
               inputMode="decimal"
@@ -246,8 +301,9 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
               }}
             />
             <p className="text-xs text-muted-foreground">
-              A general discount on the project — lowers the customer&rsquo;s out-of-pocket. This is <strong>not</strong> a deductible
-              rebate; the deductible is still shown in full (Texas law prohibits waiving or rebating it).
+              {isCash
+                ? "A discount on the cash price — lowers the customer's total."
+                : "A general discount on the project — lowers the customer's out-of-pocket. This is not a deductible rebate; the deductible is still shown in full (Texas law prohibits waiving or rebating it)."}
             </p>
           </Field>
           <Field label="Damage summary">

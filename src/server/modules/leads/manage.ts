@@ -34,6 +34,7 @@ const leadInput = z.object({
   stageId: z.string().uuid().optional().or(z.literal("")),
   assignedRepId: z.string().uuid().optional().or(z.literal("")),
   serviceType: z.enum(["roofing", "storm_restoration", "solar", "hvac", "water_filtration", "windows", "other"]).default("roofing"),
+  dealType: z.enum(["cash", "insurance"]).default("insurance"),
   valueCents: z.number().int().min(0).default(0),
   priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
   appointmentAt: z.string().optional().or(z.literal("")),
@@ -99,6 +100,7 @@ export async function createLeadAction(input: LeadInput) {
       createdById: user.userId,
       industry,
       serviceType: INDUSTRY_SERVICE_TYPE[industry],
+      dealType: d.dealType,
       value: d.valueCents,
       priority: d.priority,
       appointmentAt: d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null,
@@ -166,6 +168,7 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       sourceId: d.sourceId || null,
       ...(canAssign ? { assignedRepId: d.assignedRepId || null } : {}),
       serviceType: d.serviceType,
+      dealType: d.dealType,
       value: d.valueCents,
       priority: d.priority,
       appointmentAt: d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null,
@@ -182,6 +185,27 @@ export async function updateLeadAction(id: string, input: LeadInput) {
   revalidatePath("/portal/leads");
   revalidatePath("/portal/pipeline");
   return { ok: true as const, id };
+}
+
+const dealTypeSchema = z.object({ leadId: z.string().min(1), dealType: z.enum(["cash", "insurance"]) });
+
+/** Switch a deal between cash (out-of-pocket / financing) and insurance (filed claim).
+ *  Settable on the deal page and from the proposal builder. */
+export async function setDealTypeAction(input: z.infer<typeof dealTypeSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return { ok: false as const, error: "Not allowed." };
+  const parsed = dealTypeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: "Invalid deal type." };
+  const { leadId, dealType } = parsed.data;
+
+  const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  const lead = await prisma.lead.findFirst({ where: { AND: [{ id: leadId }, scope] }, select: { id: true } });
+  if (!lead) return { ok: false as const, error: "Deal not found." };
+
+  await prisma.lead.update({ where: { id: lead.id }, data: { dealType } });
+  revalidatePath(`/portal/leads/${lead.id}`);
+  revalidatePath(`/portal/leads/${lead.id}/presentation`);
+  return { ok: true as const };
 }
 
 const claimPriceSchema = z.object({ leadId: z.string().min(1), amountCents: z.number().int().min(0) });
