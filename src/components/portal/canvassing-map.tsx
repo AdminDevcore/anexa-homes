@@ -156,6 +156,15 @@ function territoryLabelIcon(name: string, color: string, progress: string): L.Di
   return L.divIcon({ html, className: "anexa-territory-label", iconSize: [0, 0], iconAnchor: [0, 0] });
 }
 
+/** Pulsing ring dropped on the address a rep searched for, so they can see
+ *  exactly which house dot to tap. Anchored at its center over the dot. */
+const searchRingIcon: L.DivIcon = L.divIcon({
+  html: `<div style="position:relative;width:46px;height:46px;"><div class="pulse"></div><div class="ring"></div></div>`,
+  className: "anexa-search-ring",
+  iconSize: [46, 46],
+  iconAnchor: [23, 23],
+});
+
 const ZIP_COLOR = "#2563eb";
 function zipLabelIcon(zcta: string): L.DivIcon {
   const html = `<div style="white-space:nowrap;transform:translate(-50%,-50%);background:rgba(255,255,255,0.92);color:${ZIP_COLOR};font-weight:700;font-size:11px;letter-spacing:0.02em;padding:2px 7px;border-radius:9999px;border:1.5px solid ${ZIP_COLOR};box-shadow:0 1px 3px rgba(0,0,0,.25);font-family:system-ui,sans-serif;">${zcta}</div>`;
@@ -181,6 +190,8 @@ export type CanvassingMapProps = {
   zips?: ZipFeature[];
   showZips?: boolean;
   onZipClick?: (zcta: string, ring: LatLng[]) => void;
+  // Pulsing highlight for the address a rep just searched for.
+  searchPin?: LatLng | null;
 };
 
 export function CanvassingMap({
@@ -200,6 +211,7 @@ export function CanvassingMap({
   zips,
   showZips,
   onZipClick,
+  searchPin,
 }: CanvassingMapProps) {
   return (
     <MapContainer center={center} zoom={16} scrollWheelZoom className="h-full w-full">
@@ -285,6 +297,11 @@ export function CanvassingMap({
           <Popup>{renderKnockPopup(k)}</Popup>
         </Marker>
       ))}
+
+      {/* Searched-address highlight — a pulsing ring over the matching dot */}
+      {searchPin && (
+        <Marker position={searchPin} icon={searchRingIcon} interactive={false} zIndexOffset={2000} />
+      )}
 
       {/* Pipeline deals / appointments — rendered on top of knock pins */}
       {(deals ?? []).map((d) => (

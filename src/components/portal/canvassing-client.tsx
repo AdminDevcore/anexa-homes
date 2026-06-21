@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Map as LeafletMap } from "leaflet";
-import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home } from "lucide-react";
+import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DISPOSITIONS, KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
@@ -84,6 +84,9 @@ export function CanvassingClient() {
   // ZIP boundaries are shown by default (the map is "divided into ZIP zones");
   // the "ZIP codes" button can still hide them. Only loads at city zoom (>=9).
   const [showZips, setShowZips] = React.useState(true);
+
+  // Pulsing highlight dropped on the address a rep searched for.
+  const [searchPin, setSearchPin] = React.useState<LatLng | null>(null);
 
   const [pendingTerritory, setPendingTerritory] = React.useState<LatLng[] | null>(null);
   const [pendingTerritoryName, setPendingTerritoryName] = React.useState("");
@@ -298,6 +301,13 @@ export function CanvassingClient() {
       () => toast.error("Couldn't get your location."),
       { enableHighAccuracy: true, timeout: 8000 }
     );
+  }
+
+  // Jump the map to a searched address and drop a pulsing highlight on it so the
+  // rep can see which house dot to tap. Zoom 19 so the house dots auto-load.
+  function goToAddress(lat: number, lng: number) {
+    setSearchPin([lat, lng]);
+    mapRef.current?.setView([lat, lng], 19, { animate: true });
   }
 
   function finishDrawing() {
@@ -545,6 +555,7 @@ export function CanvassingClient() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <AddressSearch onSelect={goToAddress} />
           <div className="inline-flex overflow-hidden rounded-lg border border-border">
             <button
               onClick={() => setBasemap("satellite")}
@@ -685,6 +696,14 @@ export function CanvassingClient() {
             Zoom in to load ZIP code boundaries
           </div>
         )}
+        {searchPin && (
+          <button
+            onClick={() => setSearchPin(null)}
+            className="absolute bottom-3 left-1/2 z-[1000] inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-foreground/90 px-3 py-1.5 text-xs font-medium text-background shadow hover:bg-foreground"
+          >
+            <X className="size-3.5" /> Clear highlight — tap the ringed dot to take action
+          </button>
+        )}
         <CanvassingMap
           center={center}
           basemap={basemap}
@@ -702,6 +721,7 @@ export function CanvassingClient() {
           zips={zips}
           showZips={showZips}
           onZipClick={canManage ? onZipClick : undefined}
+          searchPin={searchPin}
         />
       </div>
 
@@ -854,6 +874,115 @@ function PropertyInfo({
         </div>
       )}
       {structure.length > 0 && <div className="text-[11px] text-muted-foreground">{structure.join(" · ")}</div>}
+    </div>
+  );
+}
+
+type GeocodeResult = { label: string; lat: number; lng: number };
+
+/**
+ * Address search box for the canvassing map. Debounced forward-geocoding via
+ * /api/canvassing/geocode (Nominatim proxy). Picking a result jumps the map to
+ * that house and drops a pulsing highlight on the dot to tap.
+ */
+function AddressSearch({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
+  const [term, setTerm] = React.useState("");
+  const [debounced, setDebounced] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+  const boxRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Debounce keystrokes so we respect Nominatim's rate limits.
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebounced(term.trim()), 350);
+    return () => clearTimeout(t);
+  }, [term]);
+
+  const { data, isFetching } = useQuery<{ results: GeocodeResult[] }>({
+    queryKey: ["canvassing-geocode", debounced],
+    queryFn: async () => {
+      const res = await fetch(`/api/canvassing/geocode?q=${encodeURIComponent(debounced)}`);
+      if (!res.ok) return { results: [] };
+      return res.json();
+    },
+    enabled: debounced.length >= 3,
+    staleTime: 5 * 60 * 1000,
+  });
+  const results = data?.results ?? [];
+
+  // Close the dropdown when clicking outside.
+  React.useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  function pick(r: GeocodeResult) {
+    onSelect(r.lat, r.lng);
+    setTerm(r.label.split(",").slice(0, 2).join(", "));
+    setOpen(false);
+  }
+
+  return (
+    <div ref={boxRef} className="relative w-full sm:w-72">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={term}
+          onChange={(e) => {
+            setTerm(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && results[0]) {
+              e.preventDefault();
+              pick(results[0]);
+            }
+            if (e.key === "Escape") setOpen(false);
+          }}
+          placeholder="Search an address…"
+          className="h-9 pl-8 pr-8"
+          aria-label="Search an address on the map"
+        />
+        {isFetching ? (
+          <Loader2 className="absolute right-2.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+        ) : term ? (
+          <button
+            type="button"
+            onClick={() => {
+              setTerm("");
+              setDebounced("");
+              setOpen(false);
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            aria-label="Clear search"
+          >
+            <X className="size-4" />
+          </button>
+        ) : null}
+      </div>
+      {open && debounced.length >= 3 && (
+        <div className="absolute z-[1100] mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
+          {results.length === 0 ? (
+            <p className="px-2 py-2 text-sm text-muted-foreground">
+              {isFetching ? "Searching…" : "No matching address."}
+            </p>
+          ) : (
+            results.map((r, i) => (
+              <button
+                key={`${r.lat},${r.lng},${i}`}
+                onClick={() => pick(r)}
+                className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+              >
+                <MapPin className="mt-0.5 size-3.5 shrink-0 text-gold" />
+                <span className="line-clamp-2">{r.label}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -440,3 +440,30 @@
 /* Hide scrollbar (used by the proposal photo carousel). */
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ── Canvassing map: searched-address highlight ───────────────────────────
+   A pulsing ring dropped at the geocoded location so the rep can see exactly
+   which house dot to tap after searching an address. */
+@keyframes anexa-search-pulse {
+  0%   { transform: scale(0.4); opacity: 0.9; }
+  70%  { transform: scale(1.6); opacity: 0; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.anexa-search-ring { background: transparent !important; border: none !important; }
+.anexa-search-ring .ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 3px solid #F4631E;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+.anexa-search-ring .pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: rgba(244, 99, 30, 0.35);
+  animation: anexa-search-pulse 1.6s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anexa-search-ring .pulse { animation: none; }
+}
