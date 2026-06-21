@@ -177,7 +177,20 @@ export function defaultUpgrades(): ProposalUpgrade[] {
   ].map((label) => ({ label, priceCents: 0, selected: false }));
 }
 
-export function roofingTimeline(): string[] {
+export function roofingTimeline(dealType: ProposalDealType = "insurance"): string[] {
+  // Cash deals have no claim / adjuster / supplement / depreciation steps.
+  if (dealType === "cash") {
+    return [
+      "Inspection completed",
+      "Proposal approved",
+      "Agreement signed",
+      "Material selection",
+      "Production scheduled",
+      "Roof installation",
+      "Final inspection",
+      "Final walkthrough & closeout",
+    ];
+  }
   return [
     "Inspection completed",
     "Claim filed",
@@ -193,7 +206,35 @@ export function roofingTimeline(): string[] {
   ];
 }
 
-export function defaultFaq(): { q: string; a: string }[] {
+export function defaultFaq(dealType: ProposalDealType = "insurance"): { q: string; a: string }[] {
+  if (dealType === "cash") {
+    return [
+      {
+        q: "What does the price include?",
+        a: "Your project price is all-in for the scope shown — materials, labor, tear-off, cleanup, and the workmanship warranty. Any optional upgrades you select are added on top.",
+      },
+      {
+        q: "How do I pay?",
+        a: "Pay in full, or spread it into easy monthly payments with 0% financing (if shown). We collect a deposit to schedule, with the balance due at completion.",
+      },
+      {
+        q: "How long does a roof replacement take?",
+        a: "Most residential roofs are installed in 1–2 days once materials are delivered and production is scheduled.",
+      },
+      {
+        q: "What happens if the decking is bad?",
+        a: "If we find damaged or rotten decking during tear-off, we'll show you and replace it to code; any change to the price is reviewed with you first.",
+      },
+      {
+        q: "Can I upgrade materials?",
+        a: "Yes. You can select upgrades such as impact-resistant shingles; the added cost is included in your total.",
+      },
+      {
+        q: "Is there a warranty?",
+        a: "Yes — your installation is covered by our workmanship warranty plus the manufacturer's material warranty.",
+      },
+    ];
+  }
   return [
     {
       q: "Do I have to pay my deductible?",
@@ -226,10 +267,10 @@ export function defaultFaq(): { q: string; a: string }[] {
   ];
 }
 
-export function defaultWhyAnexa(): string[] {
+export function defaultWhyAnexa(dealType: ProposalDealType = "insurance"): string[] {
   return [
     "Licensed & insured",
-    "Full insurance-restoration support",
+    dealType === "cash" ? "Upfront, all-in pricing" : "Full insurance-restoration support",
     "Complete photo documentation",
     "Dedicated production coordination",
     "Clean closeout package",
@@ -237,14 +278,14 @@ export function defaultWhyAnexa(): string[] {
   ];
 }
 
-/** Build a fresh content blob for a new draft proposal. */
+/** Build a fresh content blob for a new draft proposal. FAQ + "why" are NOT seeded
+ *  here — the renderer fills them deal-type-aware (defaultFaq/defaultWhyAnexa) so a
+ *  cash proposal never shows insurance copy. The rep can still override via content. */
 export function defaultProposalContent(): ProposalContent {
   return {
     conditionFlags: {},
     photoCaptions: {},
     upgrades: defaultUpgrades(),
     selectedSections: defaultSections(),
-    faq: defaultFaq(),
-    whyAnexa: defaultWhyAnexa(),
   };
 }

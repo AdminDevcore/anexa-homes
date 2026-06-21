@@ -66,8 +66,8 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
   const enabled = (id: ProposalSectionId) =>
     sections.length === 0 ? true : sections.some((s) => s.id === id);
 
-  const faq = c.faq && c.faq.length > 0 ? c.faq : defaultFaq();
-  const why = c.whyAnexa && c.whyAnexa.length > 0 ? c.whyAnexa : defaultWhyAnexa();
+  const faq = c.faq && c.faq.length > 0 ? c.faq : defaultFaq(data.financials.dealType);
+  const why = c.whyAnexa && c.whyAnexa.length > 0 ? c.whyAnexa : defaultWhyAnexa(data.financials.dealType);
   const conditionFlags = c.conditionFlags ?? {};
   const activeDamageTypes = DAMAGE_TYPE_ITEMS.filter((i) => conditionFlags[i.key]);
   const activeConditions = [...activeDamageTypes, ...ROOF_CONDITION_ITEMS.filter((i) => conditionFlags[i.key])];
@@ -268,7 +268,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
               className="pointer-events-none absolute bottom-6 left-[24px] top-6 w-0.5 bg-gradient-to-b from-[var(--proposal-accent)] via-[var(--proposal-accent)]/60 to-[var(--proposal-accent)]/15 print:hidden"
               aria-hidden
             />
-            {roofingTimeline().map((step, i) => (
+            {roofingTimeline(fin.dealType).map((step, i) => (
               <li
                 key={i}
                 data-stagger

@@ -6,6 +6,8 @@ import {
   defaultSections,
   defaultUpgrades,
   defaultProposalContent,
+  defaultFaq,
+  roofingTimeline,
   PROPOSAL_SECTIONS,
 } from "../proposal";
 
@@ -143,11 +145,28 @@ describe("defaults", () => {
     expect(defaultUpgrades().every((u) => !u.selected && u.priceCents === 0)).toBe(true);
   });
 
-  it("defaultProposalContent is a complete starting blob", () => {
+  it("defaultProposalContent seeds upgrades + sections, but NOT faq/why (renderer fills deal-type-aware)", () => {
     const c = defaultProposalContent();
     expect(c.upgrades?.length).toBeGreaterThan(0);
     expect(c.selectedSections?.length).toBe(PROPOSAL_SECTIONS.length);
-    expect(c.faq?.length).toBeGreaterThan(0);
-    expect(c.whyAnexa?.length).toBeGreaterThan(0);
+    expect(c.faq).toBeUndefined();
+    expect(c.whyAnexa).toBeUndefined();
+  });
+});
+
+describe("deal-type-aware copy", () => {
+  it("cash timeline has no claim/adjuster/supplement/depreciation steps", () => {
+    const cash = roofingTimeline("cash").join(" | ").toLowerCase();
+    expect(cash).not.toMatch(/claim|adjuster|supplement|depreciation/);
+    const ins = roofingTimeline("insurance").join(" | ").toLowerCase();
+    expect(ins).toMatch(/claim filed/);
+    expect(ins).toMatch(/adjuster/);
+  });
+
+  it("cash FAQ drops deductible/depreciation language; insurance keeps it", () => {
+    const cash = defaultFaq("cash").map((f) => `${f.q} ${f.a}`).join(" ").toLowerCase();
+    expect(cash).not.toMatch(/deductible|depreciation|carrier|supplement/);
+    const ins = defaultFaq("insurance").map((f) => f.q).join(" ").toLowerCase();
+    expect(ins).toMatch(/deductible/);
   });
 });
