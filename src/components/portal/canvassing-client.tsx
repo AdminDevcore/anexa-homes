@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Map as LeafletMap } from "leaflet";
-import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home, Search } from "lucide-react";
+import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home, Search, Move } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DISPOSITIONS, KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
@@ -32,6 +32,7 @@ import {
   setTerritoryRepsAction,
   assignKnockRepAction,
   ensureHouseKnockAction,
+  updateLeadPositionAction,
 } from "@/server/modules/canvassing/actions";
 
 const CanvassingMap = dynamic(() => import("./canvassing-map").then((m) => m.CanvassingMap), {
@@ -85,8 +86,12 @@ export function CanvassingClient() {
   // the "ZIP codes" button can still hide them. Only loads at city zoom (>=9).
   const [showZips, setShowZips] = React.useState(true);
 
-  // Pulsing highlight dropped on the address a rep searched for.
+  // Pulsing highlight dropped on the address a rep searched for. searchTarget is
+  // the raw geocoded point we try to snap to the nearest real house dot once dots load.
   const [searchPin, setSearchPin] = React.useState<LatLng | null>(null);
+  const [searchTarget, setSearchTarget] = React.useState<LatLng | null>(null);
+  // Drag-to-reposition: id of the pin currently in "move" mode (knock id or `deal-<id>`).
+  const [movingId, setMovingId] = React.useState<string | null>(null);
 
   const [pendingTerritory, setPendingTerritory] = React.useState<LatLng[] | null>(null);
   const [pendingTerritoryName, setPendingTerritoryName] = React.useState("");
@@ -252,6 +257,22 @@ export function CanvassingClient() {
     return [...persistedKnocks, ...synthetic];
   }, [persistedKnocks, houseData, houseZoomOK, statuses]);
 
+  // After a search, once house dots load, snap the highlight ring to the nearest
+  // real house so it never sits in the middle of the street (street-name searches
+  // resolve to the road midpoint). Beyond ~70m we keep the raw geocoded point.
+  React.useEffect(() => {
+    if (!searchTarget || knocks.length === 0) return;
+    const [tlat, tlng] = searchTarget;
+    let best: { lat: number; lng: number } | null = null;
+    let bestD = Infinity;
+    for (const k of knocks) {
+      const d = (k.lat - tlat) ** 2 + (k.lng - tlng) ** 2;
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    if (best && bestD <= 0.0007 ** 2) setSearchPin([best.lat, best.lng]);
+    setSearchTarget(null);
+  }, [knocks, searchTarget]);
+
   const refresh = React.useCallback(() => {
     qc.invalidateQueries({ queryKey: ["canvassing-meta"] });
     qc.invalidateQueries({ queryKey: ["canvassing-knocks"] });
@@ -304,10 +325,40 @@ export function CanvassingClient() {
   }
 
   // Jump the map to a searched address and drop a pulsing highlight on it so the
-  // rep can see which house dot to tap. Zoom 19 so the house dots auto-load.
+  // rep can see which house dot to tap. Zoom 19 so the house dots auto-load. We
+  // remember the target so that, once dots load, the ring snaps to the nearest
+  // real house instead of sitting on the road midpoint of a street-name search.
   function goToAddress(lat: number, lng: number) {
     setSearchPin([lat, lng]);
+    setSearchTarget([lat, lng]);
     mapRef.current?.setView([lat, lng], 19, { animate: true });
+  }
+
+  async function handleMovePin(kind: "knock" | "deal", id: string, lat: number, lng: number) {
+    const res =
+      kind === "knock"
+        ? await updateKnockAction({ id, lat, lng })
+        : await updateLeadPositionAction({ leadId: id, lat, lng });
+    setMovingId(null);
+    if (!res.ok) return toast.error(res.error ?? "Couldn't move the pin.");
+    toast.success("Pin moved");
+    refresh();
+  }
+
+  // Begin moving a pin: materialize auto-loaded house dots first (they have no DB
+  // row yet), close the popup, then make that marker draggable.
+  async function startMoveKnock(k: KnockDTO) {
+    const id = isHouseDot(k) ? await ensureHouse(k) : k.id;
+    if (!id) return;
+    if (isHouseDot(k)) refresh();
+    mapRef.current?.closePopup();
+    setMovingId(id);
+    toast.message("Drag the pin onto the right house, then drop it.");
+  }
+  function startMoveDeal(d: DealDTO) {
+    mapRef.current?.closePopup();
+    setMovingId(`deal-${d.id}`);
+    toast.message("Drag the pin onto the right house, then drop it.");
   }
 
   function finishDrawing() {
@@ -436,10 +487,17 @@ export function CanvassingClient() {
               <UserPlus className="size-3.5" /> Convert to appointment
             </Button>
           )}
+          <button
+            onClick={() => startMoveKnock(k)}
+            className={cn("inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground", isHouseDot(k) ? "ml-auto" : "")}
+            title="Drag this pin onto the correct house"
+          >
+            <Move className="size-3.5" /> Move
+          </button>
           {!isHouseDot(k) && (
             <button
               onClick={() => removeKnock(k)}
-              className="ml-auto inline-flex items-center text-muted-foreground hover:text-destructive"
+              className="inline-flex items-center text-muted-foreground hover:text-destructive"
               aria-label="Delete pin"
             >
               <Trash2 className="size-4" />
@@ -476,12 +534,21 @@ export function CanvassingClient() {
         )}
         {d.phone && <div className="text-xs text-muted-foreground">{d.phone}</div>}
         {d.note && <p className="text-sm text-muted-foreground line-clamp-3">{d.note}</p>}
-        <button
-          onClick={() => router.push(`/portal/leads/${d.id}`)}
-          className="inline-flex items-center gap-1 text-sm font-medium text-gold hover:underline"
-        >
-          <Check className="size-3.5" /> Open deal
-        </button>
+        <div className="flex items-center justify-between gap-2">
+          <button
+            onClick={() => router.push(`/portal/leads/${d.id}`)}
+            className="inline-flex items-center gap-1 text-sm font-medium text-gold hover:underline"
+          >
+            <Check className="size-3.5" /> Open deal
+          </button>
+          <button
+            onClick={() => startMoveDeal(d)}
+            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            title="Drag this pin onto the correct house"
+          >
+            <Move className="size-3.5" /> Move
+          </button>
+        </div>
       </div>
     );
   }
@@ -696,13 +763,21 @@ export function CanvassingClient() {
             Zoom in to load ZIP code boundaries
           </div>
         )}
-        {searchPin && (
+        {searchPin && !movingId && (
           <button
             onClick={() => setSearchPin(null)}
             className="absolute bottom-3 left-1/2 z-[1000] inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-foreground/90 px-3 py-1.5 text-xs font-medium text-background shadow hover:bg-foreground"
           >
             <X className="size-3.5" /> Clear highlight — tap the ringed dot to take action
           </button>
+        )}
+        {movingId && (
+          <div className="absolute bottom-3 left-1/2 z-[1000] inline-flex -translate-x-1/2 items-center gap-2 rounded-full bg-gold px-3 py-1.5 text-xs font-medium text-white shadow">
+            <Move className="size-3.5" /> Drag the highlighted pin onto the right house, then drop it.
+            <button onClick={() => setMovingId(null)} className="ml-1 inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 hover:bg-white/30">
+              <X className="size-3" /> Cancel
+            </button>
+          </div>
         )}
         <CanvassingMap
           center={center}
@@ -722,6 +797,8 @@ export function CanvassingClient() {
           showZips={showZips}
           onZipClick={canManage ? onZipClick : undefined}
           searchPin={searchPin}
+          movingId={movingId}
+          onMovePin={handleMovePin}
         />
       </div>
 

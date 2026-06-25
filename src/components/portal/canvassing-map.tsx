@@ -192,6 +192,10 @@ export type CanvassingMapProps = {
   onZipClick?: (zcta: string, ring: LatLng[]) => void;
   // Pulsing highlight for the address a rep just searched for.
   searchPin?: LatLng | null;
+  // Drag-to-reposition: the id currently in "move" mode (knock id, or `deal-<id>`)
+  // becomes draggable; onMovePin fires with the dropped coordinates.
+  movingId?: string | null;
+  onMovePin?: (kind: "knock" | "deal", id: string, lat: number, lng: number) => void;
 };
 
 export function CanvassingMap({
@@ -212,6 +216,8 @@ export function CanvassingMap({
   showZips,
   onZipClick,
   searchPin,
+  movingId,
+  onMovePin,
 }: CanvassingMapProps) {
   return (
     <MapContainer center={center} zoom={16} scrollWheelZoom className="h-full w-full">
@@ -292,11 +298,30 @@ export function CanvassingMap({
         );
       })}
 
-      {knocks.map((k) => (
-        <Marker key={k.id} position={[k.lat, k.lng]} icon={knockIcon(k.disposition)}>
-          <Popup>{renderKnockPopup(k)}</Popup>
-        </Marker>
-      ))}
+      {knocks.map((k) => {
+        const moving = movingId === k.id;
+        return (
+          <Marker
+            key={k.id}
+            position={[k.lat, k.lng]}
+            icon={knockIcon(k.disposition)}
+            draggable={moving}
+            zIndexOffset={moving ? 2000 : 0}
+            eventHandlers={
+              moving
+                ? {
+                    dragend: (e) => {
+                      const ll = (e.target as L.Marker).getLatLng();
+                      onMovePin?.("knock", k.id, ll.lat, ll.lng);
+                    },
+                  }
+                : undefined
+            }
+          >
+            <Popup>{renderKnockPopup(k)}</Popup>
+          </Marker>
+        );
+      })}
 
       {/* Searched-address highlight — a pulsing ring over the matching dot */}
       {searchPin && (
@@ -304,11 +329,30 @@ export function CanvassingMap({
       )}
 
       {/* Pipeline deals / appointments — rendered on top of knock pins */}
-      {(deals ?? []).map((d) => (
-        <Marker key={`deal-${d.id}`} position={[d.lat, d.lng]} icon={dealIcon(d.stageColor)} zIndexOffset={1000}>
-          <Popup>{renderDealPopup ? renderDealPopup(d) : d.name}</Popup>
-        </Marker>
-      ))}
+      {(deals ?? []).map((d) => {
+        const moving = movingId === `deal-${d.id}`;
+        return (
+          <Marker
+            key={`deal-${d.id}`}
+            position={[d.lat, d.lng]}
+            icon={dealIcon(d.stageColor)}
+            draggable={moving}
+            zIndexOffset={moving ? 2100 : 1000}
+            eventHandlers={
+              moving
+                ? {
+                    dragend: (e) => {
+                      const ll = (e.target as L.Marker).getLatLng();
+                      onMovePin?.("deal", d.id, ll.lat, ll.lng);
+                    },
+                  }
+                : undefined
+            }
+          >
+            <Popup>{renderDealPopup ? renderDealPopup(d) : d.name}</Popup>
+          </Marker>
+        );
+      })}
 
       {/* In-progress territory drawing */}
       {drawPoints.length >= 2 && (

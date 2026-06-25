@@ -1,4 +1,4 @@
-import type { LatLng } from "@/lib/canvassing";
+import { pointInPolygon, type LatLng } from "@/lib/canvassing";
 
 export type AddressPoint = { lat: number; lng: number; address: string };
 
@@ -12,8 +12,39 @@ type OverpassEl = {
   lat?: number;
   lon?: number;
   center?: { lat: number; lng?: number; lon?: number };
+  // Present when querying `out geom` — the way's outline vertices.
+  geometry?: { lat: number; lon: number }[];
   tags?: Record<string, string>;
 };
+
+/**
+ * A point that lies INSIDE a building outline. The polygon centroid is used
+ * when it falls inside; for concave footprints (L-shaped townhomes) where the
+ * centroid lands off-building (e.g. in the driveway), we snap to the outline
+ * vertex nearest the centroid instead. Prevents "house dot in the street".
+ */
+function interiorPoint(ring: { lat: number; lng: number }[]): { lat: number; lng: number } {
+  let area = 0, cx = 0, cy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const f = a.lng * b.lat - b.lng * a.lat;
+    area += f; cx += (a.lng + b.lng) * f; cy += (a.lat + b.lat) * f;
+  }
+  if (Math.abs(area) < 1e-12) {
+    const n = ring.length;
+    return { lat: ring.reduce((s, p) => s + p.lat, 0) / n, lng: ring.reduce((s, p) => s + p.lng, 0) / n };
+  }
+  area *= 0.5;
+  const c = { lat: cy / (6 * area), lng: cx / (6 * area) };
+  const poly: LatLng[] = ring.map((p) => [p.lat, p.lng]);
+  if (pointInPolygon([c.lat, c.lng], poly)) return c;
+  let best = ring[0], bestD = Infinity;
+  for (const p of ring) {
+    const d = (p.lat - c.lat) ** 2 + (p.lng - c.lng) ** 2;
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return { lat: best.lat, lng: best.lng };
+}
 
 function fmtAddress(tags: Record<string, string> | undefined): string | null {
   if (!tags) return null;
@@ -82,12 +113,14 @@ export async function fetchAddressesInPolygon(polygon: LatLng[], cap = 1500): Pr
   // Prefer explicit address points; fall back to building footprints (much
   // better US coverage via the Microsoft footprints import) so reps still get a
   // pin per rooftop where per-house address tags are missing.
+  // `out geom` returns each building's outline so we can place the dot INSIDE
+  // the footprint (see interiorPoint) rather than at its bounding-box center.
   const query = `[out:json][timeout:25];
 (
   node["addr:housenumber"](poly:"${poly}");
   way["building"](poly:"${poly}");
 );
-out center ${cap};`;
+out geom ${cap};`;
 
   let data: { elements?: OverpassEl[] } | null = null;
   for (const url of OVERPASS_ENDPOINTS) {
@@ -106,25 +139,57 @@ out center ${cap};`;
   }
   if (!data?.elements) return [];
 
+  // Separate explicit addressed doors (one per unit — what canvassers knock)
+  // from bare building footprints. Addressed doors win; a footprint dot is kept
+  // only when no addressed door already represents that house, which removes the
+  // duplicate "two dots per home" clutter.
   const seen = new Set<string>();
-  const out: AddressPoint[] = [];
+  const doors: AddressPoint[] = [];
+  const footprints: AddressPoint[] = [];
   for (const el of data.elements) {
-    const lat = el.lat ?? el.center?.lat;
-    const lng = el.lon ?? el.center?.lon ?? el.center?.lng;
-    if (typeof lat !== "number" || typeof lng !== "number") continue;
-
     const tags = el.tags;
     const building = tags?.building;
-    // Skip clearly non-residential footprints.
     if (building && SKIP_BUILDINGS.has(building)) continue;
-    // Require either an address or a building footprint.
     const addr = fmtAddress(tags);
     if (!addr && !building) continue;
+
+    let lat: number | undefined;
+    let lng: number | undefined;
+    if (el.type === "way" && el.geometry && el.geometry.length >= 3) {
+      const p = interiorPoint(el.geometry.map((g) => ({ lat: g.lat, lng: g.lon })));
+      lat = p.lat; lng = p.lng;
+    } else {
+      lat = el.lat ?? el.center?.lat;
+      lng = el.lon ?? el.center?.lon ?? el.center?.lng;
+    }
+    if (typeof lat !== "number" || typeof lng !== "number") continue;
 
     const key = coordKey(lat, lng);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ lat, lng, address: addr ?? "Address pending" });
+    const pt = { lat, lng, address: addr ?? "Address pending" };
+    if (addr && el.type === "node") doors.push(pt);
+    else footprints.push(pt);
+  }
+
+  // Index addressed doors on a ~13m grid; drop any footprint dot that sits on
+  // (or right next to) an addressed door — same house, keep the better-placed one.
+  const CELL = 0.00012;
+  const cell = (lat: number, lng: number) => `${Math.round(lat / CELL)},${Math.round(lng / CELL)}`;
+  const occupied = new Set(doors.map((p) => cell(p.lat, p.lng)));
+  const nearDoor = (lat: number, lng: number) => {
+    const cy = Math.round(lat / CELL), cx = Math.round(lng / CELL);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (occupied.has(`${cy + dy},${cx + dx}`)) return true;
+    }
+    return false;
+  };
+
+  const out: AddressPoint[] = [];
+  for (const p of doors) { out.push(p); if (out.length >= cap) return out; }
+  for (const p of footprints) {
+    if (nearDoor(p.lat, p.lng)) continue;
+    out.push(p);
     if (out.length >= cap) break;
   }
   return out;

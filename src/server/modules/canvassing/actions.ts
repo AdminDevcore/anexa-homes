@@ -79,6 +79,9 @@ const updateKnockSchema = z.object({
   disposition: dispositionEnum.optional(),
   notes: z.string().max(2000).optional().nullable(),
   address: z.string().max(200).optional().nullable(),
+  // Reposition the dot (drag-to-correct on the map). Both must be supplied.
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
 });
 
 export async function updateKnockAction(
@@ -91,7 +94,7 @@ export async function updateKnockAction(
 
   const knock = await prisma.knock.findFirst({
     where: { id: parsed.data.id, companyId: me.companyId },
-    select: { repId: true, disposition: true },
+    select: { repId: true, disposition: true, leadId: true },
   });
   if (!knock) return { ok: false, error: "Knock not found." };
   // Anyone with access can knock an unclaimed (not_knocked) pin; otherwise only
@@ -104,6 +107,11 @@ export async function updateKnockAction(
   // When a rep sets a real status on a blank pin, it becomes their knock now.
   const claiming = parsed.data.disposition && (knock.repId === null || knock.disposition === "not_knocked");
 
+  // Reposition: when both coordinates are supplied, move the dot and re-detect
+  // which territory now contains it.
+  const moving = parsed.data.lat !== undefined && parsed.data.lng !== undefined;
+  const movedTerritoryId = moving ? await detectTerritory(me.companyId, parsed.data.lat!, parsed.data.lng!) : undefined;
+
   const newDisp = parsed.data.disposition as KnockDisposition | undefined;
   await prisma.knock.update({
     where: { id: parsed.data.id },
@@ -111,9 +119,17 @@ export async function updateKnockAction(
       ...(newDisp ? { disposition: newDisp } : {}),
       ...(parsed.data.notes !== undefined ? { notes: parsed.data.notes } : {}),
       ...(parsed.data.address !== undefined ? { address: parsed.data.address } : {}),
+      ...(moving ? { lat: parsed.data.lat, lng: parsed.data.lng, territoryId: movedTerritoryId } : {}),
       ...(claiming ? { repId: me.userId, knockedAt: new Date() } : {}),
     },
   });
+  // Keep a converted deal's map pin in sync with its source house.
+  if (moving && knock.leadId) {
+    await prisma.lead.updateMany({
+      where: { id: knock.leadId, companyId: me.companyId },
+      data: { lat: parsed.data.lat, lng: parsed.data.lng, geocodedAt: new Date() },
+    });
+  }
   // Record status changes in the per-house timeline (visit history / audit trail).
   if (newDisp && newDisp !== knock.disposition) {
     await prisma.knockEvent.create({
@@ -127,6 +143,29 @@ export async function updateKnockAction(
       },
     });
   }
+  return { ok: true };
+}
+
+const leadPositionSchema = z.object({
+  leadId: z.string().min(1),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+/** Move a deal/appointment pin on the canvassing map (drag-to-correct). Also
+ *  nudges any source knock so the house dot and the deal stay together. */
+export async function updateLeadPositionAction(
+  input: z.infer<typeof leadPositionSchema>
+): Promise<{ ok: boolean; error?: string }> {
+  const me = await requireUser();
+  if (!can(me, "update", "Canvassing")) return fail("No access.");
+  const parsed = leadPositionSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid position.");
+  const { leadId, lat, lng } = parsed.data;
+  const lead = await prisma.lead.findFirst({ where: { id: leadId, companyId: me.companyId }, select: { id: true } });
+  if (!lead) return fail("Deal not found.");
+  await prisma.lead.update({ where: { id: lead.id }, data: { lat, lng, geocodedAt: new Date() } });
+  await prisma.knock.updateMany({ where: { companyId: me.companyId, leadId: lead.id }, data: { lat, lng } });
   return { ok: true };
 }
 
