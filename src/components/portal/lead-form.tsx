@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { createLeadAction, updateLeadAction, type LeadInput } from "@/server/modules/leads/manage";
 import { uploadFileAction } from "@/server/modules/files/actions";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 
 type Option = { id: string; name: string };
 type FieldDef = { id: string; key: string; label: string; type: string; options: string[]; required: boolean };
@@ -153,7 +154,23 @@ export function LeadForm({
           <Field label="Email"><Input type="email" value={v.email} onChange={(e) => set("email", e.target.value)} /></Field>
           <Field label="Phone"><Input value={v.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
         </Grid>
-        <Field label="Address"><Input value={v.address} onChange={(e) => set("address", e.target.value)} /></Field>
+        <Field label="Address">
+          <AddressAutocomplete
+            value={v.address}
+            onChange={(val) => set("address", val)}
+            onSelect={(parts) =>
+              setV((s) => ({
+                ...s,
+                address: parts.address,
+                // Only overwrite City/State/ZIP when the suggestion provides them,
+                // so a partial match doesn't wipe a value the user already typed.
+                city: parts.city || s.city,
+                state: parts.state || s.state,
+                zip: parts.zip || s.zip,
+              }))
+            }
+          />
+        </Field>
         <Grid cols={3}>
           <Field label="City"><Input value={v.city} onChange={(e) => set("city", e.target.value)} /></Field>
           <Field label="State"><Input value={v.state} onChange={(e) => set("state", e.target.value)} /></Field>
