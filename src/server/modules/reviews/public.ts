@@ -121,50 +121,63 @@ export type PublicReview = {
  * Featured first, then most recently approved. Safe to call from any RSC.
  */
 export async function getPublicReviews(limit = 12): Promise<PublicReview[]> {
-  const companyId = await resolvePrimaryCompanyId();
-  if (!companyId) return [];
+  // Marketing pages are statically prerendered, so this runs at build time too.
+  // Never let a DB hiccup (or a build env without DATABASE_URL) crash the page —
+  // degrade to no reviews and let the seed testimonials carry the section.
+  try {
+    const companyId = await resolvePrimaryCompanyId();
+    if (!companyId) return [];
 
-  const rows = await prisma.review.findMany({
-    where: {
-      companyId,
-      status: "approved",
-      deletedAt: null,
-      hidden: false,
-      consentToPublish: true,
-    },
-    orderBy: [{ featured: "desc" }, { approvedAt: "desc" }, { createdAt: "desc" }],
-    take: limit,
-    select: {
-      id: true,
-      customerName: true,
-      city: true,
-      serviceType: true,
-      rating: true,
-      reviewText: true,
-      photoKey: true,
-    },
-  });
+    const rows = await prisma.review.findMany({
+      where: {
+        companyId,
+        status: "approved",
+        deletedAt: null,
+        hidden: false,
+        consentToPublish: true,
+      },
+      orderBy: [{ featured: "desc" }, { approvedAt: "desc" }, { createdAt: "desc" }],
+      take: limit,
+      select: {
+        id: true,
+        customerName: true,
+        city: true,
+        serviceType: true,
+        rating: true,
+        reviewText: true,
+        photoKey: true,
+      },
+    });
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.customerName,
-    location: r.city,
-    service: r.serviceType,
-    rating: r.rating,
-    quote: r.reviewText,
-    photoUrl: r.photoKey ? `/api/reviews/photo?id=${r.id}` : null,
-  }));
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.customerName,
+      location: r.city,
+      service: r.serviceType,
+      rating: r.rating,
+      quote: r.reviewText,
+      photoUrl: r.photoKey ? `/api/reviews/photo?id=${r.id}` : null,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /** Aggregate rating + count for trust badges / schema markup. */
 export async function getPublicReviewStats(): Promise<{ count: number; average: number } | null> {
-  const companyId = await resolvePrimaryCompanyId();
-  if (!companyId) return null;
-  const agg = await prisma.review.aggregate({
-    where: { companyId, status: "approved", deletedAt: null, hidden: false, consentToPublish: true },
-    _count: true,
-    _avg: { rating: true },
-  });
-  if (!agg._count) return null;
-  return { count: agg._count, average: Math.round((agg._avg.rating ?? 0) * 10) / 10 };
+  // Runs at build time via the marketing layout's structured data — fail soft so
+  // a missing DB never breaks the static prerender (falls back to default rating).
+  try {
+    const companyId = await resolvePrimaryCompanyId();
+    if (!companyId) return null;
+    const agg = await prisma.review.aggregate({
+      where: { companyId, status: "approved", deletedAt: null, hidden: false, consentToPublish: true },
+      _count: true,
+      _avg: { rating: true },
+    });
+    if (!agg._count) return null;
+    return { count: agg._count, average: Math.round((agg._avg.rating ?? 0) * 10) / 10 };
+  } catch {
+    return null;
+  }
 }
