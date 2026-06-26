@@ -14,6 +14,7 @@ import {
   CalendarDays,
   Calculator,
   GraduationCap,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 import type { Resource } from "@/server/rbac/matrix";
@@ -40,6 +41,7 @@ export const PORTAL_NAV: NavItem[] = [
   { label: "Payroll", href: "/portal/payroll", icon: Wallet, resource: "Payroll" },
   { label: "Bookkeeping", href: "/portal/bookkeeping", icon: Calculator, resource: "Bookkeeping" },
   { label: "Reports", href: "/portal/reports", icon: BarChart3, resource: "Report" },
+  { label: "Reviews", href: "/portal/settings/reviews", icon: Star, resource: "Review", customerHidden: true },
   { label: "Team", href: "/portal/team", icon: UserCog, resource: "User" },
   { label: "Settings", href: "/portal/settings", icon: Settings, resource: "Settings" },
 ];

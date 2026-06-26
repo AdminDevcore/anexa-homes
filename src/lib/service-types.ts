@@ -32,10 +32,18 @@ export function serviceTypeFromSlug(slug: string | null | undefined): ServiceTyp
       return "roofing";
     case "solar":
       return "solar";
+    case "hvac":
+      return "hvac";
     case "water-filtration":
       return "water_filtration";
     case "windows":
       return "windows";
+    case "storm-restoration":
+      return "storm_restoration";
+    // Gutters and insurance-claim leads have no dedicated ServiceType column;
+    // captured as "other" with the interest noted on the lead.
+    case "gutters":
+    case "insurance-claims":
     default:
       return "other";
   }

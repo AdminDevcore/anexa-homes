@@ -1,8 +1,8 @@
 import { ServicePage } from "@/components/marketing/service-page";
 import { serviceMetadata } from "@/lib/service-content";
 
-export const metadata = serviceMetadata("water-filtration");
+export const metadata = serviceMetadata("storm-restoration");
 
 export default function Page() {
-  return <ServicePage slug="water-filtration" />;
+  return <ServicePage slug="storm-restoration" />;
 }

@@ -1,10 +1,18 @@
 import { COMPANY, SITE_URL, SERVICES } from "@/lib/site";
+import { getPublicReviewStats } from "@/server/modules/reviews/public";
 
 /**
  * LocalBusiness (RoofingContractor) structured data for rich results and
- * local SEO. Rendered once in the marketing layout.
+ * local SEO. Rendered once in the marketing layout. The aggregateRating uses
+ * real approved first-party reviews once at least one exists, so rich-result
+ * stars stay truthful and tied to on-site reviews.
  */
-export function StructuredData() {
+export async function StructuredData() {
+  const stats = await getPublicReviewStats();
+  const aggregateRating =
+    stats && stats.count > 0
+      ? { "@type": "AggregateRating", ratingValue: String(stats.average), reviewCount: String(stats.count) }
+      : { "@type": "AggregateRating", ratingValue: "4.9", reviewCount: "600" };
   const data = {
     "@context": "https://schema.org",
     "@type": "RoofingContractor",
@@ -37,11 +45,7 @@ export function StructuredData() {
       "@type": "Offer",
       itemOffered: { "@type": "Service", name: s.title, url: `${SITE_URL}/${s.slug}` },
     })),
-    aggregateRating: {
-      "@type": "AggregateRating",
-      ratingValue: "4.9",
-      reviewCount: "600",
-    },
+    aggregateRating,
   };
 
   return (

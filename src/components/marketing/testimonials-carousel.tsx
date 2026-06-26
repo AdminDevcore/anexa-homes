@@ -1,11 +1,21 @@
 "use client";
 
 import * as React from "react";
-import { Star, ChevronLeft, ChevronRight } from "lucide-react";
-import { TESTIMONIALS } from "@/lib/site";
+import Link from "next/link";
+import { Star, ChevronLeft, ChevronRight, Quote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export function TestimonialsCarousel() {
+export type CarouselReview = {
+  id?: string;
+  name: string;
+  location: string | null;
+  service?: string | null;
+  rating: number;
+  quote: string;
+  photoUrl?: string | null;
+};
+
+export function TestimonialsCarousel({ items }: { items: CarouselReview[] }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [paused, setPaused] = React.useState(false);
 
@@ -19,12 +29,12 @@ export function TestimonialsCarousel() {
   }, []);
 
   React.useEffect(() => {
-    if (paused) return;
+    if (paused || items.length <= 1) return;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     if (reduce) return;
     const id = setInterval(() => scroll(1), 4500);
     return () => clearInterval(id);
-  }, [paused, scroll]);
+  }, [paused, scroll, items.length]);
 
   return (
     <div className="relative" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
@@ -32,29 +42,54 @@ export function TestimonialsCarousel() {
         ref={ref}
         className="flex snap-x snap-mandatory gap-5 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {TESTIMONIALS.map((t) => (
+        {items.map((t, i) => (
           <figure
-            key={t.name}
-            className="flex shrink-0 basis-[88%] snap-start flex-col rounded-2xl border border-border bg-card p-7 sm:basis-[48%] lg:basis-[31.5%]"
+            key={t.id ?? `${t.name}-${i}`}
+            className="flex shrink-0 basis-[88%] snap-start flex-col rounded-2xl border border-border bg-card p-7 transition-shadow hover:shadow-xl hover:shadow-black/5 sm:basis-[48%] lg:basis-[31.5%]"
           >
-            <div className="flex gap-0.5">
-              {Array.from({ length: t.rating }).map((_, j) => (
-                <Star key={j} className="size-4 fill-[var(--metal-bright)] text-metal" />
-              ))}
+            <div className="flex items-center justify-between">
+              <div className="flex gap-0.5">
+                {Array.from({ length: 5 }).map((_, j) => (
+                  <Star
+                    key={j}
+                    className={
+                      j < t.rating
+                        ? "size-4 fill-[var(--metal-bright)] text-metal"
+                        : "size-4 text-muted-foreground/30"
+                    }
+                  />
+                ))}
+              </div>
+              <Quote className="size-6 text-metal/25" />
             </div>
             <blockquote className="mt-4 flex-1 text-[15px] leading-relaxed text-foreground/85">
               &ldquo;{t.quote}&rdquo;
             </blockquote>
-            <figcaption className="mt-5 border-t pt-4">
-              <div className="font-semibold">{t.name}</div>
-              <div className="text-sm text-muted-foreground">{t.location}</div>
+            <figcaption className="mt-5 flex items-center gap-3 border-t pt-4">
+              {t.photoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={t.photoUrl} alt="" className="size-10 rounded-full object-cover" />
+              ) : (
+                <span className="grid size-10 place-items-center rounded-full bg-foreground/5 font-display text-sm font-semibold text-metal-dim">
+                  {t.name.charAt(0)}
+                </span>
+              )}
+              <div className="min-w-0">
+                <div className="truncate font-semibold">{t.name}</div>
+                <div className="truncate text-sm text-muted-foreground">
+                  {[t.location, t.service].filter(Boolean).join(" · ")}
+                </div>
+              </div>
             </figcaption>
           </figure>
         ))}
       </div>
-      <div className="mt-6 flex justify-center gap-2">
+      <div className="mt-6 flex items-center justify-center gap-3">
         <Button variant="outline" size="icon" aria-label="Previous" onClick={() => scroll(-1)}>
           <ChevronLeft className="size-4" />
+        </Button>
+        <Button asChild className="bg-gold text-gold-foreground hover:bg-gold/90">
+          <Link href="/reviews">Leave a Review</Link>
         </Button>
         <Button variant="outline" size="icon" aria-label="Next" onClick={() => scroll(1)}>
           <ChevronRight className="size-4" />

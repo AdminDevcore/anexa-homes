@@ -14,6 +14,7 @@ import {
   Calculator,
   Megaphone,
   PhoneCall,
+  Star,
 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
@@ -38,6 +39,7 @@ const SECTIONS: {
   { icon: ListChecks, title: "Inspection Outcomes", body: "Customize the outcomes recorded after an inspection.", href: "/portal/settings/inspection-outcomes" },
   { icon: ListChecks, title: "Production Checklist", body: "The QC checklist applied to every new job.", href: "/portal/settings/production-checklist" },
   { icon: Calculator, title: "Scope of Work Catalog", body: "Master list of insurance-restoration line items (no pricing).", href: "/portal/settings/scope-template" },
+  { icon: Star, title: "Website Reviews", body: "Approve, feature, hide, or remove customer reviews from the website.", href: "/portal/settings/reviews" },
   { icon: ShieldCheck, title: "Roles & Permissions", body: "Control what each role can see and do.", href: "/portal/settings/roles" },
   { icon: Palette, title: "Branding", body: "Company logo and brand colors.", href: "/portal/settings/branding" },
 ];

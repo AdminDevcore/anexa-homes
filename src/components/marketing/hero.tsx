@@ -9,6 +9,14 @@ import { GlassButton } from "./glass";
 import { TiltCard } from "./tilt-card";
 import { COMPANY, STATS } from "@/lib/site";
 
+const TRUST_BADGES = [
+  "Licensed Where Required",
+  "Insured",
+  "Insurance Claim Support",
+  "Local Texas Team",
+  "Digital Customer Portal",
+];
+
 export function Hero() {
   const ref = React.useRef<HTMLElement>(null);
   const reduce = useReducedMotion();
@@ -56,24 +64,25 @@ export function Hero() {
                 style={{ animationDelay: "0.05s" }}
               >
                 <ShieldCheck className="size-3.5 text-metal" />
-                Insurance Claim Specialists · Licensed &amp; Insured
+                Premium Home Improvement &amp; Storm Restoration
               </span>
 
               <h1
                 className="reveal-up mt-6 max-w-2xl font-display text-[2.6rem] font-semibold leading-[1.04] tracking-tight sm:text-6xl"
                 style={{ animationDelay: "0.13s" }}
               >
-                Protecting Homes.{" "}
-                <span className="gold-gradient-text">Restoring Roofs.</span>{" "}
-                Powering Better Living.
+                Protect Your Home.{" "}
+                <span className="gold-gradient-text">Restore What Matters.</span>{" "}
+                Upgrade How You Live.
               </h1>
 
               <p
                 className="reveal-up mt-6 max-w-xl text-lg leading-relaxed text-white/60"
                 style={{ animationDelay: "0.21s" }}
               >
-                Roofing, solar, water filtration &amp; windows — North Texas&rsquo;
-                trusted home-improvement team, handling your project end to end.
+                Roofing, solar, HVAC, water filtration, windows, gutters, and
+                insurance claim support — handled end to end by one professional
+                North Texas team.
               </p>
 
               <div
@@ -81,17 +90,33 @@ export function Hero() {
                 style={{ animationDelay: "0.29s" }}
               >
                 <GlassButton href="/contact" variant="gold" size="lg">
-                  Request Free Roof Inspection
+                  Schedule Free Inspection
                   <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
                 </GlassButton>
-                <GlassButton href="/contact?type=claim" variant="dark" size="lg">
-                  Start Insurance Claim Support
+                <GlassButton href="/#services" variant="dark" size="lg">
+                  Explore Services
                 </GlassButton>
               </div>
 
+              {/* Trust badges */}
               <div
-                className="reveal-up mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-white/55"
-                style={{ animationDelay: "0.37s" }}
+                className="reveal-up mt-7 flex flex-wrap gap-2"
+                style={{ animationDelay: "0.33s" }}
+              >
+                {TRUST_BADGES.map((b) => (
+                  <span
+                    key={b}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-white/65"
+                  >
+                    <ShieldCheck className="size-3 text-metal" />
+                    {b}
+                  </span>
+                ))}
+              </div>
+
+              <div
+                className="reveal-up mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-white/55"
+                style={{ animationDelay: "0.4s" }}
               >
                 <span className="flex items-center gap-1.5">
                   <span className="flex">

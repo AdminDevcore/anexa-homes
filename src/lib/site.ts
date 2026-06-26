@@ -3,6 +3,10 @@ import {
   Sun,
   Droplets,
   AppWindow,
+  Wind,
+  CloudRain,
+  CloudLightning,
+  FileCheck2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -79,12 +83,24 @@ export const SERVICES: Service[] = [
     title: "Solar",
     short: "Clean energy systems",
     description:
-      "Design and install high-efficiency solar systems that lower bills and increase home value.",
+      "High-efficiency solar designed around your usage — lower bills, real backup power, and lasting home value.",
     icon: Sun,
     href: "/solar",
     image: "/img/solar.jpg",
     features: ["System design", "Premium panels", "Battery storage", "Net metering"],
     ctaLabel: "Request Free Solar Estimate",
+  },
+  {
+    slug: "hvac",
+    title: "HVAC",
+    short: "Heating & cooling",
+    description:
+      "High-efficiency heating and cooling sized to your home — quieter comfort, cleaner air, and lower energy bills.",
+    icon: Wind,
+    href: "/hvac",
+    image: "/img/hvac.jpg",
+    features: ["AC & heat pump install", "Furnace replacement", "Repairs & tune-ups", "Smart thermostats"],
+    ctaLabel: "Request Free HVAC Estimate",
   },
   {
     slug: "water-filtration",
@@ -103,12 +119,50 @@ export const SERVICES: Service[] = [
     title: "Windows",
     short: "Energy-efficient windows",
     description:
-      "Premium replacement windows that boost curb appeal, comfort, and energy efficiency.",
+      "Premium replacement windows that boost curb appeal, comfort, and energy efficiency in every room.",
     icon: AppWindow,
     href: "/windows",
     image: "/img/windows.jpg",
     features: ["Replacement windows", "Energy-efficient glass", "Custom sizing", "Professional install"],
     ctaLabel: "Request Free Window Estimate",
+  },
+  {
+    slug: "gutters",
+    title: "Gutters",
+    short: "Seamless gutter systems",
+    description:
+      "Seamless gutters and guards that move water away from your roof and foundation — and stay clog-free year round.",
+    icon: CloudRain,
+    href: "/gutters",
+    image: "/img/home-brick.jpg",
+    features: ["Seamless gutters", "Gutter guards", "Downspouts & drainage", "Repairs & cleaning"],
+    ctaLabel: "Request Free Gutter Estimate",
+  },
+  {
+    slug: "storm-restoration",
+    title: "Storm Restoration",
+    short: "Hail & wind recovery",
+    description:
+      "Full storm recovery after hail and wind — documented damage, emergency tarping, and a roof restored to better than before.",
+    icon: CloudLightning,
+    href: "/storm-restoration",
+    image: "/img/storm.jpg",
+    features: ["Free damage inspection", "Emergency tarping", "Full restoration", "Insurance coordination"],
+    primary: true,
+    ctaLabel: "Request Free Storm Inspection",
+  },
+  {
+    slug: "insurance-claims",
+    title: "Insurance Claim Support",
+    short: "Claims handled for you",
+    description:
+      "We document the damage, meet your adjuster, and manage supplements — so you typically pay only your deductible.",
+    icon: FileCheck2,
+    href: "/insurance-claims",
+    image: "/img/home-colonial.jpg",
+    features: ["Claim filing help", "Adjuster meetings", "Supplements & depreciation", "Deductible-only goal"],
+    primary: true,
+    ctaLabel: "Start Insurance Claim Support",
   },
 ];
 

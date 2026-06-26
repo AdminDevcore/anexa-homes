@@ -8,6 +8,26 @@ import {
 } from "@/components/ui/accordion";
 import { FAQS } from "@/lib/site";
 
+/** Reusable accordion that renders any list of Q&A items (used on service pages). */
+export function FaqAccordion({ items }: { items: { q: string; a: string }[] }) {
+  return (
+    <Reveal>
+      <Accordion type="single" collapsible className="rounded-2xl border border-border bg-card px-5">
+        {items.map((f, i) => (
+          <AccordionItem key={i} value={`faq-${i}`}>
+            <AccordionTrigger className="text-left text-base font-semibold hover:no-underline">
+              {f.q}
+            </AccordionTrigger>
+            <AccordionContent className="text-[15px] leading-relaxed text-muted-foreground">
+              {f.a}
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+    </Reveal>
+  );
+}
+
 export function FaqSection() {
   return (
     <Section id="faq">

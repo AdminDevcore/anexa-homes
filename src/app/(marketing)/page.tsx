@@ -4,6 +4,9 @@ import {
   ServicesSection,
   ProcessSection,
   InsuranceHelpSection,
+  StormWarningSignsSection,
+  DigitalPortalSection,
+  FinancingSection,
   WhyAnexaSection,
   TestimonialsSection,
   ServiceAreaSection,
@@ -19,9 +22,12 @@ export default function HomePage() {
       <Hero />
       <Marquee />
       <ServicesSection />
-      <ProcessSection />
-      <InsuranceHelpSection />
       <WhyAnexaSection />
+      <StormWarningSignsSection />
+      <InsuranceHelpSection />
+      <ProcessSection />
+      <DigitalPortalSection />
+      <FinancingSection />
       <TestimonialsSection />
       <ServiceAreaSection />
       <FaqSection />
@@ -29,7 +35,7 @@ export default function HomePage() {
         <div className="grid items-start gap-12 lg:grid-cols-2">
           <SectionHeading
             eyebrow="Request Inspection"
-            title="Get your free roof inspection."
+            title="Get your free home inspection."
             description="Tell us about your property and a specialist will reach out within 24 hours. Most inspections are scheduled within 48 hours."
           />
           <ContactForm defaultType="inspection" />
