@@ -335,6 +335,10 @@ const CONTENT: Record<string, ServiceContent> = {
     overviewTitle: "Complete storm recovery, with the claim handled for you.",
     overviewBody:
       "A major storm leaves more than a damaged roof — and dealing with it alone is overwhelming. We inspect and document everything, protect your home from further damage, and restore your roof and exterior to better than before. Because we manage the insurance claim too, you get one team from first inspection to final walkthrough.",
+    // NOTE: the previous hero placeholder (/img/storm.jpg) is actually a
+    // solar-panel field photo — wrong for this page. Until a dedicated cinematic
+    // storm hero is supplied, the hero uses the new clean storm scene
+    // (service.image) rather than that mislabeled placeholder.
     benefits: [
       { title: "Rapid Response", body: "Emergency tarping and fast inspections protect your home right after the storm." },
       { title: "Full Documentation", body: "Detailed photos and reports build a strong, defensible insurance claim." },
@@ -362,7 +366,8 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "What if my claim was denied or underpaid?", a: "We frequently identify missed damage and help pursue supplements so your approved scope reflects the real repairs needed." },
       { q: "What will I pay out of pocket?", a: "On approved claims, homeowners typically pay only their deductible. We'll explain exactly what to expect up front." },
     ],
-    gallery: ["Hail-damaged roof — documented", "Emergency tarp in place", "Restoration in progress", "Restored roof — after"],
+    gallery: ["Documented hail & wind damage", "Emergency roof protection", "Insurance claim support", "Restored — better than before"],
+    galleryImages: ["/img/storm-damage.jpg", "/img/storm-tarp.jpg", "/img/storm-claim.jpg", "/img/storm-restored.jpg"],
     related: ["roofing", "insurance-claims", "gutters", "windows"],
     metaTitle: "Storm Restoration — Hail & Wind Damage",
     metaDescription:

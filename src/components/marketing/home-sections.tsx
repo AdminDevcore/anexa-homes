@@ -132,8 +132,8 @@ export function InsuranceHelpSection() {
             <div className="absolute -inset-4 rounded-[2rem] bg-white/[0.06] blur-2xl" />
             <div className="relative aspect-[5/4] overflow-hidden rounded-3xl border border-border shadow-xl shadow-black/10">
               <Image
-                src="/img/storm.jpg"
-                alt="Storm-damaged home restored by Anexa Homes"
+                src="/img/storm-restoration.jpg"
+                alt="Storm-damaged home documented and restored by Anexa Homes"
                 fill
                 sizes="(min-width: 1024px) 45vw, 100vw"
                 className="object-cover"

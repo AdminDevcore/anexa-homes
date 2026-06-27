@@ -44,7 +44,7 @@ export default async function ContactPage({
             ? "Tell us about your storm damage and our claim specialists will guide you through the entire process."
             : `Tell us about your property and a specialist will reach out within 24 hours${isRoofingFamily ? " to schedule your free inspection" : " with your free estimate"}.`
         }
-        image={svc?.image ?? (isClaim ? "/img/storm.jpg" : "/img/hero-roof.jpg")}
+        image={svc?.image ?? (isClaim ? "/img/storm-restoration.jpg" : "/img/hero-roof.jpg")}
         primaryCta={{ label: `Call ${COMPANY.phone}`, href: COMPANY.phoneHref }}
       />
 

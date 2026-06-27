@@ -146,7 +146,7 @@ export const SERVICES: Service[] = [
       "Full storm recovery after hail and wind — documented damage, emergency tarping, and a roof restored to better than before.",
     icon: CloudLightning,
     href: "/storm-restoration",
-    image: "/img/storm.jpg",
+    image: "/img/storm-restoration.jpg",
     features: ["Free damage inspection", "Emergency tarping", "Full restoration", "Insurance coordination"],
     primary: true,
     ctaLabel: "Request Free Storm Inspection",
