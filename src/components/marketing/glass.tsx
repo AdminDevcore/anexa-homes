@@ -22,6 +22,7 @@ export function GlassButton({
 }) {
   const cls = cn(
     "group inline-flex items-center justify-center gap-2 font-semibold tracking-tight",
+    "transition-[transform,box-shadow] duration-200 will-change-transform hover:-translate-y-0.5",
     SIZES[size],
     variant === "gold" ? "glass-pill-gold" : "glass-pill",
     className
