@@ -5,7 +5,8 @@ export type StormConfig = { center: LatLng; radiusMiles: number };
 // Per-company storm search center + radius. Today every company defaults to
 // Dallas @ 100 mi; this is the single seam to make it configurable later
 // (e.g. read from CompanySettings) without touching call sites.
-export async function getStormConfig(_companyId: string): Promise<StormConfig> {
+export async function getStormConfig(companyId: string): Promise<StormConfig> {
+  void companyId; // reserved: per-company center/radius will come from settings later
   return { center: { ...DALLAS }, radiusMiles: DEFAULT_RADIUS_MILES };
 }
 
