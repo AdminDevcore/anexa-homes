@@ -390,7 +390,10 @@
 /* The mark occupies the left 21% of the lockup; reveal the rest (the text) as
    --p goes 0→1, clipping the right edge. */
 .anexa-type-img {
-  clip-path: inset(0 calc((1 - (0.21 + 0.79 * var(--p))) * 100%) 0 0);
+  /* Hide the mark region (left 21%) — the mark is drawn by the opaque
+     .anexa-mark-shimmer overlay so it can breathe/glow on its own — and reveal
+     the wordmark (21%→100%) as --p goes 0→1. */
+  clip-path: inset(0 calc((1 - (0.21 + 0.79 * var(--p))) * 100%) 0 21%);
 }
 .anexa-caret {
   position: absolute;
@@ -414,18 +417,19 @@
   aspect-ratio: 305 / 329;
   z-index: 10;
   pointer-events: none;
+  transform-origin: center;
+  will-change: transform, filter;
   -webkit-mask: url("/anexa-mark.png") center / contain no-repeat;
   mask: url("/anexa-mark.png") center / contain no-repeat;
-  /* The sweeping sheen lives in the background; the mask confines it to the
-     triangle silhouette. */
-  background: linear-gradient(
-    110deg,
-    transparent 38%,
-    rgba(255, 255, 255, 0.7) 50%,
-    transparent 62%
-  );
-  background-size: 250% 100%;
-  background-position: 160% 0;
+  /* Two mask-clipped layers: a moving white sheen on top of a static
+     brushed-metal fill. This overlay IS the visible mark, so it can scale
+     (breathe) and carry the orange glow on its own. */
+  background:
+    linear-gradient(110deg, transparent 40%, rgba(255, 255, 255, 0.95) 50%, transparent 60%),
+    linear-gradient(135deg, #f2f4f6 0%, #ffffff 50%, #dde1e6 100%);
+  background-size: 250% 100%, 100% 100%;
+  background-position: 160% 0, 0 0;
+  background-repeat: no-repeat;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -437,9 +441,10 @@
     animation: anexa-caret-blink 0.75s steps(1) 5, anexa-caret-off 0.2s linear 1.2s both;
   }
   .anexa-mark-shimmer {
-    /* Sheen sweep (with a pause) + a soft pulsing glow on the mark. */
+    /* Sheen sweep + breathing scale + pulsing orange glow. */
     animation: anexa-sheen 5s ease-in-out 1.2s infinite,
-      anexa-mark-glow 3.4s ease-in-out infinite;
+      anexa-mark-breathe 3.6s ease-in-out infinite,
+      anexa-mark-glow 3.6s ease-in-out infinite;
   }
 }
 @keyframes anexa-type {
@@ -454,12 +459,22 @@
   to { opacity: 0; visibility: hidden; }
 }
 @keyframes anexa-sheen {
-  0% { background-position: 160% 0; }
-  45%, 100% { background-position: -60% 0; }
+  0% { background-position: 160% 0, 0 0; }
+  45%, 100% { background-position: -60% 0, 0 0; }
+}
+@keyframes anexa-mark-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.07); }
 }
 @keyframes anexa-mark-glow {
-  0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.12)); opacity: 0.92; }
-  50% { filter: drop-shadow(0 0 9px rgba(255, 255, 255, 0.55)); opacity: 1; }
+  0%, 100% {
+    filter: drop-shadow(0 0 3px rgba(244, 99, 30, 0.45));
+  }
+  50% {
+    filter: drop-shadow(0 0 6px rgba(244, 99, 30, 1))
+      drop-shadow(0 0 16px rgba(244, 99, 30, 0.85))
+      drop-shadow(0 0 30px rgba(244, 99, 30, 0.5));
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .anexa-type-img { clip-path: none; }
