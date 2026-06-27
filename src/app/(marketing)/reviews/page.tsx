@@ -26,6 +26,7 @@ export default async function ReviewsPage() {
           </>
         }
         description="We earn trust one home at a time. Read real reviews from North Texas families — then share your own experience with Anexa Homes."
+        image="/img/home-dusk.jpg"
         primaryCta={{ label: "Leave a Review", href: "#leave-a-review" }}
         secondaryCta={{ label: "Explore Services", href: "/#services" }}
       />
