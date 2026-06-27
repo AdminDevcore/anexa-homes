@@ -397,6 +397,27 @@
   to { opacity: 1; transform: none; }
 }
 
+/* Premium page-hero background: fade in on load + a very subtle, continuous
+   Ken Burns zoom (<3%). Parallax is handled in JS on a parent element so it
+   never conflicts with this transform. */
+@keyframes anexa-hero-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes anexa-kenburns {
+  from { transform: scale(1.005); }
+  to { transform: scale(1.03); }
+}
+.hero-bg-anim {
+  animation: anexa-hero-fade 1s ease-out both,
+             anexa-kenburns 24s ease-in-out 1s infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-bg-anim {
+    animation: anexa-hero-fade 0.5s ease-out both;
+  }
+}
+
 /* ── Public proposal: wayfinding + scroll-reveal ──────────────────────────
    Anchor links offset for the sticky nav; sections reveal as they scroll in.
    Content is visible by default and only hides once the client mounts (adds
