@@ -2251,3 +2251,92 @@ model Review {
   @@index([companyId, featured])
   @@map("reviews")
 }
+
+// ---------------------------------------------------------------------------
+// Storm Intelligence — NOAA Storm Events + SPC reports for canvassing targeting.
+// Tenancy via scalar companyId (no Company relation, like KnockEvent — these are
+// imported/derived datasets). Geospatial via lat/lng + in-app Haversine (no PostGIS).
+// ---------------------------------------------------------------------------
+
+enum StormSource {
+  noaa_storm_events
+  spc_reports
+}
+
+enum StormType {
+  hail
+  wind
+  tornado
+}
+
+model StormEvent {
+  id           String      @id @default(uuid())
+  companyId    String
+  source       StormSource
+  externalId   String? // NOAA EVENT_ID or SPC composite key — idempotent re-import
+  type         StormType
+  eventAt      DateTime
+  lat          Float
+  lng          Float
+  hailSizeIn   Float? // hail diameter, inches
+  windSpeedMph Int? // wind gust, mph
+  tornadoScale String? // EF/F rating, e.g. "EF1"
+  magnitude    Float? // raw source magnitude
+  city         String?
+  county       String?
+  state        String?
+  zip          String?
+  narrative    String?
+  raw          Json? // original imported row
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@unique([companyId, source, externalId])
+  @@index([companyId, type])
+  @@index([companyId, eventAt])
+  @@index([companyId, lat, lng])
+  @@map("storm_events")
+}
+
+model StormCanvassingZone {
+  id              String   @id @default(uuid())
+  companyId       String
+  name            String
+  centerLat       Float
+  centerLng       Float
+  radiusMiles     Float    @default(1)
+  filtersSnapshot Json? // {types, from, to, minHailIn, minWindMph} used to build it
+  eventCount      Int      @default(0)
+  totalScore      Int      @default(0)
+  assignedRepId   String?
+  territoryId     String? // canvassing Territory spawned from this zone
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, assignedRepId])
+  @@map("storm_canvassing_zones")
+}
+
+model PropertyStormMatch {
+  id             String    @id @default(uuid())
+  companyId      String
+  leadId         String? // set for lead matches (knockId null)
+  knockId        String? // set for knock matches (leadId null)
+  lat            Float
+  lng            Float
+  nearestEventId String?
+  distanceMiles  Float     @default(0)
+  dateOfLoss     DateTime? // most recent significant event nearby
+  score          Int       @default(0)
+  eventCount     Int       @default(0)
+  maxHailIn      Float?
+  maxWindMph     Int?
+  computedAt     DateTime  @default(now())
+
+  @@unique([companyId, leadId])
+  @@unique([companyId, knockId])
+  @@index([companyId, score])
+  @@map("property_storm_matches")
+}

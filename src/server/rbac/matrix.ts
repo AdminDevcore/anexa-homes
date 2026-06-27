@@ -35,6 +35,7 @@ export const RESOURCES = [
   "Settings",
   "Chat", // internal team chat (staff only)
   "Canvassing", // door-to-door knocking + territories
+  "StormIntelligence", // NOAA/SPC storm data targeting (canvassing companion)
   "Bookkeeping", // lightweight ledger / P&L (accounting + owner only)
   "Knowledge", // training library / knowledge base (role-gated)
   "Scope", // scope-of-work job cost calculator (costs management-only)
@@ -86,6 +87,7 @@ const GRANTS: Record<Role, Grant> = {
   super_admin: {
     Chat: ALL,
     Canvassing: ALL,
+    StormIntelligence: ALL,
     Company: ALL,
     User: ALL,
     Lead: ALL,
@@ -113,6 +115,7 @@ const GRANTS: Record<Role, Grant> = {
   admin: {
     Chat: ALL,
     Canvassing: ALL,
+    StormIntelligence: ALL,
     Company: ["read", "update"],
     User: ["create", "read", "update", "assign"],
     Lead: ALL,
@@ -139,6 +142,7 @@ const GRANTS: Record<Role, Grant> = {
   manager: {
     Chat: ["create", "read"],
     Canvassing: ALL,
+    StormIntelligence: ALL,
     // Sales managers can invite staff (create) but not edit roles (no update/assign).
     User: ["create", "read"],
     Lead: ["create", "read", "update", "assign"],
@@ -161,6 +165,7 @@ const GRANTS: Record<Role, Grant> = {
   sales_rep: {
     Chat: ["create", "read"],
     Canvassing: ["create", "read", "update"],
+    StormIntelligence: ["read"],
     Lead: ["create", "read", "update"],
     Pipeline: ["read"],
     Project: ["read"],
@@ -180,6 +185,7 @@ const GRANTS: Record<Role, Grant> = {
   canvasser: {
     Chat: ["create", "read"],
     Canvassing: ["create", "read", "update"],
+    StormIntelligence: ["read"],
     Lead: ["create", "read", "update"],
     Pipeline: ["read"],
     Project: ["read"],
