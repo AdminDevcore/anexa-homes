@@ -232,6 +232,10 @@ const CONTENT: Record<string, ServiceContent> = {
     overviewTitle: "Replacement windows that pay you back in comfort.",
     overviewBody:
       "Drafty, single-pane, or failing windows waste energy and let the outside in. We measure and custom-fit energy-efficient windows with low-E glass, then install them properly — sealed, square, and finished — so you feel the difference in comfort, noise, and your energy bill.",
+    // Hero spans the luxury home (left) + installer at the window (right).
+    // Bias well right so the installer/window lead on mobile; desktop shows both
+    // (no horizontal crop on the wide hero, so this only affects narrow screens).
+    heroPosition: "84% 42%",
     benefits: [
       { title: "Energy-Efficient Glass", body: "Low-E, insulated glass keeps heat out in summer and in during winter." },
       { title: "Custom-Fit", body: "Every window is measured and built for your exact openings — no gaps, no drafts." },
@@ -259,7 +263,8 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "How long does an install take?", a: "Most whole-home projects are completed in one to two days, with minimal disruption." },
       { q: "Are the windows custom-sized?", a: "Yes — every window is measured and built to your exact openings for a precise, draft-free fit." },
     ],
-    gallery: ["Old window — before", "New efficient window — after", "Detail: frame & seal", "Finished exterior"],
+    gallery: ["Premium replacement windows", "Expert installation", "Natural light, black frames", "Modern black-framed glass"],
+    galleryImages: ["/img/windows-exterior.jpg", "/img/windows-installer.jpg", "/img/windows-interior.jpg", "/img/windows-detail.jpg"],
     related: ["hvac", "roofing", "solar", "gutters"],
     metaTitle: "Replacement Windows",
     metaDescription:
