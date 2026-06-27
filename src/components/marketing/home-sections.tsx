@@ -8,6 +8,20 @@ import {
   Handshake,
   MapPin,
   Phone,
+  CloudLightning,
+  Droplet,
+  Layers,
+  Home as HomeIcon,
+  Wind as WindIcon,
+  CalendarClock,
+  Smartphone,
+  FileSignature,
+  Images,
+  MessageSquare,
+  BellRing,
+  Wallet,
+  BadgeCheck,
+  CircleDollarSign,
 } from "lucide-react";
 import { Section, SectionHeading } from "./ui";
 import { Reveal } from "./reveal";
@@ -19,8 +33,11 @@ import {
   SERVICES,
   ROOFING_PROCESS,
   WHY_ANEXA,
+  TESTIMONIALS,
   COMPANY,
 } from "@/lib/site";
+import { getPublicReviews } from "@/server/modules/reviews/public";
+import type { CarouselReview } from "./testimonials-carousel";
 
 export function ServicesSection() {
   return (
@@ -159,6 +176,119 @@ export function InsuranceHelpSection() {
   );
 }
 
+export function StormWarningSignsSection() {
+  const signs = [
+    { icon: Layers, title: "Missing or curling shingles", body: "Wind lifts and tears shingles, leaving gaps where water gets in." },
+    { icon: Droplet, title: "Granules in your gutters", body: "Shingle granules washing out is an early sign of hail or aging damage." },
+    { icon: CloudLightning, title: "Dented vents & flashing", body: "Soft-metal dents on vents and flashing usually mean hail hit your roof too." },
+    { icon: HomeIcon, title: "Interior stains or leaks", body: "Ceiling spots and attic moisture point to a roof that's already failing." },
+    { icon: CalendarClock, title: "A roof 15+ years old", body: "Older roofs are far more vulnerable to storms and overdue for inspection." },
+    { icon: WindIcon, title: "Neighbors getting roofs", body: "If a storm hit your street, your roof was likely affected too." },
+  ];
+  return (
+    <Section className="bg-muted/40">
+      <SectionHeading
+        align="center"
+        eyebrow="Storm Damage"
+        title="Warning signs your roof needs a look."
+        description="Storm damage is rarely obvious from the ground. If any of these sound familiar, a free inspection is worth it — and there's often a claim deadline."
+      />
+      <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {signs.map((s, i) => (
+          <Reveal key={s.title} delay={i % 3}>
+            <div className="flex h-full gap-4 rounded-2xl border border-border bg-card p-6">
+              <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-amber-400/15 text-amber-600 dark:text-amber-400">
+                <s.icon className="size-5" />
+              </span>
+              <div>
+                <h3 className="font-semibold">{s.title}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+              </div>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+      <div className="mt-10 flex justify-center">
+        <GlassButton href="/contact" variant="gold" size="lg">
+          Schedule a Free Inspection
+        </GlassButton>
+      </div>
+    </Section>
+  );
+}
+
+export function DigitalPortalSection() {
+  const features = [
+    { icon: FileSignature, title: "Sign from your phone", body: "Review and sign your agreement digitally — no printing, no waiting." },
+    { icon: Images, title: "Every photo, organized", body: "Inspection and install photos documented and saved to your project." },
+    { icon: MessageSquare, title: "Message your team", body: "Questions get answered fast, with everything in one thread." },
+    { icon: BellRing, title: "Real-time status", body: "Know exactly what's happening — from inspection to final walkthrough." },
+  ];
+  return (
+    <Section className="bg-[#0B0B0C] text-white">
+      <div className="grid items-center gap-12 lg:grid-cols-2">
+        <div>
+          <SectionHeading
+            invert
+            eyebrow="Digital Customer Portal"
+            title="Your whole project, in your pocket."
+            description="Home upgrades should feel organized from inspection to completion. Our customer portal keeps your documents, photos, and project status in one place — so you always know what's happening next."
+          />
+          <Button asChild size="lg" className="mt-7 w-fit bg-gold text-gold-foreground hover:bg-gold/90">
+            <Link href="/contact">Get Started</Link>
+          </Button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {features.map((f, i) => (
+            <Reveal key={f.title} delay={i % 2}>
+              <TiltCard className="h-full" max={7}>
+                <div className="h-full rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+                  <span className="grid size-10 place-items-center rounded-lg bg-[var(--metal)]/[0.15] text-metal">
+                    <f.icon className="size-5" />
+                  </span>
+                  <h3 className="mt-4 font-semibold text-white">{f.title}</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-white/55">{f.body}</p>
+                </div>
+              </TiltCard>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+export function FinancingSection() {
+  const options = [
+    { icon: Wallet, title: "Flexible Financing", body: "Affordable monthly plans for qualified homeowners — upgrade now, pay over time." },
+    { icon: BadgeCheck, title: "Insurance-Friendly", body: "On approved storm claims, your out-of-pocket is typically just your deductible." },
+    { icon: CircleDollarSign, title: "Transparent Pricing", body: "Clear, line-item quotes with no hidden fees and no surprise change orders." },
+  ];
+  return (
+    <Section>
+      <SectionHeading
+        align="center"
+        eyebrow="Financing & Payment"
+        title="Options that make it easy to say yes."
+        description="From insurance claims to flexible financing, we make premium home improvement affordable and straightforward."
+      />
+      <div className="mt-14 grid gap-5 md:grid-cols-3">
+        {options.map((o, i) => (
+          <Reveal key={o.title} delay={i % 3}>
+            <div className="h-full rounded-2xl border border-border bg-card p-7 text-center">
+              <span className="mx-auto grid size-12 place-items-center rounded-xl bg-gold/12 text-gold-muted">
+                <o.icon className="size-6" />
+              </span>
+              <h3 className="mt-5 font-display text-lg font-semibold">{o.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{o.body}</p>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 export function WhyAnexaSection() {
   return (
     <Section className="bg-[#0B0B0C] text-white">
@@ -187,16 +317,30 @@ export function WhyAnexaSection() {
   );
 }
 
-export function TestimonialsSection() {
+export async function TestimonialsSection() {
+  // Real approved reviews drive the carousel; fall back to seed quotes until a
+  // company has collected enough first-party reviews to fill it.
+  const approved = await getPublicReviews(12);
+  const seed: CarouselReview[] = TESTIMONIALS.map((t) => ({
+    name: t.name,
+    location: t.location,
+    service: null,
+    rating: t.rating,
+    quote: t.quote,
+    photoUrl: null,
+  }));
+  const items: CarouselReview[] = approved.length >= 3 ? approved : [...approved, ...seed];
+
   return (
     <Section>
       <SectionHeading
         align="center"
         eyebrow="Homeowner Reviews"
         title="Trusted by hundreds of North Texas families."
+        description="Real reviews from homeowners across the Dallas–Fort Worth metroplex."
       />
       <div className="mt-14">
-        <TestimonialsCarousel />
+        <TestimonialsCarousel items={items} />
       </div>
     </Section>
   );

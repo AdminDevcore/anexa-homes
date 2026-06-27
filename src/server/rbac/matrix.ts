@@ -39,6 +39,7 @@ export const RESOURCES = [
   "Knowledge", // training library / knowledge base (role-gated)
   "Scope", // scope-of-work job cost calculator (costs management-only)
   "Proposal", // customer-facing roofing presentation / proposal builder
+  "Review", // public website customer reviews (moderation queue)
 ] as const;
 
 export const ACTIONS = [
@@ -106,6 +107,7 @@ const GRANTS: Record<Role, Grant> = {
     Knowledge: ALL,
     Scope: ALL,
     Proposal: ALL,
+    Review: ALL,
   },
 
   admin: {
@@ -130,6 +132,8 @@ const GRANTS: Record<Role, Grant> = {
     Knowledge: ALL,
     Scope: ALL,
     Proposal: ALL,
+    // Admins moderate reviews (approve/reject/feature/hide/edit) but cannot delete.
+    Review: ["read", "update", "approve"],
   },
 
   manager: {
@@ -197,6 +201,8 @@ const GRANTS: Record<Role, Grant> = {
     Note: ["create", "read"],
     File: ["read"],
     Knowledge: ["read"],
+    // The marketing team curates website reviews (but cannot delete them).
+    Review: ["read", "update", "approve"],
   },
 
   installer: {

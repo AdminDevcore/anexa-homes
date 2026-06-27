@@ -87,8 +87,8 @@ export function SiteHeader() {
                   : "pointer-events-none -translate-y-1 opacity-0"
               )}
             >
-              <div className="w-[34rem] rounded-2xl border border-border bg-background p-3 shadow-xl shadow-black/5">
-                <div className="grid grid-cols-2 gap-1">
+              <div className="w-[46rem] rounded-2xl border border-border bg-background p-3 shadow-xl shadow-black/5">
+                <div className="grid grid-cols-3 gap-1">
                   {SERVICES.map((s) => (
                     <Link
                       key={s.slug}
