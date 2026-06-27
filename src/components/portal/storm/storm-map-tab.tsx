@@ -4,7 +4,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CloudHail, Wind, Tornado, Plus, Loader2 } from "lucide-react";
+import { CloudHail, Wind, Tornado, Plus, Loader2, Layers } from "lucide-react";
 import type { StormType } from "@prisma/client";
 import type { StormEventDTO } from "@/server/modules/storm/queries";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,7 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
   const [zip, setZip] = React.useState("");
 
   const [mapCenter, setMapCenter] = React.useState(meta.center);
+  const [showSwaths, setShowSwaths] = React.useState(true);
 
   // Create-zone dialog state.
   const [zoneOpen, setZoneOpen] = React.useState(false);
@@ -171,6 +172,16 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
           <Input value={zip} onChange={(e) => setZip(e.target.value)} className="h-9 w-24" />
         </Field>
         <div className="ml-auto flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowSwaths((s) => !s)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors ${
+              showSwaths ? "border-transparent bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+            title="Toggle hail swaths"
+          >
+            <Layers className="size-4" /> Swaths
+          </button>
           <span className="text-sm text-muted-foreground">
             {isFetching ? "Loading…" : `${events.length} reports`}
           </span>
@@ -187,6 +198,7 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
         center={meta.center}
         radiusMiles={meta.radiusMiles}
         zonePreview={zonePreview}
+        showSwaths={showSwaths}
         onMapCenter={(lat, lng) => setMapCenter({ lat, lng })}
       />
 
