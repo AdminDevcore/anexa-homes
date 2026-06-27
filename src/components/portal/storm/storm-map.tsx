@@ -1,7 +1,7 @@
 "use client";
 
 import "leaflet/dist/leaflet.css";
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Circle, Polygon, Popup, useMapEvents } from "react-leaflet";
 import type { StormEventDTO } from "@/server/modules/storm/queries";
 
 export const TYPE_COLOR: Record<StormEventDTO["type"], string> = {
@@ -54,12 +54,22 @@ function ViewportTracker({ onCenter }: { onCenter: (lat: number, lng: number) =>
 
 export type ZonePreview = { lat: number; lng: number; radiusMiles: number };
 
+export type StormWarning = {
+  id: string;
+  color: string;
+  label: string;
+  ps: string;
+  issue: string | null;
+  rings: [number, number][][];
+};
+
 export function StormMap({
   events,
   center,
   radiusMiles,
   zonePreview,
   showSwaths = true,
+  warnings = [],
   onMapCenter,
 }: {
   events: StormEventDTO[];
@@ -67,6 +77,7 @@ export function StormMap({
   radiusMiles: number;
   zonePreview?: ZonePreview | null;
   showSwaths?: boolean;
+  warnings?: StormWarning[];
   onMapCenter?: (lat: number, lng: number) => void;
 }) {
   const hail = events.filter((e) => e.type === "hail");
@@ -106,6 +117,22 @@ export function StormMap({
               />
             ))
           : null}
+
+        {/* NWS storm-warning footprints (severe t-storm / tornado) */}
+        {warnings.map((w) => (
+          <Polygon
+            key={`wn-${w.id}`}
+            positions={w.rings}
+            pathOptions={{ color: w.color, weight: 1, fillColor: w.color, fillOpacity: 0.06, dashArray: "4 4" }}
+          >
+            <Popup>
+              <div className="text-xs">
+                <div className="font-semibold">{w.ps}</div>
+                {w.issue ? <div className="text-muted-foreground">{fmtDate(w.issue)}</div> : null}
+              </div>
+            </Popup>
+          </Polygon>
+        ))}
 
         {/* Live zone preview while creating */}
         {zonePreview ? (

@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createStormZoneAction } from "@/server/modules/storm/actions";
-import { TYPE_COLOR, type ZonePreview } from "./storm-map";
+import { TYPE_COLOR, type ZonePreview, type StormWarning } from "./storm-map";
 import type { StormMeta } from "./types";
 
 const StormMap = dynamic(() => import("./storm-map").then((m) => m.StormMap), {
@@ -57,6 +57,7 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
 
   const [mapCenter, setMapCenter] = React.useState(meta.center);
   const [showSwaths, setShowSwaths] = React.useState(true);
+  const [showWarnings, setShowWarnings] = React.useState(false);
 
   // Create-zone dialog state.
   const [zoneOpen, setZoneOpen] = React.useState(false);
@@ -87,6 +88,21 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
     staleTime: 60_000,
   });
   const events = data?.events ?? [];
+
+  const wparams = new URLSearchParams();
+  if (from) wparams.set("from", from);
+  if (to) wparams.set("to", to);
+  const { data: wdata } = useQuery<{ warnings: StormWarning[] }>({
+    queryKey: ["storm-warnings", from, to],
+    queryFn: async () => {
+      const res = await fetch(`/api/storm/warnings?${wparams.toString()}`);
+      if (!res.ok) return { warnings: [] };
+      return res.json();
+    },
+    enabled: showWarnings,
+    staleTime: 5 * 60_000,
+  });
+  const warnings = showWarnings ? wdata?.warnings ?? [] : [];
 
   function toggleType(t: StormType) {
     setTypes((prev) => {
@@ -182,6 +198,16 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
           >
             <Layers className="size-4" /> Swaths
           </button>
+          <button
+            type="button"
+            onClick={() => setShowWarnings((s) => !s)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors ${
+              showWarnings ? "border-transparent bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+            title="Toggle NWS storm-warning footprints"
+          >
+            <Layers className="size-4" /> Warnings
+          </button>
           <span className="text-sm text-muted-foreground">
             {isFetching ? "Loading…" : `${events.length} reports`}
           </span>
@@ -199,6 +225,7 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
         radiusMiles={meta.radiusMiles}
         zonePreview={zonePreview}
         showSwaths={showSwaths}
+        warnings={warnings}
         onMapCenter={(lat, lng) => setMapCenter({ lat, lng })}
       />
 
