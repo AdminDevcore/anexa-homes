@@ -19,6 +19,9 @@ export type ServiceContent = {
   heroDescription: string;
   overviewTitle: string;
   overviewBody: string;
+  // Optional object-position for the hero crop (defaults bias slightly upward
+  // for rooflines; override when the subject sits lower/left, e.g. HVAC).
+  heroPosition?: string;
   benefits: Pair[];
   problemsTitle: string;
   problemsIntro: string;
@@ -130,6 +133,10 @@ const CONTENT: Record<string, ServiceContent> = {
     overviewTitle: "Heating and cooling, properly sized and installed.",
     overviewBody:
       "An oversized or poorly installed system short-cycles, wastes energy, and never quite feels comfortable. We perform a real load calculation, recommend the right high-efficiency equipment, and install it cleanly — ductwork, refrigerant, and airflow dialed in so your home stays comfortable and your bills stay low.",
+    // Subject (technician + condenser) sits lower-left over a dark, moody scene.
+    // Bias left (so it leads on mobile) and slightly up toward the lit window /
+    // condenser top, keeping it out of the darkest ground area.
+    heroPosition: "33% 46%",
     benefits: [
       { title: "Right-Sized Systems", body: "A proper load calculation means even temperatures and no wasted energy." },
       { title: "Cleaner Air", body: "Better filtration and balanced airflow improve the air your family breathes." },

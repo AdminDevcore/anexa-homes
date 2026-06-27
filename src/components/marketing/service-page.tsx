@@ -30,6 +30,7 @@ export function ServicePage({ slug }: { slug: string }) {
         }
         description={c.heroDescription}
         image={service.image}
+        imagePosition={c.heroPosition}
         primaryCta={{ label: ctaLabel, href: ctaHref }}
         secondaryCta={{ label: `Call ${COMPANY.phone}`, href: COMPANY.phoneHref }}
       />
