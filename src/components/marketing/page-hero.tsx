@@ -57,9 +57,11 @@ export function PageHero({
               />
             </div>
           </motion.div>
-          {/* Subtle dark overlay behind the text (stronger on the left). */}
-          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#0B0B0C]/90 via-[#0B0B0C]/70 to-[#0B0B0C]/40" />
-          <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#0B0B0C] via-transparent to-transparent" />
+          {/* Dark overlay behind the text — strong enough on the left for
+              legibility (paired with the headline text-shadow) but lighter
+              across the rest so the photo subject stays visible. */}
+          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#0B0B0C]/85 via-[#0B0B0C]/45 to-[#0B0B0C]/15" />
+          <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#0B0B0C] via-[#0B0B0C]/10 to-transparent" />
         </>
       ) : (
         <div className="pointer-events-none absolute inset-0 -z-10">
