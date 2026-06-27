@@ -134,7 +134,7 @@ export const SERVICES: Service[] = [
       "Seamless gutters and guards that move water away from your roof and foundation — and stay clog-free year round.",
     icon: CloudRain,
     href: "/gutters",
-    image: "/img/home-brick.jpg",
+    image: "/img/gutters.jpg",
     features: ["Seamless gutters", "Gutter guards", "Downspouts & drainage", "Repairs & cleaning"],
     ctaLabel: "Request Free Gutter Estimate",
   },

@@ -22,6 +22,11 @@ export type ServiceContent = {
   // Optional object-position for the hero crop (defaults bias slightly upward
   // for rooflines; override when the subject sits lower/left, e.g. HVAC).
   heroPosition?: string;
+  // Optional override for the hero background image only (the card, overview,
+  // gallery and OG still use the service's primary image). Used when a section's
+  // signature image shouldn't be the hero — e.g. gutters reserves the hero for a
+  // future cinematic shot.
+  heroImage?: string;
   benefits: Pair[];
   problemsTitle: string;
   problemsIntro: string;
@@ -281,6 +286,10 @@ const CONTENT: Record<string, ServiceContent> = {
     overviewTitle: "Seamless gutters engineered to move water, not collect it.",
     overviewBody:
       "Undersized, clogged, or poorly pitched gutters send water exactly where you don't want it — behind fascia, down siding, and into your foundation. We install seamless gutters custom-formed on site, with the right pitch, downspouts, and optional guards so water always ends up where it belongs.",
+    // Hero is intentionally NOT the supplied gutter collage — reserved for a
+    // future full-width cinematic gutter shot. Keep the existing placeholder;
+    // the new gutter imagery lives in the card, overview, gallery and OG.
+    heroImage: "/img/home-brick.jpg",
     benefits: [
       { title: "Seamless & Custom", body: "Formed on site to your exact runs — fewer seams means fewer leaks." },
       { title: "Gutter Guards", body: "Keep leaves and debris out so water flows freely with less maintenance." },
@@ -308,7 +317,8 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "What are seamless gutters?", a: "They're formed on site in continuous runs, so the only seams are at corners and downspouts — far fewer leak points." },
       { q: "Can you fix drainage that floods my yard?", a: "Yes. We route downspouts and add drainage so water is carried away from the foundation and landscaping." },
     ],
-    gallery: ["Overflowing old gutter — before", "New seamless run — after", "Gutter guard detail", "Downspout & drainage"],
+    gallery: ["Professional installation", "Seamless corners & outlets", "Downspouts that move water", "Premium curb appeal"],
+    galleryImages: ["/img/gutters-install.jpg", "/img/gutters-corner.jpg", "/img/gutters-downspout.jpg", "/img/gutters-home.jpg"],
     related: ["roofing", "storm-restoration", "windows", "insurance-claims"],
     metaTitle: "Seamless Gutters & Guards",
     metaDescription:
