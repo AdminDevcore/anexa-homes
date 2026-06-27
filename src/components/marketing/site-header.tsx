@@ -2,12 +2,12 @@
 
 import * as React from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Menu, LogIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_LINKS, COMPANY, SERVICES } from "@/lib/site";
 import { Logo } from "./logo";
+import { AnimatedLogo } from "./animated-logo";
 import { GlassButton } from "./glass";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,16 +51,7 @@ export function SiteHeader() {
       )}
     >
       <div className="container-anexa flex h-20 items-center justify-between gap-4 py-3 lg:h-24">
-        <Link href="/" aria-label="Anexa Homes home" className="inline-flex items-center">
-          <Image
-            src="/anexa-lockup.png"
-            alt="Anexa Homes"
-            width={360}
-            height={81}
-            priority
-            className="h-9 w-auto sm:h-11 lg:h-12"
-          />
-        </Link>
+        <AnimatedLogo />
 
         {/* Right cluster: nav links, then login + CTA (logo stays far left). */}
         <div className="hidden items-center gap-6 lg:flex">

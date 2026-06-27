@@ -370,6 +370,102 @@
   will-change: transform;
 }
 
+/* ---------------------------------------------------------------------------
+   Animated header logo: the triangle mark shimmers/glows while the wordmark
+   types itself in letter-by-letter (on load + on hover). `--p` is the type
+   progress 0→1; registered via @property so it can be animated in calc().
+--------------------------------------------------------------------------- */
+@property --p {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+.anexa-type {
+  position: relative;
+  display: inline-block;
+  --p: 1;
+  z-index: 0;
+}
+/* The mark occupies the left 21% of the lockup; reveal the rest (the text) as
+   --p goes 0→1, clipping the right edge. */
+.anexa-type-img {
+  clip-path: inset(0 calc((1 - (0.21 + 0.79 * var(--p))) * 100%) 0 0);
+}
+.anexa-caret {
+  position: absolute;
+  top: 16%;
+  height: 68%;
+  width: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  color: #fff;
+  /* Track the typing edge. */
+  left: calc((0.21 + 0.79 * var(--p)) * 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.anexa-mark-shimmer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  aspect-ratio: 305 / 329;
+  z-index: 10;
+  pointer-events: none;
+  -webkit-mask: url("/anexa-mark.png") center / contain no-repeat;
+  mask: url("/anexa-mark.png") center / contain no-repeat;
+  /* The sweeping sheen lives in the background; the mask confines it to the
+     triangle silhouette. */
+  background: linear-gradient(
+    110deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.7) 50%,
+    transparent 62%
+  );
+  background-size: 250% 100%;
+  background-position: 160% 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .anexa-type {
+    animation: anexa-type 1.15s steps(10, end) both;
+  }
+  .anexa-caret {
+    /* Blink while typing, then fade out once the wordmark is complete. */
+    animation: anexa-caret-blink 0.75s steps(1) 5, anexa-caret-off 0.2s linear 1.2s both;
+  }
+  .anexa-mark-shimmer {
+    /* Sheen sweep (with a pause) + a soft pulsing glow on the mark. */
+    animation: anexa-sheen 5s ease-in-out 1.2s infinite,
+      anexa-mark-glow 3.4s ease-in-out infinite;
+  }
+}
+@keyframes anexa-type {
+  from { --p: 0; }
+  to { --p: 1; }
+}
+@keyframes anexa-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.15; }
+}
+@keyframes anexa-caret-off {
+  to { opacity: 0; visibility: hidden; }
+}
+@keyframes anexa-sheen {
+  0% { background-position: 160% 0; }
+  45%, 100% { background-position: -60% 0; }
+}
+@keyframes anexa-mark-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.12)); opacity: 0.92; }
+  50% { filter: drop-shadow(0 0 9px rgba(255, 255, 255, 0.55)); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anexa-type-img { clip-path: none; }
+  .anexa-caret, .anexa-mark-shimmer { display: none; }
+}
+
 /* Marquee strip */
 @keyframes anexa-marquee {
   from { transform: translateX(0); }
