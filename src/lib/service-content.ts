@@ -384,6 +384,10 @@ const CONTENT: Record<string, ServiceContent> = {
     overviewTitle: "Insurance claim support, start to finish.",
     overviewBody:
       "A storm claim is its own full-time job — documentation, adjuster meetings, supplements, depreciation, and deadlines. We've done it thousands of times. Our specialists build the evidence, advocate for a fair scope, and manage every step alongside your restoration, so nothing falls through the cracks and you're never negotiating alone.",
+    // Hero reserved for a future cinematic PM + homeowner + adjuster shot. The
+    // previous placeholder (/img/home-colonial.jpg) was a small off-brand
+    // cottage, so use a premium home placeholder until the dedicated hero lands.
+    heroImage: "/img/home-dusk.jpg",
     benefits: [
       { title: "Done-For-You Documentation", body: "We build the photo and report evidence that supports a fair, complete claim." },
       { title: "Adjuster Advocacy", body: "Our specialists meet your adjuster on site to align on the right scope." },
@@ -411,7 +415,8 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "What does it cost me?", a: "Claim support is part of your restoration project. On approved claims, your out-of-pocket is typically just your deductible." },
       { q: "What if my claim was already denied?", a: "We can re-inspect, document missed damage, and help you pursue a supplement or reconsideration where it's warranted." },
     ],
-    gallery: ["Documented hail damage", "Adjuster meeting on site", "Supplement evidence", "Approved scope & closeout"],
+    gallery: ["Documented hail damage", "Digital documentation", "Claim reviewed with you", "Approved & restored"],
+    galleryImages: ["/img/insurance-roofdoc.jpg", "/img/insurance-tablet.jpg", "/img/insurance-meeting.jpg", "/img/insurance-handshake.jpg"],
     related: ["storm-restoration", "roofing", "gutters", "windows"],
     metaTitle: "Insurance Claim Support",
     metaDescription:
