@@ -4,6 +4,8 @@
     { "path": "/api/cron/stage-alerts", "schedule": "0 13 * * *" },
     { "path": "/api/cron/task-reminders", "schedule": "0 14 * * 1" },
     { "path": "/api/cron/overdue-digest", "schedule": "30 13 * * 1" },
-    { "path": "/api/cron/geocode-leads", "schedule": "*/15 * * * *" }
+    { "path": "/api/cron/geocode-leads", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/storm-spc", "schedule": "0 11 * * *" },
+    { "path": "/api/cron/storm-matches", "schedule": "30 11 * * *" }
   ]
 }
