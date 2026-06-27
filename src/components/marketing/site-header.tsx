@@ -81,13 +81,16 @@ export function SiteHeader() {
 
             <div
               className={cn(
-                "absolute left-0 top-full pt-3 transition-all duration-150",
+                // Anchored to the button's right edge so the wide (46rem) panel
+                // expands leftward into open space instead of off the right edge
+                // of the viewport (which created a horizontal-overflow gutter).
+                "absolute right-0 top-full pt-3 transition-all duration-150",
                 productsOpen
                   ? "pointer-events-auto translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0"
               )}
             >
-              <div className="w-[46rem] rounded-2xl border border-border bg-background p-3 shadow-xl shadow-black/5">
+              <div className="w-[34rem] xl:w-[46rem] rounded-2xl border border-border bg-background p-3 shadow-xl shadow-black/5">
                 <div className="grid grid-cols-3 gap-1">
                   {SERVICES.map((s) => (
                     <Link
