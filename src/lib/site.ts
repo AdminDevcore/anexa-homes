@@ -159,7 +159,7 @@ export const SERVICES: Service[] = [
       "We document the damage, meet your adjuster, and manage supplements — so you typically pay only your deductible.",
     icon: FileCheck2,
     href: "/insurance-claims",
-    image: "/img/home-colonial.jpg",
+    image: "/img/insurance-claims.jpg",
     features: ["Claim filing help", "Adjuster meetings", "Supplements & depreciation", "Deductible-only goal"],
     primary: true,
     ctaLabel: "Start Insurance Claim Support",
