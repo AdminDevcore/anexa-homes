@@ -16,6 +16,7 @@ export function ServicePage({ slug }: { slug: string }) {
   const ctaLabel = service.ctaLabel ?? "Request Free Estimate";
   const ctaHref = `/contact?service=${service.slug}`;
   const isClaim = slug === "insurance-claims";
+  const hasRealGallery = (c.galleryImages?.length ?? 0) > 0;
 
   return (
     <>
@@ -136,23 +137,29 @@ export function ServicePage({ slug }: { slug: string }) {
         <SectionHeading
           eyebrow="Real Projects"
           title="See the difference in the details."
-          description="A look at the kind of work we deliver. Replace these with your own project photos any time."
+          description={
+            hasRealGallery
+              ? "A closer look at the system, the install, and the everyday difference clean water makes."
+              : "A look at the kind of work we deliver. Replace these with your own project photos any time."
+          }
         />
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {c.gallery.map((caption, i) => (
             <Reveal key={caption} delay={i % 4}>
               <figure className="group relative aspect-[4/5] overflow-hidden rounded-2xl border border-border">
                 <Image
-                  src={service.image}
+                  src={c.galleryImages?.[i] ?? service.image}
                   alt={caption}
                   fill
                   sizes="(min-width: 1024px) 23vw, (min-width: 640px) 45vw, 100vw"
                   className="object-cover opacity-90 transition-transform duration-500 group-hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
-                <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-white/80 backdrop-blur">
-                  <ImageIcon className="size-3" /> Sample
-                </span>
+                {!hasRealGallery && (
+                  <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-white/80 backdrop-blur">
+                    <ImageIcon className="size-3" /> Sample
+                  </span>
+                )}
                 <figcaption className="absolute bottom-3 left-4 right-4 text-sm font-medium text-white">
                   {caption}
                 </figcaption>

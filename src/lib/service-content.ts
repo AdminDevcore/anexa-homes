@@ -28,7 +28,10 @@ export type ServiceContent = {
   problems: Pair[];
   process: ProcessStep[];
   faqs: Faq[];
-  gallery: string[]; // placeholder caption labels for the before/after grid
+  gallery: string[]; // caption labels for the project grid
+  // Optional per-tile gallery images (parallel to `gallery`). Falls back to the
+  // service's primary image when omitted.
+  galleryImages?: string[];
   related: string[]; // slugs of services to cross-link
   metaTitle: string;
   metaDescription: string;
@@ -181,6 +184,9 @@ const CONTENT: Record<string, ServiceContent> = {
     overviewTitle: "Whole-home water treatment, matched to your water.",
     overviewBody:
       "North Texas water is hard and heavily treated. We test what's coming into your home, then design filtration and softening that removes contaminants, ends scale buildup, and makes every tap taste better. The result is healthier water, longer-lasting appliances, and softer skin and laundry.",
+    // Hero spans the filtration system (left) + luxury kitchen (right). Bias
+    // left so the system leads on mobile; desktop shows both.
+    heroPosition: "25% 50%",
     benefits: [
       { title: "Tested, Not Guessed", body: "We test your water first and design treatment around the actual results." },
       { title: "Appliance Protection", body: "Softening ends scale that destroys water heaters, fixtures, and appliances." },
@@ -208,7 +214,8 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "Is reverse osmosis worth it?", a: "For drinking and cooking, RO delivers bottled-quality water at the tap and pairs well with whole-home treatment." },
       { q: "How much maintenance is involved?", a: "Very little — periodic salt and filter changes. We set reminders and can service it for you." },
     ],
-    gallery: ["Water test results", "Whole-home system — install", "Reverse-osmosis at the sink", "Before/after clarity"],
+    gallery: ["Whole-home filtration system", "Pure water in the kitchen", "Filtered water on tap", "Multi-stage pre-filtration"],
+    galleryImages: ["/img/water-system.jpg", "/img/water-kitchen.jpg", "/img/water-faucet.jpg", "/img/water-filters.jpg"],
     related: ["hvac", "roofing", "windows", "solar"],
     metaTitle: "Water Filtration & Softening",
     metaDescription:
