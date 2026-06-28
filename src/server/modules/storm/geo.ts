@@ -48,6 +48,31 @@ export function circlePolygon(center: LatLng, radiusMiles: number, points = 32):
   return ring;
 }
 
+/** Ray-casting point-in-polygon for one ring of [lat,lng] points. */
+export function pointInRing(lat: number, lng: number, ring: [number, number][]): boolean {
+  let inside = false;
+  const x = lng;
+  const y = lat;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i][0];
+    const xi = ring[i][1];
+    const yj = ring[j][0];
+    const xj = ring[j][1];
+    const intersect = xi > x !== xj > x && y < ((yj - yi) * (x - xi)) / (xj - xi) + yi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** Point-in-polygon with holes: rings[0]=outer, rings[1..]=holes. */
+export function pointInPolygonRings(lat: number, lng: number, rings: [number, number][][]): boolean {
+  if (!rings.length || !pointInRing(lat, lng, rings[0])) return false;
+  for (let i = 1; i < rings.length; i++) {
+    if (pointInRing(lat, lng, rings[i])) return false; // inside a hole
+  }
+  return true;
+}
+
 /** Dallas, TX — default storm search center. */
 export const DALLAS: LatLng = { lat: 32.7767, lng: -96.797 };
 export const DEFAULT_RADIUS_MILES = 100;

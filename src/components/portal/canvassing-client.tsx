@@ -14,6 +14,7 @@ import { DISPOSITIONS, KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from
 import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
 import type { Viewport, ZipFeature } from "./canvassing-map";
 import { DateRangeFilter, resolveRange, type RangePreset } from "./canvassing-filters";
+import { HouseStormInfo } from "@/components/portal/storm/house-storm-info";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -458,6 +459,7 @@ export function CanvassingClient() {
         ) : (
           <div className="text-xs text-muted-foreground">Open Details for value estimate</div>
         )}
+        <HouseStormInfo lat={k.lat} lng={k.lng} />
         <div className="flex items-center gap-2">
           <span className="inline-block size-3 rounded-full border" style={{ background: blank ? "#fff" : meta.color, borderColor: meta.color }} />
           <select
@@ -534,6 +536,7 @@ export function CanvassingClient() {
         )}
         {d.phone && <div className="text-xs text-muted-foreground">{d.phone}</div>}
         {d.note && <p className="text-sm text-muted-foreground line-clamp-3">{d.note}</p>}
+        <HouseStormInfo lat={d.lat} lng={d.lng} />
         <div className="flex items-center justify-between gap-2">
           <button
             onClick={() => router.push(`/portal/leads/${d.id}`)}

@@ -1,7 +1,14 @@
 import { Prisma, type StormType } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { geocode } from "@/server/modules/geo/geocode";
-import { haversineMiles, boundingBox, DALLAS, DEFAULT_RADIUS_MILES, type LatLng } from "./geo";
+import {
+  haversineMiles,
+  boundingBox,
+  pointInPolygonRings,
+  DALLAS,
+  DEFAULT_RADIUS_MILES,
+  type LatLng,
+} from "./geo";
 import { scoreProperty, CLUSTER_RADIUS_MI } from "./scoring";
 import { getStormConfig } from "./config";
 
@@ -319,6 +326,120 @@ export async function getStormZones(companyId: string): Promise<StormZoneDTO[]> 
 /** Convenience: company default search config (Dallas/100mi today). */
 export async function defaultStormCenter(companyId: string) {
   return getStormConfig(companyId);
+}
+
+export type StormAtPoint = {
+  score: number;
+  hailSizeIn: number | null; // best estimate (radar swath if available, else max nearby event)
+  swathHailIn: number | null; // radar MESH tier the exact point sits inside (most precise)
+  dateOfLoss: string | null;
+  maxHailIn: number | null;
+  maxWindMph: number | null;
+  eventCount: number;
+  reportsWithin5mi: number;
+  zoneName: string | null;
+  nearest:
+    | { type: StormType; eventAt: string; distanceMiles: number; hailSizeIn: number | null; windSpeedMph: number | null }
+    | null;
+};
+
+/**
+ * Full storm picture for a single coordinate (a house on the canvassing map):
+ * the radar swath tier it sits inside (precise hail size), nearby reports, date
+ * of loss, score, and which storm zone it falls in.
+ */
+export async function stormAtPoint(companyId: string, lat: number, lng: number): Promise<StormAtPoint> {
+  const pt: LatLng = { lat, lng };
+
+  // 1) Radar swath polygons whose bbox contains the point (universal data).
+  const swaths = await prisma.stormSwath.findMany({
+    where: {
+      bboxMinLat: { lte: lat },
+      bboxMaxLat: { gte: lat },
+      bboxMinLng: { lte: lng },
+      bboxMaxLng: { gte: lng },
+    },
+    orderBy: { hailMinIn: "desc" },
+    take: 300,
+  });
+  let swathHailIn: number | null = null;
+  let swathDate: Date | null = null;
+  for (const s of swaths) {
+    if (pointInPolygonRings(lat, lng, s.rings as [number, number][][])) {
+      if (swathHailIn == null || s.hailMinIn > swathHailIn) {
+        swathHailIn = s.hailMinIn;
+        swathDate = s.eventDate;
+      }
+    }
+  }
+
+  // 2) Nearby point reports within 10mi (company-scoped).
+  const box = boundingBox(pt, 10);
+  const events = await prisma.stormEvent.findMany({
+    where: { companyId, lat: { gte: box.minLat, lte: box.maxLat }, lng: { gte: box.minLng, lte: box.maxLng } },
+    orderBy: { eventAt: "desc" },
+  });
+  let maxHail = 0;
+  let maxWind = 0;
+  let reports5 = 0;
+  let count = 0;
+  let mostRecent: Date | null = null;
+  let nearest: StormAtPoint["nearest"] = null;
+  let nearestDist = Infinity;
+  for (const e of events) {
+    const d = haversineMiles(pt, { lat: e.lat, lng: e.lng });
+    if (d > 10) continue;
+    count++;
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = {
+        type: e.type,
+        eventAt: e.eventAt.toISOString(),
+        distanceMiles: Number(d.toFixed(2)),
+        hailSizeIn: e.hailSizeIn,
+        windSpeedMph: e.windSpeedMph,
+      };
+    }
+    if ((e.hailSizeIn ?? 0) > maxHail) maxHail = e.hailSizeIn ?? 0;
+    if ((e.windSpeedMph ?? 0) > maxWind) maxWind = e.windSpeedMph ?? 0;
+    if (d <= CLUSTER_RADIUS_MI) reports5++;
+    if (!mostRecent || e.eventAt > mostRecent) mostRecent = e.eventAt;
+  }
+
+  // 3) Storm zone membership.
+  const zones = await prisma.stormCanvassingZone.findMany({
+    where: { companyId },
+    select: { name: true, centerLat: true, centerLng: true, radiusMiles: true },
+  });
+  let zoneName: string | null = null;
+  for (const z of zones) {
+    if (haversineMiles(pt, { lat: z.centerLat, lng: z.centerLng }) <= z.radiusMiles) {
+      zoneName = z.name;
+      break;
+    }
+  }
+
+  const bestHail = Math.max(swathHailIn ?? 0, maxHail);
+  const dateOfLoss = swathDate ?? mostRecent;
+  const score = scoreProperty({
+    maxHailIn: bestHail,
+    maxWindMph: maxWind,
+    mostRecentEventAt: dateOfLoss,
+    reportsWithin5mi: reports5,
+  });
+
+  return {
+    score,
+    hailSizeIn: bestHail || null,
+    swathHailIn,
+    dateOfLoss: dateOfLoss ? dateOfLoss.toISOString() : null,
+    maxHailIn: maxHail || null,
+    maxWindMph: maxWind ? Math.round(maxWind) : null,
+    eventCount: count,
+    reportsWithin5mi: reports5,
+    zoneName,
+    nearest,
+  };
 }
 
 export type StormSwathDTO = {
