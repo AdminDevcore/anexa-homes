@@ -64,19 +64,28 @@ def _to_180(x, y, z=None):
 
 def build_features(path: str):
     minlon, minlat, maxlon, maxlat = (float(x) for x in BBOX.split(","))
-    left = minlon + 360 if minlon < 0 else minlon
-    right = maxlon + 360 if maxlon < 0 else maxlon
 
     feats = []
     with rasterio.open(path) as ds:
+        b = ds.bounds
+        # MRMS is natively 0..360 lon, but GDAL may present it as -180..180.
+        # Detect from the dataset's own bounds rather than assuming.
+        zero360 = b.right > 180
+        print(f"grid bounds={b} crs={ds.crs} shape={ds.shape} zero360={zero360}")
+        left = (minlon + 360 if minlon < 0 else minlon) if zero360 else minlon
+        right = (maxlon + 360 if maxlon < 0 else maxlon) if zero360 else maxlon
+
         win = from_bounds(left, minlat, right, maxlat, ds.transform)
         data = ds.read(1, window=win).astype("float64")
         transform = ds.window_transform(win)
         # MESH missing/no-coverage flags are negative (e.g. -3, -999); clamp to 0.
-        data = np.where(np.isfinite(data) & (data > 0), data, 0.0)
+        valid = np.isfinite(data) & (data > 0)
+        print(f"win={win} data.shape={data.shape} max_mm={float(data[valid].max()) if valid.any() else 0.0:.1f}")
+        data = np.where(valid, data, 0.0)
 
         for inch in TIERS_IN:
             mask = (data >= inch * MM_PER_IN).astype(np.uint8)
+            print(f"tier {inch}in (>={inch * MM_PER_IN:.0f}mm): {int(mask.sum())} cells")
             if int(mask.sum()) == 0:
                 continue
             geoms = []
