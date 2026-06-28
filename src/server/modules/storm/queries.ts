@@ -394,6 +394,16 @@ export async function defaultStormCenter(companyId: string) {
   return getStormConfig(companyId);
 }
 
+export type StormReportLite = {
+  type: StormType;
+  source: string; // NOAA / SPC etc.
+  eventAt: string;
+  distanceMiles: number;
+  hailSizeIn: number | null;
+  windSpeedMph: number | null;
+  place: string | null; // city/county/state, when known
+};
+
 export type StormAtPoint = {
   score: number;
   hailSizeIn: number | null; // best estimate (radar swath if available, else max nearby event)
@@ -407,6 +417,8 @@ export type StormAtPoint = {
   nearest:
     | { type: StormType; eventAt: string; distanceMiles: number; hailSizeIn: number | null; windSpeedMph: number | null }
     | null;
+  // The closest individual reports (for the popup's "when/where" expander).
+  reports: StormReportLite[];
 };
 
 /**
@@ -452,6 +464,7 @@ export async function stormAtPoint(companyId: string, lat: number, lng: number):
   let mostRecent: Date | null = null;
   let nearest: StormAtPoint["nearest"] = null;
   let nearestDist = Infinity;
+  const reports: StormReportLite[] = [];
   for (const e of events) {
     const d = haversineMiles(pt, { lat: e.lat, lng: e.lng });
     if (d > 10) continue;
@@ -466,11 +479,23 @@ export async function stormAtPoint(companyId: string, lat: number, lng: number):
         windSpeedMph: e.windSpeedMph,
       };
     }
+    reports.push({
+      type: e.type,
+      source: e.source,
+      eventAt: e.eventAt.toISOString(),
+      distanceMiles: Number(d.toFixed(2)),
+      hailSizeIn: e.hailSizeIn,
+      windSpeedMph: e.windSpeedMph,
+      place: [e.city, e.state].filter(Boolean).join(", ") || e.county || null,
+    });
     if ((e.hailSizeIn ?? 0) > maxHail) maxHail = e.hailSizeIn ?? 0;
     if ((e.windSpeedMph ?? 0) > maxWind) maxWind = e.windSpeedMph ?? 0;
     if (d <= CLUSTER_RADIUS_MI) reports5++;
     if (!mostRecent || e.eventAt > mostRecent) mostRecent = e.eventAt;
   }
+  // Closest reports first; cap so the popup payload stays small.
+  reports.sort((a, b) => a.distanceMiles - b.distanceMiles);
+  const topReports = reports.slice(0, 12);
 
   // 3) Storm zone membership.
   const zones = await prisma.stormCanvassingZone.findMany({
@@ -505,6 +530,7 @@ export async function stormAtPoint(companyId: string, lat: number, lng: number):
     reportsWithin5mi: reports5,
     zoneName,
     nearest,
+    reports: topReports,
   };
 }
 

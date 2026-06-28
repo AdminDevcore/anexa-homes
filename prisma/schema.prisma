@@ -1588,6 +1588,8 @@ model Knock {
   ownerSource         String? // provider label, e.g. "BatchData"
   ownerLookedUpAt     DateTime?
   ownerData           Json? // full result: { names[], phones[], emails[] } for the rep to pick from
+  // When the dot was snapped to its OSM rooftop centroid (recenter-house-dots cron).
+  recenteredAt        DateTime?
   appointmentAt       DateTime? // set when converted to an appointment
   leadId              String?
   lead                Lead?            @relation("KnockLead", fields: [leadId], references: [id], onDelete: SetNull)

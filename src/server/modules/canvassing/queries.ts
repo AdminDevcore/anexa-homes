@@ -10,6 +10,7 @@ export type KnockDTO = {
   address: string | null;
   disposition: string;
   notes: string | null;
+  contactName: string | null; // homeowner name (door capture or skip-trace)
   repId: string | null;
   repName: string | null;
   territoryId: string | null;
@@ -209,6 +210,7 @@ export async function getKnocksInBounds(
     take: cap,
     select: {
       id: true, lat: true, lng: true, address: true, disposition: true, notes: true,
+      contactName: true,
       repId: true, territoryId: true, leadId: true, knockedAt: true,
       propertyValue: true, propertyValueSource: true,
       rep: { select: { firstName: true, lastName: true } },
@@ -222,6 +224,7 @@ export async function getKnocksInBounds(
     address: k.address,
     disposition: k.disposition,
     notes: k.notes,
+    contactName: k.contactName,
     repId: k.repId,
     repName: name(k.rep),
     territoryId: k.territoryId,

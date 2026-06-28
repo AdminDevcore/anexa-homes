@@ -6,6 +6,8 @@
     { "path": "/api/cron/overdue-digest", "schedule": "30 13 * * 1" },
     { "path": "/api/cron/geocode-leads", "schedule": "*/15 * * * *" },
     { "path": "/api/cron/storm-spc", "schedule": "0 11 * * *" },
-    { "path": "/api/cron/storm-matches", "schedule": "30 11 * * *" }
+    { "path": "/api/cron/storm-matches", "schedule": "30 11 * * *" },
+    { "path": "/api/cron/recenter-house-dots", "schedule": "*/30 * * * *" },
+    { "path": "/api/cron/enrich-owners", "schedule": "0 8 * * *" }
   ]
 }

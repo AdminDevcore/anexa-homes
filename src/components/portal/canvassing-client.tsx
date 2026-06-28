@@ -71,6 +71,7 @@ export function CanvassingClient() {
   });
 
   const canManage = meta?.me.canManageAll ?? false;
+  const ownerLookupEnabled = meta?.ownerLookupEnabled ?? false;
   const territories = meta?.territories ?? [];
   const reps = meta?.reps ?? [];
 
@@ -302,6 +303,7 @@ export function CanvassingClient() {
             address: h.address,
             disposition: "not_knocked",
             notes: null,
+            contactName: null,
             repId: null,
             repName: null,
             territoryId: null,
@@ -462,6 +464,18 @@ export function CanvassingClient() {
       refresh();
     }
   }
+  // Look up the homeowner from the popup. Materialize an auto-loaded house dot
+  // first (skip-trace needs a real knock row to cache the result onto).
+  async function lookupOwnerForKnock(k: KnockDTO) {
+    const realId = isHouseDot(k) ? await ensureHouse(k) : k.id;
+    if (!realId) return;
+    const t = toast.loading("Looking up owner…");
+    const res = await lookupOwnerAction({ knockId: realId });
+    toast.dismiss(t);
+    if (!res.ok) return toast.error(res.error);
+    toast.success(res.applied.contactName ? `Owner: ${res.applied.contactName}` : `Owner found via ${res.result.source}`);
+    refresh();
+  }
   // Convert works on a real row, so materialize an auto-loaded house dot first.
   async function startConvert(k: KnockDTO) {
     if (!isHouseDot(k)) return setConvertTarget(k);
@@ -510,6 +524,13 @@ export function CanvassingClient() {
             Details
           </button>
         </div>
+        {k.contactName ? (
+          <div className="text-xs font-medium">👤 {k.contactName}</div>
+        ) : ownerLookupEnabled && k.address ? (
+          <button onClick={() => lookupOwnerForKnock(k)} className="inline-flex items-center gap-1 text-xs font-medium text-gold hover:underline">
+            <UserSearch className="size-3.5" /> Look up owner
+          </button>
+        ) : null}
         {canManage && k.repName && <div className="text-xs text-muted-foreground">Knocked by {k.repName}</div>}
         {/* Static cached value only — a live (resizing) fetch inside a Leaflet
             popup crashes Leaflet's positioning. Full estimate is in Details. */}

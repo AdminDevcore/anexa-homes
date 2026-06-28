@@ -1,7 +1,9 @@
 "use client";
 
+import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { StormAtPoint } from "@/server/modules/storm/queries";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import type { StormAtPoint, StormReportLite } from "@/server/modules/storm/queries";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -14,12 +16,24 @@ function scoreTone(score: number): string {
   return "bg-muted text-muted-foreground";
 }
 
+/** One-line summary of a single storm report: what + distance + when. */
+function reportLine(r: StormReportLite): string {
+  const what =
+    r.hailSizeIn != null
+      ? `${r.hailSizeIn.toFixed(2)}″ hail`
+      : r.windSpeedMph != null
+        ? `${r.windSpeedMph} mph wind`
+        : r.type;
+  return `${what} · ${r.distanceMiles} mi · ${fmtDate(r.eventAt)}`;
+}
+
 /**
  * Compact storm history for a house, shown inside the canvassing popup. Fixed
  * min-height so the async fetch doesn't resize the Leaflet popup (which breaks
  * its positioning).
  */
 export function HouseStormInfo({ lat, lng }: { lat: number; lng: number }) {
+  const [open, setOpen] = React.useState(false);
   const { data, isLoading } = useQuery<StormAtPoint>({
     queryKey: ["storm-at", lat.toFixed(5), lng.toFixed(5)],
     queryFn: async () => {
@@ -65,10 +79,52 @@ export function HouseStormInfo({ lat, lng }: { lat: number; lng: number }) {
               Date of loss: <b>{fmtDate(data.dateOfLoss)}</b>
             </div>
           ) : null}
-          <div className="text-muted-foreground">
-            {data.eventCount} report{data.eventCount === 1 ? "" : "s"} within 10mi
-            {data.zoneName ? ` · zone: ${data.zoneName}` : ""}
-          </div>
+
+          {/* Nearest report — the precise "when / where" for the closest event. */}
+          {data.nearest ? (
+            <div className="text-muted-foreground">
+              Nearest:{" "}
+              {data.nearest.hailSizeIn != null
+                ? `${data.nearest.hailSizeIn.toFixed(2)}″ hail`
+                : data.nearest.windSpeedMph != null
+                  ? `${data.nearest.windSpeedMph} mph wind`
+                  : data.nearest.type}{" "}
+              · {data.nearest.distanceMiles} mi · {fmtDate(data.nearest.eventAt)}
+              {data.reports[0]?.place ? ` · ${data.reports[0].place}` : ""}
+            </div>
+          ) : null}
+
+          {/* Expandable list of the individual reports (when / where / source). */}
+          {data.reports.length > 0 ? (
+            <div>
+              <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground"
+              >
+                {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                {data.eventCount} report{data.eventCount === 1 ? "" : "s"} within 10mi
+                {data.zoneName ? ` · zone: ${data.zoneName}` : ""}
+              </button>
+              {open ? (
+                <ul className="mt-1 max-h-32 space-y-0.5 overflow-auto border-l border-border pl-2">
+                  {data.reports.map((r, i) => (
+                    <li key={i} className="leading-tight">
+                      <span className="font-medium">{reportLine(r)}</span>
+                      <span className="text-muted-foreground">
+                        {r.place ? ` · ${r.place}` : ""} · {r.source}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : (
+            <div className="text-muted-foreground">
+              {data.eventCount} report{data.eventCount === 1 ? "" : "s"} within 10mi
+              {data.zoneName ? ` · zone: ${data.zoneName}` : ""}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -224,3 +224,58 @@ out geom ${cap};`;
   }
   return out;
 }
+
+function metersBetween(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const lat1 = (aLat * Math.PI) / 180, lat2 = (bLat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Snap a single point (a stored house dot) to the centroid of the nearest OSM
+ * building footprint within `maxMeters`. Used by the recenter-house-dots cron to
+ * pull off-center pins onto the actual rooftop. Returns null when there's no
+ * building nearby (OSM coverage gap) — caller keeps the original coordinate.
+ */
+export async function nearestBuildingCentroid(
+  lat: number,
+  lng: number,
+  maxMeters = 40
+): Promise<{ lat: number; lng: number } | null> {
+  const radius = Math.max(40, Math.ceil(maxMeters * 1.5));
+  const query = `[out:json][timeout:25];
+(way["building"](around:${radius},${lat},${lng}););
+out geom 60;`;
+
+  let data: { elements?: OverpassEl[] } | null = null;
+  for (const url of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "AnexaHomesCRM/1.0 (canvassing)" },
+        body: "data=" + encodeURIComponent(query),
+      });
+      if (!res.ok) continue;
+      data = await res.json();
+      break;
+    } catch {
+      // try next endpoint
+    }
+  }
+  if (!data?.elements) return null;
+
+  let best: { lat: number; lng: number } | null = null;
+  let bestM = Infinity;
+  for (const el of data.elements) {
+    const b = el.tags?.building;
+    if (b && SKIP_BUILDINGS.has(b)) continue;
+    if (el.type !== "way" || !el.geometry || el.geometry.length < 3) continue;
+    const c = interiorPoint(el.geometry.map((g) => ({ lat: g.lat, lng: g.lon })));
+    const m = metersBetween(lat, lng, c.lat, c.lng);
+    if (m < bestM) { bestM = m; best = c; }
+  }
+  return best && bestM <= maxMeters ? best : null;
+}
