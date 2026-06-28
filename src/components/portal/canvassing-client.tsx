@@ -92,6 +92,9 @@ export function CanvassingClient() {
   const [showRadar, setShowRadar] = React.useState(true);
   const [showStormReports, setShowStormReports] = React.useState(false);
   const [showStormWarnings, setShowStormWarnings] = React.useState(false);
+  // Storm-score "heat" on pins + a min-score filter.
+  const [showHeat, setShowHeat] = React.useState(true);
+  const [minScore, setMinScore] = React.useState(0);
 
   // Pulsing highlight dropped on the address a rep searched for. searchTarget is
   // the raw geocoded point we try to snap to the nearest real house dot once dots load.
@@ -233,6 +236,18 @@ export function CanvassingClient() {
   });
   const stormWarnings = showStormWarnings ? stormWarnData?.warnings ?? [] : [];
 
+  const { data: scoreData } = useQuery<{ knock: Record<string, number>; lead: Record<string, number> }>({
+    queryKey: ["cv-storm-scores"],
+    queryFn: async () => {
+      const r = await fetch("/api/storm/scores");
+      return r.ok ? r.json() : { knock: {}, lead: {} };
+    },
+    enabled: showHeat || minScore > 0,
+    staleTime: 5 * 60_000,
+  });
+  const knockScores = scoreData?.knock ?? {};
+  const dealScores = scoreData?.lead ?? {};
+
   // Managers can click a ZIP outline to turn the whole ZIP into a territory.
   function onZipClick(zcta: string, ring: LatLng[]) {
     if (!canManage || ring.length < 3) return;
@@ -297,6 +312,11 @@ export function CanvassingClient() {
       : [];
     return [...persistedKnocks, ...synthetic];
   }, [persistedKnocks, houseData, houseZoomOK, statuses]);
+
+  // Min-score filter: when > 0, show only knocks/deals at/above that storm score.
+  const mapKnocks = minScore > 0 ? knocks.filter((k) => (knockScores[k.id] ?? -1) >= minScore) : knocks;
+  const visibleDeals = showDeals ? deals : [];
+  const mapDeals = minScore > 0 ? visibleDeals.filter((d) => (dealScores[d.id] ?? -1) >= minScore) : visibleDeals;
 
   // After a search, once house dots load, snap the highlight ring to the nearest
   // real house so it never sits in the middle of the street (street-name searches
@@ -719,6 +739,31 @@ export function CanvassingClient() {
           >
             <Tornado className="size-4" /> Warnings
           </Button>
+          <Button
+            variant={showHeat ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowHeat((v) => !v)}
+            className="gap-1.5"
+            title="Glow pins by storm score (hot streets)"
+          >
+            <Sparkles className="size-4" /> Heat
+          </Button>
+          {showHeat && (
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs">
+              <span className="text-muted-foreground">Score ≥</span>
+              <input
+                type="range"
+                min={0}
+                max={150}
+                step={10}
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                className="w-24 accent-[#F4631E]"
+                title="Show only pins at/above this storm score"
+              />
+              <span className="w-6 tabular-nums font-medium">{minScore}</span>
+            </div>
+          )}
           <Button variant={mode === "knock" ? "default" : "outline"} size="sm" onClick={() => setMode("knock")} className="gap-1.5">
             <MapPin className="size-4" /> Knock
           </Button>
@@ -852,8 +897,8 @@ export function CanvassingClient() {
         <CanvassingMap
           center={center}
           basemap={basemap}
-          knocks={knocks}
-          deals={showDeals ? deals : []}
+          knocks={mapKnocks}
+          deals={mapDeals}
           territories={territories}
           drawPoints={drawPoints}
           onMapClick={onMapClick}
@@ -869,6 +914,8 @@ export function CanvassingClient() {
           radarSwaths={radarSwaths}
           stormEvents={stormEvents}
           stormWarnings={stormWarnings}
+          knockScores={showHeat ? knockScores : undefined}
+          dealScores={showHeat ? dealScores : undefined}
           searchPin={searchPin}
           movingId={movingId}
           onMovePin={handleMovePin}

@@ -28,6 +28,13 @@ function stormEventColor(e: { type: string; hailSizeIn: number | null }): string
   if (e.type === "wind") return "#14b8a6";
   return "#ef4444";
 }
+/** Pin "heat" color by storm score (null = too low to glow). */
+function scoreColor(s: number): string | null {
+  if (s >= 90) return "#ef4444";
+  if (s >= 50) return "#f97316";
+  if (s >= 20) return "#eab308";
+  return null;
+}
 
 export type Basemap = "satellite" | "street";
 
@@ -215,6 +222,9 @@ export type CanvassingMapProps = {
   radarSwaths?: StormSwathDTO[];
   stormEvents?: StormEventDTO[];
   stormWarnings?: StormWarning[];
+  // Storm score per knock/deal id → a colored glow halo under the pin.
+  knockScores?: Record<string, number>;
+  dealScores?: Record<string, number>;
   // Pulsing highlight for the address a rep just searched for.
   searchPin?: LatLng | null;
   // Drag-to-reposition: the id currently in "move" mode (knock id, or `deal-<id>`)
@@ -243,6 +253,8 @@ export function CanvassingMap({
   radarSwaths,
   stormEvents,
   stormWarnings,
+  knockScores,
+  dealScores,
   searchPin,
   movingId,
   onMovePin,
@@ -302,6 +314,40 @@ export function CanvassingMap({
           </Popup>
         </CircleMarker>
       ))}
+
+      {/* Storm-score "heat" halos under knock + deal pins (hot streets glow). */}
+      {knockScores
+        ? knocks.map((k) => {
+            const s = knockScores[k.id];
+            const c = s != null ? scoreColor(s) : null;
+            if (c == null || s == null) return null;
+            return (
+              <CircleMarker
+                key={`hk-${k.id}`}
+                center={[k.lat, k.lng]}
+                radius={11 + Math.min(13, s / 6)}
+                pathOptions={{ stroke: false, fillColor: c, fillOpacity: 0.35 }}
+                interactive={false}
+              />
+            );
+          })
+        : null}
+      {dealScores
+        ? (deals ?? []).map((d) => {
+            const s = dealScores[d.id];
+            const c = s != null ? scoreColor(s) : null;
+            if (c == null || s == null) return null;
+            return (
+              <CircleMarker
+                key={`hd-${d.id}`}
+                center={[d.lat, d.lng]}
+                radius={11 + Math.min(13, s / 6)}
+                pathOptions={{ stroke: false, fillColor: c, fillOpacity: 0.35 }}
+                interactive={false}
+              />
+            );
+          })
+        : null}
 
       <MapController onReady={onMapReady} onMapClick={onMapClick} onViewport={onViewport} />
 

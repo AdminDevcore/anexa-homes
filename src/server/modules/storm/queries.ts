@@ -442,6 +442,23 @@ export async function stormAtPoint(companyId: string, lat: number, lng: number):
   };
 }
 
+/** Storm score per knock + lead id, for coloring canvassing pins. */
+export async function getStormScores(
+  companyId: string,
+): Promise<{ knock: Record<string, number>; lead: Record<string, number> }> {
+  const rows = await prisma.propertyStormMatch.findMany({
+    where: { companyId },
+    select: { leadId: true, knockId: true, score: true },
+  });
+  const knock: Record<string, number> = {};
+  const lead: Record<string, number> = {};
+  for (const r of rows) {
+    if (r.knockId) knock[r.knockId] = r.score;
+    if (r.leadId) lead[r.leadId] = r.score;
+  }
+  return { knock, lead };
+}
+
 export type StormSwathDTO = {
   id: string;
   hailMinIn: number;
