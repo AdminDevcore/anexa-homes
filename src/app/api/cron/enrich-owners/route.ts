@@ -1,11 +1,14 @@
 import { prisma } from "@/server/db/client";
 import { getSkipTraceProvider, skipTraceEnabled, type OwnerResult } from "@/server/modules/skiptrace/provider";
+import { resolvePropertyValue } from "@/server/modules/property";
 
-// Nightly homeowner enrichment: fills name/phone/email for house dots that have
-// an address but no skip-trace yet, via the configured provider (BatchData).
-// THIS BILLS PER LOOKUP, so it's gated on a configured provider and a per-run cap
-// (OWNER_ENRICH_BATCH, default 50) to control spend. Stamps ownerLookedUpAt either
-// way so a no-match isn't retried forever. Vercel Cron calls with Bearer CRON_SECRET.
+// Nightly house enrichment: for house dots not yet enriched, fills the PROPERTY
+// value + address (AVM provider) and the homeowner NAME / PHONE / EMAIL (skip-trace
+// provider). With BatchData configured for both, one nightly pass backfills the
+// whole map. THIS BILLS PER LOOKUP, so it's gated on a configured skip-trace
+// provider and a per-run cap (OWNER_ENRICH_BATCH, default 50). Stamps
+// ownerLookedUpAt either way so a no-match isn't retried forever.
+// Vercel Cron calls with Bearer CRON_SECRET.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -17,7 +20,7 @@ export async function GET(req: Request) {
   if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("Unauthorized", { status: 401 });
   }
-  // Dormant unless a real provider + key are configured (no accidental billing).
+  // Dormant unless a real skip-trace provider + key are configured (no accidental billing).
   if (!skipTraceEnabled()) {
     return Response.json({ ok: true, skipped: "no skip-trace provider configured" });
   }
@@ -26,21 +29,51 @@ export async function GET(req: Request) {
 
   try {
     const dots = await prisma.knock.findMany({
-      where: { ownerLookedUpAt: null, address: { not: null } },
-      select: { id: true, address: true, city: true, state: true, zip: true, contactName: true, contactPhone: true, contactEmail: true },
+      where: { ownerLookedUpAt: null },
+      select: {
+        id: true, lat: true, lng: true, address: true, city: true, state: true, zip: true,
+        contactName: true, contactPhone: true, contactEmail: true,
+      },
       orderBy: { knockedAt: "asc" },
       take: cap,
     });
 
+    let valued = 0;
     let enriched = 0;
     for (let i = 0; i < dots.length; i++) {
       if (i > 0) await sleep(DELAY_MS);
       const k = dots[i];
-      let result: OwnerResult | null = null;
+
+      // 1) Property value + (for "Address pending" dots) the parcel address.
+      let address = k.address;
       try {
-        result = await provider.lookup({ address: k.address!, city: k.city, state: k.state, zip: k.zip });
+        const est = await resolvePropertyValue({ address: k.address, city: k.city, state: k.state, zip: k.zip, lat: k.lat, lng: k.lng });
+        if (est) {
+          if (!address && est.formattedAddress) address = est.formattedAddress;
+          await prisma.knock.update({
+            where: { id: k.id },
+            data: {
+              propertyValue: est.matched ? est.value : null,
+              propertyValueSource: est.source,
+              propertyValueAt: new Date(est.asOfDate),
+              propertyData: est as unknown as object,
+              ...(!k.address && est.formattedAddress ? { address: est.formattedAddress } : {}),
+            },
+          });
+          if (est.matched) valued++;
+        }
       } catch {
-        result = null;
+        /* value lookup failed — continue to owner lookup */
+      }
+
+      // 2) Homeowner skip-trace (needs an address).
+      let result: OwnerResult | null = null;
+      if (address) {
+        try {
+          result = await provider.lookup({ address, city: k.city, state: k.state, zip: k.zip });
+        } catch {
+          result = null;
+        }
       }
       await prisma.knock.update({
         where: { id: k.id },
@@ -49,7 +82,6 @@ export async function GET(req: Request) {
               ownerData: result as unknown as object,
               ownerSource: result.source,
               ownerLookedUpAt: new Date(),
-              // Fill only blank fields — never overwrite a rep's door capture.
               contactName: k.contactName || result.names[0] || null,
               contactPhone: k.contactPhone || result.phones[0] || null,
               contactEmail: k.contactEmail || result.emails[0] || null,
@@ -59,7 +91,7 @@ export async function GET(req: Request) {
       if (result) enriched++;
     }
 
-    return Response.json({ ok: true, provider: provider.name, processed: dots.length, enriched });
+    return Response.json({ ok: true, provider: provider.name, processed: dots.length, valued, enriched });
   } catch (err) {
     console.error("[cron:enrich-owners] failed", err);
     return new Response("Error", { status: 500 });

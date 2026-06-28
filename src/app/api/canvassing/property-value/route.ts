@@ -43,6 +43,13 @@ export async function GET(req: Request) {
         },
       })
       .catch(() => {});
+    // Backfill the address from the matched parcel ONLY when the dot has none
+    // ("Address pending") — never overwrite a known address.
+    if (resolved.formattedAddress) {
+      await prisma.knock
+        .updateMany({ where: { id: knockId, companyId: user.companyId, address: null }, data: { address: resolved.formattedAddress } })
+        .catch(() => {});
+    }
   }
 
   return NextResponse.json(resolved);

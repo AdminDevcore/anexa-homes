@@ -264,6 +264,75 @@ class AttomProvider implements PropertyValueProvider {
   }
 }
 
+// --- BatchData -------------------------------------------------------------
+// POST /api/v1/property/search -> property record incl. valuation + address +
+// characteristics. Same vendor/key as the homeowner skip-trace, so one BatchData
+// account fills the whole popup (value + address + owner name/phone/email).
+// Response shape varies by account, so parsing is defensive — verify field names
+// against your account's first live response.
+class BatchDataProvider implements PropertyValueProvider {
+  readonly name = "BatchData";
+  readonly needsAddress = true;
+  constructor(private apiKey: string) {}
+  async getEstimate(q: PropertyQuery): Promise<PropertyEstimate | null> {
+    const address = fullAddress(q);
+    if (!address) return null;
+    let json: unknown;
+    try {
+      const res = await fetch("https://api.batchdata.com/api/v1/property/search", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          searchCriteria: { query: address },
+          options: { take: 1 },
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) return null;
+      json = await res.json();
+    } catch {
+      return null;
+    }
+    const root = (json ?? {}) as Record<string, unknown>;
+    const results = (root.results ?? root.data ?? root) as Record<string, unknown>;
+    const propsArr = (results.properties ?? results.property ?? []) as unknown[];
+    const p = (Array.isArray(propsArr) ? propsArr[0] : propsArr) as Record<string, unknown> | undefined;
+    if (!p) return null;
+
+    const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+    const valuation = (p.valuation ?? p.value ?? {}) as Record<string, unknown>;
+    const value = dollarsToCents(num(valuation.estimatedValue) ?? num(valuation.value) ?? num(valuation.avm) ?? num(valuation.price));
+    const low = dollarsToCents(num(valuation.low) ?? num(valuation.estimatedValueLow));
+    const high = dollarsToCents(num(valuation.high) ?? num(valuation.estimatedValueHigh));
+    const addr = (p.address ?? {}) as Record<string, unknown>;
+    const formatted =
+      (typeof addr.formattedAddress === "string" && addr.formattedAddress) ||
+      [addr.street, addr.city, addr.state, addr.zip].filter((x) => typeof x === "string" && x).join(", ") ||
+      null;
+    const building = (p.building ?? p.structure ?? {}) as Record<string, unknown>;
+    const sale = ((p.sale ?? p.lastSale ?? {}) as Record<string, unknown>);
+    const assessment = (p.assessment ?? {}) as Record<string, unknown>;
+    if (value == null && !formatted) return null;
+    return {
+      value,
+      low,
+      high,
+      confidence: confidenceFromRange(value, low, high),
+      matched: value != null,
+      source: this.name,
+      asOfDate: todayISO(),
+      formattedAddress: formatted,
+      lastSalePrice: dollarsToCents(num(sale.price) ?? num(sale.amount)),
+      lastSaleDate: typeof sale.date === "string" ? sale.date.slice(0, 10) : null,
+      assessedValue: dollarsToCents(num(assessment.totalValue) ?? num(assessment.assessedValue)),
+      beds: num(building.bedroomCount) ?? num(building.beds) ?? null,
+      baths: num(building.bathroomCount) ?? num(building.baths) ?? null,
+      sqft: num(building.livingArea) ?? num(building.sqft) ?? null,
+      yearBuilt: num(building.yearBuilt) ?? null,
+    };
+  }
+}
+
 // --- Test fixture (E2E only, offline, clearly labeled) ---------------------
 class FixtureProvider implements PropertyValueProvider {
   readonly name = "Test Fixture";
@@ -313,9 +382,12 @@ export function getPropertyValueProvider(): PropertyValueProvider {
   if (cached) return cached;
   const which = (process.env.PROPERTY_VALUE_PROVIDER ?? "").toLowerCase();
   const key = process.env.PROPERTY_VALUE_API_KEY ?? "";
+  // BatchData reuses the skip-trace key so ONE BatchData key powers both value + owner.
+  const batchKey = key || process.env.SKIP_TRACE_API_KEY || "";
   if (which === "rentcast" && key) cached = new RentCastProvider(key);
   else if (which === "estated" && key) cached = new EstatedProvider(key);
   else if (which === "attom" && key) cached = new AttomProvider(key);
+  else if (which === "batchdata" && batchKey) cached = new BatchDataProvider(batchKey);
   else if (which === "fixture") cached = new FixtureProvider();
   else cached = new NoneProvider(); // no key / unknown → honest "unavailable"
   return cached;
