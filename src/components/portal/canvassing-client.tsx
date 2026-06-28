@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Map as LeafletMap } from "leaflet";
-import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home, Search, Move, CloudHail, Layers, Tornado } from "lucide-react";
+import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, UserSearch, Sparkles, Home, Search, Move, CloudHail, Layers, Tornado } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DISPOSITIONS, KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
@@ -27,6 +27,7 @@ import {
   deleteKnockAction,
   addKnockCommentAction,
   updateKnockContactAction,
+  lookupOwnerAction,
   convertKnockToLeadAction,
   convertKnockToAppointmentAction,
   createTerritoryAction,
@@ -938,6 +939,7 @@ export function CanvassingClient() {
       <KnockDetailDialog
         id={detailId}
         canManage={canManage}
+        ownerLookupEnabled={meta?.ownerLookupEnabled ?? false}
         reps={reps}
         onClose={() => setDetailId(null)}
         onChanged={refresh}
@@ -1193,6 +1195,26 @@ function StatPill({ label, value }: { label: string; value: number }) {
   );
 }
 
+/** Skip-trace alternates as clickable chips — tap one to drop it into a contact field. */
+function OwnerChips({ label, values, onPick }: { label: string; values: string[]; onPick: (v: string) => void }) {
+  if (!values || values.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      {values.map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onPick(v)}
+          className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] hover:border-gold/50 hover:bg-muted"
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 
 function TerritoryDialog({
   points,
@@ -1392,6 +1414,7 @@ function eventLabel(ev: KnockEventDTO): string {
 function KnockDetailDialog({
   id,
   canManage,
+  ownerLookupEnabled,
   reps,
   onClose,
   onChanged,
@@ -1399,6 +1422,7 @@ function KnockDetailDialog({
 }: {
   id: string | null;
   canManage: boolean;
+  ownerLookupEnabled: boolean;
   reps: { id: string; name: string }[];
   onClose: () => void;
   onChanged: () => void;
@@ -1418,6 +1442,7 @@ function KnockDetailDialog({
   const [comment, setComment] = React.useState("");
   const [contact, setContact] = React.useState({ contactName: "", contactPhone: "", contactEmail: "", bestTime: "" });
   const [savingContact, setSavingContact] = React.useState(false);
+  const [lookingUp, setLookingUp] = React.useState(false);
   const [apptAt, setApptAt] = React.useState("");
   const [apptRep, setApptRep] = React.useState("");
   const [bookingAppt, setBookingAppt] = React.useState(false);
@@ -1479,6 +1504,24 @@ function KnockDetailDialog({
     setSavingContact(false);
     if (!res.ok) return toast.error(res.error ?? "Failed");
     toast.success("Contact saved");
+    await refetch();
+    onChanged();
+  }
+  async function lookupOwner() {
+    if (!id) return;
+    setLookingUp(true);
+    const res = await lookupOwnerAction({ knockId: id });
+    setLookingUp(false);
+    if (!res.ok) return toast.error(res.error ?? "Lookup failed");
+    // Fill any blank field with the top match; the rep can pick alternates or edit.
+    setContact((c) => ({
+      ...c,
+      contactName: c.contactName || res.applied.contactName || "",
+      contactPhone: c.contactPhone || res.applied.contactPhone || "",
+      contactEmail: c.contactEmail || res.applied.contactEmail || "",
+    }));
+    const n = res.result.names.length, p = res.result.phones.length, e = res.result.emails.length;
+    toast.success(`Owner found via ${res.result.source} — ${n} name${n === 1 ? "" : "s"}, ${p} phone${p === 1 ? "" : "s"}, ${e} email${e === 1 ? "" : "s"}`);
     await refetch();
     onChanged();
   }
@@ -1560,13 +1603,32 @@ function KnockDetailDialog({
             )}
 
             <div className="space-y-2 rounded-lg border border-border p-3">
-              <p className="text-xs font-medium">Homeowner contact</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium">Homeowner contact</p>
+                {ownerLookupEnabled && detail?.address && (
+                  <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={lookupOwner} disabled={lookingUp}>
+                    {lookingUp ? <Loader2 className="size-3.5 animate-spin" /> : <UserSearch className="size-3.5" />}
+                    {detail?.owner ? "Re-run lookup" : "Look up owner"}
+                  </Button>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <Input placeholder="Name" value={contact.contactName} onChange={(e) => setContact((c) => ({ ...c, contactName: e.target.value }))} />
                 <Input placeholder="Phone" value={contact.contactPhone} onChange={(e) => setContact((c) => ({ ...c, contactPhone: e.target.value }))} />
                 <Input placeholder="Email" value={contact.contactEmail} onChange={(e) => setContact((c) => ({ ...c, contactEmail: e.target.value }))} />
                 <Input placeholder="Best time to reach" value={contact.bestTime} onChange={(e) => setContact((c) => ({ ...c, bestTime: e.target.value }))} />
               </div>
+
+              {/* Skip-trace alternates — click a chip to drop it into the matching field. */}
+              {detail?.owner && (
+                <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
+                  <p className="text-[11px] text-muted-foreground">From {detail.owner.source} — tap to use:</p>
+                  <OwnerChips label="Names" values={detail.owner.names} onPick={(v) => setContact((c) => ({ ...c, contactName: v }))} />
+                  <OwnerChips label="Phones" values={detail.owner.phones} onPick={(v) => setContact((c) => ({ ...c, contactPhone: v }))} />
+                  <OwnerChips label="Emails" values={detail.owner.emails} onPick={(v) => setContact((c) => ({ ...c, contactEmail: v }))} />
+                </div>
+              )}
+
               <Button size="sm" variant="outline" onClick={saveContact} disabled={savingContact}>
                 {savingContact && <Loader2 className="size-3.5 animate-spin" />} Save contact
               </Button>

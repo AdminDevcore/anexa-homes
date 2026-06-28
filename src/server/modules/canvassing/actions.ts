@@ -10,6 +10,7 @@ import { canManageAllCanvassing } from "./policies";
 import { fetchAddressesInPolygon, coordKey } from "./addresses";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { resolvePropertyValue } from "@/server/modules/property";
+import { getSkipTraceProvider, type OwnerResult } from "@/server/modules/skiptrace/provider";
 import { resolveStageForAppointment } from "@/server/modules/leads/staging";
 import { resolveOwningRepId } from "@/server/modules/leads/owning-rep";
 
@@ -231,6 +232,67 @@ export async function updateKnockContactAction(
     data: { companyId: me.companyId, knockId, type: "contact_update", authorId: me.userId, authorName: me.fullName },
   });
   return { ok: true };
+}
+
+// --- Homeowner skip-trace (BatchData etc.) ----------------------------------
+
+export type OwnerLookupResult =
+  | { ok: true; result: OwnerResult; applied: { contactName: string | null; contactPhone: string | null; contactEmail: string | null } }
+  | { ok: false; error: string };
+
+/** Look up the homeowner's name / phone / email for a house from its address via the
+ *  configured skip-trace provider. Caches the full result on the knock and auto-fills
+ *  any contact field that's still blank (never overwrites rep-entered values). */
+export async function lookupOwnerAction(input: { knockId: string; refresh?: boolean }): Promise<OwnerLookupResult> {
+  const me = await requireUser();
+  if (!can(me, "update", "Canvassing")) return fail("No access.");
+  const knock = await prisma.knock.findFirst({
+    where: { id: input.knockId, companyId: me.companyId },
+    select: {
+      id: true, repId: true, address: true, city: true, state: true, zip: true,
+      contactName: true, contactPhone: true, contactEmail: true, ownerData: true,
+    },
+  });
+  if (!knock) return fail("Knock not found.");
+  if (knock.repId && knock.repId !== me.userId && !canManageAllCanvassing(me.role)) {
+    return fail("You can only look up your own knocks.");
+  }
+  if (!knock.address) return fail("This house has no address to look up.");
+
+  const provider = getSkipTraceProvider();
+  if (provider.name === "Unavailable") {
+    return fail("Owner lookup isn't configured. Add a skip-trace provider in settings to enable it.");
+  }
+
+  // Reuse the cached result unless the rep explicitly refreshes (skip-trace is billed).
+  const cached = knock.ownerData as OwnerResult | null;
+  const result = !input.refresh && cached && (cached.names?.length || cached.phones?.length || cached.emails?.length)
+    ? cached
+    : await provider.lookup({ address: knock.address, city: knock.city, state: knock.state, zip: knock.zip });
+
+  if (!result) return fail("No homeowner match found for this address.");
+
+  // Auto-fill only blank fields; the rep can override and Save.
+  const contactName = knock.contactName || result.names[0] || null;
+  const contactPhone = knock.contactPhone || result.phones[0] || null;
+  const contactEmail = knock.contactEmail || result.emails[0] || null;
+
+  await prisma.knock.update({
+    where: { id: knock.id },
+    data: {
+      ownerData: result as unknown as object,
+      ownerSource: result.source,
+      ownerLookedUpAt: new Date(),
+      contactName,
+      contactPhone,
+      contactEmail,
+    },
+  });
+  await prisma.knockEvent.create({
+    data: { companyId: me.companyId, knockId: knock.id, type: "contact_update", authorId: me.userId, authorName: me.fullName, body: `Owner looked up via ${result.source}` },
+  });
+
+  return { ok: true, result, applied: { contactName, contactPhone, contactEmail } };
 }
 
 export async function deleteKnockAction(id: string): Promise<{ ok: boolean; error?: string }> {

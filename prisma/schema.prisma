@@ -1584,6 +1584,10 @@ model Knock {
   propertyValueSource String?
   propertyValueAt     DateTime?
   propertyData        Json? // full estimate snapshot (range, last sale, assessed, structure)
+  // Homeowner skip-trace result (BatchData etc.). Cached so we don't re-bill per click.
+  ownerSource         String? // provider label, e.g. "BatchData"
+  ownerLookedUpAt     DateTime?
+  ownerData           Json? // full result: { names[], phones[], emails[] } for the rep to pick from
   appointmentAt       DateTime? // set when converted to an appointment
   leadId              String?
   lead                Lead?            @relation("KnockLead", fields: [leadId], references: [id], onDelete: SetNull)

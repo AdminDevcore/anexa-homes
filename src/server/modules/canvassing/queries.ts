@@ -1,6 +1,7 @@
 import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { canManageAllCanvassing } from "./policies";
+import { skipTraceEnabled } from "@/server/modules/skiptrace/provider";
 
 export type KnockDTO = {
   id: string;
@@ -54,6 +55,8 @@ export type CanvassingMeta = {
   territories: TerritoryDTO[];
   reps: RepDTO[];
   stats: { today: number; knocked: number; houses: number; byDisposition: Record<string, number> };
+  // Whether a skip-trace provider (BatchData etc.) is configured → show "Look up owner".
+  ownerLookupEnabled: boolean;
 };
 
 function name(u: { firstName: string; lastName: string } | null): string | null {
@@ -173,6 +176,7 @@ export async function getCanvassingMeta(companyId: string, userId: string, role:
     territories,
     reps: reps.map((r) => ({ id: r.id, name: `${r.firstName} ${r.lastName}` })),
     stats: { today: todayKnocked, knocked, houses, byDisposition },
+    ownerLookupEnabled: skipTraceEnabled(),
   };
 }
 
@@ -515,10 +519,25 @@ export type KnockDetailDTO = {
   propertyValue: number | null; // cents
   propertyValueSource: string | null;
   propertyValueAt: string | null;
+  // Cached homeowner skip-trace result (BatchData etc.) — alternates the rep can pick from.
+  owner: { names: string[]; phones: string[]; emails: string[]; source: string } | null;
+  ownerLookedUpAt: string | null;
   appointmentAt: string | null;
   knockedAt: string;
   events: KnockEventDTO[];
 };
+
+/** Safe-parse the cached skip-trace JSON into the names/phones/emails the UI shows. */
+function ownerFromJson(json: unknown, source: string | null): KnockDetailDTO["owner"] {
+  if (!json || typeof json !== "object") return null;
+  const o = json as Record<string, unknown>;
+  const arr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const names = arr(o.names);
+  const phones = arr(o.phones);
+  const emails = arr(o.emails);
+  if (!names.length && !phones.length && !emails.length) return null;
+  return { names, phones, emails, source: (typeof o.source === "string" && o.source) || source || "Lookup" };
+}
 
 /** Full detail for one house pin: contact, notes, and the visit-history timeline. */
 export async function getKnockDetail(
@@ -562,6 +581,8 @@ export async function getKnockDetail(
     propertyValue: k.propertyValue,
     propertyValueSource: k.propertyValueSource,
     propertyValueAt: k.propertyValueAt ? k.propertyValueAt.toISOString().slice(0, 10) : null,
+    owner: ownerFromJson(k.ownerData, k.ownerSource),
+    ownerLookedUpAt: k.ownerLookedUpAt ? k.ownerLookedUpAt.toISOString().slice(0, 10) : null,
     appointmentAt: k.appointmentAt ? k.appointmentAt.toISOString() : null,
     knockedAt: k.knockedAt.toISOString(),
     events: k.events.map((e) => ({

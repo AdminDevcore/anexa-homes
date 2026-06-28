@@ -32,6 +32,9 @@ export default defineConfig({
       // provider. Clearly labeled "Test Fixture"; never used in dev/prod.
       PROPERTY_VALUE_PROVIDER: "fixture",
       PROPERTY_VALUE_API_KEY: "",
+      // Offline deterministic homeowner skip-trace for E2E (fake data, never prod).
+      SKIP_TRACE_PROVIDER: "fixture",
+      SKIP_TRACE_API_KEY: "",
     },
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
