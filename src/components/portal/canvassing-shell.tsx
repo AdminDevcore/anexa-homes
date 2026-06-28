@@ -11,7 +11,10 @@ export function CanvassingShell() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="font-display text-2xl font-semibold">Canvassing</h1>
+        <div>
+          <h1 className="font-display text-2xl font-semibold">Field Map</h1>
+          <p className="text-sm text-muted-foreground">Canvassing + storm intelligence in one map.</p>
+        </div>
       </div>
       <Tabs defaultValue="map" className="space-y-4">
         <TabsList>

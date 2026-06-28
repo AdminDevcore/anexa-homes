@@ -33,7 +33,7 @@ export const PORTAL_NAV: NavItem[] = [
   { label: "Appointments", href: "/portal/leads", icon: Users, resource: "Lead" },
   { label: "Pipeline", href: "/portal/pipeline", icon: KanbanSquare, resource: "Lead" },
   { label: "Calendar", href: "/portal/calendar", icon: CalendarDays, resource: "Project" },
-  { label: "Canvassing", href: "/portal/canvassing", icon: MapPinned, resource: "Canvassing" },
+  { label: "Field Map", href: "/portal/canvassing", icon: MapPinned, resource: "Canvassing" },
   { label: "Storm Intel", href: "/portal/storm-intelligence", icon: CloudLightning, resource: "StormIntelligence", customerHidden: true },
   { label: "Tasks", href: "/portal/tasks", icon: ListTodo, resource: "Task" },
   { label: "Chat", href: "/portal/chat", icon: MessagesSquare, resource: "Chat" },
