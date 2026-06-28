@@ -8,8 +8,11 @@ export async function GET(req: Request) {
   if (!user || !can(user, "read", "StormIntelligence")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const q = (new URL(req.url).searchParams.get("q") ?? "").trim();
+  const sp = new URL(req.url).searchParams;
+  const q = (sp.get("q") ?? "").trim();
   if (q.length < 4) return NextResponse.json({ error: "Enter a fuller address." }, { status: 400 });
-  const result = await addressCheck(user.companyId, q);
+  const radiusRaw = Number(sp.get("radius"));
+  const radius = [1, 3, 5, 10].includes(radiusRaw) ? radiusRaw : 10;
+  const result = await addressCheck(user.companyId, q, radius);
   return NextResponse.json(result);
 }

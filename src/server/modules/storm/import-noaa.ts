@@ -88,6 +88,7 @@ export async function importNoaaCsv(
       county: (row.CZ_NAME || "").trim() || null,
       state: (row.STATE || "").trim() || null,
       narrative: (row.EVENT_NARRATIVE || "").trim() || null,
+      raw: row, // original NOAA CSV row (debug panel)
     };
     await prisma.stormEvent.upsert({
       where: {

@@ -80,6 +80,7 @@ export async function importSpcCsv(
       county: (row.County || "").trim() || null,
       state: (row.State || "").trim() || null,
       narrative: (row.Comments || "").trim() || null,
+      raw: row, // original SPC CSV row (debug panel)
     };
     await prisma.stormEvent.upsert({
       where: { companyId_source_externalId: { companyId, source: "spc_reports", externalId } },

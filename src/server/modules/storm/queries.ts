@@ -10,6 +10,7 @@ import {
   type LatLng,
 } from "./geo";
 import { scoreProperty, CLUSTER_RADIUS_MI } from "./scoring";
+import { distanceConfidence, sourceLabel, type Confidence } from "./confidence";
 import { getStormConfig } from "./config";
 
 const EVENT_CAP = 2000;
@@ -195,79 +196,139 @@ export async function getStormMatches(
   });
 }
 
+export type StormReportHit = {
+  id: string;
+  source: string;
+  sourceLabel: string;
+  verified: boolean; // NOAA Storm Events = NWS-reviewed
+  type: StormType;
+  eventAt: string;
+  distanceMiles: number;
+  hailSizeIn: number | null;
+  windSpeedMph: number | null;
+  tornadoScale: string | null;
+  lat: number;
+  lng: number;
+  confidence: Confidence | null;
+  raw: unknown; // original source row (debug panel), when captured
+};
+
 export type AddressCheckResult = {
   query: string;
-  matched: boolean;
+  matched: boolean; // address geocoded
   center: { lat: number; lng: number; label: string } | null;
-  rings: { miles: number; count: number }[];
-  nearest:
-    | { type: StormType; eventAt: string; distanceMiles: number; hailSizeIn: number | null; windSpeedMph: number | null; tornadoScale: string | null }
-    | null;
+  radiusMiles: number; // selected search radius
+  rings: { miles: number; count: number }[]; // counts across 1/3/5/10
+  hasReport: boolean; // any report (or radar) within the selected radius
+  confidence: Confidence | null;
   dateOfLoss: string | null;
-  score: number;
-  maxHailIn: number | null;
+  hailSizeIn: number | null;
   maxWindMph: number | null;
+  swathHailIn: number | null; // radar MESH at the exact address (highest confidence)
+  primary: StormReportHit | null; // chosen date-of-loss report
+  events: StormReportHit[]; // all reports within the selected radius (sorted)
+  score: number;
 };
 
 const RING_MILES = [1, 3, 5, 10];
 
-/** Geocode an address and summarize nearby storms (1/3/5/10 mi rings, nearest
- *  event, possible date of loss, score). */
-export async function addressCheck(companyId: string, query: string): Promise<AddressCheckResult> {
+/**
+ * Geocode an address and summarize nearby storms by distance (Haversine): radar
+ * hail at the exact point, reports within the selected radius (1/3/5/10mi),
+ * confidence level, and a clear "no report" signal. Date-of-loss prioritizes the
+ * most recent nearby report (SPC for recent, NOAA for older).
+ */
+export async function addressCheck(
+  companyId: string,
+  query: string,
+  radiusMiles = 10,
+): Promise<AddressCheckResult> {
   const empty: AddressCheckResult = {
     query,
     matched: false,
     center: null,
+    radiusMiles,
     rings: RING_MILES.map((m) => ({ miles: m, count: 0 })),
-    nearest: null,
+    hasReport: false,
+    confidence: null,
     dateOfLoss: null,
-    score: 0,
-    maxHailIn: null,
+    hailSizeIn: null,
     maxWindMph: null,
+    swathHailIn: null,
+    primary: null,
+    events: [],
+    score: 0,
   };
   const geo = await geocode(query);
   if (!geo) return empty;
   const center = { lat: geo.lat, lng: geo.lng };
 
-  const box = boundingBox(center, 10);
-  const events = await prisma.stormEvent.findMany({
+  // Radar swath at the exact point — most precise per-address hail.
+  const swaths = await prisma.stormSwath.findMany({
     where: {
-      companyId,
-      lat: { gte: box.minLat, lte: box.maxLat },
-      lng: { gte: box.minLng, lte: box.maxLng },
+      bboxMinLat: { lte: center.lat },
+      bboxMaxLat: { gte: center.lat },
+      bboxMinLng: { lte: center.lng },
+      bboxMaxLng: { gte: center.lng },
     },
-    orderBy: { eventAt: "desc" },
+    orderBy: { hailMinIn: "desc" },
+    take: 300,
   });
+  let swathHailIn: number | null = null;
+  for (const s of swaths) {
+    if (pointInPolygonRings(center.lat, center.lng, s.rings as [number, number][][])) {
+      if (swathHailIn == null || s.hailMinIn > swathHailIn) swathHailIn = s.hailMinIn;
+    }
+  }
 
-  const within = events
+  // Point reports (SPC + NOAA) within 10mi, then filter to the selected radius.
+  const box = boundingBox(center, 10);
+  const rows = await prisma.stormEvent.findMany({
+    where: { companyId, lat: { gte: box.minLat, lte: box.maxLat }, lng: { gte: box.minLng, lte: box.maxLng } },
+  });
+  const within10 = rows
     .map((e) => ({ e, d: haversineMiles(center, { lat: e.lat, lng: e.lng }) }))
     .filter(({ d }) => d <= 10);
 
-  const rings = RING_MILES.map((miles) => ({ miles, count: within.filter(({ d }) => d <= miles).length }));
-  let nearest: AddressCheckResult["nearest"] = null;
-  let maxHail = 0;
-  let maxWind = 0;
-  let mostRecent: Date | null = null;
-  let nearestDist = Infinity;
-  for (const { e, d } of within) {
-    if (d < nearestDist) {
-      nearestDist = d;
-      nearest = {
-        type: e.type,
-        eventAt: e.eventAt.toISOString(),
-        distanceMiles: Number(d.toFixed(2)),
-        hailSizeIn: e.hailSizeIn,
-        windSpeedMph: e.windSpeedMph,
-        tornadoScale: e.tornadoScale,
-      };
-    }
-    if ((e.hailSizeIn ?? 0) > maxHail) maxHail = e.hailSizeIn ?? 0;
-    if ((e.windSpeedMph ?? 0) > maxWind) maxWind = e.windSpeedMph ?? 0;
-    if (!mostRecent || e.eventAt > mostRecent) mostRecent = e.eventAt;
-  }
-  const reports5 = within.filter(({ d }) => d <= CLUSTER_RADIUS_MI).length;
+  const rings = RING_MILES.map((miles) => ({ miles, count: within10.filter(({ d }) => d <= miles).length }));
+
+  const toHit = ({ e, d }: { e: (typeof rows)[number]; d: number }): StormReportHit => ({
+    id: e.id,
+    source: e.source,
+    sourceLabel: sourceLabel(e.source),
+    verified: e.source === "noaa_storm_events",
+    type: e.type,
+    eventAt: e.eventAt.toISOString(),
+    distanceMiles: Number(d.toFixed(2)),
+    hailSizeIn: e.hailSizeIn,
+    windSpeedMph: e.windSpeedMph,
+    tornadoScale: e.tornadoScale,
+    lat: e.lat,
+    lng: e.lng,
+    confidence: distanceConfidence(d),
+    raw: e.raw ?? null,
+  });
+
+  const inRadius = within10.filter(({ d }) => d <= radiusMiles);
+  const events = inRadius.map(toHit).sort((a, b) => {
+    // Date of loss: most recent nearby first; SPC (recent) outranks NOAA at the
+    // same time; then closest.
+    if (a.eventAt !== b.eventAt) return a.eventAt < b.eventAt ? 1 : -1;
+    if (a.source !== b.source) return a.source === "spc_reports" ? -1 : 1;
+    return a.distanceMiles - b.distanceMiles;
+  });
+
+  const primary = events[0] ?? null;
+  const maxHail = inRadius.reduce((m, { e }) => Math.max(m, e.hailSizeIn ?? 0), 0);
+  const maxWind = inRadius.reduce((m, { e }) => Math.max(m, e.windSpeedMph ?? 0), 0);
+  const reports5 = within10.filter(({ d }) => d <= CLUSTER_RADIUS_MI).length;
   const score = scoreProperty(
-    { maxHailIn: maxHail, maxWindMph: maxWind, mostRecentEventAt: mostRecent, reportsWithin5mi: reports5 },
+    {
+      maxHailIn: Math.max(swathHailIn ?? 0, maxHail),
+      maxWindMph: maxWind,
+      mostRecentEventAt: primary?.eventAt ?? null,
+      reportsWithin5mi: reports5,
+    },
     new Date(),
   );
 
@@ -275,12 +336,17 @@ export async function addressCheck(companyId: string, query: string): Promise<Ad
     query,
     matched: true,
     center: { lat: center.lat, lng: center.lng, label: geo.displayName },
+    radiusMiles,
     rings,
-    nearest,
-    dateOfLoss: mostRecent?.toISOString() ?? null,
+    hasReport: events.length > 0 || swathHailIn != null,
+    confidence: swathHailIn != null ? "High" : primary?.confidence ?? null,
+    dateOfLoss: primary?.eventAt ?? null,
+    hailSizeIn: swathHailIn ?? primary?.hailSizeIn ?? (maxHail || null),
+    maxWindMph: maxWind ? Math.round(maxWind) : primary?.windSpeedMph ?? null,
+    swathHailIn,
+    primary,
+    events,
     score,
-    maxHailIn: maxHail || null,
-    maxWindMph: maxWind ? Math.round(maxWind) : null,
   };
 }
 
