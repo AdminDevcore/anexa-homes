@@ -139,58 +139,88 @@ out geom ${cap};`;
   }
   if (!data?.elements) return [];
 
-  // Separate explicit addressed doors (one per unit — what canvassers knock)
-  // from bare building footprints. Addressed doors win; a footprint dot is kept
-  // only when no addressed door already represents that house, which removes the
-  // duplicate "two dots per home" clutter.
-  const seen = new Set<string>();
-  const doors: AddressPoint[] = [];
-  const footprints: AddressPoint[] = [];
+  // Roof-centered placement: prefer building-footprint centroids (the dot lands
+  // on the house), and use address NODES only for their precise address — snapped
+  // to the building that contains them — or as a fallback dot where there's no
+  // building. OSM `addr:housenumber` nodes are often dropped at the street/
+  // driveway, so using them for placement put dots off the roof. Multi-unit
+  // buildings (>= 2 addresses) keep per-unit door dots.
+  type P = { lat: number; lng: number; addr: string | null };
+  const buildings: (P & { matched: P[] })[] = [];
+  const nodes: P[] = [];
   for (const el of data.elements) {
     const tags = el.tags;
     const building = tags?.building;
     if (building && SKIP_BUILDINGS.has(building)) continue;
     const addr = fmtAddress(tags);
-    if (!addr && !building) continue;
-
-    let lat: number | undefined;
-    let lng: number | undefined;
     if (el.type === "way" && el.geometry && el.geometry.length >= 3) {
       const p = interiorPoint(el.geometry.map((g) => ({ lat: g.lat, lng: g.lon })));
-      lat = p.lat; lng = p.lng;
-    } else {
-      lat = el.lat ?? el.center?.lat;
-      lng = el.lon ?? el.center?.lon ?? el.center?.lng;
+      buildings.push({ lat: p.lat, lng: p.lng, addr, matched: [] });
+    } else if (addr) {
+      const lat = el.lat ?? el.center?.lat;
+      const lng = el.lon ?? el.center?.lon ?? el.center?.lng;
+      if (typeof lat === "number" && typeof lng === "number") nodes.push({ lat, lng, addr });
     }
-    if (typeof lat !== "number" || typeof lng !== "number") continue;
-
-    const key = coordKey(lat, lng);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const pt = { lat, lng, address: addr ?? "Address pending" };
-    if (addr && el.type === "node") doors.push(pt);
-    else footprints.push(pt);
   }
 
-  // Index addressed doors on a ~13m grid; drop any footprint dot that sits on
-  // (or right next to) an addressed door — same house, keep the better-placed one.
-  const CELL = 0.00012;
-  const cell = (lat: number, lng: number) => `${Math.round(lat / CELL)},${Math.round(lng / CELL)}`;
-  const occupied = new Set(doors.map((p) => cell(p.lat, p.lng)));
-  const nearDoor = (lat: number, lng: number) => {
-    const cy = Math.round(lat / CELL), cx = Math.round(lng / CELL);
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      if (occupied.has(`${cy + dy},${cx + dx}`)) return true;
+  // Grid-index building centroids; snap each address node to the nearest one
+  // within ~38m so the dot sits on the roof while keeping the node's address.
+  const CELL = 0.0004;
+  const cellKey = (lat: number, lng: number) => `${Math.round(lat / CELL)},${Math.round(lng / CELL)}`;
+  const grid = new Map<string, number[]>();
+  buildings.forEach((b, i) => {
+    const k = cellKey(b.lat, b.lng);
+    const arr = grid.get(k);
+    if (arr) arr.push(i);
+    else grid.set(k, [i]);
+  });
+  const MAX_SNAP = 0.00035; // ~38m
+  const leftover: P[] = [];
+  for (const n of nodes) {
+    const cy = Math.round(n.lat / CELL);
+    const cx = Math.round(n.lng / CELL);
+    let best = -1;
+    let bestD = Infinity;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (const i of grid.get(`${cy + dy},${cx + dx}`) ?? []) {
+          const b = buildings[i];
+          const d = (b.lat - n.lat) ** 2 + (b.lng - n.lng) ** 2;
+          if (d < bestD) { bestD = d; best = i; }
+        }
+      }
     }
-    return false;
-  };
+    if (best >= 0 && Math.sqrt(bestD) <= MAX_SNAP) {
+      const b = buildings[best];
+      b.matched.push(n);
+      if (!b.addr) b.addr = n.addr;
+    } else {
+      leftover.push(n);
+    }
+  }
 
   const out: AddressPoint[] = [];
-  for (const p of doors) { out.push(p); if (out.length >= cap) return out; }
-  for (const p of footprints) {
-    if (nearDoor(p.lat, p.lng)) continue;
-    out.push(p);
+  const seen = new Set<string>();
+  const push = (lat: number, lng: number, addr: string | null) => {
+    const k = coordKey(lat, lng);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ lat, lng, address: addr ?? "Address pending" });
+  };
+  for (const b of buildings) {
+    if (out.length >= cap) return out;
+    if (b.matched.length >= 2) {
+      for (const u of b.matched) {
+        if (out.length >= cap) return out;
+        push(u.lat, u.lng, u.addr); // multi-unit: keep each unit's door dot
+      }
+    } else {
+      push(b.lat, b.lng, b.addr); // single house: dot on the roof centroid
+    }
+  }
+  for (const n of leftover) {
     if (out.length >= cap) break;
+    push(n.lat, n.lng, n.addr);
   }
   return out;
 }

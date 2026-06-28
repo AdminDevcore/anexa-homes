@@ -46,10 +46,17 @@ export function HouseStormInfo({ lat, lng }: { lat: number; lng: number }) {
               score {data.score}
             </span>
           </div>
-          {data.hailSizeIn != null ? (
+          {data.swathHailIn != null ? (
             <div>
-              Hail up to <b>{data.hailSizeIn.toFixed(2)}″</b>
-              {data.swathHailIn != null ? <span className="text-muted-foreground"> · radar</span> : null}
+              Hail <b>{data.swathHailIn.toFixed(2)}″</b>{" "}
+              <span className="text-muted-foreground">· radar at this address</span>
+            </div>
+          ) : data.maxHailIn != null ? (
+            <div>
+              Hail up to <b>{data.maxHailIn.toFixed(2)}″</b>{" "}
+              <span className="text-muted-foreground">
+                · nearby{data.nearest ? ` (${data.nearest.distanceMiles} mi away)` : ""}
+              </span>
             </div>
           ) : null}
           {data.maxWindMph != null ? <div>Wind up to {data.maxWindMph} mph</div> : null}
