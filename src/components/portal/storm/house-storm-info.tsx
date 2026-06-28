@@ -77,6 +77,13 @@ export function HouseStormInfo({ lat, lng }: { lat: number; lng: number }) {
           {data.dateOfLoss ? (
             <div>
               Date of loss: <b>{fmtDate(data.dateOfLoss)}</b>
+              <span className="text-muted-foreground">
+                {data.dateOfLossSource === "radar"
+                  ? " · radar at this address"
+                  : data.dateOfLossSource === "reports"
+                    ? " · nearest report"
+                    : ""}
+              </span>
             </div>
           ) : null}
 

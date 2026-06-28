@@ -409,6 +409,10 @@ export type StormAtPoint = {
   hailSizeIn: number | null; // best estimate (radar swath if available, else max nearby event)
   swathHailIn: number | null; // radar MESH tier the exact point sits inside (most precise)
   dateOfLoss: string | null;
+  // Where dateOfLoss came from: "radar" (a hail swath on this address — most precise)
+  // or "reports" (the most recent nearby ground report). Lets the UI explain a
+  // date of loss that differs from the listed point reports.
+  dateOfLossSource: "radar" | "reports" | null;
   maxHailIn: number | null;
   maxWindMph: number | null;
   eventCount: number;
@@ -524,6 +528,7 @@ export async function stormAtPoint(companyId: string, lat: number, lng: number):
     hailSizeIn: bestHail || null,
     swathHailIn,
     dateOfLoss: dateOfLoss ? dateOfLoss.toISOString() : null,
+    dateOfLossSource: dateOfLoss ? (swathDate ? "radar" : "reports") : null,
     maxHailIn: maxHail || null,
     maxWindMph: maxWind ? Math.round(maxWind) : null,
     eventCount: count,
