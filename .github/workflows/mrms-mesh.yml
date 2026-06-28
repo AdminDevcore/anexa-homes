@@ -1,0 +1,30 @@
+name: MRMS hail swaths
+
+# Daily free radar hail-swath pipeline: pull NOAA MRMS MESH (daily-max), polygonize
+# by hail size, and POST GeoJSON to the Anexa ingest endpoint. $0 on GitHub Actions.
+on:
+  schedule:
+    - cron: "30 11 * * *" # 11:30 UTC daily (after the prior UTC day completes)
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "YYYYMMDD to backfill (optional; defaults to yesterday UTC)"
+        required: false
+
+jobs:
+  mrms:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        # rasterio manylinux wheels bundle GDAL — no apt needed.
+        run: pip install -r worker/mrms/requirements.txt
+      - name: Fetch + ingest MRMS MESH
+        env:
+          INGEST_URL: ${{ secrets.STORM_INGEST_URL }}
+          CRON_SECRET: ${{ secrets.STORM_CRON_SECRET }}
+          DATE: ${{ github.event.inputs.date }}
+        run: python worker/mrms/fetch_mesh.py

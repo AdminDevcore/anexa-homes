@@ -320,3 +320,47 @@ export async function getStormZones(companyId: string): Promise<StormZoneDTO[]> 
 export async function defaultStormCenter(companyId: string) {
   return getStormConfig(companyId);
 }
+
+export type StormSwathDTO = {
+  id: string;
+  hailMinIn: number;
+  eventDate: string;
+  rings: [number, number][][];
+};
+
+/** Radar-derived MRMS hail swaths overlapping the region within a date window. */
+export async function getStormSwaths(filters: {
+  from?: Date;
+  to?: Date;
+  center?: LatLng;
+  radiusMiles?: number;
+}): Promise<StormSwathDTO[]> {
+  const center = filters.center ?? DALLAS;
+  const radius = filters.radiusMiles ?? DEFAULT_RADIUS_MILES;
+  const box = boundingBox(center, radius);
+
+  const where: Prisma.StormSwathWhereInput = {
+    // bbox of the swath overlaps the search box
+    bboxMinLat: { lte: box.maxLat },
+    bboxMaxLat: { gte: box.minLat },
+    bboxMinLng: { lte: box.maxLng },
+    bboxMaxLng: { gte: box.minLng },
+  };
+  if (filters.from || filters.to) {
+    where.eventDate = {};
+    if (filters.from) where.eventDate.gte = filters.from;
+    if (filters.to) where.eventDate.lte = filters.to;
+  }
+
+  const swaths = await prisma.stormSwath.findMany({
+    where,
+    orderBy: { eventDate: "desc" },
+    take: 4000,
+  });
+  return swaths.map((s) => ({
+    id: s.id,
+    hailMinIn: s.hailMinIn,
+    eventDate: s.eventDate.toISOString(),
+    rings: s.rings as [number, number][][],
+  }));
+}

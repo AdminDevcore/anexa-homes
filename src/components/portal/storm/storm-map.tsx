@@ -63,6 +63,13 @@ export type StormWarning = {
   rings: [number, number][][];
 };
 
+export type RadarSwath = {
+  id: string;
+  hailMinIn: number;
+  eventDate: string;
+  rings: [number, number][][];
+};
+
 export function StormMap({
   events,
   center,
@@ -70,6 +77,7 @@ export function StormMap({
   zonePreview,
   showSwaths = true,
   warnings = [],
+  radarSwaths = [],
   onMapCenter,
 }: {
   events: StormEventDTO[];
@@ -78,6 +86,7 @@ export function StormMap({
   zonePreview?: ZonePreview | null;
   showSwaths?: boolean;
   warnings?: StormWarning[];
+  radarSwaths?: RadarSwath[];
   onMapCenter?: (lat: number, lng: number) => void;
 }) {
   const hail = events.filter((e) => e.type === "hail");
@@ -117,6 +126,26 @@ export function StormMap({
               />
             ))
           : null}
+
+        {/* Radar hail swaths (MRMS MESH) — true measured footprints, colored by size. */}
+        {radarSwaths.map((s) => (
+          <Polygon
+            key={`rs-${s.id}`}
+            positions={s.rings}
+            pathOptions={{
+              stroke: false,
+              fillColor: hailColor(s.hailMinIn),
+              fillOpacity: 0.32,
+            }}
+          >
+            <Popup>
+              <div className="text-xs">
+                <div className="font-semibold">Radar hail ≥ {s.hailMinIn.toFixed(2)}″</div>
+                <div className="text-muted-foreground">{fmtDate(s.eventDate)} · MRMS MESH</div>
+              </div>
+            </Popup>
+          </Polygon>
+        ))}
 
         {/* NWS storm-warning footprints (severe t-storm / tornado) */}
         {warnings.map((w) => (

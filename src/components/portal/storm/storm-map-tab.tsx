@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createStormZoneAction } from "@/server/modules/storm/actions";
-import { TYPE_COLOR, type ZonePreview, type StormWarning } from "./storm-map";
+import { TYPE_COLOR, type ZonePreview, type StormWarning, type RadarSwath } from "./storm-map";
 import type { StormMeta } from "./types";
 
 const StormMap = dynamic(() => import("./storm-map").then((m) => m.StormMap), {
@@ -58,6 +58,7 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
   const [mapCenter, setMapCenter] = React.useState(meta.center);
   const [showSwaths, setShowSwaths] = React.useState(true);
   const [showWarnings, setShowWarnings] = React.useState(false);
+  const [showRadar, setShowRadar] = React.useState(true);
 
   // Create-zone dialog state.
   const [zoneOpen, setZoneOpen] = React.useState(false);
@@ -103,6 +104,18 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
     staleTime: 5 * 60_000,
   });
   const warnings = showWarnings ? wdata?.warnings ?? [] : [];
+
+  const { data: rdata } = useQuery<{ swaths: RadarSwath[] }>({
+    queryKey: ["storm-swaths", from, to],
+    queryFn: async () => {
+      const res = await fetch(`/api/storm/swaths?${wparams.toString()}`);
+      if (!res.ok) return { swaths: [] };
+      return res.json();
+    },
+    enabled: showRadar,
+    staleTime: 5 * 60_000,
+  });
+  const radarSwaths = showRadar ? rdata?.swaths ?? [] : [];
 
   function toggleType(t: StormType) {
     setTypes((prev) => {
@@ -190,6 +203,16 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
         <div className="ml-auto flex items-center gap-3">
           <button
             type="button"
+            onClick={() => setShowRadar((s) => !s)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors ${
+              showRadar ? "border-transparent bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+            title="Toggle radar hail swaths (MRMS MESH)"
+          >
+            <Layers className="size-4" /> Radar
+          </button>
+          <button
+            type="button"
             onClick={() => setShowSwaths((s) => !s)}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm font-medium transition-colors ${
               showSwaths ? "border-transparent bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"
@@ -226,6 +249,7 @@ export function StormMapTab({ meta }: { meta: StormMeta }) {
         zonePreview={zonePreview}
         showSwaths={showSwaths}
         warnings={warnings}
+        radarSwaths={radarSwaths}
         onMapCenter={(lat, lng) => setMapCenter({ lat, lng })}
       />
 

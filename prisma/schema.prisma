@@ -2340,3 +2340,24 @@ model PropertyStormMatch {
   @@index([companyId, score])
   @@map("property_storm_matches")
 }
+
+// Radar-derived hail swath polygons (NOAA MRMS MESH daily-max). Universal radar
+// data — NOT tenant-scoped (same for everyone), like PropertyValue. One row per
+// polygon feature; `rings` holds [lat,lng] coords ready for Leaflet. A bbox is
+// stored for cheap region prefiltering.
+model StormSwath {
+  id         String   @id @default(uuid())
+  source     String   @default("mrms_mesh")
+  eventDate  DateTime // UTC day of the daily-max swath
+  hailMinIn  Float // size-tier lower bound, inches
+  rings      Json // [ [ [lat,lng], ... ] (outer), [hole], ... ]
+  bboxMinLat Float
+  bboxMinLng Float
+  bboxMaxLat Float
+  bboxMaxLng Float
+  createdAt  DateTime @default(now())
+
+  @@index([eventDate])
+  @@index([bboxMinLat, bboxMaxLat])
+  @@map("storm_swaths")
+}
