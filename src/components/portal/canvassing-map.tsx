@@ -3,10 +3,31 @@
 import "leaflet/dist/leaflet.css";
 import * as React from "react";
 import L from "leaflet";
-import { MapContainer, TileLayer, Marker, Polygon, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polygon, CircleMarker, Popup, useMap } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
 import { dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { KnockDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
+import type { StormSwathDTO, StormEventDTO } from "@/server/modules/storm/queries";
+import type { StormWarning } from "@/components/portal/storm/storm-map";
+
+// Hail-size color scale (matches the Storm Intelligence map).
+const HAIL_TIERS: [number, string][] = [
+  [2.5, "#d946ef"],
+  [2, "#ef4444"],
+  [1.5, "#f97316"],
+  [1, "#eab308"],
+  [0.5, "#22c55e"],
+];
+function hailColor(inch: number | null | undefined): string {
+  const h = inch ?? 0;
+  for (const [min, c] of HAIL_TIERS) if (h >= min) return c;
+  return "#3b82f6";
+}
+function stormEventColor(e: { type: string; hailSizeIn: number | null }): string {
+  if (e.type === "hail") return hailColor(e.hailSizeIn);
+  if (e.type === "wind") return "#14b8a6";
+  return "#ef4444";
+}
 
 export type Basemap = "satellite" | "street";
 
@@ -190,6 +211,10 @@ export type CanvassingMapProps = {
   zips?: ZipFeature[];
   showZips?: boolean;
   onZipClick?: (zcta: string, ring: LatLng[]) => void;
+  // Storm overlay layers (fusion with Storm Intelligence).
+  radarSwaths?: StormSwathDTO[];
+  stormEvents?: StormEventDTO[];
+  stormWarnings?: StormWarning[];
   // Pulsing highlight for the address a rep just searched for.
   searchPin?: LatLng | null;
   // Drag-to-reposition: the id currently in "move" mode (knock id, or `deal-<id>`)
@@ -215,6 +240,9 @@ export function CanvassingMap({
   zips,
   showZips,
   onZipClick,
+  radarSwaths,
+  stormEvents,
+  stormWarnings,
   searchPin,
   movingId,
   onMovePin,
@@ -240,6 +268,40 @@ export function CanvassingMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
       )}
+
+      {/* Storm overlays (fusion) — vector layers sit in the overlay pane, beneath
+          the knock/deal markers (marker pane), so pins stay clickable on top. */}
+      {(radarSwaths ?? []).map((s) => (
+        <Polygon
+          key={`rs-${s.id}`}
+          positions={s.rings}
+          pathOptions={{ stroke: false, fillColor: hailColor(s.hailMinIn), fillOpacity: 0.3 }}
+        />
+      ))}
+      {(stormWarnings ?? []).map((w) => (
+        <Polygon
+          key={`wn-${w.id}`}
+          positions={w.rings}
+          pathOptions={{ color: w.color, weight: 1, fillColor: w.color, fillOpacity: 0.05, dashArray: "4 4" }}
+        />
+      ))}
+      {(stormEvents ?? []).map((e) => (
+        <CircleMarker
+          key={`se-${e.id}`}
+          center={[e.lat, e.lng]}
+          radius={e.type === "hail" ? 4 + Math.min(10, (e.hailSizeIn ?? 0.5) * 4) : 5}
+          pathOptions={{ color: stormEventColor(e), fillColor: stormEventColor(e), fillOpacity: 0.5, weight: 1 }}
+        >
+          <Popup>
+            <div className="space-y-0.5 text-xs">
+              <div className="font-semibold capitalize">{e.type}</div>
+              {e.hailSizeIn != null ? <div>Hail {e.hailSizeIn.toFixed(2)}″</div> : null}
+              {e.windSpeedMph != null ? <div>Wind {e.windSpeedMph} mph</div> : null}
+              <div className="text-muted-foreground">{new Date(e.eventAt).toLocaleDateString()}</div>
+            </div>
+          </Popup>
+        </CircleMarker>
+      ))}
 
       <MapController onReady={onMapReady} onMapClick={onMapClick} onViewport={onViewport} />
 

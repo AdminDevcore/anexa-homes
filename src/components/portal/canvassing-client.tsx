@@ -8,13 +8,15 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Map as LeafletMap } from "leaflet";
-import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home, Search, Move } from "lucide-react";
+import { Crosshair, Pencil, MapPin, Map, Check, X, Trash2, Loader2, UserPlus, Sparkles, Home, Search, Move, CloudHail, Layers, Tornado } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DISPOSITIONS, KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
 import type { Viewport, ZipFeature } from "./canvassing-map";
 import { DateRangeFilter, resolveRange, type RangePreset } from "./canvassing-filters";
 import { HouseStormInfo } from "@/components/portal/storm/house-storm-info";
+import type { StormSwathDTO, StormEventDTO } from "@/server/modules/storm/queries";
+import type { StormWarning } from "@/components/portal/storm/storm-map";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -86,6 +88,10 @@ export function CanvassingClient() {
   // ZIP boundaries are shown by default (the map is "divided into ZIP zones");
   // the "ZIP codes" button can still hide them. Only loads at city zoom (>=9).
   const [showZips, setShowZips] = React.useState(true);
+  // Storm overlay layers (fusion with Storm Intelligence). Radar on by default.
+  const [showRadar, setShowRadar] = React.useState(true);
+  const [showStormReports, setShowStormReports] = React.useState(false);
+  const [showStormWarnings, setShowStormWarnings] = React.useState(false);
 
   // Pulsing highlight dropped on the address a rep searched for. searchTarget is
   // the raw geocoded point we try to snap to the nearest real house dot once dots load.
@@ -192,6 +198,40 @@ export function CanvassingClient() {
   });
   const zips = React.useMemo(() => (showZips && zipsZoomOK ? zipData?.zips ?? [] : []), [showZips, zipsZoomOK, zipData]);
   const zipsTooBig = !!(showZips && zipsZoomOK && zipData?.tooBig);
+
+  // Storm overlay layers (region-wide; storm data is Dallas-bounded so one fetch).
+  const { data: radarData } = useQuery<{ swaths: StormSwathDTO[] }>({
+    queryKey: ["cv-storm-swaths"],
+    queryFn: async () => {
+      const r = await fetch("/api/storm/swaths");
+      return r.ok ? r.json() : { swaths: [] };
+    },
+    enabled: showRadar,
+    staleTime: 5 * 60_000,
+  });
+  const radarSwaths = showRadar ? radarData?.swaths ?? [] : [];
+
+  const { data: stormEventData } = useQuery<{ events: StormEventDTO[] }>({
+    queryKey: ["cv-storm-events"],
+    queryFn: async () => {
+      const r = await fetch("/api/storm/events");
+      return r.ok ? r.json() : { events: [] };
+    },
+    enabled: showStormReports,
+    staleTime: 5 * 60_000,
+  });
+  const stormEvents = showStormReports ? stormEventData?.events ?? [] : [];
+
+  const { data: stormWarnData } = useQuery<{ warnings: StormWarning[] }>({
+    queryKey: ["cv-storm-warnings"],
+    queryFn: async () => {
+      const r = await fetch("/api/storm/warnings");
+      return r.ok ? r.json() : { warnings: [] };
+    },
+    enabled: showStormWarnings,
+    staleTime: 5 * 60_000,
+  });
+  const stormWarnings = showStormWarnings ? stormWarnData?.warnings ?? [] : [];
 
   // Managers can click a ZIP outline to turn the whole ZIP into a territory.
   function onZipClick(zcta: string, ring: LatLng[]) {
@@ -652,6 +692,33 @@ export function CanvassingClient() {
           >
             <Map className="size-4" /> ZIP codes
           </Button>
+          <Button
+            variant={showRadar ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowRadar((v) => !v)}
+            className="gap-1.5"
+            title="Radar hail swaths (MRMS) under the houses"
+          >
+            <CloudHail className="size-4" /> Hail
+          </Button>
+          <Button
+            variant={showStormReports ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowStormReports((v) => !v)}
+            className="gap-1.5"
+            title="Storm reports (hail/wind/tornado points)"
+          >
+            <Layers className="size-4" /> Reports
+          </Button>
+          <Button
+            variant={showStormWarnings ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowStormWarnings((v) => !v)}
+            className="gap-1.5"
+            title="NWS severe-storm warning footprints"
+          >
+            <Tornado className="size-4" /> Warnings
+          </Button>
           <Button variant={mode === "knock" ? "default" : "outline"} size="sm" onClick={() => setMode("knock")} className="gap-1.5">
             <MapPin className="size-4" /> Knock
           </Button>
@@ -799,6 +866,9 @@ export function CanvassingClient() {
           zips={zips}
           showZips={showZips}
           onZipClick={canManage ? onZipClick : undefined}
+          radarSwaths={radarSwaths}
+          stormEvents={stormEvents}
+          stormWarnings={stormWarnings}
           searchPin={searchPin}
           movingId={movingId}
           onMovePin={handleMovePin}
