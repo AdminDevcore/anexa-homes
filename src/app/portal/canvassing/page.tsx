@@ -8,5 +8,5 @@ export const metadata = { title: "Field Map" };
 export default async function CanvassingPage() {
   const user = await requireUser("/portal/canvassing");
   if (!can(user, "read", "Canvassing")) redirect("/portal/dashboard");
-  return <CanvassingShell />;
+  return <CanvassingShell canStorm={can(user, "read", "StormIntelligence")} />;
 }

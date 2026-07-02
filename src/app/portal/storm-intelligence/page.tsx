@@ -1,12 +1,8 @@
 import { redirect } from "next/navigation";
-import { requireUser } from "@/server/auth/session";
-import { can } from "@/server/rbac/guards";
-import { StormIntelligenceShell } from "@/components/portal/storm/storm-intelligence-shell";
 
-export const metadata = { title: "Storm Intelligence" };
-
-export default async function StormIntelligencePage() {
-  const user = await requireUser("/portal/storm-intelligence");
-  if (!can(user, "read", "StormIntelligence")) redirect("/portal/dashboard");
-  return <StormIntelligenceShell />;
+// Storm Intelligence was merged into the Field Map (its tools are tabs there:
+// Storm leads / Address checker / Storm zones). Old links/bookmarks land there.
+// The /export and /pdf sub-routes still work independently.
+export default function StormIntelligencePage() {
+  redirect("/portal/canvassing");
 }

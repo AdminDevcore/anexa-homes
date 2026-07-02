@@ -11,7 +11,6 @@ import {
   ListTodo,
   MessagesSquare,
   MapPinned,
-  CloudLightning,
   CalendarDays,
   Calculator,
   GraduationCap,
@@ -34,7 +33,7 @@ export const PORTAL_NAV: NavItem[] = [
   { label: "Pipeline", href: "/portal/pipeline", icon: KanbanSquare, resource: "Lead" },
   { label: "Calendar", href: "/portal/calendar", icon: CalendarDays, resource: "Project" },
   { label: "Field Map", href: "/portal/canvassing", icon: MapPinned, resource: "Canvassing" },
-  { label: "Storm Intel", href: "/portal/storm-intelligence", icon: CloudLightning, resource: "StormIntelligence", customerHidden: true },
+  // Storm Intel is folded into the Field Map (Storm leads / Address checker / Zones tabs).
   { label: "Tasks", href: "/portal/tasks", icon: ListTodo, resource: "Task" },
   { label: "Chat", href: "/portal/chat", icon: MessagesSquare, resource: "Chat" },
   { label: "Documents", href: "/portal/documents", icon: FileSignature, resource: "Document" },
