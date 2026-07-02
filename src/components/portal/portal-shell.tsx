@@ -70,8 +70,8 @@ export function PortalShell({
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
               active
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                ? "bg-gold text-white shadow-sm"
+                : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
             )}
           >
             <item.icon className="size-[18px] shrink-0" />
@@ -95,8 +95,8 @@ export function PortalShell({
   return (
     <div className="portal-root flex min-h-screen bg-muted/30">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-border bg-card lg:flex">
-        <div className="flex h-16 items-center border-b border-border px-5">
+      <aside className="dark fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-white/10 bg-[#0c0c0e] text-foreground lg:flex">
+        <div className="flex h-16 items-center border-b border-white/10 px-5">
           <Link href="/portal/dashboard" className="group inline-flex items-center">
             <div className="flex items-center gap-2">
               {branding.logoUrl ? (
@@ -108,9 +108,9 @@ export function PortalShell({
                   </span>
                 </>
               ) : (
-                // Default brand: full Anexa lockup (mark + wordmark), dark for the light sidebar.
+                // Default brand: full Anexa lockup (mark + wordmark) — white, for the dark sidebar.
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src="/anexa-lockup-dark.png" alt={branding.companyName} className="h-11 w-auto" />
+                <img src="/anexa-lockup.png" alt={branding.companyName} className="h-11 w-auto" />
               )}
             </div>
           </Link>
@@ -135,7 +135,7 @@ export function PortalShell({
           scroll inside their own container instead of pushing the page (and the
           header actions) past the viewport's right edge. */}
       <div className="flex min-w-0 flex-1 flex-col lg:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-border bg-background/85 px-4 backdrop-blur-xl sm:px-6">
+        <header className="dark sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e]/90 px-4 text-foreground backdrop-blur-xl sm:px-6">
           <div className="flex items-center gap-3">
             {/* Mobile menu */}
             <Sheet>
@@ -144,9 +144,9 @@ export function PortalShell({
                   <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-0">
+              <SheetContent side="left" className="dark w-72 bg-[#0c0c0e] p-0 text-foreground">
                 <SheetTitle className="sr-only">Navigation</SheetTitle>
-                <div className="flex h-16 items-center border-b border-border px-5">
+                <div className="flex h-16 items-center border-b border-white/10 px-5">
                   <Logo href="/portal/dashboard" />
                 </div>
                 <div className="py-4">
