@@ -37,7 +37,7 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "rounded-xl border p-5 transition-all hover:-translate-y-0.5 hover:shadow-md hover:shadow-black/5",
+        "rounded-xl border p-4 transition-all hover:-translate-y-0.5 hover:shadow-md hover:shadow-black/5 sm:p-5",
         accent
           ? "border-gold/40 bg-gradient-to-br from-gold/10 to-gold/0"
           : "border-border bg-card"
@@ -49,7 +49,7 @@ export function StatCard({
           <Icon className="size-4" />
         </span>
       </div>
-      <div className="mt-3 font-display text-2xl font-semibold tracking-tight">{value}</div>
+      <div className="mt-2.5 font-display text-xl font-semibold tracking-tight sm:mt-3 sm:text-2xl">{value}</div>
       {hint && <div className="mt-1 text-xs text-muted-foreground">{hint}</div>}
     </div>
   );

@@ -41,7 +41,7 @@ export default async function DashboardPage() {
         description={`${roleLabel(user.role)} · ${INDUSTRY_LABEL[industry]} workspace`}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard label="Total Appointments" value={stats.totalLeads} icon={Users} />
         <StatCard label="Active Projects" value={stats.activeProjects} icon={FolderKanban} />
         <StatCard label="In Production" value={stats.jobsInProduction} icon={Hammer} />
