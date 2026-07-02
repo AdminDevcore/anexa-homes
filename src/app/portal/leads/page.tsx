@@ -97,7 +97,8 @@ export default async function LeadsPage({
         />
       ) : (
         <ListFilter placeholder="Search name, phone, address…">
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {/* Desktop: table. Mobile: tap-friendly cards (below). */}
+        <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -176,6 +177,48 @@ export default async function LeadsPage({
               ))}
             </TableBody>
           </Table>
+        </div>
+
+        {/* Mobile: stacked cards */}
+        <div className="space-y-2 md:hidden">
+          {leads.map((l) => (
+            <Link
+              key={l.id}
+              href={`/portal/leads/${l.id}`}
+              data-search-item
+              data-search-text={`${l.firstName} ${l.lastName} ${l.phone ?? ""} ${l.email ?? ""} ${l.address ?? ""} ${l.city ?? ""} ${l.appointmentDisposition ?? ""}`}
+              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5 active:bg-muted/50"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">
+                    {l.firstName} {l.lastName}
+                  </div>
+                  {l.phone ? <div className="mt-0.5 text-xs text-muted-foreground">{l.phone}</div> : null}
+                </div>
+                <div className="shrink-0 text-right font-medium">{fmt.money(l.value, { compact: true })}</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                {l.stage ? (
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                    style={{ backgroundColor: `${l.stage.color}22`, color: l.stage.color }}
+                  >
+                    {l.stage.name}
+                  </span>
+                ) : null}
+                <span className="text-muted-foreground">{serviceTypeLabel(l.serviceType)}</span>
+                {l.appointmentAt ? (
+                  <span className="text-muted-foreground">· {fmt.dateTime(l.appointmentAt)}</span>
+                ) : null}
+                {l.appointmentDisposition ? (
+                  <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] font-medium text-gold-muted">
+                    {l.appointmentDisposition}
+                  </span>
+                ) : null}
+              </div>
+            </Link>
+          ))}
         </div>
         </ListFilter>
       )}
