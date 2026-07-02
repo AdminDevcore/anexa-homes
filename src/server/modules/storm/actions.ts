@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
@@ -9,10 +10,49 @@ import { importNoaaCsv } from "./import-noaa";
 import { importSpcCsv, type SpcKind } from "./import-spc";
 import { recomputeStormMatches } from "./matches";
 import { haversineMiles, boundingBox, circlePolygon } from "./geo";
+import { geocode } from "@/server/modules/geo/geocode";
 import { generateTerritoryPinsAction } from "@/server/modules/canvassing/actions";
 
 function fail(error: string) {
   return { ok: false as const, error };
+}
+
+const coverageSchema = z.object({
+  address: z.string().trim().max(200).optional(),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  radiusMiles: z.number().int().min(5).max(300),
+});
+
+/** Set the company's storm search area (center + radius). Accepts a center address
+ *  to geocode, or explicit lat/lng. Drives the daily SPC import + map/checker. */
+export async function setStormCoverageAction(input: z.infer<typeof coverageSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "StormIntelligence")) return fail("Not allowed.");
+  const parsed = coverageSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid coverage.");
+  const d = parsed.data;
+
+  let lat = d.lat ?? null;
+  let lng = d.lng ?? null;
+  let resolvedAddress: string | null = null;
+  if ((lat == null || lng == null) && d.address) {
+    const g = await geocode(d.address);
+    if (!g) return fail("Couldn't find that location — try a more specific address or city.");
+    lat = g.lat;
+    lng = g.lng;
+    resolvedAddress = g.displayName;
+  }
+  if (lat == null || lng == null) return fail("Enter a center address or coordinates.");
+
+  await prisma.companySettings.upsert({
+    where: { companyId: user.companyId },
+    update: { stormCenterLat: lat, stormCenterLng: lng, stormRadiusMiles: d.radiusMiles },
+    create: { companyId: user.companyId, stormCenterLat: lat, stormCenterLng: lng, stormRadiusMiles: d.radiusMiles },
+  });
+  revalidatePath("/portal/settings/storm-coverage");
+  revalidatePath("/portal/canvassing");
+  return { ok: true as const, lat, lng, radiusMiles: d.radiusMiles, resolvedAddress };
 }
 
 const SPC_KINDS: SpcKind[] = ["hail", "wind", "torn"];

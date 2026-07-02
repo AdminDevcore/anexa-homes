@@ -362,6 +362,11 @@ model CompanySettings {
   // Email each signer a copy of the executed PDF when a document is fully signed.
   // On by default; toggled in Settings → Notification Rules.
   emailSignedCopyToSigners   Boolean @default(true)
+  // Storm Intelligence search area. Null = default (Dallas @ 100mi in code). The
+  // daily SPC import + storm map/checker all key off this center + radius.
+  stormCenterLat          Float?
+  stormCenterLng          Float?
+  stormRadiusMiles        Int?
   updatedAt               DateTime @updatedAt
 
   @@map("company_settings")

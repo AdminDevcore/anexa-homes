@@ -141,10 +141,18 @@ export function AddressChecker() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xs text-muted-foreground">Score</div>
+                  <div className="text-xs text-muted-foreground">Area score</div>
                   <div className="font-display text-3xl font-semibold tabular-nums text-gold">{result.score}</div>
                 </div>
               </div>
+
+              {/* Make "score" vs "confidence" honest: they measure different things. */}
+              <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+                <b>Area score</b> rates storm activity <i>in the area</i> (hail size, wind, recency, report density).{" "}
+                <b>Confidence</b> is how close the nearest report is to <i>this</i> address (≤3 mi high · ≤5 medium · ≤10 low).
+                A high score with low confidence means a strong storm nearby — not a confirmed hit on this roof. Reports are
+                logged at the reporter&apos;s location, not per rooftop.
+              </p>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <Stat

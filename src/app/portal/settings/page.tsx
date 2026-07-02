@@ -15,6 +15,7 @@ import {
   Megaphone,
   PhoneCall,
   Star,
+  CloudLightning,
 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
@@ -35,6 +36,7 @@ const SECTIONS: {
   { icon: PhoneCall, title: "Call Templates", body: "Welcome & completion call scripts customers confirm via a link.", href: "/portal/settings/call-templates" },
   { icon: DollarSign, title: "Commission Rules", body: "Set percentage, flat, and override rules.", href: "/portal/settings/commissions" },
   { icon: Bell, title: "Notification Rules", body: "Choose triggers, recipients, and channels.", href: "/portal/settings/notifications" },
+  { icon: CloudLightning, title: "Storm Coverage", body: "Set the Field Map's storm search area (center + radius).", href: "/portal/settings/storm-coverage" },
   { icon: Camera, title: "Photo Templates", body: "Site & install photo checklists for projects.", href: "/portal/settings/photo-templates" },
   { icon: ListChecks, title: "Inspection Outcomes", body: "Customize the outcomes recorded after an inspection.", href: "/portal/settings/inspection-outcomes" },
   { icon: ListChecks, title: "Production Checklist", body: "The QC checklist applied to every new job.", href: "/portal/settings/production-checklist" },
