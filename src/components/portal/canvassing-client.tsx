@@ -15,6 +15,7 @@ import type { CanvassingMeta, KnockDTO, KnockDetailDTO, KnockEventDTO, Territory
 import type { Viewport, ZipFeature } from "./canvassing-map";
 import { DateRangeFilter, resolveRange, type RangePreset } from "./canvassing-filters";
 import { HouseStormInfo } from "@/components/portal/storm/house-storm-info";
+import { FieldMapLegend } from "@/components/portal/storm/field-map-legend";
 import type { StormSwathDTO, StormEventDTO } from "@/server/modules/storm/queries";
 import type { StormWarning } from "@/components/portal/storm/storm-map";
 import { Button } from "@/components/ui/button";
@@ -942,6 +943,7 @@ export function CanvassingClient() {
           movingId={movingId}
           onMovePin={handleMovePin}
         />
+        <FieldMapLegend showHail={showRadar || showStormReports} showHeat={showHeat} />
       </div>
 
       <TerritoryDialog
