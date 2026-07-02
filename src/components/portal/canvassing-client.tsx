@@ -1645,7 +1645,10 @@ function KnockDetailDialog({
               {/* Skip-trace alternates — click a chip to drop it into the matching field. */}
               {detail?.owner && (
                 <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
-                  <p className="text-[11px] text-muted-foreground">From {detail.owner.source} — tap to use:</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    From {detail.owner.source}
+                    {detail.ownerLookedUpAt ? ` · checked ${new Date(detail.ownerLookedUpAt).toLocaleDateString()}` : ""} — tap to use:
+                  </p>
                   <OwnerChips label="Names" values={detail.owner.names} onPick={(v) => setContact((c) => ({ ...c, contactName: v }))} />
                   <OwnerChips label="Phones" values={detail.owner.phones} onPick={(v) => setContact((c) => ({ ...c, contactPhone: v }))} />
                   <OwnerChips label="Emails" values={detail.owner.emails} onPick={(v) => setContact((c) => ({ ...c, contactEmail: v }))} />

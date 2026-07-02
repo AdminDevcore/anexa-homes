@@ -530,6 +530,29 @@ export type KnockDetailDTO = {
   events: KnockEventDTO[];
 };
 
+/** Homeowner-enrichment status for the "Data refresh" settings panel: how many
+ *  houses have owner data, and when the enrichment last ran. */
+export async function getOwnerEnrichmentStats(companyId: string): Promise<{
+  totalWithAddress: number;
+  enriched: number;
+  lastRunAt: string | null;
+}> {
+  const [totalWithAddress, enriched, last] = await Promise.all([
+    prisma.knock.count({ where: { companyId, address: { not: null } } }),
+    prisma.knock.count({ where: { companyId, ownerSource: { not: null } } }),
+    prisma.knock.findFirst({
+      where: { companyId, ownerLookedUpAt: { not: null } },
+      orderBy: { ownerLookedUpAt: "desc" },
+      select: { ownerLookedUpAt: true },
+    }),
+  ]);
+  return {
+    totalWithAddress,
+    enriched,
+    lastRunAt: last?.ownerLookedUpAt ? last.ownerLookedUpAt.toISOString() : null,
+  };
+}
+
 /** Safe-parse the cached skip-trace JSON into the names/phones/emails the UI shows. */
 function ownerFromJson(json: unknown, source: string | null): KnockDetailDTO["owner"] {
   if (!json || typeof json !== "object") return null;

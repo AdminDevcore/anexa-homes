@@ -236,6 +236,19 @@ export async function updateKnockContactAction(
 
 // --- Homeowner skip-trace (BatchData etc.) ----------------------------------
 
+/** Queue a full re-check of homeowner data: clears the "looked up" stamp on every
+ *  house so the nightly enrich cron re-pulls owner/contact for all of them. Use
+ *  after a storm to re-verify who lives there. Managers only. Bills per lookup. */
+export async function requeueOwnerEnrichmentAction(): Promise<{ ok: boolean; error?: string; queued?: number }> {
+  const me = await requireUser();
+  if (!canManageAllCanvassing(me.role)) return { ok: false, error: "Managers only." };
+  const res = await prisma.knock.updateMany({
+    where: { companyId: me.companyId, address: { not: null } },
+    data: { ownerLookedUpAt: null },
+  });
+  return { ok: true, queued: res.count };
+}
+
 export type OwnerLookupResult =
   | { ok: true; result: OwnerResult; applied: { contactName: string | null; contactPhone: string | null; contactEmail: string | null } }
   | { ok: false; error: string };

@@ -6,17 +6,23 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
 import { StormCoverageSettings } from "@/components/portal/storm-coverage-settings";
+import { OwnerDataRefreshPanel } from "@/components/portal/owner-data-refresh-panel";
+import { getOwnerEnrichmentStats } from "@/server/modules/canvassing/queries";
+import { skipTraceEnabled } from "@/server/modules/skiptrace/provider";
 
-export const metadata = { title: "Storm Coverage" };
+export const metadata = { title: "Storm & Homeowner Data" };
 
 export default async function StormCoveragePage() {
   const user = await requireUser("/portal/settings/storm-coverage");
   if (!can(user, "update", "StormIntelligence")) redirect("/portal/settings");
 
-  const s = await prisma.companySettings.findUnique({
-    where: { companyId: user.companyId },
-    select: { stormCenterLat: true, stormCenterLng: true, stormRadiusMiles: true },
-  });
+  const [s, enrichStats] = await Promise.all([
+    prisma.companySettings.findUnique({
+      where: { companyId: user.companyId },
+      select: { stormCenterLat: true, stormCenterLng: true, stormRadiusMiles: true },
+    }),
+    getOwnerEnrichmentStats(user.companyId),
+  ]);
   const hasCenter = s?.stormCenterLat != null && s?.stormCenterLng != null;
 
   return (
@@ -25,8 +31,8 @@ export default async function StormCoveragePage() {
         <ArrowLeft className="size-4" /> Back to settings
       </Link>
       <PageHeader
-        title="Storm Coverage"
-        description="Set the search area (center + radius) for the Field Map's storm intelligence — where NOAA/SPC storm reports are pulled and matched to houses."
+        title="Storm & Homeowner Data"
+        description="Control where the Field Map pulls storm reports, and re-verify homeowner data across every house."
       />
       <StormCoverageSettings
         initial={{
@@ -36,6 +42,7 @@ export default async function StormCoveragePage() {
           isDefault: !hasCenter,
         }}
       />
+      <OwnerDataRefreshPanel stats={enrichStats} enabled={skipTraceEnabled()} />
     </div>
   );
 }
