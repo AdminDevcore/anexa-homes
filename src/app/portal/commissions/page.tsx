@@ -54,7 +54,7 @@ export default async function CommissionsPage() {
         action={canManage ? <CommissionsToolbar pendingCount={pendingCount} /> : undefined}
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
         <StatCard label="Pending + Approved" value={fmt.money(totalPending, { compact: true })} icon={DollarSign} accent />
         <StatCard label="Paid" value={fmt.money(totalPaid, { compact: true })} icon={DollarSign} />
         <StatCard label="Records" value={commissions.length} icon={DollarSign} />
@@ -68,7 +68,8 @@ export default async function CommissionsPage() {
         />
       ) : (
         <ListFilter placeholder="Search project, recipient, status…">
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {/* Desktop: table. Mobile: cards (below). */}
+        <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -111,6 +112,43 @@ export default async function CommissionsPage() {
               ))}
             </TableBody>
           </Table>
+        </div>
+
+        {/* Mobile: cards */}
+        <div className="space-y-2 md:hidden">
+          {commissions.map((c) => (
+            <div
+              key={c.id}
+              data-search-item
+              data-search-text={`${c.project.projectNumber} ${c.project.lead ? `${c.project.lead.firstName} ${c.project.lead.lastName}` : ""} ${c.user.firstName} ${c.user.lastName} ${c.label ?? ""} ${c.status}`}
+              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Link href={`/portal/projects/${c.projectId}`} className="font-medium hover:text-gold-muted">
+                    {c.project.projectNumber}
+                  </Link>
+                  {c.project.lead ? (
+                    <div className="text-xs text-muted-foreground">
+                      {c.project.lead.firstName} {c.project.lead.lastName}
+                    </div>
+                  ) : null}
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    → {c.user.firstName} {c.user.lastName}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right font-medium">{fmt.money(c.amount)}</div>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">{c.status}</span>
+                {canManage ? (
+                  <CommissionRowActions id={c.id} status={c.status} />
+                ) : (
+                  <span className="text-xs text-muted-foreground">{fmt.date(c.createdAt)}</span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
         </ListFilter>
       )}

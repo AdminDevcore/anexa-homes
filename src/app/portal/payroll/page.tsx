@@ -42,7 +42,7 @@ export default async function PayrollPage() {
         action={canManage ? <NewPayrollRunDialog /> : undefined}
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
         <StatCard label="Unpaid Payroll" value={fmt.money(pendingAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} accent />
         <StatCard label="Commissions Owed" value={fmt.money(commissionAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} />
         <StatCard label="Payroll Runs" value={runs.length} icon={Wallet} />

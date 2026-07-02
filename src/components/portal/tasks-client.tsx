@@ -216,8 +216,8 @@ export function TasksClient({
         <span className="ml-auto text-sm text-muted-foreground">{visible.length} shown</span>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      {/* Desktop: table */}
+      <div className="hidden overflow-x-auto rounded-xl border border-border bg-card md:block">
         <table className="w-full text-sm">
           <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
             <tr>
@@ -272,6 +272,61 @@ export function TasksClient({
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile: cards */}
+      <div className="space-y-2 md:hidden">
+        {visible.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card px-3 py-10 text-center text-sm text-muted-foreground">
+            No tasks match these filters.
+          </div>
+        ) : (
+          visible.map((t) => (
+            <div
+              key={t.id}
+              data-search-item
+              data-search-text={`${t.title} ${t.leadName ?? ""} ${t.assignee ?? ""} ${t.assignedBy ?? ""}`}
+              className={cn(
+                "flex items-start gap-3 rounded-xl border bg-card p-3",
+                isOverdue(t) ? "border-destructive/30 bg-destructive/[0.03]" : "border-border"
+              )}
+            >
+              <button onClick={() => toggle(t)} aria-label="Toggle done" className="mt-0.5 shrink-0">
+                {t.status === "done" ? (
+                  <CheckCircle2 className="size-5 text-emerald-500" />
+                ) : (
+                  <Circle className="size-5 text-muted-foreground" />
+                )}
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className={cn("font-medium", t.status === "done" && "text-muted-foreground line-through")}>
+                  {t.title}
+                </div>
+                {t.leadName ? (
+                  <Link
+                    href={`/portal/leads/${t.leadId}`}
+                    className="inline-flex items-center gap-0.5 text-xs text-gold hover:underline"
+                  >
+                    <Link2 className="size-3" /> {t.leadName}
+                  </Link>
+                ) : null}
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <PriorityBadge priority={t.priority} />
+                  {t.assignee ? <span>{t.assignee}</span> : null}
+                  {t.dueAt ? (
+                    <span className={cn(isOverdue(t) && "font-medium text-destructive")}>Due {fmt.date(t.dueAt)}</span>
+                  ) : null}
+                  <span>{ageCell(t)}</span>
+                </div>
+              </div>
+              {canManage ? (
+                <button onClick={() => remove(t.id)} aria-label="Delete" className="mt-0.5 shrink-0">
+                  <Trash2 className="size-4 text-destructive" />
+                </button>
+              ) : null}
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

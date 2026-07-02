@@ -153,7 +153,7 @@ export function BookkeepingClient({
       ) : view === "transactions" ? (
         <>
           {/* Summary */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-4">
             <Stat label="Money in" value={fmt.money(summary.moneyIn)} icon={TrendingUp} tone="emerald" />
             <Stat label="Money out" value={fmt.money(summary.moneyOut)} icon={TrendingDown} tone="red" />
             <Stat label="Net profit" value={fmt.money(pnl.netProfit)} icon={Scale} tone={pnl.netProfit >= 0 ? "emerald" : "red"} accent />
@@ -1003,12 +1003,12 @@ function VendorDialog({ vendor, onClose, onDone }: { vendor?: BkVendor; onClose:
 function Stat({ label, value, icon: Icon, tone, accent }: { label: string; value: string; icon: typeof Scale; tone: "emerald" | "red"; accent?: boolean }) {
   const fmt = useFormat();
   return (
-    <div className={cn("rounded-xl border bg-card p-5", accent ? "border-gold/40 bg-gold/[0.04]" : "border-border")}>
+    <div className={cn("rounded-xl border bg-card p-4 sm:p-5", accent ? "border-gold/40 bg-gold/[0.04]" : "border-border")}>
       <div className="flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
         <Icon className={cn("size-4", tone === "emerald" ? "text-emerald-600" : "text-red-600")} />
       </div>
-      <div className="mt-1 font-display text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="mt-1 font-display text-xl font-semibold tabular-nums sm:text-2xl">{value}</div>
     </div>
   );
 }
