@@ -6,7 +6,6 @@ import { CanvassingClient } from "./canvassing-client";
 import { CanvassingLeaderboard } from "./canvassing-leaderboard";
 import { CanvassingList } from "./canvassing-list";
 import { CanvassingDashboard } from "./canvassing-dashboard";
-import { CanvassingCalendar } from "./canvassing-calendar";
 import { StormLeads } from "./storm/storm-leads";
 import { AddressChecker } from "./storm/address-checker";
 import { StormZones } from "./storm/storm-zones";
@@ -41,7 +40,6 @@ export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
           <TabsTrigger value="map">Map</TabsTrigger>
           <TabsTrigger value="list">List</TabsTrigger>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="calendar">Calendar</TabsTrigger>
           <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
           {canStorm && <TabsTrigger value="storm-leads">Storm leads</TabsTrigger>}
           {canStorm && <TabsTrigger value="storm-checker">Address checker</TabsTrigger>}
@@ -57,9 +55,6 @@ export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
         </TabsContent>
         <TabsContent value="dashboard">
           <CanvassingDashboard />
-        </TabsContent>
-        <TabsContent value="calendar">
-          <CanvassingCalendar />
         </TabsContent>
         <TabsContent value="leaderboard">
           <CanvassingLeaderboard />
