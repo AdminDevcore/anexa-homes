@@ -102,15 +102,15 @@ export function PortalShell({
               {branding.logoUrl ? (
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={branding.logoUrl} alt={branding.companyName} className="h-7 w-auto" />
-                  <span className="font-display text-base font-semibold tracking-tight">
+                  <img src={branding.logoUrl} alt={branding.companyName} className="h-10 w-auto" />
+                  <span className="font-display text-lg font-semibold tracking-tight">
                     {branding.companyName}
                   </span>
                 </>
               ) : (
                 // Default brand: full Anexa lockup (mark + wordmark), dark for the light sidebar.
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src="/anexa-lockup-dark.png" alt={branding.companyName} className="h-8 w-auto" />
+                <img src="/anexa-lockup-dark.png" alt={branding.companyName} className="h-11 w-auto" />
               )}
             </div>
           </Link>
