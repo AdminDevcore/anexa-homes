@@ -67,7 +67,7 @@ export default async function ReviewsPage() {
           <SectionHeading
             eyebrow="Leave a Review"
             title="Share your experience."
-            description="Worked with us recently? We'd love to hear about it. Your review is checked by our team before it appears on the site."
+            description="Worked with us recently? We'd love to hear about it. Your review goes live on our site right away."
           />
           <ReviewForm />
         </div>

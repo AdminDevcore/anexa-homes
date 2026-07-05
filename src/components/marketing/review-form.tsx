@@ -91,7 +91,7 @@ export function ReviewForm() {
     });
     if (res.ok) {
       setSubmitted(true);
-      toast.success("Thank you! Your review was submitted for approval.");
+      toast.success("Thank you! Your review is now live on our site.");
     } else {
       toast.error(res.error);
     }
@@ -103,8 +103,7 @@ export function ReviewForm() {
         <CheckCircle2 className="size-12 text-metal" />
         <h3 className="font-display text-2xl font-semibold">Thank you!</h3>
         <p className="max-w-sm text-muted-foreground">
-          Your review has been submitted and will appear on our site once our team approves it. We appreciate you
-          taking the time to share your experience.
+          Your review is now live on our site. We appreciate you taking the time to share your experience.
         </p>
       </div>
     );
