@@ -51,7 +51,7 @@ async function main() {
       role: "super_admin",
       status: "active",
       title: "Owner / CEO",
-      industries: ["roofing", "solar", "water"],
+      industries: ["roofing", "solar", "others"],
     },
     update: {}, // Do nothing if it exists
   });

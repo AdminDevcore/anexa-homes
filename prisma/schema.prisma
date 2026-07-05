@@ -244,7 +244,7 @@ enum ServiceType {
 enum Industry {
   roofing
   solar
-  water
+  others
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +402,7 @@ model User {
   deductiblePct         Float?
   // Industries this user may access + switch between. Defaults to all three; the
   // super admin can restrict a user (e.g. an installer locked to roofing only).
-  industries            Industry[] @default([roofing, solar, water])
+  industries            Industry[] @default([roofing, solar, others])
   // For canvassers: the sales rep they're assigned to. Their knocks, leads, and
   // appointments auto-assign to (and are visible by) this rep.
   salesRepId            String?

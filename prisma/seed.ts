@@ -109,7 +109,7 @@ async function main() {
         phone: "(555) 123-4567",
         // Everyone can switch all three workspaces by default; the installer is
         // restricted to Roofing only (demoing per-user industry access).
-        industries: u.key === "installer" ? ["roofing"] : ["roofing", "solar", "water"],
+        industries: u.key === "installer" ? ["roofing"] : ["roofing", "solar", "others"],
       },
     });
     users[u.key] = created;
@@ -188,7 +188,7 @@ async function main() {
   }
   const stageByKey = Object.fromEntries(stages.map((s) => [s.key, s]));
 
-  // Solar + Water are separate, isolated workspaces with their own starter stages
+  // Solar + Others are separate, isolated workspaces with their own starter stages
   // (different process). The team can customize these as they ramp each up.
   const SOLAR_STAGES = [
     { key: "new_appt", name: "New Appointment", color: "#FBBF24" },
@@ -201,18 +201,17 @@ async function main() {
     { key: "pto", name: "PTO / Activated", color: "#22C55E" },
     { key: "paid", name: "Paid", color: "#16A34A", isWon: true },
   ];
-  const WATER_STAGES = [
-    { key: "new_appt", name: "New Appointment", color: "#38BDF8" },
-    { key: "water_test", name: "Water Test", color: "#0EA5E9" },
-    { key: "proposal_sent", name: "Proposal Sent", color: "#6366F1" },
-    { key: "contract_signed", name: "Contract Signed", color: "#FB923C" },
-    { key: "install_scheduled", name: "Install Scheduled", color: "#60A5FA" },
-    { key: "installed", name: "Installed", color: "#34D399" },
-    { key: "paid", name: "Paid", color: "#16A34A", isWon: true },
+  // "Others" is a catch-all workspace for miscellaneous leads to sub out.
+  const OTHERS_STAGES = [
+    { key: "new_lead", name: "New Lead", color: "#94A3B8" },
+    { key: "qualified", name: "Qualified", color: "#38BDF8" },
+    { key: "quoted", name: "Quoted", color: "#6366F1" },
+    { key: "subbed_out", name: "Subbed Out", color: "#F59E0B" },
+    { key: "closed", name: "Closed", color: "#16A34A", isWon: true },
   ];
   for (const [industry, name, defs] of [
     ["solar", "Solar Pipeline", SOLAR_STAGES] as const,
-    ["water", "Water Pipeline", WATER_STAGES] as const,
+    ["others", "Others Pipeline", OTHERS_STAGES] as const,
   ]) {
     const p = await prisma.pipeline.create({ data: { companyId: company.id, name, industry, isDefault: true } });
     for (let i = 0; i < defs.length; i++) {

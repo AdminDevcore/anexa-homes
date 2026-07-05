@@ -75,7 +75,7 @@ const updateSchema = z.object({
   providedLeadFlatCents: z.number().int().min(0).optional().nullable(),
   deductiblePct: z.number().min(0).max(100).optional().nullable(),
   // Industries this user may access (must grant at least one).
-  industries: z.array(z.enum(["roofing", "solar", "water"])).min(1).optional(),
+  industries: z.array(z.enum(["roofing", "solar", "others"])).min(1).optional(),
   // For canvassers: the sales rep they report to (their deals funnel to this rep).
   salesRepId: z.string().optional().nullable(),
   // For sales reps: the sales manager they report to (manager sees their team).
