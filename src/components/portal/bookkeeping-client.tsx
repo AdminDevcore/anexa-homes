@@ -760,7 +760,7 @@ function SumLine({ label, value, tone }: { label: string; value: string; tone?: 
 
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button onClick={onClick} className={cn("rounded-lg px-4 py-2 text-sm font-medium transition-colors", active ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>
+    <button onClick={onClick} className={cn("rounded-lg px-4 py-2 text-sm font-medium transition-colors", active ? "bg-muted text-gold" : "text-muted-foreground hover:bg-muted")}>
       {children}
     </button>
   );
