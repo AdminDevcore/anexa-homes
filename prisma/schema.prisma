@@ -2243,9 +2243,11 @@ model Review {
   serviceType      String?
   rating           Int          @default(5)
   reviewText       String
-  // Storage key + mime for an optional customer-uploaded photo.
+  // Storage key + mime for an optional customer-uploaded photo (legacy single).
   photoKey         String?
   photoMime        String?
+  // Storage keys for review photos (of the work/project) — supports multiple.
+  photoKeys        String[]     @default([])
   consentToPublish Boolean      @default(false)
   status           ReviewStatus @default(pending)
   featured         Boolean      @default(false)

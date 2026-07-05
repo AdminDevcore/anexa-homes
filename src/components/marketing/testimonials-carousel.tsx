@@ -12,10 +12,16 @@ export type CarouselReview = {
   service?: string | null;
   rating: number;
   quote: string;
-  photoUrl?: string | null;
+  photoUrls?: string[];
 };
 
-export function TestimonialsCarousel({ items }: { items: CarouselReview[] }) {
+export function TestimonialsCarousel({
+  items,
+  stats,
+}: {
+  items: CarouselReview[];
+  stats?: { count: number; average: number } | null;
+}) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [paused, setPaused] = React.useState(false);
 
@@ -38,6 +44,28 @@ export function TestimonialsCarousel({ items }: { items: CarouselReview[] }) {
 
   return (
     <div className="relative" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      {stats && stats.count > 0 ? (
+        <div className="mb-8 flex flex-col items-center gap-1.5">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-0.5">
+              {Array.from({ length: 5 }).map((_, j) => (
+                <Star
+                  key={j}
+                  className={
+                    j < Math.round(stats.average)
+                      ? "size-5 fill-[var(--metal-bright)] text-metal"
+                      : "size-5 text-muted-foreground/30"
+                  }
+                />
+              ))}
+            </div>
+            <span className="font-display text-2xl font-semibold">{stats.average.toFixed(1)}</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Based on {stats.count} verified review{stats.count === 1 ? "" : "s"}
+          </p>
+        </div>
+      ) : null}
       <div
         ref={ref}
         className="flex snap-x snap-mandatory gap-5 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -65,15 +93,29 @@ export function TestimonialsCarousel({ items }: { items: CarouselReview[] }) {
             <blockquote className="mt-4 flex-1 text-[15px] leading-relaxed text-foreground/85">
               &ldquo;{t.quote}&rdquo;
             </blockquote>
+            {t.photoUrls && t.photoUrls.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {t.photoUrls.slice(0, 3).map((url, k) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={k}
+                    src={url}
+                    alt="Review photo"
+                    loading="lazy"
+                    className="size-16 rounded-lg object-cover ring-1 ring-border"
+                  />
+                ))}
+                {t.photoUrls.length > 3 ? (
+                  <span className="grid size-16 place-items-center rounded-lg bg-foreground/5 text-xs font-medium text-muted-foreground">
+                    +{t.photoUrls.length - 3}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <figcaption className="mt-5 flex items-center gap-3 border-t pt-4">
-              {t.photoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={t.photoUrl} alt="" className="size-10 rounded-full object-cover" />
-              ) : (
-                <span className="grid size-10 place-items-center rounded-full bg-foreground/5 font-display text-sm font-semibold text-metal-dim">
-                  {t.name.charAt(0)}
-                </span>
-              )}
+              <span className="grid size-10 place-items-center rounded-full bg-foreground/5 font-display text-sm font-semibold text-metal-dim">
+                {t.name.charAt(0)}
+              </span>
               <div className="min-w-0">
                 <div className="truncate font-semibold">{t.name}</div>
                 <div className="truncate text-sm text-muted-foreground">

@@ -161,10 +161,14 @@ export function ReviewsManager({
             return (
               <div key={r.id} className="rounded-xl border border-border bg-card p-5">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                  {/* Photo */}
-                  {r.photoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.photoUrl} alt="" className="size-16 shrink-0 rounded-lg object-cover" />
+                  {/* Review photos (of the work) */}
+                  {r.photoUrls.length > 0 ? (
+                    <div className="flex shrink-0 flex-wrap gap-2 sm:w-16">
+                      {r.photoUrls.map((url, i) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={i} src={url} alt="Review photo" className="size-16 rounded-lg object-cover ring-1 ring-border" />
+                      ))}
+                    </div>
                   ) : (
                     <span className="grid size-16 shrink-0 place-items-center rounded-lg bg-foreground/5 font-display text-xl font-semibold text-metal-dim">
                       {r.customerName.charAt(0)}

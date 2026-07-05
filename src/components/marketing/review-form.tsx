@@ -46,7 +46,7 @@ export function ReviewForm() {
   const [submitted, setSubmitted] = React.useState(false);
   const [rating, setRating] = React.useState(5);
   const [hover, setHover] = React.useState(0);
-  const [photo, setPhoto] = React.useState<{ name: string; dataUrl: string } | null>(null);
+  const [photos, setPhotos] = React.useState<{ name: string; dataUrl: string }[]>([]);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
   const {
@@ -61,22 +61,26 @@ export function ReviewForm() {
   const consent = watch("consentToPublish");
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please choose an image file.");
-      return;
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const next: { name: string; dataUrl: string }[] = [];
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        toast.error("Please choose image files.");
+        continue;
+      }
+      if (file.size > MAX_PHOTO_BYTES) {
+        toast.error(`${file.name} is too large (max 6 MB).`);
+        continue;
+      }
+      try {
+        next.push({ name: file.name, dataUrl: await readAsDataUrl(file) });
+      } catch {
+        toast.error("Could not read an image.");
+      }
     }
-    if (file.size > MAX_PHOTO_BYTES) {
-      toast.error("Image is too large (max 6 MB).");
-      return;
-    }
-    try {
-      const dataUrl = await readAsDataUrl(file);
-      setPhoto({ name: file.name, dataUrl });
-    } catch {
-      toast.error("Could not read that image.");
-    }
+    setPhotos((prev) => [...prev, ...next].slice(0, 6));
+    if (fileRef.current) fileRef.current.value = ""; // let the same file be re-picked
   }
 
   async function onSubmit(values: FormValues) {
@@ -87,7 +91,7 @@ export function ReviewForm() {
       rating,
       reviewText: values.reviewText,
       consentToPublish: true,
-      photoDataUrl: photo?.dataUrl ?? "",
+      photoDataUrls: photos.map((p) => p.dataUrl),
     });
     if (res.ok) {
       setSubmitted(true);
@@ -169,22 +173,40 @@ export function ReviewForm() {
         <Textarea {...register("reviewText")} rows={5} placeholder="Tell us about your experience with Anexa Homes…" />
       </Field>
 
-      {/* Optional photo */}
+      {/* Optional photos (of the work) — up to 6 */}
       <div className="space-y-1.5">
-        <Label className="text-sm">Add a photo (optional)</Label>
-        <input ref={fileRef} type="file" accept="image/*" onChange={onPhoto} className="hidden" />
-        {photo ? (
-          <div className="flex items-center gap-3 rounded-xl border border-border bg-background p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photo.dataUrl} alt="" className="size-14 rounded-lg object-cover" />
-            <span className="flex-1 truncate text-sm text-muted-foreground">{photo.name}</span>
-            <Button type="button" variant="ghost" size="icon" onClick={() => setPhoto(null)} aria-label="Remove photo">
-              <X className="size-4" />
-            </Button>
+        <Label className="text-sm">Add photos of the work (optional)</Label>
+        <input ref={fileRef} type="file" accept="image/*" multiple onChange={onPhoto} className="hidden" />
+        {photos.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {photos.map((p, i) => (
+              <div key={i} className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.dataUrl} alt={p.name} className="size-16 rounded-lg object-cover ring-1 ring-border" />
+                <button
+                  type="button"
+                  onClick={() => setPhotos((prev) => prev.filter((_, k) => k !== i))}
+                  aria-label="Remove photo"
+                  className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            ))}
+            {photos.length < 6 ? (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="grid size-16 place-items-center rounded-lg border border-dashed border-border text-muted-foreground hover:bg-muted"
+                aria-label="Add more photos"
+              >
+                <ImagePlus className="size-5" />
+              </button>
+            ) : null}
           </div>
         ) : (
           <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} className="w-full gap-2">
-            <ImagePlus className="size-4" /> Upload a photo of your project
+            <ImagePlus className="size-4" /> Upload photos of your project
           </Button>
         )}
       </div>
@@ -217,7 +239,7 @@ export function ReviewForm() {
         )}
       </Button>
       <p className="text-center text-xs text-muted-foreground">
-        Reviews are checked by our team before they appear publicly.
+        Your review publishes to our site right away.
       </p>
     </form>
   );

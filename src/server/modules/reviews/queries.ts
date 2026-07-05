@@ -10,7 +10,7 @@ export type AdminReview = {
   serviceType: string | null;
   rating: number;
   reviewText: string;
-  photoUrl: string | null;
+  photoUrls: string[];
   status: ReviewStatus;
   featured: boolean;
   hidden: boolean;
@@ -63,6 +63,7 @@ export async function getReviewsForAdmin(
       rating: true,
       reviewText: true,
       photoKey: true,
+      photoKeys: true,
       status: true,
       featured: true,
       hidden: true,
@@ -80,7 +81,9 @@ export async function getReviewsForAdmin(
     serviceType: r.serviceType,
     rating: r.rating,
     reviewText: r.reviewText,
-    photoUrl: r.photoKey ? `/api/reviews/photo?id=${r.id}` : null,
+    photoUrls: (r.photoKeys.length ? r.photoKeys : r.photoKey ? [r.photoKey] : []).map(
+      (_, i) => `/api/reviews/photo?id=${r.id}&i=${i}`
+    ),
     status: r.status,
     featured: r.featured,
     hidden: r.hidden,

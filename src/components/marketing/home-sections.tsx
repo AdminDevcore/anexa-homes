@@ -36,7 +36,7 @@ import {
   TESTIMONIALS,
   COMPANY,
 } from "@/lib/site";
-import { getPublicReviews } from "@/server/modules/reviews/public";
+import { getPublicReviews, getPublicReviewStats } from "@/server/modules/reviews/public";
 import type { CarouselReview } from "./testimonials-carousel";
 
 export function ServicesSection() {
@@ -320,14 +320,13 @@ export function WhyAnexaSection() {
 export async function TestimonialsSection() {
   // Real approved reviews drive the carousel; fall back to seed quotes until a
   // company has collected enough first-party reviews to fill it.
-  const approved = await getPublicReviews(12);
+  const [approved, stats] = await Promise.all([getPublicReviews(12), getPublicReviewStats()]);
   const seed: CarouselReview[] = TESTIMONIALS.map((t) => ({
     name: t.name,
     location: t.location,
     service: null,
     rating: t.rating,
     quote: t.quote,
-    photoUrl: null,
   }));
   const items: CarouselReview[] = approved.length >= 3 ? approved : [...approved, ...seed];
 
@@ -340,7 +339,7 @@ export async function TestimonialsSection() {
         description="Real reviews from homeowners across the Dallas–Fort Worth metroplex."
       />
       <div className="mt-14">
-        <TestimonialsCarousel items={items} />
+        <TestimonialsCarousel items={items} stats={stats} />
       </div>
     </Section>
   );

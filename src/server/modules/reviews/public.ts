@@ -26,7 +26,9 @@ const submitSchema = z.object({
   rating: z.coerce.number().int().min(1, "Please choose a rating").max(5),
   reviewText: z.string().trim().min(10, "Please share a little more").max(2000),
   consentToPublish: z.boolean(),
-  // Optional base64 data URL from the file input.
+  // Optional base64 data URLs from the file input — supports multiple photos.
+  photoDataUrls: z.array(z.string().max(MAX_PHOTO_CHARS)).max(6).optional(),
+  // Legacy single-photo field (kept for backward compatibility).
   photoDataUrl: z.string().max(MAX_PHOTO_CHARS).optional().or(z.literal("")),
 });
 
@@ -70,14 +72,15 @@ export async function submitReview(
     return { ok: false, error: "We couldn't submit your review right now. Please try again later." };
   }
 
-  let photoKey: string | null = null;
-  let photoMime: string | null = null;
-  if (data.photoDataUrl) {
-    const stored = await storeReviewPhoto(companyId, data.photoDataUrl);
-    if (stored) {
-      photoKey = stored.key;
-      photoMime = stored.mime;
-    }
+  const dataUrls = data.photoDataUrls?.length
+    ? data.photoDataUrls
+    : data.photoDataUrl
+      ? [data.photoDataUrl]
+      : [];
+  const photoKeys: string[] = [];
+  for (const url of dataUrls.slice(0, 6)) {
+    const stored = await storeReviewPhoto(companyId, url);
+    if (stored) photoKeys.push(stored.key);
   }
 
   await prisma.review.create({
@@ -89,8 +92,9 @@ export async function submitReview(
       rating: data.rating,
       reviewText: data.reviewText,
       consentToPublish: true,
-      photoKey,
-      photoMime,
+      photoKeys,
+      photoKey: photoKeys[0] ?? null, // legacy single-photo compat
+      photoMime: photoKeys.length ? "image/jpeg" : null,
       // Publish immediately so the customer sees their review go live. Admins
       // can still hide, reject, or delete it afterward.
       status: "approved",
@@ -116,7 +120,7 @@ export type PublicReview = {
   service: string | null;
   rating: number;
   quote: string;
-  photoUrl: string | null;
+  photoUrls: string[];
 };
 
 /**
@@ -149,18 +153,22 @@ export async function getPublicReviews(limit = 12): Promise<PublicReview[]> {
         rating: true,
         reviewText: true,
         photoKey: true,
+        photoKeys: true,
       },
     });
 
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.customerName,
-      location: r.city,
-      service: r.serviceType,
-      rating: r.rating,
-      quote: r.reviewText,
-      photoUrl: r.photoKey ? `/api/reviews/photo?id=${r.id}` : null,
-    }));
+    return rows.map((r) => {
+      const keys = r.photoKeys.length ? r.photoKeys : r.photoKey ? [r.photoKey] : [];
+      return {
+        id: r.id,
+        name: r.customerName,
+        location: r.city,
+        service: r.serviceType,
+        rating: r.rating,
+        quote: r.reviewText,
+        photoUrls: keys.map((_, i) => `/api/reviews/photo?id=${r.id}&i=${i}`),
+      };
+    });
   } catch {
     return [];
   }
