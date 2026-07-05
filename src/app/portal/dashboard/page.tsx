@@ -19,7 +19,8 @@ import { PageHeader, StatCard } from "@/components/portal/ui";
 import { currentFormatters } from "@/lib/format-server";
 import { roleLabel } from "@/lib/roles";
 import { getActiveIndustry } from "@/server/auth/industry";
-import { INDUSTRY_LABEL } from "@/lib/industry";
+import { INDUSTRY_LABEL, allowedIndustries } from "@/lib/industry";
+import { DashboardEmptyHint } from "@/components/portal/dashboard-empty-hint";
 
 export const metadata = { title: "Dashboard" };
 
@@ -34,12 +35,24 @@ export default async function DashboardPage() {
     getRecentProjects(user, industry),
   ]);
 
+  // If the active workspace is empty but the user has others, guide them to switch
+  // (so an empty workspace isn't mistaken for "I can't see the company's deals").
+  const dealFlowEmpty =
+    stats.totalLeads === 0 && stats.activeProjects === 0 && stats.jobsInProduction === 0 && stats.completedJobs === 0;
+  const otherWorkspaces = allowedIndustries(user.industries)
+    .filter((i) => i !== industry)
+    .map((i) => ({ ind: i, label: INDUSTRY_LABEL[i] }));
+
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Welcome back, ${user.firstName}`}
         description={`${roleLabel(user.role)} · ${INDUSTRY_LABEL[industry]} workspace`}
       />
+
+      {dealFlowEmpty && otherWorkspaces.length > 0 ? (
+        <DashboardEmptyHint activeLabel={INDUSTRY_LABEL[industry]} others={otherWorkspaces} />
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard label="Total Appointments" value={stats.totalLeads} icon={Users} />
