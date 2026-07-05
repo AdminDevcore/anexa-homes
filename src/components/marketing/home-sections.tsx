@@ -318,8 +318,9 @@ export function WhyAnexaSection() {
 }
 
 export async function TestimonialsSection() {
-  // Real approved reviews drive the carousel; fall back to seed quotes until a
-  // company has collected enough first-party reviews to fill it.
+  // Show ONLY real approved reviews once any exist (so the count badge matches
+  // and we never present placeholder testimonials as real). Seed quotes are a
+  // last-resort filler only when there are zero real reviews yet.
   const [approved, stats] = await Promise.all([getPublicReviews(12), getPublicReviewStats()]);
   const seed: CarouselReview[] = TESTIMONIALS.map((t) => ({
     name: t.name,
@@ -328,7 +329,7 @@ export async function TestimonialsSection() {
     rating: t.rating,
     quote: t.quote,
   }));
-  const items: CarouselReview[] = approved.length >= 3 ? approved : [...approved, ...seed];
+  const items: CarouselReview[] = approved.length > 0 ? approved : seed;
 
   return (
     <Section>
