@@ -135,7 +135,7 @@ export function PortalShell({
           scroll inside their own container instead of pushing the page (and the
           header actions) past the viewport's right edge. */}
       <div className="flex min-w-0 flex-1 flex-col lg:pl-64">
-        <header className="dark sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e]/90 px-4 text-foreground backdrop-blur-xl sm:px-6">
+        <header className="dark sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e] px-4 text-foreground sm:px-6">
           <div className="flex items-center gap-3">
             {/* Mobile menu */}
             <Sheet>
