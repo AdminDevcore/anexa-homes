@@ -1003,12 +1003,25 @@ function VendorDialog({ vendor, onClose, onDone }: { vendor?: BkVendor; onClose:
 function Stat({ label, value, icon: Icon, tone, accent }: { label: string; value: string; icon: typeof Scale; tone: "emerald" | "red"; accent?: boolean }) {
   const fmt = useFormat();
   return (
-    <div className={cn("rounded-xl border bg-card p-4 sm:p-5", accent ? "border-gold/40 bg-gold/[0.04]" : "border-border")}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
-        <Icon className={cn("size-4", tone === "emerald" ? "text-emerald-600" : "text-red-600")} />
+    <div
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/[0.06] sm:p-5",
+        accent ? "border-gold/30 bg-gradient-to-br from-gold/[0.08] to-transparent" : "border-border bg-card"
+      )}
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/10 to-transparent" />
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span
+          className={cn(
+            "grid size-9 shrink-0 place-items-center rounded-xl",
+            tone === "emerald" ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-600"
+          )}
+        >
+          <Icon className="size-[18px]" />
+        </span>
       </div>
-      <div className="mt-1 font-display text-xl font-semibold tabular-nums sm:text-2xl">{value}</div>
+      <div className="mt-3 font-display text-2xl font-semibold tabular-nums sm:text-[1.75rem]">{value}</div>
     </div>
   );
 }
