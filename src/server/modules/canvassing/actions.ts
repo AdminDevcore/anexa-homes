@@ -10,6 +10,7 @@ import { canManageAllCanvassing } from "./policies";
 import { fetchAddressesInPolygon, coordKey } from "./addresses";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { resolvePropertyValue } from "@/server/modules/property";
+import { importOwnerRecords, type OwnerRowMapping, type OwnerImportResult } from "@/server/modules/property/owner-records";
 import { getSkipTraceProvider, type OwnerResult } from "@/server/modules/skiptrace/provider";
 import { resolveStageForAppointment } from "@/server/modules/leads/staging";
 import { resolveOwningRepId } from "@/server/modules/leads/owning-rep";
@@ -235,6 +236,24 @@ export async function updateKnockContactAction(
 }
 
 // --- Homeowner skip-trace (BatchData etc.) ----------------------------------
+
+/** Import a county appraisal roll (public CAD data): fills owner name + value on
+ *  matching houses by address. Free — no per-lookup cost. Managers only. */
+export async function importOwnerRecordsAction(input: {
+  csvText: string;
+  mapping: OwnerRowMapping;
+}): Promise<{ ok: true; result: OwnerImportResult } | { ok: false; error: string }> {
+  const me = await requireUser();
+  if (!canManageAllCanvassing(me.role)) return { ok: false, error: "Managers only." };
+  if (!input?.csvText?.trim()) return { ok: false, error: "Upload a CSV file first." };
+  if (!input?.mapping?.owner || !input?.mapping?.address) return { ok: false, error: "Map the Owner name and Address columns." };
+  try {
+    const result = await importOwnerRecords(me.companyId, input.csvText, input.mapping);
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message || "Import failed." };
+  }
+}
 
 /** Queue a full re-check of homeowner data: clears the "looked up" stamp on every
  *  house so the nightly enrich cron re-pulls owner/contact for all of them. Use

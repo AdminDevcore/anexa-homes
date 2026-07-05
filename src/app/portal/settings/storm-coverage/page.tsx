@@ -7,6 +7,7 @@ import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
 import { StormCoverageSettings } from "@/components/portal/storm-coverage-settings";
 import { OwnerDataRefreshPanel } from "@/components/portal/owner-data-refresh-panel";
+import { CountyRecordsImport } from "@/components/portal/county-records-import";
 import { getOwnerEnrichmentStats } from "@/server/modules/canvassing/queries";
 import { skipTraceEnabled } from "@/server/modules/skiptrace/provider";
 
@@ -43,6 +44,7 @@ export default async function StormCoveragePage() {
         }}
       />
       <OwnerDataRefreshPanel stats={enrichStats} enabled={skipTraceEnabled()} />
+      <CountyRecordsImport />
     </div>
   );
 }
