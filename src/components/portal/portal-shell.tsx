@@ -59,8 +59,11 @@ export function PortalShell({
   const NavList = ({ onNavigate }: { onNavigate?: () => void }) => (
     <nav className="flex flex-col gap-1 px-3">
       {items.map((item) => {
-        const active =
-          pathname === item.href || pathname.startsWith(item.href + "/");
+        const matches = (href: string) => pathname === href || pathname.startsWith(href + "/");
+        // Longest matching href wins, so a parent route (Settings) doesn't also
+        // highlight on a child owned by another item (Reviews lives at
+        // /portal/settings/reviews).
+        const active = matches(item.href) && !items.some((o) => o.href.length > item.href.length && matches(o.href));
         const badge = item.href === "/portal/chat" && unread > 0 ? unread : null;
         return (
           <Link
