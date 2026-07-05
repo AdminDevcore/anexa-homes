@@ -91,7 +91,10 @@ export async function submitReview(
       consentToPublish: true,
       photoKey,
       photoMime,
-      status: "pending",
+      // Publish immediately so the customer sees their review go live. Admins
+      // can still hide, reject, or delete it afterward.
+      status: "approved",
+      approvedAt: new Date(),
     },
   });
 
@@ -99,7 +102,7 @@ export async function submitReview(
     data: {
       companyId,
       type: "system",
-      message: `New website review submitted by ${data.customerName} (${data.rating}★) — pending approval`,
+      message: `New website review published by ${data.customerName} (${data.rating}★) — live on the site`,
     },
   });
 

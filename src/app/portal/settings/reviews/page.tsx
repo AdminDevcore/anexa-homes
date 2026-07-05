@@ -44,7 +44,7 @@ export default async function ReviewsSettingsPage({
       </Link>
       <PageHeader
         title="Website Reviews"
-        description="Moderate reviews submitted from anexahomes.com. Approved reviews appear on the homepage and the Reviews page; pending ones stay private until you approve them."
+        description="Reviews submitted from anexahomes.com go live on the homepage and Reviews page immediately. You can Hide, Reject, or Delete any review here to take it down."
       />
       <ReviewsManager
         reviews={reviews}
