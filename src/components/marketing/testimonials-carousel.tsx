@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Star, ChevronLeft, ChevronRight, Quote } from "lucide-react";
+import { Star, ChevronLeft, ChevronRight, Quote, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export type CarouselReview = {
@@ -24,6 +24,8 @@ export function TestimonialsCarousel({
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [paused, setPaused] = React.useState(false);
+  // Full-screen photo viewer (lightbox) for review images.
+  const [lightbox, setLightbox] = React.useState<{ urls: string[]; i: number } | null>(null);
 
   const scroll = React.useCallback((dir: number) => {
     const el = ref.current;
@@ -35,12 +37,24 @@ export function TestimonialsCarousel({
   }, []);
 
   React.useEffect(() => {
-    if (paused || items.length <= 1) return;
+    if (paused || lightbox || items.length <= 1) return;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     if (reduce) return;
     const id = setInterval(() => scroll(1), 4500);
     return () => clearInterval(id);
-  }, [paused, scroll, items.length]);
+  }, [paused, lightbox, scroll, items.length]);
+
+  // Lightbox keyboard controls: Esc closes, ←/→ navigate within a review's photos.
+  React.useEffect(() => {
+    if (!lightbox) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setLightbox(null);
+      else if (e.key === "ArrowRight") setLightbox((lb) => (lb ? { ...lb, i: (lb.i + 1) % lb.urls.length } : lb));
+      else if (e.key === "ArrowLeft") setLightbox((lb) => (lb ? { ...lb, i: (lb.i - 1 + lb.urls.length) % lb.urls.length } : lb));
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
 
   return (
     <div className="relative" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
@@ -96,19 +110,26 @@ export function TestimonialsCarousel({
             {t.photoUrls && t.photoUrls.length > 0 ? (
               <div className="mt-4 flex flex-wrap gap-2">
                 {t.photoUrls.slice(0, 3).map((url, k) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <button
                     key={k}
-                    src={url}
-                    alt="Review photo"
-                    loading="lazy"
-                    className="size-16 rounded-lg object-cover ring-1 ring-border"
-                  />
+                    type="button"
+                    onClick={() => setLightbox({ urls: t.photoUrls!, i: k })}
+                    className="cursor-zoom-in overflow-hidden rounded-lg ring-1 ring-border transition-transform hover:scale-[1.04]"
+                    aria-label="View review photo"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="Review photo" loading="lazy" className="size-16 object-cover" />
+                  </button>
                 ))}
                 {t.photoUrls.length > 3 ? (
-                  <span className="grid size-16 place-items-center rounded-lg bg-foreground/5 text-xs font-medium text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={() => setLightbox({ urls: t.photoUrls!, i: 3 })}
+                    className="grid size-16 cursor-zoom-in place-items-center rounded-lg bg-foreground/5 text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground/10"
+                    aria-label="View all review photos"
+                  >
                     +{t.photoUrls.length - 3}
-                  </span>
+                  </button>
                 ) : null}
               </div>
             ) : null}
@@ -137,6 +158,57 @@ export function TestimonialsCarousel({
           <ChevronRight className="size-4" />
         </Button>
       </div>
+
+      {/* Full-screen photo viewer */}
+      {lightbox ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+          onClick={() => setLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setLightbox(null)}
+            className="absolute right-4 top-4 grid size-10 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+          >
+            <X className="size-5" />
+          </button>
+          {lightbox.urls.length > 1 ? (
+            <button
+              type="button"
+              aria-label="Previous photo"
+              onClick={(e) => { e.stopPropagation(); setLightbox((lb) => (lb ? { ...lb, i: (lb.i - 1 + lb.urls.length) % lb.urls.length } : lb)); }}
+              className="absolute left-4 grid size-11 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+            >
+              <ChevronLeft className="size-6" />
+            </button>
+          ) : null}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightbox.urls[lightbox.i]}
+            alt="Review photo"
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+          />
+          {lightbox.urls.length > 1 ? (
+            <>
+              <button
+                type="button"
+                aria-label="Next photo"
+                onClick={(e) => { e.stopPropagation(); setLightbox((lb) => (lb ? { ...lb, i: (lb.i + 1) % lb.urls.length } : lb)); }}
+                className="absolute right-4 grid size-11 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
+              >
+                <ChevronRight className="size-6" />
+              </button>
+              <div className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white">
+                {lightbox.i + 1} / {lightbox.urls.length}
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
