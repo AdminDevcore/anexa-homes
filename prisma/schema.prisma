@@ -2374,3 +2374,33 @@ model StormSwath {
   @@index([bboxMinLat, bboxMaxLat])
   @@map("storm_swaths")
 }
+
+enum CashBidStatus {
+  draft
+  sent
+  signed
+}
+
+// A simple one-page cash bid a rep sends to a cash client (no inspection): work
+// description + price + 50/50 payment terms + inline homeowner signature. Scalar
+// FKs (companyId/leadId) — no relations, to keep churn off Company/Lead/User.
+model CashBid {
+  id              String        @id @default(uuid())
+  companyId       String
+  leadId          String
+  token           String        @unique @default(uuid())
+  createdById     String?
+  workDescription String
+  totalCents      Int           @default(0)
+  depositPercent  Int           @default(50)
+  status          CashBidStatus @default(draft)
+  signerName      String?
+  signerIp        String?
+  signedAt        DateTime?
+  sentAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([companyId, leadId])
+  @@map("cash_bids")
+}

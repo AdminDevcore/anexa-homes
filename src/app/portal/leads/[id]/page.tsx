@@ -31,6 +31,8 @@ import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modu
 import { getRoofReport } from "@/server/modules/roof/queries";
 import { RoofReportButton } from "@/components/portal/roof-report";
 import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
+import { CashBidButton } from "@/components/portal/cash-bid-panel";
+import { getCashBidsForLead } from "@/server/modules/cashbid/queries";
 import { SendWelcomeCallButton } from "@/components/portal/send-welcome-call-button";
 import { getActiveWelcomeCallTemplates } from "@/server/modules/welcome-call/queries";
 import { PageHeader } from "@/components/portal/ui";
@@ -76,6 +78,7 @@ export default async function LeadDetailPage({
   // Cash deals (customer pays out of pocket / financing) hide the insurance UI:
   // no claim worksheet, no scope of work, and "Status" instead of "Claim Status".
   const isInsurance = lead.dealType !== "cash";
+  const cashBids = !isInsurance ? await getCashBidsForLead(user.companyId, lead.id) : [];
 
   const claim = lead.claims[0];
   const measurement = lead.roofMeasurements[0];
@@ -225,6 +228,9 @@ export default async function LeadDetailPage({
             )}
             {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <BuildPresentationButton leadId={lead.id} />
+            )}
+            {!isInsurance && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
+              <CashBidButton leadId={lead.id} bids={cashBids} />
             )}
             {can(user, "create", "Document") && (
               <SendWelcomeCallButton leadId={lead.id} templates={welcomeCallTemplates} />
