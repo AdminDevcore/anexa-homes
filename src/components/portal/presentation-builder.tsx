@@ -45,7 +45,10 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
   const checklist = data.checklist;
   const counts: Record<string, number> = {};
   for (const it of checklist?.items ?? []) counts[it.id] = it.count;
-  const photosOk = checklist ? requiredPhotosMet(checklist.items, counts) : true;
+  // Photos are OPTIONAL for cash bids — a cash customer may already have their
+  // own inspection and just wants a price, so we never block generating on
+  // required photos for cash. (An empty photos section is hidden in the view.)
+  const photosOk = data.proposal.dealType === "cash" || (checklist ? requiredPhotosMet(checklist.items, counts) : true);
 
   function patch(p: Partial<ProposalContent>) {
     setContent((c) => ({ ...c, ...p }));
@@ -195,11 +198,25 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
       {step === "photos" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold">Site / Inspection Photos</h3>
-            <span className={`text-sm ${photosOk ? "text-emerald-600" : "text-amber-600"}`}>
-              {photosOk ? "All required photos uploaded ✓" : "Required photos missing"}
+            <h3 className="font-semibold">Site / Inspection Photos{isCash ? " (optional)" : ""}</h3>
+            <span
+              className={`text-sm ${
+                isCash ? "text-muted-foreground" : photosOk ? "text-emerald-600" : "text-amber-600"
+              }`}
+            >
+              {isCash
+                ? "Optional for cash bids"
+                : photosOk
+                  ? "All required photos uploaded ✓"
+                  : "Required photos missing"}
             </span>
           </div>
+          {isCash && (
+            <p className="rounded-lg bg-muted/50 p-2.5 text-xs text-muted-foreground">
+              Cash bid — photos are optional. If the customer already has their own inspection and just wants a price,
+              skip this step; no inspection or empty photo section will appear on the presentation.
+            </p>
+          )}
           {!checklist && <p className="text-sm text-muted-foreground">No site photo template configured. Add one in Settings → Photo templates.</p>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {checklist?.items.map((it) => {
