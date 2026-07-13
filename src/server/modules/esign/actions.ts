@@ -16,6 +16,7 @@ import {
   recordSignatureByToken,
   voidPackage,
   getSigningLinkForUser,
+  getInPersonSigningLink,
   type SendInput,
   type SignSubmit,
 } from "./service";
@@ -89,6 +90,19 @@ export async function openSigningForOwnerAction(packageId: string) {
   const url = await getSigningLinkForUser(user, packageId);
   if (!url) return { ok: false as const, error: "No signing slot for your account." };
   return { ok: true as const, url };
+}
+
+/**
+ * Rep hands their device to a customer to sign in person. Rotates the target
+ * signer's token and returns a fresh /sign link to open right on this device —
+ * no email required. Only staff who can send documents may do this.
+ */
+export async function openInPersonSigningAction(packageId: string, signerId?: string) {
+  const user = await requireUser();
+  if (!can(user, "create", "Document")) return { ok: false as const, error: "Not allowed." };
+  const res = await getInPersonSigningLink(user, packageId, signerId);
+  if ("error" in res) return { ok: false as const, error: res.error };
+  return { ok: true as const, url: res.url, signerName: res.signerName };
 }
 
 // --- Template field editor ---

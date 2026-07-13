@@ -5,8 +5,16 @@ import { Logo } from "@/components/marketing/logo";
 
 export const metadata = { title: "Sign Document" };
 
-export default async function SignPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function SignPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ inperson?: string }>;
+}) {
   const { token } = await params;
+  const { inperson } = await searchParams;
+  const inPerson = inperson === "1";
   const view = await getViewByToken(token);
 
   if (!view) return <Status icon={XCircle} title="Invalid signing link" body="This link is not valid. Please request a new one from Anexa Homes." />;
@@ -27,6 +35,7 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
       snapshot={view.snapshot}
       ctx={view.ctx}
       signerFields={view.signerFields}
+      inPerson={inPerson}
     />
   );
 }

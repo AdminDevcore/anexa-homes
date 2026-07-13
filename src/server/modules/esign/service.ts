@@ -732,6 +732,44 @@ export async function getSigningLinkForUser(user: SessionUser, packageId: string
   return `${base}/sign/${raw}`;
 }
 
+/**
+ * Rep-initiated IN-PERSON signing. Picks the signer who can sign right now — the
+ * lowest signing order that still has an unsigned signer — rotates their token,
+ * and returns a fresh /sign link (tagged ?inperson=1) for the rep to open on
+ * their OWN phone/tablet and hand to the customer. No email needed, so it works
+ * for customers who don't have (or don't use) email. Optionally target a
+ * specific signer by id. Enforces signing order so a later party can't sign first.
+ */
+export async function getInPersonSigningLink(
+  user: SessionUser,
+  packageId: string,
+  signerId?: string
+): Promise<{ url: string; signerId: string; signerName: string; role: string } | { error: string }> {
+  const scope = listScope(user, "Document") as Prisma.DocumentPackageWhereInput;
+  const pkg = await prisma.documentPackage.findFirst({
+    where: { AND: [{ id: packageId }, scope] },
+    include: { signers: { orderBy: { order: "asc" } } },
+  });
+  if (!pkg) return { error: "Document not found." };
+  if (pkg.status === "voided") return { error: "This document has been voided." };
+  if (pkg.status === "completed") return { error: "This document is already fully signed." };
+  if (pkg.expiresAt && pkg.expiresAt < new Date()) return { error: "This signing link has expired." };
+
+  const unsigned = pkg.signers.filter((s) => s.status !== "signed");
+  if (unsigned.length === 0) return { error: "Everyone has already signed." };
+  const nextOrder = Math.min(...unsigned.map((s) => s.order));
+
+  const signer = signerId ? pkg.signers.find((s) => s.id === signerId) : unsigned.find((s) => s.order === nextOrder);
+  if (!signer) return { error: "Signer not found." };
+  if (signer.status === "signed") return { error: `${signer.name} has already signed.` };
+  if (signer.order > nextOrder) return { error: "An earlier signer must sign first." };
+
+  const { raw, hash } = generateSignerToken();
+  await prisma.documentSigner.update({ where: { id: signer.id }, data: { tokenHash: hash } });
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  return { url: `${base}/sign/${raw}?inperson=1`, signerId: signer.id, signerName: signer.name, role: signer.role };
+}
+
 // ---------------------------------------------------------------------------
 // On-demand PDF generation (preview without/with signing)
 // ---------------------------------------------------------------------------

@@ -22,9 +22,11 @@ type Props = {
   snapshot: Snapshot;
   ctx: AutofillContext;
   signerFields: SnapshotField[];
+  /** Rep handed their own device to the customer to sign in person. */
+  inPerson?: boolean;
 };
 
-export function SigningExperience({ token, title, signerName, snapshot, ctx, signerFields }: Props) {
+export function SigningExperience({ token, title, signerName, snapshot, ctx, signerFields, inPerson }: Props) {
   const today = ctx.today;
   const [consent, setConsent] = React.useState(false);
   const [values, setValues] = React.useState<Record<string, string>>(() => {
@@ -109,6 +111,11 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
           Thank you, {signerName}. Your signed copy of <strong>{title}</strong> has been securely
           stored. Anexa Homes will be in touch with next steps.
         </p>
+        {inPerson && (
+          <p className="rounded-lg border border-gold/40 bg-gold/5 px-4 py-3 text-sm font-medium text-gold-muted">
+            Please hand the device back to your Anexa Homes representative.
+          </p>
+        )}
       </div>
     );
   }

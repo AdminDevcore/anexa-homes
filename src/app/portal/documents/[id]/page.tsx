@@ -18,6 +18,7 @@ import { verifyChain } from "@/server/modules/esign/audit";
 import { PageHeader } from "@/components/portal/ui";
 import { VoidButton } from "@/components/esign/void-button";
 import { ResendButton } from "@/components/esign/resend-button";
+import { InPersonSignButton } from "@/components/esign/in-person-sign-button";
 import { SignatureStatusBadge, roleLabel } from "@/components/esign/signature-status-badge";
 import { Button } from "@/components/ui/button";
 import { currentFormatters } from "@/lib/format-server";
@@ -49,6 +50,14 @@ export default async function DocumentDetailPage({
   const canVoid = can(user, "update", "Document") && pkg.status !== "completed" && pkg.status !== "voided";
   const canResend =
     can(user, "create", "Document") && ["sent", "viewed", "partially_signed"].includes(pkg.status);
+  // In-person signing: the rep can hand their device to the signer who's up next
+  // (the lowest signing order that still has an unsigned signer).
+  const canSignInPerson =
+    can(user, "create", "Document") &&
+    ["sent", "viewed", "partially_signed"].includes(pkg.status) &&
+    (!pkg.expiresAt || pkg.expiresAt > new Date());
+  const unsignedOrders = pkg.signers.filter((s) => s.status !== "signed").map((s) => s.order);
+  const nextSignOrder = unsignedOrders.length ? Math.min(...unsignedOrders) : null;
 
   return (
     <div className="space-y-6">
@@ -106,6 +115,12 @@ export default async function DocumentDetailPage({
             <Users className="size-4 text-gold" />
             <h2 className="font-semibold">Signers</h2>
           </div>
+          {canSignInPerson && (
+            <p className="border-b border-border bg-muted/30 px-5 py-2.5 text-xs text-muted-foreground">
+              No email? Tap <span className="font-medium text-foreground">Sign on this device</span> and hand your
+              phone or tablet to the customer to sign in person.
+            </p>
+          )}
           <ul className="divide-y divide-border">
             {pkg.signers.map((s) => (
               <li key={s.id} className="px-5 py-3.5">
@@ -125,6 +140,11 @@ export default async function DocumentDetailPage({
                   {s.signedAt && <> · signed {fmt.date(s.signedAt)}</>}
                   {s.ip && <> · IP {s.ip}</>}
                 </div>
+                {canSignInPerson && s.status !== "signed" && s.order === nextSignOrder && (
+                  <div className="mt-2.5">
+                    <InPersonSignButton packageId={pkg.id} signerId={s.id} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>

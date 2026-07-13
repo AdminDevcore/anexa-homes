@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Send, Copy, FileSignature, Plus, X } from "lucide-react";
+import { Loader2, Send, Copy, FileSignature, Plus, X, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -140,9 +140,27 @@ export function SendDocumentDialog({
 
         {links ? (
           <div className="space-y-3">
+            {/* In-person: sign right now on this device instead of emailing. */}
+            <div className="rounded-lg border border-gold/40 bg-gold/5 p-3">
+              <p className="text-sm font-medium">Customer is with you now?</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Sign in person — this opens the signing screen on this device so you can hand it to the customer.
+                No email needed.
+              </p>
+              <Button
+                type="button"
+                className="mt-2.5 bg-gold text-gold-foreground hover:bg-gold/90"
+                onClick={() => {
+                  const url = links[0].url + (links[0].url.includes("?") ? "&" : "?") + "inperson=1";
+                  window.location.href = url;
+                }}
+              >
+                <PenLine className="size-4" /> Sign in person now
+              </Button>
+            </div>
             <p className="text-sm text-muted-foreground">
-              Document sent. A signing link was emailed to each signer with an email — you can also
-              share these secure links directly:
+              A signing link was also emailed to each signer with an email — you can share these secure links
+              directly:
             </p>
             {links.map((l) => (
               <div key={l.url} className="space-y-1">
