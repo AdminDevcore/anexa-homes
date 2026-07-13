@@ -266,19 +266,19 @@ export default async function LeadDetailPage({
             {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <BuildPresentationButton leadId={lead.id} />
             )}
-            {isInsurance && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
-              <InsuranceContractButton
-                leadId={lead.id}
-                bids={insuranceBids}
-                prefill={{
-                  carrier: claim?.carrier ?? "",
-                  claimNumber: claim?.claimNumber ?? "",
-                  deductibleDollars: claim?.deductible ? String(claim.deductible / 100) : "",
-                }}
-              />
-            )}
-            {!isInsurance && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
-              <CashBidButton leadId={lead.id} bids={cashBids} />
+            {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
+              <>
+                <InsuranceContractButton
+                  leadId={lead.id}
+                  bids={insuranceBids}
+                  prefill={{
+                    carrier: claim?.carrier ?? "",
+                    claimNumber: claim?.claimNumber ?? "",
+                    deductibleDollars: claim?.deductible ? String(claim.deductible / 100) : "",
+                  }}
+                />
+                <CashBidButton leadId={lead.id} bids={cashBids} />
+              </>
             )}
             {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
             {can(user, "create", "Document") && (
