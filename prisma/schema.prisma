@@ -2393,6 +2393,9 @@ model CashBid {
   workDescription String
   totalCents      Int           @default(0)
   depositPercent  Int           @default(50)
+  // Warranty terms shown on the bid/contract (years). Defaults = the standard.
+  warrantyWorkmanshipYears Int   @default(5)
+  warrantyManufacturerYears Int  @default(30)
   status          CashBidStatus @default(draft)
   signerName      String?
   signerIp        String?

@@ -28,6 +28,8 @@ const createSchema = z.object({
   workDescription: z.string().trim().min(3, "Add a short description of the work.").max(3000),
   totalCents: z.coerce.number().int().min(0).max(1_000_000_00),
   depositPercent: z.coerce.number().int().min(0).max(100).default(50),
+  warrantyWorkmanshipYears: z.coerce.number().int().min(0).max(99).default(5),
+  warrantyManufacturerYears: z.coerce.number().int().min(0).max(99).default(30),
 });
 
 export async function createCashBidAction(input: z.infer<typeof createSchema>) {
@@ -46,6 +48,8 @@ export async function createCashBidAction(input: z.infer<typeof createSchema>) {
       workDescription: d.workDescription,
       totalCents: d.totalCents,
       depositPercent: d.depositPercent,
+      warrantyWorkmanshipYears: d.warrantyWorkmanshipYears,
+      warrantyManufacturerYears: d.warrantyManufacturerYears,
       status: "sent",
       sentAt: new Date(),
     },
@@ -71,7 +75,13 @@ export async function updateCashBidAction(input: z.infer<typeof updateSchema>) {
   if (bid.status === "signed") return fail("This bid is already signed and can't be changed.");
   await prisma.cashBid.update({
     where: { id: bid.id },
-    data: { workDescription: d.workDescription, totalCents: d.totalCents, depositPercent: d.depositPercent },
+    data: {
+      workDescription: d.workDescription,
+      totalCents: d.totalCents,
+      depositPercent: d.depositPercent,
+      warrantyWorkmanshipYears: d.warrantyWorkmanshipYears,
+      warrantyManufacturerYears: d.warrantyManufacturerYears,
+    },
   });
   revalidatePath(`/portal/leads/${bid.leadId}`);
   return { ok: true as const };

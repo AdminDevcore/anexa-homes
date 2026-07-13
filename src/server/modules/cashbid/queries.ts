@@ -38,6 +38,8 @@ export type PublicCashBid = {
   depositPercent: number;
   depositCents: number;
   balanceCents: number;
+  warrantyWorkmanshipYears: number;
+  warrantyManufacturerYears: number;
   signerName: string | null;
   signedAt: string | null;
   createdAt: string;
@@ -75,6 +77,8 @@ export async function getCashBidByToken(token: string): Promise<PublicCashBid | 
     depositPercent: amt.depositPercent,
     depositCents: amt.depositCents,
     balanceCents: amt.balanceCents,
+    warrantyWorkmanshipYears: b.warrantyWorkmanshipYears,
+    warrantyManufacturerYears: b.warrantyManufacturerYears,
     signerName: b.signerName,
     signedAt: b.signedAt?.toISOString() ?? null,
     createdAt: b.createdAt.toISOString(),

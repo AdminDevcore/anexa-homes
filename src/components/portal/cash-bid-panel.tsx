@@ -20,6 +20,8 @@ export function CashBidButton({ leadId, bids }: { leadId: string; bids: CashBidR
   const [desc, setDesc] = React.useState("");
   const [dollars, setDollars] = React.useState("");
   const [deposit, setDeposit] = React.useState("50");
+  const [workYears, setWorkYears] = React.useState("5");
+  const [mfrYears, setMfrYears] = React.useState("30");
   const [busy, setBusy] = React.useState(false);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -31,13 +33,22 @@ export function CashBidButton({ leadId, bids }: { leadId: string; bids: CashBidR
     if (desc.trim().length < 3) return toast.error("Add a short description of the work.");
     if (totalCents <= 0) return toast.error("Enter a total price.");
     setBusy(true);
-    const res = await createCashBidAction({ leadId, workDescription: desc.trim(), totalCents, depositPercent: pct });
+    const res = await createCashBidAction({
+      leadId,
+      workDescription: desc.trim(),
+      totalCents,
+      depositPercent: pct,
+      warrantyWorkmanshipYears: Math.max(0, parseInt(workYears || "5", 10) || 0),
+      warrantyManufacturerYears: Math.max(0, parseInt(mfrYears || "30", 10) || 0),
+    });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success("Cash bid created — copy the link to send it.");
     setDesc("");
     setDollars("");
     setDeposit("50");
+    setWorkYears("5");
+    setMfrYears("30");
     router.refresh();
   }
 
@@ -127,6 +138,16 @@ export function CashBidButton({ leadId, bids }: { leadId: string; bids: CashBidR
             <div>
               <Label className="text-sm">Deposit %</Label>
               <Input type="number" min="0" max="100" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-sm">Workmanship warranty (yrs)</Label>
+              <Input type="number" min="0" max="99" value={workYears} onChange={(e) => setWorkYears(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-sm">Manufacturer warranty (yrs)</Label>
+              <Input type="number" min="0" max="99" value={mfrYears} onChange={(e) => setMfrYears(e.target.value)} />
             </div>
           </div>
           {total > 0 ? (

@@ -59,8 +59,8 @@ export function CashBidSignature({ bid }: { bid: PublicCashBid }) {
       <label className="mt-3 flex items-start gap-2 text-sm text-neutral-700">
         <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-1 size-4" />
         <span>
-          I, <span className="font-semibold">{name.trim() || "the homeowner"}</span>, accept this bid and authorize{" "}
-          {bid.company.name} to perform the work described above under the payment terms shown.
+          I, <span className="font-semibold">{name.trim() || "the homeowner"}</span>, accept this agreement and authorize{" "}
+          {bid.company.name} to perform the work described above under the terms, warranty, and payment schedule shown.
         </span>
       </label>
       <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -84,7 +84,9 @@ export function CashBidSignature({ bid }: { bid: PublicCashBid }) {
         </button>
       </div>
       {err ? <p className="mt-2 text-sm text-red-600">{err}</p> : null}
-      <p className="mt-3 text-xs text-neutral-400">By signing, you agree this constitutes your electronic signature.</p>
+      <p className="mt-3 text-xs text-neutral-400">
+        By signing, you agree this is a binding agreement and that your typed name is your electronic signature.
+      </p>
     </section>
   );
 }

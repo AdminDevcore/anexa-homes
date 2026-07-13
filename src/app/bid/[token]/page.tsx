@@ -46,7 +46,7 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
             <span className="font-display text-xl font-bold text-neutral-900">{c.name}</span>
           )}
           <div className="text-right">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400">Proposal / Bid</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400">Proposal &amp; Agreement</div>
             <div className="text-sm text-neutral-500">{date}</div>
           </div>
         </div>
@@ -83,6 +83,50 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
             A {bid.depositPercent}% deposit is due upon signing; the remaining balance is due upon completion of the work
             described above. This is a cash agreement — no insurance claim or inspection is required.
           </p>
+        </section>
+
+        {/* Warranty */}
+        <section className="mt-8">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Warranty</h2>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-neutral-200 p-4">
+              <div className="font-display text-2xl font-bold text-neutral-900">{bid.warrantyWorkmanshipYears}-Year</div>
+              <div className="mt-0.5 text-sm font-medium text-neutral-700">Workmanship warranty</div>
+              <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">
+                {c.name} warrants all labor and installation for {bid.warrantyWorkmanshipYears} years from completion.
+                Any defect in our workmanship will be corrected at no cost to you.
+              </p>
+            </div>
+            <div className="rounded-xl border border-neutral-200 p-4">
+              <div className="font-display text-2xl font-bold text-neutral-900">{bid.warrantyManufacturerYears}-Year</div>
+              <div className="mt-0.5 text-sm font-medium text-neutral-700">Manufacturer warranty</div>
+              <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">
+                Roofing materials carry the manufacturer&apos;s limited warranty of up to {bid.warrantyManufacturerYears}{" "}
+                years against material defects, subject to the manufacturer&apos;s terms.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Terms & Agreement */}
+        <section className="mt-8">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Terms &amp; Agreement</h2>
+          <p className="mt-2 text-sm text-neutral-700">
+            Once signed by the homeowner below, this document is a binding agreement between {c.name} and the homeowner
+            for the work and price stated above, on the following terms:
+          </p>
+          <ul className="mt-3 space-y-1.5 text-xs leading-relaxed text-neutral-600">
+            <li>• Payment: {bid.depositPercent}% due upon signing; the remaining balance due upon completion.</li>
+            <li>• Work will be performed per manufacturer specifications and applicable local building codes.</li>
+            <li>
+              • Warranty: {bid.warrantyWorkmanshipYears}-year workmanship and up to {bid.warrantyManufacturerYears}-year
+              manufacturer warranty as described above (manufacturer warranty subject to the manufacturer&apos;s terms).
+            </li>
+            <li>• Any change to the scope or price will be documented in a written change order agreed to by both parties.</li>
+            <li>• This is a cash agreement; no insurance claim or inspection is required.</li>
+            <li>• The homeowner may cancel this agreement within three (3) business days of signing.</li>
+            <li>• This document represents the entire agreement between the parties.</li>
+          </ul>
         </section>
 
         {/* Signature */}
