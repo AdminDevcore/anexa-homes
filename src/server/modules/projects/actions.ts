@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { Prisma, ProjectStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { ProjectStatus, ServiceType, Priority } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { isAdmin } from "@/server/rbac/matrix";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { getQcChecklistTemplate } from "@/server/modules/settings/queries";
@@ -81,6 +83,102 @@ export async function updateProjectStatusAction(projectId: string, status: strin
   await fireEvent({ companyId: user.companyId, event: "project_status_changed", actorId: user.userId, projectId, status });
   revalidatePath(`/portal/projects/${projectId}`);
   return ok();
+}
+
+// --------------------------- Full edit (admin) ------------------------------
+
+const dateStr = z.string().optional().or(z.literal(""));
+const text = (max: number) => z.string().trim().max(max).optional().or(z.literal(""));
+
+const editSchema = z.object({
+  projectId: z.string().uuid(),
+  projectNumber: z.string().trim().min(1, "Job number is required.").max(40),
+  status: z.enum(STATUSES),
+  priority: z.enum(["low", "medium", "high", "urgent"]),
+  serviceType: z.enum(["roofing", "storm_restoration", "solar", "hvac", "water_filtration", "windows", "other"]),
+  address: text(200),
+  city: text(80),
+  state: text(40),
+  zip: text(20),
+  roofingType: text(80),
+  materialSelection: text(120),
+  pitch: text(40),
+  tearOffLayers: z.coerce.number().int().min(0).max(20).nullable().optional(),
+  contractValueCents: z.coerce.number().int().min(0),
+  supplementCents: z.coerce.number().int().min(0),
+  deductibleCents: z.coerce.number().int().min(0),
+  depreciationCents: z.coerce.number().int().min(0),
+  repGetsSupplement: z.boolean(),
+  repGetsDepreciation: z.boolean(),
+  companyProvidedLead: z.boolean(),
+  scheduledStart: dateStr,
+  scheduledEnd: dateStr,
+  installDate: dateStr,
+  adjusterMeetingAt: dateStr,
+  completedAt: dateStr,
+  notes: text(5000),
+});
+
+/** Admin/super-admin only: edit any field on a project (job) directly. */
+export async function updateProjectAction(input: z.infer<typeof editSchema>) {
+  const user = await requireUser();
+  if (!isAdmin(user.role)) return fail("Only admins can edit job details.");
+  const parsed = editSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Please check the form.");
+  const d = parsed.data;
+  if (!(await projectInScope(user, d.projectId))) return fail("Project not found.");
+  const toDate = (s?: string) => (s ? new Date(s) : null);
+
+  try {
+    const updated = await prisma.project.update({
+      where: { id: d.projectId },
+      data: {
+        projectNumber: d.projectNumber,
+        status: d.status as ProjectStatus,
+        priority: d.priority as Priority,
+        serviceType: d.serviceType as ServiceType,
+        address: d.address || null,
+        city: d.city || null,
+        state: d.state || null,
+        zip: d.zip || null,
+        roofingType: d.roofingType || null,
+        materialSelection: d.materialSelection || null,
+        pitch: d.pitch || null,
+        tearOffLayers: d.tearOffLayers ?? null,
+        contractValue: d.contractValueCents,
+        supplementCents: d.supplementCents,
+        deductibleCents: d.deductibleCents,
+        depreciationCents: d.depreciationCents,
+        repGetsSupplement: d.repGetsSupplement,
+        repGetsDepreciation: d.repGetsDepreciation,
+        companyProvidedLead: d.companyProvidedLead,
+        scheduledStart: toDate(d.scheduledStart),
+        scheduledEnd: toDate(d.scheduledEnd),
+        installDate: toDate(d.installDate),
+        adjusterMeetingAt: toDate(d.adjusterMeetingAt),
+        completedAt: toDate(d.completedAt),
+        notes: d.notes || null,
+      },
+      select: { leadId: true },
+    });
+    await prisma.activityLog.create({
+      data: {
+        companyId: user.companyId,
+        type: "note",
+        message: `${user.fullName} edited the job details`,
+        actorId: user.userId,
+        projectId: d.projectId,
+      },
+    });
+    revalidatePath(`/portal/leads/${updated.leadId}`);
+    revalidatePath(`/portal/projects/${d.projectId}`);
+    return ok();
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return fail("That job number is already used by another project.");
+    }
+    throw e;
+  }
 }
 
 // --------------------------- QC checklist -----------------------------------

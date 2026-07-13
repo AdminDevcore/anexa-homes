@@ -25,7 +25,8 @@ import { DealFinancialsCard } from "@/components/portal/deal-financials";
 import { ProjectPayoutCard } from "@/components/portal/project-payout";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
-import { STAFF_ROLES } from "@/server/rbac/matrix";
+import { STAFF_ROLES, isAdmin } from "@/server/rbac/matrix";
+import { EditJobDialog } from "@/components/portal/edit-job-dialog";
 import { getProjectPhotoChecklists } from "@/server/modules/photos/queries";
 import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modules/settings/queries";
 import { getRoofReport } from "@/server/modules/roof/queries";
@@ -95,6 +96,38 @@ export default async function LeadDetailPage({
           crewAssignments: { include: { crew: { include: { members: true } } } },
         },
       })
+    : null;
+
+  // Admin/super-admin: edit any field on the job directly.
+  const editableJob = project
+    ? {
+        id: project.id,
+        projectNumber: project.projectNumber,
+        status: project.status,
+        priority: project.priority,
+        serviceType: project.serviceType,
+        address: project.address,
+        city: project.city,
+        state: project.state,
+        zip: project.zip,
+        roofingType: project.roofingType,
+        materialSelection: project.materialSelection,
+        pitch: project.pitch,
+        tearOffLayers: project.tearOffLayers,
+        contractValue: project.contractValue,
+        supplementCents: project.supplementCents,
+        deductibleCents: project.deductibleCents,
+        depreciationCents: project.depreciationCents,
+        repGetsSupplement: project.repGetsSupplement,
+        repGetsDepreciation: project.repGetsDepreciation,
+        companyProvidedLead: project.companyProvidedLead,
+        scheduledStart: project.scheduledStart?.toISOString() ?? null,
+        scheduledEnd: project.scheduledEnd?.toISOString() ?? null,
+        installDate: project.installDate?.toISOString() ?? null,
+        adjusterMeetingAt: project.adjusterMeetingAt?.toISOString() ?? null,
+        completedAt: project.completedAt?.toISOString() ?? null,
+        notes: project.notes,
+      }
     : null;
 
   // Who can be tagged on a follow-up for THIS deal. Rules:
@@ -232,6 +265,7 @@ export default async function LeadDetailPage({
             {!isInsurance && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <CashBidButton leadId={lead.id} bids={cashBids} />
             )}
+            {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
             {can(user, "create", "Document") && (
               <SendWelcomeCallButton leadId={lead.id} templates={welcomeCallTemplates} />
             )}
