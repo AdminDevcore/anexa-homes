@@ -2390,9 +2390,16 @@ model CashBid {
   leadId          String
   token           String        @unique @default(uuid())
   createdById     String?
+  // "cash" = out-of-pocket bid (total + deposit split); "insurance" = deductible-only
+  // repair agreement (carrier pays the approved balance).
+  kind            String        @default("cash")
   workDescription String
   totalCents      Int           @default(0)
   depositPercent  Int           @default(50)
+  // Insurance contracts: homeowner owes only the deductible; carrier/claim for reference.
+  deductibleCents Int           @default(0)
+  carrier         String?
+  claimNumber     String?
   // Warranty terms shown on the bid/contract (years). Defaults = the standard.
   warrantyWorkmanshipYears Int   @default(5)
   warrantyManufacturerYears Int  @default(30)

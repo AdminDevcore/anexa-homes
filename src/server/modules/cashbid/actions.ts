@@ -25,15 +25,19 @@ function canManage(user: SessionUser) {
 
 const createSchema = z.object({
   leadId: z.string().min(1),
+  kind: z.enum(["cash", "insurance"]).default("cash"),
   workDescription: z.string().trim().min(3, "Add a short description of the work.").max(3000),
-  totalCents: z.coerce.number().int().min(0).max(1_000_000_00),
+  totalCents: z.coerce.number().int().min(0).max(1_000_000_00).default(0),
   depositPercent: z.coerce.number().int().min(0).max(100).default(50),
+  deductibleCents: z.coerce.number().int().min(0).max(1_000_000_00).default(0),
+  carrier: z.string().trim().max(120).optional().nullable(),
+  claimNumber: z.string().trim().max(120).optional().nullable(),
   warrantyWorkmanshipYears: z.coerce.number().int().min(0).max(99).default(5),
   warrantyManufacturerYears: z.coerce.number().int().min(0).max(99).default(30),
   signatureMode: z.enum(["digital", "physical"]).default("digital"),
 });
 
-export async function createCashBidAction(input: z.infer<typeof createSchema>) {
+export async function createCashBidAction(input: z.input<typeof createSchema>) {
   const user = await requireUser();
   if (!canManage(user)) return fail("Not allowed.");
   const parsed = createSchema.safeParse(input);
@@ -46,9 +50,13 @@ export async function createCashBidAction(input: z.infer<typeof createSchema>) {
       companyId: user.companyId,
       leadId: d.leadId,
       createdById: user.userId,
+      kind: d.kind,
       workDescription: d.workDescription,
       totalCents: d.totalCents,
       depositPercent: d.depositPercent,
+      deductibleCents: d.deductibleCents,
+      carrier: d.carrier || null,
+      claimNumber: d.claimNumber || null,
       warrantyWorkmanshipYears: d.warrantyWorkmanshipYears,
       warrantyManufacturerYears: d.warrantyManufacturerYears,
       signatureMode: d.signatureMode,
@@ -63,7 +71,7 @@ export async function createCashBidAction(input: z.infer<typeof createSchema>) {
 
 const updateSchema = createSchema.extend({ id: z.string().min(1) }).omit({ leadId: true });
 
-export async function updateCashBidAction(input: z.infer<typeof updateSchema>) {
+export async function updateCashBidAction(input: z.input<typeof updateSchema>) {
   const user = await requireUser();
   if (!canManage(user)) return fail("Not allowed.");
   const parsed = updateSchema.safeParse(input);
@@ -78,9 +86,13 @@ export async function updateCashBidAction(input: z.infer<typeof updateSchema>) {
   await prisma.cashBid.update({
     where: { id: bid.id },
     data: {
+      kind: d.kind,
       workDescription: d.workDescription,
       totalCents: d.totalCents,
       depositPercent: d.depositPercent,
+      deductibleCents: d.deductibleCents,
+      carrier: d.carrier || null,
+      claimNumber: d.claimNumber || null,
       warrantyWorkmanshipYears: d.warrantyWorkmanshipYears,
       warrantyManufacturerYears: d.warrantyManufacturerYears,
       signatureMode: d.signatureMode,

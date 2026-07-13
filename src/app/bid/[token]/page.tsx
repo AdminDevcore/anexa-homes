@@ -28,6 +28,7 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
   if (!bid) notFound();
 
   const c = bid.company;
+  const isInsurance = bid.kind === "insurance";
   const money = (cents: number) => formatMoney(cents, c.currencyCode, c.locale);
   const date = new Date(bid.createdAt).toLocaleDateString(c.locale || "en-US", {
     year: "numeric",
@@ -47,7 +48,9 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
             <span className="font-display text-xl font-bold text-neutral-900">{c.name}</span>
           )}
           <div className="text-right">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400">Proposal &amp; Agreement</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400">
+              {isInsurance ? "Repair Agreement" : "Proposal & Agreement"}
+            </div>
             <div className="text-sm text-neutral-500">{date}</div>
           </div>
         </div>
@@ -65,26 +68,57 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
           <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed text-neutral-800">{bid.workDescription}</p>
         </section>
 
-        {/* Total */}
-        <section className="mt-8 rounded-xl border border-neutral-200 bg-neutral-50 p-5">
-          <div className="flex items-baseline justify-between">
-            <span className="text-sm font-medium text-neutral-500">Total investment</span>
-            <span className="font-display text-3xl font-bold text-neutral-900">{money(bid.totalCents)}</span>
-          </div>
-        </section>
+        {isInsurance ? (
+          <>
+            {/* Insurance claim reference */}
+            {bid.carrier || bid.claimNumber ? (
+              <section className="mt-8">
+                <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Insurance claim</h2>
+                <div className="mt-3 divide-y divide-neutral-200 overflow-hidden rounded-xl border border-neutral-200">
+                  {bid.carrier ? <Row label="Carrier" value={bid.carrier} /> : null}
+                  {bid.claimNumber ? <Row label="Claim #" value={bid.claimNumber} /> : null}
+                </div>
+              </section>
+            ) : null}
 
-        {/* Payment schedule */}
-        <section className="mt-6">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Payment schedule</h2>
-          <div className="mt-3 divide-y divide-neutral-200 overflow-hidden rounded-xl border border-neutral-200">
-            <Row label={`Due upon signing (${bid.depositPercent}%)`} value={money(bid.depositCents)} />
-            <Row label={`Due upon completion (${100 - bid.depositPercent}%)`} value={money(bid.balanceCents)} />
-          </div>
-          <p className="mt-3 text-xs leading-relaxed text-neutral-500">
-            A {bid.depositPercent}% deposit is due upon signing; the remaining balance is due upon completion of the work
-            described above. This is a cash agreement — no insurance claim or inspection is required.
-          </p>
-        </section>
+            {/* Payment — deductible only */}
+            <section className="mt-6">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Payment</h2>
+              <div className="mt-3 divide-y divide-neutral-200 overflow-hidden rounded-xl border border-neutral-200">
+                <Row label="Insurance-approved amount" value="Paid by carrier" />
+                <Row label="Your responsibility (deductible)" value={money(bid.deductibleCents)} />
+              </div>
+              <p className="mt-3 text-xs leading-relaxed text-neutral-500">
+                This is an insurance repair. {c.name} will perform the approved scope of work for the amount approved by
+                your insurance carrier. You are responsible only for your deductible of {money(bid.deductibleCents)}; the
+                remaining approved amount is billed to and paid by your insurance company.
+              </p>
+            </section>
+          </>
+        ) : (
+          <>
+            {/* Total */}
+            <section className="mt-8 rounded-xl border border-neutral-200 bg-neutral-50 p-5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm font-medium text-neutral-500">Total investment</span>
+                <span className="font-display text-3xl font-bold text-neutral-900">{money(bid.totalCents)}</span>
+              </div>
+            </section>
+
+            {/* Payment schedule */}
+            <section className="mt-6">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Payment schedule</h2>
+              <div className="mt-3 divide-y divide-neutral-200 overflow-hidden rounded-xl border border-neutral-200">
+                <Row label={`Due upon signing (${bid.depositPercent}%)`} value={money(bid.depositCents)} />
+                <Row label={`Due upon completion (${100 - bid.depositPercent}%)`} value={money(bid.balanceCents)} />
+              </div>
+              <p className="mt-3 text-xs leading-relaxed text-neutral-500">
+                A {bid.depositPercent}% deposit is due upon signing; the remaining balance is due upon completion of the
+                work described above. This is a cash agreement — no insurance claim or inspection is required.
+              </p>
+            </section>
+          </>
+        )}
 
         {/* Warranty */}
         <section className="mt-8">
@@ -114,20 +148,44 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
           <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">Terms &amp; Agreement</h2>
           <p className="mt-2 text-sm text-neutral-700">
             Once signed by the homeowner below, this document is a binding agreement between {c.name} and the homeowner
-            for the work and price stated above, on the following terms:
+            for the work stated above, on the following terms:
           </p>
-          <ul className="mt-3 space-y-1.5 text-xs leading-relaxed text-neutral-600">
-            <li>• Payment: {bid.depositPercent}% due upon signing; the remaining balance due upon completion.</li>
-            <li>• Work will be performed per manufacturer specifications and applicable local building codes.</li>
-            <li>
-              • Warranty: {bid.warrantyWorkmanshipYears}-year workmanship and up to {bid.warrantyManufacturerYears}-year
-              manufacturer warranty as described above (manufacturer warranty subject to the manufacturer&apos;s terms).
-            </li>
-            <li>• Any change to the scope or price will be documented in a written change order agreed to by both parties.</li>
-            <li>• This is a cash agreement; no insurance claim or inspection is required.</li>
-            <li>• The homeowner may cancel this agreement within three (3) business days of signing.</li>
-            <li>• This document represents the entire agreement between the parties.</li>
-          </ul>
+          {isInsurance ? (
+            <ul className="mt-3 space-y-1.5 text-xs leading-relaxed text-neutral-600">
+              <li>
+                • Payment: The homeowner is responsible for the insurance deductible of {money(bid.deductibleCents)}. The
+                balance of the insurance-approved scope is billed to and paid by the insurance carrier.
+              </li>
+              <li>
+                • {c.name} will perform the work approved by the homeowner&apos;s insurance carrier, including any approved
+                supplements, per manufacturer specifications and applicable local building codes.
+              </li>
+              <li>
+                • The homeowner authorizes their insurance proceeds — including recoverable depreciation and approved
+                supplements — to be applied to this work.
+              </li>
+              <li>
+                • Warranty: {bid.warrantyWorkmanshipYears}-year workmanship and up to {bid.warrantyManufacturerYears}-year
+                manufacturer warranty as described above (manufacturer warranty subject to the manufacturer&apos;s terms).
+              </li>
+              <li>• Any change to the approved scope will be handled as an insurance supplement or written change order.</li>
+              <li>• The homeowner may cancel this agreement within three (3) business days of signing.</li>
+              <li>• This document represents the entire agreement between the parties.</li>
+            </ul>
+          ) : (
+            <ul className="mt-3 space-y-1.5 text-xs leading-relaxed text-neutral-600">
+              <li>• Payment: {bid.depositPercent}% due upon signing; the remaining balance due upon completion.</li>
+              <li>• Work will be performed per manufacturer specifications and applicable local building codes.</li>
+              <li>
+                • Warranty: {bid.warrantyWorkmanshipYears}-year workmanship and up to {bid.warrantyManufacturerYears}-year
+                manufacturer warranty as described above (manufacturer warranty subject to the manufacturer&apos;s terms).
+              </li>
+              <li>• Any change to the scope or price will be documented in a written change order agreed to by both parties.</li>
+              <li>• This is a cash agreement; no insurance claim or inspection is required.</li>
+              <li>• The homeowner may cancel this agreement within three (3) business days of signing.</li>
+              <li>• This document represents the entire agreement between the parties.</li>
+            </ul>
+          )}
         </section>
 
         {/* Signature — digital e-sign, or a printable pen-and-paper line for in-person signing.

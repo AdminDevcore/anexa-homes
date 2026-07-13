@@ -33,6 +33,7 @@ import { getRoofReport } from "@/server/modules/roof/queries";
 import { RoofReportButton } from "@/components/portal/roof-report";
 import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
 import { CashBidButton } from "@/components/portal/cash-bid-panel";
+import { InsuranceContractButton } from "@/components/portal/insurance-contract-panel";
 import { getCashBidsForLead } from "@/server/modules/cashbid/queries";
 import { SendWelcomeCallButton } from "@/components/portal/send-welcome-call-button";
 import { getActiveWelcomeCallTemplates } from "@/server/modules/welcome-call/queries";
@@ -79,7 +80,10 @@ export default async function LeadDetailPage({
   // Cash deals (customer pays out of pocket / financing) hide the insurance UI:
   // no claim worksheet, no scope of work, and "Status" instead of "Claim Status".
   const isInsurance = lead.dealType !== "cash";
-  const cashBids = !isInsurance ? await getCashBidsForLead(user.companyId, lead.id) : [];
+  // One table backs both cash bids and insurance contracts; split by kind.
+  const allBids = await getCashBidsForLead(user.companyId, lead.id);
+  const cashBids = allBids.filter((b) => b.kind === "cash");
+  const insuranceBids = allBids.filter((b) => b.kind === "insurance");
 
   const claim = lead.claims[0];
   const measurement = lead.roofMeasurements[0];
@@ -261,6 +265,17 @@ export default async function LeadDetailPage({
             )}
             {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <BuildPresentationButton leadId={lead.id} />
+            )}
+            {isInsurance && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
+              <InsuranceContractButton
+                leadId={lead.id}
+                bids={insuranceBids}
+                prefill={{
+                  carrier: claim?.carrier ?? "",
+                  claimNumber: claim?.claimNumber ?? "",
+                  deductibleDollars: claim?.deductible ? String(claim.deductible / 100) : "",
+                }}
+              />
             )}
             {!isInsurance && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <CashBidButton leadId={lead.id} bids={cashBids} />

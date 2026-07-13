@@ -6,9 +6,11 @@ import { bidAmounts } from "./money";
 export type CashBidRow = {
   id: string;
   token: string;
+  kind: string;
   workDescription: string;
   totalCents: number;
   depositPercent: number;
+  deductibleCents: number;
   status: CashBidStatus;
   signerName: string | null;
   signedAt: string | null;
@@ -20,9 +22,11 @@ export async function getCashBidsForLead(companyId: string, leadId: string): Pro
   return bids.map((b) => ({
     id: b.id,
     token: b.token,
+    kind: b.kind,
     workDescription: b.workDescription,
     totalCents: b.totalCents,
     depositPercent: b.depositPercent,
+    deductibleCents: b.deductibleCents,
     status: b.status,
     signerName: b.signerName,
     signedAt: b.signedAt?.toISOString() ?? null,
@@ -33,11 +37,15 @@ export async function getCashBidsForLead(companyId: string, leadId: string): Pro
 export type PublicCashBid = {
   token: string;
   status: CashBidStatus;
+  kind: string;
   workDescription: string;
   totalCents: number;
   depositPercent: number;
   depositCents: number;
   balanceCents: number;
+  deductibleCents: number;
+  carrier: string | null;
+  claimNumber: string | null;
   warrantyWorkmanshipYears: number;
   warrantyManufacturerYears: number;
   signatureMode: string;
@@ -73,11 +81,15 @@ export async function getCashBidByToken(token: string): Promise<PublicCashBid | 
   return {
     token: b.token,
     status: b.status,
+    kind: b.kind,
     workDescription: b.workDescription,
     totalCents: amt.totalCents,
     depositPercent: amt.depositPercent,
     depositCents: amt.depositCents,
     balanceCents: amt.balanceCents,
+    deductibleCents: b.deductibleCents,
+    carrier: b.carrier,
+    claimNumber: b.claimNumber,
     warrantyWorkmanshipYears: b.warrantyWorkmanshipYears,
     warrantyManufacturerYears: b.warrantyManufacturerYears,
     signatureMode: b.signatureMode,
