@@ -22,6 +22,7 @@ export function CashBidButton({ leadId, bids }: { leadId: string; bids: CashBidR
   const [deposit, setDeposit] = React.useState("50");
   const [workYears, setWorkYears] = React.useState("5");
   const [mfrYears, setMfrYears] = React.useState("30");
+  const [physical, setPhysical] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -40,6 +41,7 @@ export function CashBidButton({ leadId, bids }: { leadId: string; bids: CashBidR
       depositPercent: pct,
       warrantyWorkmanshipYears: Math.max(0, parseInt(workYears || "5", 10) || 0),
       warrantyManufacturerYears: Math.max(0, parseInt(mfrYears || "30", 10) || 0),
+      signatureMode: physical ? "physical" : "digital",
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -49,6 +51,7 @@ export function CashBidButton({ leadId, bids }: { leadId: string; bids: CashBidR
     setDeposit("50");
     setWorkYears("5");
     setMfrYears("30");
+    setPhysical(false);
     router.refresh();
   }
 
@@ -155,6 +158,21 @@ export function CashBidButton({ leadId, bids }: { leadId: string; bids: CashBidR
               Upfront {usd((total * pct) / 100)} · on completion {usd(total - (total * pct) / 100)}
             </p>
           ) : null}
+          <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={physical}
+              onChange={(e) => setPhysical(e.target.checked)}
+              className="mt-0.5 size-4"
+            />
+            <span>
+              <span className="font-medium">Physical (pen &amp; paper) signature</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Replaces the on-screen signature with a printable signature line — for homeowners who prefer to sign in
+                person. Leave unchecked for a digital e-signature.
+              </span>
+            </span>
+          </label>
           <Button onClick={create} disabled={busy} className="w-full gap-1.5">
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Create bid
           </Button>

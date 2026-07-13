@@ -2396,6 +2396,8 @@ model CashBid {
   // Warranty terms shown on the bid/contract (years). Defaults = the standard.
   warrantyWorkmanshipYears Int   @default(5)
   warrantyManufacturerYears Int  @default(30)
+  // "digital" = homeowner e-signs on the bid page; "physical" = print with a pen signature line.
+  signatureMode   String        @default("digital")
   status          CashBidStatus @default(draft)
   signerName      String?
   signerIp        String?

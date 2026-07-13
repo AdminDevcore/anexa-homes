@@ -30,6 +30,7 @@ const createSchema = z.object({
   depositPercent: z.coerce.number().int().min(0).max(100).default(50),
   warrantyWorkmanshipYears: z.coerce.number().int().min(0).max(99).default(5),
   warrantyManufacturerYears: z.coerce.number().int().min(0).max(99).default(30),
+  signatureMode: z.enum(["digital", "physical"]).default("digital"),
 });
 
 export async function createCashBidAction(input: z.infer<typeof createSchema>) {
@@ -50,6 +51,7 @@ export async function createCashBidAction(input: z.infer<typeof createSchema>) {
       depositPercent: d.depositPercent,
       warrantyWorkmanshipYears: d.warrantyWorkmanshipYears,
       warrantyManufacturerYears: d.warrantyManufacturerYears,
+      signatureMode: d.signatureMode,
       status: "sent",
       sentAt: new Date(),
     },
@@ -81,6 +83,7 @@ export async function updateCashBidAction(input: z.infer<typeof updateSchema>) {
       depositPercent: d.depositPercent,
       warrantyWorkmanshipYears: d.warrantyWorkmanshipYears,
       warrantyManufacturerYears: d.warrantyManufacturerYears,
+      signatureMode: d.signatureMode,
     },
   });
   revalidatePath(`/portal/leads/${bid.leadId}`);

@@ -40,6 +40,7 @@ export type PublicCashBid = {
   balanceCents: number;
   warrantyWorkmanshipYears: number;
   warrantyManufacturerYears: number;
+  signatureMode: string;
   signerName: string | null;
   signedAt: string | null;
   createdAt: string;
@@ -79,6 +80,7 @@ export async function getCashBidByToken(token: string): Promise<PublicCashBid | 
     balanceCents: amt.balanceCents,
     warrantyWorkmanshipYears: b.warrantyWorkmanshipYears,
     warrantyManufacturerYears: b.warrantyManufacturerYears,
+    signatureMode: b.signatureMode,
     signerName: b.signerName,
     signedAt: b.signedAt?.toISOString() ?? null,
     createdAt: b.createdAt.toISOString(),

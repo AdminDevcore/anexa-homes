@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { getCashBidByToken } from "@/server/modules/cashbid/queries";
 import { formatMoney } from "@/server/modules/cashbid/money";
 import { CashBidSignature } from "@/components/cashbid/cash-bid-signature";
+import { CashBidPrintSignature } from "@/components/cashbid/cash-bid-print-signature";
 
 export const dynamic = "force-dynamic";
 
@@ -129,8 +130,13 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
           </ul>
         </section>
 
-        {/* Signature */}
-        <CashBidSignature bid={bid} />
+        {/* Signature — digital e-sign, or a printable pen-and-paper line for in-person signing.
+            If already signed digitally, always show the accepted state. */}
+        {bid.signatureMode === "physical" && bid.status !== "signed" ? (
+          <CashBidPrintSignature bid={bid} />
+        ) : (
+          <CashBidSignature bid={bid} />
+        )}
 
         {/* Footer */}
         <div className="mt-10 border-t border-neutral-200 pt-4 text-center text-xs text-neutral-400">
