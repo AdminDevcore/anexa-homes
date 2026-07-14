@@ -30,7 +30,15 @@ export function isIndustry(v: unknown): v is Industry {
   return v === "roofing" || v === "solar" || v === "others";
 }
 
-/** A user's accessible industries — empty list means all three. */
-export function allowedIndustries(industries: Industry[] | null | undefined): Industry[] {
-  return industries && industries.length > 0 ? industries : [...INDUSTRIES];
+/**
+ * Single-workspace build: Anexa runs one Roofing workspace. Every user works
+ * Roofing, and all leads (whatever service the homeowner picked on the website)
+ * land here — non-roofing trades are forwarded to partner companies off-platform.
+ * The `industry` column and enum stay in the schema for historical data; this is
+ * the single lever that collapses active workspace, the switcher, and the
+ * empty-workspace hint to Roofing only. Restore the old body to re-enable
+ * multi-workspace.
+ */
+export function allowedIndustries(_industries?: Industry[] | null): Industry[] {
+  return [DEFAULT_INDUSTRY];
 }

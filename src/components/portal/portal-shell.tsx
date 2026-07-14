@@ -8,12 +8,10 @@ import { Menu, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PORTAL_NAV } from "@/lib/nav";
 import { Logo } from "@/components/marketing/logo";
-import type { Industry } from "@prisma/client";
 import type { Branding } from "@/server/branding/defaults";
 import { UserMenu } from "./user-menu";
 import { NotificationBell } from "./notification-bell";
 import { CommandPalette } from "./command-palette";
-import { IndustrySwitcher } from "./industry-switcher";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
@@ -27,15 +25,11 @@ export type ShellUser = {
 export function PortalShell({
   user,
   allowedHrefs,
-  activeIndustry,
-  industries,
   branding,
   children,
 }: {
   user: ShellUser;
   allowedHrefs: string[];
-  activeIndustry: Industry;
-  industries: Industry[];
   branding: Branding;
   children: React.ReactNode;
 }) {
@@ -164,7 +158,6 @@ export function PortalShell({
 
           <div className="flex items-center gap-3">
             <CommandPalette allowedHrefs={allowedHrefs} />
-            <IndustrySwitcher active={activeIndustry} industries={industries} />
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user.roleLabel}
             </span>

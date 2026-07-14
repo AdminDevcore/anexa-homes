@@ -1,12 +1,10 @@
 import {
   Home,
-  Sun,
   Droplets,
   AppWindow,
   Wind,
   CloudRain,
   CloudLightning,
-  FileCheck2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -79,18 +77,6 @@ export const SERVICES: Service[] = [
     ctaLabel: "Request Free Inspection",
   },
   {
-    slug: "solar",
-    title: "Solar",
-    short: "Clean energy systems",
-    description:
-      "High-efficiency solar designed around your usage — lower bills, real backup power, and lasting home value.",
-    icon: Sun,
-    href: "/solar",
-    image: "/img/solar.jpg",
-    features: ["System design", "Premium panels", "Battery storage", "Net metering"],
-    ctaLabel: "Request Free Solar Estimate",
-  },
-  {
     slug: "hvac",
     title: "HVAC",
     short: "Heating & cooling",
@@ -150,19 +136,6 @@ export const SERVICES: Service[] = [
     features: ["Free damage inspection", "Emergency tarping", "Full restoration", "Insurance coordination"],
     primary: true,
     ctaLabel: "Request Free Storm Inspection",
-  },
-  {
-    slug: "insurance-claims",
-    title: "Insurance Claim Support",
-    short: "Claims handled for you",
-    description:
-      "We document the damage, meet your adjuster, and manage supplements — so you typically pay only your deductible.",
-    icon: FileCheck2,
-    href: "/insurance-claims",
-    image: "/img/insurance-claims.jpg",
-    features: ["Claim filing help", "Adjuster meetings", "Supplements & depreciation", "Deductible-only goal"],
-    primary: true,
-    ctaLabel: "Start Insurance Claim Support",
   },
 ];
 

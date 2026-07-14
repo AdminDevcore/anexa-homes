@@ -5,7 +5,6 @@ import { can } from "@/server/rbac/guards";
 import { PORTAL_NAV } from "@/lib/nav";
 import { roleLabel } from "@/lib/roles";
 import { PortalShell } from "@/components/portal/portal-shell";
-import { getActiveIndustry, userIndustries } from "@/server/auth/industry";
 import { needsOnboarding } from "@/server/modules/onboarding/queries";
 import { currentBranding } from "@/server/branding/resolve";
 import { BrandingProvider } from "@/components/portal/branding-provider";
@@ -37,8 +36,6 @@ export default async function PortalLayout({
     can(user, "read", item.resource)
   ).map((item) => item.href);
 
-  const industries = userIndustries(user);
-  const activeIndustry = await getActiveIndustry(user);
   const branding = await currentBranding();
 
   return (
@@ -53,8 +50,6 @@ export default async function PortalLayout({
           roleLabel: roleLabel(user.role),
         }}
         allowedHrefs={allowedHrefs}
-        activeIndustry={activeIndustry}
-        industries={industries}
         branding={branding}
       >
         {children}

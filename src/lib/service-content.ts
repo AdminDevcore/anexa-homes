@@ -81,54 +81,10 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "What warranty do I get?", a: "Both a workmanship warranty and the manufacturer's warranty, plus a digital closeout packet for your records." },
     ],
     gallery: ["Hail-damaged shingles — before", "New architectural shingle roof — after", "Detail: flashing & valleys", "Clean job site at closeout"],
-    related: ["storm-restoration", "insurance-claims", "gutters", "solar"],
+    related: ["storm-restoration", "gutters", "hvac", "windows"],
     metaTitle: "Roofing — Replacement & Repair",
     metaDescription:
       "Premium roof replacement and repair from Anexa Homes. Certified crews, top-tier materials, and lifetime workmanship warranties across North Texas.",
-  },
-
-  solar: {
-    slug: "solar",
-    heroLead: "Smarter solar, designed around ",
-    heroHighlight: "your home",
-    heroTail: ".",
-    heroDescription:
-      "We design high-efficiency solar around your actual usage and roof — so you get real savings, dependable backup power, and a system that pays off for decades.",
-    overviewTitle: "Solar that's engineered, not just installed.",
-    overviewBody:
-      "Off-the-shelf solar leaves savings on the table. We start with an energy review, model your production and offset, and design a system — with optional battery backup — that fits your roof, your budget, and your long-term goals. Then our team handles permitting, install, and utility interconnection.",
-    benefits: [
-      { title: "Usage-Based Design", body: "We size your array to your real consumption, not a one-size-fits-all template." },
-      { title: "Battery Backup", body: "Keep the lights, fridge, and AC running through outages with optional storage." },
-      { title: "Financing Support", body: "Flexible options and incentive guidance make going solar approachable." },
-    ],
-    problemsTitle: "Going solar shouldn't feel like a gamble.",
-    problemsIntro:
-      "Solar is a long-term investment. Done wrong, it disappoints — done right, it pays you back for 25+ years.",
-    problems: [
-      { title: "Rising utility rates", body: "Energy costs keep climbing, and renters of the grid have no control over the next increase." },
-      { title: "Oversized, overpriced systems", body: "Many companies sell more panels than you need — you pay for production you never use." },
-      { title: "Outages with no backup", body: "Solar without storage still goes dark when the grid does. We design for resilience." },
-    ],
-    process: [
-      { step: "01", title: "Energy Review", body: "We analyze your bills and usage to find the right offset for your home." },
-      { step: "02", title: "System Design", body: "Custom layout and production model tailored to your roof and goals." },
-      { step: "03", title: "Battery Options", body: "Add storage for backup power and to maximize self-consumption." },
-      { step: "04", title: "Financing", body: "We walk you through incentives and payment options that fit your budget." },
-      { step: "05", title: "Installation", body: "Permitting, install, and utility interconnection handled by our team." },
-      { step: "06", title: "Monitoring", body: "Track production and savings from your phone, with support if anything changes." },
-    ],
-    faqs: [
-      { q: "Will solar really lower my bill?", a: "A correctly sized system offsets most or all of your usage. We model expected savings before you commit, so there are no surprises." },
-      { q: "Do I need a battery?", a: "Not required, but storage gives you backup power during outages and helps you use more of what you generate. We'll show you the trade-offs." },
-      { q: "What happens on cloudy days or at night?", a: "Your home draws from the grid (or your battery) seamlessly. Net metering credits the excess your panels send back." },
-      { q: "How long does installation take?", a: "Most installs are completed in one to three days after permitting, with interconnection following utility approval." },
-    ],
-    gallery: ["Roof array — install day", "Battery & inverter — interior", "Production dashboard", "Completed system — exterior"],
-    related: ["roofing", "hvac", "windows", "insurance-claims"],
-    metaTitle: "Solar — Design, Storage & Installation",
-    metaDescription:
-      "Smarter solar from Anexa Homes — usage-based system design, battery backup, financing support, and monitoring across North Texas.",
   },
 
   hvac: {
@@ -173,7 +129,7 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "Do you service what you install?", a: "We do. Seasonal tune-ups keep your system efficient and protect your manufacturer warranty." },
     ],
     gallery: ["New condenser — exterior", "Air handler & ductwork", "Smart thermostat install", "Clean equipment closet"],
-    related: ["solar", "windows", "water-filtration", "roofing"],
+    related: ["windows", "water-filtration", "roofing", "gutters"],
     metaTitle: "HVAC — Heating, Cooling & Air Quality",
     metaDescription:
       "High-efficiency HVAC from Anexa Homes — properly sized AC, heat pumps, and furnaces, cleaner air, and lower bills across North Texas.",
@@ -221,7 +177,7 @@ const CONTENT: Record<string, ServiceContent> = {
     ],
     gallery: ["Whole-home filtration system", "Pure water in the kitchen", "Filtered water on tap", "Multi-stage pre-filtration"],
     galleryImages: ["/img/water-system.jpg", "/img/water-kitchen.jpg", "/img/water-faucet.jpg", "/img/water-filters.jpg"],
-    related: ["hvac", "roofing", "windows", "solar"],
+    related: ["hvac", "roofing", "windows", "gutters"],
     metaTitle: "Water Filtration & Softening",
     metaDescription:
       "Whole-home water filtration and softening from Anexa Homes — tested, tailored treatment for cleaner, softer water at every tap in North Texas.",
@@ -270,7 +226,7 @@ const CONTENT: Record<string, ServiceContent> = {
     ],
     gallery: ["Premium replacement windows", "Expert installation", "Natural light, black frames", "Modern black-framed glass"],
     galleryImages: ["/img/windows-exterior.jpg", "/img/windows-installer.jpg", "/img/windows-interior.jpg", "/img/windows-detail.jpg"],
-    related: ["hvac", "roofing", "solar", "gutters"],
+    related: ["hvac", "roofing", "storm-restoration", "gutters"],
     metaTitle: "Replacement Windows",
     metaDescription:
       "Premium replacement windows from Anexa Homes — energy-efficient, custom-fit, and professionally installed for comfort and curb appeal in North Texas.",
@@ -319,7 +275,7 @@ const CONTENT: Record<string, ServiceContent> = {
     ],
     gallery: ["Professional installation", "Seamless corners & outlets", "Downspouts that move water", "Premium curb appeal"],
     galleryImages: ["/img/gutters-install.jpg", "/img/gutters-corner.jpg", "/img/gutters-downspout.jpg", "/img/gutters-home.jpg"],
-    related: ["roofing", "storm-restoration", "windows", "insurance-claims"],
+    related: ["roofing", "storm-restoration", "windows", "hvac"],
     metaTitle: "Seamless Gutters & Guards",
     metaDescription:
       "Seamless gutters and guards from Anexa Homes — properly sized, pitched, and clog-resistant to protect your roof, siding, and foundation in North Texas.",
@@ -368,59 +324,10 @@ const CONTENT: Record<string, ServiceContent> = {
     ],
     gallery: ["Documented hail & wind damage", "Emergency roof protection", "Insurance claim support", "Restored — better than before"],
     galleryImages: ["/img/storm-damage.jpg", "/img/storm-tarp.jpg", "/img/storm-claim.jpg", "/img/storm-restored.jpg"],
-    related: ["roofing", "insurance-claims", "gutters", "windows"],
+    related: ["roofing", "gutters", "windows", "hvac"],
     metaTitle: "Storm Restoration — Hail & Wind Damage",
     metaDescription:
       "Storm restoration from Anexa Homes — documented hail and wind damage, emergency tarping, full restoration, and insurance claims managed for you in North Texas.",
-  },
-
-  "insurance-claims": {
-    slug: "insurance-claims",
-    heroLead: "Your claim, handled by people who ",
-    heroHighlight: "do this every day",
-    heroTail: ".",
-    heroDescription:
-      "We document the damage, meet your adjuster, and manage supplements and depreciation — so your claim is handled correctly and you typically pay only your deductible.",
-    overviewTitle: "Insurance claim support, start to finish.",
-    overviewBody:
-      "A storm claim is its own full-time job — documentation, adjuster meetings, supplements, depreciation, and deadlines. We've done it thousands of times. Our specialists build the evidence, advocate for a fair scope, and manage every step alongside your restoration, so nothing falls through the cracks and you're never negotiating alone.",
-    // Hero reserved for a future cinematic PM + homeowner + adjuster shot. The
-    // previous placeholder (/img/home-colonial.jpg) was a small off-brand
-    // cottage, so use a premium home placeholder until the dedicated hero lands.
-    heroImage: "/img/home-dusk.jpg",
-    benefits: [
-      { title: "Done-For-You Documentation", body: "We build the photo and report evidence that supports a fair, complete claim." },
-      { title: "Adjuster Advocacy", body: "Our specialists meet your adjuster on site to align on the right scope." },
-      { title: "Deductible-Only Goal", body: "We pursue supplements and recover depreciation so you typically pay just your deductible." },
-    ],
-    problemsTitle: "Insurance claims should be documented correctly — the first time.",
-    problemsIntro:
-      "Homeowners lose money every day to claims that were under-documented, under-scoped, or simply filed wrong.",
-    problems: [
-      { title: "Confusing process", body: "Adjusters, supplements, depreciation, and deadlines are a lot to manage alone." },
-      { title: "Missed damage", body: "Untrained eyes miss damage that belongs in your scope — and your settlement." },
-      { title: "Leaving money behind", body: "Without supplements and recovered depreciation, many homeowners are underpaid." },
-    ],
-    process: [
-      { step: "01", title: "Free Inspection", body: "We document all storm damage with detailed photos and a written report." },
-      { step: "02", title: "Claim Filing", body: "We help you open the claim and submit the supporting evidence." },
-      { step: "03", title: "Adjuster Meeting", body: "Our specialist attends the adjuster visit to advocate for a fair scope." },
-      { step: "04", title: "Supplements", body: "We document and submit missed items to correct an incomplete scope." },
-      { step: "05", title: "Depreciation Recovery", body: "We help recover withheld depreciation once work is completed." },
-      { step: "06", title: "Closeout", body: "Final paperwork and a digital packet so your records are complete." },
-    ],
-    faqs: [
-      { q: "Do you really handle the whole claim?", a: "Yes. We document the damage, file the claim, meet your adjuster, negotiate supplements, and help recover depreciation — so you typically pay only your deductible." },
-      { q: "Is this legal / allowed?", a: "Absolutely. As your contractor we document damage and advocate for an accurate scope of repairs. We coordinate directly with your carrier and adjuster." },
-      { q: "What does it cost me?", a: "Claim support is part of your restoration project. On approved claims, your out-of-pocket is typically just your deductible." },
-      { q: "What if my claim was already denied?", a: "We can re-inspect, document missed damage, and help you pursue a supplement or reconsideration where it's warranted." },
-    ],
-    gallery: ["Documented hail damage", "Digital documentation", "Claim reviewed with you", "Approved & restored"],
-    galleryImages: ["/img/insurance-roofdoc.jpg", "/img/insurance-tablet.jpg", "/img/insurance-meeting.jpg", "/img/insurance-handshake.jpg"],
-    related: ["storm-restoration", "roofing", "gutters", "windows"],
-    metaTitle: "Insurance Claim Support",
-    metaDescription:
-      "Insurance claim support from Anexa Homes — documentation, adjuster meetings, supplements, and depreciation recovery so you typically pay only your deductible.",
   },
 };
 
