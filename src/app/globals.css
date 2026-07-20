@@ -574,6 +574,18 @@
   .proposal-js [data-stagger] { opacity: 1 !important; transform: none !important; }
 }
 
+/* ── Cash-bid contract: clean page breaks when printed ────────────────────
+   Keeps each section (scope, payment, warranty, terms, signature) whole so a
+   2-page contract breaks between sections rather than slicing through a line
+   or, worst of all, splitting the signature block across pages. */
+@media print {
+  .cashbid-doc section,
+  .cashbid-doc h2 { break-inside: avoid; }
+  .cashbid-doc h2 { break-after: avoid; }
+  /* The signature area must never be split — push it to a fresh page if needed. */
+  .cashbid-doc .cashbid-sig { break-inside: avoid; }
+}
+
 /* Hide scrollbar (used by the proposal photo carousel). */
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .hide-scrollbar::-webkit-scrollbar { display: none; }

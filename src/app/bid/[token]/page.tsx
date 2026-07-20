@@ -38,7 +38,7 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
 
   return (
     <main className="min-h-screen bg-neutral-100 px-4 py-8 print:bg-white print:p-0">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm print:rounded-none print:border-0 print:shadow-none sm:p-12">
+      <div className="cashbid-doc mx-auto max-w-2xl rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm print:rounded-none print:border-0 print:shadow-none sm:p-12">
         {/* Header */}
         <div className="flex items-center justify-between gap-4 border-b border-neutral-200 pb-6">
           {c.logoUrl ? (
@@ -188,12 +188,20 @@ export default async function CashBidPage({ params }: { params: Promise<{ token:
           )}
         </section>
 
-        {/* Signature — digital e-sign, or a printable pen-and-paper line for in-person signing.
-            If already signed digitally, always show the accepted state. */}
-        {bid.signatureMode === "physical" && bid.status !== "signed" ? (
+        {/* Signature. Three cases:
+            • Already signed → accepted state (CashBidSignature).
+            • Physical mode, unsigned → pen-and-paper signature line, on screen + in print.
+            • Digital mode, unsigned → on-screen e-sign UI, but printing still yields a
+              physical signature area so the homeowner can sign the printout by hand. */}
+        {bid.status === "signed" ? (
+          <CashBidSignature bid={bid} />
+        ) : bid.signatureMode === "physical" ? (
           <CashBidPrintSignature bid={bid} />
         ) : (
-          <CashBidSignature bid={bid} />
+          <>
+            <CashBidSignature bid={bid} />
+            <CashBidPrintSignature bid={bid} printOnly />
+          </>
         )}
 
         {/* Footer */}

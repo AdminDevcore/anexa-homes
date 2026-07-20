@@ -87,6 +87,18 @@ export function CashBidSignature({ bid }: { bid: PublicCashBid }) {
       <p className="mt-3 text-xs text-neutral-400">
         By signing, you agree this is a binding agreement and that your typed name is your electronic signature.
       </p>
+      <div className="mt-4 border-t border-neutral-200 pt-4">
+        <button
+          type="button"
+          onClick={() => window.print()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+        >
+          <Printer className="size-4" /> Print contract to sign by hand
+        </button>
+        <p className="mt-2 text-xs text-neutral-400">
+          Prefer pen &amp; paper? Print the contract — it includes a physical signature line for the homeowner.
+        </p>
+      </div>
     </section>
   );
 }
