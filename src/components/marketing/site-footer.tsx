@@ -13,7 +13,7 @@ export function SiteFooter() {
             {COMPANY.tagline}
           </p>
           <p className="text-xs text-white/40">
-            Premium roofing, storm restoration, and home improvement across North Texas.
+            Premium roofing, solar, and home improvement across North Texas.
           </p>
         </div>
 

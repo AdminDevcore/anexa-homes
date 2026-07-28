@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: `${COMPANY.name} — Roofing & Home Improvement`,
     short_name: COMPANY.name,
     description:
-      "Premium roofing, storm restoration, insurance claim support, solar, HVAC & water filtration across North Texas.",
+      "Premium roofing, HVAC, water filtration, windows, gutters & solar panel installation across North Texas.",
     start_url: "/",
     display: "standalone",
     background_color: "#0B0B0C",

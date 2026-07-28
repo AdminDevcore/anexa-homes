@@ -53,7 +53,7 @@ export function Hero() {
             style={{ animationDelay: "0.05s" }}
           >
             <ShieldCheck className="size-3.5 text-metal" />
-            Premium Home Improvement &amp; Storm Restoration
+            Premium Roofing, Home Improvement &amp; Solar
           </span>
 
           <h1

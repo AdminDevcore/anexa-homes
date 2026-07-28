@@ -9,7 +9,7 @@ import { getPublicReviews, getPublicReviewStats } from "@/server/modules/reviews
 export const metadata: Metadata = {
   title: "Customer Reviews",
   description:
-    "Read reviews from Anexa Homes customers across North Texas — roofing, solar, HVAC, water filtration, windows, gutters, and storm restoration — and leave your own.",
+    "Read reviews from Anexa Homes customers across North Texas — roofing, HVAC, water filtration, windows, gutters, and solar panel installation — and leave your own.",
   alternates: { canonical: "/reviews" },
 };
 
