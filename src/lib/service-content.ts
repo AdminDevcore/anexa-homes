@@ -81,7 +81,7 @@ const CONTENT: Record<string, ServiceContent> = {
       { q: "What warranty do I get?", a: "Both a workmanship warranty and the manufacturer's warranty, plus a digital closeout packet for your records." },
     ],
     gallery: ["Hail-damaged shingles — before", "New architectural shingle roof — after", "Detail: flashing & valleys", "Clean job site at closeout"],
-    related: ["storm-restoration", "gutters", "hvac", "windows"],
+    related: ["solar", "gutters", "hvac", "windows"],
     metaTitle: "Roofing — Replacement & Repair",
     metaDescription:
       "Premium roof replacement and repair from Anexa Homes. Certified crews, top-tier materials, and lifetime workmanship warranties across North Texas.",
@@ -226,7 +226,7 @@ const CONTENT: Record<string, ServiceContent> = {
     ],
     gallery: ["Premium replacement windows", "Expert installation", "Natural light, black frames", "Modern black-framed glass"],
     galleryImages: ["/img/windows-exterior.jpg", "/img/windows-installer.jpg", "/img/windows-interior.jpg", "/img/windows-detail.jpg"],
-    related: ["hvac", "roofing", "storm-restoration", "gutters"],
+    related: ["hvac", "roofing", "solar", "gutters"],
     metaTitle: "Replacement Windows",
     metaDescription:
       "Premium replacement windows from Anexa Homes — energy-efficient, custom-fit, and professionally installed for comfort and curb appeal in North Texas.",
@@ -275,59 +275,55 @@ const CONTENT: Record<string, ServiceContent> = {
     ],
     gallery: ["Professional installation", "Seamless corners & outlets", "Downspouts that move water", "Premium curb appeal"],
     galleryImages: ["/img/gutters-install.jpg", "/img/gutters-corner.jpg", "/img/gutters-downspout.jpg", "/img/gutters-home.jpg"],
-    related: ["roofing", "storm-restoration", "windows", "hvac"],
+    related: ["roofing", "windows", "hvac", "solar"],
     metaTitle: "Seamless Gutters & Guards",
     metaDescription:
       "Seamless gutters and guards from Anexa Homes — properly sized, pitched, and clog-resistant to protect your roof, siding, and foundation in North Texas.",
   },
 
-  "storm-restoration": {
-    slug: "storm-restoration",
-    heroLead: "After the storm, ",
-    heroHighlight: "we restore everything",
+  solar: {
+    slug: "solar",
+    heroLead: "Smarter solar, designed around ",
+    heroHighlight: "your home",
     heroTail: ".",
     heroDescription:
-      "Hail and wind recovery handled start to finish — documented damage, emergency tarping, full restoration, and an insurance claim managed on your behalf.",
-    overviewTitle: "Complete storm recovery, with the claim handled for you.",
+      "We design high-efficiency solar around your actual usage and roof — so you get real savings, dependable backup power, and a system that pays off for decades.",
+    overviewTitle: "Solar that's engineered, not just installed.",
     overviewBody:
-      "A major storm leaves more than a damaged roof — and dealing with it alone is overwhelming. We inspect and document everything, protect your home from further damage, and restore your roof and exterior to better than before. Because we manage the insurance claim too, you get one team from first inspection to final walkthrough.",
-    // NOTE: the previous hero placeholder (/img/storm.jpg) is actually a
-    // solar-panel field photo — wrong for this page. Until a dedicated cinematic
-    // storm hero is supplied, the hero uses the new clean storm scene
-    // (service.image) rather than that mislabeled placeholder.
+      "Off-the-shelf solar leaves savings on the table. We start with an energy review, model your production and offset, and design a system — with optional battery backup — that fits your roof, your budget, and your long-term goals. Then our team handles permitting, install, and utility interconnection.",
     benefits: [
-      { title: "Rapid Response", body: "Emergency tarping and fast inspections protect your home right after the storm." },
-      { title: "Full Documentation", body: "Detailed photos and reports build a strong, defensible insurance claim." },
-      { title: "One Team, Start to Finish", body: "Inspection, claim, and restoration handled by one accountable crew." },
+      { title: "Usage-Based Design", body: "We size your array to your real consumption, not a one-size-fits-all template." },
+      { title: "Battery Backup", body: "Keep the lights, fridge, and AC running through outages with optional storage." },
+      { title: "Financing Support", body: "Flexible options and incentive guidance make going solar approachable." },
     ],
-    problemsTitle: "Storm season shouldn't leave you fighting alone.",
+    problemsTitle: "Going solar shouldn't feel like a gamble.",
     problemsIntro:
-      "After a hail or wind event, homeowners are left confused about damage, deadlines, and what insurance actually owes them.",
+      "Solar is a long-term investment. Done wrong, it disappoints — done right, it pays you back for 25+ years.",
     problems: [
-      { title: "Damage you can't see", body: "Hail bruising and wind lift often aren't visible from the ground but still fail your roof." },
-      { title: "Claim confusion", body: "Deadlines, adjusters, and paperwork are stressful — and easy to get wrong." },
-      { title: "Underpaid scopes", body: "Initial insurance offers frequently miss damage that a trained eye catches." },
+      { title: "Rising utility rates", body: "Energy costs keep climbing, and renters of the grid have no control over the next increase." },
+      { title: "Oversized, overpriced systems", body: "Many companies sell more panels than you need — you pay for production you never use." },
+      { title: "Outages with no backup", body: "Solar without storage still goes dark when the grid does. We design for resilience." },
     ],
     process: [
-      { step: "01", title: "Emergency Response", body: "Tarping and stabilization to stop further damage to your home." },
-      { step: "02", title: "Damage Inspection", body: "A thorough, documented assessment of roof and exterior storm damage." },
-      { step: "03", title: "Claim Filing", body: "We help open your claim and assemble the photo and report evidence." },
-      { step: "04", title: "Adjuster Meeting", body: "Our specialist meets your adjuster on site to align on a fair scope." },
-      { step: "05", title: "Restoration", body: "Certified crews restore your roof and exterior to better than before." },
-      { step: "06", title: "Closeout", body: "Final walkthrough, warranties, and a digital packet of all documentation." },
+      { step: "01", title: "Energy Review", body: "We analyze your bills and usage to find the right offset for your home." },
+      { step: "02", title: "System Design", body: "Custom layout and production model tailored to your roof and goals." },
+      { step: "03", title: "Battery Options", body: "Add storage for backup power and to maximize self-consumption." },
+      { step: "04", title: "Financing", body: "We walk you through incentives and payment options that fit your budget." },
+      { step: "05", title: "Installation", body: "Permitting, install, and utility interconnection handled by our team." },
+      { step: "06", title: "Monitoring", body: "Track production and savings from your phone, with support if anything changes." },
     ],
     faqs: [
-      { q: "How do I know if my roof has storm damage?", a: "Often you can't tell from the ground. Our free inspection documents hail and wind damage with photos so you know exactly where you stand." },
-      { q: "Is there a deadline to file a storm claim?", a: "Yes — most policies limit how long after a storm you can file. The sooner we inspect, the better we protect your options." },
-      { q: "What if my claim was denied or underpaid?", a: "We frequently identify missed damage and help pursue supplements so your approved scope reflects the real repairs needed." },
-      { q: "What will I pay out of pocket?", a: "On approved claims, homeowners typically pay only their deductible. We'll explain exactly what to expect up front." },
+      { q: "Will solar really lower my bill?", a: "A correctly sized system offsets most or all of your usage. We model expected savings before you commit, so there are no surprises." },
+      { q: "Do I need a battery?", a: "Not required, but storage gives you backup power during outages and helps you use more of what you generate. We'll show you the trade-offs." },
+      { q: "What happens on cloudy days or at night?", a: "Your home draws from the grid (or your battery) seamlessly. Net metering credits the excess your panels send back." },
+      { q: "How long does installation take?", a: "Most installs are completed in one to three days after permitting, with interconnection following utility approval." },
+      { q: "Should my roof be replaced first?", a: "If your roof is near end of life, replace it before the array goes up — we handle both, so the timing and the warranty stay under one roof." },
     ],
-    gallery: ["Documented hail & wind damage", "Emergency roof protection", "Insurance claim support", "Restored — better than before"],
-    galleryImages: ["/img/storm-damage.jpg", "/img/storm-tarp.jpg", "/img/storm-claim.jpg", "/img/storm-restored.jpg"],
-    related: ["roofing", "gutters", "windows", "hvac"],
-    metaTitle: "Storm Restoration — Hail & Wind Damage",
+    gallery: ["Roof array — install day", "Battery & inverter — interior", "Production dashboard", "Completed system — exterior"],
+    related: ["roofing", "hvac", "windows", "water-filtration"],
+    metaTitle: "Solar Panel Installation — Design, Storage & Install",
     metaDescription:
-      "Storm restoration from Anexa Homes — documented hail and wind damage, emergency tarping, full restoration, and insurance claims managed for you in North Texas.",
+      "Solar panel installation from Anexa Homes — usage-based system design, battery backup, financing support, and monitoring across North Texas.",
   },
 };
 

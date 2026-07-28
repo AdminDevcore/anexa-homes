@@ -4,7 +4,7 @@ import {
   AppWindow,
   Wind,
   CloudRain,
-  CloudLightning,
+  Sun,
   type LucideIcon,
 } from "lucide-react";
 
@@ -58,7 +58,7 @@ export type Service = {
   image: string;
   features: string[];
   primary?: boolean;
-  // CTA wording differs by trade: roofing/storm use "Inspection", others "Estimate".
+  // CTA wording differs by trade: roofing uses "Inspection", others "Estimate".
   ctaLabel?: string;
 };
 
@@ -125,17 +125,17 @@ export const SERVICES: Service[] = [
     ctaLabel: "Request Free Gutter Estimate",
   },
   {
-    slug: "storm-restoration",
-    title: "Storm Restoration",
-    short: "Hail & wind recovery",
+    slug: "solar",
+    title: "Solar Panel Installation",
+    short: "Clean energy systems",
     description:
-      "Full storm recovery after hail and wind — documented damage, emergency tarping, and a roof restored to better than before.",
-    icon: CloudLightning,
-    href: "/storm-restoration",
-    image: "/img/storm-restoration.jpg",
-    features: ["Free damage inspection", "Emergency tarping", "Full restoration", "Insurance coordination"],
+      "High-efficiency solar designed around your usage — lower bills, real backup power, and lasting home value.",
+    icon: Sun,
+    href: "/solar",
+    image: "/img/solar.jpg",
+    features: ["System design", "Premium panels", "Battery storage", "Net metering"],
     primary: true,
-    ctaLabel: "Request Free Storm Inspection",
+    ctaLabel: "Request Free Solar Estimate",
   },
 ];
 

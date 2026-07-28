@@ -34,6 +34,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  async redirects() {
+    return [
+      // Retired service pages. These URLs were live and indexed, so send their
+      // traffic to the closest current page instead of 404-ing.
+      { source: "/storm-restoration", destination: "/roofing", permanent: true },
+      { source: "/insurance-claims", destination: "/roofing", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

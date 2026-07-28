@@ -47,9 +47,10 @@ export function ServicesSection() {
         title="Complete home protection, under one trusted roof."
         description="Roofing is our craft — but Anexa Homes is your partner for everything that keeps a home safe, efficient, and comfortable."
       />
-      <div className="mt-14 grid items-stretch gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Six services → two full rows of three at lg (no ragged trailing row). */}
+      <div className="mt-14 grid items-stretch gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {SERVICES.map((s, i) => (
-          <Reveal key={s.slug} delay={i % 4} className="h-full">
+          <Reveal key={s.slug} delay={i % 3} className="h-full">
             <TiltCard className="h-full">
             <Link
               href={s.href}
@@ -60,7 +61,7 @@ export function ServicesSection() {
                   src={s.image}
                   alt={s.title}
                   fill
-                  sizes="(min-width: 1024px) 23vw, (min-width: 640px) 45vw, 100vw"
+                  sizes="(min-width: 1024px) 31vw, (min-width: 640px) 45vw, 100vw"
                   className="object-cover transition-transform duration-500 group-hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-transparent" />
@@ -72,7 +73,7 @@ export function ServicesSection() {
                     Core
                   </span>
                 )}
-                <h3 className="absolute bottom-3 left-4 font-display text-xl font-semibold text-white">
+                <h3 className="absolute bottom-3 left-4 right-4 font-display text-xl font-semibold text-white">
                   {s.title}
                 </h3>
               </div>

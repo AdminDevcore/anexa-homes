@@ -23,11 +23,11 @@ const geistMono = Geist_Mono({
 });
 
 const SITE_DESC =
-  "Protecting Homes. Restoring Roofs. Powering Better Living. Anexa Homes delivers premium roofing, storm restoration, insurance claim support, solar, HVAC, and water filtration across North Texas.";
+  "Protecting Homes. Restoring Roofs. Powering Better Living. Anexa Homes delivers premium roofing, HVAC, water filtration, windows, gutters, and solar panel installation across North Texas.";
 
 export const metadata: Metadata = {
   title: {
-    default: "Anexa Homes — Roofing, Storm Restoration & Home Improvement",
+    default: "Anexa Homes — Roofing, Solar & Home Improvement",
     template: "%s | Anexa Homes",
   },
   description: SITE_DESC,
@@ -39,14 +39,14 @@ export const metadata: Metadata = {
     "roof replacement Dallas",
     "storm damage roof repair",
     "insurance claim roofing",
-    "solar installation",
+    "solar panel installation",
     "HVAC",
     "water filtration",
   ],
   openGraph: {
     type: "website",
     siteName: "Anexa Homes",
-    title: "Anexa Homes — Roofing, Storm Restoration & Home Improvement",
+    title: "Anexa Homes — Roofing, Solar & Home Improvement",
     description: SITE_DESC,
     url: "https://anexahomes.com",
     locale: "en_US",

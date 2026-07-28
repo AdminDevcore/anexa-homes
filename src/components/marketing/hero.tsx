@@ -71,9 +71,8 @@ export function Hero() {
             className="reveal-up mt-6 max-w-xl text-lg leading-relaxed text-white/75 [text-shadow:0_1px_16px_rgba(0,0,0,0.5)]"
             style={{ animationDelay: "0.21s" }}
           >
-            Roofing, solar, HVAC, water filtration, windows, gutters, storm
-            restoration, and insurance claim support — handled by one
-            professional team.
+            Roofing, HVAC, water filtration, windows, gutters, and solar —
+            handled by one professional team.
           </p>
 
           <div
