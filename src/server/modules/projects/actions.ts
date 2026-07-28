@@ -95,6 +95,8 @@ const editSchema = z.object({
   projectNumber: z.string().trim().min(1, "Job number is required.").max(40),
   status: z.enum(STATUSES),
   priority: z.enum(["low", "medium", "high", "urgent"]),
+  // Full ServiceType enum, retired products included — see the note in
+  // leads/manage.ts. Selectable options are narrowed in the UI.
   serviceType: z.enum(["roofing", "storm_restoration", "solar", "hvac", "water_filtration", "windows", "other"]),
   address: text(200),
   city: text(80),

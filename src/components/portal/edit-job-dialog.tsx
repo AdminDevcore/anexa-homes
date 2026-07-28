@@ -17,14 +17,15 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { updateProjectAction } from "@/server/modules/projects/actions";
+import { serviceTypeOptions } from "@/lib/service-types";
+import type { ServiceType } from "@prisma/client";
 
 type ProjStatus = "not_started" | "in_production" | "on_hold" | "qc" | "completed" | "closed" | "cancelled";
 type ProjPriority = "low" | "medium" | "high" | "urgent";
-type ProjService = "roofing" | "storm_restoration" | "solar" | "hvac" | "water_filtration" | "windows" | "other";
+type ProjService = ServiceType;
 
 const STATUSES: ProjStatus[] = ["not_started", "in_production", "on_hold", "qc", "completed", "closed", "cancelled"];
 const PRIORITIES: ProjPriority[] = ["low", "medium", "high", "urgent"];
-const SERVICES: ProjService[] = ["roofing", "storm_restoration", "solar", "hvac", "water_filtration", "windows", "other"];
 const label = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 export type EditableJob = {
@@ -186,9 +187,9 @@ export function EditJobDialog({ job }: { job: EditableJob }) {
               </Fld>
               <Fld label="Service">
                 <select className={selectCls} value={f.serviceType} onChange={(e) => set("serviceType", e.target.value as ProjService)}>
-                  {SERVICES.map((s) => (
-                    <option key={s} value={s}>
-                      {label(s)}
+                  {serviceTypeOptions(job.serviceType).map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
                     </option>
                   ))}
                 </select>

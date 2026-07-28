@@ -33,6 +33,9 @@ const leadInput = z.object({
   sourceId: z.string().uuid().optional().or(z.literal("")),
   stageId: z.string().uuid().optional().or(z.literal("")),
   assignedRepId: z.string().uuid().optional().or(z.literal("")),
+  // Mirrors the full ServiceType enum, retired products included — editing an
+  // existing storm_restoration lead posts its current value back and must pass.
+  // Which types a user may CHOOSE is enforced in the UI (SELECTABLE_SERVICE_TYPES).
   serviceType: z.enum(["roofing", "storm_restoration", "solar", "hvac", "water_filtration", "windows", "other"]).default("roofing"),
   dealType: z.enum(["cash", "insurance"]).default("insurance"),
   valueCents: z.number().int().min(0).default(0),

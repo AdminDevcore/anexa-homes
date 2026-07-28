@@ -462,7 +462,7 @@ async function main() {
     { first: "Robert", last: "Johnson", stage: "in_production", value: 2450000, status: "open", customer: "customer", service: "roofing" },
     { first: "Emily", last: "Watson", stage: "new_lead", value: 1800000, status: "open", service: "solar" },
     { first: "David", last: "Kim", stage: "appointment_set", value: 2100000, status: "open", service: "windows" },
-    { first: "Maria", last: "Garcia", stage: "claim_opened", value: 2750000, status: "open", service: "storm_restoration" },
+    { first: "Maria", last: "Garcia", stage: "claim_opened", value: 2750000, status: "open", service: "solar" },
     { first: "James", last: "Miller", stage: "contract_signed", value: 3200000, status: "open", service: "roofing" },
     { first: "Linda", last: "Davis", stage: "scope_received", value: 1950000, status: "open", service: "water_filtration" },
     { first: "Chris", last: "Wilson", stage: "paid", value: 2890000, status: "won", service: "roofing" },
