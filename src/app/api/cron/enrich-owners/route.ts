@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { getSkipTraceProvider, skipTraceEnabled, type OwnerResult } from "@/server/modules/skiptrace/provider";
 import { resolvePropertyValue } from "@/server/modules/property";
+import { runUnscoped } from "@/server/vertical/context";
 
 // Nightly house enrichment: for house dots not yet enriched, fills the PROPERTY
 // value + address (AVM provider) and the homeowner NAME / PHONE / EMAIL (skip-trace
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
 const DELAY_MS = 1500; // throttle the paid API
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function GET(req: Request) {
+async function handler(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("Unauthorized", { status: 401 });
@@ -96,4 +97,12 @@ export async function GET(req: Request) {
     console.error("[cron:enrich-owners] failed", err);
     return new Response("Error", { status: 500 });
   }
+}
+
+/**
+ * Maintenance sweeps run over every vertical, so they declare themselves
+ * company-wide rather than inheriting a workspace they do not have.
+ */
+export async function GET(req: Request) {
+  return runUnscoped("cron: homeowner skip-trace enrichment, all verticals", () => handler(req));
 }

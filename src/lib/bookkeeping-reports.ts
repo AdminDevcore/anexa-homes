@@ -9,7 +9,29 @@
 // the balance sheet is a point-in-time position.
 
 export type ReportRow = { name: string; total: number };
-export type ReportTxn = { date: string | Date; amountCents: number; categoryName: string | null };
+export type ReportTxn = {
+  date: string | Date;
+  amountCents: number;
+  categoryName: string | null;
+  /**
+   * Which line of business the row belongs to. Null = genuinely company-level
+   * (office rent, a bank fee) and is reported as "Unassigned".
+   */
+  vertical?: string | null;
+};
+
+/**
+ * One department's slice of the P&L. The books are consolidated — reads are
+ * never filtered by vertical — so these are a BREAKOUT of the same numbers, not
+ * a separate ledger. They are guaranteed to sum back to the consolidated
+ * totals; `bookkeeping-reports.test.ts` asserts that reconciliation.
+ */
+export type PnlSegment = {
+  vertical: string; // "roofing" | "solar" | "unassigned"
+  totalIncome: number;
+  totalExpense: number;
+  netProfit: number;
+};
 /** Epoch-ms bounds; null = unbounded on that side (all time / as-of-now). */
 export type ReportPeriod = { startMs: number | null; endMs: number | null };
 
@@ -19,6 +41,8 @@ export type Pnl = {
   totalIncome: number;
   totalExpense: number;
   netProfit: number;
+  /** Per-department breakout. Always sums to the consolidated totals above. */
+  segments: PnlSegment[];
 };
 export type BalanceSheet = {
   assets: ReportRow[];
@@ -42,6 +66,7 @@ export function computeReports(
 
   const incomeByCat = new Map<string, number>();
   const expenseByCat = new Map<string, number>();
+  const segments = new Map<string, { income: number; expense: number }>();
   let moneyIn = 0;
   let moneyOut = 0;
   let cashThroughEnd = 0; // cumulative cash (= retained earnings) on/before `end`
@@ -55,13 +80,18 @@ export function computeReports(
     if (!inPeriod) continue;
 
     const name = t.categoryName ?? "Uncategorized";
+    const seg = t.vertical ?? "unassigned";
+    const bucket = segments.get(seg) ?? { income: 0, expense: 0 };
     if (t.amountCents >= 0) {
       moneyIn += t.amountCents;
       incomeByCat.set(name, (incomeByCat.get(name) ?? 0) + t.amountCents);
+      bucket.income += t.amountCents;
     } else {
       moneyOut += -t.amountCents;
       expenseByCat.set(name, (expenseByCat.get(name) ?? 0) + -t.amountCents);
+      bucket.expense += -t.amountCents;
     }
+    segments.set(seg, bucket);
   }
 
   const toRows = (m: Map<string, number>): ReportRow[] =>
@@ -73,6 +103,14 @@ export function computeReports(
     totalIncome: moneyIn,
     totalExpense: moneyOut,
     netProfit: moneyIn - moneyOut,
+    segments: [...segments.entries()]
+      .map(([vertical, b]) => ({
+        vertical,
+        totalIncome: b.income,
+        totalExpense: b.expense,
+        netProfit: b.income - b.expense,
+      }))
+      .sort((a, b) => b.netProfit - a.netProfit),
   };
 
   const balanceSheet: BalanceSheet = {

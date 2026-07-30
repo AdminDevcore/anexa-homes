@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getLeadFormOptions } from "@/server/modules/leads/queries";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { PageHeader } from "@/components/portal/ui";
 import { LeadForm } from "@/components/portal/lead-form";
 
@@ -14,7 +14,7 @@ export default async function NewLeadPage() {
   const user = await requireUser();
   if (!can(user, "create", "Lead")) redirect("/portal/leads");
 
-  const options = await getLeadFormOptions(user.companyId, await getActiveIndustry(user));
+  const options = await getLeadFormOptions(user.companyId, await getActiveVertical(user));
 
   return (
     <div className="space-y-6">

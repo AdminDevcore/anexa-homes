@@ -1,4 +1,4 @@
-import type { Prisma, Industry } from "@prisma/client";
+import type { Prisma, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { AccessUser } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
@@ -173,10 +173,10 @@ export async function getScopeEstimatedCostCents(companyId: string, leadId: stri
   return total > 0 ? total : null;
 }
 
-/** Company scope template line items for an industry. */
-export async function listScopeTemplate(companyId: string, industry: Industry) {
+/** Company scope template line items for an vertical. */
+export async function listScopeTemplate(companyId: string, vertical: Vertical) {
   return prisma.scopeTemplateItem.findMany({
-    where: { companyId, industry },
+    where: { companyId, vertical },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
 }

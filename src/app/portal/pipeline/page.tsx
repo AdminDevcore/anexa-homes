@@ -4,8 +4,8 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
-import { INDUSTRY_LABEL } from "@/lib/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
+import { VERTICAL_LABEL } from "@/lib/vertical";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { type BoardLead } from "@/components/portal/pipeline-board";
 import { PipelineView, type ListLead } from "@/components/portal/pipeline-view";
@@ -18,10 +18,10 @@ export default async function PipelinePage() {
   const user = await requireUser();
   if (!can(user, "read", "Lead")) redirect("/portal/dashboard");
 
-  // The active industry workspace's pipeline (isolated per industry).
-  const industry = await getActiveIndustry(user);
+  // The active vertical workspace's pipeline (isolated per vertical).
+  const vertical = await getActiveVertical(user);
   const pipeline = await prisma.pipeline.findFirst({
-    where: { companyId: user.companyId, industry },
+    where: { companyId: user.companyId, vertical },
     orderBy: { isDefault: "desc" },
     include: { stages: { orderBy: { position: "asc" } } },
   });
@@ -100,7 +100,7 @@ export default async function PipelinePage() {
   return (
     <ListFilter placeholder="Search deals by name, address…">
       <PipelineView
-        title={`${INDUSTRY_LABEL[industry]} Pipeline`}
+        title={`${VERTICAL_LABEL[vertical]} Pipeline`}
         count={leads.length}
         stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name, color: s.color, targetDays: s.targetDays }))}
         initialLeadsByStage={leadsByStage}

@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
-import type { Role, Industry } from "@prisma/client";
+import type { Role, Vertical } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/server/db/client";
 import type { AccessUser } from "@/server/rbac/guards";
@@ -14,7 +14,7 @@ export type SessionUser = AccessUser & {
   companySlug: string;
   avatarUrl: string | null;
   title: string | null;
-  industries: Industry[];
+  verticals: Vertical[];
 };
 
 /**
@@ -48,7 +48,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
       avatarUrl: true,
       title: true,
       permissions: true,
-      industries: true,
+      verticals: true,
       company: { select: { slug: true } },
     },
   });
@@ -72,7 +72,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     companySlug: live.company.slug,
     avatarUrl: live.avatarUrl,
     title: live.title,
-    industries: live.industries,
+    verticals: live.verticals,
   };
 });
 

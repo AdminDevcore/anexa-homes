@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db/client";
 import { getPublicProposal } from "@/server/modules/proposals/queries";
 import { PresentationView } from "@/components/proposal/presentation-view";
+import { runUnscoped } from "@/server/vertical/context";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +20,14 @@ export default async function PublicPresentationPage({ params }: { params: Promi
 
   // Best-effort first-view tracking (generated/sent -> viewed).
   try {
-    await prisma.proposal.updateMany({
-      where: { publicToken: token, status: { in: ["generated", "sent"] } },
-      data: { status: "viewed", viewedAt: new Date() },
-    });
+    await runUnscoped(
+      "public token page: first-view tracking, keyed on the token itself",
+      () =>
+        prisma.proposal.updateMany({
+          where: { publicToken: token, status: { in: ["generated", "sent"] } },
+          data: { status: "viewed", viewedAt: new Date() },
+        })
+    );
   } catch {
     /* non-fatal */
   }

@@ -8,6 +8,7 @@ import { parseItems, CALL_KIND_LABELS, type WelcomeCallContent, type CallKind } 
 import { startAvatarGeneration, syncAvatarSegments, parseSegments } from "./avatar";
 import { getObject, putObject } from "@/server/storage";
 import type { CallMode } from "@prisma/client";
+import { runUnscoped } from "@/server/vertical/context";
 
 // Lead fields needed to resolve merge tokens for a welcome call.
 const LEAD_SELECT = {
@@ -220,6 +221,13 @@ function playSegments(rawToken: string, segmentsJson: unknown): PlaySegment[] {
 
 /** Public lookup by raw token. Records the first view. Used by the /welcome/[token] page. */
 export async function getWelcomeCallByToken(rawToken: string): Promise<WelcomeCallView> {
+  return runUnscoped(
+    "public token page: the unguessable token is the authorization and identifies exactly one row, whose vertical is not known until it is read",
+    () => loadWelcomeCallByToken(rawToken)
+  );
+}
+
+async function loadWelcomeCallByToken(rawToken: string): Promise<WelcomeCallView> {
   const session = await prisma.welcomeCallSession.findUnique({
     where: { tokenHash: sha256(rawToken) },
     select: { id: true, kind: true, mode: true, status: true, customerName: true, snapshot: true, acknowledged: true, avatarStatus: true, segments: true },

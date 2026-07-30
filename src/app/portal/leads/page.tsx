@@ -7,7 +7,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
 import { currentFormatters } from "@/lib/format-server";
@@ -33,9 +33,9 @@ export default async function LeadsPage({
   if (!can(user, "read", "Lead")) redirect("/portal/dashboard");
 
   const { q } = await searchParams;
-  // Isolate by the active industry workspace (Roofing / Solar / Water).
-  const industry = await getActiveIndustry(user);
-  const scope: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), industry };
+  // Isolate by the active vertical workspace (Roofing / Solar / Water).
+  const vertical = await getActiveVertical(user);
+  const scope: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), vertical };
   const where: Prisma.LeadWhereInput = q
     ? {
         AND: [

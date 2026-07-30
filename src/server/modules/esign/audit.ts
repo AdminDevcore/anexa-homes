@@ -1,7 +1,7 @@
-import type { DocumentEventType, Prisma, PrismaClient } from "@prisma/client";
+import type { DocumentEventType } from "@prisma/client";
+import type { Db } from "@/server/db/types";
 import { sha256 } from "./tokens";
 
-type Db = PrismaClient | Prisma.TransactionClient;
 
 type AppendArgs = {
   companyId: string;

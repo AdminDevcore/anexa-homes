@@ -123,7 +123,7 @@ async function main() {
       lastName: ownerLast,
       role: "super_admin" as Role,
       title: "Owner",
-      industries: ["roofing", "solar", "others"],
+      verticals: ["roofing", "solar", "others"],
       employeeNo: 1,
     },
   });
@@ -138,7 +138,7 @@ async function main() {
 
   // Pipelines + stages for all three workspaces.
   const pipeline = await prisma.pipeline.create({
-    data: { companyId: company.id, name: "Roofing Pipeline", industry: "roofing", isDefault: true },
+    data: { companyId: company.id, name: "Roofing Pipeline", vertical: "roofing", isDefault: true },
   });
   const stages: { key: string; id: string }[] = [];
   for (let i = 0; i < STAGES.length; i++) {
@@ -158,11 +158,11 @@ async function main() {
   }
   const stageByKey = Object.fromEntries(stages.map((s) => [s.key, s]));
 
-  for (const [industry, name, defs] of [
+  for (const [vertical, name, defs] of [
     ["solar", "Solar Pipeline", SOLAR_STAGES] as const,
     ["others", "Others Pipeline", OTHERS_STAGES] as const,
   ]) {
-    const p = await prisma.pipeline.create({ data: { companyId: company.id, name, industry, isDefault: true } });
+    const p = await prisma.pipeline.create({ data: { companyId: company.id, name, vertical, isDefault: true } });
     for (let i = 0; i < defs.length; i++) {
       const s = defs[i];
       await prisma.pipelineStage.create({
@@ -310,7 +310,7 @@ async function main() {
   await prisma.scopeTemplateItem.createMany({
     data: scopeTemplate.map((t, i) => ({
       companyId: company.id,
-      industry: "roofing" as const,
+      vertical: "roofing" as const,
       position: i,
       category: t.category,
       description: t.description,

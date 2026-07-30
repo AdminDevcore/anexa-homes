@@ -181,9 +181,11 @@ export default async function LeadDetailPage({
     ? await getProjectPayout(user.companyId, project.id)
     : null;
 
-  // Customizable appointment outcomes for the "Run appointment" picker.
-  const appointmentDispositions = await getAppointmentDispositions(user.companyId);
-  const inspectionOutcomes = await getInspectionOutcomes(user.companyId);
+  // Customizable outcomes for the "Run appointment" picker. Keyed off the
+  // DEAL's vertical, not the active workspace, so the picker always matches
+  // the record being viewed.
+  const appointmentDispositions = await getAppointmentDispositions(user.companyId, lead.vertical);
+  const inspectionOutcomes = await getInspectionOutcomes(user.companyId, lead.vertical);
   const welcomeCallTemplates = can(user, "create", "Document") ? await getActiveWelcomeCallTemplates(user.companyId) : [];
 
   const roofReport = await getRoofReport(user.companyId, lead.id);
@@ -198,7 +200,7 @@ export default async function LeadDetailPage({
   const showScope = isInsurance && scopeReady && can(user, "read", "Scope");
   const scopeData = showScope ? await getScopeForLead(user, lead.id) : null;
   const scopeTemplate =
-    showScope && canSeeScopeCosts(user.role) ? await listScopeTemplate(user.companyId, lead.industry) : [];
+    showScope && canSeeScopeCosts(user.role) ? await listScopeTemplate(user.companyId, lead.vertical) : [];
   const claimLineCount = claim?.lineItems.length ?? 0;
 
   // Notes split by placement: general notes go to the Overview; outcome-tagged

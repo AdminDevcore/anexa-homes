@@ -2,7 +2,7 @@ import { prisma } from "@/server/db/client";
 import { getDealFinancials, getProjectPayout } from "@/server/modules/costs/queries";
 import { getScopeEstimatedCostCents } from "@/server/modules/scope/queries";
 import { computeDealCommission } from "@/lib/commission";
-import { computeReports, type ReportPeriod } from "@/lib/bookkeeping-reports";
+import { computeReports, type ReportPeriod, type PnlSegment } from "@/lib/bookkeeping-reports";
 
 export type BkTxn = {
   id: string;
@@ -13,6 +13,8 @@ export type BkTxn = {
   account: string | null;
   categoryId: string | null;
   categoryName: string | null;
+  /** Department tag. Null = company-level (not attributable to a vertical). */
+  vertical: string | null;
   status: string;
   approved: boolean;
   autoSuggested: boolean;
@@ -87,7 +89,15 @@ export type BookkeepingData = {
   connected: boolean;
   provider: string | null;
   summary: { moneyIn: number; moneyOut: number; net: number; uncategorized: number; outstanding: number };
-  pnl: { income: PnlRow[]; expense: PnlRow[]; totalIncome: number; totalExpense: number; netProfit: number };
+  pnl: {
+    income: PnlRow[];
+    expense: PnlRow[];
+    totalIncome: number;
+    totalExpense: number;
+    netProfit: number;
+    /** Per-department breakout; always reconciles to the totals above. */
+    segments: PnlSegment[];
+  };
   balanceSheet: {
     assets: PnlRow[];
     liabilities: PnlRow[];
@@ -174,6 +184,7 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
     account: t.account,
     categoryId: t.categoryId,
     categoryName: t.category?.name ?? null,
+    vertical: t.vertical,
     status: t.status,
     approved: t.approved,
     autoSuggested: t.autoSuggested,
@@ -195,7 +206,7 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
   // Period-aware P&L + Balance Sheet (no period = all time). Shared with the
   // client picker and the PDF routes so all three agree.
   const { pnl: pnlReport, balanceSheet } = computeReports(transactions, period);
-  const { income, expense, totalIncome, totalExpense, netProfit } = pnlReport;
+  const { income, expense, totalIncome, totalExpense, netProfit, segments } = pnlReport;
 
   // Roll up each job's bookkeeping activity. A job appears if it has any
   // transaction, invoice, or attached file.
@@ -267,7 +278,7 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
       // Money left to collect = issued (sent) invoices not yet paid.
       outstanding: invoices.filter((iv) => iv.status === "sent").reduce((s, iv) => s + iv.amountCents, 0),
     },
-    pnl: { income, expense, totalIncome, totalExpense, netProfit },
+    pnl: { income, expense, totalIncome, totalExpense, netProfit, segments },
     balanceSheet,
   };
 }

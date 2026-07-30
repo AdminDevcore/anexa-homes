@@ -9,8 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { Industry } from "@prisma/client";
-import { INDUSTRIES, INDUSTRY_LABEL } from "@/lib/industry";
+import { VERTICALS, VERTICAL_LABEL, DEFAULT_VERTICAL, type ActiveVertical } from "@/lib/vertical";
 import { updateTeamMemberAction, deleteTeamMemberAction } from "@/server/modules/team/actions";
 
 // Roles that earn a split commission (profit pool × their %).
@@ -45,7 +44,7 @@ export function TeamMemberActions({
   currentProvidedType: string;
   currentProvidedFlatCents: number | null;
   currentDeductiblePct: number | null;
-  currentIndustries: Industry[];
+  currentIndustries: ActiveVertical[];
   currentSalesRepId: string | null;
   reps: { id: string; name: string }[];
   currentManagerId: string | null;
@@ -64,17 +63,17 @@ export function TeamMemberActions({
   const [providedType, setProvidedType] = React.useState(currentProvidedType || "percentage");
   const [providedFlat, setProvidedFlat] = React.useState(currentProvidedFlatCents == null ? "" : String(currentProvidedFlatCents / 100));
   const [deductible, setDeductible] = React.useState(currentDeductiblePct == null ? "" : String(currentDeductiblePct));
-  const [industries, setIndustries] = React.useState<Industry[]>(
-    currentIndustries.length ? currentIndustries : [...INDUSTRIES]
+  const [verticals, setIndustries] = React.useState<ActiveVertical[]>(
+    currentIndustries.length ? currentIndustries : [DEFAULT_VERTICAL]
   );
   const [salesRepId, setSalesRepId] = React.useState(currentSalesRepId ?? "none");
   const [managerId, setManagerId] = React.useState(currentManagerId ?? "none");
   const [busy, setBusy] = React.useState(false);
 
-  function toggleIndustry(ind: Industry) {
+  function toggleIndustry(ind: ActiveVertical) {
     setIndustries((cur) => (cur.includes(ind) ? cur.filter((x) => x !== ind) : [...cur, ind]));
   }
-  const industriesKey = (a: Industry[]) => [...a].sort().join(",");
+  const industriesKey = (a: ActiveVertical[]) => [...a].sort().join(",");
 
   // Show roles this editor may assign, plus the member's current role so saving
   // other fields (title/status) on a privileged member still works.
@@ -93,7 +92,7 @@ export function TeamMemberActions({
     deductible !== (currentDeductiblePct == null ? "" : String(currentDeductiblePct)) ||
     salesRepId !== (currentSalesRepId ?? "none") ||
     managerId !== (currentManagerId ?? "none") ||
-    (isSuperAdmin && industriesKey(industries) !== industriesKey(currentIndustries.length ? currentIndustries : [...INDUSTRIES]));
+    (isSuperAdmin && industriesKey(verticals) !== industriesKey(currentIndustries.length ? currentIndustries : [DEFAULT_VERTICAL]));
 
   async function save() {
     let commissionSplitPct: number | null = null;
@@ -123,14 +122,14 @@ export function TeamMemberActions({
         deductiblePct = n;
       }
     }
-    if (isSuperAdmin && industries.length === 0) return toast.error("Grant at least one industry.");
+    if (isSuperAdmin && verticals.length === 0) return toast.error("Grant at least one vertical.");
     setBusy(true);
     const res = await updateTeamMemberAction({
       userId, role: role as never, title: title || null, status: status as never,
       commissionSplitPct, providedLeadType, providedLeadSplitPct, providedLeadFlatCents, deductiblePct,
       salesRepId: showCanvasserRep ? (salesRepId === "none" ? null : salesRepId) : null,
       managerId: showRepManager ? (managerId === "none" ? null : managerId) : null,
-      ...(isSuperAdmin ? { industries } : {}),
+      ...(isSuperAdmin ? { verticals } : {}),
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -254,15 +253,15 @@ export function TeamMemberActions({
         </div>
       )}
 
-      {/* Industry access — only the Super Admin decides who sees which workspace. */}
+      {/* Vertical access — only the Super Admin decides who sees which workspace. */}
       {isSuperAdmin && (
         <div className="space-y-2 rounded-lg border border-border p-3">
-          <Label className="text-xs">Industry access</Label>
+          <Label className="text-xs">Vertical access</Label>
           <div className="flex flex-col gap-1.5">
-            {INDUSTRIES.map((ind) => (
+            {VERTICALS.map((ind) => (
               <label key={ind} className="flex items-center gap-2 text-sm">
-                <Checkbox checked={industries.includes(ind)} onCheckedChange={() => toggleIndustry(ind)} />
-                {INDUSTRY_LABEL[ind]}
+                <Checkbox checked={verticals.includes(ind)} onCheckedChange={() => toggleIndustry(ind)} />
+                {VERTICAL_LABEL[ind]}
               </label>
             ))}
           </div>

@@ -7,7 +7,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { putObject } from "@/server/storage";
 import { canSeeScopeCosts } from "./policies";
 
@@ -39,9 +39,9 @@ async function ensureScope(leadId: string): Promise<
   const existing = await prisma.scopeOfWork.findUnique({ where: { leadId }, select: { id: true } });
   if (existing) return { ok: true, scopeId: existing.id, companyId: user.companyId };
 
-  const industry = await getActiveIndustry(user);
+  const vertical = await getActiveVertical(user);
   const created = await prisma.scopeOfWork.create({
-    data: { companyId: user.companyId, leadId, industry },
+    data: { companyId: user.companyId, leadId, vertical },
     select: { id: true },
   });
   return { ok: true, scopeId: created.id, companyId: user.companyId };
@@ -249,10 +249,10 @@ export async function loadScopeTemplateAction(leadId: string): Promise<Result> {
 
   const scope = await prisma.scopeOfWork.findUnique({
     where: { id: ensured.scopeId },
-    select: { industry: true },
+    select: { vertical: true },
   });
   const items = await prisma.scopeTemplateItem.findMany({
-    where: { companyId: ensured.companyId, industry: scope?.industry ?? "roofing" },
+    where: { companyId: ensured.companyId, vertical: scope?.vertical ?? "roofing" },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
   if (items.length === 0) return { ok: false, error: "No template items defined yet." };
@@ -356,12 +356,12 @@ export async function addScopeTemplateItemAction(input: {
 }): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return { ok: false, error: "Not allowed." };
-  const industry = await getActiveIndustry(user);
-  const count = await prisma.scopeTemplateItem.count({ where: { companyId: user.companyId, industry } });
+  const vertical = await getActiveVertical(user);
+  const count = await prisma.scopeTemplateItem.count({ where: { companyId: user.companyId, vertical } });
   await prisma.scopeTemplateItem.create({
     data: {
       companyId: user.companyId,
-      industry,
+      vertical,
       position: count,
       category: input.category.trim() || "General",
       description: input.description.trim(),

@@ -1,14 +1,14 @@
-import type { Prisma, Industry } from "@prisma/client";
+import type { Prisma, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/session";
 import { listScope } from "@/server/rbac/policies";
 import { STAFF_ROLES } from "@/server/rbac/matrix";
 
-export async function getLeadFormOptions(companyId: string, industry?: Industry) {
+export async function getLeadFormOptions(companyId: string, vertical?: Vertical) {
   const [sources, pipeline, reps, fieldDefs] = await Promise.all([
     prisma.leadSource.findMany({ where: { companyId, active: true }, orderBy: { position: "asc" } }),
     prisma.pipeline.findFirst({
-      where: { companyId, ...(industry ? { industry } : {}) },
+      where: { companyId, ...(vertical ? { vertical } : {}) },
       orderBy: { isDefault: "desc" },
       include: { stages: { orderBy: { position: "asc" } } },
     }),

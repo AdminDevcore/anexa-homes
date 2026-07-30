@@ -108,8 +108,9 @@ async function main() {
         title: u.title,
         phone: "(555) 123-4567",
         // Everyone can switch all three workspaces by default; the installer is
-        // restricted to Roofing only (demoing per-user industry access).
-        industries: u.key === "installer" ? ["roofing"] : ["roofing", "solar", "others"],
+        // restricted to Roofing only (demoing per-user vertical access).
+        // Installer is locked to Roofing so the restricted-user path stays testable.
+        verticals: u.key === "installer" ? ["roofing"] : ["roofing", "solar"],
       },
     });
     users[u.key] = created;
@@ -168,7 +169,7 @@ async function main() {
 
   // Pipeline + stages (Roofing is the established workspace).
   const pipeline = await prisma.pipeline.create({
-    data: { companyId: company.id, name: "Roofing Pipeline", industry: "roofing", isDefault: true },
+    data: { companyId: company.id, name: "Roofing Pipeline", vertical: "roofing", isDefault: true },
   });
   const stages = [];
   for (let i = 0; i < STAGES.length; i++) {
@@ -202,18 +203,12 @@ async function main() {
     { key: "paid", name: "Paid", color: "#16A34A", isWon: true },
   ];
   // "Others" is a catch-all workspace for miscellaneous leads to sub out.
-  const OTHERS_STAGES = [
-    { key: "new_lead", name: "New Lead", color: "#94A3B8" },
-    { key: "qualified", name: "Qualified", color: "#38BDF8" },
-    { key: "quoted", name: "Quoted", color: "#6366F1" },
-    { key: "subbed_out", name: "Subbed Out", color: "#F59E0B" },
-    { key: "closed", name: "Closed", color: "#16A34A", isWon: true },
-  ];
-  for (const [industry, name, defs] of [
+  for (const [vertical, name, defs] of [
     ["solar", "Solar Pipeline", SOLAR_STAGES] as const,
-    ["others", "Others Pipeline", OTHERS_STAGES] as const,
+    // No "Others" pipeline: `others` is a retired vertical that can never be
+    // selected, so the row would be permanently unreachable.
   ]) {
-    const p = await prisma.pipeline.create({ data: { companyId: company.id, name, industry, isDefault: true } });
+    const p = await prisma.pipeline.create({ data: { companyId: company.id, name, vertical, isDefault: true } });
     for (let i = 0; i < defs.length; i++) {
       const s = defs[i];
       await prisma.pipelineStage.create({
@@ -613,7 +608,7 @@ async function main() {
   const repTraining = await prisma.knowledgeCategory.create({
     data: {
       companyId: company.id,
-      industry: "roofing",
+      vertical: "roofing",
       name: "Sales Rep Training",
       description: "Scripts, objection handling, and onboarding for roofing consultants.",
       visibleRoles: ["sales_rep"],
@@ -652,7 +647,7 @@ async function main() {
   await prisma.knowledgeCategory.create({
     data: {
       companyId: company.id,
-      industry: "roofing",
+      vertical: "roofing",
       name: "Installer / Crew Training",
       description: "Safety, install standards, and photo documentation requirements.",
       visibleRoles: ["installer"],
@@ -679,7 +674,7 @@ async function main() {
   await prisma.knowledgeCategory.create({
     data: {
       companyId: company.id,
-      industry: "roofing",
+      vertical: "roofing",
       name: "Company-Wide",
       description: "Resources everyone on the team should know.",
       visibleRoles: ["sales_rep", "canvasser", "marketing", "installer", "accounting"],
@@ -718,7 +713,7 @@ async function main() {
   await prisma.scopeTemplateItem.createMany({
     data: scopeTemplate.map((t, i) => ({
       companyId: company.id,
-      industry: "roofing" as const,
+      vertical: "roofing" as const,
       position: i,
       category: t.category,
       description: t.description,
@@ -751,7 +746,7 @@ async function main() {
   });
   if (scopeLead) {
     const demoScope = await prisma.scopeOfWork.create({
-      data: { companyId: company.id, leadId: scopeLead.id, industry: "roofing" },
+      data: { companyId: company.id, leadId: scopeLead.id, vertical: "roofing" },
       select: { id: true },
     });
     await prisma.scopeLine.createMany({

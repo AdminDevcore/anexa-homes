@@ -1,4 +1,4 @@
-import type { Industry, Prisma } from "@prisma/client";
+import type { Vertical, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
 import type { AccessUser } from "@/server/rbac/guards";
@@ -21,11 +21,11 @@ export type CalendarEvent = {
  *  - adjuster     → Project.adjusterMeetingAt (insurance adjuster meeting)
  *  - install      → Project.installDate (scheduled install)
  * Scoped by role (reps see their own; admins/managers see all) and by the active
- * industry workspace.
+ * vertical workspace.
  */
 export async function getCalendarEvents(
   user: AccessUser,
-  industry: Industry,
+  vertical: Vertical,
   from: Date,
   to: Date
 ): Promise<CalendarEvent[]> {
@@ -36,16 +36,16 @@ export async function getCalendarEvents(
 
   const [appts, adjusters, installs] = await Promise.all([
     prisma.lead.findMany({
-      where: { AND: [leadScope, { industry }, { appointmentAt: { gte: from, lte: to } }] },
+      where: { AND: [leadScope, { vertical }, { appointmentAt: { gte: from, lte: to } }] },
       select: { id: true, firstName: true, lastName: true, address: true, city: true, appointmentAt: true, assignedRep: { select: { firstName: true, lastName: true } } },
     }),
     // Adjuster meeting lives on the CLAIM (insurance step), scoped by its lead.
     prisma.claim.findMany({
-      where: { companyId: user.companyId, adjusterMeetingAt: { gte: from, lte: to }, lead: { is: { AND: [leadScope, { industry }] } } },
+      where: { companyId: user.companyId, adjusterMeetingAt: { gte: from, lte: to }, lead: { is: { AND: [leadScope, { vertical }] } } },
       select: { id: true, adjusterMeetingAt: true, lead: { select: { id: true, firstName: true, lastName: true, assignedRep: { select: { firstName: true, lastName: true } }, project: { select: { projectNumber: true } } } } },
     }),
     prisma.project.findMany({
-      where: { AND: [projScope, { lead: { is: { industry } } }, { installDate: { not: null }, AND: [{ installDate: { gte: from } }, { installDate: { lte: to } }] }] },
+      where: { AND: [projScope, { lead: { is: { vertical } } }, { installDate: { not: null }, AND: [{ installDate: { gte: from } }, { installDate: { lte: to } }] }] },
       select: { id: true, projectNumber: true, installDate: true, lead: { select: { id: true, firstName: true, lastName: true, assignedRep: { select: { firstName: true, lastName: true } } } } },
     }),
   ]);

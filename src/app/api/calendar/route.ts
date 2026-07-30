@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/server/auth/session";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { getCalendarEvents } from "@/server/modules/calendar/queries";
 
 export async function GET(req: Request) {
@@ -12,7 +12,7 @@ export async function GET(req: Request) {
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
     return NextResponse.json({ events: [] }, { status: 400 });
   }
-  const industry = await getActiveIndustry(user);
-  const events = await getCalendarEvents(user, industry, from, to);
+  const vertical = await getActiveVertical(user);
+  const events = await getCalendarEvents(user, vertical, from, to);
   return NextResponse.json({ events });
 }

@@ -4,7 +4,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { STAFF_ROLES } from "@/server/rbac/matrix";
 import { PageHeader } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
@@ -18,12 +18,12 @@ export default async function TasksPage() {
 
   const scope = listScope(user, "Task") as Prisma.TaskWhereInput;
   const canAssign = can(user, "assign", "Task");
-  // Isolate to the active industry workspace.
-  const industry = await getActiveIndustry(user);
+  // Isolate to the active vertical workspace.
+  const vertical = await getActiveVertical(user);
 
   const [tasks, assignees] = await Promise.all([
     prisma.task.findMany({
-      where: { AND: [scope, { industry }] },
+      where: { AND: [scope, { vertical }] },
       orderBy: [{ status: "asc" }, { dueAt: "asc" }, { createdAt: "desc" }],
       include: {
         assignee: { select: { firstName: true, lastName: true } },

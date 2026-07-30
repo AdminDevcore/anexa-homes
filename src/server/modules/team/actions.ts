@@ -75,7 +75,9 @@ const updateSchema = z.object({
   providedLeadFlatCents: z.number().int().min(0).optional().nullable(),
   deductiblePct: z.number().min(0).max(100).optional().nullable(),
   // Industries this user may access (must grant at least one).
-  industries: z.array(z.enum(["roofing", "solar", "others"])).min(1).optional(),
+  // Only live verticals are grantable. `others` is retired: accepting it would
+  // hand out access to a workspace that no longer exists.
+  verticals: z.array(z.enum(["roofing", "solar"])).min(1).optional(),
   // For canvassers: the sales rep they report to (their deals funnel to this rep).
   salesRepId: z.string().optional().nullable(),
   // For sales reps: the sales manager they report to (manager sees their team).
@@ -88,7 +90,7 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
   if (!can(me, "update", "User")) return fail("Not allowed.");
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid changes.");
-  const { userId, role, title, status, commissionSplitPct, providedLeadType, providedLeadSplitPct, providedLeadFlatCents, deductiblePct, industries, salesRepId, managerId } = parsed.data;
+  const { userId, role, title, status, commissionSplitPct, providedLeadType, providedLeadSplitPct, providedLeadFlatCents, deductiblePct, verticals, salesRepId, managerId } = parsed.data;
 
   const target = await prisma.user.findFirst({ where: { id: userId, companyId: me.companyId }, select: { id: true, role: true } });
   if (!target) return fail("User not found.");
@@ -136,9 +138,9 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
     managerUpdate = null;
   }
 
-  // Only the Super Admin decides who can access which industries.
-  if (industries !== undefined && me.role !== "super_admin") {
-    return fail("Only the Super Admin can set industry access.");
+  // Only the Super Admin decides who can access which verticals.
+  if (verticals !== undefined && me.role !== "super_admin") {
+    return fail("Only the Super Admin can set vertical access.");
   }
 
   // Safety: don't let someone lock themselves out by changing their own role/status.
@@ -166,7 +168,7 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
       ...(providedLeadSplitPct !== undefined ? { providedLeadSplitPct } : {}),
       ...(providedLeadFlatCents !== undefined ? { providedLeadFlatCents } : {}),
       ...(deductiblePct !== undefined ? { deductiblePct } : {}),
-      ...(industries !== undefined ? { industries } : {}),
+      ...(verticals !== undefined ? { verticals } : {}),
       ...(salesRepUpdate !== undefined ? { salesRepId: salesRepUpdate } : {}),
       ...(managerUpdate !== undefined ? { managerId: managerUpdate } : {}),
       // Force re-auth when role/status changes so a demoted/disabled session is invalidated.

@@ -18,8 +18,8 @@ import {
 import { PageHeader, StatCard } from "@/components/portal/ui";
 import { currentFormatters } from "@/lib/format-server";
 import { roleLabel } from "@/lib/roles";
-import { getActiveIndustry } from "@/server/auth/industry";
-import { INDUSTRY_LABEL, allowedIndustries } from "@/lib/industry";
+import { getActiveVertical, userVerticals } from "@/server/auth/vertical";
+import { VERTICAL_LABEL, allowedVerticals } from "@/lib/vertical";
 import { DashboardEmptyHint } from "@/components/portal/dashboard-empty-hint";
 
 export const metadata = { title: "Dashboard" };
@@ -28,30 +28,30 @@ export default async function DashboardPage() {
   const fmt = await currentFormatters();
   const user = await requireUser();
 
-  const industry = await getActiveIndustry(user);
+  const vertical = await getActiveVertical(user);
   const [stats, leads, projects] = await Promise.all([
-    getDashboardStats(user, industry),
-    getRecentLeads(user, industry),
-    getRecentProjects(user, industry),
+    getDashboardStats(user, vertical),
+    getRecentLeads(user, vertical),
+    getRecentProjects(user, vertical),
   ]);
 
   // If the active workspace is empty but the user has others, guide them to switch
   // (so an empty workspace isn't mistaken for "I can't see the company's deals").
   const dealFlowEmpty =
     stats.totalLeads === 0 && stats.activeProjects === 0 && stats.jobsInProduction === 0 && stats.completedJobs === 0;
-  const otherWorkspaces = allowedIndustries(user.industries)
-    .filter((i) => i !== industry)
-    .map((i) => ({ ind: i, label: INDUSTRY_LABEL[i] }));
+  const otherWorkspaces = userVerticals(user)
+    .filter((i) => i !== vertical)
+    .map((i) => ({ ind: i, label: VERTICAL_LABEL[i] }));
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Welcome back, ${user.firstName}`}
-        description={`${roleLabel(user.role)} · ${INDUSTRY_LABEL[industry]} workspace`}
+        description={`${roleLabel(user.role)} · ${VERTICAL_LABEL[vertical]} workspace`}
       />
 
       {dealFlowEmpty && otherWorkspaces.length > 0 ? (
-        <DashboardEmptyHint activeLabel={INDUSTRY_LABEL[industry]} others={otherWorkspaces} />
+        <DashboardEmptyHint activeLabel={VERTICAL_LABEL[vertical]} others={otherWorkspaces} />
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

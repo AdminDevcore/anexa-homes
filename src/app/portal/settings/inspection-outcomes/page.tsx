@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { getInspectionOutcomes } from "@/server/modules/settings/queries";
 import { updateInspectionOutcomesAction } from "@/server/modules/settings/actions";
@@ -14,7 +15,7 @@ export default async function InspectionOutcomesSettingsPage() {
   const user = await requireUser("/portal/settings/inspection-outcomes");
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
-  const items = await getInspectionOutcomes(user.companyId);
+  const items = await getInspectionOutcomes(user.companyId, await getActiveVertical(user));
 
   return (
     <div className="space-y-6">

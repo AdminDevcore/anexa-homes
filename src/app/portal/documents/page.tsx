@@ -7,7 +7,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
 import { SendDocumentDialog } from "@/components/esign/send-document-dialog";
@@ -30,24 +30,24 @@ export default async function DocumentsPage() {
   const canSend = can(user, "create", "Document");
   const docScope = listScope(user, "Document") as Prisma.DocumentPackageWhereInput;
   const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
-  // Isolate sent contracts + the "send to" list to the active industry workspace.
-  const industry = await getActiveIndustry(user);
+  // Isolate sent contracts + the "send to" list to the active vertical workspace.
+  const vertical = await getActiveVertical(user);
 
   const [templates, packages, leads] = await Promise.all([
     isStaff
       ? prisma.documentTemplate.findMany({
-          where: { companyId: user.companyId, active: true, industry },
+          where: { companyId: user.companyId, active: true, vertical },
           orderBy: { name: "asc" },
         })
       : Promise.resolve([]),
     prisma.documentPackage.findMany({
-      where: { AND: [docScope, { lead: { is: { industry } } }] },
+      where: { AND: [docScope, { lead: { is: { vertical } } }] },
       orderBy: { createdAt: "desc" },
       include: { signers: true, lead: { select: { firstName: true, lastName: true } } },
     }),
     canSend
       ? prisma.lead.findMany({
-          where: { AND: [leadScope, { industry }] },
+          where: { AND: [leadScope, { vertical }] },
           orderBy: { createdAt: "desc" },
           take: 100,
           select: { id: true, firstName: true, lastName: true, email: true },

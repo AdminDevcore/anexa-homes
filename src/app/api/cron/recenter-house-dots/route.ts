@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { nearestBuildingCentroid } from "@/server/modules/canvassing/addresses";
+import { runUnscoped } from "@/server/vertical/context";
 
 // Snaps existing house dots onto their OSM rooftop centroid so pins sit on the
 // house, not the street/parcel point. Processes not-knocked dots that have an
@@ -14,7 +15,7 @@ const DELAY_MS = 1200; // be polite to the free Overpass API
 const MAX_SNAP_M = 40; // only move a dot if a rooftop is within ~40m
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function GET(req: Request) {
+async function handler(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("Unauthorized", { status: 401 });
@@ -44,4 +45,12 @@ export async function GET(req: Request) {
     console.error("[cron:recenter-house-dots] failed", err);
     return new Response("Error", { status: 500 });
   }
+}
+
+/**
+ * Maintenance sweeps run over every vertical, so they declare themselves
+ * company-wide rather than inheriting a workspace they do not have.
+ */
+export async function GET(req: Request) {
+  return runUnscoped("cron: re-centre house dots, all verticals", () => handler(req));
 }

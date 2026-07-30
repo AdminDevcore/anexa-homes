@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { getQcChecklistTemplate } from "@/server/modules/settings/queries";
 import { updateQcChecklistTemplateAction } from "@/server/modules/settings/actions";
@@ -14,7 +15,7 @@ export default async function ProductionChecklistSettingsPage() {
   const user = await requireUser("/portal/settings/production-checklist");
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
-  const items = await getQcChecklistTemplate(user.companyId);
+  const items = await getQcChecklistTemplate(user.companyId, await getActiveVertical(user));
 
   return (
     <div className="space-y-6">

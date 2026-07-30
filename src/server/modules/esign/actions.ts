@@ -8,7 +8,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { requireCan, can } from "@/server/rbac/guards";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { putObject } from "@/server/storage";
 import {
   sendForSignature,
@@ -203,13 +203,13 @@ export async function uploadTemplatePdfAction(formData: FormData) {
   return { ok: true as const, pages: pages.length };
 }
 
-/** Create a blank contract template in the active industry workspace; returns its id. */
+/** Create a blank contract template in the active vertical workspace; returns its id. */
 export async function createTemplateAction() {
   const user = await requireUser();
   if (!can(user, "update", "Document")) return { ok: false as const, error: "Not allowed." };
-  const industry = await getActiveIndustry(user);
+  const vertical = await getActiveVertical(user);
   const t = await prisma.documentTemplate.create({
-    data: { companyId: user.companyId, name: "Untitled contract", type: "custom", industry, active: true },
+    data: { companyId: user.companyId, name: "Untitled contract", type: "custom", vertical, active: true },
     select: { id: true },
   });
   revalidatePath("/portal/documents");

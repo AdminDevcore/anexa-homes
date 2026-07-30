@@ -1,4 +1,5 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import type { Db } from "@/server/db/types";
 import { computeDealSplit, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
 import { getDealJobCost } from "@/server/modules/costs/job-cost";
 
@@ -10,7 +11,6 @@ function splitLabelFor(pct: number, flatCents: number, provided: boolean): strin
   return `Deal split (${pct}%${provided ? " · provided lead" : ""})`;
 }
 
-type Db = PrismaClient | Prisma.TransactionClient;
 
 /**
  * Computes and persists commissions for a single project.

@@ -15,6 +15,7 @@ import { TeamMemberActions } from "@/components/portal/team-member-actions";
 import { CommissionOverrides } from "@/components/portal/commission-overrides";
 import { RepVendorLink } from "@/components/portal/rep-vendor-link";
 import { prisma } from "@/server/db/client";
+import { allowedVerticals } from "@/lib/vertical";
 
 export const metadata = { title: "Team member" };
 
@@ -277,7 +278,9 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               currentProvidedType={detail.providedLeadType}
               currentProvidedFlatCents={detail.providedLeadFlatCents}
               currentDeductiblePct={detail.deductiblePct}
-              currentIndustries={detail.industries}
+              // Retired values on legacy rows are filtered out here, so the editor
+              // only ever shows (and can only ever save) live verticals.
+              currentIndustries={allowedVerticals(detail.verticals)}
               currentSalesRepId={detail.salesRepId}
               reps={assignableReps}
               currentManagerId={detail.managerId}

@@ -135,7 +135,7 @@ export type UserDetail = TeamMember & {
   providedLeadSplitPct: number | null;
   providedLeadFlatCents: number | null;
   deductiblePct: number | null;
-  industries: import("@prisma/client").Industry[];
+  verticals: import("@prisma/client").Vertical[];
   // Canvasser → rep reporting.
   salesRepId: string | null;
   salesRepName: string | null;
@@ -197,7 +197,7 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
       providedLeadSplitPct: true,
       providedLeadFlatCents: true,
       deductiblePct: true,
-      industries: true,
+      verticals: true,
       salesRepId: true,
       salesRep: { select: { firstName: true, lastName: true } },
       managerId: true,
@@ -237,7 +237,7 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
     providedLeadSplitPct: u.providedLeadSplitPct,
     providedLeadFlatCents: u.providedLeadFlatCents,
     deductiblePct: u.deductiblePct,
-    industries: u.industries,
+    verticals: u.verticals,
     salesRepId: u.salesRepId,
     salesRepName: u.salesRep ? `${u.salesRep.firstName} ${u.salesRep.lastName}`.trim() : null,
     canvassers: canvassers.map((c) => ({ id: c.id, name: `${c.firstName} ${c.lastName}`.trim() })),

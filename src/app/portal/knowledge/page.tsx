@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { listKnowledge } from "@/server/modules/knowledge/queries";
 import { canManageKnowledge, TRAINING_AUDIENCE_ROLES } from "@/server/modules/knowledge/policies";
 import { roleLabel } from "@/lib/roles";
@@ -15,8 +15,8 @@ export default async function KnowledgePage() {
   const user = await requireUser();
   if (!can(user, "read", "Knowledge")) redirect("/portal/dashboard");
 
-  const industry = await getActiveIndustry(user);
-  const categories = await listKnowledge(user, industry);
+  const vertical = await getActiveVertical(user);
+  const categories = await listKnowledge(user, vertical);
   const canManage = canManageKnowledge(user.role);
 
   return (

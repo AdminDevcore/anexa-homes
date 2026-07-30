@@ -239,12 +239,25 @@ enum ServiceType {
   other
 }
 
-// Isolated portal workspaces. Each is a separate process/structure; users can be
-// granted access to one or more, and switch between the ones they can access.
-enum Industry {
+/// An isolated line of business inside one company: its own deals, pipeline,
+/// config, templates, catalog and reports. Users are granted one or more and
+/// switch between them.
+///
+/// PHYSICALLY this type is still `Industry` in Postgres and every column using
+/// it is still named `industry` (see the @map on each field). The rename to
+/// "vertical" is code-level only and emits NO DDL, so it never has to be
+/// sequenced against a deploy of the live box.
+///
+/// `others` is retired from the pre-2026-07 three-workspace build. It is kept so
+/// historical rows keep validating, but it is excluded from VERTICALS in
+/// src/lib/vertical.ts and can never be selected, switched to, or written.
+/// Adding a third vertical = add a value here + a seed. Nothing else.
+enum Vertical {
   roofing
   solar
   others
+
+  @@map("Industry")
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +380,18 @@ model CompanySettings {
   stormCenterLat          Float?
   stormCenterLng          Float?
   stormRadiusMiles        Int?
+  // ── Isolation boundary levers (stubs; both default to shared) ─────────────
+  // Anexa is one legal entity: one employee roster, one general ledger. Books
+  // and team are therefore SHARED but SEGMENTED — every transaction, commission
+  // and job carries its vertical so the P&L breaks out by department and still
+  // reconciles to the company total.
+  //
+  // These two switches are the documented extension point for splitting them
+  // fully later (separate ledgers / separate rosters per vertical). Turning
+  // either on means promoting the TAGGED models in src/server/vertical/models.ts
+  // to SCOPED; nothing reads them yet, by design.
+  isolateBooks            Boolean  @default(false)
+  isolateTeam             Boolean  @default(false)
   updatedAt               DateTime @updatedAt
 
   @@map("company_settings")
@@ -400,9 +425,10 @@ model User {
   // Rep's share (%) of the customer-paid deductible on their deals (separate from
   // the profit-pool split). null/0 = this rep doesn't get the deductible.
   deductiblePct         Float?
-  // Industries this user may access + switch between. Defaults to all three; the
-  // super admin can restrict a user (e.g. an installer locked to roofing only).
-  industries            Industry[] @default([roofing, solar, others])
+  // Verticals this user may open and switch between. New users start in Roofing
+  // only; the super admin grants Solar explicitly. Retired values on existing
+  // rows are filtered out by allowedVerticals() and can never surface.
+  verticals             Vertical[] @default([roofing]) @map("industries")
   // For canvassers: the sales rep they're assigned to. Their knocks, leads, and
   // appointments auto-assign to (and are visible by) this rep.
   salesRepId            String?
@@ -498,6 +524,8 @@ model LeadSource {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   name      String
   position  Int      @default(0)
   active    Boolean  @default(true)
@@ -505,7 +533,8 @@ model LeadSource {
 
   leads Lead[]
 
-  @@unique([companyId, name])
+  // Roofing and Solar each keep their own sources ("Door Knock", "Referral"…).
+  @@unique([companyId, vertical, name])
   @@map("lead_sources")
 }
 
@@ -514,15 +543,16 @@ model Pipeline {
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name      String
-  industry  Industry @default(roofing) // each industry has its own pipeline + stages
+  vertical  Vertical @default(roofing) @map("industry") // each vertical has its own pipeline + stages
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
 
   stages PipelineStage[]
   leads  Lead[]
 
-  @@unique([companyId, name])
-  @@index([companyId, industry])
+  // Roofing and Solar may each have a pipeline of the same name.
+  @@unique([companyId, vertical, name])
+  @@index([companyId, vertical], map: "pipelines_companyId_industry_idx")
   @@map("pipelines")
 }
 
@@ -581,8 +611,8 @@ model Lead {
   stage      PipelineStage? @relation(fields: [stageId], references: [id])
   position   Int            @default(0) // order within stage column
 
-  // Which isolated industry workspace this deal belongs to (Roofing/Solar/Water).
-  industry    Industry    @default(roofing)
+  // Which isolated vertical workspace this deal belongs to (Roofing / Solar).
+  vertical    Vertical    @default(roofing) @map("industry")
   status      LeadStatus  @default(open)
   serviceType ServiceType @default(roofing)
   // Cash (out-of-pocket / financing) vs insurance (filed claim). Drives whether the
@@ -653,7 +683,7 @@ model Lead {
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
   @@index([companyId, status])
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "leads_companyId_industry_idx")
   @@map("leads")
 }
 
@@ -661,6 +691,8 @@ model Project {
   id        String  @id @default(uuid())
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical            Vertical @default(roofing)
   leadId    String  @unique
   lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
@@ -731,6 +763,7 @@ model Project {
   @@unique([companyId, projectNumber])
   @@index([companyId, status])
   @@index([companyId, managerId])
+  @@index([companyId, vertical])
   @@map("projects")
 }
 
@@ -745,6 +778,10 @@ enum ProjectCostType {
 model ProjectCost {
   id          String          @id @default(uuid())
   companyId   String // scalar tenancy key
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical    Vertical?
   projectId   String
   project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   type        ProjectCostType @default(material)
@@ -767,6 +804,8 @@ model Claim {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical                Vertical @default(roofing)
   leadId    String
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   projectId String?
@@ -942,8 +981,8 @@ model Task {
   description     String?
   status          TaskStatus @default(todo)
   priority        Priority   @default(medium)
-  // Industry workspace this task belongs to (isolates Roofing / Solar / Water tasks).
-  industry        Industry   @default(roofing)
+  // Vertical workspace this task belongs to (isolates Roofing / Solar tasks).
+  vertical        Vertical   @default(roofing) @map("industry")
   dueAt           DateTime?
   leadId          String?
   lead            Lead?      @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -962,7 +1001,7 @@ model Task {
 
   @@index([companyId, assigneeId, status])
   @@index([companyId, createdById])
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "tasks_companyId_industry_idx")
   @@map("tasks")
 }
 
@@ -1036,6 +1075,8 @@ model PhotoTemplate {
   id        String            @id @default(uuid())
   companyId String
   company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   name      String
   kind      PhotoTemplateKind
   position  Int               @default(0)
@@ -1066,6 +1107,8 @@ model CustomFieldDef {
   id        String            @id @default(uuid())
   companyId String
   company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   entity    CustomFieldEntity
   key       String
   label     String
@@ -1075,7 +1118,7 @@ model CustomFieldDef {
   position  Int               @default(0)
   createdAt DateTime          @default(now())
 
-  @@unique([companyId, entity, key])
+  @@unique([companyId, vertical, entity, key])
   @@map("custom_field_defs")
 }
 
@@ -1110,8 +1153,8 @@ model DocumentTemplate {
   company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name         String
   type         DocumentTemplateType @default(custom)
-  // Industry workspace this contract template belongs to (each workspace has its own set).
-  industry     Industry             @default(roofing)
+  // Vertical workspace this contract template belongs to (each has its own set).
+  vertical     Vertical             @default(roofing) @map("industry")
   description  String?
   // Page model: array of { width, height } in PDF points. Default = US Letter pages.
   pages        Json                 @default("[]")
@@ -1127,7 +1170,7 @@ model DocumentTemplate {
   packages DocumentPackage[]
 
   @@index([companyId, type])
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "document_templates_companyId_industry_idx")
   @@map("document_templates")
 }
 
@@ -1158,6 +1201,8 @@ model DocumentPackage {
   id           String                @id @default(uuid())
   companyId    String
   company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical     Vertical @default(roofing)
   templateId   String?
   template     DocumentTemplate?     @relation(fields: [templateId], references: [id])
   leadId       String?
@@ -1184,6 +1229,7 @@ model DocumentPackage {
 
   @@index([companyId, status])
   @@index([companyId, projectId])
+  @@index([companyId, vertical])
   @@map("document_packages")
 }
 
@@ -1263,6 +1309,8 @@ model CommissionRule {
   id          String         @id @default(uuid())
   companyId   String
   company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical    Vertical @default(roofing)
   name        String
   // Commission category this rule pays out to. Not a user Role — it includes
   // "project_manager" (the project's assigned manager via Project.managerId).
@@ -1287,6 +1335,10 @@ model Commission {
   id             String              @id @default(uuid())
   companyId      String
   company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical       Vertical?
   projectId      String
   project        Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId         String
@@ -1389,6 +1441,10 @@ model Invoice {
   id            String        @id @default(uuid())
   companyId     String
   company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical      Vertical?
   projectId     String
   project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   invoiceNumber String
@@ -1413,6 +1469,8 @@ model NotificationRule {
   id            String            @id @default(uuid())
   companyId     String
   company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   event         NotificationEvent
   // Event-specific match conditions, e.g. { "stageId": "..." } or { "status": "in_production" }.
@@ -1531,6 +1589,8 @@ model Territory {
   id            String   @id @default(uuid())
   companyId     String
   company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   color         String   @default("#F4631E")
   polygon       Json // array of [lat, lng] pairs
@@ -1567,6 +1627,8 @@ model Knock {
   id                  String           @id @default(uuid())
   companyId           String
   company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical            Vertical @default(roofing)
   repId               String?
   rep                 User?            @relation("KnockRep", fields: [repId], references: [id], onDelete: SetNull)
   territoryId         String?
@@ -1658,6 +1720,8 @@ model RoofReport {
   id               String   @id @default(uuid())
   companyId        String
   company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical         Vertical @default(roofing)
   leadId           String   @unique
   lead             Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   facets           Json // [{ id, points:[[lat,lng]], pitch, edgeTypes:[] }]
@@ -1737,6 +1801,10 @@ model Transaction {
   id            String               @id @default(uuid())
   companyId     String
   company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical      Vertical?
   date          DateTime
   description   String
   // Signed cents: positive = money in (income/deposit), negative = money out (expense).
@@ -1851,7 +1919,7 @@ model KnowledgeCategory {
   id           String          @id @default(uuid())
   companyId    String
   company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  industry     Industry        @default(roofing)
+  vertical     Vertical        @default(roofing) @map("industry")
   name         String
   description  String?
   position     Int             @default(0)
@@ -1862,7 +1930,7 @@ model KnowledgeCategory {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "knowledge_categories_companyId_industry_idx")
   @@map("knowledge_categories")
 }
 
@@ -1896,7 +1964,7 @@ model ScopeOfWork {
   company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   leadId    String      @unique
   lead      Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  industry  Industry    @default(roofing)
+  vertical  Vertical    @default(roofing) @map("industry")
   pdfFileId String? // uploaded carrier scope PDF (FileAsset id, plain column)
   notes     String?
   // Public-adjuster fee, as a % of the supplement amount recovered (default 10%).
@@ -1951,7 +2019,7 @@ model ScopeTemplateItem {
   id                        String   @id @default(uuid())
   companyId                 String
   company                   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  industry                  Industry @default(roofing)
+  vertical                  Vertical @default(roofing) @map("industry")
   position                  Int      @default(0)
   category                  String   @default("General")
   description               String   @default("")
@@ -1962,7 +2030,7 @@ model ScopeTemplateItem {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "scope_template_items_companyId_industry_idx")
   @@map("scope_template_items")
 }
 
@@ -1974,6 +2042,8 @@ model ScopeCatalogItem {
   id                    String   @id @default(uuid())
   companyId             String
   company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical              Vertical @default(roofing)
   position              Int      @default(0)
   category              String   @default("General")
   subcategory           String   @default("")
@@ -2005,6 +2075,8 @@ model ScopeCostTemplate {
   id            String                  @id @default(uuid())
   companyId     String
   company       Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   description   String?
   effectiveDate DateTime                @default(now())
@@ -2037,6 +2109,8 @@ model ScopeSupplementTemplate {
   id            String                        @id @default(uuid())
   companyId     String
   company       Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   description   String?
   effectiveDate DateTime                      @default(now())
@@ -2081,6 +2155,8 @@ model Proposal {
   id              String         @id @default(cuid())
   companyId       String
   company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical        Vertical @default(roofing)
   leadId          String
   lead            Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
   projectId       String? // set if production has started
@@ -2151,6 +2227,8 @@ model WelcomeCallTemplate {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   name      String
   // welcome (post-sale) vs completion (post-install) — both are confirmation scripts.
   kind      CallKind @default(welcome)
@@ -2387,6 +2465,8 @@ enum CashBidStatus {
 model CashBid {
   id              String        @id @default(uuid())
   companyId       String
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical        Vertical @default(roofing)
   leadId          String
   token           String        @unique @default(uuid())
   createdById     String?

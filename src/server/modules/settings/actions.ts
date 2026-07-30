@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
+import type { Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { getActiveVertical } from "@/server/auth/vertical";
+import { writeVerticalConfig } from "@/lib/vertical-config";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
@@ -151,6 +154,36 @@ const dispositionsSchema = z.object({
 });
 
 /** Replace the company's customizable, grouped appointment outcomes (full list). */
+/**
+ * Persist one vertical's slice of a namespaced CompanySettings JSON column.
+ *
+ * Reads the current column, replaces ONLY the active vertical's entry, and
+ * writes the merged object back. This is what makes "editing Roofing config
+ * cannot mutate Solar config" true at the persistence layer rather than only in
+ * the UI.
+ */
+async function saveVerticalScopedSetting(
+  companyId: string,
+  vertical: Vertical,
+  column: "appointmentDispositions" | "inspectionOutcomes" | "qcChecklistTemplate",
+  value: unknown
+) {
+  const current = await prisma.companySettings.findUnique({
+    where: { companyId },
+    select: { [column]: true } as Record<string, true>,
+  });
+  const merged = writeVerticalConfig(
+    (current as Record<string, unknown> | null)?.[column],
+    vertical,
+    value
+  );
+  await prisma.companySettings.upsert({
+    where: { companyId },
+    create: { companyId, [column]: merged },
+    update: { [column]: merged },
+  });
+}
+
 export async function updateAppointmentDispositionsAction(input: z.infer<typeof dispositionsSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
@@ -169,11 +202,12 @@ export async function updateAppointmentDispositionsAction(input: z.infer<typeof 
   }
   if (items.length === 0) return fail("Keep at least one outcome.");
 
-  await prisma.companySettings.upsert({
-    where: { companyId: user.companyId },
-    create: { companyId: user.companyId, appointmentDispositions: items },
-    update: { appointmentDispositions: items },
-  });
+  await saveVerticalScopedSetting(
+    user.companyId,
+    await getActiveVertical(user),
+    "appointmentDispositions",
+    items
+  );
   revalidatePath("/portal/settings/appointment-outcomes");
   return ok();
 }
@@ -206,11 +240,12 @@ export async function updateInspectionOutcomesAction(input: z.infer<typeof label
   const items = cleanLabels(parsed.data.items);
   if (items.length === 0) return fail("Keep at least one outcome.");
 
-  await prisma.companySettings.upsert({
-    where: { companyId: user.companyId },
-    create: { companyId: user.companyId, inspectionOutcomes: items },
-    update: { inspectionOutcomes: items },
-  });
+  await saveVerticalScopedSetting(
+    user.companyId,
+    await getActiveVertical(user),
+    "inspectionOutcomes",
+    items
+  );
   revalidatePath("/portal/settings/inspection-outcomes");
   return ok();
 }
@@ -224,11 +259,12 @@ export async function updateQcChecklistTemplateAction(input: z.infer<typeof labe
   const items = cleanLabels(parsed.data.items);
   if (items.length === 0) return fail("Keep at least one checklist item.");
 
-  await prisma.companySettings.upsert({
-    where: { companyId: user.companyId },
-    create: { companyId: user.companyId, qcChecklistTemplate: items },
-    update: { qcChecklistTemplate: items },
-  });
+  await saveVerticalScopedSetting(
+    user.companyId,
+    await getActiveVertical(user),
+    "qcChecklistTemplate",
+    items
+  );
   revalidatePath("/portal/settings/production-checklist");
   return ok();
 }
