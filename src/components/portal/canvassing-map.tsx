@@ -209,8 +209,11 @@ export type CanvassingMapProps = {
   onMapClick: (lat: number, lng: number) => void;
   onMapReady: (map: LeafletMap) => void;
   onViewport: (v: Viewport) => void;
-  renderKnockPopup: (k: KnockDTO) => React.ReactNode;
-  renderDealPopup?: (d: DealDTO) => React.ReactNode;
+  // Houses and deals open a bottom sheet, not a Leaflet popup: popups clip at
+  // screen edges, shove the map around, and can't hold a 56px tap target.
+  onKnockClick: (k: KnockDTO) => void;
+  onDealClick?: (d: DealDTO) => void;
+  // Territories keep their popup — manager-only, desktop-only, and it works.
   renderTerritoryPopup: (t: TerritoryDTO) => React.ReactNode;
   // When a rep is selected, the IDs of that rep's territories (emphasized; others dimmed).
   highlightTerritoryIds?: Set<string> | null;
@@ -243,8 +246,8 @@ export function CanvassingMap({
   onMapClick,
   onMapReady,
   onViewport,
-  renderKnockPopup,
-  renderDealPopup,
+  onKnockClick,
+  onDealClick,
   renderTerritoryPopup,
   highlightTerritoryIds,
   zips,
@@ -423,11 +426,9 @@ export function CanvassingMap({
                       onMovePin?.("knock", k.id, ll.lat, ll.lng);
                     },
                   }
-                : undefined
+                : { click: () => onKnockClick(k) }
             }
-          >
-            <Popup>{renderKnockPopup(k)}</Popup>
-          </Marker>
+          />
         );
       })}
 
@@ -454,11 +455,9 @@ export function CanvassingMap({
                       onMovePin?.("deal", d.id, ll.lat, ll.lng);
                     },
                   }
-                : undefined
+                : { click: () => onDealClick?.(d) }
             }
-          >
-            <Popup>{renderDealPopup ? renderDealPopup(d) : d.name}</Popup>
-          </Marker>
+          />
         );
       })}
 
