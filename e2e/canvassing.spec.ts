@@ -165,7 +165,9 @@ test("canvassing: a house dot shows a property value and carries it into a conve
 
 test("canvassing: manager can draw a territory on the map", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
-  await page.goto("/portal/canvassing?houses=off");
+  // zips=0 turns off the ZIP boundary overlay. Its polygons sit over the whole
+  // map and swallow clicks, so corners would never register.
+  await page.goto("/portal/canvassing?houses=off&zips=0");
   const map = page.locator(".leaflet-container");
   await expect(map).toBeVisible({ timeout: 10000 });
   await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 20000 });
@@ -189,9 +191,10 @@ test("canvassing: manager can draw a territory on the map", async ({ page }) => 
 test("canvassing: leaderboard ranks reps and highlights the viewer", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await page.goto("/portal/canvassing?houses=off");
-  // Dashboard + Leaderboard merged into one "Insights" view.
+  // Dashboard + Leaderboard merged into one "Insights" view, so the rep's name
+  // now appears in both sections — scope the assertion to the leaderboard row.
   await page.getByRole("button", { name: "insights" }).click();
-  await expect(page.getByText("Tyler Brooks")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("Tyler Brooks").first()).toBeVisible({ timeout: 10000 });
   await expect(page.getByText("(you)")).toBeVisible();
 });
 
