@@ -30,10 +30,11 @@ function NumField({
   step?: string;
   hint?: string;
 }) {
+  const id = React.useId();
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Input type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} />
+      <Label htmlFor={id} className="text-xs">{label}</Label>
+      <Input id={id} type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} />
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   );

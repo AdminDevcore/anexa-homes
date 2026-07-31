@@ -66,7 +66,7 @@ export function DealActionsPanel({
   const groups = groupDispositions(dispositions?.length ? dispositions : DEFAULT_APPOINTMENT_DISPOSITIONS);
   return (
     <div className="mt-4 space-y-3 border-t border-border pt-4">
-      <AppointmentRun leadId={leadId} disposition={disposition} legacyNote={appointmentNote} notes={appointmentNotes} groups={groups} canEdit={canEditLead} />
+      <AppointmentRun leadId={leadId} disposition={disposition} legacyNote={appointmentNote} notes={appointmentNotes} groups={groups} canEdit={canEditLead} isSolar={isSolar} />
       {/* An insurance claim is a roofing concept. Solar has no carrier, no
           adjuster and no deductible, so the section is not rendered at all. */}
       {!isSolar && (
@@ -215,7 +215,7 @@ function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEd
         </div>
       ) : (
         <Button size="sm" variant="outline" disabled={!canEdit} onClick={() => setPicking(true)} className="mt-1.5 w-full">
-          <ClipboardCheck className="size-4" /> Set inspection outcome
+          <ClipboardCheck className="size-4" /> Set {label.toLowerCase()}
         </Button>
       )}
       <OutcomeNotes leadId={leadId} context="inspection_outcome" legacyNote={legacyNote} notes={notes} canEdit={canEdit} placeholder="Add an inspection note…" />
@@ -224,6 +224,7 @@ function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEd
 }
 
 function AppointmentRun({
+  isSolar = false,
   leadId,
   disposition,
   legacyNote,
@@ -237,6 +238,8 @@ function AppointmentRun({
   notes: OutcomeNote[];
   groups: { group: string | null; items: string[] }[];
   canEdit: boolean;
+  /** Solar qualifies a homeowner; roofing runs a storm appointment. */
+  isSolar?: boolean;
 }) {
   const router = useRouter();
   const [picking, setPicking] = React.useState(false);
@@ -296,7 +299,7 @@ function AppointmentRun({
           onClick={() => setPicking(true)}
           className="mt-1.5 w-full bg-gold text-gold-foreground hover:bg-gold/90"
         >
-          <PlayCircle className="size-4" /> Run appointment
+          <PlayCircle className="size-4" /> {isSolar ? "Record qualification" : "Run appointment"}
         </Button>
       )}
       <OutcomeNotes leadId={leadId} context="appointment_outcome" legacyNote={legacyNote} notes={notes} canEdit={canEdit} placeholder="Add an appointment note…" />

@@ -112,7 +112,7 @@ test.describe("workspace switcher", () => {
     await switchTo(page, "Solar");
 
     // The seeded solar deal sits in an externally-blocked stage.
-    await page.goto("/portal/leads");
+    await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
@@ -130,7 +130,7 @@ test.describe("workspace switcher", () => {
   test("a re-roof finding surfaces the crossover instead of burying it", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await switchTo(page, "Solar");
-    await page.goto("/portal/leads");
+    await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
@@ -149,18 +149,29 @@ test.describe("workspace switcher", () => {
   test("a proposal cannot be generated from an invalid design", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await switchTo(page, "Solar");
-    await page.goto("/portal/leads");
+    await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
-
-    // The seeded solar deal has no design yet, so the gate must refuse.
     await page.getByRole("button", { name: "Proposal", exact: true }).click();
-    const check = page.getByRole("button", { name: /Check proposal readiness/ });
-    await expect(check).toBeVisible({ timeout: 15000 });
-    await check.click();
+
+    // The seeded deal is complete, so break it: annual usage is the anchor for
+    // offset, and without it the offset figure is meaningless. This is the
+    // exact fault that produces five-figure offsets on real competitor
+    // proposals, so it must block generation.
+    const usage = page.getByLabel("Annual usage (kWh)");
+    await expect(usage).toBeVisible({ timeout: 15000 });
+    await usage.fill("");
+    await page.getByRole("button", { name: /Save design/ }).click();
+    await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole("button", { name: /Check proposal readiness/ }).click();
     await expect(page.getByText(/Blocked/)).toBeVisible({ timeout: 15000 });
-    // And the reason is actionable, not just "invalid".
-    await expect(page.getByText(/Complete the system design/)).toBeVisible();
+    await expect(page.getByText(/annual usage/i).first()).toBeVisible();
+
+    // Restore it so later specs see a complete deal.
+    await usage.fill("14000");
+    await page.getByRole("button", { name: /Save design/ }).click();
+    await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });
   });
 });
 

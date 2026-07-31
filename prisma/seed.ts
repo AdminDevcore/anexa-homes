@@ -267,7 +267,7 @@ async function main() {
   // the case the whole owned/blocked split exists for: 12 days waiting on the
   // building department is NOT our team being late, but nobody following up IS.
   if (solarPipelineId && solarStageByKey.permit_submitted) {
-    await prisma.lead.create({
+    const solarLead = await prisma.lead.create({
       data: {
         companyId: company.id,
         vertical: "solar",
@@ -291,6 +291,77 @@ async function main() {
         assignedRepId: users.rep.id,
         createdById: users.rep.id,
       },
+    });
+
+    // A real design + financing so the cockpit has something to show. Numbers
+    // are computed the same way the app computes them: 25 × 400W = 10 kW,
+    // 10 × 1450 × 0.84 = 12,180 kWh, against 14,000 kWh of usage = 87% offset.
+    const solarModule = await prisma.solarEquipment.findFirst({
+      where: { companyId: company.id, kind: "module", ratingW: 400 },
+      select: { id: true },
+    });
+    const solarInverter = await prisma.solarEquipment.findFirst({
+      where: { companyId: company.id, kind: "inverter" },
+      select: { id: true },
+    });
+    if (solarModule) {
+      await prisma.solarDesign.create({
+        data: {
+          companyId: company.id,
+          leadId: solarLead.id,
+          utilityProvider: "Oncor",
+          ratePlan: "Residential Standard",
+          netMeteringProgram: "Solar Buyback",
+          annualUsageKwh: 14000,
+          avgMonthlyBillCents: 21000,
+          mountType: "roof",
+          tsrfPct: 92,
+          moduleId: solarModule.id,
+          moduleQty: 25,
+          inverterId: solarInverter?.id ?? null,
+          systemSizeKwDc: 10,
+          systemSizeKwAc: 8.4,
+          year1ProductionKwh: 12180,
+          offsetPct: 87,
+        },
+      });
+      await prisma.solarFinance.create({
+        data: {
+          companyId: company.id,
+          leadId: solarLead.id,
+          product: "loan",
+          grossPpwCents: 350,
+          dealerFeePct: 18,
+          adderTotalCents: 385000, // the MPU adder
+          contractPriceCents: 3885000,
+          itcEstimateCents: 0, // no federal credit configured — see SolarSettings
+          aprPct: 6.99,
+          loanTermMonths: 300,
+          termYears: 25,
+        },
+      });
+    }
+
+    // Payment schedule — the one thing the cockpit needed that we did not
+    // previously capture. Commission tranches and financier draws both pay
+    // against project events, not on a fixed date.
+    await prisma.solarMilestone.createMany({
+      data: [
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 1, label: "M1", amountCents: 120000, trigger: "Contract signed", paidAt: new Date(Date.now() - 20 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 2, label: "M2", amountCents: 180000, trigger: "Install complete", expectedAt: new Date(Date.now() + 25 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 3, label: "M3", amountCents: 90000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 1, label: "1st payment", amountCents: 1260000, trigger: "NTP approved", paidAt: new Date(Date.now() - 14 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 2, label: "2nd payment", amountCents: 1575000, trigger: "Install complete", expectedAt: new Date(Date.now() + 25 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 3, label: "3rd payment", amountCents: 315000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
+      ],
+    });
+
+    await prisma.dealFeedPost.createMany({
+      data: [
+        { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "internal", body: "Plan set submitted to the city on the 18th. Round 1 review, nothing flagged yet.", authorId: users.manager.id },
+        { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "external", body: "Your permit is with the city. Typical review here runs 2-3 weeks — we will chase it weekly and let you know the moment it clears.", authorId: users.rep.id },
+        { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "customer", body: "Thanks — is there anything you need from me in the meantime?", authorId: null },
+      ],
     });
   }
 

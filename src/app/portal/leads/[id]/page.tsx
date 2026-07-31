@@ -16,8 +16,9 @@ import {
   DollarSign,
   CalendarClock,
   Calculator,
+  Zap,
 } from "lucide-react";
-import { requireUser } from "@/server/auth/session";
+import { requireUser, getSessionUser } from "@/server/auth/session";
 import { getLeadDetail } from "@/server/modules/leads/queries";
 import { getDealFinancials, getProjectPayout } from "@/server/modules/costs/queries";
 import { isStageCommissionEligible, COMMISSION_GATE_LABEL } from "@/server/modules/payroll/eligibility";
@@ -30,6 +31,16 @@ import { EditJobDialog } from "@/components/portal/edit-job-dialog";
 import { getProjectPhotoChecklists } from "@/server/modules/photos/queries";
 import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modules/settings/queries";
 import { SolarOpsCard } from "@/components/portal/solar-ops-card";
+import {
+  SolarStageBar,
+  SolarSystemMoneyPanel,
+  SolarDocumentFolders,
+  SolarActivityFeed,
+  SolarQuickActions,
+  SolarDeferredPanels,
+} from "@/components/portal/solar-cockpit";
+import { SOLAR_FOLDER_KEYS } from "@/lib/solar-folders";
+import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
 import { SolarDesignPanel, SolarFinancePanel, SolarProposalGate } from "@/components/portal/solar-panels";
 import { getSolarSettings } from "@/server/modules/solar/settings";
@@ -69,7 +80,20 @@ import { Button } from "@/components/ui/button";
 import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel } from "@/lib/service-types";
 
-export const metadata = { title: "Appointment" };
+/**
+ * Roofing books an "appointment"; solar works a "deal". The title follows the
+ * vertical rather than imposing roofing's vocabulary on both.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const user = await getSessionUser();
+  if (!user) return { title: "Deal" };
+  const lead = await prisma.lead.findFirst({
+    where: { companyId: user.companyId, id },
+    select: { vertical: true },
+  });
+  return { title: lead?.vertical === "solar" ? "Deal" : "Appointment" };
+}
 
 export default async function LeadDetailPage({
   params,
@@ -200,7 +224,14 @@ export default async function LeadDetailPage({
   // Roofing deals never render this — their stages are all internally owned.
   const [solarDesign, solarFinance, solarSettings, solarEquipment, solarProposals] = isSolarDeal
     ? await Promise.all([
-        prisma.solarDesign.findUnique({ where: { leadId: lead.id } }),
+        prisma.solarDesign.findUnique({
+          where: { leadId: lead.id },
+          include: {
+            module: { select: { manufacturer: true, model: true, ratingW: true } },
+            inverter: { select: { manufacturer: true, model: true } },
+            battery: { select: { manufacturer: true, model: true } },
+          },
+        }),
         prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
         getSolarSettings(user.companyId),
         prisma.solarEquipment.findMany({
@@ -229,6 +260,63 @@ export default async function LeadDetailPage({
   const linkedDeal = isSolarDeal || lead.linkedDealId
     ? await getLinkedDealSummary(user.companyId, lead.linkedDealId)
     : null;
+
+  const [solarMilestones, solarFeed] = isSolarDeal
+    ? await Promise.all([
+        prisma.solarMilestone.findMany({
+          where: { companyId: user.companyId, leadId: lead.id },
+          orderBy: [{ payee: "asc" }, { sequence: "asc" }],
+        }),
+        prisma.dealFeedPost.findMany({
+          where: { companyId: user.companyId, leadId: lead.id },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+          include: { author: { select: { firstName: true, lastName: true } } },
+        }),
+      ])
+    : [[], []];
+
+  // The pricing breakdown is DERIVED from the design + finance rows — no new
+  // figures are entered anywhere, so it can never disagree with the proposal.
+  const solarMoney = (() => {
+    if (!isSolarDeal || !solarDesign) return null;
+    const watts = Math.round(solarDesign.systemSizeKwDc * 1000);
+    const fin = solarFinance;
+    const breakdown = fin && (fin.product === "cash" || fin.product === "loan")
+      ? pricePurchase({
+          product: fin.product,
+          systemSizeKwDc: solarDesign.systemSizeKwDc,
+          grossPpwCents: fin.grossPpwCents,
+          dealerFeePct: fin.dealerFeePct,
+          adderTotalCents: fin.adderTotalCents,
+        })
+      : null;
+    return {
+      sizeKwDc: solarDesign.systemSizeKwDc,
+      year1ProductionKwh: solarDesign.year1ProductionKwh,
+      offsetPct: solarDesign.offsetPct,
+      moduleLabel: solarDesign.module
+        ? `${solarDesign.module.manufacturer ? `${solarDesign.module.manufacturer} ` : ""}${solarDesign.module.model}`
+        : null,
+      moduleQty: solarDesign.moduleQty,
+      inverterLabel: solarDesign.inverter?.model ?? null,
+      batteryLabel: solarDesign.battery?.model ?? null,
+      product: fin?.product ?? null,
+      systemWatts: watts,
+      basePpwCents: fin?.grossPpwCents ?? 0,
+      adderPpwCents: watts > 0 ? Math.round((fin?.adderTotalCents ?? 0) / watts) : 0,
+      dealerFeeCents: breakdown?.dealerFeeCents ?? 0,
+      dealerFeePpwCents: watts > 0 ? Math.round((breakdown?.dealerFeeCents ?? 0) / watts) : 0,
+      finalPpwCents: Math.round(breakdown?.netPpwCents ?? 0),
+      contractPriceCents: fin?.contractPriceCents ?? 0,
+    };
+  })();
+
+  const solarFolderCounts = isSolarDeal
+    ? Object.fromEntries(
+        SOLAR_FOLDER_KEYS.map((k) => [k, lead.files.filter((f) => f.category === k).length])
+      )
+    : {};
 
   const roofReport = await getRoofReport(user.companyId, lead.id);
   const roofAddress = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
@@ -285,7 +373,7 @@ export default async function LeadDetailPage({
         // Scope of Work: that is an insurance-restoration concept.
         { id: "overview", label: "Overview" },
         { id: "proposal", label: "Proposal" },
-        { id: "production", label: "Operations" },
+        { id: "production", label: "Operations", icon: "operations" },
         ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
       ]
     : [
@@ -302,7 +390,7 @@ export default async function LeadDetailPage({
         href="/portal/leads"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
-        <ArrowLeft className="size-4" /> Back to appointments
+        <ArrowLeft className="size-4" /> {isSolarDeal ? "Back to deals" : "Back to appointments"}
       </Link>
 
       <PageHeader
@@ -354,11 +442,68 @@ export default async function LeadDetailPage({
         }
       />
 
+      {isSolarDeal && lead.pipeline && (
+        <SolarStageBar
+          leadId={lead.id}
+          stages={lead.pipeline.stages.map((st) => ({
+            id: st.id, name: st.name, position: st.position, color: st.color,
+          }))}
+          currentStageId={lead.stage?.id ?? null}
+          canEdit={can(user, "update", "Lead")}
+        />
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <DealTabs tabs={dealTabs}>
             {/* ── Overview ── */}
             <div data-deal-tab="overview" className="space-y-6">
+          {isSolarDeal && (
+            <Card title="Quick actions">
+              <SolarQuickActions
+                leadId={lead.id}
+                proposalToken={solarProposals[0]?.publicToken ?? null}
+                canEdit={can(user, "update", "Lead")}
+                homeownerInvited={!!lead.customerUserId}
+              />
+            </Card>
+          )}
+
+          {isSolarDeal && (
+            <Card title="System & money" icon={Zap}>
+              <SolarSystemMoneyPanel money={solarMoney} milestones={solarMilestones.map((m) => ({
+                id: m.id, payee: m.payee, sequence: m.sequence, label: m.label,
+                amountCents: m.amountCents, trigger: m.trigger,
+                expectedAt: m.expectedAt?.toISOString() ?? null,
+                paidAt: m.paidAt?.toISOString() ?? null,
+              }))} />
+            </Card>
+          )}
+
+          {isSolarDeal && (
+            <Card title="Documents">
+              <SolarDocumentFolders counts={solarFolderCounts} />
+            </Card>
+          )}
+
+          {isSolarDeal && (
+            <Card title="Activity">
+              <SolarActivityFeed
+                leadId={lead.id}
+                canPost={can(user, "read", "Lead")}
+                posts={solarFeed.map((f) => ({
+                  id: f.id,
+                  channel: f.channel,
+                  body: f.body,
+                  author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
+                  createdAt: f.createdAt.toISOString(),
+                }))}
+              />
+            </Card>
+          )}
+
+          {isSolarDeal && <SolarDeferredPanels />}
+
           {isSolarDeal && (
             <SolarOpsCard
               leadId={lead.id}
@@ -405,7 +550,9 @@ export default async function LeadDetailPage({
             )}
           </Card>
 
-          {/* Notes */}
+          {/* Notes — roofing only. On solar the channelled Activity feed above
+              replaces this: same job, but with an audience on every post. */}
+          {!isSolarDeal && (
           <Card title="Notes & Activity">
             {canNote && <NoteForm leadId={lead.id} />}
             <ul className="mt-4 space-y-3">
@@ -423,6 +570,7 @@ export default async function LeadDetailPage({
               ))}
             </ul>
           </Card>
+          )}
           {/* Claim — insurance deals only. Roof info / line items / supplements
               live in Scope of Work; only claim tracking + amounts remain here.
               Cash deals show a plain cash card instead (no insurance fields). */}
@@ -685,6 +833,7 @@ export default async function LeadDetailPage({
               />
             }
           >
+            <>
             {/* E-signature documents, folded into the same card. */}
             <div className="space-y-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -718,6 +867,7 @@ export default async function LeadDetailPage({
               canUpload={can(user, "create", "File")}
               canDelete={can(user, "create", "File")}
             />
+            </>
           </FilesSection>
             </div>
           </DealTabs>
@@ -756,7 +906,7 @@ export default async function LeadDetailPage({
               />
               {isInsurance && <Detail label="Claim Status" value={lead.claimStatus.replace(/_/g, " ")} />}
               <Detail
-                label="Appointment Date"
+                label={isSolarDeal ? "Consult Date" : "Appointment Date"}
                 value={lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not scheduled"}
               />
               <Detail label="Created" value={fmt.date(lead.createdAt)} />

@@ -75,10 +75,13 @@ function TextField({
   disabled?: boolean;
   type?: string;
 }) {
+  // Associate the label with the input: it makes the label clickable, lets a
+  // screen reader announce the field, and is why getByLabel works in tests.
+  const id = React.useId();
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
-      <Input type={type} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      <Label htmlFor={id} className="text-xs">{label}</Label>
+      <Input id={id} type={type} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }

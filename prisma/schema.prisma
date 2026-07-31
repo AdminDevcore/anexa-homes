@@ -365,6 +365,8 @@ model Company {
   solarFinance          SolarFinance[]
   creditApplications    CreditApplication[]
   solarProposals        SolarProposal[]
+  solarMilestones       SolarMilestone[]
+  dealFeedPosts         DealFeedPost[]
 
   @@map("companies")
 }
@@ -511,6 +513,7 @@ model User {
   onboarding           UserOnboarding?
   proposalsCreated     Proposal[]           @relation("ProposalCreatedBy")
   reviewsApproved      Review[]             @relation("ReviewApprover")
+  feedPosts            DealFeedPost[]       @relation("FeedAuthor")
 
   @@unique([companyId, email])
   @@unique([companyId, employeeNo])
@@ -761,6 +764,8 @@ model Lead {
   solarFinance     SolarFinance?
   creditApplications CreditApplication[]
   solarProposals   SolarProposal[]
+  solarMilestones  SolarMilestone[]
+  feedPosts        DealFeedPost[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -2918,4 +2923,85 @@ model SolarProposalEvent {
 
   @@index([proposalId, createdAt])
   @@map("solar_proposal_events")
+}
+
+/// Who a milestone pays.
+enum MilestonePayee {
+  /// M1 / M2 / M3 — the rep's commission tranches.
+  rep
+  /// 1st / 2nd / 3rd — the financier's payments to us.
+  financier
+}
+
+/// A scheduled payment on a solar deal.
+///
+/// NEW DATA — this was not captured before. The pricing breakdown on the deal
+/// (base PPW, adders, dealer fee, final PPW) is all derived from figures we
+/// already store, but *when the money actually arrives* was not modelled
+/// anywhere: commission tranches and financier draws both pay out against
+/// milestones (contract, install, PTO), and that schedule is what a rep and a
+/// controller actually want to see on the deal.
+model SolarMilestone {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  payee     MilestonePayee
+  /// 1, 2, 3 — M1/M2/M3 for the rep, 1st/2nd/3rd for the financier.
+  sequence  Int
+  label     String
+  amountCents Int      @default(0)
+  /// What has to happen for this to pay (e.g. "Install complete").
+  trigger   String?
+  expectedAt DateTime?
+  paidAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([leadId, payee, sequence])
+  @@index([companyId, leadId])
+  @@map("solar_milestones")
+}
+
+/// Which audience a feed post is for.
+enum FeedChannel {
+  /// Visible to the customer in their portal.
+  external
+  /// Staff only — never shown to the homeowner.
+  internal
+  /// Written by, or addressed to, the homeowner.
+  customer
+}
+
+/// A post on a deal's activity feed.
+///
+/// NEW DATA. ActivityLog already records SYSTEM events, but it has no audience
+/// and no way to address a colleague — so a coordinator asking "did anyone
+/// chase the utility?" had nowhere to put it. Posts carry a channel so internal
+/// chatter can never leak to the homeowner, and @mentions notify by email.
+model DealFeedPost {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  channel   FeedChannel @default(internal)
+  body      String      @db.Text
+  authorId  String?
+  author    User?       @relation("FeedAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  /// User ids extracted from @mentions, notified on create.
+  mentions  String[]
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, leadId, createdAt])
+  @@map("deal_feed_posts")
 }
