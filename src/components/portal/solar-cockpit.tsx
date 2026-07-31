@@ -14,7 +14,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SOLAR_FOLDERS } from "@/lib/solar-folders";
 import { moveLeadStage } from "@/server/modules/leads/actions";
-import { postDealFeedAction, inviteHomeownerAction } from "@/server/modules/solar/cockpit-actions";
+import {
+  postDealFeedAction,
+  inviteHomeownerAction,
+  upsertSolarMilestoneAction,
+} from "@/server/modules/solar/cockpit-actions";
 
 const usd = (c: number) =>
   (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -152,11 +156,15 @@ export type SystemMoney = {
 };
 
 export function SolarSystemMoneyPanel({
+  leadId,
   money,
   milestones,
+  canEdit,
 }: {
+  leadId: string;
   money: SystemMoney | null;
   milestones: MilestoneLite[];
+  canEdit: boolean;
 }) {
   if (!money) {
     return (
@@ -205,51 +213,222 @@ export function SolarSystemMoneyPanel({
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <MilestoneList title="Commission milestones" empty="No commission schedule set." rows={rep} />
-        <MilestoneList title="Financier payments" empty="No payout schedule set." rows={fin} />
+        <MilestoneList
+          leadId={leadId}
+          payee="rep"
+          title="Commission milestones"
+          rows={rep}
+          canEdit={canEdit}
+          defaultLabels={["M1", "M2", "M3"]}
+          defaultTriggers={["Contract signed", "Install complete", "PTO granted"]}
+        />
+        <MilestoneList
+          leadId={leadId}
+          payee="financier"
+          title="Financier payments"
+          rows={fin}
+          canEdit={canEdit}
+          defaultLabels={["1st payment", "2nd payment", "3rd payment"]}
+          defaultTriggers={["NTP approved", "Install complete", "PTO granted"]}
+        />
       </div>
     </div>
   );
 }
 
-function MilestoneList({ title, rows, empty }: { title: string; rows: MilestoneLite[]; empty: string }) {
+/**
+ * The payment schedule, editable in place.
+ *
+ * Three fixed slots per payee, because that is how these deals are actually
+ * structured — a coordinator fills in the amounts and dates rather than
+ * inventing rows. An empty slot shows as "not set" instead of being hidden, so
+ * a schedule that has never been entered is visibly incomplete rather than
+ * silently absent.
+ */
+function MilestoneList({
+  leadId, payee, title, rows, canEdit, defaultLabels, defaultTriggers,
+}: {
+  leadId: string;
+  payee: MilestonePayee;
+  title: string;
+  rows: MilestoneLite[];
+  canEdit: boolean;
+  defaultLabels: string[];
+  defaultTriggers: string[];
+}) {
+  const [editing, setEditing] = React.useState<number | null>(null);
+  const slots = [1, 2, 3];
+
   return (
     <div>
       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
-      {rows.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{empty}</p>
-      ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border">
-          {rows.map((m) => (
-            <li key={m.id} className="flex items-center gap-2 p-2.5 text-sm">
+      <ul className="divide-y divide-border rounded-lg border border-border">
+        {slots.map((seq) => {
+          const m = rows.find((r) => r.sequence === seq) ?? null;
+          if (editing === seq) {
+            return (
+              <li key={seq} className="p-2.5">
+                <MilestoneForm
+                  leadId={leadId}
+                  payee={payee}
+                  sequence={seq}
+                  existing={m}
+                  defaultLabel={defaultLabels[seq - 1]}
+                  defaultTrigger={defaultTriggers[seq - 1]}
+                  onDone={() => setEditing(null)}
+                />
+              </li>
+            );
+          }
+          return (
+            <li key={seq} className="flex items-center gap-2 p-2.5 text-sm">
               <span
                 className={cn(
                   "grid size-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold",
-                  m.paidAt ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+                  m?.paidAt ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
                 )}
               >
-                {m.paidAt ? <Check className="size-3" /> : m.sequence}
+                {m?.paidAt ? <Check className="size-3" /> : seq}
               </span>
-              <span className="flex-1">
-                <span className="font-medium">{m.label}</span>
-                {m.trigger && <span className="block text-[11px] text-muted-foreground">{m.trigger}</span>}
-              </span>
-              <span className="text-right">
-                <span className="block tabular-nums">{usd(m.amountCents)}</span>
-                <span className="block text-[11px] text-muted-foreground">
-                  {m.paidAt
-                    ? `paid ${new Date(m.paidAt).toLocaleDateString()}`
-                    : m.expectedAt
-                      ? `due ${new Date(m.expectedAt).toLocaleDateString()}`
-                      : "no date"}
+              <span className="min-w-0 flex-1">
+                <span className={cn("font-medium", !m && "text-muted-foreground")}>
+                  {m?.label ?? defaultLabels[seq - 1]}
+                </span>
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {m?.trigger ?? defaultTriggers[seq - 1]}
                 </span>
               </span>
+              <span className="text-right">
+                <span className="block tabular-nums">{m ? usd(m.amountCents) : "—"}</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  {m?.paidAt
+                    ? `paid ${new Date(m.paidAt).toLocaleDateString()}`
+                    : m?.expectedAt
+                      ? `due ${new Date(m.expectedAt).toLocaleDateString()}`
+                      : "not set"}
+                </span>
+              </span>
+              {canEdit && (
+                <button
+                  onClick={() => setEditing(seq)}
+                  aria-label={`Edit ${m?.label ?? defaultLabels[seq - 1]}`}
+                  className="rounded-md p-1 text-muted-foreground hover:bg-muted"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+              )}
             </li>
-          ))}
-        </ul>
-      )}
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function MilestoneForm({
+  leadId, payee, sequence, existing, defaultLabel, defaultTrigger, onDone,
+}: {
+  leadId: string;
+  payee: MilestonePayee;
+  sequence: number;
+  existing: MilestoneLite | null;
+  defaultLabel: string;
+  defaultTrigger: string;
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [label, setLabel] = React.useState(existing?.label ?? defaultLabel);
+  const [amount, setAmount] = React.useState(
+    existing ? (existing.amountCents / 100).toString() : ""
+  );
+  const [trigger, setTrigger] = React.useState(existing?.trigger ?? defaultTrigger);
+  const [expected, setExpected] = React.useState(
+    existing?.expectedAt ? existing.expectedAt.slice(0, 10) : ""
+  );
+  const [paid, setPaid] = React.useState(!!existing?.paidAt);
+
+  async function save() {
+    setBusy(true);
+    const res = await upsertSolarMilestoneAction({
+      leadId,
+      payee,
+      sequence,
+      label: label.trim() || defaultLabel,
+      amountCents: Math.round(Number(amount || 0) * 100),
+      trigger: trigger.trim() || null,
+      expectedAt: expected ? new Date(expected).toISOString() : null,
+      paid,
+    });
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Milestone saved");
+    onDone();
+    router.refresh();
+  }
+
+  return (
+    <div className="space-y-2" data-testid="milestone-form">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="space-y-0.5">
+          <span className="text-[11px] text-muted-foreground">Label</span>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+          />
+        </label>
+        <label className="space-y-0.5">
+          <span className="text-[11px] text-muted-foreground">Amount ($)</span>
+          <input
+            aria-label="Amount"
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+          />
+        </label>
+        <label className="space-y-0.5">
+          <span className="text-[11px] text-muted-foreground">Pays when</span>
+          <input
+            value={trigger}
+            onChange={(e) => setTrigger(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+          />
+        </label>
+        <label className="space-y-0.5">
+          <span className="text-[11px] text-muted-foreground">Expected date</span>
+          <input
+            type="date"
+            value={expected}
+            onChange={(e) => setExpected(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+          />
+        </label>
+      </div>
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          aria-label="Paid"
+          checked={paid}
+          onChange={(e) => setPaid(e.target.checked)}
+          className="size-4"
+        />
+        Paid
+        <span className="text-muted-foreground">
+          — stamps today&rsquo;s date; unticking clears it, so the two never drift
+        </span>
+      </label>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={save} disabled={busy}>
+          {busy && <Loader2 className="size-4 animate-spin" />} Save
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }

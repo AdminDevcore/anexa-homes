@@ -600,19 +600,28 @@ async function main() {
     });
   }
 
-  // Sample leads spread across stages
-  const leadSeed = [
-    { first: "Robert", last: "Johnson", stage: "in_production", value: 2450000, status: "open", customer: "customer", service: "roofing" },
-    { first: "Emily", last: "Watson", stage: "new_lead", value: 1800000, status: "open", service: "solar" },
-    { first: "David", last: "Kim", stage: "appointment_set", value: 2100000, status: "open", service: "windows" },
-    { first: "Maria", last: "Garcia", stage: "claim_opened", value: 2750000, status: "open", service: "solar" },
-    { first: "James", last: "Miller", stage: "contract_signed", value: 3200000, status: "open", service: "roofing" },
-    { first: "Linda", last: "Davis", stage: "scope_received", value: 1950000, status: "open", service: "water_filtration" },
-    { first: "Chris", last: "Wilson", stage: "paid", value: 2890000, status: "won", service: "roofing" },
-    { first: "Nancy", last: "Moore", stage: "qc_inspection", value: 2300000, status: "open", service: "hvac" },
+  // Sample leads spread across stages.
+  //
+  // `apptDays` (negative = past, positive = future, omitted = never scheduled)
+  // and `outcome` exist so the Appointments list has every filter bucket to
+  // show out of the box: Not ran (past, unlogged), a couple of logged outcomes,
+  // Upcoming, and Unscheduled.
+  const leadSeed: {
+    first: string; last: string; stage: string; value: number; status: string;
+    customer?: string; service: string; apptDays?: number; outcome?: string;
+  }[] = [
+    { first: "Robert", last: "Johnson", stage: "in_production", value: 2450000, status: "open", customer: "customer", service: "roofing", apptDays: -9, outcome: "Ran" },
+    { first: "Emily", last: "Watson", stage: "new_lead", value: 1800000, status: "open", service: "solar", apptDays: -6, outcome: "Ran" },
+    { first: "David", last: "Kim", stage: "appointment_set", value: 2100000, status: "open", service: "windows", apptDays: -4, outcome: "No Show" },
+    { first: "Maria", last: "Garcia", stage: "claim_opened", value: 2750000, status: "open", service: "solar", apptDays: -3 },
+    { first: "James", last: "Miller", stage: "contract_signed", value: 3200000, status: "open", service: "roofing", apptDays: -2 },
+    { first: "Linda", last: "Davis", stage: "scope_received", value: 1950000, status: "open", service: "water_filtration", apptDays: -1 },
+    { first: "Chris", last: "Wilson", stage: "paid", value: 2890000, status: "won", service: "roofing", apptDays: 2 },
+    { first: "Nancy", last: "Moore", stage: "qc_inspection", value: 2300000, status: "open", service: "hvac", apptDays: 5 },
     { first: "Kevin", last: "Taylor", stage: "scheduled", value: 2050000, status: "open", service: "roofing" },
     { first: "Sarah", last: "Anderson", stage: "inspection_complete", value: 1750000, status: "open", service: "roofing" },
   ];
+  const daysFromNow = (d: number) => new Date(Date.now() + d * 24 * 60 * 60 * 1000);
 
   let projNum = 1001;
   for (let i = 0; i < leadSeed.length; i++) {
@@ -639,6 +648,8 @@ async function main() {
         assignedRepId: users.rep.id,
         createdById: users.manager.id,
         customerUserId: l.customer ? users[l.customer].id : null,
+        appointmentAt: l.apptDays === undefined ? null : daysFromNow(l.apptDays),
+        appointmentDisposition: l.outcome ?? null,
         claimStatus: ["claim_opened", "scope_received", "contract_signed"].includes(l.stage)
           ? "filed"
           : "not_filed",

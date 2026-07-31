@@ -471,12 +471,17 @@ export default async function LeadDetailPage({
 
           {isSolarDeal && (
             <Card title="System & money" icon={Zap}>
-              <SolarSystemMoneyPanel money={solarMoney} milestones={solarMilestones.map((m) => ({
+              <SolarSystemMoneyPanel
+                leadId={lead.id}
+                canEdit={can(user, "update", "Lead")}
+                money={solarMoney}
+                milestones={solarMilestones.map((m) => ({
                 id: m.id, payee: m.payee, sequence: m.sequence, label: m.label,
                 amountCents: m.amountCents, trigger: m.trigger,
                 expectedAt: m.expectedAt?.toISOString() ?? null,
                 paidAt: m.paidAt?.toISOString() ?? null,
-              }))} />
+              }))}
+              />
             </Card>
           )}
 
@@ -833,6 +838,10 @@ export default async function LeadDetailPage({
               />
             }
           >
+            {/* Wrapped in a fragment so FilesSection receives ONE child, not an
+                array. These children cross a server→client boundary, where
+                React can lose the static-children optimisation and start
+                treating them as an unkeyed list. Cheap structural immunity. */}
             <>
             {/* E-signature documents, folded into the same card. */}
             <div className="space-y-2">
