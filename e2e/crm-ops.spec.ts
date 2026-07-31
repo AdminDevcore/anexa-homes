@@ -36,9 +36,11 @@ test("tasks: create and complete", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await page.goto("/portal/tasks");
   const title = `Follow up ${Date.now() % 100000}`;
+  await page.getByRole("button", { name: "New task" }).click();
   await page.getByPlaceholder("New task…").fill(title);
-  await page.getByRole("button", { name: /^Add$/ }).click();
-  await expect(page.getByText(title)).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: /Add task/ }).click();
+  // `.first()`: the title renders in both the desktop table and the mobile cards.
+  await expect(page.getByText(title).first()).toBeVisible({ timeout: 10000 });
 });
 
 // Open a deal (lead) and make sure it's in production (crew/QC/daily/photos visible).
