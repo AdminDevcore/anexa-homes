@@ -113,7 +113,23 @@ export function ContactForm({
 
   return (
     <form
-      onSubmit={handleSubmit(onSubmit)}
+      // noValidate is load-bearing, not cosmetic.
+      //
+      // The browser runs its own constraint validation BEFORE dispatching
+      // `submit`. If any native constraint fails it swallows the event entirely,
+      // so React never runs, no zod error renders, and the visitor sees nothing
+      // happen. That is exactly how a stray `required` on the optional
+      // "preferred date" field silently blocked every website enquiry.
+      //
+      // Turning native validation off makes zod the only validator, so a
+      // rejected field always produces a visible inline message. A future stray
+      // constraint can no longer swallow a submission.
+      noValidate
+      onSubmit={handleSubmit(onSubmit, () => {
+        // Belt and braces: if validation ever rejects, say so out loud rather
+        // than appearing to do nothing.
+        toast.error("Please check the highlighted fields and try again.");
+      })}
       className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -153,7 +169,7 @@ export function ContactForm({
             <p className="text-sm font-semibold">Pick a time for your free inspection</p>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Preferred date" error={errors.preferredDate?.message}>
-                <Input type="date" min={minDate} required {...register("preferredDate")} />
+                <Input type="date" min={minDate} {...register("preferredDate")} />
               </Field>
               <Field label="Preferred time">
                 <Select value={preferredTime} onValueChange={(v) => setValue("preferredTime", v)}>
