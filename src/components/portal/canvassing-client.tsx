@@ -515,131 +515,6 @@ export function CanvassingClient() {
     refresh();
   }
 
-  function renderKnockPopup(k: KnockDTO) {
-    const meta = dispositionMeta(k.disposition);
-    const blank = k.disposition === "not_knocked";
-    return (
-      <div className="min-w-52 space-y-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="font-semibold">{k.address ?? "House"}</div>
-          <button onClick={() => openDetails(k)} className="shrink-0 text-xs font-medium text-gold hover:underline">
-            Details
-          </button>
-        </div>
-        {k.contactName ? (
-          <div className="text-xs font-medium">👤 {k.contactName}</div>
-        ) : ownerLookupEnabled && k.address ? (
-          <button onClick={() => lookupOwnerForKnock(k)} className="inline-flex items-center gap-1 text-xs font-medium text-gold hover:underline">
-            <UserSearch className="size-3.5" /> Look up owner
-          </button>
-        ) : null}
-        {canManage && k.repName && <div className="text-xs text-muted-foreground">Knocked by {k.repName}</div>}
-        {/* Static cached value only — a live (resizing) fetch inside a Leaflet
-            popup crashes Leaflet's positioning. Full estimate is in Details. */}
-        {k.propertyValue != null ? (
-          <div className="text-xs text-muted-foreground">
-            ~{usd(k.propertyValue)} · est.{k.propertyValueSource ? ` · ${k.propertyValueSource}` : ""}
-          </div>
-        ) : (
-          <div className="text-xs text-muted-foreground">Open Details for value estimate</div>
-        )}
-        <HouseStormInfo lat={k.lat} lng={k.lng} />
-        <div className="flex items-center gap-2">
-          <span className="inline-block size-3 rounded-full border" style={{ background: blank ? "#fff" : meta.color, borderColor: meta.color }} />
-          <select
-            value={blank ? "" : k.disposition}
-            onChange={(e) => e.target.value && changeDisposition(k, e.target.value)}
-            className="rounded border border-border bg-background px-2 py-1 text-sm"
-          >
-            {blank && <option value="">Set status…</option>}
-            {KNOCKED_DISPOSITIONS.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        {k.notes && <p className="text-sm text-muted-foreground">{k.notes}</p>}
-        <div className="flex items-center gap-2 pt-1">
-          {k.leadId ? (
-            <button
-              onClick={() => router.push(`/portal/leads/${k.leadId}`)}
-              className="inline-flex items-center gap-1 text-sm font-medium text-gold"
-            >
-              <Check className="size-3.5" /> Appointment created — open
-            </button>
-          ) : (
-            <Button size="sm" className="h-7 gap-1" onClick={() => startConvert(k)}>
-              <UserPlus className="size-3.5" /> Convert to appointment
-            </Button>
-          )}
-          <button
-            onClick={() => startMoveKnock(k)}
-            className={cn("inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground", isHouseDot(k) ? "ml-auto" : "")}
-            title="Drag this pin onto the correct house"
-          >
-            <Move className="size-3.5" /> Move
-          </button>
-          {!isHouseDot(k) && (
-            <button
-              onClick={() => removeKnock(k)}
-              className="inline-flex items-center text-muted-foreground hover:text-destructive"
-              aria-label="Delete pin"
-            >
-              <Trash2 className="size-4" />
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  function renderDealPopup(d: DealDTO) {
-    return (
-      <div className="min-w-56 space-y-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="font-semibold">{d.name}</div>
-          {d.stageName && (
-            <span
-              className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white"
-              style={{ background: d.stageColor ?? "#6366f1" }}
-            >
-              {d.stageName}
-            </span>
-          )}
-        </div>
-        {d.address && <div className="text-xs text-muted-foreground">{d.address}</div>}
-        <div className="text-xs text-muted-foreground">
-          {d.repName ? `Rep: ${d.repName}` : "Unassigned"}
-          {d.value ? ` · ${usd(d.value)}` : ""}
-        </div>
-        {d.appointmentAt && (
-          <div className="text-xs font-medium text-gold">
-            Appointment: {new Date(d.appointmentAt).toLocaleString()}
-          </div>
-        )}
-        {d.phone && <div className="text-xs text-muted-foreground">{d.phone}</div>}
-        {d.note && <p className="text-sm text-muted-foreground line-clamp-3">{d.note}</p>}
-        <HouseStormInfo lat={d.lat} lng={d.lng} />
-        <div className="flex items-center justify-between gap-2">
-          <button
-            onClick={() => router.push(`/portal/leads/${d.id}`)}
-            className="inline-flex items-center gap-1 text-sm font-medium text-gold hover:underline"
-          >
-            <Check className="size-3.5" /> Open deal
-          </button>
-          <button
-            onClick={() => startMoveDeal(d)}
-            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-            title="Drag this pin onto the correct house"
-          >
-            <Move className="size-3.5" /> Move
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   function renderTerritoryPopup(t: TerritoryDTO) {
     const pct = t.total ? Math.round((t.knocked / t.total) * 100) : 0;
     return (
@@ -928,8 +803,8 @@ export function CanvassingClient() {
           onMapClick={onMapClick}
           onMapReady={handleMapReady}
           onViewport={setViewport}
-          renderKnockPopup={renderKnockPopup}
-          renderDealPopup={renderDealPopup}
+          onKnockClick={(k) => void openDetails(k)}
+          onDealClick={(d) => router.push(`/portal/leads/${d.id}`)}
           renderTerritoryPopup={renderTerritoryPopup}
           highlightTerritoryIds={highlightTerritoryIds}
           zips={zips}
