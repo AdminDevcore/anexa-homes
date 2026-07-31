@@ -1,6 +1,10 @@
 import type { Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { parseDispositions, type Disposition } from "@/lib/dispositions";
+import {
+  parseDispositions,
+  DEFAULT_SOLAR_APPOINTMENT_DISPOSITIONS,
+  type Disposition,
+} from "@/lib/dispositions";
 import {
   parseLabelList,
   DEFAULT_INSPECTION_OUTCOMES,
@@ -31,7 +35,12 @@ export async function getAppointmentDispositions(
     where: { companyId },
     select: { appointmentDispositions: true },
   });
-  return parseDispositions(readVerticalConfig(settings?.appointmentDispositions, vertical));
+  // Solar shares none of roofing's insurance/storm wording, so an unconfigured
+  // solar company falls back to solar outcomes — never to "Hail Damage".
+  return parseDispositions(
+    readVerticalConfig(settings?.appointmentDispositions, vertical),
+    vertical === "solar" ? DEFAULT_SOLAR_APPOINTMENT_DISPOSITIONS : undefined
+  );
 }
 
 /** The company's customizable inspection outcomes for one vertical. */

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { User, ShieldCheck, Hammer, DollarSign, FileSignature, Calculator, type LucideIcon } from "lucide-react";
+import { User, ShieldCheck, Hammer, DollarSign, FileSignature, Calculator, Sun, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type DealTabDef = { id: string; label: string };
@@ -15,6 +15,8 @@ const TAB_ICONS: Record<string, LucideIcon> = {
   production: Hammer,
   financials: DollarSign,
   documents: FileSignature,
+  // Solar: the whole present-and-close flow lives under one tab.
+  proposal: Sun,
 };
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;

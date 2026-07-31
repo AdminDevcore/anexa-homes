@@ -55,6 +55,7 @@ import { ProjectSchedule } from "@/components/portal/project-schedule";
 import { DealActionsPanel } from "@/components/portal/deal-actions-panel";
 import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
+import { SolarProductToggle } from "@/components/portal/solar-product-toggle";
 import { DealTabs } from "@/components/portal/deal-tabs";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
@@ -197,8 +198,7 @@ export default async function LeadDetailPage({
 
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
-  const isSolar = lead.vertical === "solar";
-  const [solarDesign, solarFinance, solarSettings, solarEquipment, solarProposals] = isSolar
+  const [solarDesign, solarFinance, solarSettings, solarEquipment, solarProposals] = isSolarDeal
     ? await Promise.all([
         prisma.solarDesign.findUnique({ where: { leadId: lead.id } }),
         prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
@@ -226,7 +226,7 @@ export default async function LeadDetailPage({
         label: `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}${e.ratingW ? ` · ${e.ratingW}W` : ""}`,
         ratingW: e.ratingW,
       }));
-  const linkedDeal = isSolar || lead.linkedDealId
+  const linkedDeal = isSolarDeal || lead.linkedDealId
     ? await getLinkedDealSummary(user.companyId, lead.linkedDealId)
     : null;
 
@@ -279,15 +279,14 @@ export default async function LeadDetailPage({
   const showFinancials = !!(project && (payout || dealFinancials));
   const dealTabs = isSolarDeal
     ? [
-        // Solar's own tab set, per the domain model. No Scope of Work: that is
-        // an insurance-restoration concept with no solar equivalent.
+        // Solar's own tab set. The PROPOSAL is a single hub — design,
+        // financing, generation, contracts and the welcome call are one flow,
+        // because that is how a rep actually presents and closes a deal. No
+        // Scope of Work: that is an insurance-restoration concept.
         { id: "overview", label: "Overview" },
-        { id: "design", label: "System Design" },
         { id: "proposal", label: "Proposal" },
-        { id: "financing", label: "Financing" },
         { id: "production", label: "Operations" },
         ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
-        { id: "documents", label: "Documents" },
       ]
     : [
         { id: "overview", label: "Overview" },
@@ -319,10 +318,14 @@ export default async function LeadDetailPage({
                 {lead.stage.name}
               </span>
             )}
-            {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
+            {/* Build Presentation, Insurance Contract and Simple Cash Bid are the
+                ROOFING contract tools. A solar deal closes through its own
+                Proposal hub, and "Insurance Contract" is meaningless without an
+                insurer — so none of them render here. */}
+            {!isSolarDeal && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <BuildPresentationButton leadId={lead.id} />
             )}
-            {(can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
+            {!isSolarDeal && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
               <>
                 <InsuranceContractButton
                   leadId={lead.id}
@@ -337,7 +340,7 @@ export default async function LeadDetailPage({
               </>
             )}
             {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
-            {can(user, "create", "Document") && (
+            {!isSolarDeal && can(user, "create", "Document") && (
               <SendWelcomeCallButton leadId={lead.id} templates={welcomeCallTemplates} />
             )}
             {can(user, "update", "Lead") && (
@@ -356,7 +359,7 @@ export default async function LeadDetailPage({
           <DealTabs tabs={dealTabs}>
             {/* ── Overview ── */}
             <div data-deal-tab="overview" className="space-y-6">
-          {isSolar && (
+          {isSolarDeal && (
             <SolarOpsCard
               leadId={lead.id}
               stage={
@@ -423,7 +426,7 @@ export default async function LeadDetailPage({
           {/* Claim — insurance deals only. Roof info / line items / supplements
               live in Scope of Work; only claim tracking + amounts remain here.
               Cash deals show a plain cash card instead (no insurance fields). */}
-          {!isInsurance ? (
+          {isSolarDeal ? null : !isInsurance ? (
             <Card title="Cash Deal" icon={ShieldCheck}>
               <p className="text-sm text-muted-foreground">
                 This is a <strong>cash deal</strong> — the customer pays out of pocket or finances it; there&rsquo;s no
@@ -480,9 +483,9 @@ export default async function LeadDetailPage({
             )}
 
             {/* ── System Design (solar) ── */}
-            {isSolar && (
-              <div data-deal-tab="design" className="space-y-6">
-                <Card title="System Design" icon={Hammer}>
+            {isSolarDeal && (
+              <div data-deal-tab="proposal" className="space-y-6">
+                <Card title="1 · System Design" icon={Hammer}>
                   <SolarDesignPanel
                     leadId={lead.id}
                     design={solarDesign}
@@ -495,10 +498,25 @@ export default async function LeadDetailPage({
               </div>
             )}
 
-            {/* ── Proposal (solar) ── */}
-            {isSolar && (
+            {/* ── Financing (solar) ── */}
+            {isSolarDeal && (
               <div data-deal-tab="proposal" className="space-y-6">
-                <Card title="Proposal">
+                <Card title="2 · Financing">
+                  <SolarFinancePanel
+                    leadId={lead.id}
+                    finance={solarFinance}
+                    itcDisclaimer={solarSettings?.incentiveDisclaimer ?? ""}
+                    federalItcPct={solarSettings?.federalItcPct ?? null}
+                    canEdit={can(user, "update", "Lead")}
+                  />
+                </Card>
+              </div>
+            )}
+
+            {/* ── Proposal (solar) ── */}
+            {isSolarDeal && (
+              <div data-deal-tab="proposal" className="space-y-6">
+                <Card title="3 · Generate & send">
                   <SolarProposalGate
                     leadId={lead.id}
                     canEdit={can(user, "create", "Proposal")}
@@ -518,17 +536,15 @@ export default async function LeadDetailPage({
               </div>
             )}
 
-            {/* ── Financing (solar) ── */}
-            {isSolar && (
-              <div data-deal-tab="financing" className="space-y-6">
-                <Card title="Financing">
-                  <SolarFinancePanel
-                    leadId={lead.id}
-                    finance={solarFinance}
-                    itcDisclaimer={solarSettings?.incentiveDisclaimer ?? ""}
-                    federalItcPct={solarSettings?.federalItcPct ?? null}
-                    canEdit={can(user, "update", "Lead")}
-                  />
+            {isSolarDeal && can(user, "create", "Document") && (
+              <div data-deal-tab="proposal" className="space-y-6">
+                <Card title="4 · Welcome call">
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Send the customer a link to confirm the sale in their own words. Do this
+                    immediately after they accept — it is the cheapest cancellation insurance
+                    there is.
+                  </p>
+                  <SendWelcomeCallButton leadId={lead.id} templates={welcomeCallTemplates} />
                 </Card>
               </div>
             )}
@@ -635,11 +651,11 @@ export default async function LeadDetailPage({
             )}
 
             {/* ── Documents & files ── */}
-            <div data-deal-tab="documents" className="space-y-6">
+            <div data-deal-tab={isSolarDeal ? "proposal" : "documents"} className="space-y-6">
           {/* One place for everything: e-signature documents + all file/photo
               attachments. Survey/Install photo checklists are the header buttons. */}
           <FilesSection
-            title="Documents & Files"
+            title={isSolarDeal ? "5 · Contracts & documents" : "Documents & Files"}
             files={lead.files
               .filter(
                 (f) =>
@@ -711,10 +727,22 @@ export default async function LeadDetailPage({
         <div className="space-y-6">
           <Card title="Summary">
             <div className="space-y-3">
-              <Detail label="Project Type" value={serviceTypeLabel(lead.serviceType)} />
+              {!isSolarDeal && <Detail label="Project Type" value={serviceTypeLabel(lead.serviceType)} />}
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deal Type</span>
-                <DealTypeToggle leadId={lead.id} value={isInsurance ? "insurance" : "cash"} canEdit={can(user, "update", "Lead")} />
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {isSolarDeal ? "Financing" : "Deal Type"}
+                </span>
+                {isSolarDeal ? (
+                  // On Solar a deal's type IS its financing product. There is no
+                  // insurer, so Insurance-vs-Cash is meaningless here.
+                  <SolarProductToggle
+                    leadId={lead.id}
+                    value={solarFinance?.product ?? null}
+                    canEdit={can(user, "update", "Lead")}
+                  />
+                ) : (
+                  <DealTypeToggle leadId={lead.id} value={isInsurance ? "insurance" : "cash"} canEdit={can(user, "update", "Lead")} />
+                )}
               </div>
               {propertyValueLine && <Detail label="Property Value" value={propertyValueLine} />}
               {lastSaleLine && <Detail label="Last Sale" value={lastSaleLine} />}
@@ -736,6 +764,7 @@ export default async function LeadDetailPage({
 
             {/* Appointment run + open claim — consolidated into the Summary card */}
             <DealActionsPanel
+              isSolar={isSolarDeal}
               leadId={lead.id}
               disposition={lead.appointmentDisposition}
               appointmentNote={lead.appointmentNote}

@@ -23,7 +23,32 @@ export const DEFAULT_APPOINTMENT_DISPOSITIONS: Disposition[] = [
 // Normalize whatever is stored (JSON) into a clean, de-duped Disposition list.
 // Accepts both the legacy string[] format and the grouped object[] format.
 // Falls back to the defaults when nothing valid is stored.
-export function parseDispositions(value: unknown): Disposition[] {
+/**
+ * Solar appointment outcomes.
+ *
+ * Solar has no adjuster, no storm damage and no insurance claim, so it shares
+ * none of the roofing wording. What a solar rep records after a consult is
+ * whether the home qualifies and what is blocking it.
+ */
+export const DEFAULT_SOLAR_APPOINTMENT_DISPOSITIONS: Disposition[] = [
+  { group: "Sold", label: "Signed — proposal accepted" },
+  { group: "Sold", label: "Verbal yes — sending proposal" },
+  { group: "Pipeline", label: "Proposal presented — deciding" },
+  { group: "Pipeline", label: "Needs co-owner present" },
+  { group: "Pipeline", label: "Awaiting utility bill" },
+  { group: "Not Qualified", label: "Credit not approved" },
+  { group: "Not Qualified", label: "Roof needs replacement first" },
+  { group: "Not Qualified", label: "Too much shade" },
+  { group: "Not Qualified", label: "Usage too low to justify" },
+  { group: "Not Qualified", label: "Renter / not the owner" },
+  { group: "No Sale", label: "Not interested" },
+  { group: "No Sale", label: "Going with another installer" },
+];
+
+export function parseDispositions(
+  value: unknown,
+  fallback: Disposition[] = DEFAULT_APPOINTMENT_DISPOSITIONS
+): Disposition[] {
   if (Array.isArray(value)) {
     const seen = new Set<string>();
     const list: Disposition[] = [];
@@ -45,7 +70,7 @@ export function parseDispositions(value: unknown): Disposition[] {
     }
     if (list.length) return list;
   }
-  return DEFAULT_APPOINTMENT_DISPOSITIONS.map((d) => ({ ...d }));
+  return fallback.map((d) => ({ ...d }));
 }
 
 // Just the labels, in order — what gets stored on a lead and matched against.

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { Sun, Leaf, TreePine, Factory, Check, Loader2, ChevronDown } from "lucide-react";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import type { SolarProposalSnapshot, SavingsYear } from "@/lib/solar-proposal";
 import { SOLAR_TIMELINE, SOLAR_FAQS } from "@/lib/solar-proposal";
 import { acceptSolarProposalAction } from "@/server/modules/solar/proposal-sign-action";
 
@@ -72,6 +72,23 @@ export function SolarProposalView({
           A {s.system.sizeKwDc.toFixed(2)} kW system for {s.customer.address}, designed to cover{" "}
           <strong>{Math.round(s.system.offsetPct)}%</strong> of what your home uses.
         </p>
+
+        {/* The single number that decides it. Framed as "instead of", because
+            the choice is never solar-vs-nothing — it is solar vs 25 more years
+            of utility bills. */}
+        <div className="mx-auto mt-6 max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">
+            Projected 25-year saving
+          </p>
+          <p className="mt-1 font-display text-4xl font-semibold text-emerald-700">
+            {usd(s.savings.totalSavingsCents)}
+          </p>
+          <p className="mt-1.5 text-xs text-emerald-900">
+            versus roughly{" "}
+            {usd(s.savings.years.reduce((n, y) => n + y.utilityCostCents, 0))} paid to your utility
+            over the same period.
+          </p>
+        </div>
       </header>
 
       {/* ── Headline numbers ─────────────────────────────────────────────── */}
@@ -88,6 +105,13 @@ export function SolarProposalView({
 
       {/* ── Environmental ────────────────────────────────────────────────── */}
       <Section title="What this does for the planet">
+        <p className="mb-3 text-sm text-muted-foreground">
+          Over the {s.savings.years.length} years modelled, your system is projected to generate{" "}
+          <strong>
+            {s.savings.years.reduce((n, y) => n + y.productionKwh, 0).toLocaleString()} kWh
+          </strong>{" "}
+          of electricity that does not have to be burned into existence.
+        </p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Impact icon={Leaf} value={`${s.environmental.tonsCo2Avoided.toLocaleString()}`} label="tons CO₂ avoided" />
           <Impact icon={TreePine} value={`${s.environmental.treesEquivalent.toLocaleString()}`} label="trees planted, equivalent" />
@@ -117,7 +141,10 @@ export function SolarProposalView({
           Assumes your utility rate rises {s.assumptions.utilityEscalationPct}% a year and your
           panels lose {s.assumptions.annualDegradationPct}% output annually. Both are estimates.
         </p>
-        <div className="overflow-x-auto">
+        {/* Visual first — most people read the bars and skip the table. */}
+        <SavingsBars years={s.savings.years} />
+
+        <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[28rem] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -290,6 +317,46 @@ function AcceptForm({ token, onSigned }: { token: string; onSigned: () => void }
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
         Accept this proposal
       </button>
+    </div>
+  );
+}
+
+/**
+ * Utility vs solar, as bars. Scaled to the largest utility year so the
+ * divergence is visible at a glance — which is the whole argument.
+ */
+function SavingsBars({ years }: { years: SavingsYear[] }) {
+  const shown = years.filter((y) => y.year === 1 || y.year % 5 === 0);
+  const max = Math.max(...shown.map((y) => Math.max(y.utilityCostCents, y.solarCostCents)), 1);
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="size-2.5 rounded-sm bg-muted-foreground/40" /> Utility
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="size-2.5 rounded-sm bg-emerald-500" /> With solar
+        </span>
+      </div>
+      {shown.map((y) => (
+        <div key={y.year} className="grid grid-cols-[2.5rem_1fr] items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">Yr {y.year}</span>
+          <div className="space-y-1">
+            <div className="h-3 rounded-sm bg-muted">
+              <div
+                className="h-3 rounded-sm bg-muted-foreground/40"
+                style={{ width: `${Math.max(2, (y.utilityCostCents / max) * 100)}%` }}
+              />
+            </div>
+            <div className="h-3 rounded-sm bg-muted">
+              <div
+                className="h-3 rounded-sm bg-emerald-500"
+                style={{ width: `${Math.max(2, (y.solarCostCents / max) * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

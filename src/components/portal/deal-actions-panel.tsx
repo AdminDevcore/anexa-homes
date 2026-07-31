@@ -36,6 +36,7 @@ export function DealActionsPanel({
   appointmentNotes,
   dispositions,
   claim,
+  isSolar = false,
   inspectionOutcome,
   inspectionNote,
   inspectionNotes,
@@ -59,16 +60,30 @@ export function DealActionsPanel({
   inspectionOutcomes: string[];
   canEditLead: boolean;
   canEditClaim: boolean;
+  /** Solar has no claim, no adjuster and no roof inspection. */
+  isSolar?: boolean;
 }) {
   const groups = groupDispositions(dispositions?.length ? dispositions : DEFAULT_APPOINTMENT_DISPOSITIONS);
   return (
     <div className="mt-4 space-y-3 border-t border-border pt-4">
       <AppointmentRun leadId={leadId} disposition={disposition} legacyNote={appointmentNote} notes={appointmentNotes} groups={groups} canEdit={canEditLead} />
+      {/* An insurance claim is a roofing concept. Solar has no carrier, no
+          adjuster and no deductible, so the section is not rendered at all. */}
+      {!isSolar && (
+        <div className="border-t border-border pt-3">
+          <ClaimSection leadId={leadId} claim={claim} canOpen={canEditLead} canEdit={canEditClaim} />
+        </div>
+      )}
       <div className="border-t border-border pt-3">
-        <ClaimSection leadId={leadId} claim={claim} canOpen={canEditLead} canEdit={canEditClaim} />
-      </div>
-      <div className="border-t border-border pt-3">
-        <InspectionOutcome leadId={leadId} outcome={inspectionOutcome} legacyNote={inspectionNote} notes={inspectionNotes} outcomes={inspectionOutcomes} canEdit={canEditLead} />
+        <InspectionOutcome
+          leadId={leadId}
+          outcome={inspectionOutcome}
+          legacyNote={inspectionNote}
+          notes={inspectionNotes}
+          outcomes={inspectionOutcomes}
+          canEdit={canEditLead}
+          label={isSolar ? "Site survey outcome" : "Inspection outcome"}
+        />
       </div>
     </div>
   );
@@ -160,7 +175,7 @@ function OutcomeNotes({
   );
 }
 
-function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEdit }: { leadId: string; outcome: string | null; legacyNote: string | null; notes: OutcomeNote[]; outcomes: string[]; canEdit: boolean }) {
+function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEdit, label = "Inspection outcome" }: { leadId: string; outcome: string | null; legacyNote: string | null; notes: OutcomeNote[]; outcomes: string[]; canEdit: boolean; label?: string }) {
   const router = useRouter();
   const [picking, setPicking] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -171,14 +186,14 @@ function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEd
     setBusy(false);
     setPicking(false);
     if (!res.ok) return toast.error(res.error);
-    toast.success(value ? "Inspection outcome saved" : "Cleared");
+    toast.success(value ? `${label} saved` : "Cleared");
     router.refresh();
   }
   const options = outcome && !outcomes.includes(outcome) ? [outcome, ...outcomes] : outcomes;
 
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Inspection outcome</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
       {outcome && !picking ? (
         <div className="mt-1.5 flex items-center justify-between gap-2">
           <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-xs font-medium text-blue-600">
