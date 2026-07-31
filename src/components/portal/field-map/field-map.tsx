@@ -308,7 +308,12 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
   return (
     // Cancel PortalShell's p-4/sm:p-6/lg:p-8 and fill the viewport under the
     // h-16 header. The map is the page; nothing stacks above it.
-    <div className="relative -m-4 h-[calc(100dvh-4rem)] overflow-hidden sm:-m-6 lg:-m-8" style={{ isolation: "isolate" }}>
+    // The arbitrary variants lift Leaflet's own corners clear of our floating
+    // chrome: zoom buttons above the status bar, attribution above the legend.
+    <div
+      className="relative -m-4 h-[calc(100dvh-4rem)] overflow-hidden [&_.leaflet-bottom.leaflet-left]:mb-14 [&_.leaflet-bottom.leaflet-right]:mb-14 sm:-m-6 lg:-m-8"
+      style={{ isolation: "isolate" }}
+    >
       <CanvassingMap
         center={center}
         basemap={filters.basemap}

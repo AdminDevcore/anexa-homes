@@ -112,7 +112,8 @@ export function ViewSwitcher({
   onChange: (t: "map" | "list" | "insights") => void;
 }) {
   return (
-    <div className="absolute left-1/2 bottom-16 z-[1000] inline-flex -translate-x-1/2 overflow-hidden rounded-full bg-background/95 shadow ring-1 ring-border backdrop-blur">
+    // bottom-24 clears the status bar and Leaflet's attribution strip below it.
+    <div className="absolute left-1/2 bottom-24 z-[1000] inline-flex -translate-x-1/2 overflow-hidden rounded-full bg-background/95 shadow ring-1 ring-border backdrop-blur">
       {(["map", "list", "insights"] as const).map((t) => (
         <button
           key={t}

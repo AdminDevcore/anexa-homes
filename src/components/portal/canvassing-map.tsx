@@ -3,7 +3,7 @@
 import "leaflet/dist/leaflet.css";
 import * as React from "react";
 import L from "leaflet";
-import { MapContainer, TileLayer, Marker, Polygon, CircleMarker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polygon, CircleMarker, Popup, ZoomControl, useMap } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
 import { dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { KnockDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
@@ -263,7 +263,10 @@ export function CanvassingMap({
   onMovePin,
 }: CanvassingMapProps) {
   return (
-    <MapContainer center={center} zoom={16} scrollWheelZoom className="h-full w-full">
+    // Zoom buttons move to bottom-right: top-left is the floating search bar on
+    // mobile and the manager rail on desktop, and the default control hid under both.
+    <MapContainer center={center} zoom={16} scrollWheelZoom zoomControl={false} className="h-full w-full">
+      <ZoomControl position="bottomright" />
       {basemap === "satellite" ? (
         <>
           <TileLayer

@@ -67,6 +67,7 @@ test("field map: the map is not pushed below the fold", async ({ page }) => {
   // The map starts near the top of the viewport and owns most of the screen.
   expect(box.y).toBeLessThan(120);
   expect(box.height).toBeGreaterThan(500);
+  await page.screenshot({ path: "test-results/field-map-rep-mobile.png" });
 });
 
 test("field map: filters survive a reload via the URL", async ({ page }) => {
