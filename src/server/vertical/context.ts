@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Vertical } from "@prisma/client";
 import type { ActiveVertical } from "@/lib/vertical";
@@ -105,13 +106,19 @@ export function currentOverride(): Override | undefined {
 }
 
 /**
- * Resolve the vertical for the current call. Never throws: the caller (the
- * Prisma extension) decides what a missing context means for the model at hand.
+ * The session+cookie path, memoised for the lifetime of one request.
+ *
+ * This runs on EVERY query against a scoped model, and a page can issue
+ * hundreds. React's cache() dedupes it to a single resolution per request;
+ * without it the per-query async overhead measurably slowed the whole app
+ * (~15-25% on a full E2E run), which is a real cost to pay for a value that
+ * cannot change mid-request.
+ *
+ * Outside a React request scope (cron, scripts, tests) cache() degrades to a
+ * plain call, which is correct — those paths use runInVertical()/runUnscoped()
+ * and never reach here.
  */
-export async function resolveVertical(): Promise<Resolution> {
-  const override = storage.getStore();
-  if (override) return override;
-
+const resolveFromRequest = cache(async (): Promise<Resolution> => {
   // Dynamic import breaks the module cycle db/client -> extension -> context ->
   // auth/session -> db/client. By the time this runs every module is loaded.
   try {
@@ -125,6 +132,18 @@ export async function resolveVertical(): Promise<Resolution> {
     // failed. Not an error here — the extension decides.
     return { mode: "none" };
   }
+});
+
+/**
+ * Resolve the vertical for the current call. Never throws: the caller (the
+ * Prisma extension) decides what a missing context means for the model at hand.
+ */
+export async function resolveVertical(): Promise<Resolution> {
+  // An explicit override always wins and is a synchronous store read, so it
+  // short-circuits before any of the memoised work below.
+  const override = storage.getStore();
+  if (override) return override;
+  return resolveFromRequest();
 }
 
 /**

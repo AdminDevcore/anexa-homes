@@ -3,6 +3,9 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import type { BlockerParty } from "@prisma/client";
+import { stageOwnerLabel, BLOCKER_LABEL, BLOCKER_TONE } from "@/lib/solar-pipeline";
+import { cn } from "@/lib/utils";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +31,9 @@ type Stage = {
   id: string; name: string; color: string; isWon: boolean; isLost: boolean;
   targetDays: number; escalationDays: number; notificationRecipient: string;
   sendInApp: boolean; sendEmail: boolean; markOverdue: boolean;
+  stageType: "internally_owned" | "externally_blocked";
+  ownerRole: string | null; followUpDays: number;
+  isActionRequired: boolean; defaultBlocker: string | null;
 };
 
 const RECIPIENTS: { value: Recipient; label: string }[] = [
@@ -92,6 +98,7 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
               )}
             </div>
             <div className="flex items-center gap-1">
+              <StageOwnership stage={s} />
               <InlineDayLimit stage={s} />
               <Button variant="ghost" size="icon" disabled={busy || i === 0} onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
               <Button variant="ghost" size="icon" disabled={busy || i === stages.length - 1} onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
@@ -101,6 +108,38 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Who owns this stage, and who a deal here is waiting on.
+ *
+ * Owners are DEPARTMENT ROLES rather than named people, so work keeps routing
+ * correctly as staff change. Roofing stages carry no owner and render nothing,
+ * so this is invisible on the roofing pipeline.
+ */
+function StageOwnership({ stage }: { stage: Stage }) {
+  const owner = stageOwnerLabel(stage.ownerRole);
+  const blocker = stage.defaultBlocker as BlockerParty | null;
+  if (!owner && !blocker && !stage.isActionRequired) return null;
+  return (
+    <div className="mr-1 hidden items-center gap-1.5 sm:flex">
+      {stage.isActionRequired && (
+        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+          action required
+        </span>
+      )}
+      {owner && (
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          {owner}
+        </span>
+      )}
+      {blocker && (
+        <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", BLOCKER_TONE[blocker])}>
+          {BLOCKER_LABEL[blocker]}
+        </span>
+      )}
     </div>
   );
 }
@@ -125,6 +164,20 @@ function InlineDayLimit({ stage }: { stage: Stage }) {
     setSaving(false);
     if (res.ok) { toast.success(n > 0 ? `Day limit set to ${n}` : "Day limit removed"); router.refresh(); }
     else toast.error(res.error);
+  }
+
+  // An externally-blocked stage has no completion deadline by design — it is
+  // waiting on an AHJ, utility, lender or the customer. Offering a day limit
+  // here would invite someone to put our team on the hook for their queue.
+  if (stage.stageType === "externally_blocked") {
+    return (
+      <span
+        className="mr-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700"
+        title="Waiting on a third party. Tracked by follow-up cadence, not a deadline."
+      >
+        chase {stage.followUpDays || "—"}d
+      </span>
+    );
   }
 
   return (

@@ -1,6 +1,7 @@
 import { PrismaClient, type Role, type KnockDisposition as KnockDispo } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { DEFAULT_SCOPE_CATALOG } from "../src/lib/scope-catalog";
+import { SOLAR_STAGES } from "../src/lib/solar-pipeline";
 
 const prisma = new PrismaClient();
 
@@ -191,18 +192,10 @@ async function main() {
 
   // Solar + Others are separate, isolated workspaces with their own starter stages
   // (different process). The team can customize these as they ramp each up.
-  const SOLAR_STAGES = [
-    { key: "new_appt", name: "New Appointment", color: "#FBBF24" },
-    { key: "site_survey", name: "Site Survey", color: "#F59E0B" },
-    { key: "proposal_sent", name: "Proposal Sent", color: "#F97316" },
-    { key: "contract_signed", name: "Contract Signed", color: "#FB923C" },
-    { key: "permitting", name: "Permitting", color: "#A78BFA" },
-    { key: "install_scheduled", name: "Install Scheduled", color: "#60A5FA" },
-    { key: "installed", name: "Installed", color: "#34D399" },
-    { key: "pto", name: "PTO / Activated", color: "#22C55E" },
-    { key: "paid", name: "Paid", color: "#16A34A", isWon: true },
-  ];
   // "Others" is a catch-all workspace for miscellaneous leads to sub out.
+  let solarPipelineId: string | null = null;
+  const solarStageByKey: Record<string, string> = {};
+
   for (const [vertical, name, defs] of [
     ["solar", "Solar Pipeline", SOLAR_STAGES] as const,
     // No "Others" pipeline: `others` is a retired vertical that can never be
@@ -211,10 +204,68 @@ async function main() {
     const p = await prisma.pipeline.create({ data: { companyId: company.id, name, vertical, isDefault: true } });
     for (let i = 0; i < defs.length; i++) {
       const s = defs[i];
-      await prisma.pipelineStage.create({
-        data: { pipelineId: p.id, key: s.key, name: s.name, color: s.color, position: i, isWon: (s as { isWon?: boolean }).isWon ?? false },
+      const created = await prisma.pipelineStage.create({
+        data: {
+          pipelineId: p.id,
+          key: s.key,
+          name: s.name,
+          color: s.color,
+          position: i,
+          isWon: s.isWon ?? false,
+          // Solar stages carry their own SLA model: internally-owned stages get
+          // a hard deadline that escalates to the owning department role;
+          // externally-blocked stages get a follow-up cadence and NO deadline,
+          // because we do not control an AHJ's plan review queue.
+          stageType: s.stageType,
+          ownerRole: s.ownerRole,
+          targetDays: s.targetDays ?? 0,
+          escalationDays: s.escalationDays ?? 0,
+          followUpDays: s.followUpDays ?? 0,
+          isActionRequired: s.isActionRequired ?? false,
+          defaultBlocker: s.defaultBlocker ?? null,
+          // Escalations route to the owning role (see stage-alerts.ts); the
+          // legacy recipient setting stays off so nobody is double-notified.
+          notificationRecipient: "none",
+          sendInApp: true,
+          markOverdue: s.stageType === "internally_owned",
+        },
       });
+      if (vertical === "solar") {
+        solarPipelineId = p.id;
+        solarStageByKey[s.key] = created.id;
+      }
     }
+  }
+
+  // A solar deal parked in an externally-blocked stage, never chased. This is
+  // the case the whole owned/blocked split exists for: 12 days waiting on the
+  // building department is NOT our team being late, but nobody following up IS.
+  if (solarPipelineId && solarStageByKey.permit_submitted) {
+    await prisma.lead.create({
+      data: {
+        companyId: company.id,
+        vertical: "solar",
+        firstName: "Priya",
+        lastName: "Raman",
+        email: "priya.raman@example.com",
+        phone: "(555) 404-1180",
+        address: "902 Solaris Way",
+        city: "Dallas",
+        state: "TX",
+        zip: "75204",
+        serviceType: "solar",
+        dealType: "cash",
+        value: 3150000,
+        pipelineId: solarPipelineId,
+        stageId: solarStageByKey.permit_submitted,
+        stageChangedAt: new Date(Date.now() - 12 * 86_400_000),
+        blockedBy: "ahj",
+        blockerNote: "Plan review round 1 submitted — awaiting comments.",
+        lastTouchAt: null, // never chased, so the cadence surfaces it
+        assignedRepId: users.rep.id,
+        createdById: users.rep.id,
+      },
+    });
   }
 
   // Commission rules

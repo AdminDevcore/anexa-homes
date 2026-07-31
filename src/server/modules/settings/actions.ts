@@ -37,16 +37,33 @@ const stageSchema = z.object({
   sendInApp: z.boolean().optional(),
   sendEmail: z.boolean().optional(),
   markOverdue: z.boolean().optional(),
+  // Owned vs blocked, and who owns / who we are waiting on.
+  stageType: z.enum(["internally_owned", "externally_blocked"]).optional(),
+  ownerRole: z.string().max(60).nullable().optional(),
+  followUpDays: z.number().int().min(0).max(365).optional(),
+  isActionRequired: z.boolean().optional(),
+  defaultBlocker: z.enum(["us", "ahj", "utility", "customer", "lender"]).nullable().optional(),
 });
 
 function stageSlaData(d: z.infer<typeof stageSchema>) {
+  const stageType = d.stageType ?? "internally_owned";
+  const blocked = stageType === "externally_blocked";
   return {
-    targetDays: d.targetDays ?? 0,
-    escalationDays: d.escalationDays ?? 0,
+    stageType,
+    ownerRole: d.ownerRole ?? null,
+    isActionRequired: d.isActionRequired ?? false,
+    defaultBlocker: d.defaultBlocker ?? null,
+    // The two timing models are mutually exclusive by construction, so a stage
+    // can never end up with both a deadline and a chase cadence — that would
+    // put our team on the hook for a utility's queue, which is exactly the
+    // failure the split exists to prevent.
+    targetDays: blocked ? 0 : (d.targetDays ?? 0),
+    escalationDays: blocked ? 0 : (d.escalationDays ?? 0),
+    followUpDays: blocked ? (d.followUpDays ?? 0) : 0,
+    markOverdue: blocked ? false : (d.markOverdue ?? false),
     notificationRecipient: d.notificationRecipient ?? "none",
     sendInApp: d.sendInApp ?? true,
     sendEmail: d.sendEmail ?? false,
-    markOverdue: d.markOverdue ?? false,
   };
 }
 
@@ -87,9 +104,29 @@ export async function updatePipelineStageAction(id: string, input: z.infer<typeo
 
   const stage = await prisma.pipelineStage.findFirst({
     where: { id, pipeline: { companyId: user.companyId } },
-    select: { id: true },
+    select: {
+      id: true, stageType: true, ownerRole: true, followUpDays: true,
+      isActionRequired: true, defaultBlocker: true, targetDays: true,
+      escalationDays: true, markOverdue: true,
+    },
   });
   if (!stage) return fail("Stage not found.");
+
+  // Fall back to what the stage already has for anything the caller omitted.
+  // Without this, the existing stages manager — which knows nothing about
+  // stage types or owner roles — would silently reset every solar stage to
+  // "internally owned, no owner" the first time somebody renamed one.
+  const merged = stageSlaData({
+    ...parsed.data,
+    stageType: parsed.data.stageType ?? stage.stageType,
+    ownerRole: parsed.data.ownerRole ?? stage.ownerRole,
+    followUpDays: parsed.data.followUpDays ?? stage.followUpDays,
+    isActionRequired: parsed.data.isActionRequired ?? stage.isActionRequired,
+    defaultBlocker: parsed.data.defaultBlocker ?? stage.defaultBlocker,
+    targetDays: parsed.data.targetDays ?? stage.targetDays,
+    escalationDays: parsed.data.escalationDays ?? stage.escalationDays,
+    markOverdue: parsed.data.markOverdue ?? stage.markOverdue,
+  });
 
   await prisma.pipelineStage.update({
     where: { id },
@@ -98,7 +135,7 @@ export async function updatePipelineStageAction(id: string, input: z.infer<typeo
       color: parsed.data.color,
       isWon: parsed.data.isWon ?? false,
       isLost: parsed.data.isLost ?? false,
-      ...stageSlaData(parsed.data),
+      ...merged,
     },
   });
   revalidatePath("/portal/settings/pipeline");

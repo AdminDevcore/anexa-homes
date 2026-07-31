@@ -29,6 +29,8 @@ import { STAFF_ROLES, isAdmin } from "@/server/rbac/matrix";
 import { EditJobDialog } from "@/components/portal/edit-job-dialog";
 import { getProjectPhotoChecklists } from "@/server/modules/photos/queries";
 import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modules/settings/queries";
+import { SolarOpsCard } from "@/components/portal/solar-ops-card";
+import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
 import { getRoofReport } from "@/server/modules/roof/queries";
 import { RoofReportButton } from "@/components/portal/roof-report";
 import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
@@ -188,6 +190,13 @@ export default async function LeadDetailPage({
   const inspectionOutcomes = await getInspectionOutcomes(user.companyId, lead.vertical);
   const welcomeCallTemplates = can(user, "create", "Document") ? await getActiveWelcomeCallTemplates(user.companyId) : [];
 
+  // Solar operations: the blocker/follow-up model and the re-roof crossover.
+  // Roofing deals never render this — their stages are all internally owned.
+  const isSolar = lead.vertical === "solar";
+  const linkedDeal = isSolar || lead.linkedDealId
+    ? await getLinkedDealSummary(user.companyId, lead.linkedDealId)
+    : null;
+
   const roofReport = await getRoofReport(user.companyId, lead.id);
   const roofAddress = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
 
@@ -302,6 +311,33 @@ export default async function LeadDetailPage({
           <DealTabs tabs={dealTabs}>
             {/* ── Overview ── */}
             <div data-deal-tab="overview" className="space-y-6">
+          {isSolar && (
+            <SolarOpsCard
+              leadId={lead.id}
+              stage={
+                lead.stage
+                  ? {
+                      name: lead.stage.name,
+                      stageType: lead.stage.stageType,
+                      ownerRole: lead.stage.ownerRole,
+                      targetDays: lead.stage.targetDays,
+                      followUpDays: lead.stage.followUpDays,
+                      isActionRequired: lead.stage.isActionRequired,
+                    }
+                  : null
+              }
+              stageChangedAt={lead.stageChangedAt ? lead.stageChangedAt.toISOString() : null}
+              createdAt={lead.createdAt.toISOString()}
+              blockedBy={lead.blockedBy}
+              blockerNote={lead.blockerNote}
+              lastTouchAt={lead.lastTouchAt ? lead.lastTouchAt.toISOString() : null}
+              needsReroof={lead.needsReroof}
+              needsMpu={lead.needsMpu}
+              linkedDeal={linkedDeal}
+              canEdit={can(user, "update", "Lead")}
+            />
+          )}
+
           {/* Contact */}
           <Card title="Contact">
             <div className="grid gap-4 sm:grid-cols-2">

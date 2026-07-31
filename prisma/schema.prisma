@@ -252,6 +252,29 @@ enum ServiceType {
 /// historical rows keep validating, but it is excluded from VERTICALS in
 /// src/lib/vertical.ts and can never be selected, switched to, or written.
 /// Adding a third vertical = add a value here + a seed. Nothing else.
+/// How a pipeline stage ages.
+///
+/// The distinction is the difference between a backlog you can act on and a
+/// wall of red that everyone learns to ignore. We control when an internally
+/// owned stage completes, so it gets a hard deadline. We do NOT control an
+/// AHJ's plan review or a utility's PTO queue, so those get a follow-up cadence
+/// instead — the question is "when did WE last chase this?", never "why is our
+/// team late?".
+enum StageType {
+  internally_owned
+  externally_blocked
+}
+
+/// Who a deal is actually waiting on. Drives the follow-up cadence and the
+/// aging report — this one field is what makes the backlog actionable.
+enum BlockerParty {
+  us
+  ahj // authority having jurisdiction (building dept / plan review)
+  utility
+  customer
+  lender
+}
+
 enum Vertical {
   roofing
   solar
@@ -566,7 +589,24 @@ model PipelineStage {
   color      String   @default("#A1A1AA")
   isWon      Boolean  @default(false)
   isLost     Boolean  @default(false)
+  /// Whether we control completion (hard SLA) or are waiting on someone else
+  /// (follow-up cadence). See StageType.
+  stageType             StageType @default(internally_owned)
+  /// The DEPARTMENT ROLE that owns this stage's work — a key from
+  /// STAGE_OWNERS in src/lib/solar-pipeline.ts, never a named person, so work
+  /// keeps routing correctly as staff change.
+  ownerRole             String?
+  /// externally_blocked only: chase every N days. 0 = no cadence.
+  followUpDays          Int     @default(0)
+  /// True for "action required" sub-states (redlines, corrections) — the ball is
+  /// in someone's court and the deal cannot advance until it is cleared.
+  isActionRequired      Boolean @default(false)
+  /// Who a deal landing here is waiting on by default. Copied onto the deal on
+  /// entry; a coordinator can override per deal.
+  defaultBlocker        BlockerParty?
   // SLA / stage-duration tracking. targetDays 0 = no tracking on this stage.
+  // internally_owned only — an externally_blocked stage must never carry a
+  // completion deadline.
   targetDays            Int     @default(0)
   escalationDays        Int     @default(0)
   notificationRecipient String  @default("none") // none | assigned_user | team_manager | project_owner | department_manager | everyone
@@ -659,9 +699,35 @@ model Lead {
   stageChangedAt DateTime?
   // SLA tracking: which alerts have fired this stage (0 none, 1 target, 2 escalation),
   // reset to 0 on every stage move. stageOverdue is set by the alert job when a stage
-  // with markOverdue is exceeded.
+  // with markOverdue is exceeded. Both apply to internally_owned stages only.
   stageAlertLevel Int     @default(0)
   stageOverdue    Boolean @default(false)
+
+  // ── Externally-blocked tracking ─────────────────────────────────────────
+  /// Who this deal is waiting on right now. Seeded from the stage's
+  /// defaultBlocker on entry; a coordinator can correct it per deal.
+  blockedBy       BlockerParty?
+  /// What exactly we are waiting for ("plan review round 2", "meter spot").
+  blockerNote     String?
+  /// When WE last chased the blocker. This — not time-in-stage — is what the
+  /// follow-up cadence measures, so a utility's queue never reads as our delay.
+  lastTouchAt     DateTime?
+  /// When the chase reminder last fired, so the cadence repeats instead of
+  /// firing once and going quiet.
+  lastChaseAlertAt DateTime?
+
+  // ── Solar → Roofing crossover ───────────────────────────────────────────
+  /// Flagged at site survey / design: the roof must be replaced before install.
+  /// The highest-margin cross-sell we have — surfaced as its own card on the
+  /// deal, never buried in a note.
+  needsReroof     Boolean @default(false)
+  /// Flagged at site survey / design: main panel upgrade or derate required.
+  needsMpu        Boolean @default(false)
+  /// The deal in the OTHER vertical for the same property/contact (a solar deal
+  /// pointing at its re-roof job, or vice versa). One relationship, two jobs.
+  linkedDealId    String?
+  linkedDeal      Lead?   @relation("DealCrossover", fields: [linkedDealId], references: [id], onDelete: SetNull)
+  linkedFromDeals Lead[]  @relation("DealCrossover")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

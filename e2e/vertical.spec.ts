@@ -51,15 +51,23 @@ test.describe("workspace switcher", () => {
 
     await switchTo(page, "Solar");
 
-    // Solar is its own workspace — not one roofing deal leaks in.
+    // Solar is its own workspace: it shows its OWN deals and not one roofing
+    // deal leaks in. (Stronger than asserting emptiness — an empty list would
+    // also "pass" if the query were simply broken.)
     await page.goto("/portal/leads");
-    await expect(page.getByText("No appointments found")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("cell", { name: /Priya Raman/ })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("cell", { name: /Robert Johnson/ })).toHaveCount(0);
+    await expect(page.getByRole("cell", { name: /Linda Davis/ })).toHaveCount(0);
 
-    // …and it has its own pipeline, not roofing's.
+    // …and it has its own canonical NTP → PTO pipeline, not roofing's.
     await page.goto("/portal/pipeline");
     await expect(page.getByText("Solar Pipeline")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("PTO / Activated")).toBeVisible();
+    await expect(page.getByText("NTP Submitted")).toBeVisible();
+    await expect(page.getByText("Utility PTO")).toBeVisible();
+    await expect(page.getByText("Permit Redline — Action Required")).toBeVisible();
+    // Roofing's insurance stages must not leak in.
     await expect(page.getByText("Adjuster Meeting Scheduled")).toHaveCount(0);
+    await expect(page.getByText("Supplement Needed")).toHaveCount(0);
 
     // Switching back restores roofing: a real toggle, not a one-way door.
     await switchTo(page, "Roofing");
@@ -97,6 +105,45 @@ test.describe("workspace switcher", () => {
     );
     expect(roofingAfter).toEqual(roofingBefore);
     expect(roofingAfter).not.toContain("SOLAR ONLY OUTCOME");
+  });
+
+  test("a blocked stage tracks follow-up, not a deadline", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await switchTo(page, "Solar");
+
+    // The seeded solar deal sits in an externally-blocked stage.
+    await page.goto("/portal/leads");
+    await page.locator('table a[href^="/portal/leads/"]').first().click();
+    await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+
+    await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible({ timeout: 15000 });
+    // Waiting on a utility is never reported as our team being overdue.
+    await expect(page.getByText(/We don.t control this stage/)).toBeVisible();
+    await expect(page.getByText(/Overdue by/)).toHaveCount(0);
+
+    // Logging a follow-up resets the cadence.
+    await page.getByRole("button", { name: /Log follow-up/ }).click();
+    await expect(page.getByText(/Follow-up logged/)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Last chased/)).toBeVisible({ timeout: 15000 });
+  });
+
+  test("a re-roof finding surfaces the crossover instead of burying it", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await switchTo(page, "Solar");
+    await page.goto("/portal/leads");
+    await page.locator('table a[href^="/portal/leads/"]').first().click();
+    await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+
+    await expect(page.getByText("Site findings")).toBeVisible({ timeout: 15000 });
+    await page.getByText("Roof needs replacing before install").click();
+    await expect(page.getByRole("button", { name: /Create linked Roofing deal/ })).toBeVisible({
+      timeout: 15000,
+    });
+
+    await page.getByRole("button", { name: /Create linked Roofing deal/ }).click();
+    await expect(page.getByText(/Roofing deal created/)).toBeVisible({ timeout: 15000 });
+    // The link renders, pointing at the deal in the OTHER workspace.
+    await expect(page.getByText(/Linked\s+roofing\s+deal/i)).toBeVisible({ timeout: 15000 });
   });
 });
 
