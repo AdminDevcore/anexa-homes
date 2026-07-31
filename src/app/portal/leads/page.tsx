@@ -12,6 +12,8 @@ import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { currentFormatters } from "@/lib/format-server";
 import { buildAppointmentRows } from "@/server/modules/leads/appointment-rows";
 import { AppointmentsList } from "@/components/portal/appointments-list";
+import { getAppointmentDispositions } from "@/server/modules/settings/queries";
+import { dispositionLabels } from "@/lib/dispositions";
 
 export const metadata = { title: "Appointments" };
 
@@ -28,6 +30,15 @@ export default async function LeadsPage({
   // Isolate by the active vertical workspace (Roofing / Solar).
   const vertical = await getActiveVertical(user);
   const scope: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), vertical };
+
+  // The outcome chips mirror Settings → Appointment Outcomes so every possible
+  // result is visible, including the ones nobody has recorded yet.
+  //
+  // Scoped to the active vertical: outcomes are configured per vertical, so a
+  // roofing user must never see "Signed — proposal accepted" and a solar user
+  // must never see "Hail Damage". Passing the vertical is what keeps the chips
+  // on the correct side of the boundary.
+  const dispositions = await getAppointmentDispositions(user.companyId, vertical);
 
   const leads = await prisma.lead.findMany({
     where: scope,
@@ -65,7 +76,12 @@ export default async function LeadsPage({
           description="Appointments from canvassing conversions, lead providers, and website inquiries will appear here."
         />
       ) : (
-        <AppointmentsList rows={rows} initialQuery={q ?? ""} />
+        <AppointmentsList
+          rows={rows}
+          initialQuery={q ?? ""}
+          configuredOutcomes={dispositionLabels(dispositions)}
+        />
+
       )}
     </div>
   );

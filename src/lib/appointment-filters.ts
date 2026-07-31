@@ -1,20 +1,23 @@
 /**
  * Outcome filtering for the Appointments list.
  *
- * Appointment outcomes are per-company, per-vertical free text (Settings →
- * Appointment Outcomes), so the filters are DERIVED from the rows on screen
- * rather than hard-coded. Roofing gets "Ran" / "No Show"; solar gets "Signed —
- * proposal accepted" and friends; a company that renames everything tomorrow
- * gets its own words. None of it needs a code change.
+ * The workflow this models: a rep hits "Run appointment" and must pick an
+ * outcome. So the outcome field answers WHAT HAPPENED — that it ran at all is
+ * implied by the field being set. That is why "ran" is not itself an outcome
+ * here; running is simply the absence of NOT_RAN.
  *
- * Three synthetic filters cover the states no outcome label can express.
+ * Outcomes are per-company free text (Settings → Appointment Outcomes), so the
+ * chips are built from the COMPANY'S CONFIGURED LIST — including outcomes no
+ * appointment has yet, so you can see which results are going unused. Anything
+ * recorded on a lead but missing from config (a since-deleted outcome) is
+ * appended, or those rows would be unreachable by any filter.
  */
 
 export const ALL_OUTCOMES = "__all__";
 /**
- * The appointment time has passed and nobody recorded what happened. This is
- * the chase list — deliberately NOT "any appointment without an outcome",
- * which would bury real gaps under next week's calendar.
+ * The appointment time has passed and nobody recorded an outcome. This is the
+ * chase list — deliberately NOT "any appointment without an outcome", which
+ * would bury real gaps under next week's calendar.
  */
 export const NOT_RAN = "__not_ran__";
 /** Scheduled in the future — nothing to record yet. */
@@ -23,6 +26,14 @@ export const UPCOMING = "__upcoming__";
 export const UNSCHEDULED = "__unscheduled__";
 
 export type OutcomeFilter = { key: string; label: string; count: number };
+
+/** Chips split into the two rows the UI renders. */
+export type OutcomeFilterGroups = {
+  /** All / Not ran / Upcoming / Unscheduled — where an appointment stands. */
+  states: OutcomeFilter[];
+  /** One per configured outcome — what happened. Zero-count entries are kept. */
+  outcomes: OutcomeFilter[];
+};
 
 type Filterable = { outcome: string | null; when: string | null; isPast: boolean };
 
@@ -33,31 +44,43 @@ function bucketOf(row: Filterable): string {
   return row.isPast ? NOT_RAN : UPCOMING;
 }
 
+const SYNTHETIC = new Set([NOT_RAN, UPCOMING, UNSCHEDULED]);
+
 /**
- * Filters for the given rows, in scan order: All, Not ran, each outcome present
- * (most common first), then the two "nothing to record yet" states. Filters that
- * would match nothing are dropped — except All, which always anchors the row.
+ * @param rows        appointments currently in view (already search-filtered)
+ * @param configured  outcome labels from Settings, in configured order
  */
-export function buildOutcomeFilters(rows: Filterable[]): OutcomeFilter[] {
+export function buildOutcomeFilters(
+  rows: Filterable[],
+  configured: string[] = []
+): OutcomeFilterGroups {
   const counts = new Map<string, number>();
   for (const r of rows) {
     const key = bucketOf(r);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
 
-  const synthetic = new Set([NOT_RAN, UPCOMING, UNSCHEDULED]);
-  const outcomes = [...counts.entries()]
-    .filter(([key]) => !synthetic.has(key))
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([key, count]) => ({ key, label: key, count }));
-
-  return [
+  // A state chip that matches nothing is noise; All always anchors the row.
+  const states = [
     { key: ALL_OUTCOMES, label: "All", count: rows.length },
     { key: NOT_RAN, label: "Not ran", count: counts.get(NOT_RAN) ?? 0 },
-    ...outcomes,
     { key: UPCOMING, label: "Upcoming", count: counts.get(UPCOMING) ?? 0 },
     { key: UNSCHEDULED, label: "Unscheduled", count: counts.get(UNSCHEDULED) ?? 0 },
   ].filter((f) => f.key === ALL_OUTCOMES || f.count > 0);
+
+  const configuredSet = new Set(configured);
+  const retired = [...counts.keys()]
+    .filter((k) => !SYNTHETIC.has(k) && !configuredSet.has(k))
+    .sort();
+
+  // Configured order first (it already clusters by group), retired ones last.
+  const outcomes = [...configured, ...retired].map((label) => ({
+    key: label,
+    label,
+    count: counts.get(label) ?? 0,
+  }));
+
+  return { states, outcomes };
 }
 
 export function matchesOutcomeFilter(row: Filterable, filter: string): boolean {

@@ -17,6 +17,7 @@ import {
   ALL_OUTCOMES,
   buildOutcomeFilters,
   matchesOutcomeFilter,
+  type OutcomeFilter,
 } from "@/lib/appointment-filters";
 
 /** One appointment row, fully formatted server-side (money/dates use company locale + tz). */
@@ -44,9 +45,12 @@ export type AppointmentRow = {
 export function AppointmentsList({
   rows,
   initialQuery = "",
+  configuredOutcomes = [],
 }: {
   rows: AppointmentRow[];
   initialQuery?: string;
+  /** Outcome labels from Settings → Appointment Outcomes, in configured order. */
+  configuredOutcomes?: string[];
 }) {
   const [q, setQ] = React.useState(initialQuery);
   const [filter, setFilter] = React.useState<string>(ALL_OUTCOMES);
@@ -64,13 +68,21 @@ export function AppointmentsList({
   }, [rows, q]);
 
   // Counts reflect the current search, so the chips always add up to what's shown.
-  const filters = React.useMemo(() => buildOutcomeFilters(searched), [searched]);
+  const { states, outcomes } = React.useMemo(
+    () => buildOutcomeFilters(searched, configuredOutcomes),
+    [searched, configuredOutcomes]
+  );
 
-  // A filter can disappear as the search narrows (e.g. the last "No Show" is
-  // typed out of view). Fall back to All by DERIVING the effective filter rather
-  // than resetting state in an effect — no cascading render, and the original
-  // choice is restored for free if the search widens again.
-  const active = filters.some((f) => f.key === filter) ? filter : ALL_OUTCOMES;
+  // A state chip can disappear as the search narrows (e.g. the last upcoming
+  // appointment is typed out of view). Fall back to All by DERIVING the
+  // effective filter rather than resetting state in an effect — no cascading
+  // render, and the original choice is restored if the search widens again.
+  // Outcome chips never vanish, so a zero-count one stays selectable.
+  const selectable = React.useMemo(
+    () => new Set([...states, ...outcomes].map((f) => f.key)),
+    [states, outcomes]
+  );
+  const active = selectable.has(filter) ? filter : ALL_OUTCOMES;
 
   const visible = React.useMemo(
     () => searched.filter((r) => matchesOutcomeFilter(r, active)),
@@ -91,42 +103,27 @@ export function AppointmentsList({
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by outcome">
-          {filters.map((f) => {
-            const isActive = active === f.key;
-            return (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => setFilter(f.key)}
-                aria-pressed={isActive}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isActive
-                    ? "border-gold/40 bg-gold/12 text-gold-muted"
-                    : "border-border bg-card text-muted-foreground hover:border-foreground/20 hover:text-foreground"
-                )}
-              >
-                {/* Solar outcomes are full sentences ("Signed — proposal
-                    accepted"), so cap the label rather than let one chip own
-                    the row. The title attribute keeps it readable. */}
-                <span className="max-w-[13rem] truncate" title={f.label}>
-                  {f.label}
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums",
-                    isActive ? "bg-gold/20" : "bg-muted"
-                  )}
-                >
-                  {f.count}
-                </span>
-              </button>
-            );
-          })}
+        {/* Row 1 — where an appointment stands. */}
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
+          {states.map((f) => (
+            <FilterChip key={f.key} filter={f} active={active === f.key} onSelect={setFilter} />
+          ))}
         </div>
       </div>
+
+      {/* Row 2 — what happened. Every configured outcome shows, including the
+          ones nobody has used yet, so unused results are visible rather than
+          silently absent. */}
+      {outcomes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-3" role="group" aria-label="Filter by outcome">
+          <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Outcome
+          </span>
+          {outcomes.map((f) => (
+            <FilterChip key={f.key} filter={f} active={active === f.key} onSelect={setFilter} />
+          ))}
+        </div>
+      )}
 
       {visible.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-card/50 px-6 py-14 text-center">
@@ -281,6 +278,49 @@ export function AppointmentsList({
         </>
       )}
     </div>
+  );
+}
+
+function FilterChip({
+  filter,
+  active,
+  onSelect,
+}: {
+  filter: OutcomeFilter;
+  active: boolean;
+  onSelect: (key: string) => void;
+}) {
+  const empty = filter.count === 0;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(filter.key)}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active
+          ? "border-gold/40 bg-gold/12 text-gold-muted"
+          : empty
+            // Recessed, not hidden — an unused outcome is information.
+            ? "border-dashed border-border/70 bg-transparent text-muted-foreground/50 hover:text-muted-foreground"
+            : "border-border bg-card text-muted-foreground hover:border-foreground/20 hover:text-foreground"
+      )}
+    >
+      {/* Outcomes can be full sentences ("Homeowner Not Interested"), so cap the
+          label rather than let one chip own the row. */}
+      <span className="max-w-[13rem] truncate" title={filter.label}>
+        {filter.label}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums",
+          active ? "bg-gold/20" : empty ? "bg-muted/50" : "bg-muted"
+        )}
+      >
+        {filter.count}
+      </span>
+    </button>
   );
 }
 
