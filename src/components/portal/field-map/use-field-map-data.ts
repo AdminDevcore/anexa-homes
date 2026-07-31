@@ -11,7 +11,7 @@ import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CanvassingMeta, KnockDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
 import type { Viewport, ZipFeature } from "../canvassing-map";
-import type { StormSwathDTO, StormEventDTO } from "@/server/modules/storm/queries";
+import type { StormSwathDTO } from "@/server/modules/storm/queries";
 import type { StormWarning } from "@/components/portal/storm/storm-map";
 import { statusesFor, type FieldMapFilters } from "@/lib/field-map-filters";
 import { resolveRange } from "../canvassing-filters";
@@ -32,7 +32,6 @@ export type FieldMapData = {
   zips: ZipFeature[];
   zipsTooBig: boolean;
   radarSwaths: StormSwathDTO[];
-  stormEvents: StormEventDTO[];
   stormWarnings: StormWarning[];
   knockScores: Record<string, number>;
   dealScores: Record<string, number>;
@@ -171,20 +170,6 @@ export function useFieldMapData(filters: FieldMapFilters, viewport: Viewport | n
     [filters.showRadar, radarData]
   );
 
-  const { data: stormEventData } = useQuery<{ events: StormEventDTO[] }>({
-    queryKey: ["cv-storm-events"],
-    queryFn: async () => {
-      const r = await fetch("/api/storm/events");
-      return r.ok ? r.json() : { events: [] };
-    },
-    enabled: filters.showStormReports,
-    staleTime: 5 * 60_000,
-  });
-  const stormEvents = React.useMemo(
-    () => (filters.showStormReports ? stormEventData?.events ?? [] : []),
-    [filters.showStormReports, stormEventData]
-  );
-
   const { data: stormWarnData } = useQuery<{ warnings: StormWarning[] }>({
     queryKey: ["cv-storm-warnings"],
     queryFn: async () => {
@@ -311,7 +296,6 @@ export function useFieldMapData(filters: FieldMapFilters, viewport: Viewport | n
     zips,
     zipsTooBig,
     radarSwaths,
-    stormEvents,
     stormWarnings,
     knockScores,
     dealScores,

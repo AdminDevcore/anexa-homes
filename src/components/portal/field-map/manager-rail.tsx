@@ -13,11 +13,11 @@ import {
   Sparkles,
   Trash2,
   CloudHail,
+  SlidersHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TerritoryDTO } from "@/server/modules/canvassing/queries";
 import type { FieldMapFilters } from "@/lib/field-map-filters";
-import { LayersPanel } from "./layers-panel";
 import { FilterControls } from "./filters-sheet";
 
 export type StormTab = "storm-leads" | "storm-checker" | "storm-zones";
@@ -56,8 +56,12 @@ function subscribeRail(cb: () => void) {
     railListeners.delete(cb);
   };
 }
+// Closed until asked for. Open-by-default meant every manager — and every
+// super admin, which is how the owner always signs in — landed on a 320px
+// panel covering a fifth of the map, showing the same date presets and
+// disposition chips the redesign was meant to get out of the way.
 function getRailOpen() {
-  return window.localStorage.getItem(RAIL_KEY) !== "0";
+  return window.localStorage.getItem(RAIL_KEY) === "1";
 }
 function setRailOpen(next: boolean) {
   window.localStorage.setItem(RAIL_KEY, next ? "1" : "0");
@@ -109,18 +113,27 @@ export function ManagerRail({
   onOpenStormTab,
   canStorm,
 }: ManagerRailProps) {
-  const open = React.useSyncExternalStore(subscribeRail, getRailOpen, () => true);
+  const open = React.useSyncExternalStore(subscribeRail, getRailOpen, () => false);
   const toggleRail = () => setRailOpen(!open);
 
   if (!open) {
+    // Now the default state, so it has to read as a labelled control rather
+    // than an anonymous chevron a manager has to discover by poking at it.
     return (
       <button
         onClick={toggleRail}
         aria-label="Open tools"
         aria-expanded={false}
-        className="absolute left-3 top-1/2 z-[1000] grid size-10 -translate-y-1/2 place-items-center rounded-full bg-background/95 shadow ring-1 ring-border backdrop-blur hover:bg-muted"
+        className="absolute left-3 top-1/2 z-[1000] inline-flex -translate-y-1/2 items-center gap-1.5 rounded-full bg-background/95 py-2 pl-3 pr-2.5 text-sm font-medium shadow ring-1 ring-border backdrop-blur hover:bg-muted"
       >
-        <ChevronRight className="size-4" />
+        <SlidersHorizontal className="size-4" />
+        Tools
+        {activeCount > 0 && (
+          <span className="grid size-5 place-items-center rounded-full bg-gold text-[11px] font-bold tabular-nums text-white">
+            {activeCount}
+          </span>
+        )}
+        <ChevronRight className="size-4 text-muted-foreground" />
       </button>
     );
   }
@@ -139,10 +152,9 @@ export function ManagerRail({
         </button>
       </div>
 
-      <Section title="Layers">
-        <LayersPanel filters={filters} set={set} canManage />
-      </Section>
-
+      {/* No Layers section: the floating ≡ button already opens the same panel
+          for every role, and having it in two places is the duplication this
+          redesign exists to remove. */}
       <Section title={activeCount > 0 ? `Filters (${activeCount})` : "Filters"} defaultOpen>
         <FilterControls
           filters={filters}
@@ -257,17 +269,21 @@ export function ManagerRail({
           <div className="space-y-1">
             {(
               [
-                ["storm-leads", "Storm leads"],
-                ["storm-checker", "Address checker"],
-                ["storm-zones", "Storm zones"],
+                ["storm-leads", "Storm leads", "Existing leads ranked by how hard their house was hit."],
+                ["storm-checker", "Check an address", "Paste one address to see its hail history."],
+                ["storm-zones", "Worst-hit areas", "Neighbourhoods ranked by damage — where to send crews."],
               ] as const
-            ).map(([tab, label]) => (
+            ).map(([tab, label, hint]) => (
               <button
                 key={tab}
                 onClick={() => onOpenStormTab(tab)}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-muted"
+                className="flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left hover:bg-muted"
               >
-                <CloudHail className="size-4 text-muted-foreground" /> {label}
+                <CloudHail className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{label}</span>
+                  <span className="block text-xs leading-snug text-muted-foreground">{hint}</span>
+                </span>
               </button>
             ))}
           </div>

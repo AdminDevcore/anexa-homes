@@ -104,16 +104,51 @@ export function MovingBanner({ onCancel }: { onCancel: () => void }) {
   );
 }
 
+/** Today / Knocked / Houses for managers, who have no status bar to carry them.
+ *  Without this the rail took the counts away and gave nothing back. */
+export function StatsCard({
+  today,
+  knocked,
+  houses,
+}: {
+  today: number;
+  knocked: number;
+  houses: number;
+}) {
+  const stats: [string, number][] = [
+    ["Today", today],
+    ["Knocked", knocked],
+    ["Houses", houses],
+  ];
+  return (
+    <div className="pointer-events-none absolute right-3 top-16 z-[1000] flex gap-3 rounded-lg bg-background/95 px-3 py-2 shadow ring-1 ring-border backdrop-blur">
+      {stats.map(([label, value]) => (
+        <div key={label} className="text-center">
+          <div className="text-sm font-semibold tabular-nums leading-tight">{value.toLocaleString()}</div>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ViewSwitcher({
   tab,
   onChange,
+  className,
 }: {
   tab: string;
   onChange: (t: "map" | "list" | "insights") => void;
+  className?: string;
 }) {
   return (
-    // bottom-24 clears the status bar and Leaflet's attribution strip below it.
-    <div className="absolute left-1/2 bottom-24 z-[1000] inline-flex -translate-x-1/2 overflow-hidden rounded-full bg-background/95 shadow ring-1 ring-border backdrop-blur">
+    // Managers have no status bar under it, so they get the lower position.
+    <div
+      className={cn(
+        "absolute left-1/2 bottom-24 z-[1000] inline-flex -translate-x-1/2 overflow-hidden rounded-full bg-background/95 shadow ring-1 ring-border backdrop-blur",
+        className
+      )}
+    >
       {(["map", "list", "insights"] as const).map((t) => (
         <button
           key={t}

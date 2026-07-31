@@ -1,25 +1,44 @@
 "use client";
 
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { FieldMapLegend } from "@/components/portal/storm/field-map-legend";
 import { MAX_SCORE, type FieldMapFilters } from "@/lib/field-map-filters";
 
 export type LayersPanelProps = {
   filters: FieldMapFilters;
   set: <K extends keyof FieldMapFilters>(key: K, value: FieldMapFilters[K]) => void;
-  /** Managers additionally get ZIP codes, Reports and Warnings. */
+  /** Managers additionally get ZIP codes and weather warnings. */
   canManage: boolean;
 };
 
-type Toggle = { key: keyof FieldMapFilters; label: string; managerOnly?: boolean };
+type Toggle = {
+  key: keyof FieldMapFilters;
+  label: string;
+  /** One line, in the words a rep would use. Bare labels taught nobody what
+   *  "Heat" or "Reports" meant — which is most of why the old toolbar read as
+   *  noise. A control that can't explain itself doesn't earn its place. */
+  hint: string;
+  managerOnly?: boolean;
+};
 
-// A rep prioritising a street cares about hail and heat. ZIP boundaries, storm
-// reports and NWS warnings are planning tools — they'd be noise on a phone.
+// A rep prioritising a street cares about hail and damage. ZIP boundaries and
+// NWS warnings are planning tools — they'd be noise on a phone.
 const TOGGLES: Toggle[] = [
-  { key: "showRadar", label: "Hail" },
-  { key: "showHeat", label: "Heat" },
-  { key: "showZips", label: "ZIP codes", managerOnly: true },
-  { key: "showStormReports", label: "Reports", managerOnly: true },
-  { key: "showStormWarnings", label: "Warnings", managerOnly: true },
+  { key: "showRadar", label: "Hail", hint: "Where hail fell, shaded by size." },
+  { key: "showHeat", label: "Storm damage", hint: "Tints each house by how hard it was hit." },
+  {
+    key: "showZips",
+    label: "ZIP codes",
+    hint: "Outlines ZIP boundaries. Tap one to turn it into a territory.",
+    managerOnly: true,
+  },
+  {
+    key: "showStormWarnings",
+    label: "Weather warnings",
+    hint: "Live National Weather Service alerts.",
+    managerOnly: true,
+  },
 ];
 
 export function LayersPanel({ filters, set, canManage }: LayersPanelProps) {
@@ -41,28 +60,31 @@ export function LayersPanel({ filters, set, canManage }: LayersPanelProps) {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
         {TOGGLES.filter((t) => canManage || !t.managerOnly).map((t) => {
           const on = filters[t.key] as boolean;
           return (
-            <button
+            <label
               key={t.key}
-              onClick={() => set(t.key, !on as FieldMapFilters[typeof t.key])}
-              aria-pressed={on}
-              className={cn(
-                "rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
-                on ? "border-foreground bg-foreground text-background" : "border-border hover:bg-muted"
-              )}
+              className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 hover:bg-muted/50"
             >
-              {t.label}
-            </button>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{t.label}</span>
+                <span className="block text-xs leading-snug text-muted-foreground">{t.hint}</span>
+              </span>
+              <Switch
+                checked={on}
+                onCheckedChange={(v) => set(t.key, v as FieldMapFilters[typeof t.key])}
+                aria-label={t.label}
+              />
+            </label>
           );
         })}
       </div>
 
       {filters.showHeat && (
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">Score ≥</span>
+          <span className="shrink-0 text-muted-foreground">Only show damage over</span>
           <input
             type="range"
             min={0}
@@ -70,12 +92,15 @@ export function LayersPanel({ filters, set, canManage }: LayersPanelProps) {
             step={10}
             value={filters.minScore}
             onChange={(e) => set("minScore", Number(e.target.value))}
-            className="flex-1 accent-[#F4631E]"
-            title="Show only pins at/above this storm score"
+            className="min-w-0 flex-1 accent-[#F4631E]"
+            title="Show only houses at or above this storm score"
           />
-          <span className="w-6 tabular-nums font-medium">{filters.minScore}</span>
+          <span className="w-8 shrink-0 font-medium tabular-nums">{filters.minScore}+</span>
         </label>
       )}
+
+      {/* The colour key lives with the toggles it explains, not floating on the map. */}
+      <FieldMapLegend showHail={filters.showRadar} showHeat={filters.showHeat} />
     </div>
   );
 }

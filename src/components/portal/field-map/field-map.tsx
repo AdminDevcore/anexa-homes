@@ -11,7 +11,6 @@ import { Loader2 } from "lucide-react";
 import type { LatLng } from "@/lib/canvassing";
 import type { KnockDTO, DealDTO, TerritoryDTO } from "@/server/modules/canvassing/queries";
 import type { Viewport } from "../canvassing-map";
-import { FieldMapLegend } from "@/components/portal/storm/field-map-legend";
 import { useMapFilters } from "./use-map-filters";
 import { useFieldMapData } from "./use-field-map-data";
 import { KnockSheet } from "./knock-sheet";
@@ -19,7 +18,7 @@ import { DealSheet } from "./deal-sheet";
 import { FiltersSheet } from "./filters-sheet";
 import { LayersSheet } from "./layers-sheet";
 import { ManagerRail, type StormTab } from "./manager-rail";
-import { LoadingPill, TopBar, StatusBar, MovingBanner, Banner, ViewSwitcher } from "./map-overlays";
+import { LoadingPill, TopBar, StatusBar, MovingBanner, Banner, ViewSwitcher, StatsCard } from "./map-overlays";
 import { AddressSearch, TerritoryDialog, ConvertDialog, KnockDetailDialog } from "./dialogs";
 import {
   updateKnockAction,
@@ -332,7 +331,6 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
         showZips={filters.showZips}
         onZipClick={canManage ? onZipClick : undefined}
         radarSwaths={data.radarSwaths}
-        stormEvents={data.stormEvents}
         stormWarnings={data.stormWarnings}
         knockScores={filters.showHeat ? knockScores : undefined}
         dealScores={filters.showHeat ? dealScores : undefined}
@@ -353,7 +351,11 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
       )}
       {movingId && <MovingBanner onCancel={() => setMovingId(null)} />}
 
-      <ViewSwitcher tab={tab} onChange={onChangeTab} />
+      <ViewSwitcher tab={tab} onChange={onChangeTab} className={canManage ? "bottom-6" : undefined} />
+
+      {canManage && (
+        <StatsCard today={data.todayCount} knocked={data.knockedCount} houses={data.houseCount} />
+      )}
 
       {canManage ? (
         <ManagerRail
@@ -385,8 +387,6 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
         />
       )}
 
-      <FieldMapLegend showHail={filters.showRadar || filters.showStormReports} showHeat={filters.showHeat} />
-
       <FiltersSheet
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
@@ -399,7 +399,13 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
         reps={data.reps}
         canManage={canManage}
       />
-      <LayersSheet open={layersOpen} onOpenChange={setLayersOpen} filters={filters} set={set} />
+      <LayersSheet
+        open={layersOpen}
+        onOpenChange={setLayersOpen}
+        filters={filters}
+        set={set}
+        canManage={canManage}
+      />
 
       {/* key: opening a different house remounts the sheet, resetting it to peek. */}
       <KnockSheet

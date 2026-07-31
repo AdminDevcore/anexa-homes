@@ -1,6 +1,7 @@
 "use client";
 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { DISPOSITIONS } from "@/lib/canvassing";
 import type { FieldMapFilters, DatePreset } from "@/lib/field-map-filters";
@@ -42,34 +43,37 @@ export function FilterControls({
         setCustomTo={(v) => set("dateTo", v)}
       />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => set("remainingOnly", !filters.remainingOnly)}
-          aria-pressed={filters.remainingOnly}
-          className={cn(
-            "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-            filters.remainingOnly
-              ? "border-foreground bg-foreground text-background"
-              : "border-border hover:bg-muted"
-          )}
-        >
-          Remaining only
-        </button>
-        <button
-          type="button"
-          onClick={() => set("showDeals", !filters.showDeals)}
-          aria-pressed={filters.showDeals}
-          title="Show pipeline deals & appointments on the map"
-          className={cn(
-            "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
-            filters.showDeals
-              ? "border-foreground bg-foreground text-background"
-              : "border-border hover:bg-muted"
-          )}
-        >
-          Deals
-        </button>
+      {/* Both of these used to be bare chips nobody could decode. The hint is
+          the point — without it "Remaining only" and "Deals" read as jargon. */}
+      <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+        <label className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 hover:bg-muted/50">
+          <span className="min-w-0">
+            {/* Not "Not knocked yet" — that collides with the Not Knocked
+                disposition chip sitting right below it. */}
+            <span className="block text-sm font-medium">Only doors left to knock</span>
+            <span className="block text-xs leading-snug text-muted-foreground">
+              Hides every house you&rsquo;ve already been to.
+            </span>
+          </span>
+          <Switch
+            checked={filters.remainingOnly}
+            onCheckedChange={(v) => set("remainingOnly", v)}
+            aria-label="Only doors left to knock"
+          />
+        </label>
+        <label className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 hover:bg-muted/50">
+          <span className="min-w-0">
+            <span className="block text-sm font-medium">Appointments &amp; sold jobs</span>
+            <span className="block text-xs leading-snug text-muted-foreground">
+              Shows pipeline pins alongside your knocks.
+            </span>
+          </span>
+          <Switch
+            checked={filters.showDeals}
+            onCheckedChange={(v) => set("showDeals", v)}
+            aria-label="Appointments and sold jobs"
+          />
+        </label>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -138,7 +142,7 @@ export function FiltersSheet({ open, onOpenChange, ...controls }: FiltersSheetPr
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="max-h-[85dvh] gap-3 overflow-y-auto rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
+        className="max-h-[85dvh] gap-3 overflow-y-auto rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:mx-auto sm:max-w-md"
       >
         <SheetHeader className="p-0 pr-8 text-left">
           <SheetTitle className="text-base font-semibold">Filters</SheetTitle>

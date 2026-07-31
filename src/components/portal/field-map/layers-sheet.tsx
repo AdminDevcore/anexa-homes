@@ -9,20 +9,24 @@ export type LayersSheetProps = {
   onOpenChange: (open: boolean) => void;
   filters: FieldMapFilters;
   set: <K extends keyof FieldMapFilters>(key: K, value: FieldMapFilters[K]) => void;
+  /** Managers see the two planning layers (ZIP codes, weather warnings) too. */
+  canManage: boolean;
 };
 
-/** Rep-only. Managers get the same panel inside the rail instead. */
-export function LayersSheet({ open, onOpenChange, filters, set }: LayersSheetProps) {
+/** The one place layers are switched, for every role. */
+export function LayersSheet({ open, onOpenChange, filters, set, canManage }: LayersSheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="gap-3 rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3"
+        // Built for a phone; on a wide screen an edge-to-edge sheet reads as a
+        // page takeover, so cap it and centre it.
+        className="gap-3 rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:mx-auto sm:max-w-md sm:rounded-t-2xl"
       >
         <SheetHeader className="p-0 pr-8 text-left">
           <SheetTitle className="text-base font-semibold">Layers</SheetTitle>
         </SheetHeader>
-        <LayersPanel filters={filters} set={set} canManage={false} />
+        <LayersPanel filters={filters} set={set} canManage={canManage} />
       </SheetContent>
     </Sheet>
   );

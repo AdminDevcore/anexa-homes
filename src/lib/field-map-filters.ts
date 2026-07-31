@@ -25,7 +25,6 @@ export type FieldMapFilters = {
   basemap: "satellite" | "street";
   showZips: boolean;
   showRadar: boolean;
-  showStormReports: boolean;
   showStormWarnings: boolean;
   showHeat: boolean;
   minScore: number;
@@ -42,7 +41,6 @@ export const DEFAULT_FILTERS: FieldMapFilters = {
   basemap: "satellite",
   showZips: true,
   showRadar: true,
-  showStormReports: false,
   showStormWarnings: false,
   showHeat: true,
   minScore: 0,
@@ -77,7 +75,6 @@ export function parseFilters(sp: URLSearchParams): FieldMapFilters {
     basemap: rawBasemap === "street" ? "street" : DEFAULT_FILTERS.basemap,
     showZips: bool(sp.get("zips"), DEFAULT_FILTERS.showZips),
     showRadar: bool(sp.get("hail"), DEFAULT_FILTERS.showRadar),
-    showStormReports: bool(sp.get("reports"), DEFAULT_FILTERS.showStormReports),
     showStormWarnings: bool(sp.get("warnings"), DEFAULT_FILTERS.showStormWarnings),
     showHeat: bool(sp.get("heat"), DEFAULT_FILTERS.showHeat),
     minScore,
@@ -97,7 +94,6 @@ export function serializeFilters(f: FieldMapFilters): string {
   if (f.basemap !== DEFAULT_FILTERS.basemap) sp.set("base", f.basemap);
   if (f.showZips !== DEFAULT_FILTERS.showZips) sp.set("zips", f.showZips ? "1" : "0");
   if (f.showRadar !== DEFAULT_FILTERS.showRadar) sp.set("hail", f.showRadar ? "1" : "0");
-  if (f.showStormReports !== DEFAULT_FILTERS.showStormReports) sp.set("reports", f.showStormReports ? "1" : "0");
   if (f.showStormWarnings !== DEFAULT_FILTERS.showStormWarnings) sp.set("warnings", f.showStormWarnings ? "1" : "0");
   if (f.showHeat !== DEFAULT_FILTERS.showHeat) sp.set("heat", f.showHeat ? "1" : "0");
   if (f.minScore !== DEFAULT_FILTERS.minScore) sp.set("score", String(f.minScore));

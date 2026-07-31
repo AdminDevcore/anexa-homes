@@ -51,8 +51,8 @@ export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
             <TabsTrigger value="insights">Insights</TabsTrigger>
             {/* Storm tools are opened from the manager rail, not the tab strip. */}
             {canStorm && <TabsTrigger value="storm-leads">Storm leads</TabsTrigger>}
-            {canStorm && <TabsTrigger value="storm-checker">Address checker</TabsTrigger>}
-            {canStorm && <TabsTrigger value="storm-zones">Storm zones</TabsTrigger>}
+            {canStorm && <TabsTrigger value="storm-checker">Check an address</TabsTrigger>}
+            {canStorm && <TabsTrigger value="storm-zones">Worst-hit areas</TabsTrigger>}
           </TabsList>
         )}
 
