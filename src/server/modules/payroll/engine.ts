@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { Db } from "@/server/db/types";
 import { computeDealSplit, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
+import { VERTICAL_LABEL } from "@/lib/vertical";
 import { getDealJobCost } from "@/server/modules/costs/job-cost";
 
 function splitLabelFor(pct: number, flatCents: number, provided: boolean): string {
@@ -187,15 +188,23 @@ export async function computeCommissionsForProject(
   });
   if (rep) {
     const repName = `${rep.firstName} ${rep.lastName}`.trim();
-    const overrides = await db.commissionOverride.findMany({ where: { companyId, sourceId: rep.id } });
+    // Matched on the DEAL's vertical, not the session's. Roofing and Solar pay
+    // different rates off the same rep, and payroll can run from a cron with no
+    // workspace context — the project's own column is the only honest source.
+    // CommissionOverride is a shared model (see models.ts), so this filter is
+    // the isolation, not the extension.
+    const overrides = await db.commissionOverride.findMany({
+      where: { companyId, sourceId: rep.id, vertical: project.vertical },
+    });
     const ovData: Prisma.CommissionCreateManyInput[] = [];
     for (const o of overrides) {
       const amount = o.type === "flat" ? o.flatAmount : Math.round((contract * o.percent) / 100);
       if (amount <= 0) continue;
+      const side = VERTICAL_LABEL[o.vertical];
       const label =
         o.type === "flat"
-          ? `Override on ${repName} (flat)`
-          : `Override on ${repName} (${o.percent}% of contract)`;
+          ? `${side} override on ${repName} (flat)`
+          : `${side} override on ${repName} (${o.percent}% of contract)`;
       ovData.push({ companyId, projectId, userId: o.beneficiaryId, overrideId: o.id, label, baseAmount: contract, amount, status: "pending" });
     }
     if (ovData.length) {

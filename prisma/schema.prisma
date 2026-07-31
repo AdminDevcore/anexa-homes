@@ -1463,6 +1463,13 @@ model Commission {
 // Person-to-person override: `beneficiary` earns a % of contract (or a flat
 // amount) on every deal whose assigned rep is `source`. E.g. a manager earning
 // 3% on a rep's deals, or a senior rep earning $500/deal off a junior rep.
+//
+// Deliberately NOT registered in src/server/vertical/models.ts. Roofing and
+// Solar pay differently, so the rate is per vertical (see `vertical` below) —
+// but the Team page is a shared roster screen that must show a person's whole
+// override sheet, both sides at once. Scoping the model would hide half of it
+// from whichever workspace the admin happened to be standing in. The vertical
+// is carried as data and matched against the deal's own vertical at payout.
 model CommissionOverride {
   id            String         @id @default(uuid())
   companyId     String
@@ -1471,6 +1478,10 @@ model CommissionOverride {
   beneficiary   User           @relation("OverrideBeneficiary", fields: [beneficiaryId], references: [id], onDelete: Cascade)
   sourceId      String // whose deals trigger it (the assigned rep)
   source        User           @relation("OverrideSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  /// Which side of the business this rate applies to. A rep working both
+  /// verticals gets one row per vertical, each with its own type and amount —
+  /// an override never pays across the workspace it was written for.
+  vertical      Vertical       @default(roofing)
   type          CommissionType @default(percentage) // percentage (of contract) | flat
   percent       Float          @default(0)
   flatAmount    Int            @default(0) // cents per deal
@@ -1479,8 +1490,8 @@ model CommissionOverride {
 
   commissions Commission[]
 
-  @@unique([companyId, beneficiaryId, sourceId])
-  @@index([companyId, sourceId])
+  @@unique([companyId, beneficiaryId, sourceId, vertical])
+  @@index([companyId, sourceId, vertical])
   @@map("commission_overrides")
 }
 

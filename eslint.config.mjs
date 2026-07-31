@@ -41,10 +41,13 @@ const eslintConfig = defineConfig([
   {
     // MUST come after the rule above — in flat config, later blocks win.
     //
-    // The isolation suite resets its own throwaway Postgres schema and must use
-    // the UNextended client to build cross-vertical fixtures — the very thing it
-    // then proves is unreachable. Mirrored in no-raw-sql.test.ts's allowlist.
-    files: ["src/server/vertical/__tests__/*.itest.ts"],
+    // Integration suites reset their own throwaway Postgres schema and must use
+    // the UNextended client to build cross-vertical fixtures — the very thing
+    // they then prove is unreachable. Every `.itest.ts` runs only against
+    // `vertical_test` (see vitest.integration.config.ts), never a real database.
+    // Mirrored file-by-file in no-raw-sql.test.ts's allowlist, which stays the
+    // narrower guard: adding an itest here still requires justifying it there.
+    files: ["src/**/__tests__/*.itest.ts"],
     rules: { "no-restricted-syntax": "off" },
   },
 ]);

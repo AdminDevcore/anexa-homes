@@ -48,6 +48,12 @@ const ALLOWED: Record<string, string> = {
   // set up the cross-vertical cases the suite then proves are unreachable.
   "src/server/vertical/__tests__/isolation.itest.ts":
     'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
+  // Same pattern as the isolation suite: a whole-schema truncate against
+  // `vertical_test` to reset fixtures, on the UNextended client because the
+  // cases under test are deliberately cross-vertical (one rep, one deal per
+  // side). Not a scoped read or write.
+  "src/server/modules/payroll/__tests__/override-vertical.itest.ts":
+    'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
   // The guard itself and its own fixtures mention the identifiers in strings.
   "src/lib/__tests__/no-raw-sql.test.ts": "this guard",
 };

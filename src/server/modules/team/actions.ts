@@ -11,6 +11,8 @@ import { inviteEmailTemplate } from "@/server/modules/notifications/email-templa
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { ensureRepVendor } from "@/server/modules/bookkeeping/rep-vendor";
 import { roleLabel, canAssignRole } from "@/lib/roles";
+import { VERTICALS, VERTICAL_LABEL } from "@/lib/vertical";
+import { userVerticals } from "@/server/auth/vertical";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -21,29 +23,44 @@ function fail(error: string) {
 const overrideSchema = z.object({
   beneficiaryId: z.string().min(1),
   sourceId: z.string().min(1),
+  // Roofing and Solar are separate businesses with separate pay. An override is
+  // always written for one of them; `others` is retired and rejected here.
+  vertical: z.enum(VERTICALS),
   type: z.enum(["percentage", "flat"]),
   percent: z.number().min(0).max(100).default(0),
   flatAmount: z.number().int().min(0).default(0), // cents
 });
 
-/** Create/update an override: `beneficiary` earns off `source`'s deals. */
+/**
+ * Create/update an override: `beneficiary` earns off `source`'s deals in one
+ * vertical. The same pair can hold a roofing rate and a solar rate at once —
+ * they are separate rows, keyed by vertical, and never pay across sides.
+ */
 export async function setCommissionOverrideAction(input: z.infer<typeof overrideSchema>) {
   const me = await requireUser();
   if (!can(me, "update", "User")) return fail("Not allowed.");
   const parsed = overrideSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid override.");
-  const { beneficiaryId, sourceId, type, percent, flatAmount } = parsed.data;
+  const { beneficiaryId, sourceId, vertical, type, percent, flatAmount } = parsed.data;
   if (beneficiaryId === sourceId) return fail("An override must be on a different person.");
   if (type === "percentage" && !(percent > 0)) return fail("Enter a percent above 0.");
   if (type === "flat" && !(flatAmount > 0)) return fail("Enter an amount above 0.");
   const both = await prisma.user.findMany({
     where: { companyId: me.companyId, id: { in: [beneficiaryId, sourceId] } },
-    select: { id: true },
+    select: { id: true, role: true, verticals: true },
   });
   if (both.length < 2) return fail("User not found.");
+  // A rate on a workspace the rep cannot work would silently never pay out.
+  // Catch it here rather than let it sit in the sheet looking configured.
+  const source = both.find((u) => u.id === sourceId);
+  if (source && !userVerticals(source).includes(vertical)) {
+    return fail(`That person doesn't have ${VERTICAL_LABEL[vertical]} access, so their deals can never trigger this.`);
+  }
   await prisma.commissionOverride.upsert({
-    where: { companyId_beneficiaryId_sourceId: { companyId: me.companyId, beneficiaryId, sourceId } },
-    create: { companyId: me.companyId, beneficiaryId, sourceId, type, percent, flatAmount },
+    where: {
+      companyId_beneficiaryId_sourceId_vertical: { companyId: me.companyId, beneficiaryId, sourceId, vertical },
+    },
+    create: { companyId: me.companyId, beneficiaryId, sourceId, vertical, type, percent, flatAmount },
     update: { type, percent, flatAmount },
   });
   revalidatePath(`/portal/team/${beneficiaryId}`);

@@ -36,6 +36,18 @@ export function userVerticals(user: HasVerticals): ActiveVertical[] {
 }
 
 /**
+ * The verticals this BUILD runs, independent of who is looking.
+ *
+ * `userVerticals` answers "which workspaces may this person open"; this answers
+ * "which workspaces exist at all". Config screens need the second: a roofing-only
+ * admin still edits a rep's solar commission rate, and showing them a one-item
+ * list would quietly make that rate unreachable.
+ */
+export function companyVerticals(): ActiveVertical[] {
+  return solarVerticalEnabled() ? [...VERTICALS] : [DEFAULT_VERTICAL];
+}
+
+/**
  * The active vertical for this request: the workspace cookie when the user is
  * actually granted it, otherwise their default. A cookie naming a vertical the
  * user has lost access to (or a retired one like `others`) is ignored rather
