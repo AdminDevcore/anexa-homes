@@ -7,7 +7,6 @@ import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { STAFF_ROLES } from "@/server/rbac/matrix";
 import { PageHeader } from "@/components/portal/ui";
-import { ListFilter } from "@/components/portal/list-filter";
 import { TasksClient } from "@/components/portal/tasks-client";
 
 export const metadata = { title: "Tasks" };
@@ -43,7 +42,6 @@ export default async function TasksPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Tasks" description="Follow-ups assigned to you and your team." />
-      <ListFilter placeholder="Search tasks…">
       <TasksClient
         meId={user.userId}
         tasks={tasks.map((t) => ({
@@ -67,7 +65,6 @@ export default async function TasksPage() {
         canCreate={can(user, "create", "Task")}
         canManage={can(user, "update", "Task")}
       />
-      </ListFilter>
     </div>
   );
 }
