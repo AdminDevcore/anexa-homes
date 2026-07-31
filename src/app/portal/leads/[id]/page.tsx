@@ -198,7 +198,7 @@ export default async function LeadDetailPage({
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
   const isSolar = lead.vertical === "solar";
-  const [solarDesign, solarFinance, solarSettings, solarEquipment] = isSolar
+  const [solarDesign, solarFinance, solarSettings, solarEquipment, solarProposals] = isSolar
     ? await Promise.all([
         prisma.solarDesign.findUnique({ where: { leadId: lead.id } }),
         prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
@@ -208,8 +208,16 @@ export default async function LeadDetailPage({
           orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
           select: { id: true, kind: true, manufacturer: true, model: true, ratingW: true },
         }),
+        prisma.solarProposal.findMany({
+          where: { companyId: user.companyId, leadId: lead.id },
+          orderBy: { version: "desc" },
+          select: {
+            id: true, version: true, status: true, publicToken: true, supersededAt: true,
+            sentAt: true, viewedAt: true, signedAt: true, createdAt: true,
+          },
+        }),
       ])
-    : [null, null, null, []];
+    : [null, null, null, [], []];
   const equipOptions = (kind: string) =>
     solarEquipment
       .filter((e) => e.kind === kind)
@@ -491,7 +499,21 @@ export default async function LeadDetailPage({
             {isSolar && (
               <div data-deal-tab="proposal" className="space-y-6">
                 <Card title="Proposal">
-                  <SolarProposalGate leadId={lead.id} />
+                  <SolarProposalGate
+                    leadId={lead.id}
+                    canEdit={can(user, "create", "Proposal")}
+                    versions={solarProposals.map((v) => ({
+                      id: v.id,
+                      version: v.version,
+                      status: v.status,
+                      publicToken: v.publicToken,
+                      supersededAt: v.supersededAt?.toISOString() ?? null,
+                      sentAt: v.sentAt?.toISOString() ?? null,
+                      viewedAt: v.viewedAt?.toISOString() ?? null,
+                      signedAt: v.signedAt?.toISOString() ?? null,
+                      createdAt: v.createdAt.toISOString(),
+                    }))}
+                  />
                 </Card>
               </div>
             )}

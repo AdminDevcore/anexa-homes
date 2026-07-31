@@ -67,7 +67,7 @@ describe("cash vs loan: the dealer fee is the whole difference", () => {
 describe("lease and PPA do not use the purchase model at all", () => {
   it("a PPA bills per kWh and falls as the array degrades", () => {
     const t = priceThirdParty(
-      { product: "ppa", rateMillsPerKwh: 145, escalatorPct: 2.9, termYears: 25, year1ProductionKwh: 12_180 },
+      { product: "ppa", rateMillsPerKwh: 145, escalatorPct: 2.9, termYears: 25, year1ProductionKwh: 12_180, systemSizeKwDc: 10 },
       A
     );
     expect(t.year1CostCents).toBe(Math.round((12_180 * 145) / 10));
@@ -77,7 +77,7 @@ describe("lease and PPA do not use the purchase model at all", () => {
 
   it("a lease bills a fixed monthly regardless of output", () => {
     const t = priceThirdParty(
-      { product: "lease", monthlyPaymentCents: 18_500, escalatorPct: 0, termYears: 20, year1ProductionKwh: 12_180 },
+      { product: "lease", monthlyPaymentCents: 18_500, escalatorPct: 0, termYears: 20, year1ProductionKwh: 12_180, systemSizeKwDc: 10 },
       A
     );
     expect(t.year1CostCents).toBe(18_500 * 12);
@@ -112,14 +112,21 @@ describe("commission bases differ per product", () => {
     expect(c).toBe(287_000); // 10% of net, not 350,000
   });
 
-  it("PPW and margin pay nothing on a lease or PPA — they do not exist there", () => {
+  it("a TPO rep is never left uncompensated: flat and per-watt both pay", () => {
     const t = priceThirdParty(
-      { product: "ppa", rateMillsPerKwh: 145, escalatorPct: 2.9, termYears: 25, year1ProductionKwh: 12_180 },
+      { product: "ppa", rateMillsPerKwh: 145, escalatorPct: 2.9, termYears: 25, year1ProductionKwh: 12_180, systemSizeKwDc: 10 },
       A
     );
-    expect(solarCommissionCents("ppa", { type: "ppw", ratePerWattCents: 25 }, { thirdParty: t })).toBe(0);
+    // Margin genuinely does not exist — a third party owns the system, so there
+    // is no cost basis of ours to take a margin on.
     expect(solarCommissionCents("ppa", { type: "margin", percent: 40 }, { thirdParty: t })).toBe(0);
-    // A percentage of year-one customer cost does apply.
+    // But the array IS installed, so a per-watt rule must still pay. Returning
+    // zero here would leave every TPO rep uncompensated, silently.
+    expect(solarCommissionCents("ppa", { type: "ppw", ratePerWattCents: 25 }, { thirdParty: t })).toBe(
+      10_000 * 25
+    );
+    // …as must flat and a percentage of year-one customer cost.
+    expect(solarCommissionCents("ppa", { type: "flat", amountCents: 150_000 }, { thirdParty: t })).toBe(150_000);
     expect(solarCommissionCents("ppa", { type: "percentage", percent: 10 }, { thirdParty: t })).toBeGreaterThan(0);
   });
 });

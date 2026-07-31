@@ -15,6 +15,10 @@ import {
   saveSolarFinanceAction,
   validateSolarDealAction,
 } from "@/server/modules/solar/actions";
+import {
+  generateSolarProposalAction,
+  markProposalSentAction,
+} from "@/server/modules/solar/proposal-actions";
 
 type EquipmentOption = { id: string; label: string; ratingW: number | null };
 
@@ -415,10 +419,48 @@ export function SolarFinancePanel({
  * already blocked on the validation rules, so the builder inherits the guard
  * rails rather than bolting them on afterwards.
  */
-export function SolarProposalGate({ leadId }: { leadId: string }) {
+export type ProposalVersion = {
+  id: string;
+  version: number;
+  status: string;
+  publicToken: string;
+  supersededAt: string | null;
+  sentAt: string | null;
+  viewedAt: string | null;
+  signedAt: string | null;
+  createdAt: string;
+};
+
+export function SolarProposalGate({
+  leadId,
+  versions,
+  canEdit,
+}: {
+  leadId: string;
+  versions: ProposalVersion[];
+  canEdit: boolean;
+}) {
   const [issues, setIssues] = React.useState<ValidationIssue[] | null>(null);
   const [canGen, setCanGen] = React.useState<boolean | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const router = useRouter();
+
+  async function generate() {
+    setBusy(true);
+    const res = await generateSolarProposalAction(leadId);
+    setBusy(false);
+    if (!res.ok) {
+      // Blocking issues are surfaced inline rather than as a bare toast — the
+      // rep needs to know WHAT to fix, not just that it failed.
+      if ("issues" in res && res.issues) {
+        setIssues(res.issues);
+        setCanGen(false);
+      }
+      return toast.error(res.error);
+    }
+    toast.success(`Proposal v${res.version} generated`);
+    router.refresh();
+  }
 
   async function check() {
     setBusy(true);
@@ -443,10 +485,66 @@ export function SolarProposalGate({ leadId }: { leadId: string }) {
       {issues && issues.length === 0 && (
         <p className="text-xs text-muted-foreground">No issues found.</p>
       )}
-      <p className="text-[11px] text-muted-foreground">
-        The customer-facing proposal builder lands in the next phase. Generation will be gated on
-        exactly these checks.
-      </p>
+
+      {canEdit && (
+        <Button size="sm" onClick={generate} disabled={busy}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sun className="size-4" />}
+          Generate proposal
+        </Button>
+      )}
+
+      {versions.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Versions
+          </div>
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {versions.map((v) => (
+              <li key={v.id} className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
+                <span className="font-medium">v{v.version}</span>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    v.signedAt
+                      ? "bg-emerald-100 text-emerald-700"
+                      : v.supersededAt
+                        ? "bg-muted text-muted-foreground"
+                        : "bg-sky-100 text-sky-700"
+                  )}
+                >
+                  {v.supersededAt ? "superseded" : v.status}
+                </span>
+                <span className="flex-1 text-[11px] text-muted-foreground">
+                  {new Date(v.createdAt).toLocaleDateString()}
+                  {v.viewedAt ? " · viewed" : ""}
+                  {v.signedAt ? ` · accepted ${new Date(v.signedAt).toLocaleDateString()}` : ""}
+                </span>
+                <a
+                  href={`/proposal/${v.publicToken}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs underline underline-offset-2"
+                >
+                  Open
+                </a>
+                {canEdit && !v.sentAt && !v.supersededAt && (
+                  <button
+                    className="text-xs underline underline-offset-2"
+                    onClick={async () => {
+                      const res = await markProposalSentAction(v.id);
+                      if (!res.ok) return toast.error(res.error);
+                      toast.success("Marked as sent");
+                      router.refresh();
+                    }}
+                  >
+                    Mark sent
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

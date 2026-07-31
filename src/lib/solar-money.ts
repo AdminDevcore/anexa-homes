@@ -154,9 +154,17 @@ export type ThirdPartyInput = {
   escalatorPct: number;
   termYears: number;
   year1ProductionKwh: number;
+  /**
+   * The array is still physically installed on a lease or PPA, so the system
+   * size is real even though there is no system PRICE. Carried through so a
+   * per-watt commission rule can pay on a third-party-owned deal.
+   */
+  systemSizeKwDc: number;
 };
 
 export type ThirdPartyBreakdown = {
+  /** Real installed watts. There is no system price, but there is a system. */
+  systemWatts: number;
   year1CostCents: number;
   /** Total the customer pays across the term, with the escalator applied. */
   lifetimeCostCents: number;
@@ -188,6 +196,7 @@ export function priceThirdParty(input: ThirdPartyInput, a: SolarAssumptions): Th
   }
 
   return {
+    systemWatts: Math.round(input.systemSizeKwDc * 1000),
     year1CostCents,
     lifetimeCostCents: Math.round(lifetimeCostCents),
     effectiveRateMills: lifetimeKwh > 0 ? (lifetimeCostCents * 10) / lifetimeKwh : 0,
@@ -236,10 +245,20 @@ export function solarCommissionCents(
     }
   }
 
-  // Lease / PPA
+  // ── Lease / PPA ─────────────────────────────────────────────────────────
   const t = deal.thirdParty;
   if (!t) return 0;
-  if (basis.type === "percentage") return Math.round(t.year1CostCents * (basis.percent / 100));
-  // PPW and margin do not exist on a third-party-owned system.
-  return 0;
+  switch (basis.type) {
+    case "ppw":
+      // The array is still installed, so per-watt pays normally. Without this a
+      // rep on a PPW rule would earn NOTHING on every TPO deal they closed —
+      // silently, because the formula would just return zero.
+      return Math.round(t.systemWatts * basis.ratePerWattCents);
+    case "percentage":
+      return Math.round(t.year1CostCents * (basis.percent / 100));
+    case "margin":
+      // Genuinely does not exist: a third party owns the system, so there is no
+      // cost basis of ours to take a margin on. Use PPW or flat for TPO.
+      return 0;
+  }
 }

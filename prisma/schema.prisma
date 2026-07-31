@@ -364,6 +364,7 @@ model Company {
   solarDesigns          SolarDesign[]
   solarFinance          SolarFinance[]
   creditApplications    CreditApplication[]
+  solarProposals        SolarProposal[]
 
   @@map("companies")
 }
@@ -759,6 +760,7 @@ model Lead {
   solarDesign      SolarDesign?
   solarFinance     SolarFinance?
   creditApplications CreditApplication[]
+  solarProposals   SolarProposal[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -2853,4 +2855,67 @@ model CreditApplication {
   @@index([companyId, leadId])
   @@index([companyId, status])
   @@map("credit_applications")
+}
+
+/// A versioned, customer-facing solar proposal.
+///
+/// The snapshot is the point. Every figure the homeowner sees is FROZEN at
+/// generation time — the assumptions, the design, the money, all of it. When
+/// the CPA changes the ITC percentage next month, a proposal already sent must
+/// still show what that customer was shown, or the document is worthless as a
+/// record of what was offered.
+///
+/// Versions are never overwritten: regenerating supersedes and keeps the old
+/// one, so the trail of what was offered and when survives intact.
+model SolarProposal {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  version   Int
+  status    ProposalStatus @default(draft)
+  /// Unguessable public token = the shareable customer link (/proposal/[token]).
+  publicToken String @unique
+
+  /// The frozen document. See SolarProposalSnapshot in src/lib/solar-proposal.ts.
+  snapshot  Json
+
+  /// Set when a newer version replaces this one.
+  supersededAt DateTime?
+  /// The e-sign envelope, once sent for signature.
+  documentPackageId String?
+
+  createdById String?
+  sentAt      DateTime?
+  viewedAt    DateTime?
+  signedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  events SolarProposalEvent[]
+
+  @@unique([leadId, version])
+  @@index([companyId, leadId])
+  @@map("solar_proposals")
+}
+
+/// Append-only audit trail for a proposal: who did what, when, from where.
+model SolarProposalEvent {
+  id         String        @id @default(uuid())
+  proposalId String
+  proposal   SolarProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  /// generated | sent | viewed | signed | superseded
+  type       String
+  actorId    String?
+  actorName  String?
+  ip         String?
+  detail     String?
+  createdAt  DateTime      @default(now())
+
+  @@index([proposalId, createdAt])
+  @@map("solar_proposal_events")
 }
