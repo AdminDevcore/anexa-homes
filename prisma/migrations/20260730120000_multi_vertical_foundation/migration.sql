@@ -13,17 +13,15 @@
 -- Every added column defaults to 'roofing', so existing rows are backfilled by
 -- the DDL itself and the live roofing business is untouched.
 --
+-- DEPLOY-SAFE: this migration is additive only and can be applied to production
+-- while the CURRENT code is still running. In particular it does NOT drop the
+-- old narrow unique indexes (lead_sources_companyId_name_key and friends) —
+-- the running code still upserts against those, and removing them early would
+-- break website lead intake and knock->lead conversion. They are dropped in
+-- 20260730200000_drop_legacy_uniques, which runs at flag-on time.
+--
 -- Rollback: see down.sql in this directory.
 -- ===========================================================================
-
--- DropIndex
-DROP INDEX "custom_field_defs_companyId_entity_key_key";
-
--- DropIndex
-DROP INDEX "lead_sources_companyId_name_key";
-
--- DropIndex
-DROP INDEX "pipelines_companyId_name_key";
 
 -- AlterTable
 ALTER TABLE "cash_bids" ADD COLUMN     "vertical" "Industry" NOT NULL DEFAULT 'roofing';

@@ -20,18 +20,12 @@
 DROP INDEX IF EXISTS "projects_companyId_vertical_idx";
 DROP INDEX IF EXISTS "document_packages_companyId_vertical_idx";
 
--- ── Unique constraints: narrow them back to their pre-vertical form ────────
+-- ── The WIDER unique constraints added here ────────────────────────────────
+-- The original narrow ones were never dropped by this migration, so they are
+-- already in place and nothing needs recreating.
 DROP INDEX IF EXISTS "custom_field_defs_companyId_vertical_entity_key_key";
-CREATE UNIQUE INDEX "custom_field_defs_companyId_entity_key_key"
-    ON "custom_field_defs" ("companyId", "entity", "key");
-
 DROP INDEX IF EXISTS "lead_sources_companyId_vertical_name_key";
-CREATE UNIQUE INDEX "lead_sources_companyId_name_key"
-    ON "lead_sources" ("companyId", "name");
-
 DROP INDEX IF EXISTS "pipelines_companyId_industry_name_key";
-CREATE UNIQUE INDEX "pipelines_companyId_name_key"
-    ON "pipelines" ("companyId", "name");
 
 -- ── The 21 added columns ───────────────────────────────────────────────────
 -- Isolated (NOT NULL DEFAULT 'roofing'):
