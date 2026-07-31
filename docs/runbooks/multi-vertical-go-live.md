@@ -16,12 +16,13 @@ today. **Step 9 is the only step that changes what anyone sees.**
 | 4 | Run migrations (deploy-safe) | | yes | none |
 | 5 | Deploy code, flag OFF | | yes | none |
 | 6 | **Verify Roofing unchanged** | **required** | yes | none |
-| 7 | Review who gets Solar | **required** | read only | none |
+| 7 | **Review AND clean Solar grants** | **required** | yes (targeted UPDATE) | none |
 | 8 | Drop legacy uniques | | yes | none |
 | 9 | **Flip the flag on** | | yes | Solar appears |
 
 Steps 2, 3, 6 and 7 are **gates, not checks** — do not proceed past a failing
-one. Steps 1–3 touch no production infrastructure at all: you learn whether the
+one. Step 7 is the last gate before the flip: **the flag does not go on until
+grants are clean and re-verified.** Steps 1–3 touch no production infrastructure at all: you learn whether the
 whole Solar flow works before production is modified in any way.
 
 \* see [Rollback](#rollback) for what changes once the flag has been on.
@@ -417,14 +418,17 @@ changed nothing user-visible yet, so rolling back is cheap.
 
 ---
 
-## Step 7 — Review who would get Solar access
+## Step 7 — Review AND clean Solar grants  **[REQUIRED GATE]**
 
-Run this **read-only** query and decide, per person, whether the grant is
-intentional. Accounts created under the old default inherited Solar; that is a
-business decision, not a code one.
+Reviewing is not remediating. This step ends with a re-verified list, and the
+flag does not go on until it does.
+
+Accounts created before this work inherited Solar from the old default. Who
+should keep it is a business decision — the code cannot make it for you.
+
+### 7a. Who has Solar today (read only)
 
 ```sql
--- Who currently has 'solar' in their grants?
 SELECT
   email,
   role,
@@ -450,22 +454,114 @@ GROUP BY industries
 ORDER BY people DESC;
 ```
 
-To remove Solar from someone before flag-on:
+Go down the list and decide, per person: **should this human be able to open the
+Solar workspace on day one?** Write the ones who should not into the list below.
+
+### 7b. Preview the revocation — dry run, no commit
+
+Edit the email list, then run the whole block. It shows exactly what would
+change and then throws it away.
 
 ```sql
-UPDATE users
-   SET industries = array_remove(industries, 'solar'::"Industry")
- WHERE email = 'person@anexahomes.com';
+BEGIN;
+
+UPDATE users u
+   SET industries = COALESCE(
+         NULLIF(array_remove(u.industries, 'solar'::"Industry"), '{}'),
+         ARRAY['roofing']::"Industry"[]
+       )
+ WHERE u.email = ANY(ARRAY[
+         -- ▼ EDIT: the people who should NOT have Solar on day one
+         'someone@anexahomes.com',
+         'someone.else@anexahomes.com'
+         -- ▲
+       ])
+   AND u."deletedAt" IS NULL
+RETURNING u.email, u.role, u.industries AS grants_after;
+
+-- Read the output. Every row should show grants_after WITHOUT 'solar'.
+-- If the row count is not what you expected, an email is misspelled.
+ROLLBACK;   -- nothing was changed
 ```
 
-Notes:
-- The **super admin always sees every vertical** regardless of grants, by
-  design — an owner locked out by a stale grant list is a support incident.
-- New users default to **Roofing only**.
-- The retired `others` value was already stripped from every grant by migration
-  1 and can never be selected.
+`array_remove` strips only Solar and leaves any other grant intact, so this
+stays correct if a third vertical is ever added. The `COALESCE`/`NULLIF` guard
+means nobody can end up with an empty grant list — if removing Solar would empty
+it, they fall back to Roofing. (Both behaviours were verified against a copy of
+the schema before this runbook shipped: the dry run reports `{roofing}` and the
+`ROLLBACK` leaves grants untouched.)
 
----
+### 7c. Apply it
+
+Same block, `COMMIT` instead of `ROLLBACK`:
+
+```sql
+BEGIN;
+
+UPDATE users u
+   SET industries = COALESCE(
+         NULLIF(array_remove(u.industries, 'solar'::"Industry"), '{}'),
+         ARRAY['roofing']::"Industry"[]
+       )
+ WHERE u.email = ANY(ARRAY[
+         -- ▼ the SAME list you just previewed
+         'someone@anexahomes.com',
+         'someone.else@anexahomes.com'
+         -- ▲
+       ])
+   AND u."deletedAt" IS NULL
+RETURNING u.email, u.role, u.industries AS grants_after;
+
+COMMIT;
+```
+
+To revoke by id instead of email, swap the predicate:
+
+```sql
+ WHERE u.id = ANY(ARRAY['<uuid>', '<uuid>']::text[])
+```
+
+### 7d. Re-verify — this is the gate
+
+Re-run the read-only query from 7a. **Only the people you intend should appear.**
+
+```sql
+SELECT email, role, status, industries AS grants
+FROM users
+WHERE 'solar' = ANY(industries)
+  AND "deletedAt" IS NULL
+ORDER BY role, email;
+```
+
+```
+Grants reviewed and cleaned by: ____________________  Date: ____________
+People intentionally keeping Solar (count): ______
+Re-verified list matches intent:            YES / NO
+```
+
+**If this is NO, do not proceed to Step 9.**
+
+### What to expect operationally
+
+- **No logout required.** `getSessionUser()` re-reads the grant column from the
+  database on every request, so a revocation takes effect on that person's very
+  next page load.
+- **Anyone sitting in Solar is bounced safely.** `getActiveVertical()` validates
+  the workspace cookie against current grants, so a revoked user lands back in
+  Roofing rather than getting an error or a blank workspace.
+- **No data is touched.** This changes who can *see* Solar, nothing else.
+
+### super_admin is intentionally exempt
+
+Running the UPDATE against a `super_admin` will appear to succeed and **will have
+no effect on what they can open**: `userVerticals()` returns every live vertical
+for that role regardless of the grant column. That is deliberate — an owner
+locked out of a workspace by a stale grant list is a support incident, not a
+security win.
+
+If you genuinely need to keep a `super_admin` out of Solar, change their **role**
+(Team → member → Role). That is a different and much larger decision, and it is
+not part of this rollout.
 
 ## Step 8 — Drop the legacy unique indexes
 
