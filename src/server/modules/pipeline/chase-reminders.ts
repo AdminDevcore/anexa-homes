@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { chaseTiming } from "@/lib/stage-status";
 import { stageOwnerRbacRole, stageOwnerLabel, BLOCKER_LABEL } from "@/lib/solar-pipeline";
+import { runInVertical, asActiveVertical } from "@/server/vertical/context";
 
 /**
  * Follow-up reminders for deals sitting in EXTERNALLY-BLOCKED stages.
@@ -30,6 +31,7 @@ export async function runChaseReminders(now: number = Date.now()) {
       companyId: true,
       firstName: true,
       lastName: true,
+      vertical: true,
       createdAt: true,
       stageChangedAt: true,
       lastTouchAt: true,
@@ -45,6 +47,7 @@ export async function runChaseReminders(now: number = Date.now()) {
 
   const ownerCache = new Map<string, string[]>();
   let reminders = 0;
+  let tasks = 0;
 
   for (const lead of leads) {
     const stage = lead.stage;
@@ -111,9 +114,82 @@ export async function runChaseReminders(now: number = Date.now()) {
       })),
     });
 
+    // A cadence that produces only a notification does not reduce a backlog —
+    // the bell gets cleared and the deal goes quiet again. So the cadence also
+    // raises a REAL, assigned follow-up task in somebody's queue.
+    //
+    // The task is created inside runInVertical() because this job sweeps every
+    // workspace under runUnscoped(); without it a solar deal's follow-up task
+    // would be written with the column default and land in Roofing.
+    const created = await ensureFollowUpTask(lead, stage, waitingOn, title, [...ids], now);
+    if (created) tasks++;
+
     await prisma.lead.update({ where: { id: lead.id }, data: { lastChaseAlertAt: new Date(now) } });
     reminders++;
   }
 
-  return { processed: leads.length, reminders };
+  return { processed: leads.length, reminders, tasks };
+}
+
+const FOLLOW_UP_MARKER = "Follow up:";
+
+/**
+ * Raise (or reuse) the assigned follow-up task for a blocked deal.
+ *
+ * One open task per deal at a time: a 90-day utility wait should produce one
+ * live to-do that keeps showing up, not thirteen. When the owner completes it
+ * and logs the follow-up the clock resets, and the next cadence raises a fresh
+ * one — which is the loop that actually drains a backlog.
+ *
+ * Assigned to the least-loaded person in the OWNING ROLE, so it lands in a real
+ * queue rather than being addressed to a role nobody owns personally.
+ */
+async function ensureFollowUpTask(
+  lead: { id: string; companyId: string; vertical: string },
+  stage: { name: string; followUpDays: number; ownerRole: string | null },
+  waitingOn: string,
+  title: string,
+  candidateIds: string[],
+  now: number
+): Promise<boolean> {
+  const existing = await prisma.task.findFirst({
+    where: {
+      companyId: lead.companyId,
+      leadId: lead.id,
+      status: { not: "done" },
+      title: { startsWith: FOLLOW_UP_MARKER },
+    },
+    select: { id: true },
+  });
+  if (existing) return false;
+
+  // Least-loaded owner, so chases spread across the department.
+  const loads = await prisma.task.groupBy({
+    by: ["assigneeId"],
+    where: { companyId: lead.companyId, assigneeId: { in: candidateIds }, status: { not: "done" } },
+    _count: { _all: true },
+  });
+  const loadBy = new Map(loads.map((l) => [l.assigneeId, l._count._all]));
+  const assigneeId = [...candidateIds].sort(
+    (a, b) => (loadBy.get(a) ?? 0) - (loadBy.get(b) ?? 0)
+  )[0];
+  if (!assigneeId) return false;
+
+  await runInVertical(asActiveVertical(lead.vertical as never), () =>
+    prisma.task.create({
+      data: {
+        companyId: lead.companyId,
+        leadId: lead.id,
+        title: `${FOLLOW_UP_MARKER} ${waitingOn} — ${stage.name}`,
+        description: title,
+        status: "todo",
+        priority: "high",
+        assigneeId,
+        // Due on the next cadence tick, so it is actionable now and overdue if
+        // the chase slips another full cycle.
+        dueAt: new Date(now + stage.followUpDays * 86_400_000),
+      },
+    })
+  );
+  return true;
 }

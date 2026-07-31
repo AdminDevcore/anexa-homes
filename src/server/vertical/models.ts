@@ -57,6 +57,12 @@ export const SCOPED_MODELS = [
   // Field operations
   "Territory",
   "Knock",
+  // Solar domain. Inherently solar, but registered anyway so the guarantee is
+  // uniform: a roofing session cannot read or write them even by mistake.
+  "SolarEquipment",
+  "SolarDesign",
+  "SolarFinance",
+  "CreditApplication",
 ] as const;
 
 /** Writes stamped, reads never filtered — consolidated books, segmented reporting. */

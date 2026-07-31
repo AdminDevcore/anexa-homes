@@ -185,6 +185,12 @@ enum CommissionType {
   percentage
   flat
   job_cost
+  /// Dollars per watt of system size. The standard solar rep comp basis for
+  /// cash and loan deals.
+  ppw
+  /// Percentage of margin, net of dealer fee and adders — what the company
+  /// actually keeps, not the sticker price.
+  margin
 }
 
 enum CommissionStatus {
@@ -353,6 +359,11 @@ model Company {
   welcomeCallTemplates  WelcomeCallTemplate[]
   welcomeCallSessions   WelcomeCallSession[]
   reviews               Review[]
+  solarSettings         SolarSettings?
+  solarEquipment        SolarEquipment[]
+  solarDesigns          SolarDesign[]
+  solarFinance          SolarFinance[]
+  creditApplications    CreditApplication[]
 
   @@map("companies")
 }
@@ -745,6 +756,9 @@ model Lead {
   scope            ScopeOfWork?
   proposals        Proposal[]
   welcomeCalls     WelcomeCallSession[]
+  solarDesign      SolarDesign?
+  solarFinance     SolarFinance?
+  creditApplications CreditApplication[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -2561,4 +2575,282 @@ model CashBid {
 
   @@index([companyId, leadId])
   @@map("cash_bids")
+}
+
+// ---------------------------------------------------------------------------
+// Solar domain
+//
+// Everything below is solar-only. Roofing never creates these rows and never
+// renders them; the roofing-only concepts (Claim, RoofReport, the insurance
+// scope) are HIDDEN for solar deals rather than dropped, because those tables
+// hold live roofing money.
+// ---------------------------------------------------------------------------
+
+/// The four financing products. They are NOT variations of one model — they
+/// price differently, they carry different fields, and they pay commission on
+/// different bases. Treating them as one is how a lease gets quoted with a
+/// loan's dealer fee.
+enum FinanceProduct {
+  /// Customer pays cash. No dealer fee. Priced on system price / PPW.
+  cash
+  /// Financed purchase. A dealer fee is embedded in the GROSS price; net PPW is
+  /// gross minus that fee. Commission on PPW or margin.
+  loan
+  /// Third party owns the system; customer pays a fixed monthly with an annual
+  /// escalator. There is no system price in the cash/loan sense.
+  lease
+  /// Third party owns the system; customer pays per kWh produced, with an
+  /// annual escalator.
+  ppa
+}
+
+enum CreditStatus {
+  not_submitted
+  submitted
+  approved
+  /// Approved subject to stipulations that must be cleared before NTP.
+  conditional
+  declined
+  expired
+}
+
+enum MountType {
+  roof
+  ground
+}
+
+/// Catalog item kinds. Adders are rank-ordered so a rep sees them in the order
+/// the company wants them sold.
+enum SolarEquipmentKind {
+  module
+  inverter
+  battery
+  adder
+}
+
+/// Per-company Solar assumptions. Deliberately DATA, not code.
+///
+/// The federal residential-solar credit changed in 2025 and is still moving, so
+/// the percentage lives here for the company's CPA to set and change without a
+/// deploy. Everything it produces is an ESTIMATE and is labelled as one.
+model SolarSettings {
+  id        String  @id @default(uuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // ── Production assumptions ──────────────────────────────────────────────
+  /// System losses (soiling, wiring, inverter, mismatch). 0.84 = 16% loss.
+  derateFactor          Float @default(0.84)
+  /// Annual production loss from panel ageing, for the 25-year model.
+  annualDegradationPct  Float @default(0.5)
+  /// Assumed annual utility rate rise, for the savings comparison.
+  utilityEscalationPct  Float @default(3.5)
+  /// kWh produced per kW-DC per year in this market. Set from local irradiance.
+  kwhPerKwYear          Int   @default(1450)
+
+  // ── Pricing defaults ────────────────────────────────────────────────────
+  /// Default gross price per watt, in cents (e.g. 350 = $3.50/W).
+  defaultGrossPpwCents  Int   @default(350)
+  /// Lender dealer fee as a % of gross. Applies to LOAN only — cash has none.
+  defaultDealerFeePct   Float @default(18)
+
+  // ── Incentives ──────────────────────────────────────────────────────────
+  /// Federal credit %, as an ESTIMATE. NOT hardcoded anywhere in code: the
+  /// rules changed in 2025 and are still in flux, so this is set by the
+  /// company's CPA. Null = do not show a federal credit at all.
+  federalItcPct         Float?
+  /// Free-text state/local incentive summary shown on the proposal.
+  stateIncentiveNote    String?
+  /// The disclaimer rendered anywhere an incentive figure appears. Seeded with
+  /// the standard not-a-guarantee wording; editable per company.
+  incentiveDisclaimer   String @default("Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.")
+
+  // ── Validation bounds ───────────────────────────────────────────────────
+  // A rep must not be able to generate a physically impossible proposal.
+  // These are the guard rails; see src/lib/solar-validation.ts.
+  minOffsetPct          Float @default(0)
+  maxOffsetPct          Float @default(150)
+  minPpwCents           Int   @default(150)
+  maxPpwCents           Int   @default(800)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("solar_settings")
+}
+
+/// Equipment and adders a rep can pick from. Prices live here so a proposal is
+/// built from the catalog rather than typed in free-hand.
+model SolarEquipment {
+  id        String             @id @default(uuid())
+  companyId String
+  company   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical           @default(solar)
+  kind      SolarEquipmentKind
+  manufacturer String?
+  model     String
+  /// Modules: watts per panel. Inverters: rated output W. Batteries: usable Wh.
+  ratingW   Int?
+  /// Unit cost to us, cents.
+  costCents Int                @default(0)
+  /// What the customer pays, cents. For adders this is the adder price.
+  priceCents Int               @default(0)
+  /// Adders only: display order, so the highest-margin ones lead.
+  rank      Int                @default(0)
+  /// Adders only: ties an adder to the Phase-3 crossover so picking "Re-roof"
+  /// or "MPU" on a design raises the flag on the deal rather than quietly
+  /// becoming a line item. One of: "reroof" | "mpu" | null.
+  crossoverKind String?
+  specs     Json               @default("{}")
+  isActive  Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  designsAsModule   SolarDesign[] @relation("DesignModule")
+  designsAsInverter SolarDesign[] @relation("DesignInverter")
+  designsAsBattery  SolarDesign[] @relation("DesignBattery")
+
+  @@index([companyId, kind, isActive])
+  @@map("solar_equipment")
+}
+
+/// The engineering truth for one solar deal: what the utility bill says, what
+/// the roof looks like, and what we are going to build.
+model SolarDesign {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String  @unique
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  // ── Utility & usage ─────────────────────────────────────────────────────
+  utilityProvider    String?
+  ratePlan           String?
+  utilityAccountNo   String?
+  meterNo            String?
+  /// Net metering / buyback programme name.
+  netMeteringProgram String?
+  /// 12 monthly kWh readings, Jan..Dec. The basis for offset — a design that
+  /// does not track usage is the thing validation rejects.
+  monthlyUsageKwh    Json    @default("[]")
+  annualUsageKwh     Int?
+  avgMonthlyBillCents Int?
+
+  // ── Site ────────────────────────────────────────────────────────────────
+  mountType        MountType @default(roof)
+  /// [{ name, azimuth, tilt, moduleCount, shadingPct }]
+  roofPlanes       Json      @default("[]")
+  /// Total Solar Resource Fraction, %. Below ~75 is a shading problem.
+  tsrfPct          Float?
+  setbackNotes     String?
+  structuralNotes  String?
+  electricalNotes  String?
+
+  // ── System ──────────────────────────────────────────────────────────────
+  moduleId       String?
+  module         SolarEquipment? @relation("DesignModule", fields: [moduleId], references: [id], onDelete: SetNull)
+  moduleQty      Int             @default(0)
+  inverterId     String?
+  inverter       SolarEquipment? @relation("DesignInverter", fields: [inverterId], references: [id], onDelete: SetNull)
+  batteryId      String?
+  battery        SolarEquipment? @relation("DesignBattery", fields: [batteryId], references: [id], onDelete: SetNull)
+  batteryQty     Int             @default(0)
+  systemSizeKwDc Float           @default(0)
+  systemSizeKwAc Float           @default(0)
+  year1ProductionKwh Int         @default(0)
+  offsetPct      Float           @default(0)
+
+  // ── Plan-set artifacts (FileAsset ids, plain columns) ───────────────────
+  planSetFileId    String?
+  singleLineFileId String?
+  loadCalcFileId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, vertical])
+  @@map("solar_designs")
+}
+
+/// The money for one solar deal. Which columns matter depends entirely on
+/// `product` — see FinanceProduct. Cash/loan use the PPW block; lease/PPA use
+/// the rate block. They are never mixed.
+model SolarFinance {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String  @unique
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  product FinanceProduct @default(cash)
+
+  // ── Cash / Loan ─────────────────────────────────────────────────────────
+  /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
+  grossPpwCents  Int   @default(0)
+  /// Lender fee as a % of gross. Zero for cash by definition.
+  dealerFeePct   Float @default(0)
+  /// Sum of selected adders, cents.
+  adderTotalCents Int  @default(0)
+  /// Final contract price, cents.
+  contractPriceCents Int @default(0)
+  /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
+  itcEstimateCents Int @default(0)
+
+  // ── Lease / PPA ─────────────────────────────────────────────────────────
+  /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
+  rateMillsPerKwh Int?
+  /// Lease only: fixed monthly payment, cents.
+  monthlyPaymentCents Int?
+  /// Annual payment/rate increase, %. Applies to lease and PPA.
+  escalatorPct   Float?
+  termYears      Int?
+
+  // ── Loan terms (from the approved credit application) ────────────────────
+  aprPct         Float?
+  loanTermMonths Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, vertical])
+  @@map("solar_finance")
+}
+
+/// One submission to one lender. A deal can have several (declined by one,
+/// approved by another), so this is not 1:1.
+model CreditApplication {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  lender        String
+  status        CreditStatus @default(not_submitted)
+  /// The lender's own application id — the key the webhook matches on.
+  externalId    String?
+  amountCents   Int          @default(0)
+  termMonths    Int?
+  aprPct        Float?
+  dealerFeePct  Float?
+  /// Conditions that must be cleared before NTP, e.g. proof of income.
+  stipulations  Json         @default("[]")
+  submittedAt   DateTime?
+  decidedAt     DateTime?
+  expiresAt     DateTime?
+  notes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, lender, externalId])
+  @@index([companyId, leadId])
+  @@index([companyId, status])
+  @@map("credit_applications")
 }

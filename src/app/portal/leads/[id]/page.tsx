@@ -31,6 +31,8 @@ import { getProjectPhotoChecklists } from "@/server/modules/photos/queries";
 import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modules/settings/queries";
 import { SolarOpsCard } from "@/components/portal/solar-ops-card";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
+import { SolarDesignPanel, SolarFinancePanel, SolarProposalGate } from "@/components/portal/solar-panels";
+import { getSolarSettings } from "@/server/modules/solar/settings";
 import { getRoofReport } from "@/server/modules/roof/queries";
 import { RoofReportButton } from "@/components/portal/roof-report";
 import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
@@ -81,7 +83,10 @@ export default async function LeadDetailPage({
 
   // Cash deals (customer pays out of pocket / financing) hide the insurance UI:
   // no claim worksheet, no scope of work, and "Status" instead of "Claim Status".
-  const isInsurance = lead.dealType !== "cash";
+  // Solar has no adjuster, no claim and no insurance scope. Those concepts are
+  // HIDDEN here, never deleted — Claim and RoofReport hold live roofing money.
+  const isSolarDeal = lead.vertical === "solar";
+  const isInsurance = !isSolarDeal && lead.dealType !== "cash";
   // One table backs both cash bids and insurance contracts; split by kind.
   const allBids = await getCashBidsForLead(user.companyId, lead.id);
   const cashBids = allBids.filter((b) => b.kind === "cash");
@@ -193,6 +198,26 @@ export default async function LeadDetailPage({
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
   const isSolar = lead.vertical === "solar";
+  const [solarDesign, solarFinance, solarSettings, solarEquipment] = isSolar
+    ? await Promise.all([
+        prisma.solarDesign.findUnique({ where: { leadId: lead.id } }),
+        prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
+        getSolarSettings(user.companyId),
+        prisma.solarEquipment.findMany({
+          where: { companyId: user.companyId, isActive: true },
+          orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
+          select: { id: true, kind: true, manufacturer: true, model: true, ratingW: true },
+        }),
+      ])
+    : [null, null, null, []];
+  const equipOptions = (kind: string) =>
+    solarEquipment
+      .filter((e) => e.kind === kind)
+      .map((e) => ({
+        id: e.id,
+        label: `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}${e.ratingW ? ` · ${e.ratingW}W` : ""}`,
+        ratingW: e.ratingW,
+      }));
   const linkedDeal = isSolar || lead.linkedDealId
     ? await getLinkedDealSummary(user.companyId, lead.linkedDealId)
     : null;
@@ -206,7 +231,7 @@ export default async function LeadDetailPage({
     isScopeReady(lead.claimStatus) ||
     stageAtOrAfterScope(lead.pipeline?.stages ?? [], lead.stage?.id ?? null);
   // Scope of Work is an insurance-claim concept — hidden entirely for cash deals.
-  const showScope = isInsurance && scopeReady && can(user, "read", "Scope");
+  const showScope = !isSolarDeal && isInsurance && scopeReady && can(user, "read", "Scope");
   const scopeData = showScope ? await getScopeForLead(user, lead.id) : null;
   const scopeTemplate =
     showScope && canSeeScopeCosts(user.role) ? await listScopeTemplate(user.companyId, lead.vertical) : [];
@@ -244,13 +269,25 @@ export default async function LeadDetailPage({
   // The deal page is split into tabs to keep it scannable. Financials only shows
   // for commission-capable roles with a job.
   const showFinancials = !!(project && (payout || dealFinancials));
-  const dealTabs = [
-    { id: "overview", label: "Overview" },
-    ...(showScope ? [{ id: "scope", label: "Scope of Work" }] : []),
-    { id: "production", label: "Production" },
-    ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
-    { id: "documents", label: "Documents" },
-  ];
+  const dealTabs = isSolarDeal
+    ? [
+        // Solar's own tab set, per the domain model. No Scope of Work: that is
+        // an insurance-restoration concept with no solar equivalent.
+        { id: "overview", label: "Overview" },
+        { id: "design", label: "System Design" },
+        { id: "proposal", label: "Proposal" },
+        { id: "financing", label: "Financing" },
+        { id: "production", label: "Operations" },
+        ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
+        { id: "documents", label: "Documents" },
+      ]
+    : [
+        { id: "overview", label: "Overview" },
+        ...(showScope ? [{ id: "scope", label: "Scope of Work" }] : []),
+        { id: "production", label: "Production" },
+        ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
+        { id: "documents", label: "Documents" },
+      ];
 
   return (
     <div className="space-y-6">
@@ -434,11 +471,53 @@ export default async function LeadDetailPage({
               </div>
             )}
 
+            {/* ── System Design (solar) ── */}
+            {isSolar && (
+              <div data-deal-tab="design" className="space-y-6">
+                <Card title="System Design" icon={Hammer}>
+                  <SolarDesignPanel
+                    leadId={lead.id}
+                    design={solarDesign}
+                    modules={equipOptions("module")}
+                    inverters={equipOptions("inverter")}
+                    batteries={equipOptions("battery")}
+                    canEdit={can(user, "update", "Lead")}
+                  />
+                </Card>
+              </div>
+            )}
+
+            {/* ── Proposal (solar) ── */}
+            {isSolar && (
+              <div data-deal-tab="proposal" className="space-y-6">
+                <Card title="Proposal">
+                  <SolarProposalGate leadId={lead.id} />
+                </Card>
+              </div>
+            )}
+
+            {/* ── Financing (solar) ── */}
+            {isSolar && (
+              <div data-deal-tab="financing" className="space-y-6">
+                <Card title="Financing">
+                  <SolarFinancePanel
+                    leadId={lead.id}
+                    finance={solarFinance}
+                    itcDisclaimer={solarSettings?.incentiveDisclaimer ?? ""}
+                    federalItcPct={solarSettings?.federalItcPct ?? null}
+                    canEdit={can(user, "update", "Lead")}
+                  />
+                </Card>
+              </div>
+            )}
+
             {/* ── Production ── */}
             <div data-deal-tab="production" className="space-y-6">
           {/* Production (job): crew, QC, daily reports, site & install photos */}
           <Card title="Production" icon={Hammer}>
-            {can(user, "update", "Lead") && (
+            {/* Aerial roof measurement is a roofing estimating tool — a solar
+                deal measures the array in System Design instead. */}
+            {!isSolarDeal && can(user, "update", "Lead") && (
               <div className="mb-6 flex items-center justify-between gap-2 border-b border-border pb-4">
                 <div>
                   <p className="text-sm font-medium">Aerial roof measurements</p>
