@@ -300,7 +300,7 @@ cd anexa-homes
 DATABASE_URL="$PROD_MIGRATE_URL" npx prisma migrate status
 ```
 
-You should see 5 pending:
+You should see 6 pending:
 
 ```
 20260730120000_multi_vertical_foundation
@@ -308,7 +308,14 @@ You should see 5 pending:
 20260730150000_solar_pipeline_sla
 20260730170000_solar_domain
 20260730190000_solar_proposal
+20260731090000_solar_cockpit
 ```
+
+> `20260731090000_solar_cockpit` is newer than the held-back
+> `20260730200000_drop_legacy_uniques`, so it applies here in Step 4 while that
+> one waits for Step 8. Prisma applies whatever is in the folder and not yet in
+> `_prisma_migrations` — it does not require timestamps to be monotonic — so
+> re-adding the older migration later works as written.
 
 `20260730200000_drop_legacy_uniques` is **also pending and must NOT run yet** —
 see Step 8. Hold it back:
@@ -329,9 +336,18 @@ itself:
 
 ```bash
 psql "$PROD_MIGRATE_URL" -tAc "
-select count(*) || ' tables have a vertical column (expect 21)'
+select count(*) || ' tables have a vertical column (expect 28)'
 from information_schema.columns
 where column_name='vertical' and table_schema='public';"
+
+-- The other 7 keep the physical name 'industry' — that is the @map rename
+-- doing its job (zero DDL). Expect exactly these, unchanged:
+--   document_templates, knowledge_categories, leads, pipelines,
+--   scope_template_items, scopes_of_work, tasks
+psql "$PROD_MIGRATE_URL" -tAc "
+select count(*) || ' tables still use the physical name industry (expect 7)'
+from information_schema.columns
+where column_name='industry' and table_schema='public';"
 
 psql "$PROD_MIGRATE_URL" -tAc "
 select string_agg(table_name, ', ' order by table_name) as new_tables
@@ -339,7 +355,8 @@ from information_schema.tables
 where table_schema='public'
   and table_name in ('solar_settings','solar_equipment','solar_designs',
                      'solar_finance','credit_applications','solar_proposals',
-                     'solar_proposal_events');"
+                     'solar_proposal_events','solar_milestones');"
+-- expect all 8. solar_milestones comes from 20260731090000_solar_cockpit.
 
 -- Both old AND new uniques must be present at this point.
 psql "$PROD_MIGRATE_URL" -tAc "
