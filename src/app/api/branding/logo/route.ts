@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
 import { getObject } from "@/server/storage";
+import { brandingLogoCategory } from "@/lib/vertical-settings";
+import { isVertical } from "@/lib/vertical";
 
 /**
  * Public logo serving route. Logos must render pre-auth (login page) and in
@@ -9,11 +11,20 @@ import { getObject } from "@/server/storage";
  * company. Callers point an <img src> here via CompanySettings.logoUrl.
  */
 export async function GET(req: Request) {
-  const company = new URL(req.url).searchParams.get("company");
+  const url = new URL(req.url);
+  const company = url.searchParams.get("company");
   if (!company) return new NextResponse("Missing company", { status: 400 });
 
+  // The vertical comes from the URL, never from a session: this route is
+  // deliberately unauthenticated so the logo renders on the login page and
+  // inside email clients, where there is no session to read. A missing or
+  // unknown value resolves to the company/Roofing logo, so every logoUrl
+  // already stored in the wild keeps working untouched.
+  const raw = url.searchParams.get("vertical");
+  const vertical = raw && isVertical(raw) ? raw : null;
+
   const asset = await prisma.fileAsset.findFirst({
-    where: { companyId: company, category: "branding_logo" },
+    where: { companyId: company, category: brandingLogoCategory(vertical) },
     orderBy: { createdAt: "desc" },
     select: { storageKey: true, mimeType: true },
   });

@@ -40,6 +40,8 @@ export function derivePrefix(name: string): string {
 
 type CompanyInput = { name: string; timezone?: string | null };
 type SettingsInput = Partial<{
+  /** Per-vertical brand name. Not a column — arrives via verticalOverrides. */
+  brandName: string;
   recordPrefix: string;
   supportPhone: string | null;
   supportEmail: string | null;
@@ -61,8 +63,12 @@ export function resolveBranding(input: {
 }): Branding {
   const s = input.settings ?? {};
   return {
-    companyName: input.company.name,
-    recordPrefix: s.recordPrefix?.trim() || derivePrefix(input.company.name),
+    // A vertical may carry its own brand name (Solar = Prime Solar). Unset
+    // falls back to the company name, which is what Roofing always shows — so
+    // this line is a no-op until someone fills Solar's brand in.
+    companyName: s.brandName?.trim() || input.company.name,
+    recordPrefix:
+      s.recordPrefix?.trim() || derivePrefix(s.brandName?.trim() || input.company.name),
     supportPhone: s.supportPhone ?? null,
     supportEmail: s.supportEmail ?? null,
     currencyCode: s.currencyCode || DEFAULT_BRANDING.currencyCode,

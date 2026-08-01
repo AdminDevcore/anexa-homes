@@ -43,8 +43,11 @@ const LOCALES = [
 
 export function BrandingForm({
   initial,
+  workspaceLabel,
+  isOverride,
 }: {
   initial: {
+    brandName: string;
     logoUrl: string;
     faviconUrl: string;
     primaryColor: string;
@@ -59,8 +62,13 @@ export function BrandingForm({
     customDomain: string;
     removePoweredBy: boolean;
   };
+  /** Which brand is being edited — Anexa Homes (Roofing) vs Prime Solar. */
+  workspaceLabel?: string;
+  /** True when edits land on this vertical's overrides rather than the company row. */
+  isOverride?: boolean;
 }) {
   const router = useRouter();
+  const [brandName, setBrandName] = React.useState(initial.brandName);
   const [logoUrl, setLogoUrl] = React.useState(initial.logoUrl);
   const [faviconUrl, setFaviconUrl] = React.useState(initial.faviconUrl);
   const [primaryColor, setPrimaryColor] = React.useState(initial.primaryColor);
@@ -99,6 +107,7 @@ export function BrandingForm({
   async function save() {
     setPending(true);
     const res = await updateBrandingAction({
+      brandName,
       logoUrl,
       faviconUrl,
       primaryColor,
@@ -127,7 +136,26 @@ export function BrandingForm({
     <div className="space-y-6">
       {/* Branding Card */}
       <div className="space-y-4 rounded-xl border border-border bg-card p-6">
-        <h3 className="font-medium">Branding</h3>
+        <h3 className="font-medium">Branding{workspaceLabel ? ` — ${workspaceLabel}` : ""}</h3>
+
+        {isOverride ? (
+          // Says out loud that blanks inherit rather than clear, so nobody
+          // fills the whole form in defensively to avoid an empty brand.
+          <p className="text-sm text-muted-foreground">
+            These values apply to the <strong>{workspaceLabel}</strong> workspace only. Anything you
+            leave blank falls back to the company brand, so a partly-filled brand never renders
+            empty. Currency and locale are company-wide and shared with every workspace.
+          </p>
+        ) : null}
+
+        <div className="space-y-1.5">
+          <Label>Brand name</Label>
+          <Input
+            value={brandName}
+            onChange={(e) => setBrandName(e.target.value)}
+            placeholder={isOverride ? "e.g. Prime Solar — blank inherits the company name" : "Company name"}
+          />
+        </div>
 
         <div className="space-y-1.5">
           <Label>Logo</Label>

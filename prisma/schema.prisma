@@ -356,8 +356,6 @@ model Company {
   scopeCostTemplates    ScopeCostTemplate[]
   scopeSupplementTemplates ScopeSupplementTemplate[]
   proposals             Proposal[]
-  welcomeCallTemplates  WelcomeCallTemplate[]
-  welcomeCallSessions   WelcomeCallSession[]
   reviews               Review[]
   solarSettings         SolarSettings?
   solarEquipment        SolarEquipment[]
@@ -429,6 +427,17 @@ model CompanySettings {
   // to SCOPED; nothing reads them yet, by design.
   isolateBooks            Boolean  @default(false)
   isolateTeam             Boolean  @default(false)
+  // Per-vertical overrides for the SCALAR settings above, keyed by vertical:
+  //   { "solar": { "logoUrl": "...", "primaryColor": "#...", "recordPrefix": "PS-" } }
+  //
+  // The columns above stay the company/Roofing values. A vertical with no entry
+  // here inherits them, which is what lets Solar branding start empty and fall
+  // back rather than render blank — and is why Roofing is untouched: with no
+  // "roofing" key, every read returns the same column it always did.
+  //
+  // JSON settings (emailTemplates, requiredDocuments, …) are NOT here; they
+  // carry their own per-vertical keys via lib/vertical-config.
+  verticalOverrides       Json     @default("{}")
   updatedAt               DateTime @updatedAt
 
   @@map("company_settings")
@@ -759,7 +768,6 @@ model Lead {
   roofReport       RoofReport?
   scope            ScopeOfWork?
   proposals        Proposal[]
-  welcomeCalls     WelcomeCallSession[]
   solarDesign      SolarDesign?
   solarFinance     SolarFinance?
   creditApplications CreditApplication[]
@@ -2293,108 +2301,6 @@ model StoredFile {
   createdAt   DateTime @default(now())
 
   @@map("stored_files")
-}
-
-// ---------------------------------------------------------------------------
-// Call Templates — self-service customer confirmation flows. Two kinds:
-// `welcome` (post-sale) and `completion` (post-install). An admin authors a
-// reusable script (ordered confirmation items w/ merge tokens); a rep sends a
-// deal-specific link; the customer acknowledges each item and confirms.
-// See docs/superpowers/specs/2026-06-16-welcome-call-design.md
-// ---------------------------------------------------------------------------
-
-// Which kind of confirmation call a template/session is.
-enum CallKind {
-  welcome
-  completion
-}
-
-// How a call template is delivered: a text confirmation page, or a recorded
-// AI-avatar video call.
-enum CallMode {
-  confirm
-  avatar
-}
-
-// Lifecycle of the generated HeyGen avatar clips for an avatar-mode session.
-enum AvatarStatus {
-  none
-  generating
-  ready
-  failed
-}
-
-model WelcomeCallTemplate {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  /// Isolated per vertical: this row belongs to exactly one workspace.
-  vertical  Vertical @default(roofing)
-  name      String
-  // welcome (post-sale) vs completion (post-install) — both are confirmation scripts.
-  kind      CallKind @default(welcome)
-  // confirm = text confirmation page; avatar = recorded AI-avatar video call.
-  mode      CallMode @default(confirm)
-  intro     String? // shown above the items
-  closing   String? // thank-you message after confirm
-  // Ordered confirmation items: [{ id, title, body }] — body may contain merge tokens.
-  items     Json     @default("[]")
-  active    Boolean  @default(true)
-  position  Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  sessions WelcomeCallSession[]
-
-  @@index([companyId])
-  @@map("welcome_call_templates")
-}
-
-enum WelcomeCallStatus {
-  sent
-  viewed
-  completed
-  voided
-}
-
-model WelcomeCallSession {
-  id         String               @id @default(uuid())
-  companyId  String
-  company    Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  templateId String?
-  template   WelcomeCallTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  leadId     String
-  lead       Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  projectId  String?
-
-  customerName  String
-  customerEmail String?
-  kind          CallKind          @default(welcome)
-  mode          CallMode          @default(confirm)
-  status        WelcomeCallStatus @default(sent)
-  tokenHash     String            @unique
-  // Frozen at send time: { intro, closing, items: [{ id, title, body }] } with all merge
-  // tokens already resolved against the deal. The customer confirms THIS snapshot.
-  snapshot      Json
-  // Item ids the customer acknowledged (confirm mode).
-  acknowledged  Json              @default("[]")
-  // Avatar mode: clip generation lifecycle + ordered clips.
-  avatarStatus  AvatarStatus      @default(none)
-  // [{ key: "intro"|"closing"|itemId, text, heygenVideoId, storageKey, status }]
-  segments      Json              @default("[]")
-  // Avatar mode: the final composited call recording.
-  recordingStorageKey String?
-  recordedAt          DateTime?
-  sentAt        DateTime          @default(now())
-  viewedAt      DateTime?
-  completedAt   DateTime?
-  voidedAt      DateTime?
-  confirmedIp   String?
-  createdById   String?
-
-  @@index([companyId, leadId])
-  @@index([companyId, status])
-  @@map("welcome_call_sessions")
 }
 
 // ---------------------------------------------------------------------------

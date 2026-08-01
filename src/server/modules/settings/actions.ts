@@ -5,8 +5,11 @@ import { z } from "zod";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
 import type { Vertical } from "@prisma/client";
-import { prisma } from "@/server/db/client";
 import { getActiveVertical } from "@/server/auth/vertical";
+import { DEFAULT_VERTICAL } from "@/lib/vertical";
+import { writeVerticalOverrides, brandingLogoCategory } from "@/lib/vertical-settings";
+import { prisma } from "@/server/db/client";
+
 import { writeVerticalConfig } from "@/lib/vertical-config";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
@@ -363,6 +366,7 @@ export async function deleteCustomFieldAction(id: string) {
 // --------------------------- Branding ---------------------------------------
 
 const brandingSchema = z.object({
+  brandName: z.string().max(120).optional().or(z.literal("")),
   logoUrl: z.string().max(500).optional().or(z.literal("")),
   faviconUrl: z.string().max(500).optional().or(z.literal("")),
   primaryColor: z.string().min(1).max(20),
@@ -384,7 +388,14 @@ export async function updateBrandingAction(input: z.infer<typeof brandingSchema>
   const parsed = brandingSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid branding values.");
   const d = parsed.data;
-  const data = {
+
+  // Currency and locale identify the BUSINESS, not the brand — always company
+  // level, whichever workspace you are editing from.
+  const shared = { currencyCode: d.currencyCode.toUpperCase(), locale: d.locale };
+
+  // Everything else is per brand.
+  const branded = {
+    brandName: d.brandName?.trim() || "",
     logoUrl: d.logoUrl || null,
     faviconUrl: d.faviconUrl || null,
     primaryColor: d.primaryColor,
@@ -393,24 +404,49 @@ export async function updateBrandingAction(input: z.infer<typeof brandingSchema>
     recordPrefix: d.recordPrefix?.trim() || "",
     supportPhone: d.supportPhone || null,
     supportEmail: d.supportEmail || null,
-    currencyCode: d.currencyCode.toUpperCase(),
-    locale: d.locale,
     emailFromName: d.emailFromName || null,
     customDomain: d.customDomain?.trim().toLowerCase() || null,
     removePoweredBy: d.removePoweredBy ?? false,
   };
-  await prisma.companySettings.upsert({
-    where: { companyId: user.companyId },
-    update: data,
-    create: { companyId: user.companyId, ...data },
-  });
+
+  const vertical = await getActiveVertical(user);
+
+  // The DEFAULT vertical writes the base COLUMNS, exactly as before — so the
+  // roofing edit path is unchanged and the stored row still holds the company
+  // values that every other vertical inherits. A non-default vertical writes
+  // only its deviations into verticalOverrides, so clearing a field there means
+  // "inherit again" rather than "blank the brand".
+  if (vertical === DEFAULT_VERTICAL) {
+    const data = { ...shared, ...branded };
+    // brandName is override-only; it has no column to write to.
+    delete (data as { brandName?: string }).brandName;
+    await prisma.companySettings.upsert({
+      where: { companyId: user.companyId },
+      update: data,
+      create: { companyId: user.companyId, ...data },
+    });
+  } else {
+    const current = await prisma.companySettings.findUnique({
+      where: { companyId: user.companyId },
+      select: { verticalOverrides: true },
+    });
+    const verticalOverrides = writeVerticalOverrides(
+      current?.verticalOverrides,
+      vertical,
+      branded
+    );
+    await prisma.companySettings.upsert({
+      where: { companyId: user.companyId },
+      update: { ...shared, verticalOverrides },
+      create: { companyId: user.companyId, ...shared, verticalOverrides },
+    });
+  }
   revalidatePath("/portal/settings/branding");
   revalidatePath("/portal", "layout");
   return ok();
 }
 
 /** Category tag for the company's branding logo FileAsset (one per company). */
-const BRANDING_LOGO_CATEGORY = "branding_logo";
 const LOGO_MAX_BYTES = 5 * 1024 * 1024; // 5MB — logos are small
 const LOGO_ALLOWED = new Set(["image/png", "image/jpeg", "image/webp"]);
 
@@ -447,9 +483,12 @@ export async function uploadBrandingLogoAction(
   const key = `companies/${user.companyId}/branding/${nanoid()}.png`;
   await putObject(key, png);
 
-  // One logo per company: drop prior branding-logo rows, then record the new one.
+  // One logo per BRAND, not per company: a solar logo is a solar asset, so it
+  // gets its own category tag and replacing it must not delete Roofing's.
+  const logoVertical = await getActiveVertical(user);
+  const category = brandingLogoCategory(logoVertical);
   await prisma.fileAsset.deleteMany({
-    where: { companyId: user.companyId, category: BRANDING_LOGO_CATEGORY },
+    where: { companyId: user.companyId, category },
   });
   await prisma.fileAsset.create({
     data: {
@@ -459,18 +498,40 @@ export async function uploadBrandingLogoAction(
       storageKey: key,
       mimeType: "image/png",
       size: png.length,
-      category: BRANDING_LOGO_CATEGORY,
+      category,
       uploadedById: user.userId,
     },
   });
 
   // Relative URL with a cache-busting version. Emails absolutize it via appUrl.
-  const logoUrl = `/api/branding/logo?company=${user.companyId}&v=${Date.now()}`;
-  await prisma.companySettings.upsert({
-    where: { companyId: user.companyId },
-    update: { logoUrl },
-    create: { companyId: user.companyId, logoUrl },
-  });
+  // The vertical rides in the URL because the serving route is unauthenticated
+  // (login page, email clients) and so has no session to infer it from.
+  const isDefault = logoVertical === DEFAULT_VERTICAL;
+  const logoUrl = isDefault
+    ? `/api/branding/logo?company=${user.companyId}&v=${Date.now()}`
+    : `/api/branding/logo?company=${user.companyId}&vertical=${logoVertical}&v=${Date.now()}`;
+
+  if (isDefault) {
+    // Unchanged path: the company column, exactly as before.
+    await prisma.companySettings.upsert({
+      where: { companyId: user.companyId },
+      update: { logoUrl },
+      create: { companyId: user.companyId, logoUrl },
+    });
+  } else {
+    const current = await prisma.companySettings.findUnique({
+      where: { companyId: user.companyId },
+      select: { verticalOverrides: true },
+    });
+    const verticalOverrides = writeVerticalOverrides(current?.verticalOverrides, logoVertical, {
+      logoUrl,
+    });
+    await prisma.companySettings.upsert({
+      where: { companyId: user.companyId },
+      update: { verticalOverrides },
+      create: { companyId: user.companyId, verticalOverrides },
+    });
+  }
 
   revalidatePath("/portal/settings/branding");
   revalidatePath("/portal", "layout");

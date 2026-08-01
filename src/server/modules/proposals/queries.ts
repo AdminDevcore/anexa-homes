@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { AccessUser } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
-import { brandingForCompany } from "@/server/branding/resolve";
+import { brandingForRecord } from "@/server/branding/resolve";
 import { runUnscoped } from "@/server/vertical/context";
 import {
   type ProposalContent,
@@ -96,7 +96,7 @@ function frontHeroPhoto(groups: ProposalPhotoGroup[]): string | null {
 // Shared loader: pulls lead/claim/scope/photos for a proposal and assembles the
 // customer-safe view. `photoUrl` differs by context (authed portal vs public token).
 async function assembleView(
-  proposal: { id: string; status: string; theme: string; publicToken: string; customerName: string; propertyAddress: string; content: unknown; createdAt: Date; companyId: string; leadId: string },
+  proposal: { id: string; status: string; theme: string; publicToken: string; customerName: string; propertyAddress: string; content: unknown; createdAt: Date; companyId: string; leadId: string; vertical: Vertical },
   photoUrl: (fileId: string) => string,
 ): Promise<ProposalView> {
   const content = asContent(proposal.content);
@@ -124,7 +124,10 @@ async function assembleView(
       orderBy: { createdAt: "asc" },
       select: { id: true, category: true },
     }),
-    brandingForCompany(proposal.companyId),
+    // Branded by the PROPOSAL's vertical, not by any session: the public page
+    // is opened by an anonymous customer who has no workspace cookie at all, so
+    // a solar proposal must say Prime Solar and a roofing one Anexa Homes.
+    brandingForRecord(proposal.companyId, proposal.vertical),
   ]);
 
   const captions = content.photoCaptions ?? {};

@@ -1,6 +1,6 @@
 import type { CashBidStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
-import { brandingForCompany } from "@/server/branding/resolve";
+import { brandingForRecord } from "@/server/branding/resolve";
 import { bidAmounts } from "./money";
 import { runUnscoped } from "@/server/vertical/context";
 
@@ -81,7 +81,9 @@ async function loadCashBidByToken(token: string): Promise<PublicCashBid | null> 
     where: { id: b.leadId },
     select: { firstName: true, lastName: true, address: true, city: true, state: true, zip: true },
   });
-  const branding = await brandingForCompany(b.companyId);
+  // The signature page is opened by the customer with no session — brand it
+  // from the BID's vertical, never from an ambient workspace.
+  const branding = await brandingForRecord(b.companyId, b.vertical);
   const amt = bidAmounts(b.totalCents, b.depositPercent);
   const addr = [lead?.address, [lead?.city, lead?.state].filter(Boolean).join(", "), lead?.zip]
     .filter(Boolean)
