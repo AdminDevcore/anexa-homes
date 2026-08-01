@@ -2,6 +2,7 @@ import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { managerTeamUserFilter } from "@/server/rbac/policies";
 import { getCommissionLiability } from "./queries";
+import { ledgerVerticalFilter } from "./vertical-filter";
 
 // Whole-dollar formatting keeps reports scannable.
 const usd = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
@@ -261,7 +262,13 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
   const leadWhere = scope.leadWhere;
   const projectWhere: Prisma.ProjectWhereInput = { companyId: user.companyId, lead: leadWhere };
   const projIds = await scopeProjectIds(scope);
-  const txnProjectFilter = projIds ? { projectId: { in: projIds } } : {};
+  // `projIds` is null for a company-wide scope, which used to mean NO filter at
+  // all — that is how both verticals' money ended up in one report. The ledger
+  // filter is unconditional for exactly that reason.
+  const txnProjectFilter = {
+    ...(projIds ? { projectId: { in: projIds } } : {}),
+    ...(await ledgerVerticalFilter()),
+  };
   const BACKLOG_STATUSES = ["not_started", "in_production", "on_hold", "qc"] as const;
 
   const [appts, won, soldAgg, activeProjects, txns, collectedAgg, liability, leadsBySource, wonBySource] = await Promise.all([
@@ -432,7 +439,13 @@ async function buildOperations(user: ReportUser, period: Period, scope: Resolved
 async function buildFinancial(user: ReportUser, period: Period, scope: ResolvedScope): Promise<ReportResult> {
   const inPeriod = { gte: period.from, lte: period.to };
   const projIds = await scopeProjectIds(scope);
-  const txnProjectFilter = projIds ? { projectId: { in: projIds } } : {};
+  // `projIds` is null for a company-wide scope, which used to mean NO filter at
+  // all — that is how both verticals' money ended up in one report. The ledger
+  // filter is unconditional for exactly that reason.
+  const txnProjectFilter = {
+    ...(projIds ? { projectId: { in: projIds } } : {}),
+    ...(await ledgerVerticalFilter()),
+  };
 
   // 1099 / subcontractor vendor names — for "contractor payments".
   const vendors1099 = await prisma.bookkeepingVendor.findMany({ where: { companyId: user.companyId, is1099: true }, select: { name: true } });

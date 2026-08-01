@@ -823,6 +823,9 @@ model Project {
   adjusterMeetingAt DateTime?
   // Scheduled installation date.
   installDate       DateTime?
+  // Scheduled inspection (solar: AHJ / utility inspection after install).
+  // Nullable and unused by roofing, whose calendar keeps its existing set.
+  inspectionAt      DateTime?
   completedAt       DateTime?
   notes             String?
   customFields      Json      @default("{}")

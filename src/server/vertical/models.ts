@@ -62,6 +62,7 @@ export const SCOPED_MODELS = [
   "SolarEquipment",
   "SolarDesign",
   "SolarFinance",
+  "SolarMilestone",
   "CreditApplication",
 ] as const;
 

@@ -8,15 +8,21 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-type EventType = "appointment" | "adjuster" | "install";
+type EventType = "appointment" | "adjuster" | "install" | "inspection";
 type Ev = { id: string; type: EventType; date: string; title: string; subtitle: string | null; rep: string | null; href: string };
 
 const TYPE_META: Record<EventType, { label: string; dot: string; pill: string }> = {
   appointment: { label: "Appointments", dot: "bg-gold", pill: "bg-gold/15 text-gold-muted" },
   adjuster: { label: "Adjuster meetings", dot: "bg-blue-500", pill: "bg-blue-500/15 text-blue-600" },
   install: { label: "Installs", dot: "bg-emerald-500", pill: "bg-emerald-500/15 text-emerald-600" },
+  inspection: { label: "Inspections", dot: "bg-violet-500", pill: "bg-violet-500/15 text-violet-600" },
 };
-const TYPES: EventType[] = ["appointment", "adjuster", "install"];
+
+// Which filter chips exist is decided by the ACTIVE VERTICAL and passed in from
+// the server, which is the only place that knows it. Defaulting to roofing's
+// set keeps the component's old behaviour for any caller that doesn't say —
+// notably, it never invents an "Adjuster meetings" chip for solar.
+const DEFAULT_TYPES: EventType[] = ["appointment", "adjuster", "install"];
 
 const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -28,10 +34,13 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "n
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export function WorkCalendar() {
+export function WorkCalendar({ types }: { types?: EventType[] } = {}) {
   const router = useRouter();
+  const TYPES = types?.length ? types : DEFAULT_TYPES;
   const [anchor, setAnchor] = React.useState<Date>(() => startOfMonth(new Date()));
-  const [on, setOn] = React.useState<Record<EventType, boolean>>({ appointment: true, adjuster: true, install: true });
+  const [on, setOn] = React.useState<Record<EventType, boolean>>(() =>
+    Object.fromEntries(TYPES.map((t) => [t, true])) as Record<EventType, boolean>
+  );
   const [selected, setSelected] = React.useState<Ev | null>(null);
 
   const gridStart = startOfWeek(startOfMonth(anchor));

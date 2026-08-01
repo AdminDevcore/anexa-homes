@@ -281,8 +281,17 @@ export async function updateItemAction(input: {
   const title = input.title?.trim();
   if (!title) return { ok: false, error: "Title is required." };
 
+  // Constrain through the CATEGORY, which carries the vertical. KnowledgeItem
+  // has a companyId but no vertical of its own, so `{ id, companyId }` alone
+  // would let a roofing session edit a solar article by id — the isolation is
+  // on the parent, so the lookup has to go through the parent.
+  const vertical = await getActiveVertical(user);
   const item = await prisma.knowledgeItem.findFirst({
-    where: { id: input.id, companyId: user.companyId },
+    where: {
+      id: input.id,
+      companyId: user.companyId,
+      category: { is: { companyId: user.companyId, vertical } },
+    },
     select: { id: true, type: true },
   });
   if (!item) return { ok: false, error: "Item not found." };
@@ -307,8 +316,15 @@ export async function deleteItemAction(id: string): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "delete", "Knowledge")) return { ok: false, error: "Not allowed." };
 
+  // Same as updateItemAction: scope through the category, or a roofing session
+  // could delete a solar article (and its file) by id.
+  const vertical = await getActiveVertical(user);
   const item = await prisma.knowledgeItem.findFirst({
-    where: { id, companyId: user.companyId },
+    where: {
+      id,
+      companyId: user.companyId,
+      category: { is: { companyId: user.companyId, vertical } },
+    },
     select: { id: true, fileId: true },
   });
   if (!item) return { ok: false, error: "Item not found." };

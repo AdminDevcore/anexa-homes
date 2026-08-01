@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { ledgerVerticalFilter } from "./vertical-filter";
 import type { Period, RenderableReport, ResolvedScope } from "./builders";
 
 type ReportUser = { companyId: string; userId: string; role: string };
@@ -26,7 +27,10 @@ export async function buildContractorPayReport(
 ): Promise<RenderableReport> {
   const inPeriod = { gte: period.from, lte: period.to };
   const projIds = await scopeProjectIds(scope);
-  const txnProjectFilter = projIds ? { projectId: { in: projIds } } : {};
+  const txnProjectFilter = {
+    ...(projIds ? { projectId: { in: projIds } } : {}),
+    ...(await ledgerVerticalFilter()),
+  };
 
   const vendors1099 = await prisma.bookkeepingVendor.findMany({
     where: { companyId: user.companyId, is1099: true },
