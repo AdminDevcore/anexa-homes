@@ -1,6 +1,7 @@
 import { PrismaClient, type Role, type KnockDisposition as KnockDispo } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { DEFAULT_SCOPE_CATALOG } from "../src/lib/scope-catalog";
+import { SOLAR_STAGES } from "../src/lib/solar-pipeline";
 
 const prisma = new PrismaClient();
 
@@ -108,8 +109,9 @@ async function main() {
         title: u.title,
         phone: "(555) 123-4567",
         // Everyone can switch all three workspaces by default; the installer is
-        // restricted to Roofing only (demoing per-user industry access).
-        industries: u.key === "installer" ? ["roofing"] : ["roofing", "solar", "others"],
+        // restricted to Roofing only (demoing per-user vertical access).
+        // Installer is locked to Roofing so the restricted-user path stays testable.
+        verticals: u.key === "installer" ? ["roofing"] : ["roofing", "solar"],
       },
     });
     users[u.key] = created;
@@ -168,7 +170,7 @@ async function main() {
 
   // Pipeline + stages (Roofing is the established workspace).
   const pipeline = await prisma.pipeline.create({
-    data: { companyId: company.id, name: "Roofing Pipeline", industry: "roofing", isDefault: true },
+    data: { companyId: company.id, name: "Roofing Pipeline", vertical: "roofing", isDefault: true },
   });
   const stages = [];
   for (let i = 0; i < STAGES.length; i++) {
@@ -190,36 +192,177 @@ async function main() {
 
   // Solar + Others are separate, isolated workspaces with their own starter stages
   // (different process). The team can customize these as they ramp each up.
-  const SOLAR_STAGES = [
-    { key: "new_appt", name: "New Appointment", color: "#FBBF24" },
-    { key: "site_survey", name: "Site Survey", color: "#F59E0B" },
-    { key: "proposal_sent", name: "Proposal Sent", color: "#F97316" },
-    { key: "contract_signed", name: "Contract Signed", color: "#FB923C" },
-    { key: "permitting", name: "Permitting", color: "#A78BFA" },
-    { key: "install_scheduled", name: "Install Scheduled", color: "#60A5FA" },
-    { key: "installed", name: "Installed", color: "#34D399" },
-    { key: "pto", name: "PTO / Activated", color: "#22C55E" },
-    { key: "paid", name: "Paid", color: "#16A34A", isWon: true },
-  ];
   // "Others" is a catch-all workspace for miscellaneous leads to sub out.
-  const OTHERS_STAGES = [
-    { key: "new_lead", name: "New Lead", color: "#94A3B8" },
-    { key: "qualified", name: "Qualified", color: "#38BDF8" },
-    { key: "quoted", name: "Quoted", color: "#6366F1" },
-    { key: "subbed_out", name: "Subbed Out", color: "#F59E0B" },
-    { key: "closed", name: "Closed", color: "#16A34A", isWon: true },
-  ];
-  for (const [industry, name, defs] of [
+  let solarPipelineId: string | null = null;
+  const solarStageByKey: Record<string, string> = {};
+
+  for (const [vertical, name, defs] of [
     ["solar", "Solar Pipeline", SOLAR_STAGES] as const,
-    ["others", "Others Pipeline", OTHERS_STAGES] as const,
+    // No "Others" pipeline: `others` is a retired vertical that can never be
+    // selected, so the row would be permanently unreachable.
   ]) {
-    const p = await prisma.pipeline.create({ data: { companyId: company.id, name, industry, isDefault: true } });
+    const p = await prisma.pipeline.create({ data: { companyId: company.id, name, vertical, isDefault: true } });
     for (let i = 0; i < defs.length; i++) {
       const s = defs[i];
-      await prisma.pipelineStage.create({
-        data: { pipelineId: p.id, key: s.key, name: s.name, color: s.color, position: i, isWon: (s as { isWon?: boolean }).isWon ?? false },
+      const created = await prisma.pipelineStage.create({
+        data: {
+          pipelineId: p.id,
+          key: s.key,
+          name: s.name,
+          color: s.color,
+          position: i,
+          isWon: s.isWon ?? false,
+          // Solar stages carry their own SLA model: internally-owned stages get
+          // a hard deadline that escalates to the owning department role;
+          // externally-blocked stages get a follow-up cadence and NO deadline,
+          // because we do not control an AHJ's plan review queue.
+          stageType: s.stageType,
+          ownerRole: s.ownerRole,
+          targetDays: s.targetDays ?? 0,
+          escalationDays: s.escalationDays ?? 0,
+          followUpDays: s.followUpDays ?? 0,
+          isActionRequired: s.isActionRequired ?? false,
+          defaultBlocker: s.defaultBlocker ?? null,
+          // Escalations route to the owning role (see stage-alerts.ts); the
+          // legacy recipient setting stays off so nobody is double-notified.
+          notificationRecipient: "none",
+          sendInApp: true,
+          markOverdue: s.stageType === "internally_owned",
+        },
+      });
+      if (vertical === "solar") {
+        solarPipelineId = p.id;
+        solarStageByKey[s.key] = created.id;
+      }
+    }
+  }
+
+  // Solar assumptions. federalItcPct is left NULL on purpose: the 2025 federal
+  // rule changes are still settling, so the company's CPA sets it. Until then
+  // no credit figure is shown anywhere.
+  await prisma.solarSettings.create({
+    data: { companyId: company.id, federalItcPct: null, stateIncentiveNote: null },
+  });
+
+  // A small starter catalog so a rep can build a system on day one.
+  await prisma.solarEquipment.createMany({
+    data: [
+      { companyId: company.id, kind: "module", manufacturer: "Qcells", model: "Q.PEAK DUO BLK ML-G10+", ratingW: 400, costCents: 21000, priceCents: 0 },
+      { companyId: company.id, kind: "module", manufacturer: "REC", model: "Alpha Pure-R 430", ratingW: 430, costCents: 25000, priceCents: 0 },
+      { companyId: company.id, kind: "inverter", manufacturer: "Enphase", model: "IQ8+ Microinverter", ratingW: 290, costCents: 15000, priceCents: 0 },
+      { companyId: company.id, kind: "inverter", manufacturer: "SolarEdge", model: "SE7600H-US", ratingW: 7600, costCents: 130000, priceCents: 0 },
+      { companyId: company.id, kind: "battery", manufacturer: "Enphase", model: "IQ Battery 5P", ratingW: 5000, costCents: 480000, priceCents: 720000 },
+      { companyId: company.id, kind: "battery", manufacturer: "Tesla", model: "Powerwall 3", ratingW: 13500, costCents: 950000, priceCents: 1400000 },
+      // Adders, highest-margin first. The two crossover adders tie back to the
+      // Phase-3 re-roof / MPU branch rather than being silent line items.
+      { companyId: company.id, kind: "adder", model: "Full re-roof (under array)", costCents: 900000, priceCents: 1450000, rank: 1, crossoverKind: "reroof" },
+      { companyId: company.id, kind: "adder", model: "Main panel upgrade (200A)", costCents: 220000, priceCents: 385000, rank: 2, crossoverKind: "mpu" },
+      { companyId: company.id, kind: "adder", model: "Ground mount racking", costCents: 400000, priceCents: 650000, rank: 3 },
+      { companyId: company.id, kind: "adder", model: "EV charger (Level 2)", costCents: 65000, priceCents: 145000, rank: 4 },
+      { companyId: company.id, kind: "adder", model: "Trenching (per 50ft)", costCents: 90000, priceCents: 175000, rank: 5 },
+    ],
+  });
+
+  // A solar deal parked in an externally-blocked stage, never chased. This is
+  // the case the whole owned/blocked split exists for: 12 days waiting on the
+  // building department is NOT our team being late, but nobody following up IS.
+  if (solarPipelineId && solarStageByKey.permit_submitted) {
+    const solarLead = await prisma.lead.create({
+      data: {
+        companyId: company.id,
+        vertical: "solar",
+        firstName: "Priya",
+        lastName: "Raman",
+        email: "priya.raman@example.com",
+        phone: "(555) 404-1180",
+        address: "902 Solaris Way",
+        city: "Dallas",
+        state: "TX",
+        zip: "75204",
+        serviceType: "solar",
+        dealType: "cash",
+        value: 3150000,
+        pipelineId: solarPipelineId,
+        stageId: solarStageByKey.permit_submitted,
+        stageChangedAt: new Date(Date.now() - 12 * 86_400_000),
+        blockedBy: "ahj",
+        blockerNote: "Plan review round 1 submitted — awaiting comments.",
+        lastTouchAt: null, // never chased, so the cadence surfaces it
+        assignedRepId: users.rep.id,
+        createdById: users.rep.id,
+      },
+    });
+
+    // A real design + financing so the cockpit has something to show. Numbers
+    // are computed the same way the app computes them: 25 × 400W = 10 kW,
+    // 10 × 1450 × 0.84 = 12,180 kWh, against 14,000 kWh of usage = 87% offset.
+    const solarModule = await prisma.solarEquipment.findFirst({
+      where: { companyId: company.id, kind: "module", ratingW: 400 },
+      select: { id: true },
+    });
+    const solarInverter = await prisma.solarEquipment.findFirst({
+      where: { companyId: company.id, kind: "inverter" },
+      select: { id: true },
+    });
+    if (solarModule) {
+      await prisma.solarDesign.create({
+        data: {
+          companyId: company.id,
+          leadId: solarLead.id,
+          utilityProvider: "Oncor",
+          ratePlan: "Residential Standard",
+          netMeteringProgram: "Solar Buyback",
+          annualUsageKwh: 14000,
+          avgMonthlyBillCents: 21000,
+          mountType: "roof",
+          tsrfPct: 92,
+          moduleId: solarModule.id,
+          moduleQty: 25,
+          inverterId: solarInverter?.id ?? null,
+          systemSizeKwDc: 10,
+          systemSizeKwAc: 8.4,
+          year1ProductionKwh: 12180,
+          offsetPct: 87,
+        },
+      });
+      await prisma.solarFinance.create({
+        data: {
+          companyId: company.id,
+          leadId: solarLead.id,
+          product: "loan",
+          grossPpwCents: 350,
+          dealerFeePct: 18,
+          adderTotalCents: 385000, // the MPU adder
+          contractPriceCents: 3885000,
+          itcEstimateCents: 0, // no federal credit configured — see SolarSettings
+          aprPct: 6.99,
+          loanTermMonths: 300,
+          termYears: 25,
+        },
       });
     }
+
+    // Payment schedule — the one thing the cockpit needed that we did not
+    // previously capture. Commission tranches and financier draws both pay
+    // against project events, not on a fixed date.
+    await prisma.solarMilestone.createMany({
+      data: [
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 1, label: "M1", amountCents: 120000, trigger: "Contract signed", paidAt: new Date(Date.now() - 20 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 2, label: "M2", amountCents: 180000, trigger: "Install complete", expectedAt: new Date(Date.now() + 25 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 3, label: "M3", amountCents: 90000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 1, label: "1st payment", amountCents: 1260000, trigger: "NTP approved", paidAt: new Date(Date.now() - 14 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 2, label: "2nd payment", amountCents: 1575000, trigger: "Install complete", expectedAt: new Date(Date.now() + 25 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 3, label: "3rd payment", amountCents: 315000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
+      ],
+    });
+
+    await prisma.dealFeedPost.createMany({
+      data: [
+        { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "internal", body: "Plan set submitted to the city on the 18th. Round 1 review, nothing flagged yet.", authorId: users.manager.id },
+        { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "external", body: "Your permit is with the city. Typical review here runs 2-3 weeks — we will chase it weekly and let you know the moment it clears.", authorId: users.rep.id },
+        { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "customer", body: "Thanks — is there anything you need from me in the meantime?", authorId: null },
+      ],
+    });
   }
 
   // Commission rules
@@ -624,7 +767,7 @@ async function main() {
   const repTraining = await prisma.knowledgeCategory.create({
     data: {
       companyId: company.id,
-      industry: "roofing",
+      vertical: "roofing",
       name: "Sales Rep Training",
       description: "Scripts, objection handling, and onboarding for roofing consultants.",
       visibleRoles: ["sales_rep"],
@@ -663,7 +806,7 @@ async function main() {
   await prisma.knowledgeCategory.create({
     data: {
       companyId: company.id,
-      industry: "roofing",
+      vertical: "roofing",
       name: "Installer / Crew Training",
       description: "Safety, install standards, and photo documentation requirements.",
       visibleRoles: ["installer"],
@@ -690,7 +833,7 @@ async function main() {
   await prisma.knowledgeCategory.create({
     data: {
       companyId: company.id,
-      industry: "roofing",
+      vertical: "roofing",
       name: "Company-Wide",
       description: "Resources everyone on the team should know.",
       visibleRoles: ["sales_rep", "canvasser", "marketing", "installer", "accounting"],
@@ -729,7 +872,7 @@ async function main() {
   await prisma.scopeTemplateItem.createMany({
     data: scopeTemplate.map((t, i) => ({
       companyId: company.id,
-      industry: "roofing" as const,
+      vertical: "roofing" as const,
       position: i,
       category: t.category,
       description: t.description,
@@ -762,7 +905,7 @@ async function main() {
   });
   if (scopeLead) {
     const demoScope = await prisma.scopeOfWork.create({
-      data: { companyId: company.id, leadId: scopeLead.id, industry: "roofing" },
+      data: { companyId: company.id, leadId: scopeLead.id, vertical: "roofing" },
       select: { id: true },
     });
     await prisma.scopeLine.createMany({

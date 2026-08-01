@@ -2,6 +2,7 @@ import type { CashBidStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { brandingForCompany } from "@/server/branding/resolve";
 import { bidAmounts } from "./money";
+import { runUnscoped } from "@/server/vertical/context";
 
 export type CashBidRow = {
   id: string;
@@ -67,6 +68,13 @@ export type PublicCashBid = {
 
 /** The public one-page bid for the homeowner (token-gated, unauthenticated). */
 export async function getCashBidByToken(token: string): Promise<PublicCashBid | null> {
+  return runUnscoped(
+    "public token page: the unguessable token is the authorization and identifies exactly one row, whose vertical is not known until it is read",
+    () => loadCashBidByToken(token)
+  );
+}
+
+async function loadCashBidByToken(token: string): Promise<PublicCashBid | null> {
   const b = await prisma.cashBid.findUnique({ where: { token } });
   if (!b) return null;
   const lead = await prisma.lead.findUnique({

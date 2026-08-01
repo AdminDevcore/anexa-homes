@@ -16,8 +16,8 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
 
   const lead = await getLeadDetail(user, id);
   if (!lead) notFound();
-  // Stages from the deal's own industry pipeline.
-  const options = await getLeadFormOptions(user.companyId, lead.industry);
+  // Stages from the deal's own vertical pipeline.
+  const options = await getLeadFormOptions(user.companyId, lead.vertical);
 
   return (
     <div className="space-y-6">

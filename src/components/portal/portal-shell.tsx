@@ -15,6 +15,8 @@ import { CommandPalette } from "./command-palette";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
+import { WorkspaceSwitcher } from "./workspace-switcher";
+import { VERTICAL_ACCENT, type ActiveVertical } from "@/lib/vertical";
 
 export type ShellUser = {
   name: string;
@@ -26,11 +28,16 @@ export function PortalShell({
   user,
   allowedHrefs,
   branding,
+  vertical,
+  availableVerticals,
   children,
 }: {
   user: ShellUser;
   allowedHrefs: string[];
   branding: Branding;
+  /** Active workspace. Null when the multi-vertical experience is switched off. */
+  vertical: ActiveVertical | null;
+  availableVerticals: ActiveVertical[];
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -132,7 +139,7 @@ export function PortalShell({
           scroll inside their own container instead of pushing the page (and the
           header actions) past the viewport's right edge. */}
       <div className="flex min-w-0 flex-1 flex-col lg:pl-64">
-        <header className="dark sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e] px-4 text-foreground sm:px-6">
+        <header className="dark sticky top-0 z-30 flex h-16 relative items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e] px-4 text-foreground sm:px-6">
           <div className="flex items-center gap-3">
             {/* Mobile menu */}
             <Sheet>
@@ -158,12 +165,24 @@ export function PortalShell({
 
           <div className="flex items-center gap-3">
             <CommandPalette allowedHrefs={allowedHrefs} />
+            {vertical && (
+              <WorkspaceSwitcher active={vertical} available={availableVerticals} />
+            )}
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user.roleLabel}
             </span>
             <NotificationBell />
             <UserMenu name={user.name} email={user.email} roleLabel={user.roleLabel} />
           </div>
+          {/* Full-width accent strip in the active workspace's colour. Peripheral
+              but always in view, so nobody works a whole session in the wrong one. */}
+          {vertical && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5"
+              style={{ background: VERTICAL_ACCENT[vertical] }}
+            />
+          )}
         </header>
 
         <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">{children}</main>

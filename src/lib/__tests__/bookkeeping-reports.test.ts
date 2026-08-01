@@ -77,3 +77,56 @@ describe("resolvePeriod", () => {
     expect(r.asOfLabel).toBe("As of Jun 30, 2025");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 1 acceptance: the company P&L segments by vertical AND reconciles to
+// the consolidated total. One legal entity, one ledger, reported by department.
+// ---------------------------------------------------------------------------
+describe("P&L segments by vertical and reconciles", () => {
+  const txns = [
+    { date: "2026-03-01", amountCents: 100_00, categoryName: "Job revenue", vertical: "roofing" },
+    { date: "2026-03-02", amountCents: -40_00, categoryName: "Materials", vertical: "roofing" },
+    { date: "2026-03-03", amountCents: 250_00, categoryName: "Job revenue", vertical: "solar" },
+    { date: "2026-03-04", amountCents: -90_00, categoryName: "Equipment", vertical: "solar" },
+    // Company-level: belongs to no vertical (office rent).
+    { date: "2026-03-05", amountCents: -30_00, categoryName: "Rent", vertical: null },
+  ];
+
+  it("breaks out each department", () => {
+    const { pnl } = computeReports(txns);
+    const by = Object.fromEntries(pnl.segments.map((s) => [s.vertical, s]));
+
+    expect(by.roofing).toMatchObject({ totalIncome: 100_00, totalExpense: 40_00, netProfit: 60_00 });
+    expect(by.solar).toMatchObject({ totalIncome: 250_00, totalExpense: 90_00, netProfit: 160_00 });
+    expect(by.unassigned).toMatchObject({ totalIncome: 0, totalExpense: 30_00, netProfit: -30_00 });
+  });
+
+  it("segments sum exactly to the consolidated totals", () => {
+    const { pnl } = computeReports(txns);
+    const sum = (f: "totalIncome" | "totalExpense" | "netProfit") =>
+      pnl.segments.reduce((n, s) => n + s[f], 0);
+
+    expect(sum("totalIncome")).toBe(pnl.totalIncome);
+    expect(sum("totalExpense")).toBe(pnl.totalExpense);
+    expect(sum("netProfit")).toBe(pnl.netProfit);
+    // …and the consolidated figure is still the whole company.
+    expect(pnl.netProfit).toBe(190_00);
+  });
+
+  it("reconciles when every row is roofing (today's live state)", () => {
+    const roofingOnly = txns.filter((t) => t.vertical === "roofing");
+    const { pnl } = computeReports(roofingOnly);
+    expect(pnl.segments).toHaveLength(1);
+    expect(pnl.segments[0].netProfit).toBe(pnl.netProfit);
+  });
+
+  it("respects the period filter per segment", () => {
+    const { pnl } = computeReports(txns, {
+      startMs: Date.parse("2026-03-03"),
+      endMs: Date.parse("2026-03-04"),
+    });
+    expect(pnl.segments).toHaveLength(1);
+    expect(pnl.segments[0]).toMatchObject({ vertical: "solar", netProfit: 160_00 });
+    expect(pnl.segments[0].netProfit).toBe(pnl.netProfit);
+  });
+});

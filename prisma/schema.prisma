@@ -185,6 +185,12 @@ enum CommissionType {
   percentage
   flat
   job_cost
+  /// Dollars per watt of system size. The standard solar rep comp basis for
+  /// cash and loan deals.
+  ppw
+  /// Percentage of margin, net of dealer fee and adders — what the company
+  /// actually keeps, not the sticker price.
+  margin
 }
 
 enum CommissionStatus {
@@ -239,12 +245,48 @@ enum ServiceType {
   other
 }
 
-// Isolated portal workspaces. Each is a separate process/structure; users can be
-// granted access to one or more, and switch between the ones they can access.
-enum Industry {
+/// An isolated line of business inside one company: its own deals, pipeline,
+/// config, templates, catalog and reports. Users are granted one or more and
+/// switch between them.
+///
+/// PHYSICALLY this type is still `Industry` in Postgres and every column using
+/// it is still named `industry` (see the @map on each field). The rename to
+/// "vertical" is code-level only and emits NO DDL, so it never has to be
+/// sequenced against a deploy of the live box.
+///
+/// `others` is retired from the pre-2026-07 three-workspace build. It is kept so
+/// historical rows keep validating, but it is excluded from VERTICALS in
+/// src/lib/vertical.ts and can never be selected, switched to, or written.
+/// Adding a third vertical = add a value here + a seed. Nothing else.
+/// How a pipeline stage ages.
+///
+/// The distinction is the difference between a backlog you can act on and a
+/// wall of red that everyone learns to ignore. We control when an internally
+/// owned stage completes, so it gets a hard deadline. We do NOT control an
+/// AHJ's plan review or a utility's PTO queue, so those get a follow-up cadence
+/// instead — the question is "when did WE last chase this?", never "why is our
+/// team late?".
+enum StageType {
+  internally_owned
+  externally_blocked
+}
+
+/// Who a deal is actually waiting on. Drives the follow-up cadence and the
+/// aging report — this one field is what makes the backlog actionable.
+enum BlockerParty {
+  us
+  ahj // authority having jurisdiction (building dept / plan review)
+  utility
+  customer
+  lender
+}
+
+enum Vertical {
   roofing
   solar
   others
+
+  @@map("Industry")
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +359,14 @@ model Company {
   welcomeCallTemplates  WelcomeCallTemplate[]
   welcomeCallSessions   WelcomeCallSession[]
   reviews               Review[]
+  solarSettings         SolarSettings?
+  solarEquipment        SolarEquipment[]
+  solarDesigns          SolarDesign[]
+  solarFinance          SolarFinance[]
+  creditApplications    CreditApplication[]
+  solarProposals        SolarProposal[]
+  solarMilestones       SolarMilestone[]
+  dealFeedPosts         DealFeedPost[]
 
   @@map("companies")
 }
@@ -367,6 +417,18 @@ model CompanySettings {
   stormCenterLat          Float?
   stormCenterLng          Float?
   stormRadiusMiles        Int?
+  // ── Isolation boundary levers (stubs; both default to shared) ─────────────
+  // Anexa is one legal entity: one employee roster, one general ledger. Books
+  // and team are therefore SHARED but SEGMENTED — every transaction, commission
+  // and job carries its vertical so the P&L breaks out by department and still
+  // reconciles to the company total.
+  //
+  // These two switches are the documented extension point for splitting them
+  // fully later (separate ledgers / separate rosters per vertical). Turning
+  // either on means promoting the TAGGED models in src/server/vertical/models.ts
+  // to SCOPED; nothing reads them yet, by design.
+  isolateBooks            Boolean  @default(false)
+  isolateTeam             Boolean  @default(false)
   updatedAt               DateTime @updatedAt
 
   @@map("company_settings")
@@ -400,9 +462,10 @@ model User {
   // Rep's share (%) of the customer-paid deductible on their deals (separate from
   // the profit-pool split). null/0 = this rep doesn't get the deductible.
   deductiblePct         Float?
-  // Industries this user may access + switch between. Defaults to all three; the
-  // super admin can restrict a user (e.g. an installer locked to roofing only).
-  industries            Industry[] @default([roofing, solar, others])
+  // Verticals this user may open and switch between. New users start in Roofing
+  // only; the super admin grants Solar explicitly. Retired values on existing
+  // rows are filtered out by allowedVerticals() and can never surface.
+  verticals             Vertical[] @default([roofing]) @map("industries")
   // For canvassers: the sales rep they're assigned to. Their knocks, leads, and
   // appointments auto-assign to (and are visible by) this rep.
   salesRepId            String?
@@ -450,6 +513,7 @@ model User {
   onboarding           UserOnboarding?
   proposalsCreated     Proposal[]           @relation("ProposalCreatedBy")
   reviewsApproved      Review[]             @relation("ReviewApprover")
+  feedPosts            DealFeedPost[]       @relation("FeedAuthor")
 
   @@unique([companyId, email])
   @@unique([companyId, employeeNo])
@@ -498,6 +562,8 @@ model LeadSource {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   name      String
   position  Int      @default(0)
   active    Boolean  @default(true)
@@ -505,7 +571,8 @@ model LeadSource {
 
   leads Lead[]
 
-  @@unique([companyId, name])
+  // Roofing and Solar each keep their own sources ("Door Knock", "Referral"…).
+  @@unique([companyId, vertical, name])
   @@map("lead_sources")
 }
 
@@ -514,15 +581,16 @@ model Pipeline {
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name      String
-  industry  Industry @default(roofing) // each industry has its own pipeline + stages
+  vertical  Vertical @default(roofing) @map("industry") // each vertical has its own pipeline + stages
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
 
   stages PipelineStage[]
   leads  Lead[]
 
-  @@unique([companyId, name])
-  @@index([companyId, industry])
+  // Roofing and Solar may each have a pipeline of the same name.
+  @@unique([companyId, vertical, name])
+  @@index([companyId, vertical], map: "pipelines_companyId_industry_idx")
   @@map("pipelines")
 }
 
@@ -536,7 +604,24 @@ model PipelineStage {
   color      String   @default("#A1A1AA")
   isWon      Boolean  @default(false)
   isLost     Boolean  @default(false)
+  /// Whether we control completion (hard SLA) or are waiting on someone else
+  /// (follow-up cadence). See StageType.
+  stageType             StageType @default(internally_owned)
+  /// The DEPARTMENT ROLE that owns this stage's work — a key from
+  /// STAGE_OWNERS in src/lib/solar-pipeline.ts, never a named person, so work
+  /// keeps routing correctly as staff change.
+  ownerRole             String?
+  /// externally_blocked only: chase every N days. 0 = no cadence.
+  followUpDays          Int     @default(0)
+  /// True for "action required" sub-states (redlines, corrections) — the ball is
+  /// in someone's court and the deal cannot advance until it is cleared.
+  isActionRequired      Boolean @default(false)
+  /// Who a deal landing here is waiting on by default. Copied onto the deal on
+  /// entry; a coordinator can override per deal.
+  defaultBlocker        BlockerParty?
   // SLA / stage-duration tracking. targetDays 0 = no tracking on this stage.
+  // internally_owned only — an externally_blocked stage must never carry a
+  // completion deadline.
   targetDays            Int     @default(0)
   escalationDays        Int     @default(0)
   notificationRecipient String  @default("none") // none | assigned_user | team_manager | project_owner | department_manager | everyone
@@ -581,8 +666,8 @@ model Lead {
   stage      PipelineStage? @relation(fields: [stageId], references: [id])
   position   Int            @default(0) // order within stage column
 
-  // Which isolated industry workspace this deal belongs to (Roofing/Solar/Water).
-  industry    Industry    @default(roofing)
+  // Which isolated vertical workspace this deal belongs to (Roofing / Solar).
+  vertical    Vertical    @default(roofing) @map("industry")
   status      LeadStatus  @default(open)
   serviceType ServiceType @default(roofing)
   // Cash (out-of-pocket / financing) vs insurance (filed claim). Drives whether the
@@ -629,9 +714,35 @@ model Lead {
   stageChangedAt DateTime?
   // SLA tracking: which alerts have fired this stage (0 none, 1 target, 2 escalation),
   // reset to 0 on every stage move. stageOverdue is set by the alert job when a stage
-  // with markOverdue is exceeded.
+  // with markOverdue is exceeded. Both apply to internally_owned stages only.
   stageAlertLevel Int     @default(0)
   stageOverdue    Boolean @default(false)
+
+  // ── Externally-blocked tracking ─────────────────────────────────────────
+  /// Who this deal is waiting on right now. Seeded from the stage's
+  /// defaultBlocker on entry; a coordinator can correct it per deal.
+  blockedBy       BlockerParty?
+  /// What exactly we are waiting for ("plan review round 2", "meter spot").
+  blockerNote     String?
+  /// When WE last chased the blocker. This — not time-in-stage — is what the
+  /// follow-up cadence measures, so a utility's queue never reads as our delay.
+  lastTouchAt     DateTime?
+  /// When the chase reminder last fired, so the cadence repeats instead of
+  /// firing once and going quiet.
+  lastChaseAlertAt DateTime?
+
+  // ── Solar → Roofing crossover ───────────────────────────────────────────
+  /// Flagged at site survey / design: the roof must be replaced before install.
+  /// The highest-margin cross-sell we have — surfaced as its own card on the
+  /// deal, never buried in a note.
+  needsReroof     Boolean @default(false)
+  /// Flagged at site survey / design: main panel upgrade or derate required.
+  needsMpu        Boolean @default(false)
+  /// The deal in the OTHER vertical for the same property/contact (a solar deal
+  /// pointing at its re-roof job, or vice versa). One relationship, two jobs.
+  linkedDealId    String?
+  linkedDeal      Lead?   @relation("DealCrossover", fields: [linkedDealId], references: [id], onDelete: SetNull)
+  linkedFromDeals Lead[]  @relation("DealCrossover")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -649,11 +760,17 @@ model Lead {
   scope            ScopeOfWork?
   proposals        Proposal[]
   welcomeCalls     WelcomeCallSession[]
+  solarDesign      SolarDesign?
+  solarFinance     SolarFinance?
+  creditApplications CreditApplication[]
+  solarProposals   SolarProposal[]
+  solarMilestones  SolarMilestone[]
+  feedPosts        DealFeedPost[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
   @@index([companyId, status])
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "leads_companyId_industry_idx")
   @@map("leads")
 }
 
@@ -661,6 +778,8 @@ model Project {
   id        String  @id @default(uuid())
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical            Vertical @default(roofing)
   leadId    String  @unique
   lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
@@ -731,6 +850,7 @@ model Project {
   @@unique([companyId, projectNumber])
   @@index([companyId, status])
   @@index([companyId, managerId])
+  @@index([companyId, vertical])
   @@map("projects")
 }
 
@@ -745,6 +865,10 @@ enum ProjectCostType {
 model ProjectCost {
   id          String          @id @default(uuid())
   companyId   String // scalar tenancy key
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical    Vertical?
   projectId   String
   project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   type        ProjectCostType @default(material)
@@ -767,6 +891,8 @@ model Claim {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical                Vertical @default(roofing)
   leadId    String
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   projectId String?
@@ -942,8 +1068,8 @@ model Task {
   description     String?
   status          TaskStatus @default(todo)
   priority        Priority   @default(medium)
-  // Industry workspace this task belongs to (isolates Roofing / Solar / Water tasks).
-  industry        Industry   @default(roofing)
+  // Vertical workspace this task belongs to (isolates Roofing / Solar tasks).
+  vertical        Vertical   @default(roofing) @map("industry")
   dueAt           DateTime?
   leadId          String?
   lead            Lead?      @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -962,7 +1088,7 @@ model Task {
 
   @@index([companyId, assigneeId, status])
   @@index([companyId, createdById])
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "tasks_companyId_industry_idx")
   @@map("tasks")
 }
 
@@ -1036,6 +1162,8 @@ model PhotoTemplate {
   id        String            @id @default(uuid())
   companyId String
   company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   name      String
   kind      PhotoTemplateKind
   position  Int               @default(0)
@@ -1066,6 +1194,8 @@ model CustomFieldDef {
   id        String            @id @default(uuid())
   companyId String
   company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   entity    CustomFieldEntity
   key       String
   label     String
@@ -1075,7 +1205,7 @@ model CustomFieldDef {
   position  Int               @default(0)
   createdAt DateTime          @default(now())
 
-  @@unique([companyId, entity, key])
+  @@unique([companyId, vertical, entity, key])
   @@map("custom_field_defs")
 }
 
@@ -1110,8 +1240,8 @@ model DocumentTemplate {
   company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name         String
   type         DocumentTemplateType @default(custom)
-  // Industry workspace this contract template belongs to (each workspace has its own set).
-  industry     Industry             @default(roofing)
+  // Vertical workspace this contract template belongs to (each has its own set).
+  vertical     Vertical             @default(roofing) @map("industry")
   description  String?
   // Page model: array of { width, height } in PDF points. Default = US Letter pages.
   pages        Json                 @default("[]")
@@ -1127,7 +1257,7 @@ model DocumentTemplate {
   packages DocumentPackage[]
 
   @@index([companyId, type])
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "document_templates_companyId_industry_idx")
   @@map("document_templates")
 }
 
@@ -1158,6 +1288,8 @@ model DocumentPackage {
   id           String                @id @default(uuid())
   companyId    String
   company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical     Vertical @default(roofing)
   templateId   String?
   template     DocumentTemplate?     @relation(fields: [templateId], references: [id])
   leadId       String?
@@ -1184,6 +1316,7 @@ model DocumentPackage {
 
   @@index([companyId, status])
   @@index([companyId, projectId])
+  @@index([companyId, vertical])
   @@map("document_packages")
 }
 
@@ -1263,6 +1396,8 @@ model CommissionRule {
   id          String         @id @default(uuid())
   companyId   String
   company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical    Vertical @default(roofing)
   name        String
   // Commission category this rule pays out to. Not a user Role — it includes
   // "project_manager" (the project's assigned manager via Project.managerId).
@@ -1287,6 +1422,10 @@ model Commission {
   id             String              @id @default(uuid())
   companyId      String
   company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical       Vertical?
   projectId      String
   project        Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId         String
@@ -1324,6 +1463,13 @@ model Commission {
 // Person-to-person override: `beneficiary` earns a % of contract (or a flat
 // amount) on every deal whose assigned rep is `source`. E.g. a manager earning
 // 3% on a rep's deals, or a senior rep earning $500/deal off a junior rep.
+//
+// Deliberately NOT registered in src/server/vertical/models.ts. Roofing and
+// Solar pay differently, so the rate is per vertical (see `vertical` below) —
+// but the Team page is a shared roster screen that must show a person's whole
+// override sheet, both sides at once. Scoping the model would hide half of it
+// from whichever workspace the admin happened to be standing in. The vertical
+// is carried as data and matched against the deal's own vertical at payout.
 model CommissionOverride {
   id            String         @id @default(uuid())
   companyId     String
@@ -1332,6 +1478,10 @@ model CommissionOverride {
   beneficiary   User           @relation("OverrideBeneficiary", fields: [beneficiaryId], references: [id], onDelete: Cascade)
   sourceId      String // whose deals trigger it (the assigned rep)
   source        User           @relation("OverrideSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  /// Which side of the business this rate applies to. A rep working both
+  /// verticals gets one row per vertical, each with its own type and amount —
+  /// an override never pays across the workspace it was written for.
+  vertical      Vertical       @default(roofing)
   type          CommissionType @default(percentage) // percentage (of contract) | flat
   percent       Float          @default(0)
   flatAmount    Int            @default(0) // cents per deal
@@ -1340,8 +1490,8 @@ model CommissionOverride {
 
   commissions Commission[]
 
-  @@unique([companyId, beneficiaryId, sourceId])
-  @@index([companyId, sourceId])
+  @@unique([companyId, beneficiaryId, sourceId, vertical])
+  @@index([companyId, sourceId, vertical])
   @@map("commission_overrides")
 }
 
@@ -1389,6 +1539,10 @@ model Invoice {
   id            String        @id @default(uuid())
   companyId     String
   company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical      Vertical?
   projectId     String
   project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   invoiceNumber String
@@ -1413,6 +1567,8 @@ model NotificationRule {
   id            String            @id @default(uuid())
   companyId     String
   company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   event         NotificationEvent
   // Event-specific match conditions, e.g. { "stageId": "..." } or { "status": "in_production" }.
@@ -1531,6 +1687,8 @@ model Territory {
   id            String   @id @default(uuid())
   companyId     String
   company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   color         String   @default("#F4631E")
   polygon       Json // array of [lat, lng] pairs
@@ -1567,6 +1725,8 @@ model Knock {
   id                  String           @id @default(uuid())
   companyId           String
   company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical            Vertical @default(roofing)
   repId               String?
   rep                 User?            @relation("KnockRep", fields: [repId], references: [id], onDelete: SetNull)
   territoryId         String?
@@ -1658,6 +1818,8 @@ model RoofReport {
   id               String   @id @default(uuid())
   companyId        String
   company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical         Vertical @default(roofing)
   leadId           String   @unique
   lead             Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   facets           Json // [{ id, points:[[lat,lng]], pitch, edgeTypes:[] }]
@@ -1737,6 +1899,10 @@ model Transaction {
   id            String               @id @default(uuid())
   companyId     String
   company       Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every row is tagged so the P&L, commissions and
+  /// reports break out by department. Null = genuinely company-level.
+  vertical      Vertical?
   date          DateTime
   description   String
   // Signed cents: positive = money in (income/deposit), negative = money out (expense).
@@ -1851,7 +2017,7 @@ model KnowledgeCategory {
   id           String          @id @default(uuid())
   companyId    String
   company      Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  industry     Industry        @default(roofing)
+  vertical     Vertical        @default(roofing) @map("industry")
   name         String
   description  String?
   position     Int             @default(0)
@@ -1862,7 +2028,7 @@ model KnowledgeCategory {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "knowledge_categories_companyId_industry_idx")
   @@map("knowledge_categories")
 }
 
@@ -1896,7 +2062,7 @@ model ScopeOfWork {
   company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
   leadId    String      @unique
   lead      Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  industry  Industry    @default(roofing)
+  vertical  Vertical    @default(roofing) @map("industry")
   pdfFileId String? // uploaded carrier scope PDF (FileAsset id, plain column)
   notes     String?
   // Public-adjuster fee, as a % of the supplement amount recovered (default 10%).
@@ -1951,7 +2117,7 @@ model ScopeTemplateItem {
   id                        String   @id @default(uuid())
   companyId                 String
   company                   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  industry                  Industry @default(roofing)
+  vertical                  Vertical @default(roofing) @map("industry")
   position                  Int      @default(0)
   category                  String   @default("General")
   description               String   @default("")
@@ -1962,7 +2128,7 @@ model ScopeTemplateItem {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
-  @@index([companyId, industry])
+  @@index([companyId, vertical], map: "scope_template_items_companyId_industry_idx")
   @@map("scope_template_items")
 }
 
@@ -1974,6 +2140,8 @@ model ScopeCatalogItem {
   id                    String   @id @default(uuid())
   companyId             String
   company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical              Vertical @default(roofing)
   position              Int      @default(0)
   category              String   @default("General")
   subcategory           String   @default("")
@@ -2005,6 +2173,8 @@ model ScopeCostTemplate {
   id            String                  @id @default(uuid())
   companyId     String
   company       Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   description   String?
   effectiveDate DateTime                @default(now())
@@ -2037,6 +2207,8 @@ model ScopeSupplementTemplate {
   id            String                        @id @default(uuid())
   companyId     String
   company       Company                       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical      Vertical @default(roofing)
   name          String
   description   String?
   effectiveDate DateTime                      @default(now())
@@ -2081,6 +2253,8 @@ model Proposal {
   id              String         @id @default(cuid())
   companyId       String
   company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical        Vertical @default(roofing)
   leadId          String
   lead            Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
   projectId       String? // set if production has started
@@ -2151,6 +2325,8 @@ model WelcomeCallTemplate {
   id        String   @id @default(uuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
   name      String
   // welcome (post-sale) vs completion (post-install) — both are confirmation scripts.
   kind      CallKind @default(welcome)
@@ -2387,6 +2563,8 @@ enum CashBidStatus {
 model CashBid {
   id              String        @id @default(uuid())
   companyId       String
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical        Vertical @default(roofing)
   leadId          String
   token           String        @unique @default(uuid())
   createdById     String?
@@ -2415,4 +2593,426 @@ model CashBid {
 
   @@index([companyId, leadId])
   @@map("cash_bids")
+}
+
+// ---------------------------------------------------------------------------
+// Solar domain
+//
+// Everything below is solar-only. Roofing never creates these rows and never
+// renders them; the roofing-only concepts (Claim, RoofReport, the insurance
+// scope) are HIDDEN for solar deals rather than dropped, because those tables
+// hold live roofing money.
+// ---------------------------------------------------------------------------
+
+/// The four financing products. They are NOT variations of one model — they
+/// price differently, they carry different fields, and they pay commission on
+/// different bases. Treating them as one is how a lease gets quoted with a
+/// loan's dealer fee.
+enum FinanceProduct {
+  /// Customer pays cash. No dealer fee. Priced on system price / PPW.
+  cash
+  /// Financed purchase. A dealer fee is embedded in the GROSS price; net PPW is
+  /// gross minus that fee. Commission on PPW or margin.
+  loan
+  /// Third party owns the system; customer pays a fixed monthly with an annual
+  /// escalator. There is no system price in the cash/loan sense.
+  lease
+  /// Third party owns the system; customer pays per kWh produced, with an
+  /// annual escalator.
+  ppa
+}
+
+enum CreditStatus {
+  not_submitted
+  submitted
+  approved
+  /// Approved subject to stipulations that must be cleared before NTP.
+  conditional
+  declined
+  expired
+}
+
+enum MountType {
+  roof
+  ground
+}
+
+/// Catalog item kinds. Adders are rank-ordered so a rep sees them in the order
+/// the company wants them sold.
+enum SolarEquipmentKind {
+  module
+  inverter
+  battery
+  adder
+}
+
+/// Per-company Solar assumptions. Deliberately DATA, not code.
+///
+/// The federal residential-solar credit changed in 2025 and is still moving, so
+/// the percentage lives here for the company's CPA to set and change without a
+/// deploy. Everything it produces is an ESTIMATE and is labelled as one.
+model SolarSettings {
+  id        String  @id @default(uuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // ── Production assumptions ──────────────────────────────────────────────
+  /// System losses (soiling, wiring, inverter, mismatch). 0.84 = 16% loss.
+  derateFactor          Float @default(0.84)
+  /// Annual production loss from panel ageing, for the 25-year model.
+  annualDegradationPct  Float @default(0.5)
+  /// Assumed annual utility rate rise, for the savings comparison.
+  utilityEscalationPct  Float @default(3.5)
+  /// kWh produced per kW-DC per year in this market. Set from local irradiance.
+  kwhPerKwYear          Int   @default(1450)
+
+  // ── Pricing defaults ────────────────────────────────────────────────────
+  /// Default gross price per watt, in cents (e.g. 350 = $3.50/W).
+  defaultGrossPpwCents  Int   @default(350)
+  /// Lender dealer fee as a % of gross. Applies to LOAN only — cash has none.
+  defaultDealerFeePct   Float @default(18)
+
+  // ── Incentives ──────────────────────────────────────────────────────────
+  /// Federal credit %, as an ESTIMATE. NOT hardcoded anywhere in code: the
+  /// rules changed in 2025 and are still in flux, so this is set by the
+  /// company's CPA. Null = do not show a federal credit at all.
+  federalItcPct         Float?
+  /// Free-text state/local incentive summary shown on the proposal.
+  stateIncentiveNote    String?
+  /// The disclaimer rendered anywhere an incentive figure appears. Seeded with
+  /// the standard not-a-guarantee wording; editable per company.
+  incentiveDisclaimer   String @default("Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.")
+
+  // ── Validation bounds ───────────────────────────────────────────────────
+  // A rep must not be able to generate a physically impossible proposal.
+  // These are the guard rails; see src/lib/solar-validation.ts.
+  minOffsetPct          Float @default(0)
+  maxOffsetPct          Float @default(150)
+  minPpwCents           Int   @default(150)
+  maxPpwCents           Int   @default(800)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("solar_settings")
+}
+
+/// Equipment and adders a rep can pick from. Prices live here so a proposal is
+/// built from the catalog rather than typed in free-hand.
+model SolarEquipment {
+  id        String             @id @default(uuid())
+  companyId String
+  company   Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical           @default(solar)
+  kind      SolarEquipmentKind
+  manufacturer String?
+  model     String
+  /// Modules: watts per panel. Inverters: rated output W. Batteries: usable Wh.
+  ratingW   Int?
+  /// Unit cost to us, cents.
+  costCents Int                @default(0)
+  /// What the customer pays, cents. For adders this is the adder price.
+  priceCents Int               @default(0)
+  /// Adders only: display order, so the highest-margin ones lead.
+  rank      Int                @default(0)
+  /// Adders only: ties an adder to the Phase-3 crossover so picking "Re-roof"
+  /// or "MPU" on a design raises the flag on the deal rather than quietly
+  /// becoming a line item. One of: "reroof" | "mpu" | null.
+  crossoverKind String?
+  specs     Json               @default("{}")
+  isActive  Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  designsAsModule   SolarDesign[] @relation("DesignModule")
+  designsAsInverter SolarDesign[] @relation("DesignInverter")
+  designsAsBattery  SolarDesign[] @relation("DesignBattery")
+
+  @@index([companyId, kind, isActive])
+  @@map("solar_equipment")
+}
+
+/// The engineering truth for one solar deal: what the utility bill says, what
+/// the roof looks like, and what we are going to build.
+model SolarDesign {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String  @unique
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  // ── Utility & usage ─────────────────────────────────────────────────────
+  utilityProvider    String?
+  ratePlan           String?
+  utilityAccountNo   String?
+  meterNo            String?
+  /// Net metering / buyback programme name.
+  netMeteringProgram String?
+  /// 12 monthly kWh readings, Jan..Dec. The basis for offset — a design that
+  /// does not track usage is the thing validation rejects.
+  monthlyUsageKwh    Json    @default("[]")
+  annualUsageKwh     Int?
+  avgMonthlyBillCents Int?
+
+  // ── Site ────────────────────────────────────────────────────────────────
+  mountType        MountType @default(roof)
+  /// [{ name, azimuth, tilt, moduleCount, shadingPct }]
+  roofPlanes       Json      @default("[]")
+  /// Total Solar Resource Fraction, %. Below ~75 is a shading problem.
+  tsrfPct          Float?
+  setbackNotes     String?
+  structuralNotes  String?
+  electricalNotes  String?
+
+  // ── System ──────────────────────────────────────────────────────────────
+  moduleId       String?
+  module         SolarEquipment? @relation("DesignModule", fields: [moduleId], references: [id], onDelete: SetNull)
+  moduleQty      Int             @default(0)
+  inverterId     String?
+  inverter       SolarEquipment? @relation("DesignInverter", fields: [inverterId], references: [id], onDelete: SetNull)
+  batteryId      String?
+  battery        SolarEquipment? @relation("DesignBattery", fields: [batteryId], references: [id], onDelete: SetNull)
+  batteryQty     Int             @default(0)
+  systemSizeKwDc Float           @default(0)
+  systemSizeKwAc Float           @default(0)
+  year1ProductionKwh Int         @default(0)
+  offsetPct      Float           @default(0)
+
+  // ── Plan-set artifacts (FileAsset ids, plain columns) ───────────────────
+  planSetFileId    String?
+  singleLineFileId String?
+  loadCalcFileId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, vertical])
+  @@map("solar_designs")
+}
+
+/// The money for one solar deal. Which columns matter depends entirely on
+/// `product` — see FinanceProduct. Cash/loan use the PPW block; lease/PPA use
+/// the rate block. They are never mixed.
+model SolarFinance {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String  @unique
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  product FinanceProduct @default(cash)
+
+  // ── Cash / Loan ─────────────────────────────────────────────────────────
+  /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
+  grossPpwCents  Int   @default(0)
+  /// Lender fee as a % of gross. Zero for cash by definition.
+  dealerFeePct   Float @default(0)
+  /// Sum of selected adders, cents.
+  adderTotalCents Int  @default(0)
+  /// Final contract price, cents.
+  contractPriceCents Int @default(0)
+  /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
+  itcEstimateCents Int @default(0)
+
+  // ── Lease / PPA ─────────────────────────────────────────────────────────
+  /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
+  rateMillsPerKwh Int?
+  /// Lease only: fixed monthly payment, cents.
+  monthlyPaymentCents Int?
+  /// Annual payment/rate increase, %. Applies to lease and PPA.
+  escalatorPct   Float?
+  termYears      Int?
+
+  // ── Loan terms (from the approved credit application) ────────────────────
+  aprPct         Float?
+  loanTermMonths Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, vertical])
+  @@map("solar_finance")
+}
+
+/// One submission to one lender. A deal can have several (declined by one,
+/// approved by another), so this is not 1:1.
+model CreditApplication {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  lender        String
+  status        CreditStatus @default(not_submitted)
+  /// The lender's own application id — the key the webhook matches on.
+  externalId    String?
+  amountCents   Int          @default(0)
+  termMonths    Int?
+  aprPct        Float?
+  dealerFeePct  Float?
+  /// Conditions that must be cleared before NTP, e.g. proof of income.
+  stipulations  Json         @default("[]")
+  submittedAt   DateTime?
+  decidedAt     DateTime?
+  expiresAt     DateTime?
+  notes         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, lender, externalId])
+  @@index([companyId, leadId])
+  @@index([companyId, status])
+  @@map("credit_applications")
+}
+
+/// A versioned, customer-facing solar proposal.
+///
+/// The snapshot is the point. Every figure the homeowner sees is FROZEN at
+/// generation time — the assumptions, the design, the money, all of it. When
+/// the CPA changes the ITC percentage next month, a proposal already sent must
+/// still show what that customer was shown, or the document is worthless as a
+/// record of what was offered.
+///
+/// Versions are never overwritten: regenerating supersedes and keeps the old
+/// one, so the trail of what was offered and when survives intact.
+model SolarProposal {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  version   Int
+  status    ProposalStatus @default(draft)
+  /// Unguessable public token = the shareable customer link (/proposal/[token]).
+  publicToken String @unique
+
+  /// The frozen document. See SolarProposalSnapshot in src/lib/solar-proposal.ts.
+  snapshot  Json
+
+  /// Set when a newer version replaces this one.
+  supersededAt DateTime?
+  /// The e-sign envelope, once sent for signature.
+  documentPackageId String?
+
+  createdById String?
+  sentAt      DateTime?
+  viewedAt    DateTime?
+  signedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  events SolarProposalEvent[]
+
+  @@unique([leadId, version])
+  @@index([companyId, leadId])
+  @@map("solar_proposals")
+}
+
+/// Append-only audit trail for a proposal: who did what, when, from where.
+model SolarProposalEvent {
+  id         String        @id @default(uuid())
+  proposalId String
+  proposal   SolarProposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  /// generated | sent | viewed | signed | superseded
+  type       String
+  actorId    String?
+  actorName  String?
+  ip         String?
+  detail     String?
+  createdAt  DateTime      @default(now())
+
+  @@index([proposalId, createdAt])
+  @@map("solar_proposal_events")
+}
+
+/// Who a milestone pays.
+enum MilestonePayee {
+  /// M1 / M2 / M3 — the rep's commission tranches.
+  rep
+  /// 1st / 2nd / 3rd — the financier's payments to us.
+  financier
+}
+
+/// A scheduled payment on a solar deal.
+///
+/// NEW DATA — this was not captured before. The pricing breakdown on the deal
+/// (base PPW, adders, dealer fee, final PPW) is all derived from figures we
+/// already store, but *when the money actually arrives* was not modelled
+/// anywhere: commission tranches and financier draws both pay out against
+/// milestones (contract, install, PTO), and that schedule is what a rep and a
+/// controller actually want to see on the deal.
+model SolarMilestone {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  payee     MilestonePayee
+  /// 1, 2, 3 — M1/M2/M3 for the rep, 1st/2nd/3rd for the financier.
+  sequence  Int
+  label     String
+  amountCents Int      @default(0)
+  /// What has to happen for this to pay (e.g. "Install complete").
+  trigger   String?
+  expectedAt DateTime?
+  paidAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([leadId, payee, sequence])
+  @@index([companyId, leadId])
+  @@map("solar_milestones")
+}
+
+/// Which audience a feed post is for.
+enum FeedChannel {
+  /// Visible to the customer in their portal.
+  external
+  /// Staff only — never shown to the homeowner.
+  internal
+  /// Written by, or addressed to, the homeowner.
+  customer
+}
+
+/// A post on a deal's activity feed.
+///
+/// NEW DATA. ActivityLog already records SYSTEM events, but it has no audience
+/// and no way to address a colleague — so a coordinator asking "did anyone
+/// chase the utility?" had nowhere to put it. Posts carry a channel so internal
+/// chatter can never leak to the homeowner, and @mentions notify by email.
+model DealFeedPost {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(roofing)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  channel   FeedChannel @default(internal)
+  body      String      @db.Text
+  authorId  String?
+  author    User?       @relation("FeedAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  /// User ids extracted from @mentions, notified on create.
+  mentions  String[]
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, leadId, createdAt])
+  @@map("deal_feed_posts")
 }

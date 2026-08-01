@@ -6,7 +6,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
 import { CommissionRowActions, CommissionsToolbar } from "@/components/portal/commission-actions";
 import { ListFilter } from "@/components/portal/list-filter";
@@ -29,10 +29,10 @@ export default async function CommissionsPage() {
 
   const canManage = can(user, "approve", "Commission");
   const scope = listScope(user, "Commission") as Prisma.CommissionWhereInput;
-  // Isolate to the active industry workspace (a deal's industry lives on its lead).
-  const industry = await getActiveIndustry(user);
+  // Isolate to the active vertical workspace (a deal's vertical lives on its lead).
+  const vertical = await getActiveVertical(user);
   const commissions = await prisma.commission.findMany({
-    where: { AND: [scope, { project: { lead: { industry } } }] },
+    where: { AND: [scope, { project: { lead: { vertical } } }] },
     orderBy: { createdAt: "desc" },
     include: {
       user: { select: { firstName: true, lastName: true } },

@@ -2,14 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { Prisma, Industry } from "@prisma/client";
+import type { Prisma, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
-import { getActiveIndustry } from "@/server/auth/industry";
-import { INDUSTRY_SERVICE_TYPE } from "@/lib/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
+import { VERTICAL_SERVICE_TYPE } from "@/lib/vertical";
 import { resolveStageForAppointment } from "./staging";
 import { resolveOwningRepId } from "./owning-rep";
 import { zonedWallClockToUtc } from "@/lib/tz";
@@ -47,9 +47,9 @@ const leadInput = z.object({
 
 export type LeadInput = z.infer<typeof leadInput>;
 
-async function defaultPipeline(companyId: string, industry: Industry) {
+async function defaultPipeline(companyId: string, vertical: Vertical) {
   return prisma.pipeline.findFirst({
-    where: { companyId, industry },
+    where: { companyId, vertical },
     orderBy: { isDefault: "desc" },
     include: { stages: { orderBy: { position: "asc" }, take: 1 } },
   });
@@ -62,10 +62,10 @@ export async function createLeadAction(input: LeadInput) {
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid lead." };
   const d = parsed.data;
 
-  // The deal belongs to the active industry workspace; serviceType is derived
+  // The deal belongs to the active vertical workspace; serviceType is derived
   // from it (the form no longer lets you pick a product).
-  const industry = await getActiveIndustry(user);
-  const pipeline = await defaultPipeline(user.companyId, industry);
+  const vertical = await getActiveVertical(user);
+  const pipeline = await defaultPipeline(user.companyId, vertical);
   // Reps can only assign leads to themselves unless they can "assign". A canvasser
   // assigned to a rep auto-funnels the lead to that rep (see resolveOwningRepId).
   const canAssign = can(user, "assign", "Lead");
@@ -101,8 +101,8 @@ export async function createLeadAction(input: LeadInput) {
       sourceId: d.sourceId || null,
       assignedRepId,
       createdById: user.userId,
-      industry,
-      serviceType: INDUSTRY_SERVICE_TYPE[industry],
+      vertical,
+      serviceType: VERTICAL_SERVICE_TYPE[vertical],
       dealType: d.dealType,
       value: d.valueCents,
       priority: d.priority,

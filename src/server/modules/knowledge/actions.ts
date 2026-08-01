@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { putObject } from "@/server/storage";
 import { TRAINING_AUDIENCE_ROLES } from "./policies";
 
@@ -123,15 +123,15 @@ export async function createCategoryAction(input: {
   const name = input.name?.trim();
   if (!name) return { ok: false, error: "Category name is required." };
 
-  const industry = await getActiveIndustry(user);
+  const vertical = await getActiveVertical(user);
   const count = await prisma.knowledgeCategory.count({
-    where: { companyId: user.companyId, industry },
+    where: { companyId: user.companyId, vertical },
   });
 
   await prisma.knowledgeCategory.create({
     data: {
       companyId: user.companyId,
-      industry,
+      vertical,
       name,
       description: input.description?.trim() || null,
       visibleRoles: sanitizeRoles(input.visibleRoles ?? []),

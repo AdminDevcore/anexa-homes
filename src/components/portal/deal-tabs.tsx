@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { User, ShieldCheck, Hammer, DollarSign, FileSignature, Calculator, type LucideIcon } from "lucide-react";
+import { User, ShieldCheck, Hammer, DollarSign, FileSignature, Calculator, Sun, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type DealTabDef = { id: string; label: string };
+/** `icon` overrides the id-based lookup — solar Operations is not a hammer. */
+export type DealTabDef = { id: string; label: string; icon?: string };
 
 // Icons live here (client side) — components can't be passed from a server
 // component across the RSC boundary as props.
@@ -15,6 +16,10 @@ const TAB_ICONS: Record<string, LucideIcon> = {
   production: Hammer,
   financials: DollarSign,
   documents: FileSignature,
+  // Solar: the whole present-and-close flow lives under one tab.
+  proposal: Sun,
+  // Solar operations is electrical work, not carpentry.
+  operations: Zap,
 };
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
@@ -40,7 +45,7 @@ export function DealTabs({ tabs, children }: { tabs: DealTabDef[]; children: Rea
     <div className="space-y-6">
       <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1">
         {tabs.map((t) => {
-          const Icon = TAB_ICONS[t.id];
+          const Icon = TAB_ICONS[t.icon ?? t.id];
           return (
             <button
               key={t.id}

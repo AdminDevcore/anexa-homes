@@ -33,6 +33,8 @@ export default async function PipelineSettingsPage() {
             id: s.id, name: s.name, color: s.color, isWon: s.isWon, isLost: s.isLost,
             targetDays: s.targetDays, escalationDays: s.escalationDays, notificationRecipient: s.notificationRecipient,
             sendInApp: s.sendInApp, sendEmail: s.sendEmail, markOverdue: s.markOverdue,
+            stageType: s.stageType, ownerRole: s.ownerRole, followUpDays: s.followUpDays,
+            isActionRequired: s.isActionRequired, defaultBlocker: s.defaultBlocker,
           }))}
         />
       ) : (

@@ -3,6 +3,7 @@
 import { z } from "zod";
 import type { KnockDisposition } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { DISPOSITION_VALUES, pointInPolygon, type LatLng } from "@/lib/canvassing";
@@ -364,7 +365,13 @@ export async function convertKnockToLeadAction(
   if (knock.leadId) return { ok: true, leadId: knock.leadId };
 
   const source = await prisma.leadSource.upsert({
-    where: { companyId_name: { companyId: me.companyId, name: "Door Knock" } },
+    where: {
+      companyId_vertical_name: {
+        companyId: me.companyId,
+        vertical: await getActiveVertical(me),
+        name: "Door Knock",
+      },
+    },
     update: {},
     create: { companyId: me.companyId, name: "Door Knock" },
   });

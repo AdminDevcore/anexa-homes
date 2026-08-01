@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db/client";
 import { getObject } from "@/server/storage";
+import { runUnscoped } from "@/server/vertical/context";
 
 // Token-scoped public image serving for the customer presentation. A valid
 // proposal token only unlocks PHOTOS attached to that proposal's own lead — never
@@ -8,10 +9,16 @@ import { getObject } from "@/server/storage";
 export async function GET(_req: Request, { params }: { params: Promise<{ token: string; fileId: string }> }) {
   const { token, fileId } = await params;
 
-  const proposal = await prisma.proposal.findUnique({
-    where: { publicToken: token },
-    select: { companyId: true, leadId: true },
-  });
+  // The unguessable token IS the authorization and identifies exactly one
+  // proposal, whose workspace is not known until it has been read.
+  const proposal = await runUnscoped(
+    "public presentation photo: resolve the proposal by its token",
+    () =>
+      prisma.proposal.findUnique({
+        where: { publicToken: token },
+        select: { companyId: true, leadId: true },
+      })
+  );
   if (!proposal) return new NextResponse("Not found", { status: 404 });
 
   const file = await prisma.fileAsset.findFirst({

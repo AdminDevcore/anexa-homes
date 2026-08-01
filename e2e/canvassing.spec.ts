@@ -12,9 +12,9 @@ async function login(page: Page, email: string) {
 }
 
 // Auto-loaded house dots stream in from the live OSM API and re-render the
-// markers, which can detach an open popup mid-click. So: wait for the map to
-// settle, then click pins with short, retried clicks until one opens its action
-// card. Returns when the detail dialog is open.
+// markers, which can detach the sheet mid-click. So: wait for the map to
+// settle, then click pins with short, retried clicks until one opens its sheet.
+// Returns when the detail dialog is open.
 async function openADotDetail(page: Page) {
   await expect(page.locator(".leaflet-container")).toBeVisible({ timeout: 10000 });
   await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 20000 });
@@ -36,8 +36,11 @@ async function openADotDetail(page: Page) {
       if (!bb) continue;
       await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
       await page.waitForTimeout(250);
+      // The sheet opens at peek height; Details lives one tap further up.
+      const more = page.getByRole("button", { name: /More —/ }).first();
+      if (!(await more.isVisible().catch(() => false))) continue;
+      if (!(await more.click({ timeout: 2500 }).then(() => true).catch(() => false))) continue;
       const details = page.getByRole("button", { name: "Details" }).first();
-      if (!(await details.isVisible().catch(() => false))) continue;
       // Bound the click so a detach (marker re-render) doesn't burn the budget.
       const clicked = await details.click({ timeout: 2500 }).then(() => true).catch(() => false);
       if (!clicked) continue;
@@ -55,11 +58,18 @@ async function openADotDetail(page: Page) {
   throw new Error("Could not open a house dot detail card");
 }
 
+/** Filters moved off the toolbar: reps open a sheet, managers use the rail. */
+async function openFilters(page: Page) {
+  await expect(page.locator(".leaflet-container")).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: /^Filters/ }).first().click();
+  await page.waitForTimeout(300);
+}
+
 test("canvassing: rep sees their seeded knocks but cannot draw territories", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await page.goto("/portal/canvassing?houses=off");
-  await expect(page.getByRole("heading", { name: "Canvassing" })).toBeVisible();
-  // Seeded: rep has 1 "Sold" knock.
+  // Seeded: rep has 1 "Sold" knock. Disposition chips live in the Filters sheet.
+  await openFilters(page);
   await expect(page.getByRole("button", { name: /Sold/ })).toContainText("1", { timeout: 10000 });
   // Reps cannot draw/manage territories.
   await expect(page.getByRole("button", { name: /Draw territory/ })).toHaveCount(0);
@@ -68,10 +78,11 @@ test("canvassing: rep sees their seeded knocks but cannot draw territories", asy
 test("canvassing: blank house pins are tracked as 'Not Knocked' with territory progress", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await page.goto("/portal/canvassing?houses=off");
-  // Seeded territory: 4 knocked + 4 not-knocked = 8 houses.
+  // Seeded territory: 4 knocked + 4 not-knocked = 8 houses. The status bar
+  // replaces the old Today/Knocked/Houses pill row.
+  await expect(page.getByText(/\d+ today · 4 left/)).toBeVisible({ timeout: 10000 });
+  await openFilters(page);
   await expect(page.getByRole("button", { name: /Not Knocked/ })).toContainText("4", { timeout: 10000 });
-  await expect(page.getByText("Houses", { exact: true }).locator("..")).toContainText("8");
-  await expect(page.getByText("Knocked", { exact: true }).locator("..")).toContainText("4");
   // Remaining-only filter exists.
   await expect(page.getByRole("button", { name: "Remaining only" })).toBeVisible();
 });
@@ -79,8 +90,11 @@ test("canvassing: blank house pins are tracked as 'Not Knocked' with territory p
 test("canvassing: manager can draw territories and filter by rep", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await page.goto("/portal/canvassing?houses=off");
+  // Manager tooling lives in the rail; Territories is collapsed by default.
+  await expect(page.getByRole("button", { name: "Territories" })).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: "Territories" }).click();
   await expect(page.getByRole("button", { name: /Draw territory/ })).toBeVisible({ timeout: 10000 });
-  // Manager gets the rep filter (sees all reps' activity).
+  // Manager gets the rep filter (sees all reps' activity) in the open Filters section.
   await expect(page.getByRole("combobox").filter({ hasText: /All reps/ })).toBeVisible();
 });
 
@@ -94,11 +108,12 @@ test("canvassing: only house dots are actionable — empty taps create no pin", 
 
   // Tapping empty space must NOT open any pin/dialog (no manual pins).
   const box = (await map.boundingBox())!;
-  await page.mouse.click(box.x + box.width * 0.94, box.y + box.height * 0.05);
+  // Empty space is left of the rail and below the top bar so no overlay is hit.
+  await page.mouse.click(box.x + box.width * 0.94, box.y + box.height * 0.45);
   await page.waitForTimeout(700);
   expect(await page.getByRole("dialog").count()).toBe(0);
 
-  // Tapping a pre-generated house dot opens its action popup.
+  // Tapping a pre-generated house dot opens its action sheet.
   const pins = page.locator(".anexa-knock-pin");
   await expect(pins.first()).toBeVisible({ timeout: 10000 });
   const n = await pins.count();
@@ -108,7 +123,7 @@ test("canvassing: only house dots are actionable — empty taps create no pin", 
     if (!bb) continue;
     await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
     await page.waitForTimeout(300);
-    if (await page.getByRole("button", { name: "Details" }).first().isVisible().catch(() => false)) {
+    if (await page.getByRole("button", { name: /More —/ }).first().isVisible().catch(() => false)) {
       opened = true;
       break;
     }
@@ -150,17 +165,21 @@ test("canvassing: a house dot shows a property value and carries it into a conve
 
 test("canvassing: manager can draw a territory on the map", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
-  await page.goto("/portal/canvassing?houses=off");
+  // zips=0 turns off the ZIP boundary overlay. Its polygons sit over the whole
+  // map and swallow clicks, so corners would never register.
+  await page.goto("/portal/canvassing?houses=off&zips=0");
   const map = page.locator(".leaflet-container");
   await expect(map).toBeVisible({ timeout: 10000 });
   await page.locator(".leaflet-tile-loaded").first().waitFor({ timeout: 20000 });
   await page.waitForTimeout(2500);
   const box = (await map.boundingBox())!;
+  await page.getByRole("button", { name: "Territories" }).click();
   await page.getByRole("button", { name: /Draw territory/ }).click();
-  // Draw in the top-right area, away from the seeded center pins/label.
-  await page.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.15);
-  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height * 0.15);
-  await page.mouse.click(box.x + box.width * 0.8, box.y + box.height * 0.32);
+  // Draw in the right-hand area: clear of the rail, the top bar and the seeded
+  // center pins/label.
+  await page.mouse.click(box.x + box.width * 0.7, box.y + box.height * 0.3);
+  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height * 0.3);
+  await page.mouse.click(box.x + box.width * 0.8, box.y + box.height * 0.47);
   await page.getByRole("button", { name: /Finish \(3\)/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("New territory")).toBeVisible({ timeout: 10000 });
@@ -172,8 +191,10 @@ test("canvassing: manager can draw a territory on the map", async ({ page }) => 
 test("canvassing: leaderboard ranks reps and highlights the viewer", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await page.goto("/portal/canvassing?houses=off");
-  await page.getByRole("tab", { name: "Leaderboard" }).click();
-  await expect(page.getByText("Tyler Brooks")).toBeVisible({ timeout: 10000 });
+  // Dashboard + Leaderboard merged into one "Insights" view, so the rep's name
+  // now appears in both sections — scope the assertion to the leaderboard row.
+  await page.getByRole("button", { name: "insights" }).click();
+  await expect(page.getByText("Tyler Brooks").first()).toBeVisible({ timeout: 10000 });
   await expect(page.getByText("(you)")).toBeVisible();
 });
 

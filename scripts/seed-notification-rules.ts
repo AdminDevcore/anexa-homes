@@ -28,7 +28,7 @@ async function main() {
   const companies = await prisma.company.findMany({ select: { id: true, name: true } });
   for (const company of companies) {
     const pipeline = await prisma.pipeline.findFirst({
-      where: { companyId: company.id, industry: "roofing" },
+      where: { companyId: company.id, vertical: "roofing" },
       select: { id: true, stages: { select: { id: true, key: true } } },
     });
     if (!pipeline) { console.log(`! ${company.name}: no roofing pipeline, skipping`); continue; }

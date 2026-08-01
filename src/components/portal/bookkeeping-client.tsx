@@ -371,6 +371,7 @@ export function BookkeepingClient({
                 <span className="font-semibold">Net profit</span>
                 <span className={cn("font-display text-lg font-semibold tabular-nums", pnl.netProfit >= 0 ? "text-emerald-600" : "text-red-600")}>{fmt.money(pnl.netProfit)}</span>
               </div>
+              <PnlByDepartment segments={pnl.segments} netProfit={pnl.netProfit} />
             </div>
             <div className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-center justify-between">
@@ -1022,6 +1023,66 @@ function Stat({ label, value, icon: Icon, tone, accent }: { label: string; value
         </span>
       </div>
       <div className="mt-3 font-display text-2xl font-semibold tabular-nums sm:text-[1.75rem]">{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Per-department breakout of the same consolidated P&L above.
+ *
+ * The books are NOT split — reads are never filtered by vertical — so this is a
+ * view of one ledger by department, and it always sums back to Net profit.
+ * Renders only once there is genuinely more than one department, so a
+ * roofing-only company sees exactly what it saw before.
+ */
+function PnlByDepartment({
+  segments,
+  netProfit,
+}: {
+  segments: { vertical: string; totalIncome: number; totalExpense: number; netProfit: number }[];
+  netProfit: number;
+}) {
+  const fmt = useFormat();
+  if (segments.length < 2) return null;
+
+  const label = (v: string) =>
+    v === "unassigned" ? "Company-wide" : v.charAt(0).toUpperCase() + v.slice(1);
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        By department
+      </div>
+      <table className="mt-2 w-full text-sm">
+        <thead>
+          <tr className="text-xs text-muted-foreground">
+            <th className="py-1 text-left font-medium">Department</th>
+            <th className="py-1 text-right font-medium">Income</th>
+            <th className="py-1 text-right font-medium">Expenses</th>
+            <th className="py-1 text-right font-medium">Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {segments.map((s) => (
+            <tr key={s.vertical} className="border-t border-border/60">
+              <td className="py-1.5">{label(s.vertical)}</td>
+              <td className="py-1.5 text-right tabular-nums text-muted-foreground">{fmt.money(s.totalIncome)}</td>
+              <td className="py-1.5 text-right tabular-nums text-muted-foreground">{fmt.money(s.totalExpense)}</td>
+              <td className={cn("py-1.5 text-right font-medium tabular-nums", s.netProfit >= 0 ? "text-emerald-600" : "text-red-600")}>
+                {fmt.money(s.netProfit)}
+              </td>
+            </tr>
+          ))}
+          <tr className="border-t border-border font-semibold">
+            <td className="py-1.5">Consolidated</td>
+            <td />
+            <td />
+            <td className={cn("py-1.5 text-right tabular-nums", netProfit >= 0 ? "text-emerald-600" : "text-red-600")}>
+              {fmt.money(netProfit)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }

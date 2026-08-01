@@ -4,6 +4,7 @@ import { prisma } from "@/server/db/client";
 import type { AccessUser } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { brandingForCompany } from "@/server/branding/resolve";
+import { runUnscoped } from "@/server/vertical/context";
 import {
   type ProposalContent,
   type ProposalUpgrade,
@@ -275,6 +276,13 @@ export async function getProposalForBuilder(user: AccessUser, leadId: string): P
 
 /** Public payload by token (no auth). Photos served via the token photo route. */
 export async function getPublicProposal(token: string): Promise<ProposalView | null> {
+  return runUnscoped(
+    "public token page: the unguessable token is the authorization and identifies exactly one row, whose vertical is not known until it is read",
+    () => loadPublicProposal(token)
+  );
+}
+
+async function loadPublicProposal(token: string): Promise<ProposalView | null> {
   const proposal = await prisma.proposal.findUnique({ where: { publicToken: token } });
   if (!proposal) return null;
   return assembleView(proposal, (fileId) => `/present/${token}/photo/${fileId}`);

@@ -34,7 +34,10 @@ test("payroll: generate -> approve commissions -> run -> pay -> export", async (
 
   // Land on the run detail page.
   await page.waitForURL(/\/portal\/payroll\/[0-9a-f-]+$/, { timeout: 15000 });
-  await expect(page.getByText("E2E Payroll Run")).toBeVisible();
+  // Anchor on the heading, not bare text: after a client-side navigation Next
+  // also puts the page title in #__next-route-announcer__, so getByText is
+  // strict-mode ambiguous depending on how fast the announcer clears.
+  await expect(page.getByRole("heading", { name: "E2E Payroll Run" })).toBeVisible();
 
   // Approve then pay.
   await page.getByRole("button", { name: /Approve Run/ }).click();

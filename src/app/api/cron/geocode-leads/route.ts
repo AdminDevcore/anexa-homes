@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { geocodeParts } from "@/server/modules/geo/geocode";
+import { runUnscoped } from "@/server/vertical/context";
 
 // Backfills lead map coordinates from their address (free OSM Nominatim).
 // Picks leads that have an address but haven't been geocoded yet, one batch per
@@ -12,7 +13,7 @@ const BATCH = 20;
 const DELAY_MS = 1100; // be polite to the free geocoder
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function GET(req: Request) {
+async function handler(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
     return new Response("Unauthorized", { status: 401 });
@@ -61,4 +62,12 @@ export async function GET(req: Request) {
     console.error("[cron:geocode-leads] failed", err);
     return new Response("Error", { status: 500 });
   }
+}
+
+/**
+ * Maintenance sweeps run over every vertical, so they declare themselves
+ * company-wide rather than inheriting a workspace they do not have.
+ */
+export async function GET(req: Request) {
+  return runUnscoped("cron: geocode every un-geocoded lead, all verticals", () => handler(req));
 }

@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { getSessionUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { prisma } from "@/server/db/client";
 
 export type LeadLookupItem = {
@@ -16,7 +16,7 @@ export type LeadLookupItem = {
 
 /**
  * Typeahead for the "tag a job" picker on a task. Deliberately separate from
- * `/api/search` (the ⌘K palette): this one is scoped to the ACTIVE industry and
+ * `/api/search` (the ⌘K palette): this one is scoped to the ACTIVE vertical and
  * carries the deal's assigned rep, so the task form can pre-select the person
  * who actually owns the job.
  *
@@ -34,13 +34,13 @@ export async function GET(req: Request) {
 
   const contains = { contains: q, mode: "insensitive" as const };
   const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
-  const industry = await getActiveIndustry(user);
+  const vertical = await getActiveVertical(user);
 
   const leads = await prisma.lead.findMany({
     where: {
       AND: [
         scope,
-        { industry },
+        { vertical },
         {
           OR: [
             { firstName: contains },

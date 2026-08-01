@@ -4,8 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Layers, ArrowRight } from "lucide-react";
-import type { Industry } from "@prisma/client";
-import { setActiveIndustryAction } from "@/server/modules/industry/actions";
+import type { ActiveVertical } from "@/lib/vertical";
+import { setActiveVerticalAction } from "@/server/modules/vertical/actions";
 
 /**
  * Shown on the dashboard when the ACTIVE workspace has no deal flow but the user
@@ -17,15 +17,15 @@ export function DashboardEmptyHint({
   others,
 }: {
   activeLabel: string;
-  others: { ind: Industry; label: string }[];
+  others: { ind: ActiveVertical; label: string }[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
 
-  async function switchTo(ind: Industry) {
+  async function switchTo(ind: ActiveVertical) {
     if (busy) return;
     setBusy(true);
-    const res = await setActiveIndustryAction(ind);
+    const res = await setActiveVerticalAction(ind);
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     router.push("/portal/dashboard");

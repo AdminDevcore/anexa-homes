@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import type { ProjectStatus, ServiceType, Priority } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { isAdmin } from "@/server/rbac/matrix";
 import { listScope } from "@/server/rbac/policies";
@@ -273,7 +274,7 @@ export async function ensureProjectForLeadAction(
       // rep's estimate if it hasn't been entered yet.
       contractValue: lead.claimPrice ?? lead.value,
       // Seed the QC checklist from the company's customizable template.
-      qcChecklist: (await getQcChecklistTemplate(user.companyId)).map((label) => ({ label, done: false })),
+      qcChecklist: (await getQcChecklistTemplate(user.companyId, await getActiveVertical(user))).map((label) => ({ label, done: false })),
     },
     select: { id: true },
   });

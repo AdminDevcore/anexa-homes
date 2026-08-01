@@ -4,6 +4,9 @@ import { z } from "zod";
 import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { serviceTypeFromSlug } from "@/lib/service-types";
+import { verticalForServiceSlug, DEFAULT_VERTICAL } from "@/lib/vertical";
+import { runInVertical } from "@/server/vertical/context";
+import { solarVerticalEnabled } from "@/server/vertical/flag";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
@@ -49,6 +52,7 @@ const websiteLeadSchema = z.object({
 });
 
 type WebsiteLeadInput = z.infer<typeof websiteLeadSchema>;
+type WebsiteLeadData = z.output<typeof websiteLeadSchema>;
 
 // Preferred time windows → the start hour used to build the appointment timestamp.
 const TIME_WINDOWS: Record<string, { label: string; hour: number }> = {
@@ -76,6 +80,19 @@ export async function submitWebsiteLead(
   }
   const data = parsed.data;
 
+  // The website has no portal session, so this path declares its own vertical
+  // rather than inheriting one: the service the homeowner picked decides which
+  // workspace the enquiry lands in. With the flag off everything is roofing,
+  // exactly as before.
+  const vertical = solarVerticalEnabled() ? verticalForServiceSlug(data.service) : DEFAULT_VERTICAL;
+  return runInVertical(vertical, () => createWebsiteLead(data, vertical));
+}
+
+async function createWebsiteLead(
+  data: WebsiteLeadData,
+  vertical: ReturnType<typeof verticalForServiceSlug>
+): Promise<{ ok: true } | { ok: false; error: string }> {
+
   const company = await resolvePrimaryCompany();
   if (!company) {
     return { ok: false, error: "We couldn't process your request. Please call us directly." };
@@ -88,9 +105,9 @@ export async function submitWebsiteLead(
   });
 
   const source = await prisma.leadSource.upsert({
-    where: { companyId_name: { companyId: company.id, name: "Website" } },
+    where: { companyId_vertical_name: { companyId: company.id, vertical, name: "Website" } },
     update: {},
-    create: { companyId: company.id, name: "Website" },
+    create: { companyId: company.id, vertical, name: "Website" },
   });
 
   // Build the requested appointment timestamp from the chosen date + time window.

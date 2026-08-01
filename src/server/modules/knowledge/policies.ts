@@ -1,4 +1,4 @@
-import type { Prisma, Role, Industry } from "@prisma/client";
+import type { Prisma, Role, Vertical } from "@prisma/client";
 import type { AccessUser } from "@/server/rbac/guards";
 
 // Management roles manage the whole knowledge base AND see every category
@@ -24,16 +24,16 @@ export function canManageKnowledge(role: Role): boolean {
 
 /**
  * Prisma where-fragment scoping categories to exactly what `user` may see in the
- * active `industry` workspace. Management roles see all; everyone else sees only
+ * active `vertical` workspace. Management roles see all; everyone else sees only
  * categories whose `visibleRoles` includes their role.
  */
 export function categoryScope(
   user: AccessUser,
-  industry: Industry
+  vertical: Vertical
 ): Prisma.KnowledgeCategoryWhereInput {
   const base: Prisma.KnowledgeCategoryWhereInput = {
     companyId: user.companyId,
-    industry,
+    vertical,
   };
   if (canManageKnowledge(user.role)) return base;
   return { ...base, visibleRoles: { has: user.role } };

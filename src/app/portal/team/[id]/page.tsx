@@ -15,6 +15,8 @@ import { TeamMemberActions } from "@/components/portal/team-member-actions";
 import { CommissionOverrides } from "@/components/portal/commission-overrides";
 import { RepVendorLink } from "@/components/portal/rep-vendor-link";
 import { prisma } from "@/server/db/client";
+import { allowedVerticals, isActiveVertical, DEFAULT_VERTICAL } from "@/lib/vertical";
+import { companyVerticals, userVerticals } from "@/server/auth/vertical";
 
 export const metadata = { title: "Team member" };
 
@@ -53,21 +55,26 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
   const onboarding = canViewOnboarding ? await getUserOnboarding(user.companyId, detail.id) : null;
 
   // Overrides this member earns off other people's deals (commission-capable roles).
+  // Read unfiltered by workspace on purpose: this is the person's whole override
+  // sheet, and an admin standing in Roofing still needs to see the Solar rates.
   const showOverrides = showFull && ["sales_rep", "manager"].includes(detail.role);
   const [overrideRows, overrideCandidates] = showOverrides
     ? await Promise.all([
         prisma.commissionOverride.findMany({
           where: { companyId: user.companyId, beneficiaryId: id },
           include: { source: { select: { firstName: true, lastName: true } } },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ vertical: "asc" }, { createdAt: "asc" }],
         }),
         prisma.user.findMany({
           where: { companyId: user.companyId, status: "active", role: { in: ["sales_rep", "manager"] }, id: { not: id } },
-          select: { id: true, firstName: true, lastName: true },
+          select: { id: true, firstName: true, lastName: true, role: true, verticals: true },
           orderBy: { firstName: "asc" },
         }),
       ])
     : [[], []];
+  // Workspaces this build runs — one vertical collapses the override sheet back
+  // to a flat list with no picker.
+  const liveVerticals = companyVerticals();
 
   // Sales reps are 1099 contractors — show their linked vendor + let admins reassign it.
   const showRepVendor = canEdit && detail.role === "sales_rep";
@@ -277,7 +284,9 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               currentProvidedType={detail.providedLeadType}
               currentProvidedFlatCents={detail.providedLeadFlatCents}
               currentDeductiblePct={detail.deductiblePct}
-              currentIndustries={detail.industries}
+              // Retired values on legacy rows are filtered out here, so the editor
+              // only ever shows (and can only ever save) live verticals.
+              currentIndustries={allowedVerticals(detail.verticals)}
               currentSalesRepId={detail.salesRepId}
               reps={assignableReps}
               currentManagerId={detail.managerId}
@@ -305,11 +314,21 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                 id: o.id,
                 sourceId: o.sourceId,
                 sourceName: `${o.source.firstName} ${o.source.lastName}`.trim(),
+                // Retired verticals are pinned to the default so a legacy row
+                // still renders somewhere real instead of an empty group.
+                vertical: isActiveVertical(o.vertical) ? o.vertical : DEFAULT_VERTICAL,
                 type: o.type as "percentage" | "flat",
                 percent: o.percent,
                 flatAmount: o.flatAmount,
               }))}
-              candidates={overrideCandidates.map((c) => ({ id: c.id, name: `${c.firstName} ${c.lastName}`.trim() }))}
+              candidates={overrideCandidates.map((c) => ({
+                id: c.id,
+                name: `${c.firstName} ${c.lastName}`.trim(),
+                // Only the sides this person works: an override on a workspace
+                // they can't sell in would never pay, so it isn't offered.
+                verticals: userVerticals(c),
+              }))}
+              verticals={liveVerticals}
               canEdit={canEdit}
             />
           )}

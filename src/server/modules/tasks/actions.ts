@@ -7,7 +7,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { fireEvent } from "@/server/modules/notifications/engine";
 
 function fail(error: string) {
@@ -29,15 +29,15 @@ export async function createTaskAction(input: z.infer<typeof createSchema>) {
   if (!parsed.success) return fail("Title is required.");
   const d = parsed.data;
 
-  // If linking to a lead, confirm it's visible to this user (and inherit its industry).
+  // If linking to a lead, confirm it's visible to this user (and inherit its vertical).
   let leadId: string | null = null;
-  let leadIndustry: Prisma.TaskCreateInput["industry"] | null = null;
+  let leadVertical: Prisma.TaskCreateInput["vertical"] | null = null;
   if (d.leadId) {
     const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
-    const lead = await prisma.lead.findFirst({ where: { AND: [{ id: d.leadId }, scope] }, select: { id: true, industry: true } });
+    const lead = await prisma.lead.findFirst({ where: { AND: [{ id: d.leadId }, scope] }, select: { id: true, vertical: true } });
     if (!lead) return fail("Lead not found or access denied.");
     leadId = lead.id;
-    leadIndustry = lead.industry;
+    leadVertical = lead.vertical;
   }
   // For a deal-linked follow-up, enforce who may be tagged (mirrors the deal page list):
   //  management/office roles always; the deal's OWN rep (not other reps); installers only if
@@ -63,15 +63,15 @@ export async function createTaskAction(input: z.infer<typeof createSchema>) {
     if (!allowed) return fail("That person can't be tagged on a follow-up for this deal.");
   }
 
-  // A lead-linked task lives in that deal's industry; a standalone task in the active workspace.
-  const industry = leadIndustry ?? (await getActiveIndustry(user));
+  // A lead-linked task lives in that deal's vertical; a standalone task in the active workspace.
+  const vertical = leadVertical ?? (await getActiveVertical(user));
 
   const task = await prisma.task.create({
     data: {
       companyId: user.companyId,
       title: d.title,
       priority: d.priority,
-      industry,
+      vertical,
       assigneeId: d.assigneeId || user.userId,
       createdById: user.userId,
       dueAt: d.dueAt ? new Date(d.dueAt) : null,

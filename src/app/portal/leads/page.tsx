@@ -7,7 +7,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { currentFormatters } from "@/lib/format-server";
 import { buildAppointmentRows } from "@/server/modules/leads/appointment-rows";
@@ -27,13 +27,18 @@ export default async function LeadsPage({
   if (!can(user, "read", "Lead")) redirect("/portal/dashboard");
 
   const { q } = await searchParams;
-  // Isolate by the active industry workspace.
-  const industry = await getActiveIndustry(user);
-  const scope: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), industry };
+  // Isolate by the active vertical workspace (Roofing / Solar).
+  const vertical = await getActiveVertical(user);
+  const scope: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), vertical };
 
   // The outcome chips mirror Settings → Appointment Outcomes so every possible
   // result is visible, including the ones nobody has recorded yet.
-  const dispositions = await getAppointmentDispositions(user.companyId);
+  //
+  // Scoped to the active vertical: outcomes are configured per vertical, so a
+  // roofing user must never see "Signed — proposal accepted" and a solar user
+  // must never see "Hail Damage". Passing the vertical is what keeps the chips
+  // on the correct side of the boundary.
+  const dispositions = await getAppointmentDispositions(user.companyId, vertical);
 
   const leads = await prisma.lead.findMany({
     where: scope,
@@ -76,6 +81,7 @@ export default async function LeadsPage({
           initialQuery={q ?? ""}
           configuredOutcomes={dispositionLabels(dispositions)}
         />
+
       )}
     </div>
   );

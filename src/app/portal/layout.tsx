@@ -7,6 +7,8 @@ import { roleLabel } from "@/lib/roles";
 import { PortalShell } from "@/components/portal/portal-shell";
 import { needsOnboarding } from "@/server/modules/onboarding/queries";
 import { currentBranding } from "@/server/branding/resolve";
+import { getActiveVertical, userVerticals } from "@/server/auth/vertical";
+import { solarVerticalEnabled } from "@/server/vertical/flag";
 import { BrandingProvider } from "@/components/portal/branding-provider";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -38,6 +40,12 @@ export default async function PortalLayout({
 
   const branding = await currentBranding();
 
+  // With the flag off there is exactly one workspace and no switcher to show,
+  // so the shell renders precisely as it did before this work.
+  const multiVertical = solarVerticalEnabled();
+  const availableVerticals = multiVertical ? userVerticals(user) : [];
+  const vertical = multiVertical ? await getActiveVertical(user) : null;
+
   return (
     <BrandingProvider branding={branding}>
       {branding.fontFamily && (
@@ -51,6 +59,8 @@ export default async function PortalLayout({
         }}
         allowedHrefs={allowedHrefs}
         branding={branding}
+        vertical={vertical}
+        availableVerticals={availableVerticals}
       >
         {children}
       </PortalShell>

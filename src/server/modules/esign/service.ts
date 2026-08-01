@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { runInVertical, runUnscoped, asActiveVertical } from "@/server/vertical/context";
+import type { ActiveVertical } from "@/lib/vertical";
 import type { SessionUser } from "@/server/auth/session";
 import { requireCan } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
@@ -366,7 +368,35 @@ function ctxForLead(lead: LeadForCtx, companyName: string): AutofillContext {
 
 export type SigningState = "active" | "completed" | "voided" | "expired" | "already_signed" | "waiting";
 
+/**
+ * Resolve which workspace a public signing link belongs to.
+ *
+ * The signing pages carry no session, so the request has no ambient vertical.
+ * We read the envelope's workspace first (unscoped — the token is the
+ * authorization and identifies exactly one signer), then run the rest of the
+ * request inside runInVertical() so everything downstream is correctly scoped:
+ * the envelope itself, the deal, and crucially the NOTIFICATION RULES that fire
+ * on signature — a solar signing must not trigger roofing's rules.
+ */
+async function verticalForSignerToken(rawToken: string): Promise<ActiveVertical | null> {
+  const signer = await runUnscoped(
+    "public signing link: resolve the envelope's workspace before scoping the request",
+    () =>
+      prisma.documentSigner.findUnique({
+        where: { tokenHash: sha256(rawToken) },
+        select: { package: { select: { vertical: true } } },
+      })
+  );
+  return signer ? asActiveVertical(signer.package.vertical) : null;
+}
+
 export async function getViewByToken(rawToken: string) {
+  const vertical = await verticalForSignerToken(rawToken);
+  if (!vertical) return null;
+  return runInVertical(vertical, () => loadViewByToken(rawToken));
+}
+
+async function loadViewByToken(rawToken: string) {
   const signer = await prisma.documentSigner.findUnique({
     where: { tokenHash: sha256(rawToken) },
     include: {
@@ -434,6 +464,16 @@ export type SignSubmit = {
 };
 
 export async function recordSignatureByToken(
+  rawToken: string,
+  input: SignSubmit,
+  meta: { ip: string | null; userAgent: string | null }
+): Promise<{ ok: boolean; error?: string; completed?: boolean }> {
+  const vertical = await verticalForSignerToken(rawToken);
+  if (!vertical) return { ok: false, error: "Invalid signing link." };
+  return runInVertical(vertical, () => recordSignature(rawToken, input, meta));
+}
+
+async function recordSignature(
   rawToken: string,
   input: SignSubmit,
   meta: { ip: string | null; userAgent: string | null }

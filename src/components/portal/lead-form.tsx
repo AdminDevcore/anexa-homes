@@ -180,7 +180,7 @@ export function LeadForm({
 
       <Section title="Pipeline">
         <Grid>
-          {/* No product/industry picker — the deal belongs to the active industry
+          {/* No product/vertical picker — the deal belongs to the active vertical
               workspace (switched from the top-right). */}
           <Field label="Stage">
             <Picker value={v.stageId} onChange={(val) => set("stageId", val)} options={stages} placeholder="Select stage" />

@@ -1,12 +1,12 @@
-import type { Industry } from "@prisma/client";
+import type { Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { AccessUser } from "@/server/rbac/guards";
 import { categoryScope } from "./policies";
 
-/** Categories (with items) visible to `user` in the active `industry` workspace. */
-export async function listKnowledge(user: AccessUser, industry: Industry) {
+/** Categories (with items) visible to `user` in the active `vertical` workspace. */
+export async function listKnowledge(user: AccessUser, vertical: Vertical) {
   const categories = await prisma.knowledgeCategory.findMany({
-    where: categoryScope(user, industry),
+    where: categoryScope(user, vertical),
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     include: {
       items: { orderBy: [{ position: "asc" }, { createdAt: "asc" }] },
@@ -41,7 +41,7 @@ export async function listKnowledge(user: AccessUser, industry: Industry) {
  */
 export async function knowledgeFileForUser(
   user: AccessUser,
-  industry: Industry,
+  vertical: Vertical,
   itemId: string
 ) {
   const item = await prisma.knowledgeItem.findFirst({
@@ -50,7 +50,7 @@ export async function knowledgeFileForUser(
       companyId: user.companyId,
       type: { in: ["file", "video"] },
       fileId: { not: null },
-      category: categoryScope(user, industry),
+      category: categoryScope(user, vertical),
     },
     select: { fileId: true },
   });

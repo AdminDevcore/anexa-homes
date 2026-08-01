@@ -20,6 +20,32 @@ export const DEFAULT_QC_CHECKLIST = [
   "Customer closeout walkthrough",
 ];
 
+// ── Solar defaults ──────────────────────────────────────────────────────────
+// Solar has no adjuster and no claim, so it inherits none of the roofing lists.
+// What roofing calls an "inspection outcome" is, in solar, the result of the
+// site survey that gates engineering.
+
+export const DEFAULT_SOLAR_INSPECTION_OUTCOMES = [
+  "Site survey passed — proceed to design",
+  "Roof condition requires re-roof first",
+  "Main panel upgrade required",
+  "Derate required",
+  "Structural reinforcement required",
+  "Excessive shading — resize system",
+  "Utility/meter issue — needs research",
+  "Failed — not feasible",
+];
+
+export const DEFAULT_SOLAR_QC_CHECKLIST = [
+  "Array layout matches approved plan set",
+  "Rafter attachment + flashing verified",
+  "Conduit run and torque checks complete",
+  "Inverter / battery commissioned",
+  "Rapid shutdown labeling installed",
+  "Monitoring online and reporting",
+  "Site cleaned + customer walkthrough",
+];
+
 /** Coerce a stored JSON value into a clean, de-duped list of non-empty labels. */
 export function parseLabelList(value: unknown, fallback: string[]): string[] {
   if (!Array.isArray(value)) return fallback;

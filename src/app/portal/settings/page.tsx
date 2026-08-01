@@ -16,8 +16,11 @@ import {
   PhoneCall,
   Star,
   CloudLightning,
+  Sun,
+  PanelsTopLeft,
 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
@@ -27,6 +30,9 @@ const SECTIONS: {
   title: string;
   body: string;
   href?: string;
+  /// Solar-only cards are hidden entirely in the Roofing workspace — the
+  /// assumptions and equipment they configure do not apply there.
+  solarOnly?: boolean;
 }[] = [
   { icon: KanbanSquare, title: "Pipeline Stages", body: "Customize the stages appointments move through.", href: "/portal/settings/pipeline" },
   { icon: ListChecks, title: "Appointment Outcomes", body: "Customize the outcomes reps record after appointments.", href: "/portal/settings/appointment-outcomes" },
@@ -44,6 +50,8 @@ const SECTIONS: {
   { icon: Star, title: "Website Reviews", body: "Approve, feature, hide, or remove customer reviews from the website.", href: "/portal/settings/reviews" },
   { icon: ShieldCheck, title: "Roles & Permissions", body: "Control what each role can see and do.", href: "/portal/settings/roles" },
   { icon: Palette, title: "Branding", body: "Company logo and brand colors.", href: "/portal/settings/branding" },
+  { icon: Sun, title: "Solar Settings", body: "Production and pricing assumptions, incentive %, validation bounds, and stage owners.", href: "/portal/settings/solar", solarOnly: true },
+  { icon: PanelsTopLeft, title: "Solar Equipment", body: "Modules, inverters, batteries and rank-ordered adders.", href: "/portal/settings/solar-equipment", solarOnly: true },
 ];
 
 export const metadata = { title: "Settings" };
@@ -51,6 +59,7 @@ export const metadata = { title: "Settings" };
 export default async function SettingsPage() {
   const user = await requireUser();
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
+  const vertical = await getActiveVertical(user);
 
   const company = await prisma.company.findUnique({
     where: { id: user.companyId },
@@ -77,7 +86,7 @@ export default async function SettingsPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {SECTIONS.map((s) => {
+        {SECTIONS.filter((s) => !s.solarOnly || vertical === "solar").map((s) => {
           const inner = (
             <>
               <span className="grid size-10 place-items-center rounded-lg bg-gold/12 text-gold-muted">

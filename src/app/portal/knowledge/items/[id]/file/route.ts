@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/server/auth/session";
-import { getActiveIndustry } from "@/server/auth/industry";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { getObject } from "@/server/storage";
 import { knowledgeFileForUser } from "@/server/modules/knowledge/queries";
 
@@ -12,9 +12,9 @@ import { knowledgeFileForUser } from "@/server/modules/knowledge/queries";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const industry = await getActiveIndustry(user);
+  const vertical = await getActiveVertical(user);
 
-  const file = await knowledgeFileForUser(user, industry, id);
+  const file = await knowledgeFileForUser(user, vertical, id);
   if (!file) return new NextResponse("Not found", { status: 404 });
 
   let data: Buffer;

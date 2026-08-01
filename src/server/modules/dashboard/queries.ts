@@ -2,7 +2,7 @@ import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
-import type { Prisma, Role, Industry } from "@prisma/client";
+import type { Prisma, Role, Vertical } from "@prisma/client";
 
 // Roles allowed to see company financials on the dashboard: revenue, deal/lead
 // dollar values. Field/ops roles (installer, canvasser, marketing) and customers
@@ -26,10 +26,10 @@ export type DashboardStats = {
   canSeeFinancials: boolean;
 };
 
-export async function getDashboardStats(user: SessionUser, industry: Industry): Promise<DashboardStats> {
-  // Deal-flow stats are isolated to the active industry workspace.
-  const leadWhere: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), industry };
-  const projectWhere: Prisma.ProjectWhereInput = { ...(listScope(user, "Project") as Prisma.ProjectWhereInput), lead: { industry } };
+export async function getDashboardStats(user: SessionUser, vertical: Vertical): Promise<DashboardStats> {
+  // Deal-flow stats are isolated to the active vertical workspace.
+  const leadWhere: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), vertical };
+  const projectWhere: Prisma.ProjectWhereInput = { ...(listScope(user, "Project") as Prisma.ProjectWhereInput), lead: { vertical } };
   const docWhere = listScope(user, "Document") as Prisma.DocumentPackageWhereInput;
 
   const canSeePayroll = can(user, "read", "Payroll");
@@ -97,8 +97,8 @@ export async function getDashboardStats(user: SessionUser, industry: Industry): 
   };
 }
 
-export async function getRecentLeads(user: SessionUser, industry: Industry, take = 6) {
-  const where: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), industry };
+export async function getRecentLeads(user: SessionUser, vertical: Vertical, take = 6) {
+  const where: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), vertical };
   const leads = await prisma.lead.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -114,8 +114,8 @@ export async function getRecentLeads(user: SessionUser, industry: Industry, take
   return leads.map((l) => ({ ...l, value: seeFinancials ? l.value : null }));
 }
 
-export async function getRecentProjects(user: SessionUser, industry: Industry, take = 6) {
-  const where: Prisma.ProjectWhereInput = { ...(listScope(user, "Project") as Prisma.ProjectWhereInput), lead: { industry } };
+export async function getRecentProjects(user: SessionUser, vertical: Vertical, take = 6) {
+  const where: Prisma.ProjectWhereInput = { ...(listScope(user, "Project") as Prisma.ProjectWhereInput), lead: { vertical } };
   return prisma.project.findMany({
     where,
     orderBy: { updatedAt: "desc" },

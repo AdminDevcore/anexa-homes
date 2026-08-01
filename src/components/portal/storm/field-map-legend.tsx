@@ -21,11 +21,14 @@ const SCORE = [
 /** Map legend for the storm overlays — hail-size + storm-score color keys, plus
  *  the MRMS experimental-data note. Rendered as an overlay on the Field Map. */
 export function FieldMapLegend({ showHail, showHeat }: { showHail: boolean; showHeat: boolean }) {
-  const [open, setOpen] = React.useState(true);
+  // Closed by default: expanded, it covers a quarter of a phone screen and sits
+  // on top of the status bar. It's a reference, not something you read while
+  // knocking. Sits above the status bar so the two never overlap.
+  const [open, setOpen] = React.useState(false);
   if (!showHail && !showHeat) return null;
 
   return (
-    <div className="pointer-events-auto absolute bottom-3 left-3 z-[1000] max-w-[250px] rounded-lg border border-border bg-background/92 p-2.5 text-[11px] shadow-sm backdrop-blur">
+    <div className="pointer-events-auto absolute bottom-24 left-3 z-[999] max-w-[250px] rounded-lg border border-border bg-background/92 p-2.5 text-[11px] shadow-sm backdrop-blur">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

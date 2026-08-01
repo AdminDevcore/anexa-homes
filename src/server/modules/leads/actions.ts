@@ -109,7 +109,7 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   // Validate stage belongs to this company.
   const stage = await prisma.pipelineStage.findFirst({
     where: { id: parsed.data.stageId, pipeline: { companyId: user.companyId } },
-    select: { id: true, name: true },
+    select: { id: true, name: true, defaultBlocker: true, stageType: true },
   });
   if (!stage) return { ok: false as const, error: "Invalid stage." };
 
@@ -121,6 +121,14 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
       // New stage = fresh SLA clock: clear any fired alerts + overdue flag.
       stageAlertLevel: 0,
       stageOverdue: false,
+      // …and a fresh follow-up clock. Entering a stage seeds who we are waiting
+      // on from the stage's default (a coordinator can correct it per deal) and
+      // clears the chase history, so the cadence starts from this entry rather
+      // than inheriting a touch logged against the previous blocker.
+      blockedBy: stage.defaultBlocker,
+      lastTouchAt: null,
+      lastChaseAlertAt: null,
+      ...(stage.stageType === "internally_owned" ? { blockerNote: null } : {}),
       ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
     },
   });
