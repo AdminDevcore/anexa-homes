@@ -17,6 +17,7 @@ import {
   CalendarClock,
   Calculator,
   Zap,
+  Satellite,
 } from "lucide-react";
 import { requireUser, getSessionUser } from "@/server/auth/session";
 import { getLeadDetail } from "@/server/modules/leads/queries";
@@ -65,6 +66,7 @@ import { DealActionsPanel } from "@/components/portal/deal-actions-panel";
 import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
 import { SolarProductToggle } from "@/components/portal/solar-product-toggle";
+import { PropertyView } from "@/components/portal/solar/property-view";
 import { DealTabs } from "@/components/portal/deal-tabs";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
@@ -445,6 +447,20 @@ export default async function LeadDetailPage({
           currentStageId={lead.stage?.id ?? null}
           canEdit={can(user, "update", "Lead")}
         />
+      )}
+
+      {/* The property itself, directly under the stage bar — the first thing you
+          see on a solar deal, the way Pipe Solar leads with the roof. Roofing
+          deals are untouched: this renders only for solar. */}
+      {isSolarDeal && (
+        <Card title="Property" icon={Satellite}>
+          <PropertyView
+            leadId={lead.id}
+            address={[lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+        </Card>
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
