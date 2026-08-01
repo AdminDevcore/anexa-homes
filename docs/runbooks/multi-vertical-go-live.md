@@ -300,7 +300,7 @@ cd anexa-homes
 DATABASE_URL="$PROD_MIGRATE_URL" npx prisma migrate status
 ```
 
-You should see 6 pending:
+You should see 7 pending:
 
 ```
 20260730120000_multi_vertical_foundation
@@ -309,6 +309,7 @@ You should see 6 pending:
 20260730170000_solar_domain
 20260730190000_solar_proposal
 20260731090000_solar_cockpit
+20260731170000_commission_override_per_vertical
 ```
 
 > `20260731090000_solar_cockpit` is newer than the held-back
@@ -336,9 +337,11 @@ itself:
 
 ```bash
 psql "$PROD_MIGRATE_URL" -tAc "
-select count(*) || ' tables have a vertical column (expect 28)'
+select count(*) || ' tables have a vertical column (expect 29)'
 from information_schema.columns
 where column_name='vertical' and table_schema='public';"
+-- 28 from the foundation migrations + 1 from
+-- 20260731170000_commission_override_per_vertical (commission_overrides).
 
 -- The other 7 keep the physical name 'industry' — that is the @map rename
 -- doing its job (zero DDL). Expect exactly these, unchanged:
