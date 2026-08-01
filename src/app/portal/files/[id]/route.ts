@@ -20,8 +20,31 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!file) return new NextResponse("Not found", { status: 404 });
 
   // Chat attachments: only members of that conversation may fetch them.
+  // Chat is deliberately cross-vertical, so these skip the vertical check below.
   if (file.conversationId) {
     if ((file.conversation?.members.length ?? 0) === 0) return new NextResponse("Forbidden", { status: 403 });
+  }
+
+  // VERTICAL ISOLATION — applies to EVERY role, admins included.
+  //
+  // FileAsset has no vertical of its own and is intentionally not a SCOPED
+  // model: the same table holds company-level assets (the branding logo,
+  // bookkeeping receipts) that belong to no workspace. So a deal-attached file
+  // is isolated through its PARENT instead.
+  //
+  // Non-admin staff were already covered further down, because `listScope` runs
+  // through the scoped `prisma.lead` / `prisma.project`. Admins were not: their
+  // branch skips that check entirely, so an admin sitting in Roofing could
+  // fetch a Solar photo by guessing or replaying its id. That is the hole this
+  // closes, and it is why the check lives here rather than in the staff branch.
+  //
+  // Flag off, the extension short-circuits and these lookups return the row
+  // exactly as before — so Roofing behaviour is unchanged today.
+  if (!file.conversationId && (file.leadId || file.projectId)) {
+    const inVertical = file.leadId
+      ? await prisma.lead.findFirst({ where: { id: file.leadId }, select: { id: true } })
+      : await prisma.project.findFirst({ where: { id: file.projectId! }, select: { id: true } });
+    if (!inVertical) return new NextResponse("Not found", { status: 404 });
   }
 
   // Customers may only access files tied to their own lead/project.
