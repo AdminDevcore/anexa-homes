@@ -10,8 +10,8 @@ import type { ActiveVertical } from "@/lib/vertical";
  *
  *  1. An explicit override set with runInVertical() / runUnscoped(). This is how
  *     code that has no HTTP request scope declares its intent: cron jobs, the
- *     website intake action, public token pages (/sign, /present, /bid,
- *     /welcome), seeds and tests.
+ *     website intake action, public token pages (/sign, /present, /bid), seeds
+ *     and tests.
  *
  *  2. The active request's session + workspace cookie. This covers every server
  *     component, server action and route handler in the portal, which is the

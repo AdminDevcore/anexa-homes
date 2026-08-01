@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { FileSignature, FileText, Pencil, PhoneCall } from "lucide-react";
+import { FileSignature, FileText, Pencil } from "lucide-react";
 import { DeleteTemplateButton } from "@/components/portal/delete-template-button";
 import type { Prisma } from "@prisma/client";
 import { requireUser } from "@/server/auth/session";
@@ -14,9 +14,6 @@ import { SendDocumentDialog } from "@/components/esign/send-document-dialog";
 import { SignatureStatusBadge, roleLabel } from "@/components/esign/signature-status-badge";
 import { ResendButton } from "@/components/esign/resend-button";
 import { NewTemplateButton } from "@/components/portal/new-template-button";
-import { WelcomeCallsList } from "@/components/portal/welcome-calls-list";
-import { listWelcomeCalls } from "@/server/modules/welcome-call/queries";
-import { CALL_KIND_LABELS } from "@/server/modules/welcome-call/types";
 import { currentFormatters } from "@/lib/format-server";
 
 export const metadata = { title: "Documents" };
@@ -54,18 +51,6 @@ export default async function DocumentsPage() {
         })
       : Promise.resolve([]),
   ]);
-
-  const welcomeCalls = isStaff ? await listWelcomeCalls(user.companyId) : [];
-  const welcomeRows = welcomeCalls.map((w) => ({
-    id: w.id,
-    customerName: w.customerName,
-    kind: w.kind,
-    templateName: w.template?.name ?? CALL_KIND_LABELS[w.kind],
-    status: w.status as "sent" | "viewed" | "completed" | "voided",
-    when: fmt.date(w.completedAt ?? w.viewedAt ?? w.sentAt),
-    leadId: w.leadId,
-    hasRecording: w.mode === "avatar" && !!w.recordingStorageKey,
-  }));
 
   return (
     <div className="space-y-6">
@@ -206,31 +191,6 @@ export default async function DocumentsPage() {
         )}
       </div>
 
-      {isStaff && (
-        <div className="rounded-xl border border-border bg-card">
-          <div className="flex items-center gap-2 border-b border-border px-5 py-3.5">
-            <PhoneCall className="size-4 text-gold" />
-            <h2 className="font-semibold">Confirmation Calls</h2>
-          </div>
-          {welcomeRows.length === 0 ? (
-            <div className="p-5">
-              <EmptyState
-                icon={PhoneCall}
-                title="No calls sent yet"
-                description={
-                  canSend
-                    ? "Open a lead and click “Send Call” to send a customer a welcome or completion confirmation link. Build scripts in Settings → Call Templates."
-                    : "Sent welcome and completion calls will appear here."
-                }
-              />
-            </div>
-          ) : (
-            <div className="p-5">
-              <WelcomeCallsList rows={welcomeRows} canSend={canSend} />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

@@ -122,8 +122,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("1 · System Design")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("2 · Financing")).toBeVisible();
     await expect(page.getByText("3 · Generate & send")).toBeVisible();
-    await expect(page.getByText("4 · Welcome call")).toBeVisible();
-    await expect(page.getByText("5 · Contracts & documents")).toBeVisible();
+    await expect(page.getByText("4 · Contracts & documents")).toBeVisible();
   });
 
 

@@ -14,9 +14,9 @@ import sharp from "sharp";
 const MAX_BYTES = 30 * 1024 * 1024; // 30MB (phone photos); compressed after upload
 const CALL_MAX_BYTES = 100 * 1024 * 1024; // 100MB — call recordings (audio, uncompressed)
 
-// Dedicated call-recording slots on a deal (Welcome Call, QC Call). Kept in
-// sync with src/lib/call-groups.ts.
-const CALL_GROUPS = new Set(["welcome_call", "qc_call"]);
+// Dedicated call-recording slots on a deal (QC Call). Kept in sync with
+// src/lib/call-groups.ts.
+const CALL_GROUPS = new Set(["qc_call"]);
 
 // Audio formats accepted for call recordings. Browsers report m4a/aac
 // inconsistently, so we accept the common spellings.

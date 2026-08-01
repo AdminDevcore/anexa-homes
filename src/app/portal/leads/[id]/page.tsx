@@ -50,8 +50,6 @@ import { BuildPresentationButton } from "@/components/portal/build-presentation-
 import { CashBidButton } from "@/components/portal/cash-bid-panel";
 import { InsuranceContractButton } from "@/components/portal/insurance-contract-panel";
 import { getCashBidsForLead } from "@/server/modules/cashbid/queries";
-import { SendWelcomeCallButton } from "@/components/portal/send-welcome-call-button";
-import { getActiveWelcomeCallTemplates } from "@/server/modules/welcome-call/queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { FilesSection } from "@/components/portal/files-section";
@@ -218,7 +216,6 @@ export default async function LeadDetailPage({
   // the record being viewed.
   const appointmentDispositions = await getAppointmentDispositions(user.companyId, lead.vertical);
   const inspectionOutcomes = await getInspectionOutcomes(user.companyId, lead.vertical);
-  const welcomeCallTemplates = can(user, "create", "Document") ? await getActiveWelcomeCallTemplates(user.companyId) : [];
 
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
@@ -368,9 +365,9 @@ export default async function LeadDetailPage({
   const dealTabs = isSolarDeal
     ? [
         // Solar's own tab set. The PROPOSAL is a single hub — design,
-        // financing, generation, contracts and the welcome call are one flow,
-        // because that is how a rep actually presents and closes a deal. No
-        // Scope of Work: that is an insurance-restoration concept.
+        // financing, generation and contracts are one flow, because that is how
+        // a rep actually presents and closes a deal. No Scope of Work: that is
+        // an insurance-restoration concept.
         { id: "overview", label: "Overview" },
         { id: "proposal", label: "Proposal" },
         { id: "production", label: "Operations", icon: "operations" },
@@ -428,9 +425,6 @@ export default async function LeadDetailPage({
               </>
             )}
             {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
-            {!isSolarDeal && can(user, "create", "Document") && (
-              <SendWelcomeCallButton leadId={lead.id} templates={welcomeCallTemplates} />
-            )}
             {can(user, "update", "Lead") && (
               <Button asChild variant="outline" size="sm">
                 <Link href={`/portal/leads/${lead.id}/edit`}>
@@ -689,19 +683,6 @@ export default async function LeadDetailPage({
               </div>
             )}
 
-            {isSolarDeal && can(user, "create", "Document") && (
-              <div data-deal-tab="proposal" className="space-y-6">
-                <Card title="4 · Welcome call">
-                  <p className="mb-3 text-sm text-muted-foreground">
-                    Send the customer a link to confirm the sale in their own words. Do this
-                    immediately after they accept — it is the cheapest cancellation insurance
-                    there is.
-                  </p>
-                  <SendWelcomeCallButton leadId={lead.id} templates={welcomeCallTemplates} />
-                </Card>
-              </div>
-            )}
-
             {/* ── Production ── */}
             <div data-deal-tab="production" className="space-y-6">
           {/* Production (job): crew, QC, daily reports, site & install photos */}
@@ -808,7 +789,7 @@ export default async function LeadDetailPage({
           {/* One place for everything: e-signature documents + all file/photo
               attachments. Survey/Install photo checklists are the header buttons. */}
           <FilesSection
-            title={isSolarDeal ? "5 · Contracts & documents" : "Documents & Files"}
+            title={isSolarDeal ? "4 · Contracts & documents" : "Documents & Files"}
             files={lead.files
               .filter(
                 (f) =>
@@ -867,7 +848,7 @@ export default async function LeadDetailPage({
               )}
             </div>
 
-            {/* Dedicated Welcome Call / QC Call recording slots. */}
+            {/* Dedicated QC Call recording slot. */}
             <DealCallRecordings
               leadId={lead.id}
               recordings={lead.files

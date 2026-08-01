@@ -1,6 +1,10 @@
-# Welcome Call & QC Call recording slots — Design
+# Call recording slots — Design
 
 **Date:** 2026-06-14
+
+> **Superseded in part (2026-08-01):** the Welcome Call slot was removed along
+> with the rest of the welcome-call feature. Only the **QC Call** slot ships
+> today; everything below describing a Welcome Call slot is historical.
 
 ## Problem
 

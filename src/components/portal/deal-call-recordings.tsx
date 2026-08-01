@@ -11,8 +11,8 @@ import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actio
 export type CallRecording = { id: string; name: string; group: CallGroup };
 
 /**
- * Dedicated upload slots for the Welcome Call and QC Call recordings on a deal.
- * One audio recording per slot — re-uploading replaces it (handled server-side).
+ * Dedicated upload slot for the QC Call recording on a deal. One audio recording
+ * per slot — re-uploading replaces it (handled server-side).
  */
 export function DealCallRecordings({
   leadId,

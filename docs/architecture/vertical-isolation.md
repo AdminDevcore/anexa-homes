@@ -57,8 +57,8 @@ Both have been verified to fail on a planted violation.
 
 1. **An explicit override** — `runInVertical(v, fn)` / `runUnscoped(reason, fn)`.
    This is how code with no HTTP request declares intent: cron jobs, the website
-   intake action, public token pages (`/sign`, `/present`, `/bid`, `/welcome`),
-   seeds and tests.
+   intake action, public token pages (`/sign`, `/present`, `/bid`), seeds and
+   tests.
 2. **The request's session + workspace cookie** — covers every portal server
    component, server action and route handler, i.e. the vast majority of call
    sites, with no code change at all.

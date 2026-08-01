@@ -41,7 +41,6 @@ export const SCOPED_MODELS = [
   "PhotoTemplate",
   "CommissionRule",
   "NotificationRule",
-  "WelcomeCallTemplate",
   "DocumentTemplate",
   "KnowledgeCategory",
   // Product / scope catalog
