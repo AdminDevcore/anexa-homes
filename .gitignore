@@ -44,4 +44,11 @@ next-env.d.ts
 /storage
 /test-results
 /playwright-report
-/.next-e2e
+# EVERY alternate NEXT_DIST_DIR, not just the e2e one. Tailwind v4's automatic
+# content detection skips gitignored paths — so a build directory that is NOT
+# ignored gets scanned as source, class names are extracted from compiled JS,
+# and the resulting garbage utility (`.bg-[var(-<binary>)]`) fails to parse.
+# The symptom is a 500 on every page with "Parsing CSS source code failed",
+# including in an unrelated dev server that happens to be running. Building
+# into a scratch dist dir must never be able to do that again.
+/.next-*
