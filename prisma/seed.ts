@@ -340,6 +340,44 @@ async function main() {
           termYears: 25,
         },
       });
+
+      // The approved credit decision behind that loan. Deliberately two rows:
+      // the first lender declined, the second approved. That is the normal
+      // shape of a financed solar deal, and it is what the deal page has to
+      // resolve — showing the newest row here would show the DECLINE.
+      //
+      // Stipulations stay free of the words "insurance", "claim" and the rest:
+      // solar-no-insurance.spec.ts asserts none of them appear anywhere on a
+      // solar deal, and this text renders on the page.
+      await prisma.creditApplication.createMany({
+        data: [
+          {
+            companyId: company.id,
+            leadId: solarLead.id,
+            lender: "Sunlight Financial",
+            status: "declined",
+            amountCents: 3885000,
+            submittedAt: new Date(Date.now() - 46 * 86_400_000),
+            decidedAt: new Date(Date.now() - 45 * 86_400_000),
+            notes: "Debt-to-income over programme limit.",
+          },
+          {
+            companyId: company.id,
+            leadId: solarLead.id,
+            lender: "GoodLeap",
+            status: "approved",
+            externalId: "GL-4417820",
+            amountCents: 3885000,
+            termMonths: 300,
+            aprPct: 6.99,
+            dealerFeePct: 18,
+            stipulations: ["Proof of income — two most recent pay stubs"],
+            submittedAt: new Date(Date.now() - 44 * 86_400_000),
+            decidedAt: new Date(Date.now() - 43 * 86_400_000),
+            expiresAt: new Date(Date.now() + 47 * 86_400_000),
+          },
+        ],
+      });
     }
 
     // Payment schedule — the one thing the cockpit needed that we did not
