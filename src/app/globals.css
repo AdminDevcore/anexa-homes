@@ -14,6 +14,8 @@
   --color-gold: var(--gold);
   --color-gold-foreground: var(--gold-foreground);
   --color-gold-muted: var(--gold-muted);
+  --color-solar: var(--solar);
+  --color-solar-foreground: var(--solar-foreground);
   --color-metal: var(--metal);
   --color-metal-bright: var(--metal-bright);
   --color-metal-dim: var(--metal-dim);
@@ -84,6 +86,12 @@
   --gold: oklch(0.665 0.2 41);
   --gold-foreground: oklch(0.99 0 0);
   --gold-muted: oklch(0.6 0.19 40);
+  /* Solar workspace accent — sky (~#0EA5E9), the hex already used by
+     VERTICAL_ACCENT.solar for the switcher dot and the shell strip. Promoted to
+     a token so the Solar deal page can tint with opacity modifiers and get
+     dark-mode handling, instead of hardcoding the hex in a style attribute. */
+  --solar: oklch(0.685 0.148 237.3);
+  --solar-foreground: oklch(0.99 0 0);
   /* Brushed-metal palette — the dominant marketing accent */
   --metal: #c7ccd1;
   --metal-bright: #eef1f4;
@@ -117,6 +125,9 @@
   --gold: oklch(0.7 0.2 42);
   --gold-foreground: oklch(0.99 0 0);
   --gold-muted: oklch(0.76 0.16 50);
+  /* Lifted for contrast against the dark card surface. */
+  --solar: oklch(0.74 0.14 237.3);
+  --solar-foreground: oklch(0.145 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
