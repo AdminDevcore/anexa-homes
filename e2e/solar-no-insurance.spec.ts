@@ -147,10 +147,11 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("M1", { exact: true })).toBeVisible();
     await expect(page.getByText("1st payment", { exact: true })).toBeVisible();
 
-    // 3 · Document folders with counts.
-    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets", "Permits", "Internal Documents"]) {
-      await expect(page.getByText(folder, { exact: true })).toBeVisible();
-    }
+    // 3 · The property hero and the lender's own terms, both on the Overview.
+    await expect(page.getByRole("heading", { name: "Property" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Homeowner Information" })).toBeVisible();
+    await expect(page.getByText("Financing & lender")).toBeVisible();
+    await expect(page.getByText("GoodLeap").first()).toBeVisible();
 
     // 4 · Feed with its three channels.
     await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
@@ -160,10 +161,42 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("Edit design", { exact: true })).toBeVisible();
     await expect(page.getByText("Upload files", { exact: true })).toBeVisible();
 
-    // Deferred items are labelled, not silently missing.
-    await expect(page.getByText("Satellite roof render")).toBeVisible();
+    // Deferred items are labelled, not silently missing. "Satellite roof
+    // render" is deliberately NOT among them any more — the real property view
+    // shipped and is the hero asserted above.
+    await expect(page.getByText("Satellite roof render")).toHaveCount(0);
     await expect(page.getByText("Project AI assistant")).toBeVisible();
     await expect(page.getByText("Coming soon").first()).toBeVisible();
+
+    // 6 · Document folders moved to the Proposal tab, beside the files they
+    // describe, so they are hidden until that tab is opened.
+    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets"]) {
+      await expect(page.getByText(folder, { exact: true })).toBeHidden();
+    }
+    await page.getByRole("button", { name: "Proposal", exact: true }).click();
+    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets", "Permits", "Internal Documents"]) {
+      await expect(page.getByText(folder, { exact: true })).toBeVisible();
+    }
+  });
+
+  test("the summary row answers stage, financier, size and rep without scrolling", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openSolarDeal(page);
+
+    const cards = page.getByTestId("solar-summary-cards");
+    await expect(cards).toBeVisible({ timeout: 15000 });
+    await expect(cards.getByText("Current stage")).toBeVisible();
+    await expect(cards.getByText("Financier")).toBeVisible();
+    // The APPROVED lender, not the newer decline — the seed has both.
+    await expect(cards.getByText("GoodLeap")).toBeVisible();
+    await expect(cards.getByText("Sunlight Financial")).toHaveCount(0);
+    await expect(cards.getByText("System size")).toBeVisible();
+    await expect(cards.getByText("10.00 kW")).toBeVisible();
+    await expect(cards.getByText("Sales rep")).toBeVisible();
+
+    // No project on this deal, so there is no project manager to name — the
+    // card is absent rather than rendered empty.
+    await expect(cards.getByText("Project manager")).toHaveCount(0);
   });
 
   test("internal feed posts are marked as staff-only", async ({ page }) => {
