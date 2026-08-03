@@ -13,7 +13,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SOLAR_FOLDERS } from "@/lib/solar-folders";
-import { moveLeadStage } from "@/server/modules/leads/actions";
 import {
   postDealFeedAction,
   inviteHomeownerAction,
@@ -25,105 +24,11 @@ const usd = (c: number) =>
 const usdc = (c: number) =>
   (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
 
-// ---------------------------------------------------------------------------
-// 1 · Stage bar
-// ---------------------------------------------------------------------------
-
-export type StageLite = { id: string; name: string; position: number; color: string };
-
-/**
- * The full lifecycle at a glance, New Lead through System Activated.
- *
- * 25 stages will not fit on a phone, so it scrolls horizontally and auto-scrolls
- * the current stage into view. Every stage is clickable — a coordinator moving a
- * deal should not have to open a menu to do the single most common action on
- * the page.
- */
-export function SolarStageBar({
-  leadId,
-  stages,
-  currentStageId,
-  canEdit,
-}: {
-  leadId: string;
-  stages: StageLite[];
-  currentStageId: string | null;
-  canEdit: boolean;
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState<string | null>(null);
-  const currentRef = React.useRef<HTMLButtonElement>(null);
-
-  React.useEffect(() => {
-    currentRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
-  }, [currentStageId]);
-
-  const currentIndex = stages.findIndex((s) => s.id === currentStageId);
-
-  async function move(stageId: string) {
-    if (!canEdit || stageId === currentStageId) return;
-    setBusy(stageId);
-    const res = await moveLeadStage({ leadId, stageId });
-    setBusy(null);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Stage updated");
-    router.refresh();
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Project lifecycle
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {currentIndex >= 0 ? `${currentIndex + 1} of ${stages.length}` : "Not started"}
-        </span>
-      </div>
-      <div className="flex gap-1 overflow-x-auto pb-1" data-testid="solar-stage-bar">
-        {stages.map((s, i) => {
-          const done = currentIndex >= 0 && i < currentIndex;
-          const current = s.id === currentStageId;
-          return (
-            <button
-              key={s.id}
-              ref={current ? currentRef : undefined}
-              disabled={!canEdit || busy !== null}
-              onClick={() => move(s.id)}
-              title={s.name}
-              className={cn(
-                "group flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-default",
-                current
-                  ? "border-transparent text-white"
-                  : done
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-border text-muted-foreground hover:bg-muted"
-              )}
-              style={current ? { background: s.color } : undefined}
-            >
-              {busy === s.id ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : done ? (
-                <Check className="size-3" />
-              ) : (
-                <span className="text-[10px] tabular-nums opacity-60">{i + 1}</span>
-              )}
-              <span className="whitespace-nowrap">{s.name}</span>
-            </button>
-          );
-        })}
-      </div>
-      {canEdit && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Click any stage to move the deal there.
-        </p>
-      )}
-    </div>
-  );
-}
+// The stage bar used to live here. Nothing about it was solar-specific, so it
+// now serves both verticals from `deal-stage-bar.tsx` (DealStageBar).
 
 // ---------------------------------------------------------------------------
-// 2 · System & money
+// 1 · System & money
 // ---------------------------------------------------------------------------
 
 export type MilestoneLite = {
@@ -452,7 +357,7 @@ function SpecRow({ k, v }: { k: string; v: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// 3 · Document folders
+// 2 · Document folders
 // ---------------------------------------------------------------------------
 
 export function SolarDocumentFolders({
@@ -503,7 +408,7 @@ export function SolarDocumentFolders({
 }
 
 // ---------------------------------------------------------------------------
-// 4 · Activity feed
+// 3 · Activity feed
 // ---------------------------------------------------------------------------
 
 export type FeedPost = {
@@ -623,7 +528,7 @@ export function SolarActivityFeed({
 }
 
 // ---------------------------------------------------------------------------
-// 5 · Quick actions
+// 4 · Quick actions
 // ---------------------------------------------------------------------------
 
 /**

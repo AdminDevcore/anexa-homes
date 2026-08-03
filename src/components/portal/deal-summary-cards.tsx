@@ -1,15 +1,19 @@
 import { cn } from "@/lib/utils";
 
 /**
- * The five facts a solar deal is judged on, directly under the customer name.
+ * The handful of facts a deal is judged on, directly under the customer name.
  *
- * The point is that a coordinator opening a deal should not have to scroll or
- * open a tab to answer "where is it, who is funding it, how big is it, and who
- * owns it". Everything here already existed on the page — it was just spread
- * across a sidebar, a tab and a card body.
+ * The point is that whoever opens a deal should not have to scroll or open a
+ * tab to answer "where is it, who owns it, what is it worth". Everything here
+ * already existed on the page — it was just spread across a sidebar, a tab and
+ * a card body.
  *
  * A card with no value is NOT rendered. An empty tile reads as "we don't know"
  * with the same visual weight as a real answer, which is worse than absence.
+ *
+ * Vertical-agnostic by construction: it takes a list of already-formatted
+ * facts and an accent, so Solar and Roofing share one row rather than growing
+ * two that drift apart.
  */
 
 export type SummaryCard = {
@@ -17,16 +21,23 @@ export type SummaryCard = {
   value: string;
   /** Secondary line — credit status, days in stage, panel count. */
   hint?: string;
-  /** Accent bar colour. Defaults to the Solar workspace accent. */
+  /** Per-card accent override, e.g. a pipeline stage's own colour. */
   accent?: string;
 };
 
-export function SolarSummaryCards({ cards }: { cards: SummaryCard[] }) {
+export function DealSummaryCards({
+  cards,
+  accent = "var(--gold)",
+}: {
+  cards: SummaryCard[];
+  /** The workspace accent: `var(--solar)` on solar, brand orange on roofing. */
+  accent?: string;
+}) {
   if (cards.length === 0) return null;
 
   return (
     <dl
-      data-testid="solar-summary-cards"
+      data-testid="deal-summary-cards"
       // Flex, not a fixed grid: the number of cards varies from two to five
       // depending on what the deal knows, and `grid-cols-5` with four cards
       // leaves a conspicuous hole at the end of the row. `flex-1` off a 220px
@@ -46,7 +57,7 @@ export function SolarSummaryCards({ cards }: { cards: SummaryCard[] }) {
           <span
             aria-hidden
             className="absolute inset-y-0 left-0 w-1"
-            style={{ background: c.accent ?? "var(--solar)" }}
+            style={{ background: c.accent ?? accent }}
           />
           <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             {c.label}
