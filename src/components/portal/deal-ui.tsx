@@ -92,8 +92,19 @@ export function Card({
             </>
           ) : (
             <>
-              {Icon && <Icon className="size-4 text-gold" />}
-              <h2 className="font-semibold">{title}</h2>
+              {Icon && <Icon className="size-4 shrink-0 text-gold" />}
+              {/* Only wrap when there IS a description, so the many existing
+                  brand cards that pass none keep their exact markup. */}
+              {description ? (
+                <div className="min-w-0">
+                  <h2 className="font-semibold">{title}</h2>
+                  <p className="line-clamp-2 text-xs font-normal text-muted-foreground">
+                    {description}
+                  </p>
+                </div>
+              ) : (
+                <h2 className="font-semibold">{title}</h2>
+              )}
               {action && <div className="ml-auto">{action}</div>}
             </>
           )}

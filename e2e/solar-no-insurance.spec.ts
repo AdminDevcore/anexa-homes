@@ -131,7 +131,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await openSolarDeal(page);
 
     // 1 · Stage bar across the whole 25-stage lifecycle.
-    const bar = page.getByTestId("solar-stage-bar");
+    const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
     await expect(bar.getByText("New Lead")).toBeVisible();
     await expect(bar.getByText("Utility PTO")).toBeVisible();
@@ -183,7 +183,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
 
-    const cards = page.getByTestId("solar-summary-cards");
+    const cards = page.getByTestId("deal-summary-cards");
     await expect(cards).toBeVisible({ timeout: 15000 });
     await expect(cards.getByText("Current stage")).toBeVisible();
     await expect(cards.getByText("Financier")).toBeVisible();
@@ -228,7 +228,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await page.getByRole("button", { name: /Create Appointment/ }).click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
-    const bar = page.getByTestId("solar-stage-bar");
+    const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
     await bar.getByText("Permit Approved", { exact: true }).click();
     await expect(page.getByText(/Stage updated/)).toBeVisible({ timeout: 15000 });

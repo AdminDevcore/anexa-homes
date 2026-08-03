@@ -1,9 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
-  Phone,
-  Mail,
-  MapPin,
   ShieldCheck,
   ArrowLeft,
   Pencil,
@@ -21,6 +18,7 @@ import {
   MessageSquare,
   Sun,
   FolderOpen,
+  FileSignature,
   User as UserIcon,
 } from "lucide-react";
 import { requireUser, getSessionUser } from "@/server/auth/session";
@@ -37,13 +35,13 @@ import { getProjectPhotoChecklists } from "@/server/modules/photos/queries";
 import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modules/settings/queries";
 import { SolarOpsCard } from "@/components/portal/solar-ops-card";
 import {
-  SolarStageBar,
   SolarSystemMoneyPanel,
   SolarDocumentFolders,
   SolarActivityFeed,
   SolarQuickActions,
   SolarDeferredPanels,
 } from "@/components/portal/solar-cockpit";
+import { DealStageBar } from "@/components/portal/deal-stage-bar";
 import { SOLAR_FOLDER_KEYS } from "@/lib/solar-folders";
 import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
@@ -70,9 +68,9 @@ import { DealActionsPanel } from "@/components/portal/deal-actions-panel";
 import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
 import { SolarProductToggle } from "@/components/portal/solar-product-toggle";
-import { PropertyView } from "@/components/portal/solar/property-view";
-import { SolarSummaryCards, type SummaryCard } from "@/components/portal/solar/deal-summary-cards";
-import { HomeownerCard } from "@/components/portal/solar/homeowner-card";
+import { PropertyView } from "@/components/portal/property-view";
+import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-summary-cards";
+import { HomeownerCard } from "@/components/portal/homeowner-card";
 import { FinancingTermsPanel } from "@/components/portal/solar/financing-terms";
 import { Card, Detail, Section } from "@/components/portal/deal-ui";
 import { DealTabs } from "@/components/portal/deal-tabs";
@@ -363,9 +361,13 @@ export default async function LeadDetailPage({
     : null;
 
   // The at-a-glance row under the customer name. Cards with no value are
-  // dropped rather than rendered empty — see SolarSummaryCards.
+  // dropped rather than rendered empty — see DealSummaryCards.
+  //
+  // Stage is the one card BOTH verticals carry; after that the two businesses
+  // are judged on different things, so the lists diverge rather than being
+  // forced into one shape.
   const summaryCards: SummaryCard[] = [];
-  if (isSolarDeal) {
+  {
     const stageIndex = lead.pipeline
       ? lead.pipeline.stages.findIndex((s) => s.id === lead.stage?.id)
       : -1;
@@ -386,6 +388,37 @@ export default async function LeadDetailPage({
         accent: lead.stage.color,
       });
     }
+  }
+  if (!isSolarDeal) {
+    const claimStatus = lead.claimStatus.replace(/_/g, " ");
+    summaryCards.push({
+      label: "Deal type",
+      value: isInsurance ? "Insurance" : "Cash",
+      hint: isInsurance
+        ? `Claim ${claimStatus}`
+        : "Out of pocket / financed",
+    });
+    if (claim?.carrier) {
+      summaryCards.push({
+        label: "Carrier",
+        value: claim.carrier,
+        hint: claim.claimNumber ? `Claim ${claim.claimNumber}` : undefined,
+      });
+    }
+    if (lead.assignedRep) {
+      summaryCards.push({
+        label: "Assigned rep",
+        value: `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`,
+      });
+    }
+    // `claimPrice` is the CONTRACT price set from the scope — the real number.
+    // Deliberately not `lead.value`, the rep's estimate: that was removed from
+    // this page on purpose and must not come back as a headline figure.
+    if (lead.claimPrice) {
+      summaryCards.push({ label: "Contract value", value: fmt.money(lead.claimPrice) });
+    }
+  }
+  if (isSolarDeal) {
     if (creditApp?.lender) {
       const status = creditApp.status.replace(/_/g, " ");
       summaryCards.push({
@@ -500,39 +533,11 @@ export default async function LeadDetailPage({
         title={`${lead.firstName} ${lead.lastName}`}
         description={lead.source ? `Source: ${lead.source.name}` : undefined}
         action={
+          // Both verticals now end at the same low density: edit the record,
+          // plus the admin-only job editor. The stage lives in the bar and the
+          // summary row; the three roofing contract tools moved to the
+          // Documents tab, beside the documents they produce.
           <div className="flex items-center gap-2">
-            {/* Roofing's only stage indicator. A solar deal states its stage
-                twice already — in the progress bar and in the summary row — so a
-                third copy here is noise. */}
-            {!isSolarDeal && lead.stage && (
-              <span
-                className="rounded-full px-3 py-1 text-xs font-medium"
-                style={{ backgroundColor: `${lead.stage.color}22`, color: lead.stage.color }}
-              >
-                {lead.stage.name}
-              </span>
-            )}
-            {/* Build Presentation, Insurance Contract and Simple Cash Bid are the
-                ROOFING contract tools. A solar deal closes through its own
-                Proposal hub, and "Insurance Contract" is meaningless without an
-                insurer — so none of them render here. */}
-            {!isSolarDeal && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
-              <BuildPresentationButton leadId={lead.id} />
-            )}
-            {!isSolarDeal && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
-              <>
-                <InsuranceContractButton
-                  leadId={lead.id}
-                  bids={insuranceBids}
-                  prefill={{
-                    carrier: claim?.carrier ?? "",
-                    claimNumber: claim?.claimNumber ?? "",
-                    deductibleDollars: claim?.deductible ? String(claim.deductible / 100) : "",
-                  }}
-                />
-                <CashBidButton leadId={lead.id} bids={cashBids} />
-              </>
-            )}
             {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
             {can(user, "update", "Lead") && (
               <Button asChild variant="outline" size="sm">
@@ -556,10 +561,16 @@ export default async function LeadDetailPage({
         />
       )}
 
-      {isSolarDeal && <SolarSummaryCards cards={summaryCards} />}
+      <DealSummaryCards
+        cards={summaryCards}
+        accent={isSolarDeal ? "var(--solar)" : "var(--gold)"}
+      />
 
-      {isSolarDeal && lead.pipeline && (
-        <SolarStageBar
+      {/* Both verticals get the real progress bar off their own pipeline's
+          stages. Roofing used to get a single status chip in the header, which
+          said where the deal was but never how far along that made it. */}
+      {lead.pipeline && (
+        <DealStageBar
           leadId={lead.id}
           stages={lead.pipeline.stages.map((st) => ({
             id: st.id, name: st.name, position: st.position, color: st.color,
@@ -574,23 +585,25 @@ export default async function LeadDetailPage({
           <DealTabs tabs={dealTabs}>
             {/* ── Overview ── */}
             <div data-deal-tab="overview" className="space-y-6">
-          {/* The property leads the Overview, the way Pipe Solar leads with the
-              roof. Roofing deals never render this. */}
-          {isSolarDeal && (
-            <Card
-              title="Property"
-              icon={Satellite}
-              tone="solar"
-              description="Panel layout still needs a design provider — imagery only for now"
-            >
-              <PropertyView
-                leadId={lead.id}
-                address={[lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
-                  .filter(Boolean)
-                  .join(" · ")}
-              />
-            </Card>
-          )}
+          {/* The property leads the Overview on both verticals — solar sells a
+              roof it has to fit an array onto, roofing sells the roof itself. */}
+          <Card
+            title="Property"
+            icon={Satellite}
+            tone={isSolarDeal ? "solar" : "brand"}
+            description={
+              isSolarDeal
+                ? "Panel layout still needs a design provider — imagery only for now"
+                : "Aerial imagery. Trace and measure the roof in Production."
+            }
+          >
+            <PropertyView
+              leadId={lead.id}
+              address={[lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
+                .filter(Boolean)
+                .join(" · ")}
+            />
+          </Card>
 
           {/* System, pricing, payment schedule AND the lender's terms in one
               card. These were two separate concerns on two separate surfaces,
@@ -664,29 +677,6 @@ export default async function LeadDetailPage({
               linkedDeal={linkedDeal}
               canEdit={can(user, "update", "Lead")}
             />
-          )}
-
-          {/* Contact — roofing only. On solar the same facts live in the
-              sidebar as "Homeowner Information", where they stay visible from
-              every tab instead of scrolling away with the Overview. */}
-          {!isSolarDeal && (
-          <Card title="Contact">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Detail icon={Phone} label="Phone" value={lead.phone ?? "—"} />
-              <Detail icon={Mail} label="Email" value={lead.email ?? "—"} />
-              <Detail
-                icon={MapPin}
-                label="Address"
-                value={[lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") || "—"}
-                full
-              />
-            </div>
-            {lead.notes && (
-              <p className="mt-4 rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
-                {lead.notes}
-              </p>
-            )}
-          </Card>
           )}
 
           {/* Notes — roofing only. On solar the channelled Activity feed above
@@ -926,6 +916,35 @@ export default async function LeadDetailPage({
 
             {/* ── Documents & files ── */}
             <div data-deal-tab={isSolarDeal ? "proposal" : "documents"} className="space-y-6">
+          {/* The roofing contract tools, moved out of the page header.
+              Build Presentation, Insurance Contract and Simple Cash Bid all
+              produce a customer-facing document, so they belong beside the
+              documents rather than as three same-weight buttons above a deal
+              nobody has read yet. A solar deal closes through its own Proposal
+              hub, and "Insurance Contract" is meaningless without an insurer —
+              so none of them render there. */}
+          {!isSolarDeal && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
+            <Card
+              title="Create a document"
+              icon={FileSignature}
+              description="Build a proposal, or send a contract for signature."
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <BuildPresentationButton leadId={lead.id} />
+                <InsuranceContractButton
+                  leadId={lead.id}
+                  bids={insuranceBids}
+                  prefill={{
+                    carrier: claim?.carrier ?? "",
+                    claimNumber: claim?.claimNumber ?? "",
+                    deductibleDollars: claim?.deductible ? String(claim.deductible / 100) : "",
+                  }}
+                />
+                <CashBidButton leadId={lead.id} bids={cashBids} />
+              </div>
+            </Card>
+          )}
+
           {/* One place for everything: e-signature documents + all file/photo
               attachments. Survey/Install photo checklists are the header buttons. */}
           <FilesSection
@@ -1020,24 +1039,28 @@ export default async function LeadDetailPage({
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Homeowner first on solar: on a deal that lives in tabs, the person
-              you are calling should not be one of them. */}
-          {isSolarDeal && (
-            <Card title="Homeowner Information" icon={UserIcon} tone="solar">
-              <HomeownerCard
-                facts={{
-                  name: `${lead.firstName} ${lead.lastName}`,
-                  phone: lead.phone,
-                  email: lead.email,
-                  address:
-                    [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") ||
-                    null,
-                  leadSource: lead.source?.name ?? null,
-                  notes: lead.notes,
-                }}
-              />
-            </Card>
-          )}
+          {/* Homeowner first: on a deal that lives in tabs, the person you are
+              calling should not be one of them. This replaced roofing's
+              "Contact" card in the Overview — same facts, now reachable from
+              every tab and with copy buttons on the values you actually use. */}
+          <Card
+            title="Homeowner Information"
+            icon={UserIcon}
+            tone={isSolarDeal ? "solar" : "brand"}
+          >
+            <HomeownerCard
+              facts={{
+                name: `${lead.firstName} ${lead.lastName}`,
+                phone: lead.phone,
+                email: lead.email,
+                address:
+                  [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") ||
+                  null,
+                leadSource: lead.source?.name ?? null,
+                notes: lead.notes,
+              }}
+            />
+          </Card>
 
           <Card title="Summary" tone={isSolarDeal ? "solar" : "brand"}>
             <div className="space-y-3">
@@ -1060,18 +1083,11 @@ export default async function LeadDetailPage({
               </div>
               {propertyValueLine && <Detail label="Property Value" value={propertyValueLine} />}
               {lastSaleLine && <Detail label="Last Sale" value={lastSaleLine} />}
-              {/* On solar the rep already has a summary card of its own; a
-                  second copy three inches below it is just noise. */}
-              {!isSolarDeal && (
-                <Detail
-                  label="Assigned Rep"
-                  value={
-                    lead.assignedRep
-                      ? `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`
-                      : "Unassigned"
-                  }
-                />
-              )}
+              {/* An assigned rep already has a summary card of its own; a second
+                  copy three inches below it is just noise. UNASSIGNED still
+                  shows here, because that gap is worth stating explicitly and
+                  the summary row omits the card entirely when there is no rep. */}
+              {!lead.assignedRep && <Detail label="Assigned Rep" value="Unassigned" />}
               {isInsurance && <Detail label="Claim Status" value={lead.claimStatus.replace(/_/g, " ")} />}
               <Detail
                 label={isSolarDeal ? "Consult Date" : "Appointment Date"}
