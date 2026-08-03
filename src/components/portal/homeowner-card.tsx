@@ -1,4 +1,4 @@
-import { Mail, MapPin, Phone, Tag, User } from "lucide-react";
+import { Languages, Mail, MapPin, Phone, Tag, User } from "lucide-react";
 import { CopyButton } from "@/components/portal/copy-button";
 
 /**
@@ -18,6 +18,8 @@ export type HomeownerFacts = {
   phone: string | null;
   email: string | null;
   address: string | null;
+  /** Preferred spoken language, e.g. "Spanish". Null on most deals. */
+  language: string | null;
   leadSource: string | null;
   notes: string | null;
 };
@@ -47,6 +49,10 @@ export function HomeownerCard({ facts }: { facts: HomeownerFacts }) {
       {facts.address && (
         <Row icon={MapPin} label="Address" value={facts.address} copyLabel="address" />
       )}
+      {/* Before the lead source on purpose: this one changes how you talk to
+          the person, so it belongs with the ways of reaching them. No copy
+          button — nobody pastes a language anywhere. */}
+      {facts.language && <Row icon={Languages} label="Language" value={facts.language} />}
       {facts.leadSource && <Row icon={Tag} label="Lead source" value={facts.leadSource} />}
 
       {facts.notes && (

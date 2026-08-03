@@ -23,7 +23,11 @@ export type FinancingTerms = {
   termMonths: number | null;
   dealerFeePct: number | null;
   stipulations: string[];
-  /** Lease only — a loan's payment is set by the lender, not stored here. */
+  /** Loan only: cash down, reducing the financed amount. */
+  downPaymentCents: number | null;
+  /** Loan only: the lender's own payment figure. Never computed here. */
+  loanMonthlyPaymentCents: number | null;
+  /** Lease only — a lease's fixed monthly. */
   monthlyPaymentCents: number | null;
   escalatorPct: number | null;
   /** PPA only, in tenths of a cent per kWh. */
@@ -59,6 +63,9 @@ export function FinancingTermsPanel({ terms }: { terms: FinancingTerms }) {
 
   if (terms.product) rows.push({ k: "Product", v: PRODUCT_LABEL[terms.product] ?? terms.product });
   if (terms.lender) rows.push({ k: "Lender", v: terms.lender });
+  if (terms.downPaymentCents) {
+    rows.push({ k: "Down payment", v: usd(terms.downPaymentCents) });
+  }
   if (terms.amountFinancedCents) {
     rows.push({ k: "Amount financed", v: usd(terms.amountFinancedCents) });
   }
@@ -72,6 +79,11 @@ export function FinancingTermsPanel({ terms }: { terms: FinancingTerms }) {
     rows.push({ k: "Term", v: label });
   }
   if (terms.dealerFeePct) rows.push({ k: "Dealer fee", v: `${terms.dealerFeePct}%` });
+  // Two different products' payments, never both at once: the loan figure comes
+  // from the lender, the lease figure is the lease itself.
+  if (terms.loanMonthlyPaymentCents) {
+    rows.push({ k: "Monthly payment", v: `${usd(terms.loanMonthlyPaymentCents)}/mo` });
+  }
   if (terms.monthlyPaymentCents) {
     rows.push({ k: "Monthly payment", v: `${usd(terms.monthlyPaymentCents)}/mo` });
   }

@@ -275,6 +275,8 @@ async function main() {
         lastName: "Raman",
         email: "priya.raman@example.com",
         phone: "(555) 404-1180",
+        // Demoes the homeowner language row; most deals leave this null.
+        preferredLanguage: "Spanish",
         address: "902 Solaris Way",
         city: "Dallas",
         state: "TX",
@@ -338,6 +340,9 @@ async function main() {
           aprPct: 6.99,
           loanTermMonths: 300,
           termYears: 25,
+          // The lender's OWN figures from the approval, not computed here.
+          downPaymentCents: 500000, // $5,000 down
+          loanMonthlyPaymentCents: 27400, // $274/mo as issued by GoodLeap
         },
       });
 

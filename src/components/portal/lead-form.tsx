@@ -49,6 +49,7 @@ export function LeadForm({
     firstName: initial?.firstName ?? "",
     lastName: initial?.lastName ?? "",
     coOwnerName: initial?.coOwnerName ?? "",
+    preferredLanguage: initial?.preferredLanguage ?? "",
     email: initial?.email ?? "",
     phone: initial?.phone ?? "",
     address: initial?.address ?? "",
@@ -110,6 +111,7 @@ export function LeadForm({
       firstName: v.firstName,
       lastName: v.lastName,
       coOwnerName: v.coOwnerName,
+      preferredLanguage: v.preferredLanguage,
       email: v.email,
       phone: v.phone,
       address: v.address,
@@ -151,6 +153,22 @@ export function LeadForm({
           <Field label="First name" required><Input value={v.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
           <Field label="Last name" required><Input value={v.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
           <Field label="Co-owner name (if applicable)"><Input value={v.coOwnerName} onChange={(e) => set("coOwnerName", e.target.value)} /></Field>
+          {/* Free text with suggestions rather than a fixed <select>: the list
+              a company actually serves is theirs, not ours, and a datalist
+              still lets someone type "Tagalog". */}
+          <Field label="Preferred language">
+            <Input
+              list="preferred-language-options"
+              value={v.preferredLanguage}
+              placeholder="English"
+              onChange={(e) => set("preferredLanguage", e.target.value)}
+            />
+            <datalist id="preferred-language-options">
+              {["English", "Spanish", "Vietnamese", "Mandarin", "Tagalog", "Arabic", "French", "Portuguese"].map((l) => (
+                <option key={l} value={l} />
+              ))}
+            </datalist>
+          </Field>
           <Field label="Email"><Input type="email" value={v.email} onChange={(e) => set("email", e.target.value)} /></Field>
           <Field label="Phone"><Input value={v.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
         </Grid>

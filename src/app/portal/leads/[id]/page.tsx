@@ -354,6 +354,8 @@ export default async function LeadDetailPage({
         stipulations: Array.isArray(creditApp?.stipulations)
           ? (creditApp.stipulations as unknown[]).filter((s): s is string => typeof s === "string")
           : [],
+        downPaymentCents: solarFinance?.downPaymentCents ?? null,
+        loanMonthlyPaymentCents: solarFinance?.loanMonthlyPaymentCents ?? null,
         monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
         escalatorPct: solarFinance?.escalatorPct ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
@@ -1056,6 +1058,7 @@ export default async function LeadDetailPage({
                 address:
                   [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") ||
                   null,
+                language: lead.preferredLanguage,
                 leadSource: lead.source?.name ?? null,
                 notes: lead.notes,
               }}

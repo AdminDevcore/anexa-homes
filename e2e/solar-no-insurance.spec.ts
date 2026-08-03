@@ -280,6 +280,42 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     }
   });
 
+  test("the lender's own loan figures round-trip and are loan-only", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openSolarDeal(page);
+
+    // Seeded values reach the read-only summary on the Overview. `exact` is
+    // load-bearing: tab content stays mounted, so a loose "Down payment" also
+    // matches the "Down payment $" input label over in the Proposal tab.
+    await expect(page.getByText("Down payment", { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("$5,000", { exact: true })).toBeVisible();
+    await expect(page.getByText("$274/mo")).toBeVisible();
+
+    // Edit them where the sibling financing fields are edited.
+    await page.getByRole("button", { name: "Proposal", exact: true }).click();
+    await expect(page.getByText("Approved loan terms")).toBeVisible();
+    await page.getByLabel("Down payment $").fill("7500");
+    await page.getByLabel("Monthly payment $").fill("259.40");
+    await page.getByRole("button", { name: "Save financing" }).click();
+    // Wait for the action to actually land. Reloading straight off the click
+    // races it and re-renders the OLD row.
+    await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
+
+    // …and they persist. This is the whole point of storing rather than
+    // deriving: the number shown is the number that was entered.
+    await page.reload();
+    await expect(page.getByText("$7,500", { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("$259/mo")).toBeVisible();
+
+    // Switching to Cash removes the block entirely — a cash deal is paid in
+    // full, so it has neither a down payment nor a lender's monthly.
+    // Matched by its blurb: a bare "Cash" also hits the Summary sidebar's
+    // product toggle, which is a different control for the same field.
+    await page.getByRole("button", { name: "Proposal", exact: true }).click();
+    await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
+    await expect(page.getByText("Approved loan terms")).toBeHidden();
+  });
+
   test("roofing keeps every one of those concepts", async ({ page }) => {
     // The mirror assertion: this is a strip for SOLAR, not a deletion.
     await login(page, "admin@anexahomes.com");

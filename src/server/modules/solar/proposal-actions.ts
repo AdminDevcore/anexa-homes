@@ -79,6 +79,8 @@ export async function generateSolarProposalAction(leadId: string) {
       monthlyPaymentCents: finance.monthlyPaymentCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
+      downPaymentCents: finance.downPaymentCents,
+      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
     },
     assumptions
   );
@@ -127,6 +129,11 @@ export async function generateSolarProposalAction(leadId: string) {
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.aprPct,
+      // NOTE: downPaymentCents / loanMonthlyPaymentCents are deliberately NOT
+      // in this snapshot. The snapshot is what the customer was shown, frozen;
+      // putting a figure in it that the public proposal does not render would
+      // freeze something nobody saw. Add both here and to the proposal layout
+      // together, or not at all.
     },
     lender: approvedCredit?.lender ?? null,
     assumptions,
