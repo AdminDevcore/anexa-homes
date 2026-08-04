@@ -78,6 +78,10 @@ export function DealStageBar({
   const nextStage = stages.slice(currentIndex + 1).find((s) => !s.isLost) ?? null;
   const lostStage = stages.find((s) => s.isLost) ?? null;
   const isCancelled = !!current?.isLost;
+  // Progress counts the stages a deal can progress THROUGH. Cancelled is in the
+  // pipeline but is not a step towards anything, and counting it turned a
+  // 21-stage job into "step 4 of 22".
+  const liveCount = stages.filter((s) => !s.isLost).length;
 
   async function move(stageId: string) {
     if (!canEdit || stageId === currentStageId) return;
@@ -116,9 +120,9 @@ export function DealStageBar({
           <span className="truncate font-semibold tracking-tight">
             {current ? current.name : "Not started"}
           </span>
-          {current && (
+          {current && !isCancelled && (
             <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
-              {step}/{stages.length}
+              {step}/{liveCount}
             </span>
           )}
         </div>
