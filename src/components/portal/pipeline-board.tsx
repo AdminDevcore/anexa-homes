@@ -208,7 +208,11 @@ function Card({
       ref={setNodeRef}
       data-search-item
       className={cn(
-        "group relative overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all",
+        // shrink-0 is load-bearing: the card is a flex item in the column's
+        // overflow-y-auto drop zone, and `overflow-hidden` here resolves its auto
+        // min-height to 0. Without it, a full column squashes every card instead of
+        // scrolling — clipping the footer/age row inside each one.
+        "group relative shrink-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all",
         "hover:-translate-y-0.5 hover:border-border hover:shadow-md",
         isDragging && "opacity-40",
         overlay && "rotate-2 shadow-xl ring-1 ring-gold/30"
