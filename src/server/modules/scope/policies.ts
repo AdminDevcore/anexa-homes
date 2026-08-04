@@ -1,4 +1,4 @@
-import type { Role, ClaimStatus } from "@prisma/client";
+import type { Role } from "@prisma/client";
 
 // Only management sees our cost and profit/margin. Everyone else sees the
 // insurance/scope side. Enforced in BOTH the payload serializer and the UI.
@@ -10,16 +10,22 @@ export function canSeeScopeCosts(role: Role): boolean {
 
 // Claim statuses at/after which the scope of work is available (scope has been
 // received from the carrier). Before this, the deal has no scope tab.
-const SCOPE_READY_STATUSES: ClaimStatus[] = [
+//
+// These are the BUILT-IN keys from src/lib/claim-status.ts. A company can rename
+// them freely — the key is frozen at creation, so "Scope Received" renamed to
+// "ITEL Received" still unlocks the scope. A status the company invented from
+// scratch has its own key and does not; the pipeline-stage check below is the
+// other, independent way in.
+const SCOPE_READY_STATUSES = new Set([
   "scope_received",
   "supplement_needed",
   "approved",
   "paid",
   "closed",
-];
+]);
 
-export function isScopeReady(status: ClaimStatus): boolean {
-  return SCOPE_READY_STATUSES.includes(status);
+export function isScopeReady(status: string): boolean {
+  return SCOPE_READY_STATUSES.has(status);
 }
 
 /**

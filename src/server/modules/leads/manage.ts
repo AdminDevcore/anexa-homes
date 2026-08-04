@@ -9,6 +9,7 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { getActiveVertical } from "@/server/auth/vertical";
+import { getClaimStatuses } from "@/server/modules/settings/queries";
 import { VERTICAL_SERVICE_TYPE } from "@/lib/vertical";
 import { resolveStageForAppointment } from "./staging";
 import { resolveOwningRepId } from "./owning-rep";
@@ -364,6 +365,42 @@ export async function setDealTypeAction(input: z.infer<typeof dealTypeSchema>) {
   if (!lead) return { ok: false as const, error: "Deal not found." };
 
   await prisma.lead.update({ where: { id: lead.id }, data: { dealType } });
+  revalidatePath(`/portal/leads/${lead.id}`);
+  revalidatePath(`/portal/leads/${lead.id}/presentation`);
+  return { ok: true as const };
+}
+
+const claimStatusSchema = z.object({ leadId: z.string().min(1), status: z.string().min(1).max(60) });
+
+/**
+ * Move the deal along its insurance claim.
+ *
+ * The accepted values are the COMPANY's configured list (Settings → Claim
+ * Statuses), not a fixed enum — so this validates against that list rather than
+ * against a type. Anything not on the list is rejected: the column is plain text
+ * now, and without this check a stale tab could write a status the office
+ * deleted months ago.
+ */
+export async function setClaimStatusAction(input: z.infer<typeof claimStatusSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return { ok: false as const, error: "Not allowed." };
+  const parsed = claimStatusSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: "Invalid status." };
+  const { leadId, status } = parsed.data;
+
+  const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  const lead = await prisma.lead.findFirst({
+    where: { AND: [{ id: leadId }, scope] },
+    select: { id: true, vertical: true, claimStatus: true },
+  });
+  if (!lead) return { ok: false as const, error: "Deal not found." };
+
+  const options = await getClaimStatuses(user.companyId, lead.vertical);
+  if (!options.some((o) => o.key === status) && status !== lead.claimStatus) {
+    return { ok: false as const, error: "That status is no longer available." };
+  }
+
+  await prisma.lead.update({ where: { id: lead.id }, data: { claimStatus: status } });
   revalidatePath(`/portal/leads/${lead.id}`);
   revalidatePath(`/portal/leads/${lead.id}/presentation`);
   return { ok: true as const };

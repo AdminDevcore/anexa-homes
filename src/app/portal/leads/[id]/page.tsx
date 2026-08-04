@@ -28,7 +28,12 @@ import { prisma } from "@/server/db/client";
 import { STAFF_ROLES, isAdmin } from "@/server/rbac/matrix";
 import { EditJobDialog } from "@/components/portal/edit-job-dialog";
 import { getProjectPhotoChecklists } from "@/server/modules/photos/queries";
-import { getAppointmentDispositions, getInspectionOutcomes } from "@/server/modules/settings/queries";
+import {
+  getAppointmentDispositions,
+  getInspectionOutcomes,
+  getClaimStatuses,
+} from "@/server/modules/settings/queries";
+import { claimStatusLabel, claimStatusOptionsFor } from "@/lib/claim-status";
 import { SolarOpsCard } from "@/components/portal/solar-ops-card";
 import {
   SolarSystemMoneyPanel,
@@ -65,6 +70,7 @@ import { SolarProductToggle } from "@/components/portal/solar-product-toggle";
 import { PropertyView } from "@/components/portal/property-view";
 import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-summary-cards";
 import { DealSummaryPanel } from "@/components/portal/deal-summary-panel";
+import { ClaimStatusSelect } from "@/components/portal/claim-status-select";
 import { HomeownerCard } from "@/components/portal/homeowner-card";
 import { FinancingTermsPanel } from "@/components/portal/solar/financing-terms";
 import { Card, Section } from "@/components/portal/deal-ui";
@@ -231,6 +237,12 @@ export default async function LeadDetailPage({
   // the record being viewed.
   const appointmentDispositions = await getAppointmentDispositions(user.companyId, lead.vertical);
   const inspectionOutcomes = await getInspectionOutcomes(user.companyId, lead.vertical);
+  // The company's own claim-status vocabulary, widened to keep this deal's
+  // current status pickable even if the office has since deleted it.
+  const claimStatusOptions = claimStatusOptionsFor(
+    lead.claimStatus,
+    await getClaimStatuses(user.companyId, lead.vertical)
+  );
 
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
@@ -411,12 +423,11 @@ export default async function LeadDetailPage({
     }
   }
   if (!isSolarDeal) {
-    const claimStatus = lead.claimStatus.replace(/_/g, " ");
     summaryCards.push({
       label: "Deal type",
       value: isInsurance ? "Insurance" : "Cash",
       hint: isInsurance
-        ? `Claim ${claimStatus}`
+        ? `Claim: ${claimStatusLabel(lead.claimStatus, claimStatusOptions)}`
         : "Out of pocket / financed",
     });
     if (claim?.carrier) {
@@ -1184,9 +1195,20 @@ export default async function LeadDetailPage({
                 : null,
               propertyValue: propertyValueLine,
               lastSale: lastSaleLine,
-              claimStatus: isInsurance ? lead.claimStatus.replace(/_/g, " ") : null,
               created: fmt.date(lead.createdAt),
             }}
+            claimStatusSlot={
+              // Insurance-only: a cash deal has no carrier, and solar has no
+              // claim at all.
+              isInsurance ? (
+                <ClaimStatusSelect
+                  leadId={lead.id}
+                  value={lead.claimStatus}
+                  options={claimStatusOptions}
+                  canEdit={can(user, "update", "Lead")}
+                />
+              ) : null
+            }
             dealTypeSlot={
               isSolarDeal ? (
                 // On Solar a deal's type IS its financing product. There is no

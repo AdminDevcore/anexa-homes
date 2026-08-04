@@ -28,6 +28,11 @@ describe("settings sections", () => {
     expect(titles("solar")).not.toContain("Scope of Work Catalog");
   });
 
+  it("hides claim statuses from solar, which has no carrier", () => {
+    expect(titles("roofing")).toContain("Claim Statuses");
+    expect(titles("solar")).not.toContain("Claim Statuses");
+  });
+
   it("renames rather than hides the cards solar still needs", () => {
     const solar = titles("solar");
     // Solar runs a site survey, not a roof inspection — but it is the same list,

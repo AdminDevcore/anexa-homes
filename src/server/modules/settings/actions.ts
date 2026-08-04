@@ -8,6 +8,7 @@ import type { Vertical } from "@prisma/client";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { DEFAULT_VERTICAL } from "@/lib/vertical";
 import { writeVerticalOverrides, brandingLogoCategory } from "@/lib/vertical-settings";
+import { claimStatusKey, type ClaimStatusOption } from "@/lib/claim-status";
 import { prisma } from "@/server/db/client";
 
 import { writeVerticalConfig } from "@/lib/vertical-config";
@@ -205,7 +206,7 @@ const dispositionsSchema = z.object({
 async function saveVerticalScopedSetting(
   companyId: string,
   vertical: Vertical,
-  column: "appointmentDispositions" | "inspectionOutcomes" | "qcChecklistTemplate",
+  column: "appointmentDispositions" | "inspectionOutcomes" | "qcChecklistTemplate" | "claimStatuses",
   value: unknown
 ) {
   const current = await prisma.companySettings.findUnique({
@@ -306,6 +307,64 @@ export async function updateQcChecklistTemplateAction(input: z.infer<typeof labe
     items
   );
   revalidatePath("/portal/settings/production-checklist");
+  return ok();
+}
+
+// --------------------------- Claim statuses ---------------------------------
+
+const claimStatusesSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        /** Absent on a brand-new option; present (and frozen) on every existing one. */
+        key: z.string().trim().max(60).optional(),
+        label: z.string().trim().min(1).max(60),
+      })
+    )
+    .max(40),
+});
+
+/**
+ * Replace the company's customizable claim statuses (full list).
+ *
+ * Keys are assigned once and never re-derived: a rename must NOT change the key,
+ * or every deal already sitting on that status would be orphaned and scope
+ * gating (`isScopeReady`) would stop recognising it.
+ */
+export async function updateClaimStatusesAction(input: z.infer<typeof claimStatusesSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = claimStatusesSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid statuses.");
+
+  const seenKeys = new Set<string>();
+  const seenLabels = new Set<string>();
+  const items: ClaimStatusOption[] = [];
+  for (const raw of parsed.data.items) {
+    const label = raw.label.trim();
+    if (!label || seenLabels.has(label.toLowerCase())) continue;
+    // New option: slug its label, then disambiguate rather than collide with an
+    // existing key — two statuses named "Approved (partial)" and "Approved —
+    // partial" would otherwise slug to the same thing and silently merge.
+    let key = raw.key?.trim() || claimStatusKey(label);
+    if (seenKeys.has(key)) {
+      let n = 2;
+      while (seenKeys.has(`${key}_${n}`)) n++;
+      key = `${key}_${n}`;
+    }
+    seenKeys.add(key);
+    seenLabels.add(label.toLowerCase());
+    items.push({ key, label });
+  }
+  if (items.length === 0) return fail("Keep at least one status.");
+
+  await saveVerticalScopedSetting(
+    user.companyId,
+    await getActiveVertical(user),
+    "claimStatuses",
+    items
+  );
+  revalidatePath("/portal/settings/claim-statuses");
   return ok();
 }
 

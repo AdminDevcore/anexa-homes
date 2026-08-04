@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarClock, Check, Loader2, Pencil, Wallet, X } from "lucide-react";
+import { CalendarClock, Check, Loader2, Pencil, ShieldCheck, Wallet, X } from "lucide-react";
 import { Card, Detail, type DealTone } from "@/components/portal/deal-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,6 +64,7 @@ export function DealSummaryPanel({
   serviceTypes,
   display,
   dealTypeSlot,
+  claimStatusSlot,
   installDateSlot,
   actionsSlot,
 }: {
@@ -84,11 +85,12 @@ export function DealSummaryPanel({
     assignedRep: string | null;
     propertyValue: string | null;
     lastSale: string | null;
-    claimStatus: string | null;
     created: string;
   };
   /** Live controls that write on click — rendered in both modes. */
   dealTypeSlot: React.ReactNode;
+  /** Null on cash and solar deals, which have no carrier claim to track. */
+  claimStatusSlot: React.ReactNode;
   installDateSlot: React.ReactNode;
   actionsSlot: React.ReactNode;
 }) {
@@ -232,7 +234,18 @@ export function DealSummaryPanel({
           !display.assignedRep && <Detail label="Assigned Rep" value="Unassigned" />
         )}
 
-        {display.claimStatus && <Detail label="Claim Status" value={display.claimStatus} />}
+        {/* Another live control: where the carrier claim stands right now. The
+            options come from Settings → Claim Statuses, so this list is the
+            office's own vocabulary. */}
+        {claimStatusSlot && (
+          <div>
+            <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
+              <ShieldCheck className="size-3.5" />
+              Claim Status
+            </div>
+            <div className="mt-1.5">{claimStatusSlot}</div>
+          </div>
+        )}
 
         {editing ? (
           <FieldRow label={isSolar ? "Consult Date" : "Appointment Date"}>

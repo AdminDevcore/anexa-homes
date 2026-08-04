@@ -57,17 +57,9 @@ enum ProjectStatus {
   cancelled
 }
 
-enum ClaimStatus {
-  not_filed
-  filed
-  adjuster_scheduled
-  scope_received
-  supplement_needed
-  approved
-  paid
-  denied
-  closed
-}
+// NOTE: claim status was an enum here. It is now free-form text on Lead,
+// backed by the company-editable list in Settings → Claim Statuses. The nine
+// original values live on as the default keys in src/lib/claim-status.ts.
 
 // How a deal is paid for. `insurance` = filed claim (RCV/ACV/depreciation/deductible,
 // scope of work). `cash` = customer pays out of pocket / financing — no insurance.
@@ -399,6 +391,10 @@ model CompanySettings {
   // Default production QC checklist applied to new jobs — JSON array of labels.
   // Empty falls back to DEFAULT_QC in code.
   qcChecklistTemplate     Json     @default("[]")
+  // Customizable insurance claim statuses — JSON array of { key, label }. Empty
+  // falls back to DEFAULT_CLAIM_STATUSES in code. The key is frozen on create so
+  // renaming a status never breaks the code that keys off it (scope gating).
+  claimStatuses           Json     @default("[]")
   // Bookkeeping integration (bank / QuickBooks). Key stored for the connector.
   bookkeepingProvider     String? // "quickbooks" | "plaid" | "manual"
   bookkeepingApiKey       String?
@@ -719,7 +715,10 @@ model Lead {
   // Inspection result recorded after the appointment / when opening the claim + a note.
   inspectionOutcome      String?
   inspectionNote         String?
-  claimStatus            ClaimStatus @default(not_filed)
+  /// A key from the company's customizable claim-status list (Settings → Claim
+  /// Statuses). The nine built-in keys are the old enum values, so `isScopeReady`
+  /// and every historical row keep working.
+  claimStatus            String      @default("not_filed")
   notes                  String?
   customFields           Json        @default("{}")
 
@@ -921,7 +920,8 @@ model Claim {
   adjusterEmail           String?
   lossDate                DateTime?
   adjusterMeetingAt       DateTime?
-  status                  ClaimStatus @default(filed)
+  /// Same customizable key space as `Lead.claimStatus` — see claim-status.ts.
+  status                  String      @default("filed")
   rcv                     Int         @default(0) // replacement cost value, cents
   acv                     Int         @default(0) // actual cash value, cents
   deductible              Int         @default(0)

@@ -12,6 +12,7 @@ import {
   DEFAULT_SOLAR_INSPECTION_OUTCOMES,
   DEFAULT_SOLAR_QC_CHECKLIST,
 } from "@/lib/job-settings";
+import { parseClaimStatuses, type ClaimStatusOption } from "@/lib/claim-status";
 import { readVerticalConfig } from "@/lib/vertical-config";
 
 /** All lead sources (active + inactive) for the settings manager, with usage counts. */
@@ -55,6 +56,23 @@ export async function getInspectionOutcomes(
   const fallback =
     vertical === "solar" ? DEFAULT_SOLAR_INSPECTION_OUTCOMES : DEFAULT_INSPECTION_OUTCOMES;
   return parseLabelList(readVerticalConfig(settings?.inspectionOutcomes, vertical), fallback);
+}
+
+/**
+ * The company's customizable insurance claim statuses for one vertical.
+ *
+ * Vertical-scoped like every other list here, though only roofing surfaces it —
+ * solar has no carrier, so its deal page never renders a claim status at all.
+ */
+export async function getClaimStatuses(
+  companyId: string,
+  vertical: Vertical
+): Promise<ClaimStatusOption[]> {
+  const settings = await prisma.companySettings.findUnique({
+    where: { companyId },
+    select: { claimStatuses: true },
+  });
+  return parseClaimStatuses(readVerticalConfig(settings?.claimStatuses, vertical));
 }
 
 /** The company's default production QC checklist (labels) for one vertical. */

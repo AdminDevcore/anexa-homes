@@ -81,6 +81,14 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   { icon: ListChecks, title: "Production Checklist", body: "The QC checklist applied to every new job.", href: "/portal/settings/production-checklist" },
   {
+    icon: ShieldCheck,
+    title: "Claim Statuses",
+    body: "Customize the insurance claim statuses on the deal Summary.",
+    href: "/portal/settings/claim-statuses",
+    // A carrier claim is insurance restoration; solar has no adjuster to track.
+    verticals: ["roofing"],
+  },
+  {
     icon: Calculator,
     title: "Scope of Work Catalog",
     body: "Master list of insurance-restoration line items (no pricing).",
