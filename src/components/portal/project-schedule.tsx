@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Hammer, Loader2 } from "lucide-react";
-import { setProjectScheduleAction } from "@/server/modules/costs/actions";
+import { setProjectScheduleAction, setLeadInstallDateAction } from "@/server/modules/costs/actions";
 
 const toInput = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
 
@@ -44,14 +44,24 @@ function DateInput({
   );
 }
 
-/** Set the install date that drives the calendar. */
+/**
+ * Set the install date that drives the calendar.
+ *
+ * Takes a leadId as well as a projectId because the date has to be settable on
+ * a deal that has NOT started production — which is most of them. `installDate`
+ * is a Project column, so the server creates the job on demand when a date is
+ * first picked; see `setLeadInstallDateAction`.
+ */
 export function ProjectSchedule({
   projectId,
+  leadId,
   installDate,
   canManage,
   bare = false,
 }: {
-  projectId: string;
+  /** Null when the deal has no job yet. */
+  projectId: string | null;
+  leadId: string;
   installDate: string | null;
   canManage: boolean;
   /**
@@ -66,10 +76,21 @@ export function ProjectSchedule({
 
   async function save(field: Field, date: string) {
     setBusy(field);
-    const res = await setProjectScheduleAction({ projectId, field, date: date || null });
+    // Without a job there is nothing to hang the date on, so route through the
+    // action that creates one first. Everything else keeps the direct path.
+    const res =
+      field === "install" && !projectId
+        ? await setLeadInstallDateAction({ leadId, date: date || null })
+        : await setProjectScheduleAction({ projectId: projectId!, field, date: date || null });
     setBusy(null);
     if (!res.ok) return toast.error(res.error);
-    toast.success(date ? "Date saved — it'll show on the calendar" : "Date cleared");
+    toast.success(
+      !date
+        ? "Date cleared"
+        : "created" in res && res.created
+          ? "Install date set — the job is now open"
+          : "Date saved — it'll show on the calendar"
+    );
     router.refresh();
   }
 

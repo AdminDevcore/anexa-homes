@@ -12,6 +12,7 @@ import { putObject } from "@/server/storage";
 import { computeDealCommission, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
 import { isStageCommissionEligible, COMMISSION_GATE_LABEL } from "@/server/modules/payroll/eligibility";
 import { getDealJobCost } from "./job-cost";
+import { ensureProjectForLeadAction } from "@/server/modules/projects/actions";
 
 function safeName(n: string): string {
   return n.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "file";
@@ -331,4 +332,51 @@ export async function setProjectScheduleAction(input: z.infer<typeof scheduleSch
   revalidatePath(`/portal/leads/${project.leadId}`);
   revalidatePath("/portal/calendar");
   return { ok: true as const };
+}
+
+const leadScheduleSchema = z.object({
+  leadId: z.string().min(1),
+  date: z.string().optional().nullable(),
+});
+
+/**
+ * Set a DEAL's install date, creating the job if it does not have one yet.
+ *
+ * `installDate` is a column on Project, so the obvious implementation — only
+ * offer the field once a project exists — hides it on the 13 of 16 deals that
+ * have not started production. But an install date is exactly the sort of thing
+ * you agree with a homeowner BEFORE the job formally opens, and the deal page
+ * offers it in the Summary next to the other dates, so picking one has to work
+ * from a standing start.
+ *
+ * The job container is already a create-on-demand concept (see
+ * `ensureProjectForLeadAction`, behind the "Start production" button); this just
+ * reaches the same path from the date field. Clearing a date never creates one.
+ */
+export async function setLeadInstallDateAction(input: z.infer<typeof leadScheduleSchema>) {
+  const user = await requireUser();
+  const parsed = leadScheduleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: "Invalid request." };
+  const { leadId, date } = parsed.data;
+
+  const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  const lead = await prisma.lead.findFirst({
+    where: { AND: [{ id: leadId }, leadScope] },
+    select: { id: true, project: { select: { id: true } } },
+  });
+  if (!lead) return { ok: false as const, error: "Deal not found." };
+
+  let projectId = lead.project?.id ?? null;
+  if (!projectId) {
+    // Nothing to clear a date off, and creating a job just to blank a field
+    // would be a surprising side effect of an empty input.
+    if (!date) return { ok: true as const, created: false };
+    const created = await ensureProjectForLeadAction(leadId);
+    if (!created.ok) return { ok: false as const, error: created.error };
+    projectId = created.projectId;
+  }
+
+  const res = await setProjectScheduleAction({ projectId, field: "install", date });
+  if (!res.ok) return res;
+  return { ok: true as const, created: !lead.project };
 }

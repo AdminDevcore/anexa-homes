@@ -1,9 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
-  ShieldCheck,
   ArrowLeft,
-  Pencil,
   ListTodo,
   Hammer,
   Camera,
@@ -79,7 +77,6 @@ import {
   QcChecklistEditor,
   CrewAssigner,
 } from "@/components/portal/project-workflows";
-import { Button } from "@/components/ui/button";
 import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel } from "@/lib/service-types";
 import { daysInStage } from "@/lib/stage-status";
@@ -541,11 +538,17 @@ export default async function LeadDetailPage({
         title={`${lead.firstName} ${lead.lastName}`}
         description={lead.source ? `Source: ${lead.source.name}` : undefined}
         action={
-          // Actions ON the record, all in one row: move it, kill it, edit it.
-          // Move and Cancel used to live down in the progress bar, which is a
-          // readout — you look there to see how far along a job is, not to
-          // operate on it. The three roofing contract tools moved to the
-          // Documents tab, beside the documents they produce.
+          // Actions ON the record: move it, kill it. Move and Cancel used to
+          // live down in the progress bar, which is a readout — you look there
+          // to see how far along a job is, not to operate on it. The three
+          // roofing contract tools moved to the Documents tab, beside the
+          // documents they produce.
+          //
+          // No Edit button here. A blanket "Edit" that threw you onto a separate
+          // form for the whole lead is the wrong shape for the work: a rep fixes
+          // ONE wrong phone number, and every card now carries its own Edit that
+          // opens exactly the fields it shows. "Edit Job" moved to the Field
+          // Production slide, next to the job number it edits.
           <div className="flex flex-wrap items-center gap-2">
             {lead.pipeline && (
               <DealStageActions
@@ -554,14 +557,6 @@ export default async function LeadDetailPage({
                 currentStageId={lead.stage?.id ?? null}
                 canEdit={can(user, "update", "Lead")}
               />
-            )}
-            {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
-            {can(user, "update", "Lead") && (
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/portal/leads/${lead.id}/edit`}>
-                  <Pencil className="size-4" /> Edit
-                </Link>
-              </Button>
             )}
           </div>
         }
@@ -598,8 +593,14 @@ export default async function LeadDetailPage({
 
       {/* `items-start` is load-bearing: a grid item stretches to the row's
           height by default, and a full-height sidebar can never stick. */}
-      <div className="grid items-start gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-6">
+      {/* The sidebar is a fixed 22rem rail rather than a fraction of the grid:
+          it only ever holds labels and short values, so letting it grow with
+          the viewport just stretched whitespace and squeezed the map, tables
+          and photo grids in the main column. `minmax(0,1fr)` + `min-w-0` keep
+          wide children (satellite map, scope tables) from blowing the track
+          out instead of scrolling inside it. */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 space-y-6">
             {/* ── Overview ── */}
             <section id="overview" className="scroll-mt-24 space-y-6">
           {/* The property leads the Overview on both verticals — solar sells a
@@ -771,7 +772,10 @@ export default async function LeadDetailPage({
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
-                      <ProjectStatusControl projectId={project.id} status={project.status} />
+                      <div className="flex items-center gap-2">
+                        {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
+                        <ProjectStatusControl projectId={project.id} status={project.status} />
+                      </div>
                     </div>
 
                     <Section icon={Camera} label="Site & Install Photos">
@@ -909,7 +913,10 @@ export default async function LeadDetailPage({
                   <div className="space-y-6">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
-                      <ProjectStatusControl projectId={project.id} status={project.status} />
+                      <div className="flex items-center gap-2">
+                        {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
+                        <ProjectStatusControl projectId={project.id} status={project.status} />
+                      </div>
                     </div>
 
                     <Section icon={Camera} label="Site & Install Photos" tone="solar">
@@ -1168,24 +1175,26 @@ export default async function LeadDetailPage({
               {/* The install date lives HERE, with the other key dates, and is
                   editable in place. It used to sit inside the Production
                   section, which meant the one date a customer asks about was
-                  three screens down inside a card about photo checklists. Only
-                  meaningful once a job exists, so it is absent rather than "—". */}
-              {project && (
-                <div>
-                  <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-                    <CalendarClock className="size-3.5" />
-                    Install Date
-                  </div>
-                  <div className="mt-1">
-                    <ProjectSchedule
-                      bare
-                      projectId={project.id}
-                      installDate={project.installDate ? project.installDate.toISOString() : null}
-                      canManage={canManageProd}
-                    />
-                  </div>
+                  three screens down inside a card about photo checklists.
+                  ALWAYS rendered: gating it on an existing job hid it on 13 of
+                  16 real deals, and an install date is exactly what you agree
+                  with a homeowner before the job formally opens. Picking one
+                  creates the job. */}
+              <div>
+                <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
+                  <CalendarClock className="size-3.5" />
+                  Install Date
                 </div>
-              )}
+                <div className="mt-1">
+                  <ProjectSchedule
+                    bare
+                    leadId={lead.id}
+                    projectId={project?.id ?? null}
+                    installDate={project?.installDate ? project.installDate.toISOString() : null}
+                    canManage={canManageProd}
+                  />
+                </div>
+              </div>
               <Detail label="Created" value={fmt.date(lead.createdAt)} />
             </div>
 
