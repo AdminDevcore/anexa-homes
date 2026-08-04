@@ -24,6 +24,14 @@ const STAGES = [
   { key: "closed", name: "Closed", color: "#16A34A", isWon: true },
 ];
 
+/**
+ * Where dead deals go. Deliberately NOT part of any progression list — those
+ * describe how a deal moves forward, and Advance on the deal page walks that
+ * list — but a pipeline with no stage flagged `isLost` has no cancel action at
+ * all, so every pipeline ends with one.
+ */
+const CANCELLED_STAGE = { key: "cancelled", name: "Cancelled", color: "#EF4444", isLost: true };
+
 const DOC_TEMPLATES: { name: string; type: any }[] = [
   { name: "Roofing Contract", type: "roofing_contract" },
   { name: "Insurance Contingency Agreement", type: "insurance_contingency" },
@@ -173,8 +181,9 @@ async function main() {
     data: { companyId: company.id, name: "Roofing Pipeline", vertical: "roofing", isDefault: true },
   });
   const stages = [];
-  for (let i = 0; i < STAGES.length; i++) {
-    const s = STAGES[i];
+  const roofingStages = [...STAGES, CANCELLED_STAGE];
+  for (let i = 0; i < roofingStages.length; i++) {
+    const s = roofingStages[i];
     stages.push(
       await prisma.pipelineStage.create({
         data: {
@@ -184,6 +193,7 @@ async function main() {
           color: s.color,
           position: i,
           isWon: (s as { isWon?: boolean }).isWon ?? false,
+          isLost: (s as { isLost?: boolean }).isLost ?? false,
         },
       })
     );
@@ -235,6 +245,23 @@ async function main() {
         solarStageByKey[s.key] = created.id;
       }
     }
+    // Terminal, appended after the progression rather than inside it.
+    await prisma.pipelineStage.create({
+      data: {
+        pipelineId: p.id,
+        key: CANCELLED_STAGE.key,
+        name: CANCELLED_STAGE.name,
+        color: CANCELLED_STAGE.color,
+        position: defs.length,
+        isLost: true,
+        stageType: "internally_owned",
+        ownerRole: "project_coordinator",
+        notificationRecipient: "none",
+        // A dead deal has no deadline to blow and nobody to chase.
+        targetDays: 0,
+        markOverdue: false,
+      },
+    });
   }
 
   // Solar assumptions. federalItcPct is left NULL on purpose: the 2025 federal

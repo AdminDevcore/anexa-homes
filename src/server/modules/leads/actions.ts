@@ -97,6 +97,35 @@ const moveSchema = z.object({
   position: z.number().int().min(0).optional(),
 });
 
+/** The stage fields every entry into a stage resets, whichever path got us here. */
+type StageEntry = Pick<
+  Prisma.PipelineStageGetPayload<{ select: { id: true; defaultBlocker: true; stageType: true } }>,
+  "id" | "defaultBlocker" | "stageType"
+>;
+
+/**
+ * What lands on the lead when it enters a stage.
+ *
+ * Entering a stage means a fresh SLA clock and a fresh follow-up clock: the
+ * alerts that fired against the previous stage are cleared, and the chase
+ * history is wiped so the cadence counts from this entry rather than inheriting
+ * a touch logged against the old blocker. Cancelling is a stage entry like any
+ * other, so it shares this rather than reimplementing it — two copies of this
+ * block is two chances for a cancelled deal to keep escalating.
+ */
+function stageEntryData(stage: StageEntry): Prisma.LeadUpdateInput {
+  return {
+    stage: { connect: { id: stage.id } },
+    stageChangedAt: new Date(),
+    stageAlertLevel: 0,
+    stageOverdue: false,
+    blockedBy: stage.defaultBlocker,
+    lastTouchAt: null,
+    lastChaseAlertAt: null,
+    ...(stage.stageType === "internally_owned" ? { blockerNote: null } : {}),
+  };
+}
+
 export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   const user = await requireUser();
   const parsed = moveSchema.safeParse(input);
@@ -116,19 +145,7 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   await prisma.lead.update({
     where: { id: parsed.data.leadId },
     data: {
-      stageId: parsed.data.stageId,
-      stageChangedAt: new Date(),
-      // New stage = fresh SLA clock: clear any fired alerts + overdue flag.
-      stageAlertLevel: 0,
-      stageOverdue: false,
-      // …and a fresh follow-up clock. Entering a stage seeds who we are waiting
-      // on from the stage's default (a coordinator can correct it per deal) and
-      // clears the chase history, so the cadence starts from this entry rather
-      // than inheriting a touch logged against the previous blocker.
-      blockedBy: stage.defaultBlocker,
-      lastTouchAt: null,
-      lastChaseAlertAt: null,
-      ...(stage.stageType === "internally_owned" ? { blockerNote: null } : {}),
+      ...stageEntryData(stage),
       ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
     },
   });
@@ -152,6 +169,99 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
 
   revalidatePath("/portal/pipeline");
   return { ok: true as const };
+}
+
+const cancelSchema = z.object({
+  leadId: z.string().uuid(),
+  reason: z.string().trim().min(1).max(2000),
+});
+
+/**
+ * Kill a deal: move it to its pipeline's lost stage and stop it counting as
+ * live work anywhere else.
+ *
+ * The stage move alone is not enough. Reports read `Lead.status` and
+ * `Project.status`, and no stage move has ever touched either — so a deal
+ * dragged to a "Cancelled" stage went on counting as open revenue and sitting
+ * in production totals. This closes all three at once.
+ *
+ * The target stage is whichever one the pipeline flags `isLost`, resolved from
+ * the deal's own pipeline, so Roofing and Solar each cancel to their own stage
+ * and no stage name is hardcoded. A pipeline with nothing flagged has no cancel
+ * action — the UI hides the button, and this refuses rather than guessing that
+ * the last stage means dead.
+ *
+ * Reversing it is a normal stage move, but `status` does NOT follow the deal
+ * back out: inferring "this is live again" from a drag is how a written-off job
+ * quietly re-enters revenue totals. Reopening is deliberate.
+ */
+export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
+  const user = await requireUser();
+  const parsed = cancelSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: "A reason is required." };
+  if (!can(user, "update", "Lead")) return { ok: false as const, error: "Not allowed." };
+
+  const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  await assertLeadInScope(user.companyId, scope, parsed.data.leadId);
+
+  const lead = await prisma.lead.findUnique({
+    where: { id: parsed.data.leadId },
+    select: { id: true, pipelineId: true, project: { select: { id: true } } },
+  });
+  if (!lead?.pipelineId) return { ok: false as const, error: "This deal has no pipeline." };
+
+  const stage = await prisma.pipelineStage.findFirst({
+    where: { pipelineId: lead.pipelineId, isLost: true, pipeline: { companyId: user.companyId } },
+    orderBy: { position: "asc" },
+    select: { id: true, name: true, defaultBlocker: true, stageType: true },
+  });
+  if (!stage) {
+    return {
+      ok: false as const,
+      error: "No cancelled stage is configured. Mark one as Lost in Settings → Pipeline.",
+    };
+  }
+
+  const { reason } = parsed.data;
+  await prisma.$transaction([
+    prisma.lead.update({
+      where: { id: lead.id },
+      data: { ...stageEntryData(stage), status: "lost" },
+    }),
+    // Only if the deal got as far as a job. Cancelling before that is normal.
+    ...(lead.project
+      ? [prisma.project.update({ where: { id: lead.project.id }, data: { status: "cancelled" } })]
+      : []),
+    prisma.note.create({
+      data: {
+        companyId: user.companyId,
+        leadId: lead.id,
+        body: `Deal cancelled — ${reason}`,
+        authorId: user.userId,
+      },
+    }),
+    prisma.activityLog.create({
+      data: {
+        companyId: user.companyId,
+        type: "stage_change",
+        message: `${user.fullName} cancelled the deal — ${reason}`,
+        actorId: user.userId,
+        leadId: lead.id,
+      },
+    }),
+  ]);
+
+  await fireEvent({
+    companyId: user.companyId,
+    event: "stage_changed",
+    actorId: user.userId,
+    leadId: lead.id,
+    stageId: stage.id,
+  });
+
+  revalidatePath(`/portal/leads/${lead.id}`);
+  revalidatePath("/portal/pipeline");
+  return { ok: true as const, stageName: stage.name };
 }
 
 // --- Appointment disposition + claim (deal page right-rail controls) ---------

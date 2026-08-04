@@ -60,6 +60,14 @@ const OTHERS_STAGES = [
   { key: "closed", name: "Closed", color: "#16A34A", isWon: true },
 ];
 
+/**
+ * Where dead deals go. Appended to every pipeline rather than written into the
+ * lists above, because it is a dead end rather than a step: Advance on the deal
+ * page walks the progression and skips it. A pipeline with nothing flagged
+ * `isLost` has no cancel action at all.
+ */
+const CANCELLED_STAGE = { key: "cancelled", name: "Cancelled", color: "#EF4444", isLost: true };
+
 const DOC_TEMPLATES: { name: string; type: any }[] = [
   { name: "Roofing Contract", type: "roofing_contract" },
   { name: "Insurance Contingency Agreement", type: "insurance_contingency" },
@@ -141,8 +149,9 @@ async function main() {
     data: { companyId: company.id, name: "Roofing Pipeline", vertical: "roofing", isDefault: true },
   });
   const stages: { key: string; id: string }[] = [];
-  for (let i = 0; i < STAGES.length; i++) {
-    const s = STAGES[i];
+  const roofingStages = [...STAGES, CANCELLED_STAGE];
+  for (let i = 0; i < roofingStages.length; i++) {
+    const s = roofingStages[i];
     const created = await prisma.pipelineStage.create({
       data: {
         pipelineId: pipeline.id,
@@ -151,6 +160,7 @@ async function main() {
         color: s.color,
         position: i,
         isWon: (s as { isWon?: boolean }).isWon ?? false,
+        isLost: (s as { isLost?: boolean }).isLost ?? false,
       },
       select: { key: true, id: true },
     });
@@ -169,6 +179,16 @@ async function main() {
         data: { pipelineId: p.id, key: s.key, name: s.name, color: s.color, position: i, isWon: (s as { isWon?: boolean }).isWon ?? false },
       });
     }
+    await prisma.pipelineStage.create({
+      data: {
+        pipelineId: p.id,
+        key: CANCELLED_STAGE.key,
+        name: CANCELLED_STAGE.name,
+        color: CANCELLED_STAGE.color,
+        position: defs.length,
+        isLost: true,
+      },
+    });
   }
 
   // Commission rules (starter — tune in Settings → Commissions).
