@@ -21,6 +21,26 @@ export type MapType = "satellite" | "roadmap";
 /** Zoom that frames a single suburban roof. 20 is Google's max for most areas. */
 export const DEFAULT_ZOOM = 20;
 
+/**
+ * Read a `?zoom=` query parameter, falling back to DEFAULT_ZOOM.
+ *
+ * A pure function with tests rather than three lines inline in the route,
+ * because the inline version shipped a bug that put a picture of the whole
+ * planet on every deal: `searchParams.get()` returns `null` for an absent
+ * param, `Number(null)` is `0` (not NaN), so `Number.isFinite` was true, the
+ * fallback never fired, and the clamp floored it to 1. `Number("")` is also 0,
+ * so a blank param needs the same guard.
+ *
+ * Out-of-range values are clamped, not rejected: Google answers an impossible
+ * zoom with a grey tile and HTTP 200, which reads as a broken feature.
+ */
+export function parseZoomParam(raw: string | null | undefined): number {
+  if (raw === null || raw === undefined || raw.trim() === "") return DEFAULT_ZOOM;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_ZOOM;
+  return Math.min(21, Math.max(1, Math.round(n)));
+}
+
 export type StaticMapOptions = {
   lat: number;
   lng: number;

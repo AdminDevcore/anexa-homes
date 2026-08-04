@@ -4,8 +4,39 @@ import {
   parseGoogleGeocode,
   geocodeStatusReason,
   satelliteConfigured,
+  parseZoomParam,
   DEFAULT_ZOOM,
 } from "@/server/modules/property/satellite";
+
+describe("zoom query parameter", () => {
+  // The regression this exists for: an ABSENT param used to become zoom 1 and
+  // every deal showed a picture of the whole planet. `Number(null)` is 0, not
+  // NaN, so the old `Number.isFinite()` fallback never fired.
+  it("falls back to the roof-framing default when the param is absent", () => {
+    expect(parseZoomParam(null)).toBe(DEFAULT_ZOOM);
+    expect(parseZoomParam(undefined)).toBe(DEFAULT_ZOOM);
+  });
+
+  it("falls back for blank and non-numeric values", () => {
+    for (const raw of ["", "   ", "abc", "NaN"]) {
+      expect(parseZoomParam(raw)).toBe(DEFAULT_ZOOM);
+    }
+  });
+
+  it("never returns a whole-planet zoom by accident", () => {
+    for (const raw of [null, undefined, "", "abc"]) {
+      expect(parseZoomParam(raw)).toBeGreaterThanOrEqual(19);
+    }
+  });
+
+  it("honours an explicit zoom, clamped to what Google will serve", () => {
+    expect(parseZoomParam("18")).toBe(18);
+    expect(parseZoomParam("19.6")).toBe(20);
+    expect(parseZoomParam("0")).toBe(1); // explicit 0 IS a request; clamp it
+    expect(parseZoomParam("-5")).toBe(1);
+    expect(parseZoomParam("99")).toBe(21);
+  });
+});
 
 describe("static map URL", () => {
   const url = (over = {}) =>

@@ -5,7 +5,7 @@ import {
   staticMapUrl,
   googleGeocode,
   satelliteConfigured,
-  DEFAULT_ZOOM,
+  parseZoomParam,
   type MapType,
 } from "@/server/modules/property/satellite";
 
@@ -34,10 +34,7 @@ export async function GET(req: Request) {
   if (!leadId) return new NextResponse("Missing leadId", { status: 400 });
 
   const type: MapType = url.searchParams.get("type") === "roadmap" ? "roadmap" : "satellite";
-  const zoomRaw = Number(url.searchParams.get("zoom"));
-  // Clamp rather than trust: an out-of-range zoom makes Google return a grey
-  // placeholder tile with HTTP 200, which looks like a broken feature.
-  const zoom = Number.isFinite(zoomRaw) ? Math.min(21, Math.max(1, Math.round(zoomRaw))) : DEFAULT_ZOOM;
+  const zoom = parseZoomParam(url.searchParams.get("zoom"));
 
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!satelliteConfigured(key)) return new NextResponse("Not configured", { status: 404 });
