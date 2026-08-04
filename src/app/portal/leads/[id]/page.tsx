@@ -619,6 +619,7 @@ export default async function LeadDetailPage({
               address={[lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
                 .filter(Boolean)
                 .join(" · ")}
+              geoStamp={lead.geocodedAt?.toISOString() ?? null}
             />
           </Card>
 

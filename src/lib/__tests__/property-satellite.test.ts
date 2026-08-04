@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   staticMapUrl,
-  parseGoogleGeocode,
-  geocodeStatusReason,
   satelliteConfigured,
   parseZoomParam,
   DEFAULT_ZOOM,
 } from "@/server/modules/property/satellite";
+// Geocoding moved to geo/ — it answers "where is this house" for the canvassing
+// map and the skip-trace too, not just for this picture.
+import { parseGoogleGeocode, geocodeStatusReason } from "@/server/modules/geo/google";
 
 describe("zoom query parameter", () => {
   // The regression this exists for: an ABSENT param used to become zoom 1 and

@@ -7,6 +7,18 @@ import { cn } from "@/lib/utils";
 type MapType = "satellite" | "roadmap";
 
 /**
+ * Short, stable hash of the inputs that decide which house is in the picture.
+ * Deterministic so the server and client agree on the URL and hydration is
+ * quiet; djb2 rather than a crypto digest because this only has to differ when
+ * the address does, not resist anyone.
+ */
+function fingerprint(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+/**
  * The property as seen from above, with a Satellite / Map toggle.
  *
  * The image is served by our own route, never straight from Google, so the API
@@ -20,10 +32,13 @@ type MapType = "satellite" | "roadmap";
 export function PropertyView({
   leadId,
   address,
+  geoStamp,
   className,
 }: {
   leadId: string;
   address: string | null;
+  /** When this deal's coordinates were last resolved. Part of the cache key. */
+  geoStamp?: string | null;
   className?: string;
 }) {
   const [type, setType] = React.useState<MapType>("satellite");
@@ -64,12 +79,18 @@ export function PropertyView({
     else setFailed((f) => (f[t] ? f : { ...f, [t]: true }));
   }, []);
 
-  // `v` is a cache-buster, not a feature: browsers hold this route's responses
-  // for a day, so without it every user who loaded the page while the zoom bug
-  // was live would keep seeing the cached picture of the whole planet. Bump it
-  // whenever the rendered image changes meaning.
+  // The URL has to change whenever the PICTURE would change, because this route
+  // is cached in the browser for a day and the response body is not part of the
+  // URL. Keyed on leadId alone, correcting a wrong address updated the caption
+  // instantly and left the photo of the old house up until tomorrow — which is
+  // exactly what "I fixed it and it still shows the wrong place" looked like.
+  //
+  // `address` covers an edit; `geoStamp` covers the coordinates moving without
+  // the address changing, e.g. a rep dragging the pin on the Field Map. `v` stays
+  // a manual lever for when the rendering itself changes meaning.
+  const key = React.useMemo(() => fingerprint(`${address ?? ""}@${geoStamp ?? ""}`), [address, geoStamp]);
   const src = (t: MapType) =>
-    `/api/property/satellite?leadId=${encodeURIComponent(leadId)}&type=${t}&v=2`;
+    `/api/property/satellite?leadId=${encodeURIComponent(leadId)}&type=${t}&v=3&k=${key}`;
 
   return (
     <div className={cn("space-y-3", className)}>

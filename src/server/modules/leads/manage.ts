@@ -13,6 +13,7 @@ import { VERTICAL_SERVICE_TYPE } from "@/lib/vertical";
 import { resolveStageForAppointment } from "./staging";
 import { resolveOwningRepId } from "./owning-rep";
 import { zonedWallClockToUtc } from "@/lib/tz";
+import { addressChanged } from "@/server/modules/geo/resolve";
 
 /** The company's appointment timezone (defaults to Central if unset). */
 async function companyTimeZone(companyId: string): Promise<string> {
@@ -138,9 +139,22 @@ export async function updateLeadAction(id: string, input: LeadInput) {
   const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   const existing = await prisma.lead.findFirst({
     where: { AND: [{ id }, scope] },
-    select: { id: true, assignedRepId: true, pipelineId: true, stageId: true },
+    select: {
+      id: true, assignedRepId: true, pipelineId: true, stageId: true,
+      address: true, city: true, state: true, zip: true,
+    },
   });
   if (!existing) return { ok: false as const, error: "Lead not found or access denied." };
+
+  // Coordinates are a CACHE of the address, so correcting the address has to
+  // invalidate them. It didn't, which is why fixing a wrong address left the
+  // deal's aerial view pointing at the old house forever — the map only ever
+  // re-geocodes when lat is null. Keyed on the normalised parts so editing a
+  // phone number, or re-typing the same street with different spacing, doesn't
+  // throw away a pin a rep dragged onto the right roof by hand.
+  const moved = addressChanged(existing, {
+    address: d.address || null, city: d.city || null, state: d.state || null, zip: d.zip || null,
+  });
 
   const canAssign = can(user, "assign", "Lead");
 
@@ -169,6 +183,7 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       city: d.city || null,
       state: d.state || null,
       zip: d.zip || null,
+      ...(moved ? { lat: null, lng: null, geocodedAt: null } : {}),
       stageId,
       ...(stageChanged ? { stageChangedAt: new Date() } : {}),
       sourceId: d.sourceId || null,
@@ -250,7 +265,10 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
   const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   const existing = await prisma.lead.findFirst({
     where: { AND: [{ id: leadId }, scope] },
-    select: { id: true, assignedRepId: true, pipelineId: true, stageId: true },
+    select: {
+      id: true, assignedRepId: true, pipelineId: true, stageId: true,
+      address: true, city: true, state: true, zip: true,
+    },
   });
   if (!existing) return { ok: false as const, error: "Lead not found or access denied." };
 
@@ -267,6 +285,27 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
   if ("state" in d) data.state = d.state || null;
   if ("zip" in d) data.zip = d.zip || null;
   if ("notes" in d) data.notes = d.notes || null;
+
+  // Coordinates are a CACHE of the address, so correcting the address here has
+  // to invalidate them exactly as the full form does — otherwise fixing a wrong
+  // street from the Homeowner card leaves the deal's aerial view pointing at the
+  // old house forever, since the map only re-geocodes when lat is null. A patch
+  // may carry only some of the four parts, so the comparison falls back to the
+  // stored value for any part this save isn't touching.
+  const touchesAddress = ["address", "city", "state", "zip"].some((k) => k in d);
+  if (touchesAddress) {
+    const moved = addressChanged(existing, {
+      address: "address" in d ? d.address || null : existing.address,
+      city: "city" in d ? d.city || null : existing.city,
+      state: "state" in d ? d.state || null : existing.state,
+      zip: "zip" in d ? d.zip || null : existing.zip,
+    });
+    if (moved) {
+      data.lat = null;
+      data.lng = null;
+      data.geocodedAt = null;
+    }
+  }
   if ("serviceType" in d) data.serviceType = d.serviceType!;
   if ("dealType" in d) data.dealType = d.dealType!;
   if ("priority" in d) data.priority = d.priority!;

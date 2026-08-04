@@ -3,11 +3,11 @@ import { requireUser } from "@/server/auth/session";
 import { prisma } from "@/server/db/client";
 import {
   staticMapUrl,
-  googleGeocode,
   satelliteConfigured,
   parseZoomParam,
   type MapType,
 } from "@/server/modules/property/satellite";
+import { resolveLeadLocation } from "@/server/modules/geo/resolve";
 
 /**
  * Serves the property image for a deal, proxying Google Static Maps.
@@ -48,9 +48,11 @@ export async function GET(req: Request) {
   let { lat, lng } = lead;
 
   // Cached on the Lead, so a deal is geocoded once rather than on every load —
-  // Geocoding is billed per request and the answer does not change.
+  // Geocoding is billed per request and the answer does not change. Editing the
+  // address clears the cache (see updateLeadAction), which is what makes it safe
+  // to trust: coordinates here always belong to the address shown on the card.
   if (lat == null || lng == null) {
-    const point = await googleGeocode(lead, key);
+    const point = await resolveLeadLocation(lead);
     if (!point) {
       // Stamp the attempt so a permanently unmatchable address is not retried
       // on every page view, matching the existing geocode-leads cron's contract.
