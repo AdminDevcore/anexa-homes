@@ -558,13 +558,18 @@ export default async function LeadDetailPage({
           leadId={lead.id}
           stages={lead.pipeline.stages.map((st) => ({
             id: st.id, name: st.name, position: st.position, color: st.color,
+            // Drives both the Cancel button's target and the fact that Advance
+            // refuses to walk a deal into a dead stage.
+            isLost: st.isLost,
           }))}
           currentStageId={lead.stage?.id ?? null}
           canEdit={can(user, "update", "Lead")}
         />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      {/* `items-start` is load-bearing: a grid item stretches to the row's
+          height by default, and a full-height sidebar can never stick. */}
+      <div className="grid items-start gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
             {/* ── Overview ── */}
             <section id="overview" className="scroll-mt-24 space-y-6">
@@ -1009,8 +1014,17 @@ export default async function LeadDetailPage({
             </section>
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
+        {/* Sidebar — who this is and where the deal stands.
+            On a phone the column order is reversed: with everything on one
+            page, a sidebar rendered last would put the homeowner's phone
+            number thousands of pixels below the fold. Identity first, work
+            second.
+            On a desktop it sticks under the 4rem shell header and scrolls
+            inside itself, so the name, the stage and the follow-ups stay
+            reachable from the documents at the bottom of the page. Scroll
+            chaining is deliberately NOT contained — reaching the end of the
+            sidebar should carry on scrolling the page, not trap the wheel. */}
+        <div className="order-first space-y-6 lg:order-none lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
           {/* Homeowner first: the person you are calling stays pinned beside the
               deal instead of scrolling away with it. This replaced roofing's
               "Contact" card in the Overview — same facts, with copy buttons on
