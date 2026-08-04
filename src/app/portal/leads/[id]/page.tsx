@@ -376,12 +376,17 @@ export default async function LeadDetailPage({
     // calling an impure function during render, and this is the same figure the
     // pipeline board and the SLA alert job already compute.
     const inStage = daysInStage(lead.stageChangedAt, lead.createdAt);
+    // Progress counts the stages a deal moves THROUGH. Cancelled lives in the
+    // pipeline but is a dead end, and counting it made a 21-stage roofing job
+    // read "step 4 of 22". A cancelled deal gets no step at all.
+    const liveStages = (lead.pipeline?.stages ?? []).filter((s) => !s.isLost);
+    const showStep = stageIndex >= 0 && !lead.stage?.isLost;
     if (lead.stage) {
       summaryCards.push({
         label: "Current stage",
         value: lead.stage.name,
         hint: [
-          stageIndex >= 0 ? `Step ${stageIndex + 1} of ${lead.pipeline?.stages.length}` : null,
+          showStep ? `Step ${stageIndex + 1} of ${liveStages.length}` : null,
           `${inStage}d in stage`,
         ]
           .filter(Boolean)
