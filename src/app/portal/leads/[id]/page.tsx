@@ -1042,6 +1042,7 @@ export default async function LeadDetailPage({
             <HomeownerCard
               facts={{
                 name: `${lead.firstName} ${lead.lastName}`,
+                coOwner: lead.coOwnerName,
                 phone: lead.phone,
                 email: lead.email,
                 address:
@@ -1051,6 +1052,7 @@ export default async function LeadDetailPage({
                 leadSource: lead.source?.name ?? null,
                 notes: lead.notes,
               }}
+              editHref={can(user, "update", "Lead") ? `/portal/leads/${lead.id}/edit` : undefined}
             />
           </Card>
 
