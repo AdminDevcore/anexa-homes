@@ -52,6 +52,10 @@ export type SolarFinanceView = {
   monthlyPaymentCents: number | null;
   escalatorPct: number | null;
   termYears: number | null;
+  aprPct: number | null;
+  loanTermMonths: number | null;
+  downPaymentCents: number | null;
+  loanMonthlyPaymentCents: number | null;
 } | null;
 
 const PRODUCTS: { value: FinanceProduct; label: string; blurb: string }[] = [
@@ -67,13 +71,14 @@ function money(cents: number) {
 
 /** Module scope on purpose — react-hooks/static-components is an error here. */
 function TextField({
-  label, value, onChange, disabled, type = "text",
+  label, value, onChange, disabled, type = "text", step,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
   type?: string;
+  step?: string;
 }) {
   // Associate the label with the input: it makes the label clickable, lets a
   // screen reader announce the field, and is why getByLabel works in tests.
@@ -81,7 +86,7 @@ function TextField({
   return (
     <div className="space-y-1">
       <Label htmlFor={id} className="text-xs">{label}</Label>
-      <Input id={id} type={type} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      <Input id={id} type={type} step={step} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }
@@ -295,9 +300,16 @@ export function SolarFinancePanel({
     monthly: finance?.monthlyPaymentCents ? (finance.monthlyPaymentCents / 100).toString() : "",
     escalatorPct: finance?.escalatorPct?.toString() ?? "",
     termYears: finance?.termYears?.toString() ?? "",
+    aprPct: finance?.aprPct?.toString() ?? "",
+    loanTermMonths: finance?.loanTermMonths?.toString() ?? "",
+    downPayment: finance?.downPaymentCents ? (finance.downPaymentCents / 100).toString() : "",
+    loanMonthly: finance?.loanMonthlyPaymentCents
+      ? (finance.loanMonthlyPaymentCents / 100).toString()
+      : "",
   });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const isPurchase = product === "cash" || product === "loan";
+  const isLoan = product === "loan";
 
   async function save() {
     setBusy(true);
@@ -311,6 +323,12 @@ export function SolarFinancePanel({
       monthlyPaymentCents: form.monthly ? Math.round(Number(form.monthly) * 100) : null,
       escalatorPct: form.escalatorPct ? Number(form.escalatorPct) : null,
       termYears: form.termYears ? Number(form.termYears) : null,
+      aprPct: form.aprPct ? Number(form.aprPct) : null,
+      loanTermMonths: form.loanTermMonths ? Number(form.loanTermMonths) : null,
+      downPaymentCents: form.downPayment ? Math.round(Number(form.downPayment) * 100) : null,
+      loanMonthlyPaymentCents: form.loanMonthly
+        ? Math.round(Number(form.loanMonthly) * 100)
+        : null,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -360,7 +378,34 @@ export function SolarFinancePanel({
             <Input type="number" value={form.adderTotal} disabled={!canEdit} onChange={(e) => set("adderTotal", e.target.value)} />
           </div>
         </div>
-      ) : (
+      ) : null}
+
+      {/* The lender's terms, as issued. Loan only — a cash deal has no lender,
+          no down payment (it is paid in full) and no monthly.
+          The monthly is TYPED IN, never computed from amount + APR + term:
+          promotional periods, fees and re-amortisation mean a derived figure
+          can contradict the lender's real one, and the number a customer is
+          quoted must be the number the lender issued. */}
+      {isLoan && (
+        <div className="space-y-2 rounded-lg border border-border p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Approved loan terms
+          </div>
+          {/* TextField, not bare Label+Input: it wires htmlFor/id, so a screen
+              reader announces each figure and the label is clickable. */}
+          <div className="grid gap-3 sm:grid-cols-4">
+            <TextField label="APR %" type="number" step="0.01" value={form.aprPct} disabled={!canEdit} onChange={(v) => set("aprPct", v)} />
+            <TextField label="Term (months)" type="number" value={form.loanTermMonths} disabled={!canEdit} onChange={(v) => set("loanTermMonths", v)} />
+            <TextField label="Down payment $" type="number" value={form.downPayment} disabled={!canEdit} onChange={(v) => set("downPayment", v)} />
+            <TextField label="Monthly payment $" type="number" step="0.01" value={form.loanMonthly} disabled={!canEdit} onChange={(v) => set("loanMonthly", v)} />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Enter the lender&rsquo;s own figures from the approval — these are never calculated here.
+          </p>
+        </div>
+      )}
+
+      {!isPurchase && (
         <div className="grid gap-3 sm:grid-cols-4">
           {product === "ppa" && (
             <div className="space-y-1">

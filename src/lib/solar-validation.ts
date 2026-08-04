@@ -48,6 +48,8 @@ export type FinanceForValidation = {
   monthlyPaymentCents: number | null;
   escalatorPct: number | null;
   termYears: number | null;
+  downPaymentCents: number | null;
+  loanMonthlyPaymentCents: number | null;
 };
 
 /** True when nothing blocks generation. Warnings do not block. */
@@ -152,7 +154,34 @@ export function validateFinance(
     if (f.contractPriceCents <= 0) {
       block("contractPriceCents", "Contract price has not been calculated.");
     }
+    // A down payment at or above the system price means there is nothing left
+    // to finance — almost always a stray decimal, and it would put a nonsense
+    // "amount financed" in front of a customer.
+    if (f.downPaymentCents && f.contractPriceCents > 0 && f.downPaymentCents >= f.contractPriceCents) {
+      block(
+        "downPaymentCents",
+        `A down payment of $${(f.downPaymentCents / 100).toLocaleString()} is not less than the $${(f.contractPriceCents / 100).toLocaleString()} system price — there would be nothing to finance.`
+      );
+    }
+    // Cash is paid in full and has no lender, so neither figure can apply.
+    if (f.product === "cash" && f.downPaymentCents) {
+      block("downPaymentCents", "A cash deal is paid in full — it has no down payment.");
+    }
+    if (f.product === "cash" && f.loanMonthlyPaymentCents) {
+      block("loanMonthlyPaymentCents", "A cash deal has no lender and no monthly payment.");
+    }
   } else {
+    // Lease and PPA carry their own payment model; a loan payment here would be
+    // a leftover from a product switch.
+    if (f.loanMonthlyPaymentCents) {
+      block(
+        "loanMonthlyPaymentCents",
+        "A loan monthly payment does not belong on a lease or PPA. Use the lease's own monthly."
+      );
+    }
+    if (f.downPaymentCents) {
+      block("downPaymentCents", "A lease or PPA is third-party owned — there is no down payment on a system you do not buy.");
+    }
     // Lease / PPA
     if (!f.termYears || f.termYears < 5 || f.termYears > 30) {
       block("termYears", "Lease and PPA terms run 5–30 years.");

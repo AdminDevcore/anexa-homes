@@ -21,21 +21,36 @@ async function openDeal(page: Page, query: string) {
   await page.waitForURL("**/portal/leads/**");
 }
 
+/**
+ * The contract tools moved out of the page header and into the Documents tab,
+ * beside the documents they produce. Tab content stays mounted but hidden, so
+ * the tab has to be opened before the link is clickable.
+ */
+async function openDocumentsTab(page: Page) {
+  await page.getByRole("button", { name: "Documents", exact: true }).click();
+}
+
 async function uploadSlot(page: Page, labelText: string) {
   const input = page.locator("label", { hasText: labelText }).locator('input[type="file"]');
   await input.first().setInputFiles({ name: `${labelText.replace(/\W+/g, "_")}.png`, mimeType: "image/png", buffer: PNG });
 }
 
-test("deal header shows Build Presentation", async ({ page }) => {
+test("the Documents tab offers Build Presentation, not the page header", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await openDeal(page, "Linda");
+  // Hidden until the tab is opened — the header is down to Edit / Edit Job.
+  await expect(page.getByRole("link", { name: "Build Presentation" })).toBeHidden();
+  await openDocumentsTab(page);
   await expect(page.getByRole("link", { name: "Build Presentation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Insurance Contract" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Simple Cash Bid" })).toBeVisible();
   await page.context().clearCookies();
 });
 
 test("builder gates generation until required photos are uploaded", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await openDeal(page, "Linda");
+  await openDocumentsTab(page);
   await page.getByRole("link", { name: "Build Presentation" }).click();
   await page.waitForURL("**/presentation");
 
@@ -55,6 +70,7 @@ test("builder gates generation until required photos are uploaded", async ({ pag
 test("generate produces a public presentation with NO cost/profit leak", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await openDeal(page, "Linda");
+  await openDocumentsTab(page);
   await page.getByRole("link", { name: "Build Presentation" }).click();
   await page.waitForURL("**/presentation");
 

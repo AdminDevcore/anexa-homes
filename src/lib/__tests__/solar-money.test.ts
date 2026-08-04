@@ -210,6 +210,7 @@ describe("a rep cannot generate a nonsense proposal", () => {
     const f: FinanceForValidation = {
       product: "loan", grossPpwCents: 1200, dealerFeePct: 18, contractPriceCents: 5_000_000,
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
     };
     expect(canGenerate(validateFinance(f, A))).toBe(false);
   });
@@ -218,22 +219,56 @@ describe("a rep cannot generate a nonsense proposal", () => {
     const f: FinanceForValidation = {
       product: "cash", grossPpwCents: 350, dealerFeePct: 18, contractPriceCents: 3_500_000,
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
     };
     const issues = validateFinance(f, A);
     expect(canGenerate(issues)).toBe(false);
     expect(issues.find((i) => i.field === "dealerFeePct")?.message).toMatch(/no lender/i);
   });
 
+  it("BLOCKS a down payment that leaves nothing to finance", () => {
+    const base: FinanceForValidation = {
+      product: "loan", grossPpwCents: 350, dealerFeePct: 18, contractPriceCents: 3_885_000,
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
+    };
+    // A real down payment is fine.
+    expect(canGenerate(validateFinance({ ...base, downPaymentCents: 500_000 }, A))).toBe(true);
+    // One at or above the system price is the stray-decimal case.
+    expect(canGenerate(validateFinance({ ...base, downPaymentCents: 3_885_000 }, A))).toBe(false);
+    expect(canGenerate(validateFinance({ ...base, downPaymentCents: 9_000_000 }, A))).toBe(false);
+  });
+
+  it("BLOCKS loan-only money on products that have no lender", () => {
+    const cash: FinanceForValidation = {
+      product: "cash", grossPpwCents: 350, dealerFeePct: 0, contractPriceCents: 3_885_000,
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
+    };
+    expect(canGenerate(validateFinance({ ...cash, downPaymentCents: 500_000 }, A))).toBe(false);
+    expect(canGenerate(validateFinance({ ...cash, loanMonthlyPaymentCents: 27_400 }, A))).toBe(false);
+
+    // …and a loan payment left behind after switching to a third-party product.
+    const lease: FinanceForValidation = {
+      product: "lease", grossPpwCents: 0, dealerFeePct: 0, contractPriceCents: 0,
+      rateMillsPerKwh: null, monthlyPaymentCents: 18_500, escalatorPct: 2.9, termYears: 20,
+      downPaymentCents: null, loanMonthlyPaymentCents: 27_400,
+    };
+    expect(canGenerate(validateFinance(lease, A))).toBe(false);
+  });
+
   it("BLOCKS mixing lease and PPA fields", () => {
     const ppaWithMonthly: FinanceForValidation = {
       product: "ppa", grossPpwCents: 0, dealerFeePct: 0, contractPriceCents: 0,
       rateMillsPerKwh: 145, monthlyPaymentCents: 18_500, escalatorPct: 2.9, termYears: 25,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
     };
     expect(canGenerate(validateFinance(ppaWithMonthly, A))).toBe(false);
 
     const leaseWithRate: FinanceForValidation = {
       product: "lease", grossPpwCents: 0, dealerFeePct: 0, contractPriceCents: 0,
       rateMillsPerKwh: 145, monthlyPaymentCents: 18_500, escalatorPct: 2.9, termYears: 20,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
     };
     expect(canGenerate(validateFinance(leaseWithRate, A))).toBe(false);
   });
@@ -242,6 +277,7 @@ describe("a rep cannot generate a nonsense proposal", () => {
     const f: FinanceForValidation = {
       product: "loan", grossPpwCents: 900, dealerFeePct: 18, contractPriceCents: 5_000_000,
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
     };
     expect(canGenerate(validateFinance(f, A))).toBe(false);
     expect(canGenerate(validateFinance(f, { ...A, maxPpwCents: 1000 }))).toBe(true);

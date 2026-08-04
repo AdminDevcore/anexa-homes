@@ -6,14 +6,13 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Loader2, Check, ChevronRight, FileText, Upload, ListTodo, UserPlus,
-  Sun, Pencil, Lock, Satellite, Sparkles, Send,
+  Sun, Pencil, Lock, Sparkles, Send,
 } from "lucide-react";
 import type { FeedChannel, MilestonePayee } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SOLAR_FOLDERS } from "@/lib/solar-folders";
-import { moveLeadStage } from "@/server/modules/leads/actions";
 import {
   postDealFeedAction,
   inviteHomeownerAction,
@@ -25,105 +24,11 @@ const usd = (c: number) =>
 const usdc = (c: number) =>
   (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
 
-// ---------------------------------------------------------------------------
-// 1 · Stage bar
-// ---------------------------------------------------------------------------
-
-export type StageLite = { id: string; name: string; position: number; color: string };
-
-/**
- * The full lifecycle at a glance, New Lead through System Activated.
- *
- * 25 stages will not fit on a phone, so it scrolls horizontally and auto-scrolls
- * the current stage into view. Every stage is clickable — a coordinator moving a
- * deal should not have to open a menu to do the single most common action on
- * the page.
- */
-export function SolarStageBar({
-  leadId,
-  stages,
-  currentStageId,
-  canEdit,
-}: {
-  leadId: string;
-  stages: StageLite[];
-  currentStageId: string | null;
-  canEdit: boolean;
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState<string | null>(null);
-  const currentRef = React.useRef<HTMLButtonElement>(null);
-
-  React.useEffect(() => {
-    currentRef.current?.scrollIntoView({ block: "nearest", inline: "center" });
-  }, [currentStageId]);
-
-  const currentIndex = stages.findIndex((s) => s.id === currentStageId);
-
-  async function move(stageId: string) {
-    if (!canEdit || stageId === currentStageId) return;
-    setBusy(stageId);
-    const res = await moveLeadStage({ leadId, stageId });
-    setBusy(null);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Stage updated");
-    router.refresh();
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Project lifecycle
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {currentIndex >= 0 ? `${currentIndex + 1} of ${stages.length}` : "Not started"}
-        </span>
-      </div>
-      <div className="flex gap-1 overflow-x-auto pb-1" data-testid="solar-stage-bar">
-        {stages.map((s, i) => {
-          const done = currentIndex >= 0 && i < currentIndex;
-          const current = s.id === currentStageId;
-          return (
-            <button
-              key={s.id}
-              ref={current ? currentRef : undefined}
-              disabled={!canEdit || busy !== null}
-              onClick={() => move(s.id)}
-              title={s.name}
-              className={cn(
-                "group flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-default",
-                current
-                  ? "border-transparent text-white"
-                  : done
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-border text-muted-foreground hover:bg-muted"
-              )}
-              style={current ? { background: s.color } : undefined}
-            >
-              {busy === s.id ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : done ? (
-                <Check className="size-3" />
-              ) : (
-                <span className="text-[10px] tabular-nums opacity-60">{i + 1}</span>
-              )}
-              <span className="whitespace-nowrap">{s.name}</span>
-            </button>
-          );
-        })}
-      </div>
-      {canEdit && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Click any stage to move the deal there.
-        </p>
-      )}
-    </div>
-  );
-}
+// The stage bar used to live here. Nothing about it was solar-specific, so it
+// now serves both verticals from `deal-stage-bar.tsx` (DealStageBar).
 
 // ---------------------------------------------------------------------------
-// 2 · System & money
+// 1 · System & money
 // ---------------------------------------------------------------------------
 
 export type MilestoneLite = {
@@ -452,7 +357,7 @@ function SpecRow({ k, v }: { k: string; v: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// 3 · Document folders
+// 2 · Document folders
 // ---------------------------------------------------------------------------
 
 export function SolarDocumentFolders({
@@ -503,7 +408,7 @@ export function SolarDocumentFolders({
 }
 
 // ---------------------------------------------------------------------------
-// 4 · Activity feed
+// 3 · Activity feed
 // ---------------------------------------------------------------------------
 
 export type FeedPost = {
@@ -623,9 +528,17 @@ export function SolarActivityFeed({
 }
 
 // ---------------------------------------------------------------------------
-// 5 · Quick actions
+// 4 · Quick actions
 // ---------------------------------------------------------------------------
 
+/**
+ * A single calm row of pills under the page header.
+ *
+ * This used to be a three-across grid of full-width tiles in its own card,
+ * which gave five secondary actions the same visual weight as the deal's
+ * financials. As a pill row it stays reachable without competing with the
+ * content — the reference design's "actions live near their section, quietly".
+ */
 export function SolarQuickActions({
   leadId,
   proposalToken,
@@ -650,22 +563,24 @@ export function SolarQuickActions({
   }
 
   return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="flex flex-wrap items-center gap-2">
       {proposalToken ? (
         <QuickAction href={`/proposal/${proposalToken}`} icon={Sun} label="View proposal" external />
       ) : (
         <QuickAction disabled icon={Sun} label="No proposal yet" />
       )}
-      <QuickAction href={`/portal/leads/${leadId}#design`} icon={Pencil} label="Edit design" />
-      <QuickAction href={`/portal/leads/${leadId}#documents`} icon={Upload} label="Upload files" />
+      {/* `#proposal` / `#production` select a tab (see DealTabs) — these were
+          `#design` and `#documents`, anchors that matched nothing on the page. */}
+      <QuickAction href={`/portal/leads/${leadId}#proposal`} icon={Pencil} label="Edit design" />
+      <QuickAction href={`/portal/leads/${leadId}#proposal`} icon={Upload} label="Upload files" />
       <QuickAction href={`/portal/tasks?lead=${leadId}`} icon={ListTodo} label="Tasks" />
       {canEdit && !homeownerInvited && (
         <button
           onClick={invite}
           disabled={busy}
-          className="flex items-center gap-2 rounded-lg border border-border p-3 text-sm hover:bg-muted disabled:opacity-60"
+          className={cn(QUICK_ACTION_CLS, "hover:bg-muted disabled:opacity-60")}
         >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4 text-muted-foreground" />}
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5 text-muted-foreground" />}
           Invite homeowner
         </button>
       )}
@@ -673,6 +588,9 @@ export function SolarQuickActions({
     </div>
   );
 }
+
+const QUICK_ACTION_CLS =
+  "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1";
 
 function QuickAction({
   href, icon: Icon, label, external, disabled,
@@ -685,20 +603,17 @@ function QuickAction({
 }) {
   const inner = (
     <>
-      <Icon className="size-4 text-muted-foreground" />
-      <span className="flex-1 text-left">{label}</span>
-      {!disabled && <ChevronRight className="size-4 text-muted-foreground" />}
+      <Icon className="size-3.5 text-muted-foreground" />
+      {label}
     </>
   );
-  const cls = cn(
-    "flex items-center gap-2 rounded-lg border border-border p-3 text-sm",
-    disabled ? "opacity-50" : "hover:bg-muted"
-  );
+  const cls = cn(QUICK_ACTION_CLS, disabled ? "opacity-50" : "hover:bg-muted");
   if (disabled || !href) return <span className={cls}>{inner}</span>;
   if (external) {
     return (
       <a href={href} target="_blank" rel="noreferrer" className={cls}>
         {inner}
+        <ChevronRight className="size-3.5 text-muted-foreground" />
       </a>
     );
   }
@@ -714,18 +629,20 @@ function QuickAction({
 // ---------------------------------------------------------------------------
 
 /**
- * Placeholders for the two items that need work outside this codebase. Shown
- * rather than hidden so the gap is visible to whoever picks them up, and
+ * Placeholders for work that needs something outside this codebase. Shown
+ * rather than hidden so the gap is visible to whoever picks it up, and
  * explicitly NOT wired to anything.
+ *
+ * "Satellite roof render" used to sit here too. It was removed once the real
+ * property view shipped (`solar/property-view.tsx`) and became this page's
+ * hero — a "coming soon" card directly below the working feature it describes
+ * teaches people to ignore the whole panel. The remaining gap, drawing the
+ * PANEL LAYOUT onto that imagery, still needs a design provider and is called
+ * out in the property card itself.
  */
 export function SolarDeferredPanels() {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <DeferredCard
-        icon={Satellite}
-        title="Satellite roof render"
-        why="Needs a design/imagery provider (Google Solar API, Aurora or EagleView). Scoped separately — no imagery vendor is wired up yet."
-      />
+    <div className="grid gap-3">
       <DeferredCard
         icon={Sparkles}
         title="Project AI assistant"

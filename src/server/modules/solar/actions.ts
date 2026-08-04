@@ -157,6 +157,8 @@ const financeSchema = z.object({
   termYears: z.number().int().min(0).max(40).nullable().optional(),
   aprPct: z.number().min(0).max(50).nullable().optional(),
   loanTermMonths: z.number().int().min(0).max(600).nullable().optional(),
+  downPaymentCents: z.number().int().min(0).nullable().optional(),
+  loanMonthlyPaymentCents: z.number().int().min(0).nullable().optional(),
 });
 
 /**
@@ -188,6 +190,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   });
 
   const isPurchase = f.product === "cash" || f.product === "loan";
+  const isLoan = f.product === "loan";
   // Cash has no lender, so it can never carry a dealer fee.
   const dealerFeePct = f.product === "loan" ? (f.dealerFeePct ?? assumptions.defaultDealerFeePct) : 0;
 
@@ -221,6 +224,12 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     termYears: f.termYears ?? null,
     aprPct: f.aprPct ?? null,
     loanTermMonths: f.loanTermMonths ?? null,
+    // Loan block — nulled for every other product, the same way the rate block
+    // is nulled for purchases. A down payment on a cash deal is a contradiction
+    // (cash IS paid in full), and a loan payment left behind after switching to
+    // a lease would show the wrong monthly on the proposal.
+    downPaymentCents: isLoan ? (f.downPaymentCents ?? null) : null,
+    loanMonthlyPaymentCents: isLoan ? (f.loanMonthlyPaymentCents ?? null) : null,
   };
 
   await prisma.solarFinance.upsert({
@@ -287,6 +296,8 @@ export async function validateSolarDealAction(leadId: string) {
       monthlyPaymentCents: finance.monthlyPaymentCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
+      downPaymentCents: finance.downPaymentCents,
+      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
     },
     assumptions
   );

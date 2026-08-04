@@ -33,6 +33,25 @@ export function DealTabs({ tabs, children }: { tabs: DealTabDef[]; children: Rea
   const [active, setActive] = React.useState(tabs[0]?.id ?? "");
   const ref = React.useRef<HTMLDivElement>(null);
 
+  // `#proposal` etc. selects a tab, so links elsewhere on the page (the quick
+  // actions) can point at content that is one click deep. Synced in an effect
+  // rather than in the initial state so the server and first client render
+  // still agree — the hash does not exist during SSR.
+  // Keyed on the ids, not the array: `tabs` is a fresh literal on every server
+  // render, and depending on it would re-apply the hash after the user has
+  // clicked a different tab — snapping them back.
+  const tabIds = tabs.map((t) => t.id).join(",");
+  React.useEffect(() => {
+    const ids = new Set(tabIds.split(","));
+    const apply = () => {
+      const id = window.location.hash.slice(1);
+      if (ids.has(id)) setActive(id);
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+  }, [tabIds]);
+
   useIsoLayoutEffect(() => {
     const root = ref.current;
     if (!root) return;

@@ -12,9 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Playwright builds the app into its own dist dir (playwright.config.ts sets
-    // NEXT_DIST_DIR). Same generated output as .next — never lint it.
-    ".next-e2e/**",
+    // EVERY alternate NEXT_DIST_DIR, not just Playwright's `.next-e2e`.
+    // playwright.config.ts sets NEXT_DIST_DIR, and so does anyone building into
+    // a scratch dir to avoid clobbering a running dev server's `.next`. It is
+    // all the same generated output — linting it reports tens of thousands of
+    // problems in compiled chunks and buries the real ones.
+    ".next-*/**",
   ]),
   // ---------------------------------------------------------------------
   // Vertical isolation guard: raw SQL bypasses the Prisma client extension

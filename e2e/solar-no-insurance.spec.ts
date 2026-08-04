@@ -131,7 +131,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await openSolarDeal(page);
 
     // 1 · Stage bar across the whole 25-stage lifecycle.
-    const bar = page.getByTestId("solar-stage-bar");
+    const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
     await expect(bar.getByText("New Lead")).toBeVisible();
     await expect(bar.getByText("Utility PTO")).toBeVisible();
@@ -147,10 +147,11 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("M1", { exact: true })).toBeVisible();
     await expect(page.getByText("1st payment", { exact: true })).toBeVisible();
 
-    // 3 · Document folders with counts.
-    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets", "Permits", "Internal Documents"]) {
-      await expect(page.getByText(folder, { exact: true })).toBeVisible();
-    }
+    // 3 · The property hero and the lender's own terms, both on the Overview.
+    await expect(page.getByRole("heading", { name: "Property" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Homeowner Information" })).toBeVisible();
+    await expect(page.getByText("Financing & lender")).toBeVisible();
+    await expect(page.getByText("GoodLeap").first()).toBeVisible();
 
     // 4 · Feed with its three channels.
     await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
@@ -160,10 +161,42 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("Edit design", { exact: true })).toBeVisible();
     await expect(page.getByText("Upload files", { exact: true })).toBeVisible();
 
-    // Deferred items are labelled, not silently missing.
-    await expect(page.getByText("Satellite roof render")).toBeVisible();
+    // Deferred items are labelled, not silently missing. "Satellite roof
+    // render" is deliberately NOT among them any more — the real property view
+    // shipped and is the hero asserted above.
+    await expect(page.getByText("Satellite roof render")).toHaveCount(0);
     await expect(page.getByText("Project AI assistant")).toBeVisible();
     await expect(page.getByText("Coming soon").first()).toBeVisible();
+
+    // 6 · Document folders moved to the Proposal tab, beside the files they
+    // describe, so they are hidden until that tab is opened.
+    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets"]) {
+      await expect(page.getByText(folder, { exact: true })).toBeHidden();
+    }
+    await page.getByRole("button", { name: "Proposal", exact: true }).click();
+    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets", "Permits", "Internal Documents"]) {
+      await expect(page.getByText(folder, { exact: true })).toBeVisible();
+    }
+  });
+
+  test("the summary row answers stage, financier, size and rep without scrolling", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openSolarDeal(page);
+
+    const cards = page.getByTestId("deal-summary-cards");
+    await expect(cards).toBeVisible({ timeout: 15000 });
+    await expect(cards.getByText("Current stage")).toBeVisible();
+    await expect(cards.getByText("Financier")).toBeVisible();
+    // The APPROVED lender, not the newer decline — the seed has both.
+    await expect(cards.getByText("GoodLeap")).toBeVisible();
+    await expect(cards.getByText("Sunlight Financial")).toHaveCount(0);
+    await expect(cards.getByText("System size")).toBeVisible();
+    await expect(cards.getByText("10.00 kW")).toBeVisible();
+    await expect(cards.getByText("Sales rep")).toBeVisible();
+
+    // No project on this deal, so there is no project manager to name — the
+    // card is absent rather than rendered empty.
+    await expect(cards.getByText("Project manager")).toHaveCount(0);
   });
 
   test("internal feed posts are marked as staff-only", async ({ page }) => {
@@ -195,7 +228,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await page.getByRole("button", { name: /Create Appointment/ }).click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
-    const bar = page.getByTestId("solar-stage-bar");
+    const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
     await bar.getByText("Permit Approved", { exact: true }).click();
     await expect(page.getByText(/Stage updated/)).toBeVisible({ timeout: 15000 });
@@ -245,6 +278,42 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     for (const label of ["1st payment", "2nd payment", "3rd payment"]) {
       await expect(page.getByText(label, { exact: true })).toBeVisible();
     }
+  });
+
+  test("the lender's own loan figures round-trip and are loan-only", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openSolarDeal(page);
+
+    // Seeded values reach the read-only summary on the Overview. `exact` is
+    // load-bearing: tab content stays mounted, so a loose "Down payment" also
+    // matches the "Down payment $" input label over in the Proposal tab.
+    await expect(page.getByText("Down payment", { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("$5,000", { exact: true })).toBeVisible();
+    await expect(page.getByText("$274/mo")).toBeVisible();
+
+    // Edit them where the sibling financing fields are edited.
+    await page.getByRole("button", { name: "Proposal", exact: true }).click();
+    await expect(page.getByText("Approved loan terms")).toBeVisible();
+    await page.getByLabel("Down payment $").fill("7500");
+    await page.getByLabel("Monthly payment $").fill("259.40");
+    await page.getByRole("button", { name: "Save financing" }).click();
+    // Wait for the action to actually land. Reloading straight off the click
+    // races it and re-renders the OLD row.
+    await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
+
+    // …and they persist. This is the whole point of storing rather than
+    // deriving: the number shown is the number that was entered.
+    await page.reload();
+    await expect(page.getByText("$7,500", { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("$259/mo")).toBeVisible();
+
+    // Switching to Cash removes the block entirely — a cash deal is paid in
+    // full, so it has neither a down payment nor a lender's monthly.
+    // Matched by its blurb: a bare "Cash" also hits the Summary sidebar's
+    // product toggle, which is a different control for the same field.
+    await page.getByRole("button", { name: "Proposal", exact: true }).click();
+    await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
+    await expect(page.getByText("Approved loan terms")).toBeHidden();
   });
 
   test("roofing keeps every one of those concepts", async ({ page }) => {

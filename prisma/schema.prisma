@@ -656,6 +656,12 @@ model Lead {
   // Optional co-owner / co-signer on the deal (e.g. spouse). Maps to the
   // "Co-owner" autofill token + co-homeowner slots on document templates.
   coOwnerName String?
+  /// Preferred spoken language for calls, visits and door-knocks. Free text,
+  /// deliberately not an enum: which languages a company serves is business
+  /// config, and an enum would need a migration every time someone adds
+  /// Vietnamese. Applies to any vertical — a roofing customer has a preferred
+  /// language too.
+  preferredLanguage String?
   email     String?
   phone     String?
   address   String?
@@ -2739,6 +2745,14 @@ model SolarFinance {
   // ── Loan terms (from the approved credit application) ────────────────────
   aprPct         Float?
   loanTermMonths Int?
+  /// Cash the customer puts down, reducing the financed amount. Cents.
+  downPaymentCents Int?
+  /// The lender's OWN monthly payment figure, cents. Deliberately STORED and
+  /// never derived from amount + APR + term: promotional periods, fees and
+  /// re-amortisation all mean a computed figure can contradict the real one,
+  /// and the number a customer is quoted has to be the number the lender
+  /// issued. Distinct from `monthlyPaymentCents` above, which is LEASE-only.
+  loanMonthlyPaymentCents Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
