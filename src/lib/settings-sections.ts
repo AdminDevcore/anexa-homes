@@ -1,0 +1,122 @@
+import {
+  KanbanSquare,
+  SlidersHorizontal,
+  FileSignature,
+  DollarSign,
+  Palette,
+  ShieldCheck,
+  Bell,
+  Camera,
+  ListChecks,
+  Calculator,
+  Megaphone,
+  Star,
+  CloudLightning,
+  Sun,
+  PanelsTopLeft,
+} from "lucide-react";
+import type { ActiveVertical } from "./vertical";
+
+/**
+ * The Settings hub's cards, and which workspace each one belongs to.
+ *
+ * Two distinct kinds of per-vertical difference live here, and conflating them
+ * is what made the hub wrong for Solar:
+ *
+ *   `verticals` — the card is about a concept the other vertical does not have.
+ *                 An insurance-restoration line-item catalog has no meaning in
+ *                 solar; a module/inverter list has none in roofing. Hidden.
+ *
+ *   `labels`    — the same underlying setting, different vocabulary. Solar does
+ *                 run a pre-install visit; it is a site survey, not a roof
+ *                 inspection. Hiding that card would leave the solar deal page's
+ *                 "Site survey outcome" dropdown uneditable, so it is renamed
+ *                 rather than removed.
+ */
+export type SettingsSection = {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  body: string;
+  href?: string;
+  /** Workspaces this card appears in. Absent = every workspace. */
+  verticals?: ActiveVertical[];
+  /** Per-vertical wording for the same destination. */
+  labels?: Partial<Record<ActiveVertical, { title: string; body: string }>>;
+};
+
+export const SETTINGS_SECTIONS: SettingsSection[] = [
+  { icon: KanbanSquare, title: "Pipeline Stages", body: "Customize the stages appointments move through.", href: "/portal/settings/pipeline" },
+  { icon: ListChecks, title: "Appointment Outcomes", body: "Customize the outcomes reps record after appointments.", href: "/portal/settings/appointment-outcomes" },
+  { icon: SlidersHorizontal, title: "Custom Fields", body: "Add custom fields to appointments and projects.", href: "/portal/settings/fields" },
+  { icon: Megaphone, title: "Lead Sources", body: "Customize where leads come from (Door Knock, Referral, Ads…).", href: "/portal/settings/lead-sources" },
+  { icon: FileSignature, title: "Document Templates", body: "Build and edit contract templates.", href: "/portal/documents" },
+  { icon: DollarSign, title: "Commission Rules", body: "Set percentage, flat, and override rules.", href: "/portal/settings/commissions" },
+  { icon: Bell, title: "Notification Rules", body: "Choose triggers, recipients, and channels.", href: "/portal/settings/notifications" },
+  {
+    icon: CloudLightning,
+    title: "Storm & Homeowner Data",
+    body: "Storm search area + re-verify homeowner data across houses.",
+    href: "/portal/settings/storm-coverage",
+    // The storm search area is roofing's; owner re-verify and county records are
+    // ordinary canvassing tooling, so solar keeps the page minus that panel.
+    labels: {
+      solar: {
+        title: "Homeowner Data",
+        body: "Re-verify homeowner data across houses and import county records.",
+      },
+    },
+  },
+  { icon: Camera, title: "Photo Templates", body: "Site & install photo checklists for projects.", href: "/portal/settings/photo-templates" },
+  {
+    icon: ListChecks,
+    title: "Inspection Outcomes",
+    body: "Customize the outcomes recorded after an inspection.",
+    href: "/portal/settings/inspection-outcomes",
+    labels: {
+      solar: {
+        title: "Site Survey Outcomes",
+        body: "Customize the outcomes recorded after a site survey.",
+      },
+    },
+  },
+  { icon: ListChecks, title: "Production Checklist", body: "The QC checklist applied to every new job.", href: "/portal/settings/production-checklist" },
+  {
+    icon: Calculator,
+    title: "Scope of Work Catalog",
+    body: "Master list of insurance-restoration line items (no pricing).",
+    href: "/portal/settings/scope-template",
+    verticals: ["roofing"],
+  },
+  { icon: Star, title: "Website Reviews", body: "Approve, feature, hide, or remove customer reviews from the website.", href: "/portal/settings/reviews" },
+  { icon: ShieldCheck, title: "Roles & Permissions", body: "Control what each role can see and do.", href: "/portal/settings/roles" },
+  { icon: Palette, title: "Branding", body: "Company logo and brand colors.", href: "/portal/settings/branding" },
+  {
+    icon: Sun,
+    title: "Solar Settings",
+    body: "Production and pricing assumptions, incentive %, validation bounds, and stage owners.",
+    href: "/portal/settings/solar",
+    verticals: ["solar"],
+  },
+  {
+    icon: PanelsTopLeft,
+    title: "Solar Equipment",
+    body: "Modules, inverters, batteries and rank-ordered adders.",
+    href: "/portal/settings/solar-equipment",
+    verticals: ["solar"],
+  },
+];
+
+export type ResolvedSettingsSection = {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  body: string;
+  href?: string;
+};
+
+/** The cards this workspace shows, already resolved to its own vocabulary. */
+export function visibleSettingsSections(vertical: ActiveVertical): ResolvedSettingsSection[] {
+  return SETTINGS_SECTIONS.filter((s) => !s.verticals || s.verticals.includes(vertical)).map((s) => {
+    const label = s.labels?.[vertical];
+    return { icon: s.icon, title: label?.title ?? s.title, body: label?.body ?? s.body, href: s.href };
+  });
+}

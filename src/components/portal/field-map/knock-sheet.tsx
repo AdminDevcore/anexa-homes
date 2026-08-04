@@ -24,6 +24,8 @@ export type KnockSheetProps = {
   onConvert: (k: KnockDTO) => void;
   onMove: (k: KnockDTO) => void;
   onDelete: (k: KnockDTO) => void;
+  /** Hail history for the address — meaningless outside a storm vertical. */
+  storm: boolean;
 };
 
 const isHouseDot = (k: KnockDTO) => k.id.startsWith("house:");
@@ -39,6 +41,7 @@ export function KnockSheet({
   onConvert,
   onMove,
   onDelete,
+  storm,
 }: KnockSheetProps) {
   // Callers mount this with key={knock.id}, so opening a different house
   // remounts and both of these reset to their peek/idle defaults for free.
@@ -116,7 +119,7 @@ export function KnockSheet({
             animate={{ opacity: 1, y: 0 }}
             className="space-y-3 border-t border-border pt-3"
           >
-            <HouseStormInfo lat={k.lat} lng={k.lng} />
+            {storm && <HouseStormInfo lat={k.lat} lng={k.lng} />}
             {!k.contactName && ownerLookupEnabled && k.address && (
               <button
                 onClick={() => onLookupOwner(k)}

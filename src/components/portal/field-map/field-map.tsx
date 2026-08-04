@@ -47,14 +47,22 @@ export type FieldMapProps = {
   tab: string;
   onChangeTab: (t: "map" | "list" | "insights") => void;
   onOpenStormTab: (tab: StormTab) => void;
-  canStorm: boolean;
+  /**
+   * Whether storm tooling exists on this map at all: hail radar, storm scores,
+   * NOAA reports, NWS warnings, per-house hail history and the storm tabs. The
+   * caller ANDs the StormIntelligence permission with the active vertical (see
+   * lib/vertical-features) — a solar rep has no use for a hail swath.
+   */
+  storm: boolean;
 };
 
-export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMapProps) {
+export function FieldMap({ tab, onChangeTab, onOpenStormTab, storm }: FieldMapProps) {
   const router = useRouter();
   const mapRef = React.useRef<LeafletMap | null>(null);
 
-  const { filters, activeCount, set, toggleDisposition, reset } = useMapFilters();
+  // Storm layers are stripped inside the hook, so `filters` here can never carry
+  // a storm toggle in a storm-less workspace — not even from a shared URL.
+  const { filters, activeCount, set, toggleDisposition, reset } = useMapFilters(storm);
   const [viewport, setViewport] = React.useState<Viewport | null>(null);
   const data = useFieldMapData(filters, viewport);
 
@@ -374,7 +382,7 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
           onDeleteTerritory={removeTerritory}
           onSetTerritoryReps={setTerritoryReps}
           onOpenStormTab={onOpenStormTab}
-          canStorm={canStorm}
+          canStorm={storm}
         />
       ) : (
         <StatusBar
@@ -385,7 +393,12 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
         />
       )}
 
-      <FieldMapLegend showHail={filters.showRadar || filters.showStormReports} showHeat={filters.showHeat} />
+      {/* Both flags are already false in a storm-less workspace, so the legend
+          returns null there — the guard is stated anyway so the intent survives
+          any future change to the legend's own empty check. */}
+      {storm && (
+        <FieldMapLegend showHail={filters.showRadar || filters.showStormReports} showHeat={filters.showHeat} />
+      )}
 
       <FiltersSheet
         open={filtersOpen}
@@ -399,7 +412,7 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
         reps={data.reps}
         canManage={canManage}
       />
-      <LayersSheet open={layersOpen} onOpenChange={setLayersOpen} filters={filters} set={set} />
+      <LayersSheet open={layersOpen} onOpenChange={setLayersOpen} filters={filters} set={set} storm={storm} />
 
       {/* key: opening a different house remounts the sheet, resetting it to peek. */}
       <KnockSheet
@@ -414,8 +427,9 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, canStorm }: FieldMa
         onConvert={startConvert}
         onMove={startMoveKnock}
         onDelete={removeKnock}
+        storm={storm}
       />
-      <DealSheet deal={sheetDeal} onClose={() => setSheetDeal(null)} onMove={startMoveDeal} />
+      <DealSheet deal={sheetDeal} onClose={() => setSheetDeal(null)} onMove={startMoveDeal} storm={storm} />
 
       <TerritoryDialog
         points={pendingTerritory}

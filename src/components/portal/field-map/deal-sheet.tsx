@@ -11,9 +11,11 @@ export type DealSheetProps = {
   deal: DealDTO | null;
   onClose: () => void;
   onMove: (d: DealDTO) => void;
+  /** Hail history for the address — meaningless outside a storm vertical. */
+  storm: boolean;
 };
 
-export function DealSheet({ deal, onClose, onMove }: DealSheetProps) {
+export function DealSheet({ deal, onClose, onMove, storm }: DealSheetProps) {
   const router = useRouter();
   if (!deal) return null;
   const d = deal;
@@ -53,7 +55,7 @@ export function DealSheet({ deal, onClose, onMove }: DealSheetProps) {
         </div>
         {d.note && <p className="line-clamp-3 text-sm text-muted-foreground">{d.note}</p>}
 
-        <HouseStormInfo lat={d.lat} lng={d.lng} />
+        {storm && <HouseStormInfo lat={d.lat} lng={d.lng} />}
 
         <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
           <button

@@ -13,6 +13,11 @@ import { StormZones } from "./storm/storm-zones";
 import { StormImportDialog } from "./storm/storm-import-dialog";
 import type { StormMeta } from "./storm/types";
 
+/**
+ * @param canStorm StormIntelligence permission AND a vertical that has storms.
+ *   Roofing prospects off hail; solar does not, so its Field Map is territories
+ *   and knocks with no storm surface anywhere on it.
+ */
 export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
   // Storm Intelligence is folded into the Field Map. Its tools are reachable
   // from the manager rail rather than as top-level tabs.
@@ -37,7 +42,9 @@ export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="font-display text-2xl font-semibold">Field Map</h1>
-            <p className="text-sm text-muted-foreground">Canvassing + storm intelligence in one map.</p>
+            <p className="text-sm text-muted-foreground">
+              {canStorm ? "Canvassing + storm intelligence in one map." : "Canvassing and territories in one map."}
+            </p>
           </div>
           {canStorm && stormMeta?.canManage ? <StormImportDialog /> : null}
         </div>
@@ -63,7 +70,7 @@ export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
             tab={tab}
             onChangeTab={setTab}
             onOpenStormTab={(t: StormTab) => setTab(t)}
-            canStorm={canStorm}
+            storm={canStorm}
           />
         </TabsContent>
         <TabsContent value="list">
