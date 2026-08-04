@@ -152,7 +152,6 @@ test.describe("workspace switcher", () => {
     await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
-    await page.getByRole("button", { name: "Proposal", exact: true }).click();
 
     // The seeded deal is complete, so break it: annual usage is the anchor for
     // offset, and without it the offset figure is meaningless. This is the

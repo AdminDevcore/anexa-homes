@@ -20,7 +20,6 @@ test("manager sees Scope of Work with profit + margin on a scope-received deal",
   await login(page, "manager@anexahomes.com");
   await openDeal(page, "Linda");
 
-  await page.getByRole("button", { name: "Scope of Work" }).click();
 
   // Seeded insurance RCV $13,530.00. Profit pool = RCV − cost − 10% overhead.
   // Old gross margin was $3,570 (26.4%); after the $1,353 overhead the pool is
@@ -38,7 +37,6 @@ test("sales rep sees the scope but NOT cost or profit", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await openDeal(page, "Linda");
 
-  await page.getByRole("button", { name: "Scope of Work" }).click();
 
   // Insurance side is visible (totals render as text)
   await expect(page.getByText("$13,530.00").first()).toBeVisible();
@@ -50,11 +48,11 @@ test("sales rep sees the scope but NOT cost or profit", async ({ page }) => {
   await page.context().clearCookies();
 });
 
-test("no Scope of Work tab before Scope Received", async ({ page }) => {
+test("no Scope of Work section before Scope Received", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await openDeal(page, "David"); // David Kim — appointment_set stage
 
-  await expect(page.getByRole("button", { name: "Scope of Work" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Scope of Work" })).toHaveCount(0);
 
   await page.context().clearCookies();
 });
@@ -62,7 +60,6 @@ test("no Scope of Work tab before Scope Received", async ({ page }) => {
 test("scope panel exposes cost/supplement template pickers + load-from-catalog", async ({ page }) => {
   await login(page, "owner@anexahomes.com");
   await openDeal(page, "Linda");
-  await page.getByRole("button", { name: "Scope of Work" }).click();
 
   // New template-driven controls + columns are present.
   await expect(page.getByText("Cost template").first()).toBeVisible();

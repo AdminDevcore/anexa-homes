@@ -49,9 +49,7 @@ async function openProductionDeal(page: Page) {
   await page.getByRole("button", { name: "List" }).click();
   await page.locator('table a[href^="/portal/leads/"]').first().click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
-  // The deal page is tabbed — production (crew/QC/photos) lives under its own tab.
-  const prodTab = page.getByRole("button", { name: "Production", exact: true });
-  if (await prodTab.isVisible().catch(() => false)) await prodTab.click();
+  // The deal page is one page — production (crew/QC/photos) is already on it.
   const start = page.getByRole("button", { name: /Start production/ });
   if (await start.isVisible().catch(() => false)) {
     await start.click();

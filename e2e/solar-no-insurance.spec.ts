@@ -47,13 +47,8 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await openSolarDeal(page);
     await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible({ timeout: 15000 });
 
-    // Walk every tab so hidden panels are exercised too, then assert on the
-    // whole rendered document — a leak in any tab fails this.
-    for (const tab of ["Overview", "Proposal", "Operations"]) {
-      await page.getByRole("button", { name: tab, exact: true }).click();
-      await page.waitForTimeout(150);
-    }
-
+    // The deal is one page, so every panel is already rendered — assert on the
+    // whole document and a leak anywhere on it fails this.
     const body = (await page.locator("body").innerText()).toLowerCase();
     for (const term of [
       "insurance",
@@ -107,17 +102,14 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     }
   });
 
-  test("the Proposal tab is a single hub, not scattered tabs", async ({ page }) => {
+  test("the close flow is one ordered run of cards on the deal page", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
 
-    // One Proposal tab…
-    await expect(page.getByRole("button", { name: "Proposal", exact: true })).toBeVisible({ timeout: 15000 });
-    // …and no separate System Design / Financing / Documents tabs.
-    await expect(page.getByRole("button", { name: "System Design", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Documents", exact: true })).toHaveCount(0);
+    // Nothing is behind a tab any more — the deal is a single page.
+    await expect(page.getByRole("button", { name: "Proposal", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Overview", exact: true })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Proposal", exact: true }).click();
     // The whole close flow is here, in order.
     await expect(page.getByText("1 · System Design")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("2 · Financing")).toBeVisible();
@@ -133,14 +125,16 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // 1 · Stage bar across the whole 25-stage lifecycle.
     const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
-    // Collapsed by default it is a gauge, not 25 labels — the current stage and
-    // the position are what it states up front.
-    await expect(bar.getByText(/step \d+ of 25/)).toBeVisible();
-    // The full labelled list is one click away.
-    await bar.getByRole("button", { name: /All 25 stages/ }).click();
-    await expect(bar.getByText("New Lead")).toBeVisible();
-    await expect(bar.getByText("Utility PTO")).toBeVisible();
-    await expect(bar.getByText("System Activated / Monitoring")).toBeVisible();
+    // Two lines: where the deal is, and what is next. Twenty-five stage labels
+    // on the page were a wall; they live in the Change dropdown now.
+    await expect(bar.getByText("Permit Submitted")).toBeVisible();
+    await expect(bar.getByText(/\d+\/25/)).toBeVisible();
+    await expect(bar.getByText(/^Next:/)).toBeVisible();
+    // The full list is one click away, and it is the whole pipeline.
+    await bar.getByRole("button", { name: /Change/ }).click();
+    await expect(page.getByRole("menuitem", { name: /New Lead/ })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /Utility PTO/ })).toBeVisible();
+    await page.keyboard.press("Escape");
 
     // 2 · Money panel, including the PPW decomposition and both schedules.
     await expect(page.getByText("Pricing breakdown")).toBeVisible();
@@ -173,12 +167,8 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("Project AI assistant")).toBeVisible();
     await expect(page.getByText("Coming soon").first()).toBeVisible();
 
-    // 6 · Document folders moved to the Proposal tab, beside the files they
-    // describe, so they are hidden until that tab is opened.
-    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets"]) {
-      await expect(page.getByText(folder, { exact: true })).toBeHidden();
-    }
-    await page.getByRole("button", { name: "Proposal", exact: true }).click();
+    // 6 · Document folders sit beside the files they describe, further down the
+    // same page.
     for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets", "Permits", "Internal Documents"]) {
       await expect(page.getByText(folder, { exact: true })).toBeVisible();
     }
@@ -235,8 +225,8 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
 
     const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
-    await bar.getByRole("button", { name: /All \d+ stages/ }).click();
-    await bar.getByText("Permit Approved", { exact: true }).click();
+    await bar.getByRole("button", { name: /Change/ }).click();
+    await page.getByRole("menuitem", { name: /Permit Approved/ }).click();
     await expect(page.getByText(/Stage updated/)).toBeVisible({ timeout: 15000 });
 
     // Reload and confirm it actually stuck, rather than trusting the toast.
@@ -290,15 +280,14 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
 
-    // Seeded values reach the read-only summary on the Overview. `exact` is
-    // load-bearing: tab content stays mounted, so a loose "Down payment" also
-    // matches the "Down payment $" input label over in the Proposal tab.
+    // Seeded values reach the read-only summary near the top of the page.
+    // `exact` is load-bearing: a loose "Down payment" also matches the
+    // "Down payment $" input label in the financing card further down.
     await expect(page.getByText("Down payment", { exact: true })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("$5,000", { exact: true })).toBeVisible();
     await expect(page.getByText("$274/mo")).toBeVisible();
 
     // Edit them where the sibling financing fields are edited.
-    await page.getByRole("button", { name: "Proposal", exact: true }).click();
     await expect(page.getByText("Approved loan terms")).toBeVisible();
     await page.getByLabel("Down payment $").fill("7500");
     await page.getByLabel("Monthly payment $").fill("259.40");
@@ -317,7 +306,6 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // full, so it has neither a down payment nor a lender's monthly.
     // Matched by its blurb: a bare "Cash" also hits the Summary sidebar's
     // product toggle, which is a different control for the same field.
-    await page.getByRole("button", { name: "Proposal", exact: true }).click();
     await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
     await expect(page.getByText("Approved loan terms")).toBeHidden();
   });

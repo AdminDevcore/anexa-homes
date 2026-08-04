@@ -73,7 +73,6 @@ import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-sum
 import { HomeownerCard } from "@/components/portal/homeowner-card";
 import { FinancingTermsPanel } from "@/components/portal/solar/financing-terms";
 import { Card, Detail, Section } from "@/components/portal/deal-ui";
-import { DealTabs } from "@/components/portal/deal-tabs";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
 import { ScopeOfWorkPanel } from "@/components/portal/scope-of-work-panel";
@@ -500,27 +499,10 @@ export default async function LeadDetailPage({
       ? `${fmt.money(pd.lastSalePrice)}${pd.lastSaleDate ? ` · ${pd.lastSaleDate.slice(0, 4)}` : ""}`
       : null;
 
-  // The deal page is split into tabs to keep it scannable. Financials only shows
-  // for commission-capable roles with a job.
+  // The deal page is ONE page: every section is rendered in a single column and
+  // reached by scrolling. There is no tab bar — nothing on a deal is hidden
+  // behind a click. Financials only shows for commission-capable roles with a job.
   const showFinancials = !!(project && (payout || dealFinancials));
-  const dealTabs = isSolarDeal
-    ? [
-        // Solar's own tab set. The PROPOSAL is a single hub — design,
-        // financing, generation and contracts are one flow, because that is how
-        // a rep actually presents and closes a deal. No Scope of Work: that is
-        // an insurance-restoration concept.
-        { id: "overview", label: "Overview" },
-        { id: "proposal", label: "Proposal" },
-        { id: "production", label: "Operations", icon: "operations" },
-        ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
-      ]
-    : [
-        { id: "overview", label: "Overview" },
-        ...(showScope ? [{ id: "scope", label: "Scope of Work" }] : []),
-        { id: "production", label: "Production" },
-        ...(showFinancials ? [{ id: "financials", label: "Financials" }] : []),
-        { id: "documents", label: "Documents" },
-      ];
 
   return (
     <div className="space-y-6">
@@ -583,10 +565,9 @@ export default async function LeadDetailPage({
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <DealTabs tabs={dealTabs}>
+        <div className="lg:col-span-2 space-y-6">
             {/* ── Overview ── */}
-            <div data-deal-tab="overview" className="space-y-6">
+            <section id="overview" className="scroll-mt-24 space-y-6">
           {/* The property leads the Overview on both verticals — solar sells a
               roof it has to fit an array onto, roofing sells the roof itself. */}
           <Card
@@ -740,11 +721,11 @@ export default async function LeadDetailPage({
               </p>
             </Card>
           )}
-            </div>
+            </section>
 
             {/* ── Scope of Work (job profitability) ── */}
             {showScope && (
-              <div data-deal-tab="scope" className="space-y-6">
+              <section id="scope" className="scroll-mt-24 space-y-6">
                 <Card title="Scope of Work" icon={Calculator}>
                   <p className="mb-4 text-sm text-muted-foreground">
                     Cost the job: enter what insurance pays vs. our cost per line and see the profit and margin.
@@ -758,12 +739,12 @@ export default async function LeadDetailPage({
                     hasTemplate={scopeTemplate.length > 0}
                   />
                 </Card>
-              </div>
+              </section>
             )}
 
-            {/* ── System Design (solar) ── */}
+            {/* ── Proposal (solar): design → financing → generate, in order ── */}
             {isSolarDeal && (
-              <div data-deal-tab="proposal" className="space-y-6">
+              <section id="proposal" className="scroll-mt-24 space-y-6">
                 <Card title="1 · System Design" icon={Hammer} tone="solar">
                   <SolarDesignPanel
                     leadId={lead.id}
@@ -774,12 +755,7 @@ export default async function LeadDetailPage({
                     canEdit={can(user, "update", "Lead")}
                   />
                 </Card>
-              </div>
-            )}
 
-            {/* ── Financing (solar) ── */}
-            {isSolarDeal && (
-              <div data-deal-tab="proposal" className="space-y-6">
                 <Card title="2 · Financing" icon={Landmark} tone="solar">
                   <SolarFinancePanel
                     leadId={lead.id}
@@ -789,12 +765,7 @@ export default async function LeadDetailPage({
                     canEdit={can(user, "update", "Lead")}
                   />
                 </Card>
-              </div>
-            )}
 
-            {/* ── Proposal (solar) ── */}
-            {isSolarDeal && (
-              <div data-deal-tab="proposal" className="space-y-6">
                 <Card title="3 · Generate & send" icon={Sun} tone="solar">
                   <SolarProposalGate
                     leadId={lead.id}
@@ -812,11 +783,11 @@ export default async function LeadDetailPage({
                     }))}
                   />
                 </Card>
-              </div>
+              </section>
             )}
 
             {/* ── Production ── */}
-            <div data-deal-tab="production" className="space-y-6">
+            <section id="production" className="scroll-mt-24 space-y-6">
           {/* Production (job): crew, QC, daily reports, site & install photos */}
           <Card title="Production" icon={Hammer} tone={isSolarDeal ? "solar" : "brand"}>
             {/* Aerial roof measurement is a roofing estimating tool — a solar
@@ -889,11 +860,11 @@ export default async function LeadDetailPage({
               </div>
             )}
           </Card>
-            </div>
+            </section>
 
             {/* ── Financials ── */}
             {showFinancials && (
-            <div data-deal-tab="financials" className="space-y-6">
+            <section id="financials" className="scroll-mt-24 space-y-6">
           {/* Commission payout breakdown — every recipient on this job + total owed */}
           {project && payout && (
             <Card title="Commission Payout" icon={DollarSign} tone={isSolarDeal ? "solar" : "brand"}>
@@ -913,11 +884,11 @@ export default async function LeadDetailPage({
               />
             </Card>
           )}
-            </div>
+            </section>
             )}
 
             {/* ── Documents & files ── */}
-            <div data-deal-tab={isSolarDeal ? "proposal" : "documents"} className="space-y-6">
+            <section id="documents" className="scroll-mt-24 space-y-6">
           {/* The roofing contract tools, moved out of the page header.
               Build Presentation, Insurance Contract and Simple Cash Bid all
               produce a customer-facing document, so they belong beside the
@@ -1035,16 +1006,15 @@ export default async function LeadDetailPage({
               <SolarDocumentFolders counts={solarFolderCounts} />
             </Card>
           )}
-            </div>
-          </DealTabs>
+            </section>
         </div>
 
         {/* Sidebar */}
         <div className="space-y-6">
-          {/* Homeowner first: on a deal that lives in tabs, the person you are
-              calling should not be one of them. This replaced roofing's
-              "Contact" card in the Overview — same facts, now reachable from
-              every tab and with copy buttons on the values you actually use. */}
+          {/* Homeowner first: the person you are calling stays pinned beside the
+              deal instead of scrolling away with it. This replaced roofing's
+              "Contact" card in the Overview — same facts, with copy buttons on
+              the values you actually use. */}
           <Card
             title="Homeowner Information"
             icon={UserIcon}

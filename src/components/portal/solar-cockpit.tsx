@@ -569,10 +569,10 @@ export function SolarQuickActions({
       ) : (
         <QuickAction disabled icon={Sun} label="No proposal yet" />
       )}
-      {/* `#proposal` / `#production` select a tab (see DealTabs) — these were
-          `#design` and `#documents`, anchors that matched nothing on the page. */}
+      {/* The deal page is one long page; these scroll to a section on it. The
+          ids live on the <section> wrappers in the deal page. */}
       <QuickAction href={`/portal/leads/${leadId}#proposal`} icon={Pencil} label="Edit design" />
-      <QuickAction href={`/portal/leads/${leadId}#proposal`} icon={Upload} label="Upload files" />
+      <QuickAction href={`/portal/leads/${leadId}#documents`} icon={Upload} label="Upload files" />
       <QuickAction href={`/portal/tasks?lead=${leadId}`} icon={ListTodo} label="Tasks" />
       {canEdit && !homeownerInvited && (
         <button
