@@ -84,6 +84,48 @@ describe("geocode parsing", () => {
       lat: 32.7767,
       lng: -96.797,
       formatted: "500 Test Ave, Dallas, TX 75201, USA",
+      // Google omits location_type on this fixture; null, not undefined, so the
+      // "we don't know how precise this is" case is explicit.
+      precision: null,
+    });
+  });
+
+  it("prefers a ROOFTOP match over a coarser one, whatever the order", () => {
+    const mixed = {
+      status: "OK",
+      results: [
+        {
+          formatted_address: "75201, USA",
+          geometry: { location: { lat: 1, lng: 1 }, location_type: "APPROXIMATE" },
+        },
+        {
+          formatted_address: "500 Test Ave, Dallas, TX 75201, USA",
+          geometry: { location: { lat: 2, lng: 2 }, location_type: "ROOFTOP" },
+        },
+      ],
+    };
+    // Taking results[0] blindly would centre the map on a postcode.
+    expect(parseGoogleGeocode(mixed)).toMatchObject({ lat: 2, lng: 2, precision: "ROOFTOP" });
+  });
+
+  it("still returns an interpolated match when that is all Google has", () => {
+    // The real 267 Big Bear Drive case: a new subdivision Google has not mapped
+    // to a rooftop, so the point lands on the ROAD. Usable, but the caller needs
+    // to know it is an estimate — hence `precision`.
+    const interpolated = {
+      status: "OK",
+      results: [
+        {
+          formatted_address: "267 Big Bear Dr, Melissa, TX 75454, USA",
+          geometry: {
+            location: { lat: 33.2798313, lng: -96.5898469 },
+            location_type: "RANGE_INTERPOLATED",
+          },
+        },
+      ],
+    };
+    expect(parseGoogleGeocode(interpolated)).toMatchObject({
+      precision: "RANGE_INTERPOLATED",
     });
   });
 

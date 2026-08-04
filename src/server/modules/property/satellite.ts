@@ -76,10 +76,26 @@ export function staticMapUrl(key: string, o: StaticMapOptions): string {
     format: "png",
     key,
   });
+  // A PIN on the exact point. Without one the image is six roofs and a street
+  // and no way to tell which one the deal is about — and when Google can only
+  // interpolate an address along the road (RANGE_INTERPOLATED, common on newer
+  // subdivisions), the centre IS the road, so the picture looks plain wrong.
+  // The marker at least says "here, as well as Google knows".
+  params.append("markers", `color:0xF4631E|${lat},${lng}`);
   return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
 }
 
-export type GeoPoint = { lat: number; lng: number; formatted: string };
+export type GeoPoint = {
+  lat: number;
+  lng: number;
+  formatted: string;
+  /**
+   * Google's `location_type`. ROOFTOP means an actual building;
+   * RANGE_INTERPOLATED means "somewhere along this street between number X and
+   * number Y", which is why a brand-new subdivision can centre on the road.
+   */
+  precision?: string | null;
+};
 
 /**
  * Parse a Google Geocoding response. Pure so the failure modes are testable:
@@ -88,23 +104,53 @@ export type GeoPoint = { lat: number; lng: number; formatted: string };
  * signal. Treating 200 as success is the classic way to ship a silently broken
  * integration.
  */
+/**
+ * Google's precision tiers, best first. ROOFTOP is an actual building;
+ * RANGE_INTERPOLATED is a guess along the street between two known house
+ * numbers, which on a newer subdivision lands the pin on the ROAD rather than
+ * the roof. Picking the best available result matters when Google returns
+ * several — taking `results[0]` blindly can hand back a postcode centroid while
+ * a rooftop match sits at index 1.
+ */
+const PRECISION_ORDER = [
+  "ROOFTOP",
+  "RANGE_INTERPOLATED",
+  "GEOMETRIC_CENTER",
+  "APPROXIMATE",
+] as const;
+
 export function parseGoogleGeocode(data: unknown): GeoPoint | null {
   if (!data || typeof data !== "object") return null;
   const d = data as {
     status?: string;
     results?: Array<{
       formatted_address?: string;
-      geometry?: { location?: { lat?: number; lng?: number } };
+      geometry?: { location?: { lat?: number; lng?: number }; location_type?: string };
     }>;
   };
   if (d.status !== "OK") return null;
-  const first = d.results?.[0];
-  const loc = first?.geometry?.location;
-  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return null;
+
+  const usable = (d.results ?? []).filter((r) => {
+    const loc = r.geometry?.location;
+    return loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng);
+  });
+  if (usable.length === 0) return null;
+
+  const rank = (r: (typeof usable)[number]) => {
+    const i = PRECISION_ORDER.indexOf(
+      (r.geometry?.location_type ?? "") as (typeof PRECISION_ORDER)[number]
+    );
+    return i === -1 ? PRECISION_ORDER.length : i;
+  };
+  // Stable: equal precision keeps Google's own ordering.
+  const best = usable.reduce((a, b) => (rank(b) < rank(a) ? b : a));
+  const loc = best.geometry!.location!;
+
   return {
     lat: loc.lat as number,
     lng: loc.lng as number,
-    formatted: first?.formatted_address ?? "",
+    formatted: best.formatted_address ?? "",
+    precision: best.geometry?.location_type ?? null,
   };
 }
 
