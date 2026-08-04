@@ -36,7 +36,19 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts",
     ".next-e2e/types/**/*.ts",
-    ".next-e2e/dev/types/**/*.ts"
+    ".next-e2e/dev/types/**/*.ts",
+    ".next-verify/types/**/*.ts",
+    ".next-verify/dev/types/**/*.ts",
+    ".next-verify-e2e/types/**/*.ts",
+    ".next-verify-e2e/dev/types/**/*.ts",
+    ".next/verify-e2e/types/**/*.ts",
+    ".next/verify-e2e/dev/types/**/*.ts",
+    ".next/verify-wc/types/**/*.ts",
+    ".next/verify-wc/dev/types/**/*.ts",
+    ".next-e2e-stage/types/**/*.ts",
+    ".next-e2e-stage/dev/types/**/*.ts",
+    ".next-build/types/**/*.ts",
+    ".next-build/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
