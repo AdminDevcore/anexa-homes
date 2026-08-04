@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarClock, Check, Loader2, Pencil, X } from "lucide-react";
+import { CalendarClock, Check, Loader2, Pencil, Wallet, X } from "lucide-react";
 import { Card, Detail, type DealTone } from "@/components/portal/deal-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -191,12 +191,15 @@ export function DealSummaryPanel({
             <Detail label="Project Type" value={display.serviceTypeLabel} />
           ))}
 
-        {/* Live toggle in both modes — it already writes on click. */}
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {/* Live toggle in both modes — it already writes on click. Stacked like
+            the Install Date block rather than squeezed to the right of its
+            label: the picker is a full-width choice, not a one-line readout. */}
+        <div>
+          <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
+            <Wallet className="size-3.5" />
             {isSolar ? "Financing" : "Deal Type"}
-          </span>
-          {dealTypeSlot}
+          </div>
+          <div className="mt-1.5">{dealTypeSlot}</div>
         </div>
 
         {display.propertyValue && <Detail label="Property Value" value={display.propertyValue} />}
