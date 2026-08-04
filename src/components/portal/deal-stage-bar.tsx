@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Check } from "lucide-react";
+import { Loader2, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { moveLeadStage } from "@/server/modules/leads/actions";
 
@@ -18,9 +18,14 @@ export type StageLite = { id: string; name: string; position: number; color: str
  * started life as SolarStageBar; nothing about it was ever solar-specific
  * except where it happened to live.
  *
- * A long pipeline will not fit on a phone, so it scrolls horizontally and
- * auto-scrolls the current stage into view. Every stage is clickable — moving a
- * deal is the single most common action on this page and should not need a menu.
+ * A 22-stage pipeline cannot show 22 labels without becoming a wall, so the
+ * default state is a SEGMENTED GAUGE: one bar per stage on a single line,
+ * completed filled, current taller and in its own colour. That answers "how far
+ * along is this?" instantly, which twenty-two chips never did. The full labelled
+ * list is one click away for when you need to jump somewhere specific.
+ *
+ * Every segment and every chip is clickable — moving a deal is the most common
+ * action on this page and should not need a menu.
  */
 export function DealStageBar({
   leadId,
@@ -35,11 +40,11 @@ export function DealStageBar({
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [expanded, setExpanded] = React.useState(false);
 
   const currentIndex = stages.findIndex((s) => s.id === currentStageId);
   const step = currentIndex + 1;
-  const pct = stages.length > 0 && currentIndex >= 0 ? (step / stages.length) * 100 : 0;
-  const currentColor = currentIndex >= 0 ? stages[currentIndex].color : undefined;
+  const nextStage = currentIndex >= 0 ? stages[currentIndex + 1] : stages[0];
 
   async function move(stageId: string) {
     if (!canEdit || stageId === currentStageId) return;
@@ -52,7 +57,7 @@ export function DealStageBar({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
+    <div className="rounded-xl border border-border bg-card p-3" data-testid="deal-stage-bar">
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Project lifecycle
@@ -69,27 +74,69 @@ export function DealStageBar({
         </span>
       </div>
 
-      {/* How far along, in one glance. Twenty-two pills convey "there are a lot
-          of stages"; they do not convey "we are a seventh of the way through". */}
+      {/* One segment per stage, one line, no wrapping and nothing clipped.
+          Twenty-two labelled chips told you there are a lot of stages; they did
+          not tell you where in them you are. A gauge does that at a glance, and
+          the names are one click away rather than three rows of noise. */}
       <div
-        className="mb-2.5 h-1 overflow-hidden rounded-full bg-muted"
+        className="flex items-center gap-0.5"
         role="progressbar"
         aria-valuenow={Math.max(0, step)}
         aria-valuemin={0}
         aria-valuemax={stages.length}
-        aria-label="Pipeline progress"
+        aria-label={`Pipeline progress: step ${step} of ${stages.length}`}
       >
-        <div
-          className="h-full rounded-full transition-[width] duration-300"
-          style={{ width: `${pct}%`, background: currentColor ?? "var(--gold)" }}
-        />
+        {stages.map((s, i) => {
+          const done = currentIndex >= 0 && i < currentIndex;
+          const current = s.id === currentStageId;
+          return (
+            <button
+              key={s.id}
+              disabled={!canEdit || busy !== null}
+              onClick={() => move(s.id)}
+              title={`${i + 1}. ${s.name}`}
+              aria-label={`Move to ${s.name}`}
+              className={cn(
+                "h-2 min-w-0 flex-1 rounded-[3px] transition-all",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                canEdit && !current && "hover:opacity-70",
+                current ? "h-3.5 shadow-sm" : done ? "bg-emerald-400" : "bg-muted",
+                busy === s.id && "animate-pulse"
+              )}
+              style={current ? { background: s.color } : undefined}
+            />
+          );
+        })}
       </div>
 
-      {/* WRAPS — it must not scroll horizontally. A 22-stage roofing pipeline in
-          an overflow-x container clipped the last pill mid-word and hid the rest
-          behind a scrollbar nobody noticed. Wrapping costs two extra rows and
-          makes every stage visible and clickable. */}
-      <div className="flex flex-wrap gap-1" data-testid="deal-stage-bar">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <span className="text-[11px] text-muted-foreground">
+          {currentIndex > 0 && (
+            <span className="text-emerald-600">{currentIndex} complete</span>
+          )}
+          {currentIndex > 0 && nextStage && " · "}
+          {nextStage && (
+            <>
+              Next: <span className="font-medium text-foreground">{nextStage.name}</span>
+            </>
+          )}
+          {!nextStage && currentIndex >= 0 && (
+            <span className="text-emerald-600">Final stage</span>
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {expanded ? "Hide stages" : `All ${stages.length} stages`}
+          <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
+        </button>
+      </div>
+
+      {expanded && (
+      <div className="mt-2.5 flex flex-wrap gap-1 border-t border-border pt-2.5">
         {stages.map((s, i) => {
           const done = currentIndex >= 0 && i < currentIndex;
           const current = s.id === currentStageId;
@@ -128,7 +175,8 @@ export function DealStageBar({
           );
         })}
       </div>
-      {canEdit && (
+      )}
+      {canEdit && expanded && (
         <p className="mt-1.5 text-[11px] text-muted-foreground">
           Click any stage to move the deal there.
         </p>

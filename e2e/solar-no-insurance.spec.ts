@@ -133,6 +133,11 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // 1 · Stage bar across the whole 25-stage lifecycle.
     const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
+    // Collapsed by default it is a gauge, not 25 labels — the current stage and
+    // the position are what it states up front.
+    await expect(bar.getByText(/step \d+ of 25/)).toBeVisible();
+    // The full labelled list is one click away.
+    await bar.getByRole("button", { name: /All 25 stages/ }).click();
     await expect(bar.getByText("New Lead")).toBeVisible();
     await expect(bar.getByText("Utility PTO")).toBeVisible();
     await expect(bar.getByText("System Activated / Monitoring")).toBeVisible();
@@ -230,6 +235,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
 
     const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
+    await bar.getByRole("button", { name: /All \d+ stages/ }).click();
     await bar.getByText("Permit Approved", { exact: true }).click();
     await expect(page.getByText(/Stage updated/)).toBeVisible({ timeout: 15000 });
 

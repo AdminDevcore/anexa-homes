@@ -48,7 +48,28 @@ export function PropertyView({
     setRequested((r) => (r[t] ? r : { ...r, [t]: true }));
   };
 
-  const src = (t: MapType) => `/api/property/satellite?leadId=${encodeURIComponent(leadId)}&type=${t}`;
+  /**
+   * An image that finishes loading BEFORE React hydrates never fires `onLoad`
+   * — the handler is attached after the fact — so `loaded` stayed false and the
+   * spinner ran forever on top of a perfectly good, `opacity-0` image. A cached
+   * response (this route sends max-age=86400) makes that the NORMAL case on
+   * every repeat visit, not a race.
+   *
+   * So settle from the element itself on mount: `complete` with a non-zero
+   * `naturalWidth` is a load, `complete` with zero is an error.
+   */
+  const settle = React.useCallback((t: MapType, el: HTMLImageElement | null) => {
+    if (!el || !el.complete) return;
+    if (el.naturalWidth > 0) setLoaded((l) => (l[t] ? l : { ...l, [t]: true }));
+    else setFailed((f) => (f[t] ? f : { ...f, [t]: true }));
+  }, []);
+
+  // `v` is a cache-buster, not a feature: browsers hold this route's responses
+  // for a day, so without it every user who loaded the page while the zoom bug
+  // was live would keep seeing the cached picture of the whole planet. Bump it
+  // whenever the rendered image changes meaning.
+  const src = (t: MapType) =>
+    `/api/property/satellite?leadId=${encodeURIComponent(leadId)}&type=${t}&v=2`;
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -92,6 +113,9 @@ export function PropertyView({
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
               key={t}
+              ref={(el) => {
+                settle(t, el);
+              }}
               src={src(t)}
               alt={t === "satellite" ? "Satellite view of the property" : "Map view of the property"}
               onLoad={() => setLoaded((l) => ({ ...l, [t]: true }))}
