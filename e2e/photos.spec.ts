@@ -68,8 +68,11 @@ test("photos: deal Survey/Install buttons capture and compile each group separat
   await page.getByRole("button", { name: "Survey" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Survey" })).toBeVisible({ timeout: 10000 });
-  await dialog.locator('input[type="file"]').setInputFiles("public/anexa-mark.png");
-  await expect(page.getByText(/added/)).toBeVisible({ timeout: 15000 });
+  // One input PER SLOT — the Survey set has nine, so target the first.
+  await dialog.locator('input[type="file"]').first().setInputFiles("public/anexa-mark.png");
+  // Anchored: a bare /added/ also matches "Notes can't be edited once added"
+  // in the Summary sidebar, twice, which is a strict-mode violation not a pass.
+  await expect(page.getByText(/^\d+ .* added$/)).toBeVisible({ timeout: 15000 });
 
   const href = await dialog.locator('a:has-text("Compile PDF")').getAttribute("href");
   expect(href).toContain("group=survey");

@@ -19,6 +19,8 @@ function field(page: Page, label: string): Locator {
 }
 
 // Every field that previously failed to persist, plus the ones that worked.
+// Roof info (squares, waste, pitch, stories) deliberately absent: it moved to
+// Scope of Work and the claim card only tracks the claim and its amounts.
 const VALUES: Record<string, string> = {
   "Carrier": "Allstate",
   "Claim Number": "AS-2026-777",
@@ -28,10 +30,6 @@ const VALUES: Record<string, string> = {
   "Adjuster Email": "jane@insurance.com",
   "Adjuster Meeting Date": "2026-07-15",
   "Date of Loss": "2026-03-02",
-  "Total Squares": "32",
-  "Waste Factor (%)": "15",
-  "Pitch": "6/12",
-  "Story Count": "2",
   "Deductible ($)": "2750",
   "RCV ($)": "41000",
   "ACV ($)": "32000",
