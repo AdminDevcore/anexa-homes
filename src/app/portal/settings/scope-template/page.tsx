@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, DollarSign, FilePlus2 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { getActiveVertical } from "@/server/auth/vertical";
+import { insuranceEnabled } from "@/lib/vertical-features";
 import { can } from "@/server/rbac/guards";
 import { getScopeCatalog } from "@/server/modules/scope/queries";
 import { PageHeader } from "@/components/portal/ui";
@@ -13,6 +15,9 @@ export const metadata = { title: "Scope of Work Catalog" };
 export default async function ScopeCatalogPage() {
   const user = await requireUser("/portal/settings/scope-template");
   if (!can(user, "update", "Settings")) redirect("/portal/dashboard");
+  // The catalog prices an insurance supplement. Solar has no carrier to bill, so
+  // the page is unreachable there rather than showing an irrelevant line list.
+  if (!insuranceEnabled(await getActiveVertical(user))) redirect("/portal/settings");
 
   const items = await getScopeCatalog(user.companyId);
 

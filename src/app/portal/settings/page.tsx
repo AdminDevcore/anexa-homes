@@ -1,56 +1,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import {
-  Settings as SettingsIcon,
-  KanbanSquare,
-  SlidersHorizontal,
-  FileSignature,
-  DollarSign,
-  Palette,
-  ShieldCheck,
-  Bell,
-  Camera,
-  ListChecks,
-  Calculator,
-  Megaphone,
-  Star,
-  CloudLightning,
-  Sun,
-  PanelsTopLeft,
-} from "lucide-react";
+import { Settings as SettingsIcon } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
-
-const SECTIONS: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  body: string;
-  href?: string;
-  /// Solar-only cards are hidden entirely in the Roofing workspace — the
-  /// assumptions and equipment they configure do not apply there.
-  solarOnly?: boolean;
-}[] = [
-  { icon: KanbanSquare, title: "Pipeline Stages", body: "Customize the stages appointments move through.", href: "/portal/settings/pipeline" },
-  { icon: ListChecks, title: "Appointment Outcomes", body: "Customize the outcomes reps record after appointments.", href: "/portal/settings/appointment-outcomes" },
-  { icon: SlidersHorizontal, title: "Custom Fields", body: "Add custom fields to appointments and projects.", href: "/portal/settings/fields" },
-  { icon: Megaphone, title: "Lead Sources", body: "Customize where leads come from (Door Knock, Referral, Ads…).", href: "/portal/settings/lead-sources" },
-  { icon: FileSignature, title: "Document Templates", body: "Build and edit contract templates.", href: "/portal/documents" },
-  { icon: DollarSign, title: "Commission Rules", body: "Set percentage, flat, and override rules.", href: "/portal/settings/commissions" },
-  { icon: Bell, title: "Notification Rules", body: "Choose triggers, recipients, and channels.", href: "/portal/settings/notifications" },
-  { icon: CloudLightning, title: "Storm & Homeowner Data", body: "Storm search area + re-verify homeowner data across houses.", href: "/portal/settings/storm-coverage" },
-  { icon: Camera, title: "Photo Templates", body: "Site & install photo checklists for projects.", href: "/portal/settings/photo-templates" },
-  { icon: ListChecks, title: "Inspection Outcomes", body: "Customize the outcomes recorded after an inspection.", href: "/portal/settings/inspection-outcomes" },
-  { icon: ListChecks, title: "Production Checklist", body: "The QC checklist applied to every new job.", href: "/portal/settings/production-checklist" },
-  { icon: Calculator, title: "Scope of Work Catalog", body: "Master list of insurance-restoration line items (no pricing).", href: "/portal/settings/scope-template" },
-  { icon: Star, title: "Website Reviews", body: "Approve, feature, hide, or remove customer reviews from the website.", href: "/portal/settings/reviews" },
-  { icon: ShieldCheck, title: "Roles & Permissions", body: "Control what each role can see and do.", href: "/portal/settings/roles" },
-  { icon: Palette, title: "Branding", body: "Company logo and brand colors.", href: "/portal/settings/branding" },
-  { icon: Sun, title: "Solar Settings", body: "Production and pricing assumptions, incentive %, validation bounds, and stage owners.", href: "/portal/settings/solar", solarOnly: true },
-  { icon: PanelsTopLeft, title: "Solar Equipment", body: "Modules, inverters, batteries and rank-ordered adders.", href: "/portal/settings/solar-equipment", solarOnly: true },
-];
+import { visibleSettingsSections } from "@/lib/settings-sections";
 
 export const metadata = { title: "Settings" };
 
@@ -84,7 +40,7 @@ export default async function SettingsPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {SECTIONS.filter((s) => !s.solarOnly || vertical === "solar").map((s) => {
+        {visibleSettingsSections(vertical).map((s) => {
           const inner = (
             <>
               <span className="grid size-10 place-items-center rounded-lg bg-gold/12 text-gold-muted">

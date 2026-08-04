@@ -50,6 +50,27 @@ export const DEFAULT_FILTERS: FieldMapFilters = {
 
 const bool = (v: string | null, fallback: boolean) => (v === null ? fallback : v === "1");
 
+/** The query params that carry storm layer state. */
+export const STORM_PARAMS = ["hail", "reports", "warnings", "heat", "score"] as const;
+
+/**
+ * Force every storm layer off. Applied wherever the active workspace has no
+ * storm concept (see lib/vertical-features), and applied at *parse* time rather
+ * than at render time on purpose: a link like `?hail=1&heat=1&score=50` — a
+ * shared view from the roofing workspace, or a stale bookmark — must not be able
+ * to switch a hail overlay back on in solar, or fire `/api/storm/*` for it.
+ */
+export function withoutStormLayers(f: FieldMapFilters): FieldMapFilters {
+  return {
+    ...f,
+    showRadar: false,
+    showStormReports: false,
+    showStormWarnings: false,
+    showHeat: false,
+    minScore: 0,
+  };
+}
+
 export function parseFilters(sp: URLSearchParams): FieldMapFilters {
   const disp = (sp.get("disp") ?? "").split(",").filter((d) => FILTERABLE.includes(d));
 

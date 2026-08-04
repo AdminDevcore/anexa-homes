@@ -40,6 +40,11 @@ export type ManagerRailProps = {
   onDeleteTerritory: (t: TerritoryDTO) => void;
   onSetTerritoryReps: (t: TerritoryDTO, repIds: string[]) => void;
   onOpenStormTab: (tab: StormTab) => void;
+  /**
+   * Storm tooling is both a permission and a workspace question: the user must
+   * be allowed to read StormIntelligence AND be standing in a vertical that has
+   * storms. The caller ANDs the two, so this stays a single boolean.
+   */
   canStorm: boolean;
 };
 
@@ -140,7 +145,7 @@ export function ManagerRail({
       </div>
 
       <Section title="Layers">
-        <LayersPanel filters={filters} set={set} canManage />
+        <LayersPanel filters={filters} set={set} canManage storm={canStorm} />
       </Section>
 
       <Section title={activeCount > 0 ? `Filters (${activeCount})` : "Filters"} defaultOpen>
