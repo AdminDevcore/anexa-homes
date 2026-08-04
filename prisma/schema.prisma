@@ -344,7 +344,6 @@ model Company {
   knocks                Knock[]
   territories           Territory[]
   photoTemplates        PhotoTemplate[]
-  roofReports           RoofReport[]
   transactions          Transaction[]
   bookkeepingCategories BookkeepingCategory[]
   bookkeepingVendors    BookkeepingVendor[]
@@ -771,7 +770,6 @@ model Lead {
   documentPackages DocumentPackage[]
   activityLogs     ActivityLog[]
   knocks           Knock[]           @relation("KnockLead")
-  roofReport       RoofReport?
   scope            ScopeOfWork?
   proposals        Proposal[]
   solarDesign      SolarDesign?
@@ -1831,38 +1829,6 @@ model KnockEvent {
 
 // Aerial roof-measurement report traced on the lead detail page. One per lead
 // (re-editable). `facets` stores the traced geometry so it can be reopened.
-model RoofReport {
-  id               String   @id @default(uuid())
-  companyId        String
-  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  /// Isolated per vertical: this row belongs to exactly one workspace.
-  vertical         Vertical @default(roofing)
-  leadId           String   @unique
-  lead             Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  facets           Json // [{ id, points:[[lat,lng]], pitch, edgeTypes:[] }]
-  footprintArea    Float    @default(0) // sq ft
-  roofArea         Float    @default(0) // sloped sq ft
-  squares          Float    @default(0)
-  facetCount       Int      @default(0)
-  predominantPitch String?
-  perimeterFt      Float    @default(0)
-  ridgeFt          Float    @default(0)
-  hipFt            Float    @default(0)
-  valleyFt         Float    @default(0)
-  eaveFt           Float    @default(0)
-  rakeFt           Float    @default(0)
-  wastePct         Float    @default(12)
-  squaresToOrder   Float    @default(0)
-  preparedBy       String?
-  reportFileId     String? // generated PDF (FileAsset)
-  source           String   @default("manual_trace") // seam for EagleView/Hover/Nearmap
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@index([companyId])
-  @@map("roof_reports")
-}
-
 // ---------------------------------------------------------------------------
 // Bookkeeping (lightweight ledger: transactions → categories → P&L)
 // ---------------------------------------------------------------------------
@@ -2514,7 +2480,7 @@ model CashBid {
 // Solar domain
 //
 // Everything below is solar-only. Roofing never creates these rows and never
-// renders them; the roofing-only concepts (Claim, RoofReport, the insurance
+// renders them; the roofing-only concepts (Claim, the insurance
 // scope) are HIDDEN for solar deals rather than dropped, because those tables
 // hold live roofing money.
 // ---------------------------------------------------------------------------

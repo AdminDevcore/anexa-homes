@@ -46,9 +46,9 @@ test("every claim field persists after reload", async ({ page }) => {
   await page.locator('table a[href^="/portal/leads/"]').first().click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
-  // Open the Claim tab and fill every field.
-  await page.getByRole("button", { name: "Claim", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Claim Information" })).toBeVisible({ timeout: 10000 });
+  // Claim Info is the first slide of the job switcher, so it is already open.
+  await expect(page.getByRole("tab", { name: "Claim Info" })).toBeVisible({ timeout: 10000 });
+  await expect(field(page, "Carrier")).toBeVisible();
 
   for (const [label, value] of Object.entries(VALUES)) {
     await field(page, label).fill(value);
@@ -60,8 +60,7 @@ test("every claim field persists after reload", async ({ page }) => {
 
   // Reload from scratch and confirm EVERY value persisted.
   await page.reload();
-  await page.getByRole("button", { name: "Claim", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Claim Information" })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("tab", { name: "Claim Info" })).toBeVisible({ timeout: 10000 });
 
   for (const [label, value] of Object.entries(VALUES)) {
     await expect(field(page, label), `field "${label}" should persist`).toHaveValue(value);

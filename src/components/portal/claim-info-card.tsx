@@ -4,10 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ShieldCheck, Loader2, Check } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useFormat } from "@/components/portal/branding-provider";
 import { ClaimPriceEditor } from "@/components/portal/claim-price-editor";
 import { updateClaimInfoAction } from "@/server/modules/leads/actions";
 
@@ -24,6 +22,7 @@ export function ClaimInfoCard({
   canEdit,
   claimPrice,
   canEditClaimPrice,
+  bare = false,
 }: {
   leadId: string;
   claim: ClaimFull;
@@ -31,6 +30,13 @@ export function ClaimInfoCard({
   // The deal's claim/contract price (set at Scope Received) — lives with the claim info.
   claimPrice: number | null;
   canEditClaimPrice: boolean;
+  /**
+   * Drop this component's own card chrome. Set when it renders INSIDE another
+   * card — the deal page's slide switcher — where a bordered header nested in a
+   * bordered header reads as a mistake. The Save button moves inline instead of
+   * disappearing: it is the only way to commit the form.
+   */
+  bare?: boolean;
 }) {
   const router = useRouter();
   const [saving, setSaving] = React.useState(false);
@@ -87,24 +93,10 @@ export function ClaimInfoCard({
 
   const onBlur = () => { if (canEdit) commit(); };
 
-  return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="size-4 text-gold" />
-          <h2 className="font-display text-lg font-semibold">Claim Information</h2>
-        </div>
-        <div className="flex items-center gap-3">
-          {saving && <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin" /> saving</span>}
-          {canEdit && (
-            <Button size="sm" onClick={() => commit({ toastOk: true })} className="bg-gold text-gold-foreground hover:bg-gold/90">
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Save claim
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-6 p-5">
+  // The content itself, defined once and rendered by both the bare and the
+  // chromed branch below.
+  const body = (
+    <>
         {/* Claim Price — the contract price from the insurance scope (Scope Received). */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 rounded-xl border border-gold/30 bg-gold/5 px-4 py-3">
           <div className="flex flex-col">
@@ -138,6 +130,42 @@ export function ClaimInfoCard({
           </div>
         </Section>
 
+    </>
+  );
+
+  const actions = (
+    <div className="flex items-center gap-3">
+      {saving && <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin" /> saving</span>}
+      {canEdit && (
+        <Button size="sm" onClick={() => commit({ toastOk: true })} className="bg-gold text-gold-foreground hover:bg-gold/90">
+          {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Save claim
+        </Button>
+      )}
+    </div>
+  );
+
+  if (bare) {
+    return (
+      <div className="space-y-6">
+        {/* No header bar, but the Save button still has to be reachable. */}
+        <div className="flex justify-end">{actions}</div>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="size-4 text-gold" />
+          <h2 className="font-display text-lg font-semibold">Claim Information</h2>
+        </div>
+        {actions}
+      </div>
+
+      <div className="space-y-6 p-5">
+        {body}
       </div>
     </div>
   );

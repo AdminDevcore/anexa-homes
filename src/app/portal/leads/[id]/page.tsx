@@ -19,10 +19,9 @@ import {
   Sun,
   FolderOpen,
   FileSignature,
-  User as UserIcon,
 } from "lucide-react";
 import { requireUser, getSessionUser } from "@/server/auth/session";
-import { getLeadDetail } from "@/server/modules/leads/queries";
+import { getLeadDetail, getLeadFormOptions } from "@/server/modules/leads/queries";
 import { getDealFinancials, getProjectPayout } from "@/server/modules/costs/queries";
 import { isStageCommissionEligible, COMMISSION_GATE_LABEL } from "@/server/modules/payroll/eligibility";
 import { DealFinancialsCard } from "@/components/portal/deal-financials";
@@ -47,8 +46,6 @@ import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
 import { SolarDesignPanel, SolarFinancePanel, SolarProposalGate } from "@/components/portal/solar-panels";
 import { getSolarSettings } from "@/server/modules/solar/settings";
-import { getRoofReport } from "@/server/modules/roof/queries";
-import { RoofReportButton } from "@/components/portal/roof-report";
 import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
 import { CashBidButton } from "@/components/portal/cash-bid-panel";
 import { InsuranceContractButton } from "@/components/portal/insurance-contract-panel";
@@ -73,6 +70,7 @@ import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-sum
 import { HomeownerCard } from "@/components/portal/homeowner-card";
 import { FinancingTermsPanel } from "@/components/portal/solar/financing-terms";
 import { Card, Detail, Section } from "@/components/portal/deal-ui";
+import { DealSlides, type DealSlideDef } from "@/components/portal/deal-slides";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
 import { ScopeOfWorkPanel } from "@/components/portal/scope-of-work-panel";
@@ -115,7 +113,7 @@ export default async function LeadDetailPage({
   // Cash deals (customer pays out of pocket / financing) hide the insurance UI:
   // no claim worksheet, no scope of work, and "Status" instead of "Claim Status".
   // Solar has no adjuster, no claim and no insurance scope. Those concepts are
-  // HIDDEN here, never deleted — Claim and RoofReport hold live roofing money.
+  // HIDDEN here, never deleted — Claim holds live roofing money.
   const isSolarDeal = lead.vertical === "solar";
   const isInsurance = !isSolarDeal && lead.dealType !== "cash";
   // One table backs both cash bids and insurance contracts; split by kind.
@@ -124,9 +122,12 @@ export default async function LeadDetailPage({
   const insuranceBids = allBids.filter((b) => b.kind === "insurance");
 
   const claim = lead.claims[0];
-  const measurement = lead.roofMeasurements[0];
   const canNote = can(user, "create", "Note");
   const canAssign = can(user, "assign", "Task");
+  // Lead sources and staff, for the sidebar cards' inline editors. Fetched here
+  // rather than inside them because those are client components and this is the
+  // only place with a session to scope the query by.
+  const formOptions = await getLeadFormOptions(user.companyId, lead.vertical);
 
   // Production (the deal's job container). Created on demand via "Start production".
   const canManageProd = can(user, "create", "Project") || can(user, "update", "Project");
@@ -471,8 +472,6 @@ export default async function LeadDetailPage({
       )
     : {};
 
-  const roofReport = await getRoofReport(user.companyId, lead.id);
-  const roofAddress = [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ");
 
   // Scope of Work — job profitability calculator. Available once the deal reaches
   // "Scope Received" (by pipeline stage or claim status), gated by the Scope resource.
@@ -519,6 +518,15 @@ export default async function LeadDetailPage({
   // reached by scrolling. There is no tab bar — nothing on a deal is hidden
   // behind a click. Financials only shows for commission-capable roles with a job.
   const showFinancials = !!(project && (payout || dealFinancials));
+
+  // The one switcher on the page. Financials is omitted entirely rather than
+  // shown empty: it is gated on `can(read, Commission)` AND an existing job, so
+  // a sales rep sees two slides, not three with a locked one.
+  const dealSlides: DealSlideDef[] = [
+    { id: "claim", label: "Claim Info" },
+    { id: "field", label: "Field Production" },
+    ...(showFinancials ? [{ id: "financials", label: "Deal Financials" }] : []),
+  ];
 
   return (
     <div className="space-y-6">
@@ -709,43 +717,115 @@ export default async function LeadDetailPage({
             </ul>
           </Card>
           )}
-          {/* Claim — insurance deals only. Roof info / line items / supplements
-              live in Scope of Work; only claim tracking + amounts remain here.
-              Cash deals show a plain cash card instead (no insurance fields). */}
-          {isSolarDeal ? null : !isInsurance ? (
-            <Card title="Cash Deal" icon={ShieldCheck}>
-              <p className="text-sm text-muted-foreground">
-                This is a <strong>cash deal</strong> — the customer pays out of pocket or finances it; there&rsquo;s no
-                insurance claim, deductible, or depreciation. Set the price in the proposal (<strong>Build Presentation</strong>).
-              </p>
-            </Card>
-          ) : claim ? (
-            <ClaimInfoCard
-              leadId={lead.id}
-              canEdit={can(user, "update", "Claim")}
-              claimPrice={lead.claimPrice}
-              canEditClaimPrice={can(user, "update", "Lead")}
-              claim={{
-                carrier: claim.carrier,
-                claimNumber: claim.claimNumber,
-                lossDate: claim.lossDate ? claim.lossDate.toISOString() : null,
-                policyNumber: claim.policyNumber,
-                adjusterName: claim.adjusterName,
-                adjusterPhone: claim.adjusterPhone,
-                adjusterEmail: claim.adjusterEmail,
-                adjusterMeetingAt: claim.adjusterMeetingAt ? claim.adjusterMeetingAt.toISOString() : null,
-                deductible: claim.deductible,
-                rcv: claim.rcv,
-                acv: claim.acv,
-                depreciation: claim.depreciation,
-              }}
-            />
-          ) : (
-            <Card title="Claim Information" icon={ShieldCheck}>
-              <p className="text-sm text-muted-foreground">
-                No insurance claim opened yet. Use <strong>Open claim</strong> in the Summary to start the claim worksheet.
-              </p>
-            </Card>
+          {/* Claim · Field production · Financials — three readings of the same
+              job, one at a time. See DealSlides for why this is the one place on
+              an otherwise single-scroll page that hides content behind a click. */}
+          {!isSolarDeal && (
+            <DealSlides slides={dealSlides}>
+              {/* ── Claim info ── */}
+              <div data-deal-slide="claim">
+                {!isInsurance ? (
+                  <p className="text-sm text-muted-foreground">
+                    This is a <strong>cash deal</strong> — the customer pays out of pocket or finances it; there&rsquo;s no
+                    insurance claim, deductible, or depreciation. Set the price in the proposal (<strong>Build Presentation</strong>).
+                  </p>
+                ) : claim ? (
+                  <ClaimInfoCard
+                    bare
+                    leadId={lead.id}
+                    canEdit={can(user, "update", "Claim")}
+                    claimPrice={lead.claimPrice}
+                    canEditClaimPrice={can(user, "update", "Lead")}
+                    claim={{
+                      carrier: claim.carrier,
+                      claimNumber: claim.claimNumber,
+                      lossDate: claim.lossDate ? claim.lossDate.toISOString() : null,
+                      policyNumber: claim.policyNumber,
+                      adjusterName: claim.adjusterName,
+                      adjusterPhone: claim.adjusterPhone,
+                      adjusterEmail: claim.adjusterEmail,
+                      adjusterMeetingAt: claim.adjusterMeetingAt ? claim.adjusterMeetingAt.toISOString() : null,
+                      deductible: claim.deductible,
+                      rcv: claim.rcv,
+                      acv: claim.acv,
+                      depreciation: claim.depreciation,
+                    }}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No insurance claim opened yet. Use <strong>Open claim</strong> in the Summary to start the claim worksheet.
+                  </p>
+                )}
+              </div>
+
+              {/* ── Field production: what the crew photographs and checks off ── */}
+              <div data-deal-slide="field" className="space-y-6">
+                {!project ? (
+                  canManageProd ? (
+                    <StartProductionButton leadId={lead.id} />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">This deal isn&rsquo;t in production yet.</p>
+                  )
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
+                      <ProjectStatusControl projectId={project.id} status={project.status} />
+                    </div>
+
+                    <Section icon={Camera} label="Site & Install Photos">
+                      <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
+                    </Section>
+
+                    <Section icon={Users} label="Crew">
+                      {canAssignCrew ? (
+                        <CrewAssigner
+                          projectId={project.id}
+                          crews={crews}
+                          assignments={project.crewAssignments.map((a) => ({
+                            id: a.id,
+                            crewName: a.crew.name,
+                            members: a.crew.members.length,
+                          }))}
+                        />
+                      ) : project.crewAssignments.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No crew assigned.</p>
+                      ) : (
+                        <ul className="space-y-1 text-sm">
+                          {project.crewAssignments.map((a) => (
+                            <li key={a.id}>{a.crew.name} · {a.crew.members.length} members</li>
+                          ))}
+                        </ul>
+                      )}
+                    </Section>
+
+                    <Section icon={ClipboardCheck} label="QC Checklist">
+                      <QcChecklistEditor projectId={project.id} items={qcItems} />
+                    </Section>
+                  </>
+                )}
+              </div>
+
+              {/* ── Deal financials (+ the payout breakdown) ── */}
+              {showFinancials && (
+                <div data-deal-slide="financials" className="space-y-6">
+                  {project && dealFinancials && (
+                    <DealFinancialsCard
+                      financials={dealFinancials}
+                      projectId={project.id}
+                      canManage={can(user, "update", "Commission")}
+                      commissionEligible={commissionEligible}
+                      gateLabel={COMMISSION_GATE_LABEL}
+                    />
+                  )}
+                  {project && payout && (
+                    <Section icon={DollarSign} label="Commission Payout">
+                      <ProjectPayoutCard payout={payout} canManage={can(user, "approve", "Commission")} />
+                    </Section>
+                  )}
+                </div>
+              )}
+            </DealSlides>
           )}
             </section>
 
@@ -812,81 +892,60 @@ export default async function LeadDetailPage({
               </section>
             )}
 
-            {/* ── Production ── */}
+            {/* ── Operations (solar only) ──
+                Roofing's equivalent is the "Field production" slide above; a
+                roofing deal must not render this section twice. */}
+            {isSolarDeal && (
             <section id="production" className="scroll-mt-24 space-y-6">
-          {/* Production (job): crew, QC, daily reports, site & install photos */}
-          <Card title="Production" icon={Hammer} tone={isSolarDeal ? "solar" : "brand"}>
-            {/* Aerial roof measurement is a roofing estimating tool — a solar
-                deal measures the array in System Design instead. */}
-            {!isSolarDeal && can(user, "update", "Lead") && (
-              <div className="mb-6 flex items-center justify-between gap-2 border-b border-border pb-4">
-                <div>
-                  <p className="text-sm font-medium">Aerial roof measurements</p>
-                  <p className="text-xs text-muted-foreground">Trace the roof to estimate squares for the scope.</p>
-                </div>
-                <RoofReportButton
-                  leadId={lead.id}
-                  address={roofAddress || `${lead.firstName} ${lead.lastName}`}
-                  initialFacets={roofReport?.facets ?? []}
-                  initialWaste={roofReport?.wastePct ?? 12}
-                  hasReport={!!roofReport}
-                />
-              </div>
-            )}
-            {!project ? (
-              canManageProd ? (
-                <StartProductionButton leadId={lead.id} />
-              ) : (
-                <p className="text-sm text-muted-foreground">This deal isn&rsquo;t in production yet.</p>
-              )
-            ) : (
-              <div className="space-y-6">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
-                  <ProjectStatusControl projectId={project.id} status={project.status} />
-                </div>
-
-                <Section icon={CalendarClock} label="Schedule">
-                  <ProjectSchedule
-                    projectId={project.id}
-                    installDate={project.installDate ? project.installDate.toISOString() : null}
-                    canManage={canManageProd}
-                  />
-                </Section>
-
-                <Section icon={Camera} label="Site & Install Photos">
-                  <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
-                </Section>
-
-                <Section icon={Users} label="Crew">
-                  {canAssignCrew ? (
-                    <CrewAssigner
-                      projectId={project.id}
-                      crews={crews}
-                      assignments={project.crewAssignments.map((a) => ({
-                        id: a.id,
-                        crewName: a.crew.name,
-                        members: a.crew.members.length,
-                      }))}
-                    />
-                  ) : project.crewAssignments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No crew assigned.</p>
+              <Card title="Operations" icon={Hammer} tone="solar">
+                {!project ? (
+                  canManageProd ? (
+                    <StartProductionButton leadId={lead.id} />
                   ) : (
-                    <ul className="space-y-1 text-sm">
-                      {project.crewAssignments.map((a) => (
-                        <li key={a.id}>{a.crew.name} · {a.crew.members.length} members</li>
-                      ))}
-                    </ul>
-                  )}
-                </Section>
+                    <p className="text-sm text-muted-foreground">This deal isn&rsquo;t in production yet.</p>
+                  )
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
+                      <ProjectStatusControl projectId={project.id} status={project.status} />
+                    </div>
 
-                <Section icon={ClipboardCheck} label="QC Checklist">
-                  <QcChecklistEditor projectId={project.id} items={qcItems} />
-                </Section>
-              </div>
-            )}
-          </Card>
+                    <Section icon={Camera} label="Site & Install Photos" tone="solar">
+                      <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
+                    </Section>
+
+                    <Section icon={Users} label="Crew" tone="solar">
+                      {canAssignCrew ? (
+                        <CrewAssigner
+                          projectId={project.id}
+                          crews={crews}
+                          assignments={project.crewAssignments.map((a) => ({
+                            id: a.id,
+                            crewName: a.crew.name,
+                            members: a.crew.members.length,
+                          }))}
+                        />
+                      ) : project.crewAssignments.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No crew assigned.</p>
+                      ) : (
+                        <ul className="space-y-1 text-sm">
+                          {project.crewAssignments.map((a) => (
+                            <li key={a.id}>{a.crew.name} · {a.crew.members.length} members</li>
+                          ))}
+                        </ul>
+                      )}
+                    </Section>
+
+                    <Section icon={ClipboardCheck} label="QC Checklist" tone="solar">
+                      <QcChecklistEditor projectId={project.id} items={qcItems} />
+                    </Section>
+                  </div>
+                )}
+              </Card>
             </section>
+            )}
+
 
             {/* ── Financials ── */}
             {showFinancials && (
@@ -1050,27 +1109,29 @@ export default async function LeadDetailPage({
               deal instead of scrolling away with it. This replaced roofing's
               "Contact" card in the Overview — same facts, with copy buttons on
               the values you actually use. */}
-          <Card
-            title="Homeowner Information"
-            icon={UserIcon}
+          {/* Renders its own card chrome: the Edit button sits in the header and
+              toggles the fields in the body, which only works if one component
+              owns both. */}
+          <HomeownerCard
+            leadId={lead.id}
+            values={{
+              firstName: lead.firstName,
+              lastName: lead.lastName,
+              coOwnerName: lead.coOwnerName,
+              phone: lead.phone,
+              email: lead.email,
+              address: lead.address,
+              city: lead.city,
+              state: lead.state,
+              zip: lead.zip,
+              preferredLanguage: lead.preferredLanguage,
+              sourceId: lead.sourceId,
+              notes: lead.notes,
+            }}
+            sources={formOptions.sources}
+            canEdit={can(user, "update", "Lead")}
             tone={isSolarDeal ? "solar" : "brand"}
-          >
-            <HomeownerCard
-              facts={{
-                name: `${lead.firstName} ${lead.lastName}`,
-                coOwner: lead.coOwnerName,
-                phone: lead.phone,
-                email: lead.email,
-                address:
-                  [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") ||
-                  null,
-                language: lead.preferredLanguage,
-                leadSource: lead.source?.name ?? null,
-                notes: lead.notes,
-              }}
-              editHref={can(user, "update", "Lead") ? `/portal/leads/${lead.id}/edit` : undefined}
-            />
-          </Card>
+          />
 
           <Card title="Summary" tone={isSolarDeal ? "solar" : "brand"}>
             <div className="space-y-3">
@@ -1103,10 +1164,26 @@ export default async function LeadDetailPage({
                 label={isSolarDeal ? "Consult Date" : "Appointment Date"}
                 value={lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not scheduled"}
               />
-              {/* The date the customer actually cares about. Only meaningful
-                  once production exists, so it is absent rather than "—". */}
-              {isSolarDeal && project?.installDate && (
-                <Detail label="Install Date" value={fmt.date(project.installDate)} />
+              {/* The install date lives HERE, with the other key dates, and is
+                  editable in place. It used to sit inside the Production
+                  section, which meant the one date a customer asks about was
+                  three screens down inside a card about photo checklists. Only
+                  meaningful once a job exists, so it is absent rather than "—". */}
+              {project && (
+                <div>
+                  <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
+                    <CalendarClock className="size-3.5" />
+                    Install Date
+                  </div>
+                  <div className="mt-1">
+                    <ProjectSchedule
+                      bare
+                      projectId={project.id}
+                      installDate={project.installDate ? project.installDate.toISOString() : null}
+                      canManage={canManageProd}
+                    />
+                  </div>
+                </div>
               )}
               <Detail label="Created" value={fmt.date(lead.createdAt)} />
             </div>

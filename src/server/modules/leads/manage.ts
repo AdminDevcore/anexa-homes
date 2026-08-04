@@ -193,6 +193,122 @@ export async function updateLeadAction(id: string, input: LeadInput) {
   return { ok: true as const, id };
 }
 
+/**
+ * The subset of lead fields the deal page's per-card Edit buttons can write.
+ *
+ * Deliberately NOT `leadInput.partial()`: that schema carries `.default()` on
+ * serviceType/dealType/priority, and a default fires for an ABSENT key — so a
+ * homeowner-only patch would silently post `serviceType: "roofing"` and
+ * `priority: "medium"` over whatever the deal actually had. Same shape, no
+ * defaults, so an omitted key stays omitted.
+ */
+const leadPatch = z
+  .object({
+    firstName: z.string().min(1).max(80),
+    lastName: z.string().min(1).max(80),
+    coOwnerName: z.string().max(80).or(z.literal("")),
+    preferredLanguage: z.string().max(40).or(z.literal("")),
+    email: z.string().email().or(z.literal("")),
+    phone: z.string().max(30).or(z.literal("")),
+    address: z.string().max(160).or(z.literal("")),
+    city: z.string().max(80).or(z.literal("")),
+    state: z.string().max(40).or(z.literal("")),
+    zip: z.string().max(12).or(z.literal("")),
+    sourceId: z.string().uuid().or(z.literal("")),
+    assignedRepId: z.string().uuid().or(z.literal("")),
+    serviceType: z.enum(["roofing", "storm_restoration", "solar", "hvac", "water_filtration", "windows", "other"]),
+    dealType: z.enum(["cash", "insurance"]),
+    valueCents: z.number().int().min(0),
+    priority: z.enum(["low", "medium", "high", "urgent"]),
+    appointmentAt: z.string().or(z.literal("")),
+    notes: z.string().max(4000).or(z.literal("")),
+  })
+  .partial();
+
+export type LeadPatch = z.infer<typeof leadPatch>;
+
+/**
+ * Update SOME of a lead's fields, leaving every other column alone.
+ *
+ * `updateLeadAction` above takes a whole `LeadInput` and writes all of it, which
+ * is right for the full edit form and wrong for the deal page's per-card Edit
+ * buttons: saving the Homeowner card there would post an empty stage, value and
+ * priority over live data. This one writes only the keys actually present in
+ * `patch`, so each card owns exactly its own fields.
+ *
+ * An empty string is a real value here — it means "clear this" — which is why
+ * presence is tested with `in` rather than truthiness.
+ */
+export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return { ok: false as const, error: "Not allowed." };
+  const parsed = leadPatch.safeParse(patch);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid value." };
+  const d = parsed.data;
+  if (Object.keys(d).length === 0) return { ok: true as const, id: leadId };
+
+  const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  const existing = await prisma.lead.findFirst({
+    where: { AND: [{ id: leadId }, scope] },
+    select: { id: true, assignedRepId: true, pipelineId: true, stageId: true },
+  });
+  if (!existing) return { ok: false as const, error: "Lead not found or access denied." };
+
+  const data: Prisma.LeadUpdateInput = {};
+  // Plain string columns: "" clears to null, matching updateLeadAction.
+  if ("firstName" in d) data.firstName = d.firstName!;
+  if ("lastName" in d) data.lastName = d.lastName!;
+  if ("coOwnerName" in d) data.coOwnerName = d.coOwnerName || null;
+  if ("preferredLanguage" in d) data.preferredLanguage = d.preferredLanguage || null;
+  if ("email" in d) data.email = d.email || null;
+  if ("phone" in d) data.phone = d.phone || null;
+  if ("address" in d) data.address = d.address || null;
+  if ("city" in d) data.city = d.city || null;
+  if ("state" in d) data.state = d.state || null;
+  if ("zip" in d) data.zip = d.zip || null;
+  if ("notes" in d) data.notes = d.notes || null;
+  if ("serviceType" in d) data.serviceType = d.serviceType!;
+  if ("dealType" in d) data.dealType = d.dealType!;
+  if ("priority" in d) data.priority = d.priority!;
+  if ("valueCents" in d) data.value = d.valueCents!;
+  if ("sourceId" in d) data.source = d.sourceId ? { connect: { id: d.sourceId } } : { disconnect: true };
+
+  // Reassignment is a separate permission from editing — a rep may correct a
+  // phone number on their own deal without being able to hand it to someone else.
+  const canAssign = can(user, "assign", "Lead");
+  if ("assignedRepId" in d && canAssign) {
+    data.assignedRep = d.assignedRepId ? { connect: { id: d.assignedRepId } } : { disconnect: true };
+  }
+
+  // Setting or clearing the appointment re-derives the front-of-pipeline stage,
+  // exactly as the full form does — otherwise booking from the Summary card
+  // would leave the deal sitting in "New Lead" with a date on it.
+  if ("appointmentAt" in d) {
+    const tz = await companyTimeZone(user.companyId);
+    data.appointmentAt = d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null;
+    const stageId = await resolveStageForAppointment({
+      pipelineId: existing.pipelineId,
+      candidateStageId: existing.stageId,
+      hasAppointment: Boolean(d.appointmentAt),
+    });
+    if (stageId && stageId !== existing.stageId) {
+      data.stage = { connect: { id: stageId } };
+      data.stageChangedAt = new Date();
+    }
+  }
+
+  await prisma.lead.update({ where: { id: existing.id }, data });
+
+  if (canAssign && d.assignedRepId && d.assignedRepId !== existing.assignedRepId) {
+    await fireEvent({ companyId: user.companyId, event: "lead_assigned", actorId: user.userId, leadId: existing.id });
+  }
+
+  revalidatePath(`/portal/leads/${existing.id}`);
+  revalidatePath("/portal/leads");
+  revalidatePath("/portal/pipeline");
+  return { ok: true as const, id: existing.id };
+}
+
 const dealTypeSchema = z.object({ leadId: z.string().min(1), dealType: z.enum(["cash", "insurance"]) });
 
 /** Switch a deal between cash (out-of-pocket / financing) and insurance (filed claim).

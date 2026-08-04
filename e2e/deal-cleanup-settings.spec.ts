@@ -18,8 +18,8 @@ test("deal page: no Claim tab, claim info folded into Overview, no Estimated Val
 
   // Claim tab is gone
   await expect(page.getByRole("button", { name: "Claim", exact: true })).toHaveCount(0);
-  // Claim info now shows in the Overview (default tab)
-  await expect(page.getByRole("heading", { name: "Claim Information" })).toBeVisible();
+  // Claim info is the first slide of the job switcher, open by default.
+  await expect(page.getByRole("tab", { name: "Claim Info" })).toBeVisible();
   // Roof info / line items / supplements removed from the claim card
   await expect(page.getByText("Total Squares")).toHaveCount(0);
   await expect(page.getByText("Line Item Information")).toHaveCount(0);

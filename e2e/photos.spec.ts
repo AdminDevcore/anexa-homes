@@ -12,6 +12,11 @@ async function login(page: Page, email: string) {
 }
 
 // Open a deal in production (photo checklists live in the production section).
+/** The photo checklists live on the Field Production slide of the job switcher. */
+async function openFieldProduction(page: Page) {
+  await page.getByRole("tab", { name: "Field Production" }).click();
+}
+
 async function openProductionDeal(page: Page) {
   await page.goto("/portal/pipeline");
   await page.getByRole("button", { name: "List" }).click();
@@ -27,6 +32,7 @@ async function openProductionDeal(page: Page) {
 test("photos: deal shows Site & Install checklists and accepts an upload", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await openProductionDeal(page);
+  await openFieldProduction(page);
 
   await expect(page.getByText("Front of house")).toBeVisible({ timeout: 10000 });
 
@@ -39,6 +45,7 @@ test("photos: deal shows Site & Install checklists and accepts an upload", async
 test("photos: compiles a PDF photo report for a deal", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await openProductionDeal(page);
+  await openFieldProduction(page);
   const href = await page.locator('a:has-text("Compile PDF report")').first().getAttribute("href");
   expect(href).toBeTruthy();
   const res = await page.request.get(href!);

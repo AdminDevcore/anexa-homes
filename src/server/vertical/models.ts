@@ -31,7 +31,6 @@ export const SCOPED_MODELS = [
   "Lead",
   "Project",
   "Claim",
-  "RoofReport",
   // Pipeline + workflow config
   "Pipeline",
   "Task",
