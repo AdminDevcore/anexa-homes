@@ -18,6 +18,15 @@ function field(page: Page, label: string): Locator {
     .locator("input");
 }
 
+// The claim card reads by default and edits on request, like every other card
+// on the deal, so its inputs only exist once Edit is open. Scoped to the claim
+// slide because the Homeowner and Summary cards each have an "Edit" of their own.
+async function openClaimEditor(page: Page) {
+  const edit = page.locator('[data-deal-slide="claim"]').getByRole("button", { name: "Edit" });
+  await edit.click();
+  await expect(field(page, "Carrier")).toBeVisible();
+}
+
 // Every field that previously failed to persist, plus the ones that worked.
 // Roof info (squares, waste, pitch, stories) deliberately absent: it moved to
 // Scope of Work and the claim card only tracks the claim and its amounts.
@@ -46,7 +55,7 @@ test("every claim field persists after reload", async ({ page }) => {
 
   // Claim Info is the first slide of the job switcher, so it is already open.
   await expect(page.getByRole("tab", { name: "Claim Info" })).toBeVisible({ timeout: 10000 });
-  await expect(field(page, "Carrier")).toBeVisible();
+  await openClaimEditor(page);
 
   for (const [label, value] of Object.entries(VALUES)) {
     await field(page, label).fill(value);
@@ -59,6 +68,7 @@ test("every claim field persists after reload", async ({ page }) => {
   // Reload from scratch and confirm EVERY value persisted.
   await page.reload();
   await expect(page.getByRole("tab", { name: "Claim Info" })).toBeVisible({ timeout: 10000 });
+  await openClaimEditor(page);
 
   for (const [label, value] of Object.entries(VALUES)) {
     await expect(field(page, label), `field "${label}" should persist`).toHaveValue(value);

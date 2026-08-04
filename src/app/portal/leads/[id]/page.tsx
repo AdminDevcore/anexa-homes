@@ -8,7 +8,6 @@ import {
   Users,
   ClipboardCheck,
   DollarSign,
-  CalendarClock,
   Calculator,
   Zap,
   Satellite,
@@ -65,9 +64,10 @@ import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
 import { SolarProductToggle } from "@/components/portal/solar-product-toggle";
 import { PropertyView } from "@/components/portal/property-view";
 import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-summary-cards";
+import { DealSummaryPanel } from "@/components/portal/deal-summary-panel";
 import { HomeownerCard } from "@/components/portal/homeowner-card";
 import { FinancingTermsPanel } from "@/components/portal/solar/financing-terms";
-import { Card, Detail, Section } from "@/components/portal/deal-ui";
+import { Card, Section } from "@/components/portal/deal-ui";
 import { DealSlides, type DealSlideDef } from "@/components/portal/deal-slides";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
@@ -78,7 +78,8 @@ import {
   CrewAssigner,
 } from "@/components/portal/project-workflows";
 import { currentFormatters } from "@/lib/format-server";
-import { serviceTypeLabel } from "@/lib/service-types";
+import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
+import { utcToZonedWallClock } from "@/lib/tz";
 import { daysInStage } from "@/lib/stage-status";
 
 /**
@@ -125,6 +126,11 @@ export default async function LeadDetailPage({
   // rather than inside them because those are client components and this is the
   // only place with a session to scope the query by.
   const formOptions = await getLeadFormOptions(user.companyId, lead.vertical);
+  // Appointments are stored as instants but entered as wall-clock times, so the
+  // Summary card's datetime input has to be seeded in the company's zone.
+  const companyTz =
+    (await prisma.company.findUnique({ where: { id: user.companyId }, select: { timezone: true } }))
+      ?.timezone || "America/Chicago";
 
   // Production (the deal's job container). Created on demand via "Start production".
   const canManageProd = can(user, "create", "Project") || can(user, "update", "Project");
@@ -955,8 +961,12 @@ export default async function LeadDetailPage({
             )}
 
 
-            {/* ── Financials ── */}
-            {showFinancials && (
+            {/* ── Financials ──
+                Solar only. A roofing deal reads its financials inside the
+                Claim Info / Field Production / Deal Financials switcher above;
+                rendering them here too put the same two cards on the page
+                twice. Solar has no switcher, so this stays its only home. */}
+            {showFinancials && isSolarDeal && (
             <section id="financials" className="scroll-mt-24 space-y-6">
           {/* Commission payout breakdown — every recipient on this job + total owed */}
           {project && payout && (
@@ -1107,12 +1117,12 @@ export default async function LeadDetailPage({
             page, a sidebar rendered last would put the homeowner's phone
             number thousands of pixels below the fold. Identity first, work
             second.
-            On a desktop it sticks under the 4rem shell header and scrolls
-            inside itself, so the name, the stage and the follow-ups stay
-            reachable from the documents at the bottom of the page. Scroll
-            chaining is deliberately NOT contained — reaching the end of the
-            sidebar should carry on scrolling the page, not trap the wheel. */}
-        <div className="order-first space-y-6 lg:order-none lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
+            On a desktop it scrolls WITH the page. It used to be sticky with its
+            own overflow-y-auto, which gave the page two independent scrollers:
+            the wheel moved whichever column the cursor happened to be over, so
+            the same gesture did two different things depending on the pointer.
+            One page, one scroll. */}
+        <div className="order-first space-y-6 lg:order-none">
           {/* Homeowner first: the person you are calling stays pinned beside the
               deal instead of scrolling away with it. This replaced roofing's
               "Contact" card in the Overview — same facts, with copy buttons on
@@ -1141,64 +1151,71 @@ export default async function LeadDetailPage({
             tone={isSolarDeal ? "solar" : "brand"}
           />
 
-          <Card title="Summary" tone={isSolarDeal ? "solar" : "brand"}>
-            <div className="space-y-3">
-              {!isSolarDeal && <Detail label="Project Type" value={serviceTypeLabel(lead.serviceType)} />}
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {isSolarDeal ? "Financing" : "Deal Type"}
-                </span>
-                {isSolarDeal ? (
-                  // On Solar a deal's type IS its financing product. There is no
-                  // insurer, so Insurance-vs-Cash is meaningless here.
-                  <SolarProductToggle
-                    leadId={lead.id}
-                    value={solarFinance?.product ?? null}
-                    canEdit={can(user, "update", "Lead")}
-                  />
-                ) : (
-                  <DealTypeToggle leadId={lead.id} value={isInsurance ? "insurance" : "cash"} canEdit={can(user, "update", "Lead")} />
-                )}
-              </div>
-              {propertyValueLine && <Detail label="Property Value" value={propertyValueLine} />}
-              {lastSaleLine && <Detail label="Last Sale" value={lastSaleLine} />}
-              {/* An assigned rep already has a summary card of its own; a second
-                  copy three inches below it is just noise. UNASSIGNED still
-                  shows here, because that gap is worth stating explicitly and
-                  the summary row omits the card entirely when there is no rep. */}
-              {!lead.assignedRep && <Detail label="Assigned Rep" value="Unassigned" />}
-              {isInsurance && <Detail label="Claim Status" value={lead.claimStatus.replace(/_/g, " ")} />}
-              <Detail
-                label={isSolarDeal ? "Consult Date" : "Appointment Date"}
-                value={lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not scheduled"}
+          {/* Owns its card chrome so the header's Edit button can drive the
+              fields in the body. The three live controls below (deal type,
+              install date, appointment actions) already write on click, so they
+              pass through as slots and render the same in both modes. */}
+          <DealSummaryPanel
+            leadId={lead.id}
+            isSolar={isSolarDeal}
+            tone={isSolarDeal ? "solar" : "brand"}
+            canEdit={can(user, "update", "Lead")}
+            canAssign={can(user, "assign", "Lead")}
+            values={{
+              serviceType: lead.serviceType,
+              // Company wall clock, NOT UTC — the save path reads it back in the
+              // company's zone, so seeding from toISOString() would shift the
+              // appointment by the offset on every untouched save.
+              appointmentLocal: lead.appointmentAt
+                ? utcToZonedWallClock(lead.appointmentAt, companyTz)
+                : "",
+              priority: lead.priority,
+              valueCents: lead.value,
+              assignedRepId: lead.assignedRepId,
+            }}
+            reps={formOptions.reps}
+            serviceTypes={serviceTypeOptions(lead.serviceType)}
+            display={{
+              serviceTypeLabel: serviceTypeLabel(lead.serviceType),
+              appointment: lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not scheduled",
+              value: fmt.money(lead.value),
+              assignedRep: lead.assignedRep
+                ? `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`
+                : null,
+              propertyValue: propertyValueLine,
+              lastSale: lastSaleLine,
+              claimStatus: isInsurance ? lead.claimStatus.replace(/_/g, " ") : null,
+              created: fmt.date(lead.createdAt),
+            }}
+            dealTypeSlot={
+              isSolarDeal ? (
+                // On Solar a deal's type IS its financing product. There is no
+                // insurer, so Insurance-vs-Cash is meaningless here.
+                <SolarProductToggle
+                  leadId={lead.id}
+                  value={solarFinance?.product ?? null}
+                  canEdit={can(user, "update", "Lead")}
+                />
+              ) : (
+                <DealTypeToggle leadId={lead.id} value={isInsurance ? "insurance" : "cash"} canEdit={can(user, "update", "Lead")} />
+              )
+            }
+            installDateSlot={
+              /* The install date lives HERE, with the other key dates. ALWAYS
+                 rendered: gating it on an existing job hid it on 13 of 16 real
+                 deals, and an install date is exactly what you agree with a
+                 homeowner before the job formally opens. Picking one creates
+                 the job. */
+              <ProjectSchedule
+                bare
+                leadId={lead.id}
+                projectId={project?.id ?? null}
+                installDate={project?.installDate ? project.installDate.toISOString() : null}
+                canManage={canManageProd}
               />
-              {/* The install date lives HERE, with the other key dates, and is
-                  editable in place. It used to sit inside the Production
-                  section, which meant the one date a customer asks about was
-                  three screens down inside a card about photo checklists.
-                  ALWAYS rendered: gating it on an existing job hid it on 13 of
-                  16 real deals, and an install date is exactly what you agree
-                  with a homeowner before the job formally opens. Picking one
-                  creates the job. */}
-              <div>
-                <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-                  <CalendarClock className="size-3.5" />
-                  Install Date
-                </div>
-                <div className="mt-1">
-                  <ProjectSchedule
-                    bare
-                    leadId={lead.id}
-                    projectId={project?.id ?? null}
-                    installDate={project?.installDate ? project.installDate.toISOString() : null}
-                    canManage={canManageProd}
-                  />
-                </div>
-              </div>
-              <Detail label="Created" value={fmt.date(lead.createdAt)} />
-            </div>
-
-            {/* Appointment run + open claim — consolidated into the Summary card */}
+            }
+            actionsSlot={
+            /* Appointment run + open claim — consolidated into the Summary card */
             <DealActionsPanel
               isSolar={isSolarDeal}
               leadId={lead.id}
@@ -1230,7 +1247,8 @@ export default async function LeadDetailPage({
               canEditLead={can(user, "update", "Lead")}
               canEditClaim={can(user, "update", "Claim")}
             />
-          </Card>
+            }
+          />
 
           {/* Follow-ups on the side, next to the summary */}
           <Card title="Follow-ups & Tasks" icon={ListTodo} tone={isSolarDeal ? "solar" : "brand"}>

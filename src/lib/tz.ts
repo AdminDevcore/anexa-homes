@@ -9,6 +9,35 @@
  * stored as 14:00Z and shown as 9 AM Central. This shifts by the zone's offset at
  * that date (DST-aware), independent of the server's own timezone.
  */
+/**
+ * The inverse of `zonedWallClockToUtc`: render a stored instant as the naive
+ * "YYYY-MM-DDTHH:mm" wall clock an `<input type="datetime-local">` expects,
+ * read in `timeZone`.
+ *
+ * Needed because the pair has to round-trip. Seeding such an input from
+ * `date.toISOString().slice(0, 16)` hands it the UTC wall clock, which
+ * `zonedWallClockToUtc` then reads back as company-local — so merely opening an
+ * editor and saving it unchanged walks the appointment by the zone's offset
+ * every time. Formatting through the same zone the parser assumes makes an
+ * untouched save a no-op.
+ */
+export function utcToZonedWallClock(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    // h23, not hour12:false — the latter renders midnight as "24" in some ICU
+    // builds, which an input[type=datetime-local] rejects outright.
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
+}
+
 export function zonedWallClockToUtc(naiveLocal: string, timeZone: string): Date {
   const asIfUtc = new Date(`${naiveLocal.replace(/Z$/, "")}Z`);
   if (Number.isNaN(asIfUtc.getTime())) return new Date(naiveLocal); // unparseable → best effort
