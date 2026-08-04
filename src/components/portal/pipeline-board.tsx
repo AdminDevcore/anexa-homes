@@ -138,7 +138,7 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
   const total = leads.reduce((sum, l) => sum + l.value, 0);
 
   return (
-    <div className="flex w-[19rem] shrink-0 flex-col">
+    <div className="flex w-[19rem] shrink-0 flex-col" data-testid="pipeline-column">
       {/* Column header */}
       <div className="mb-2 rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm">
         <div className="flex items-center justify-between gap-2">
@@ -162,6 +162,7 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
       {/* Drop zone */}
       <div
         ref={setNodeRef}
+        data-testid="pipeline-dropzone"
         className={cn(
           "flex flex-1 flex-col gap-2.5 overflow-y-auto rounded-xl border border-dashed border-transparent p-1.5 transition-colors",
           isOver && "border-gold/50 bg-gold/5"
@@ -207,6 +208,7 @@ function Card({
     <div
       ref={setNodeRef}
       data-search-item
+      data-testid="pipeline-card"
       className={cn(
         // shrink-0 is load-bearing: the card is a flex item in the column's
         // overflow-y-auto drop zone, and `overflow-hidden` here resolves its auto

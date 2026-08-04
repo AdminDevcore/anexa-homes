@@ -41,7 +41,7 @@ import {
   SolarQuickActions,
   SolarDeferredPanels,
 } from "@/components/portal/solar-cockpit";
-import { DealStageBar } from "@/components/portal/deal-stage-bar";
+import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
 import { SOLAR_FOLDER_KEYS } from "@/lib/solar-folders";
 import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
@@ -367,6 +367,17 @@ export default async function LeadDetailPage({
   // Stage is the one card BOTH verticals carry; after that the two businesses
   // are judged on different things, so the lists diverge rather than being
   // forced into one shape.
+  // The deal's own pipeline, trimmed to what the client components need. Shared
+  // by the header actions and the progress bar so the two can never disagree
+  // about which stage is next or which one means dead.
+  const stageLite = (lead.pipeline?.stages ?? []).map((st) => ({
+    id: st.id,
+    name: st.name,
+    position: st.position,
+    color: st.color,
+    isLost: st.isLost,
+  }));
+
   const summaryCards: SummaryCard[] = [];
   {
     const stageIndex = lead.pipeline
@@ -522,11 +533,20 @@ export default async function LeadDetailPage({
         title={`${lead.firstName} ${lead.lastName}`}
         description={lead.source ? `Source: ${lead.source.name}` : undefined}
         action={
-          // Both verticals now end at the same low density: edit the record,
-          // plus the admin-only job editor. The stage lives in the bar and the
-          // summary row; the three roofing contract tools moved to the
+          // Actions ON the record, all in one row: move it, kill it, edit it.
+          // Move and Cancel used to live down in the progress bar, which is a
+          // readout — you look there to see how far along a job is, not to
+          // operate on it. The three roofing contract tools moved to the
           // Documents tab, beside the documents they produce.
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {lead.pipeline && (
+              <DealStageActions
+                leadId={lead.id}
+                stages={stageLite}
+                currentStageId={lead.stage?.id ?? null}
+                canEdit={can(user, "update", "Lead")}
+              />
+            )}
             {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
             {can(user, "update", "Lead") && (
               <Button asChild variant="outline" size="sm">
@@ -559,16 +579,12 @@ export default async function LeadDetailPage({
           stages. Roofing used to get a single status chip in the header, which
           said where the deal was but never how far along that made it. */}
       {lead.pipeline && (
-        <DealStageBar
+        <DealProgressBar
           leadId={lead.id}
-          stages={lead.pipeline.stages.map((st) => ({
-            id: st.id, name: st.name, position: st.position, color: st.color,
-            // Drives both the Cancel button's target and the fact that Advance
-            // refuses to walk a deal into a dead stage.
-            isLost: st.isLost,
-          }))}
+          stages={stageLite}
           currentStageId={lead.stage?.id ?? null}
           canEdit={can(user, "update", "Lead")}
+          daysInStage={daysInStage(lead.stageChangedAt, lead.createdAt)}
         />
       )}
 
