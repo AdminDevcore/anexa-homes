@@ -3,102 +3,46 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Camera, Loader2, Trash2, FileDown, ClipboardList, Hammer } from "lucide-react";
+import { Camera, Loader2, Trash2, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { PHOTO_GROUPS, PHOTO_GROUP_KEYS, type PhotoGroup } from "@/lib/photo-groups";
+import { PHOTO_GROUPS, type PhotoGroup } from "@/lib/photo-groups";
 import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actions";
 import { ProjectPhotos } from "./project-photos";
 import type { PhotoChecklist } from "@/server/modules/photos/queries";
 
 export type GroupPhoto = { id: string; name: string; group: PhotoGroup };
 
-// Survey maps to the "site" photo template; Install Photos to the "install" one.
-const GROUP_KIND: Record<PhotoGroup, "site" | "install"> = { survey: "site", install: "install" };
-
-const GROUP_ICON: Record<PhotoGroup, typeof Camera> = { survey: ClipboardList, install: Hammer };
+/** Survey maps to the "site" photo template; Install Photos to the "install" one. */
+export const GROUP_KIND: Record<PhotoGroup, "site" | "install"> = { survey: "site", install: "install" };
 
 /**
- * Two buttons — Survey & Install Photos — on the deal. Each opens a checklist
- * dialog where the user can drop all the photos for that group at once, then
- * compile that group into its own PDF (Survey and Roof/Install stay separate).
+ * The capture UI for one photo group — slot-by-slot checklist when the deal is
+ * in production, bulk upload before that, plus Compile PDF.
+ *
+ * This used to live inside a modal opened by a pair of Survey / Install buttons
+ * in the Documents & Files header. Those buttons are gone — the Survey Photos
+ * and Install Photos folders are the entry point now, and this renders inline
+ * when you open one. The capture behaviour is unchanged; only its host moved.
  */
-export function DealPhotos({
-  leadId,
-  projectId,
-  photos,
-  checklists = [],
-  canUpload,
-  canDelete,
-}: {
-  leadId: string;
-  projectId?: string | null;
-  photos: GroupPhoto[];
-  checklists?: PhotoChecklist[];
-  canUpload: boolean;
-  canDelete: boolean;
-}) {
-  const [open, setOpen] = React.useState<PhotoGroup | null>(null);
-  const counts = React.useMemo(() => {
-    const c: Record<PhotoGroup, number> = { survey: 0, install: 0 };
-    for (const p of photos) c[p.group] += 1;
-    return c;
-  }, [photos]);
-
-  return (
-    <>
-      <div className="flex flex-wrap gap-2">
-        {PHOTO_GROUP_KEYS.map((g) => {
-          const Icon = GROUP_ICON[g];
-          return (
-            <Button key={g} size="sm" variant="outline" onClick={() => setOpen(g)}>
-              <Icon className="size-4" /> {PHOTO_GROUPS[g].label}
-              {counts[g] > 0 && (
-                <span className="ml-1 rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{counts[g]}</span>
-              )}
-            </Button>
-          );
-        })}
-      </div>
-
-      {PHOTO_GROUP_KEYS.map((g) => (
-        <GroupDialog
-          key={g}
-          group={g}
-          open={open === g}
-          onClose={() => setOpen(null)}
-          leadId={leadId}
-          projectId={projectId}
-          photos={photos.filter((p) => p.group === g)}
-          checklist={checklists.find((c) => c.kind === GROUP_KIND[g]) ?? null}
-          canUpload={canUpload}
-          canDelete={canDelete}
-        />
-      ))}
-    </>
-  );
-}
-
-function GroupDialog({
+export function PhotoGroupBody({
   group,
-  open,
-  onClose,
   leadId,
   projectId,
   photos,
   checklist,
   canUpload,
   canDelete,
+  /** Inline in a folder there is no modal to fit inside, so drop the caps. */
+  inline = false,
 }: {
   group: PhotoGroup;
-  open: boolean;
-  onClose: () => void;
   leadId: string;
   projectId?: string | null;
   photos: GroupPhoto[];
   checklist: PhotoChecklist | null;
   canUpload: boolean;
   canDelete: boolean;
+  inline?: boolean;
 }) {
   const router = useRouter();
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -135,20 +79,17 @@ function GroupDialog({
     router.refresh();
   }
 
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{def.label}</DialogTitle>
-        </DialogHeader>
+  if (useChecklist) {
+    // Real templated checklist (slots + per-slot Add) for this group.
+    return (
+      <div className={inline ? "" : "max-h-[72vh] overflow-y-auto pr-1"}>
+        <ProjectPhotos projectId={projectId!} checklists={[checklist!]} />
+      </div>
+    );
+  }
 
-        {useChecklist ? (
-          // Real templated checklist (slots + per-slot Add) for this group.
-          <div className="max-h-[72vh] overflow-y-auto pr-1">
-            <ProjectPhotos projectId={projectId!} checklists={[checklist!]} />
-          </div>
-        ) : (
-          <>
+  return (
+    <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-muted-foreground">
                 {projectId
@@ -190,7 +131,11 @@ function GroupDialog({
                 No {def.label.toLowerCase()} yet. Tap “Add photos” to upload them all at once.
               </p>
             ) : (
-              <div className="grid max-h-[55vh] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+              <div
+                className={`grid grid-cols-3 gap-2 sm:grid-cols-4 ${
+                  inline ? "" : "max-h-[55vh] overflow-y-auto"
+                }`}
+              >
                 {photos.map((p) => (
                   <div key={p.id} className="group relative aspect-square overflow-hidden rounded-lg border border-border">
                     <a href={`/portal/files/${p.id}`} target="_blank" rel="noreferrer">
@@ -210,9 +155,6 @@ function GroupDialog({
                 ))}
               </div>
             )}
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 }

@@ -37,13 +37,11 @@ import { claimStatusLabel, claimStatusOptionsFor } from "@/lib/claim-status";
 import { SolarOpsCard } from "@/components/portal/solar-ops-card";
 import {
   SolarSystemMoneyPanel,
-  SolarDocumentFolders,
   SolarActivityFeed,
   SolarQuickActions,
   SolarDeferredPanels,
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
-import { SOLAR_FOLDER_KEYS } from "@/lib/solar-folders";
 import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
 import { SolarDesignPanel, SolarFinancePanel, SolarProposalGate } from "@/components/portal/solar-panels";
@@ -54,11 +52,7 @@ import { InsuranceContractButton } from "@/components/portal/insurance-contract-
 import { getCashBidsForLead } from "@/server/modules/cashbid/queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
-import { FilesSection } from "@/components/portal/files-section";
-import { DealPhotos, type GroupPhoto } from "@/components/portal/deal-photos";
-import { DealCallRecordings, type CallRecording } from "@/components/portal/deal-call-recordings";
-import { PHOTO_GROUP_KEYS, type PhotoGroup } from "@/lib/photo-groups";
-import { CALL_GROUP_KEYS, type CallGroup } from "@/lib/call-groups";
+import { DealFolders } from "@/components/portal/deal-folders";
 import { LeadTasks } from "@/components/portal/lead-tasks";
 import { ProjectPhotos } from "@/components/portal/project-photos";
 import { StartProductionButton } from "@/components/portal/start-production-button";
@@ -479,13 +473,6 @@ export default async function LeadDetailPage({
       });
     }
   }
-
-  const solarFolderCounts = isSolarDeal
-    ? Object.fromEntries(
-        SOLAR_FOLDER_KEYS.map((k) => [k, lead.files.filter((f) => f.category === k).length])
-      )
-    : {};
-
 
   // Scope of Work — job profitability calculator. Available once the deal reaches
   // "Scope Received" (by pipeline stage or claim status), gated by the Scope resource.
@@ -1032,94 +1019,64 @@ export default async function LeadDetailPage({
             </Card>
           )}
 
-          {/* One place for everything: e-signature documents + all file/photo
-              attachments. Survey/Install photo checklists are the header buttons. */}
-          <FilesSection
+          {/* One card for everything filed against this deal.
+              E-signature packages stay pinned above the grid: they are
+              DocumentPackage rows with their own status and route, not files,
+              so filing them into a folder would misrepresent what they are.
+              Everything that IS a file lives in the folders below — including
+              the Survey/Install checklists and the QC call, which used to be
+              header buttons and a bolted-on slot. */}
+          <Card
             title={isSolarDeal ? "4 · Contracts & documents" : "Documents & Files"}
-            files={lead.files
-              .filter(
-                (f) =>
-                  !PHOTO_GROUP_KEYS.includes(f.category as PhotoGroup) &&
-                  !CALL_GROUP_KEYS.includes(f.category as CallGroup)
-              )
-              .map((f) => ({
-                id: f.id,
-                name: f.name,
-                kind: f.kind,
-                mimeType: f.mimeType,
-                uploadedBy: f.uploadedBy ? `${f.uploadedBy.firstName} ${f.uploadedBy.lastName}` : null,
-              }))}
-            leadId={lead.id}
-            canUpload={can(user, "create", "File")}
-            canDelete={can(user, "create", "File")}
-            headerActions={
-              <DealPhotos
-                leadId={lead.id}
-                projectId={project?.id ?? null}
-                checklists={photoChecklists}
-                photos={lead.files
-                  .filter((f) => f.kind === "photo" && PHOTO_GROUP_KEYS.includes(f.category as PhotoGroup))
-                  .map((f) => ({ id: f.id, name: f.name, group: f.category as PhotoGroup }) satisfies GroupPhoto)}
-                canUpload={can(user, "create", "File")}
-                canDelete={can(user, "create", "File")}
-              />
-            }
+            icon={FolderOpen}
+            tone={isSolarDeal ? "solar" : "brand"}
+            description="Signed paperwork, photos and every file on this job"
           >
-            {/* Wrapped in a fragment so FilesSection receives ONE child, not an
-                array. These children cross a server→client boundary, where
-                React can lose the static-children optimisation and start
-                treating them as an unkeyed list. Cheap structural immunity. */}
-            <>
-            {/* E-signature documents, folded into the same card. */}
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Documents
-              </p>
-              {lead.documentPackages.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No documents yet.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {lead.documentPackages.map((d) => (
-                    <li key={d.id}>
-                      <Link
-                        href={`/portal/documents/${d.id}`}
-                        className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-gold/40"
-                      >
-                        <span className="font-medium">{d.title}</span>
-                        <span className="text-xs capitalize text-muted-foreground">{d.status.replace(/_/g, " ")}</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Documents
+                </p>
+                {lead.documentPackages.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No documents yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {lead.documentPackages.map((d) => (
+                      <li key={d.id}>
+                        <Link
+                          href={`/portal/documents/${d.id}`}
+                          className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-gold/40"
+                        >
+                          <span className="font-medium">{d.title}</span>
+                          <span className="text-xs capitalize text-muted-foreground">{d.status.replace(/_/g, " ")}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-2 border-t border-border pt-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Folders
+                </p>
+                <DealFolders
+                  leadId={lead.id}
+                  projectId={project?.id ?? null}
+                  vertical={lead.vertical}
+                  checklists={photoChecklists}
+                  files={lead.files.map((f) => ({
+                    id: f.id,
+                    name: f.name,
+                    kind: f.kind,
+                    category: f.category,
+                  }))}
+                  canUpload={can(user, "create", "File")}
+                  canDelete={can(user, "create", "File")}
+                />
+              </div>
             </div>
-
-            {/* Dedicated QC Call recording slot. */}
-            <DealCallRecordings
-              leadId={lead.id}
-              recordings={lead.files
-                .filter((f) => CALL_GROUP_KEYS.includes(f.category as CallGroup))
-                .map((f) => ({ id: f.id, name: f.name, group: f.category as CallGroup }) satisfies CallRecording)}
-              canUpload={can(user, "create", "File")}
-              canDelete={can(user, "create", "File")}
-            />
-            </>
-          </FilesSection>
-
-          {/* The folder map, moved off the Overview to sit beside the files it
-              describes. On the Overview it was a fourth stacked card competing
-              with the system and the money; here it answers the question it was
-              always meant to answer — "where does this document go?". */}
-          {isSolarDeal && (
-            <Card
-              title="Document folders"
-              icon={FolderOpen}
-              tone="solar"
-              description="What belongs where, and how much is filed"
-            >
-              <SolarDocumentFolders counts={solarFolderCounts} />
-            </Card>
-          )}
+          </Card>
             </section>
         </div>
 

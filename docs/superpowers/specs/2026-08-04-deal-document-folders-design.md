@@ -151,15 +151,21 @@ existing visual treatment.
 ## Refactors
 
 - `GroupDialog`'s body in `deal-photos.tsx` is extracted into an exported
-  `PhotoGroupBody`, consumed by both the existing dialog and the folder view.
-  One implementation, two hosts.
-- `DealCallRecordings` grows an optional prop to render a single group's slot
-  without its own "Call Recordings" heading, since the folder header already
-  says so.
+  `PhotoGroupBody` with an `inline` flag that drops the modal-fitting scroll
+  caps. `DealPhotos` and `GroupDialog` themselves are **deleted**: with the
+  header buttons gone the deal page was their only consumer, so keeping the
+  modal wrapper would have left dead code behind the folder it replaced.
+- `DealCallRecordings` drops its own "Call Recordings" heading — the folder
+  header already says so — and renders just the slot grid.
 - `src/lib/solar-folders.ts` is deleted; `solar-cockpit.tsx` drops the now-unused
   `SolarDocumentFolders` export and its `SOLAR_FOLDERS` import.
 - `src/components/portal/files-section.tsx` is deleted. The deal page was its
   only consumer.
+- `DealFolders` carries `data-testid="deal-folders"` in both states. The deal
+  page has several hidden file inputs, so an unscoped
+  `input[type=file].first()` in a test grabs whichever happens to come first —
+  this gives the folder card a stable anchor, matching the `data-testid`
+  convention already used by the pipeline board and stage bar.
 
 ## Security
 
@@ -190,12 +196,26 @@ vertical isolation and per-role deal scope, and folders do not touch it.
 
 **E2E — updates to existing specs**
 - `e2e/photos.spec.ts` — the Survey/Install entry point is now a folder tile,
-  not a header button. The spec navigates through the tile; the checklist,
-  upload and `group=survey` *Compile PDF* assertions are unchanged, which is
-  what proves the extraction preserved behaviour.
+  not a header button. The spec navigates through the tile and the capture and
+  *Compile PDF* assertions still hold, which is what proves the extraction
+  preserved behaviour. Two assertions were loosened for a reason that predates
+  this work: whether the checklist or the bulk uploader renders depends on
+  whether the deal reached production, and the deal this spec picks is not
+  fixed across runs. It now accepts either path's toast and either route's
+  group parameter (`site` for the checklist, `survey` for bulk) rather than
+  hard-coding the one the seed happened to produce. This test was already
+  failing on the baseline for exactly that reason; it passes now.
 - `e2e/appointment-form.spec.ts` — the staged attachment is uncategorised, so it
   now lands in **Other**. The spec opens that folder before asserting the
   filename is visible.
+- `e2e/crm-ops.spec.ts` — `openProductionDeal` looked for "Start production"
+  while the Claim Info slide was showing. That button lives *inside* the Field
+  Production slide, so `isVisible()` always answered false and the helper never
+  actually started production. The test still passed because its
+  page-wide `input[type=file].first()` was landing on the old Documents & Files
+  header input, not on the photo checklist its own comment describes. With that
+  input gone the accident stopped working, so the helper now opens the slide
+  first and the upload is scoped to `[data-deal-slide="field"]`.
 
 ## Risks
 

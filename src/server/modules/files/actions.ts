@@ -9,6 +9,7 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { getMembership } from "@/server/modules/chat/queries";
+import { foldersFor } from "@/lib/deal-folders";
 import sharp from "sharp";
 
 const MAX_BYTES = 30 * 1024 * 1024; // 30MB (phone photos); compressed after upload
@@ -193,6 +194,49 @@ export async function uploadFileAction(formData: FormData) {
   if (projectId) revalidatePath(`/portal/projects/${projectId}`);
   if (leadId) revalidatePath(`/portal/leads/${leadId}`);
   revalidatePath("/portal/customer");
+  return { ok: true as const };
+}
+
+/**
+ * Refile a document into another deal folder.
+ *
+ * Every file uploaded before folders existed is uncategorised, so it lands in
+ * "Other" — this is how it gets put away. Authorisation is deliberately
+ * identical to deleteFileAction: moving a file is a smaller act than destroying
+ * one, so anyone allowed to delete it is allowed to move it, and nobody else.
+ */
+export async function moveFileAction(id: string, category: string) {
+  const user = await requireUser();
+  if (user.role === "customer") {
+    return { ok: false as const, error: "Customers can't move files." };
+  }
+  if (!can(user, "update", "File") && !can(user, "create", "File")) {
+    return { ok: false as const, error: "Not allowed." };
+  }
+  const file = await prisma.fileAsset.findFirst({
+    where: { id, companyId: user.companyId },
+    select: {
+      id: true,
+      uploadedById: true,
+      projectId: true,
+      leadId: true,
+      lead: { select: { vertical: true } },
+    },
+  });
+  if (!file) return { ok: false as const, error: "File not found." };
+  if (!can(user, "update", "File") && file.uploadedById !== user.userId) {
+    return { ok: false as const, error: "You can only move your own uploads." };
+  }
+
+  // The target must be a real folder for THIS deal's vertical — otherwise an
+  // arbitrary category string could be written straight into the column.
+  if (!foldersFor(file.lead?.vertical).some((f) => f.key === category)) {
+    return { ok: false as const, error: "Unknown folder." };
+  }
+
+  await prisma.fileAsset.update({ where: { id }, data: { category } });
+  if (file.projectId) revalidatePath(`/portal/projects/${file.projectId}`);
+  if (file.leadId) revalidatePath(`/portal/leads/${file.leadId}`);
   return { ok: true as const };
 }
 

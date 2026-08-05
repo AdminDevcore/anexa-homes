@@ -13,6 +13,10 @@ export type CallRecording = { id: string; name: string; group: CallGroup };
 /**
  * Dedicated upload slot for the QC Call recording on a deal. One audio recording
  * per slot — re-uploading replaces it (handled server-side).
+ *
+ * Rendered inside the Call Recordings folder in Documents & Files. The folder
+ * header already names it, so there is no heading here — the folder is the
+ * heading.
  */
 export function DealCallRecordings({
   leadId,
@@ -26,22 +30,17 @@ export function DealCallRecordings({
   canDelete: boolean;
 }) {
   return (
-    <div className="space-y-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Call Recordings
-      </p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {CALL_GROUP_KEYS.map((g) => (
-          <CallSlot
-            key={g}
-            group={g}
-            leadId={leadId}
-            recording={recordings.find((r) => r.group === g) ?? null}
-            canUpload={canUpload}
-            canDelete={canDelete}
-          />
-        ))}
-      </div>
+    <div className="grid gap-2 sm:grid-cols-2">
+      {CALL_GROUP_KEYS.map((g) => (
+        <CallSlot
+          key={g}
+          group={g}
+          leadId={leadId}
+          recording={recordings.find((r) => r.group === g) ?? null}
+          canUpload={canUpload}
+          canDelete={canDelete}
+        />
+      ))}
     </div>
   );
 }

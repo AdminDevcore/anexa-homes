@@ -5,14 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Loader2, Check, ChevronRight, FileText, Upload, ListTodo, UserPlus,
-  Sun, Pencil, Lock, Sparkles, Send,
+  Loader2, Check, ChevronRight, Upload, ListTodo, UserPlus,
+  Sun, Pencil, Sparkles, Send,
 } from "lucide-react";
 import type { FeedChannel, MilestonePayee } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { SOLAR_FOLDERS } from "@/lib/solar-folders";
 import {
   postDealFeedAction,
   inviteHomeownerAction,
@@ -352,57 +351,6 @@ function SpecRow({ k, v }: { k: string; v: string }) {
     <div className="flex items-center justify-between gap-4 py-2">
       <dt className="text-muted-foreground">{k}</dt>
       <dd className="text-right font-medium tabular-nums">{v}</dd>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 2 · Document folders
-// ---------------------------------------------------------------------------
-
-export function SolarDocumentFolders({
-  counts,
-  onOpenUpload,
-}: {
-  counts: Record<string, number>;
-  onOpenUpload?: string;
-}) {
-  return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-      {SOLAR_FOLDERS.map((f) => (
-        <div
-          key={f.key}
-          className={cn(
-            "flex items-start gap-3 rounded-lg border p-3",
-            f.internal ? "border-dashed border-border bg-muted/30" : "border-border"
-          )}
-        >
-          <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-muted">
-            {f.internal ? (
-              <Lock className="size-4 text-muted-foreground" />
-            ) : (
-              <FileText className="size-4 text-muted-foreground" />
-            )}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-sm font-medium">{f.label}</span>
-              <span className="rounded-full bg-muted px-1.5 text-[11px] tabular-nums text-muted-foreground">
-                {counts[f.key] ?? 0}
-              </span>
-            </div>
-            <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{f.hint}</p>
-          </div>
-        </div>
-      ))}
-      {onOpenUpload && (
-        <a
-          href={onOpenUpload}
-          className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground hover:bg-muted"
-        >
-          <Upload className="size-4" /> Upload a file
-        </a>
-      )}
     </div>
   );
 }

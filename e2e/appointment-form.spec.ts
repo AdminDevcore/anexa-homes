@@ -41,9 +41,10 @@ test("new appointment: required custom field is enforced, attachment uploads", a
   await page.getByRole("option", { name: "Hail", exact: true }).click();
   await page.getByRole("button", { name: "Create Appointment" }).click();
 
-  // Lands on the new deal; the staged attachment is in Documents & Files, which
-  // is part of the same page (no tab to open).
+  // Lands on the new deal. The staged attachment is uncategorised, so it files
+  // itself into the "Other" folder in Documents & Files — open that to see it.
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+  await page.getByRole("button", { name: /^Other/ }).click();
   await expect(page.getByText("site-photo.pdf")).toBeVisible({ timeout: 10000 });
 
   await page.context().clearCookies();

@@ -43,17 +43,28 @@ test("tasks: create and complete", async ({ page }) => {
   await expect(page.getByText(title).first()).toBeVisible({ timeout: 10000 });
 });
 
-// Open a deal (lead) and make sure it's in production (crew/QC/daily/photos visible).
+/**
+ * Open a deal and make sure it really is in production (crew / QC / photos).
+ *
+ * Both the "Start production" button and everything it unlocks live INSIDE the
+ * Field Production slide of the job switcher, and Claim Info is the slide that
+ * shows by default. So the slide has to be opened before the button can be
+ * seen at all — checking `isVisible()` on the default slide always answered
+ * false, which quietly made this helper a no-op and left the deal un-started.
+ */
 async function openProductionDeal(page: Page) {
   await page.goto("/portal/pipeline");
   await page.getByRole("button", { name: "List" }).click();
   await page.locator('table a[href^="/portal/leads/"]').first().click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
-  // The deal page is one page — production (crew/QC/photos) is already on it.
+
+  await page.getByRole("tab", { name: "Field Production" }).click();
   const start = page.getByRole("button", { name: /Start production/ });
   if (await start.isVisible().catch(() => false)) {
     await start.click();
-    await expect(page.getByText(/Job AH-/)).toBeVisible({ timeout: 10000 });
+    // The refresh re-renders the page on the default slide, so re-open it.
+    await expect(page.getByText(/Job AH-/)).toBeVisible({ timeout: 15000 });
+    await page.getByRole("tab", { name: "Field Production" }).click();
   }
 }
 
@@ -62,13 +73,21 @@ test("photo upload appears on a project", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await openProductionDeal(page);
 
-  // The production section has a file input per photo-checklist slot; upload into the first.
-  await page.locator('input[type="file"]').first().setInputFiles({
+  // Scoped to the production slide. A page-wide input[type=file].first() used
+  // to land here by accident, back when Documents & Files kept an
+  // always-mounted upload input; now that files live in folders, this has to
+  // name the section it means.
+  const production = page.locator('[data-deal-slide="field"]');
+
+  // One file input per photo-checklist slot; upload into the first.
+  await production.locator('input[type="file"]').first().setInputFiles({
     name: "roof.png",
     mimeType: "image/png",
     buffer: PNG,
   });
   // After upload + refresh, an image served from /portal/files should appear.
-  await expect(page.locator('img[src^="/portal/files/"]').first()).toBeVisible({ timeout: 15000 });
+  await expect(production.locator('img[src^="/portal/files/"]').first()).toBeVisible({
+    timeout: 15000,
+  });
 });
 
