@@ -269,13 +269,33 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
     ...(projIds ? { projectId: { in: projIds } } : {}),
     ...(await ledgerVerticalFilter()),
   };
-  const BACKLOG_STATUSES = ["not_started", "in_production", "on_hold", "qc"] as const;
+  // Backlog = signed work not yet finished, keyed off the deal's PIPELINE
+  // STAGE: a job counts until its deal reaches a won stage (Paid / Closed) or a
+  // lost one (Cancelled). A job whose deal has no stage still counts — it is
+  // signed work that has not been finished.
+  //
+  // It used to key off `Project.status`, a second status that duplicated the
+  // pipeline (which already has In Production, QC Inspection, Paid and
+  // Cancelled as stages) and had to be advanced by hand in a separate control
+  // on the deal page. That control is gone; `Project.status` survives only as a
+  // field inside the admin Edit Job dialog, so it now drifts from reality the
+  // moment nobody remembers to open that dialog. The stage is moved every day
+  // because it IS the pipeline, which makes it the honest input for a money
+  // figure.
 
   const [appts, won, soldAgg, activeProjects, txns, collectedAgg, liability, leadsBySource, wonBySource] = await Promise.all([
     prisma.lead.count({ where: { ...leadWhere, createdAt: inPeriod } }),
     prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: inPeriod } }),
     prisma.project.aggregate({ where: { ...projectWhere, createdAt: inPeriod }, _sum: { contractValue: true }, _count: { _all: true } }),
-    prisma.project.findMany({ where: { ...projectWhere, status: { notIn: ["cancelled"] } }, select: { contractValue: true, deductibleCents: true, supplementCents: true, status: true } }),
+    prisma.project.findMany({
+      where: { ...projectWhere, status: { notIn: ["cancelled"] } },
+      select: {
+        contractValue: true,
+        deductibleCents: true,
+        supplementCents: true,
+        lead: { select: { stage: { select: { isWon: true, isLost: true } } } },
+      },
+    }),
     prisma.transaction.findMany({ where: { companyId: user.companyId, date: inPeriod, ...txnProjectFilter }, select: { amountCents: true } }),
     prisma.transaction.aggregate({ where: { companyId: user.companyId, amountCents: { gt: 0 }, ...txnProjectFilter }, _sum: { amountCents: true } }),
     getCommissionLiability(user.companyId, scope),
@@ -320,7 +340,9 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
     return prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : cur > 0 ? 100 : cur < 0 ? -100 : 0;
   };
 
-  const backlog = activeProjects.filter((p) => (BACKLOG_STATUSES as readonly string[]).includes(p.status)).reduce((s, p) => s + p.contractValue, 0);
+  const backlog = activeProjects
+    .filter((p) => !p.lead?.stage?.isWon && !p.lead?.stage?.isLost)
+    .reduce((s, p) => s + p.contractValue, 0);
   const supplement = activeProjects.reduce((s, p) => s + p.supplementCents, 0);
   const collectible = activeProjects.reduce((s, p) => s + p.contractValue + p.deductibleCents + p.supplementCents, 0);
   const collected = collectedAgg._sum.amountCents ?? 0;

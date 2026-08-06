@@ -72,11 +72,7 @@ import { DealSlides, type DealSlideDef } from "@/components/portal/deal-slides";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
 import { ScopeOfWorkPanel } from "@/components/portal/scope-of-work-panel";
-import {
-  ProjectStatusControl,
-  QcChecklistEditor,
-  CrewAssigner,
-} from "@/components/portal/project-workflows";
+import { QcChecklistEditor, CrewAssigner } from "@/components/portal/project-workflows";
 import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
 import { utcToZonedWallClock } from "@/lib/tz";
@@ -776,10 +772,12 @@ export default async function LeadDetailPage({
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
-                      <div className="flex items-center gap-2">
-                        {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
-                        <ProjectStatusControl projectId={project.id} status={project.status} />
-                      </div>
+                      {/* No production-status control. `Project.status` was a
+                          second, hand-maintained status that duplicated the
+                          pipeline — which already has In Production, QC
+                          Inspection, Paid and Cancelled as stages. The deal's
+                          stage is the only status now. */}
+                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
                     </div>
 
                     <Section icon={Camera} label="Site & Install Photos">
@@ -917,10 +915,12 @@ export default async function LeadDetailPage({
                   <div className="space-y-6">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
-                      <div className="flex items-center gap-2">
-                        {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
-                        <ProjectStatusControl projectId={project.id} status={project.status} />
-                      </div>
+                      {/* No production-status control. `Project.status` was a
+                          second, hand-maintained status that duplicated the
+                          pipeline — which already has In Production, QC
+                          Inspection, Paid and Cancelled as stages. The deal's
+                          stage is the only status now. */}
+                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
                     </div>
 
                     <Section icon={Camera} label="Site & Install Photos" tone="solar">

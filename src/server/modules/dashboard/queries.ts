@@ -121,7 +121,9 @@ export async function getRecentProjects(user: SessionUser, vertical: Vertical, t
     orderBy: { updatedAt: "desc" },
     take,
     include: {
-      lead: { select: { firstName: true, lastName: true } },
+      // The stage comes along because it, not `Project.status`, is where a
+      // job's status lives now — see the badge in the dashboard's project list.
+      lead: { select: { firstName: true, lastName: true, stage: { select: { name: true } } } },
       manager: { select: { firstName: true, lastName: true } },
     },
   });

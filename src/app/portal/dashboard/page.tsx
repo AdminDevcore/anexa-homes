@@ -147,8 +147,12 @@ export default async function DashboardPage() {
                     {p.manager ? `PM: ${p.manager.firstName} ${p.manager.lastName}` : "Unassigned"}
                   </div>
                 </div>
-                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
-                  {p.status.replace(/_/g, " ")}
+                {/* The deal's pipeline stage, not `Project.status` — that
+                    second status duplicated this one and lost its control on
+                    the deal page, so it now sits at whatever it was last set
+                    to. The stage moves every day. */}
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium">
+                  {p.lead.stage?.name ?? "No stage"}
                 </span>
               </li>
             ))}

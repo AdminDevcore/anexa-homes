@@ -17,47 +17,10 @@ import {
 } from "@/components/ui/select";
 import {
   submitDailyReportAction,
-  updateProjectStatusAction,
   toggleQcItemAction,
   assignCrewAction,
   unassignCrewAction,
 } from "@/server/modules/projects/actions";
-
-const STATUS_OPTIONS = [
-  "not_started",
-  "in_production",
-  "on_hold",
-  "qc",
-  "completed",
-  "closed",
-  "cancelled",
-];
-
-export function ProjectStatusControl({ projectId, status }: { projectId: string; status: string }) {
-  const router = useRouter();
-  const [pending, setPending] = React.useState(false);
-
-  async function change(next: string) {
-    setPending(true);
-    const res = await updateProjectStatusAction(projectId, next);
-    setPending(false);
-    if (res.ok) {
-      toast.success("Status updated");
-      router.refresh();
-    } else toast.error(res.error);
-  }
-
-  return (
-    <Select value={status} onValueChange={change} disabled={pending}>
-      <SelectTrigger className="h-8 w-[170px] capitalize"><SelectValue /></SelectTrigger>
-      <SelectContent>
-        {STATUS_OPTIONS.map((s) => (
-          <SelectItem key={s} value={s} className="capitalize">{s.replace(/_/g, " ")}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
 
 export function QcChecklistEditor({
   projectId,
