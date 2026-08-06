@@ -17,33 +17,84 @@ type OverpassEl = {
   tags?: Record<string, string>;
 };
 
+type Pt = { lat: number; lng: number };
+
 /**
- * A point that lies INSIDE a building outline. The polygon centroid is used
- * when it falls inside; for concave footprints (L-shaped townhomes) where the
- * centroid lands off-building (e.g. in the driveway), we snap to the outline
- * vertex nearest the centroid instead. Prevents "house dot in the street".
+ * Where the horizontal line at `lat` crosses the ring's edges, left to right.
+ * Consecutive pairs bound the interior, so [0,1], [2,3]… are spans of house.
  */
-function interiorPoint(ring: { lat: number; lng: number }[]): { lat: number; lng: number } {
-  let area = 0, cx = 0, cy = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i], b = ring[(i + 1) % ring.length];
-    const f = a.lng * b.lat - b.lng * a.lat;
-    area += f; cx += (a.lng + b.lng) * f; cy += (a.lat + b.lat) * f;
+function crossingsAt(ring: Pt[], lat: number): number[] {
+  const xs: number[] = [];
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[j], b = ring[i];
+    if ((a.lat > lat) !== (b.lat > lat)) {
+      xs.push(a.lng + ((lat - a.lat) / (b.lat - a.lat)) * (b.lng - a.lng));
+    }
   }
-  if (Math.abs(area) < 1e-12) {
+  return xs.sort((p, q) => p - q);
+}
+
+/** The middle of the widest run of interior along `lat`, with its width. */
+function widestSpan(ring: Pt[], lat: number): { lng: number; width: number } | null {
+  const xs = crossingsAt(ring, lat);
+  let best: { lng: number; width: number } | null = null;
+  for (let i = 0; i + 1 < xs.length; i += 2) {
+    const width = xs[i + 1] - xs[i];
+    if (!best || width > best.width) best = { lng: (xs[i] + xs[i + 1]) / 2, width };
+  }
+  return best;
+}
+
+/**
+ * A point that lies INSIDE a building outline — the dot a rep taps, which has
+ * to land on the roof rather than the lawn or the kerb.
+ *
+ * Two things decide that, and both were wrong before:
+ *
+ * 1. The shoelace sums MUST run on coordinates shifted to a local origin. On raw
+ *    lat/lng every cross product is ~3200 while their signed total (twice the
+ *    area) is ~1e-7 for a house — five orders of catastrophic cancellation. The
+ *    "centroid" came out a median 11 m from true centre, which is wider than the
+ *    house, so it fell outside the footprint for two thirds of buildings.
+ *
+ * 2. When the centroid genuinely lands outside a concave footprint (an L-shaped
+ *    house, a courtyard block), the nearest outline VERTEX is a CORNER of the
+ *    roof — a visibly wrong place for a pin. Slide along the centroid's own
+ *    latitude to the middle of the widest part of the house instead: always
+ *    interior, and still the part of the roof the eye reads as its centre.
+ */
+export function interiorPoint(ring: Pt[]): Pt {
+  const ox = ring[0].lng, oy = ring[0].lat;
+  let a2 = 0, cx = 0, cy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const p = ring[i], q = ring[(i + 1) % ring.length];
+    const px = p.lng - ox, py = p.lat - oy, qx = q.lng - ox, qy = q.lat - oy;
+    const f = px * qy - qx * py;
+    a2 += f; cx += (px + qx) * f; cy += (py + qy) * f;
+  }
+  // Collinear or zero-area outline — nothing to centre on.
+  if (Math.abs(a2) < 1e-16) {
     const n = ring.length;
     return { lat: ring.reduce((s, p) => s + p.lat, 0) / n, lng: ring.reduce((s, p) => s + p.lng, 0) / n };
   }
-  area *= 0.5;
-  const c = { lat: cy / (6 * area), lng: cx / (6 * area) };
+  const c = { lat: cy / (3 * a2) + oy, lng: cx / (3 * a2) + ox };
   const poly: LatLng[] = ring.map((p) => [p.lat, p.lng]);
   if (pointInPolygon([c.lat, c.lng], poly)) return c;
-  let best = ring[0], bestD = Infinity;
-  for (const p of ring) {
-    const d = (p.lat - c.lat) ** 2 + (p.lng - c.lng) ** 2;
-    if (d < bestD) { bestD = d; best = p; }
+
+  const onCentroidLat = widestSpan(ring, c.lat);
+  if (onCentroidLat) return { lat: c.lat, lng: onCentroidLat.lng };
+
+  // The centroid's latitude misses the outline entirely (self-touching rings).
+  // Sweep the footprint for the widest span anywhere in it.
+  const lats = ring.map((p) => p.lat);
+  const lo = Math.min(...lats), hi = Math.max(...lats);
+  let best: { lat: number; lng: number; width: number } | null = null;
+  for (let k = 1; k < 8; k++) {
+    const lat = lo + ((hi - lo) * k) / 8;
+    const span = widestSpan(ring, lat);
+    if (span && (!best || span.width > best.width)) best = { lat, lng: span.lng, width: span.width };
   }
-  return { lat: best.lat, lng: best.lng };
+  return best ? { lat: best.lat, lng: best.lng } : { lat: ring[0].lat, lng: ring[0].lng };
 }
 
 function fmtAddress(tags: Record<string, string> | undefined): string | null {
