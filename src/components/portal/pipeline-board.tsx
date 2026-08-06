@@ -25,6 +25,8 @@ export type BoardLead = {
   value: number;
   phone: string | null;
   city: string | null;
+  /** Full street/city/state/ZIP — searchable, but only `city` is rendered. */
+  addressText: string | null;
   rep: string | null;
   // Whole-day ages (computed server-side): total age since the appointment was
   // booked, and time spent in the current stage.
@@ -208,6 +210,7 @@ function Card({
     <div
       ref={setNodeRef}
       data-search-item
+      data-search-text={lead.addressText ?? undefined}
       data-testid="pipeline-card"
       className={cn(
         // shrink-0 is load-bearing: the card is a flex item in the column's

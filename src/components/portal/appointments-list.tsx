@@ -16,6 +16,7 @@ import {
 import {
   ALL_OUTCOMES,
   buildOutcomeFilters,
+  matchesAppointmentQuery,
   matchesOutcomeFilter,
   type OutcomeFilter,
 } from "@/lib/appointment-filters";
@@ -26,6 +27,8 @@ export type AppointmentRow = {
   name: string;
   phone: string | null;
   email: string | null;
+  /** Street/city/state/ZIP as one searchable string; not rendered. */
+  address: string | null;
   typeLabel: string;
   sourceName: string | null;
   stage: { name: string; color: string } | null;
@@ -55,17 +58,10 @@ export function AppointmentsList({
   const [q, setQ] = React.useState(initialQuery);
   const [filter, setFilter] = React.useState<string>(ALL_OUTCOMES);
 
-  const searched = React.useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter((r) =>
-      [r.name, r.phone, r.email, r.repName, r.sourceName, r.stage?.name, r.outcome]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(needle)
-    );
-  }, [rows, q]);
+  const searched = React.useMemo(
+    () => (q.trim() ? rows.filter((r) => matchesAppointmentQuery(r, q)) : rows),
+    [rows, q]
+  );
 
   // Counts reflect the current search, so the chips always add up to what's shown.
   const { states, outcomes } = React.useMemo(
@@ -97,7 +93,7 @@ export function AppointmentsList({
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name, phone, rep…"
+            placeholder="Search name, address, phone, rep…"
             className="h-9 pl-8"
             aria-label="Search appointments"
           />

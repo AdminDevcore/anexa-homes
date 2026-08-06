@@ -26,6 +26,8 @@ type Task = {
   createdById: string | null;
   leadId: string | null;
   leadName: string | null;
+  /** The tagged job's address — searchable, never rendered. */
+  leadAddress: string | null;
 };
 type Option = { id: string; name: string };
 
@@ -92,7 +94,8 @@ export function TasksClient({
       if (fromMs && created < fromMs) return false;
       if (toMs && created > toMs) return false;
       if (needle) {
-        const hay = `${t.title} ${t.leadName ?? ""} ${t.assignee ?? ""} ${t.assignedBy ?? ""}`.toLowerCase();
+        const hay =
+          `${t.title} ${t.leadName ?? ""} ${t.leadAddress ?? ""} ${t.assignee ?? ""} ${t.assignedBy ?? ""}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;

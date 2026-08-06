@@ -8,6 +8,7 @@ import { getActiveVertical } from "@/server/auth/vertical";
 import { STAFF_ROLES } from "@/server/rbac/matrix";
 import { PageHeader } from "@/components/portal/ui";
 import { TasksClient } from "@/components/portal/tasks-client";
+import { addressSearchText } from "@/lib/address";
 
 export const metadata = { title: "Tasks" };
 
@@ -27,7 +28,17 @@ export default async function TasksPage() {
       include: {
         assignee: { select: { firstName: true, lastName: true } },
         createdBy: { select: { firstName: true, lastName: true } },
-        lead: { select: { id: true, firstName: true, lastName: true } },
+        lead: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            address: true,
+            city: true,
+            state: true,
+            zip: true,
+          },
+        },
       },
     }),
     canAssign
@@ -59,6 +70,9 @@ export default async function TasksPage() {
           createdById: t.createdById,
           leadId: t.leadId,
           leadName: t.lead ? `${t.lead.firstName} ${t.lead.lastName}` : null,
+          // Searchable only — the job chip shows the customer's name, but the
+          // task is just as often remembered by the house it belongs to.
+          leadAddress: t.lead ? addressSearchText(t.lead) || null : null,
         }))}
         assignees={assignees.map((a) => ({ id: a.id, name: `${a.firstName} ${a.lastName}` }))}
         canAssign={canAssign}

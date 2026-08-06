@@ -21,6 +21,8 @@ export type ListLead = {
   name: string;
   value: number;
   city: string | null;
+  /** Full street/city/state/ZIP — searchable, but only `city` is rendered. */
+  addressText: string | null;
   rep: string | null;
   serviceType: string;
   stageName: string;
@@ -119,7 +121,12 @@ export function PipelineView({
                 </TableRow>
               ) : (
                 listLeads.map((l) => (
-                  <TableRow key={l.id} className="cursor-pointer" data-search-item>
+                  <TableRow
+                    key={l.id}
+                    className="cursor-pointer"
+                    data-search-item
+                    data-search-text={l.addressText ?? undefined}
+                  >
                     <TableCell className="font-medium">
                       <Link href={`/portal/leads/${l.id}`} className="hover:text-gold-muted">
                         {l.name}

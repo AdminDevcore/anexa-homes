@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, FileText, Loader2, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, FileSignature, FileText, Loader2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,13 @@ export type FolderFile = {
   category: string | null;
 };
 
+/** An e-signature package on this deal — a DocumentPackage row, not an upload. */
+export type FolderPackage = {
+  id: string;
+  title: string;
+  status: string;
+};
+
 /**
  * Documents & Files as a folder grid — the Pipe "Cloud storage" layout.
  *
@@ -40,6 +48,7 @@ export function DealFolders({
   projectId,
   vertical,
   files,
+  packages = [],
   checklists = [],
   canUpload,
   canDelete,
@@ -48,6 +57,7 @@ export function DealFolders({
   projectId?: string | null;
   vertical: string | null;
   files: FolderFile[];
+  packages?: FolderPackage[];
   checklists?: PhotoChecklist[];
   canUpload: boolean;
   canDelete: boolean;
@@ -76,6 +86,7 @@ export function DealFolders({
         <OpenFolder
           folder={open}
           files={byFolder.get(open.key) ?? []}
+          packages={open.hostsPackages ? packages : []}
           folders={folders}
           leadId={leadId}
           projectId={projectId}
@@ -92,17 +103,17 @@ export function DealFolders({
     <div className="space-y-4" data-testid="deal-folders">
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {folders.map((f) => {
-          const count = byFolder.get(f.key)?.length ?? 0;
+          // The Contract tile counts its e-sign packages too, so the badge
+          // matches what you actually find when you open it.
+          const count =
+            (byFolder.get(f.key)?.length ?? 0) + (f.hostsPackages ? packages.length : 0);
           const Icon = f.icon;
           return (
             <button
               key={f.key}
               type="button"
               onClick={() => setOpenKey(f.key)}
-              className={cn(
-                "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-muted/60",
-                f.internal ? "border-dashed border-border bg-muted/30" : "border-border"
-              )}
+              className="flex items-start gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted/60"
             >
               <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-muted">
                 <Icon className="size-4 text-muted-foreground" />
@@ -130,6 +141,7 @@ export function DealFolders({
 function OpenFolder({
   folder,
   files,
+  packages,
   folders,
   leadId,
   projectId,
@@ -140,6 +152,7 @@ function OpenFolder({
 }: {
   folder: DealFolder;
   files: FolderFile[];
+  packages: FolderPackage[];
   folders: DealFolder[];
   leadId: string;
   projectId?: string | null;
@@ -186,6 +199,7 @@ function OpenFolder({
         <GenericFolder
           folderKey={folder.key}
           files={files}
+          packages={packages}
           folders={folders}
           leadId={leadId}
           projectId={projectId}
@@ -201,6 +215,7 @@ function OpenFolder({
 function GenericFolder({
   folderKey,
   files,
+  packages,
   folders,
   leadId,
   projectId,
@@ -209,6 +224,7 @@ function GenericFolder({
 }: {
   folderKey: string;
   files: FolderFile[];
+  packages: FolderPackage[];
   folders: DealFolder[];
   leadId: string;
   projectId?: string | null;
@@ -273,7 +289,32 @@ function GenericFolder({
         </>
       )}
 
-      {files.length === 0 && (
+      {/* E-signature packages, above the uploads in the same folder. They link
+          out to the signer rather than to a stored file, and carry a status
+          instead of a delete — so they render as their own rows, not as part
+          of the file list. */}
+      {packages.length > 0 && (
+        <ul className="space-y-2">
+          {packages.map((d) => (
+            <li key={d.id}>
+              <Link
+                href={`/portal/documents/${d.id}`}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-gold/40"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <FileSignature className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate font-medium">{d.title}</span>
+                </span>
+                <span className="shrink-0 text-xs capitalize text-muted-foreground">
+                  {d.status.replace(/_/g, " ")}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {files.length === 0 && packages.length === 0 && (
         <p className="py-6 text-center text-sm text-muted-foreground">This folder is empty.</p>
       )}
 

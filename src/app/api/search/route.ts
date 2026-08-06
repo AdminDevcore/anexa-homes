@@ -4,8 +4,9 @@ import { getSessionUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { prisma } from "@/server/db/client";
+import { addressContains } from "@/lib/address";
 
-type Item = { id: string; title: string; subtitle: string | null; href: string };
+type Item ={ id: string; title: string; subtitle: string | null; href: string };
 
 export async function GET(req: Request) {
   const user = await getSessionUser();
@@ -20,7 +21,20 @@ export async function GET(req: Request) {
   const [leads, projects, team] = await Promise.all([
     can(user, "read", "Lead")
       ? prisma.lead.findMany({
-          where: { AND: [leadScope, { OR: [{ firstName: contains }, { lastName: contains }, { email: contains }, { phone: contains }, { address: contains }] }] },
+          where: {
+            AND: [
+              leadScope,
+              {
+                OR: [
+                  { firstName: contains },
+                  { lastName: contains },
+                  { email: contains },
+                  { phone: contains },
+                  ...addressContains(q),
+                ],
+              },
+            ],
+          },
           orderBy: { updatedAt: "desc" },
           take: 6,
           select: { id: true, firstName: true, lastName: true, address: true, city: true, state: true },
@@ -28,7 +42,24 @@ export async function GET(req: Request) {
       : Promise.resolve([]),
     can(user, "read", "Project")
       ? prisma.project.findMany({
-          where: { AND: [projScope, { OR: [{ projectNumber: contains }, { address: contains }, { lead: { is: { OR: [{ firstName: contains }, { lastName: contains }] } } }] }] },
+          where: {
+            AND: [
+              projScope,
+              {
+                OR: [
+                  { projectNumber: contains },
+                  ...addressContains(q),
+                  {
+                    lead: {
+                      is: {
+                        OR: [{ firstName: contains }, { lastName: contains }, ...addressContains(q)],
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
           orderBy: { updatedAt: "desc" },
           take: 5,
           select: { id: true, projectNumber: true, leadId: true, lead: { select: { firstName: true, lastName: true } } },

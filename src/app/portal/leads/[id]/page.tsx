@@ -1019,63 +1019,37 @@ export default async function LeadDetailPage({
             </Card>
           )}
 
-          {/* One card for everything filed against this deal.
-              E-signature packages stay pinned above the grid: they are
-              DocumentPackage rows with their own status and route, not files,
-              so filing them into a folder would misrepresent what they are.
-              Everything that IS a file lives in the folders below — including
-              the Survey/Install checklists and the QC call, which used to be
-              header buttons and a bolted-on slot. */}
+          {/* One card, one level: every piece of paper on this job is in a
+              folder. E-signature packages live in the Contract folder rather
+              than in a list beside the grid — a proposal sent for signature and
+              the signed PDF that comes back are the same thing to whoever is
+              looking for them, and a second "Documents" heading above a set of
+              document folders only ever raised the question of which was which. */}
           <Card
             title={isSolarDeal ? "4 · Contracts & documents" : "Documents & Files"}
             icon={FolderOpen}
             tone={isSolarDeal ? "solar" : "brand"}
             description="Signed paperwork, photos and every file on this job"
           >
-            <div className="space-y-5">
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Documents
-                </p>
-                {lead.documentPackages.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No documents yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {lead.documentPackages.map((d) => (
-                      <li key={d.id}>
-                        <Link
-                          href={`/portal/documents/${d.id}`}
-                          className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-gold/40"
-                        >
-                          <span className="font-medium">{d.title}</span>
-                          <span className="text-xs capitalize text-muted-foreground">{d.status.replace(/_/g, " ")}</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="space-y-2 border-t border-border pt-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Folders
-                </p>
-                <DealFolders
-                  leadId={lead.id}
-                  projectId={project?.id ?? null}
-                  vertical={lead.vertical}
-                  checklists={photoChecklists}
-                  files={lead.files.map((f) => ({
-                    id: f.id,
-                    name: f.name,
-                    kind: f.kind,
-                    category: f.category,
-                  }))}
-                  canUpload={can(user, "create", "File")}
-                  canDelete={can(user, "create", "File")}
-                />
-              </div>
-            </div>
+            <DealFolders
+              leadId={lead.id}
+              projectId={project?.id ?? null}
+              vertical={lead.vertical}
+              checklists={photoChecklists}
+              files={lead.files.map((f) => ({
+                id: f.id,
+                name: f.name,
+                kind: f.kind,
+                category: f.category,
+              }))}
+              packages={lead.documentPackages.map((d) => ({
+                id: d.id,
+                title: d.title,
+                status: d.status,
+              }))}
+              canUpload={can(user, "create", "File")}
+              canDelete={can(user, "create", "File")}
+            />
           </Card>
             </section>
         </div>

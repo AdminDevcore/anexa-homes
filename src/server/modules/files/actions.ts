@@ -193,7 +193,6 @@ export async function uploadFileAction(formData: FormData) {
 
   if (projectId) revalidatePath(`/portal/projects/${projectId}`);
   if (leadId) revalidatePath(`/portal/leads/${leadId}`);
-  revalidatePath("/portal/customer");
   return { ok: true as const };
 }
 
@@ -261,6 +260,5 @@ export async function deleteFileAction(id: string) {
   await prisma.fileAsset.delete({ where: { id } });
   if (file.projectId) revalidatePath(`/portal/projects/${file.projectId}`);
   if (file.leadId) revalidatePath(`/portal/leads/${file.leadId}`);
-  revalidatePath("/portal/customer");
   return { ok: true as const };
 }

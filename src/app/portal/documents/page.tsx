@@ -15,6 +15,7 @@ import { SignatureStatusBadge, roleLabel } from "@/components/esign/signature-st
 import { ResendButton } from "@/components/esign/resend-button";
 import { NewTemplateButton } from "@/components/portal/new-template-button";
 import { currentFormatters } from "@/lib/format-server";
+import { addressSearchText } from "@/lib/address";
 
 export const metadata = { title: "Documents" };
 
@@ -40,7 +41,19 @@ export default async function DocumentsPage() {
     prisma.documentPackage.findMany({
       where: { AND: [docScope, { lead: { is: { vertical } } }] },
       orderBy: { createdAt: "desc" },
-      include: { signers: true, lead: { select: { firstName: true, lastName: true } } },
+      include: {
+        signers: true,
+        lead: {
+          select: {
+            firstName: true,
+            lastName: true,
+            address: true,
+            city: true,
+            state: true,
+            zip: true,
+          },
+        },
+      },
     }),
     canSend
       ? prisma.lead.findMany({
@@ -134,7 +147,7 @@ export default async function DocumentsPage() {
             />
           </div>
         ) : (
-          <ListFilter placeholder="Search documents…" className="p-5">
+          <ListFilter placeholder="Search documents, customer, address…" className="p-5">
           <ul className="divide-y divide-border rounded-lg border border-border">
             {packages.map((p) => {
               const signedCount = p.signers.filter((s) => s.status === "signed").length;
@@ -145,7 +158,7 @@ export default async function DocumentsPage() {
                 key={p.id}
                 className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-start sm:justify-between"
                 data-search-item
-                data-search-text={`${p.title} ${p.lead ? `${p.lead.firstName} ${p.lead.lastName}` : ""} ${p.status} ${p.signers
+                data-search-text={`${p.status} ${addressSearchText(p.lead)} ${p.signers
                   .map((s) => `${s.name} ${s.status}`)
                   .join(" ")}`}
               >

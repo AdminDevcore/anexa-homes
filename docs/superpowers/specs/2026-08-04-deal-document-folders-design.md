@@ -36,21 +36,22 @@ export type DealFolder = {
   hint: string;
   /** Rendered on the tile and in the open-folder header. */
   icon: IconType;
-  /** Dashed border + lock. Never shown to a homeowner. */
-  internal?: boolean;
   /** Opens an existing specialised UI instead of the generic file list. */
   special?: "photos" | "calls";
+  /** This folder also lists the deal's e-signature packages, above its files. */
+  hostsPackages?: boolean;
 };
 
 export function foldersFor(vertical: string): DealFolder[];
+export function folderKeyFor(vertical: string, category: string | null): string;
 export function folderLabel(vertical: string, key: string | null): string;
 ```
 
-### Roofing — 12 folders
+### Roofing — 11 folders
 
 | key | label | hint |
 |---|---|---|
-| `contract` | Contract | Signed agreement and any change orders |
+| `contract` | Contract | Proposals sent for signature, the signed agreement, change orders — **hosts the e-sign packages** |
 | `insurance_docs` | Insurance Documents | Policy, declarations page, carrier correspondence |
 | `adjuster_scope` | Adjuster Scope | Carrier scope, estimate, supplements |
 | `survey` | Survey Photos | Roof, elevations, damage — the inspection set |
@@ -61,14 +62,13 @@ export function folderLabel(vertical: string, key: string | null): string;
 | `invoices` | Invoices & Payments | Certificate of completion, depreciation invoice, receipts |
 | `qc_call` | Call Recordings | QC call audio |
 | `other` | Other | Anything that does not fit above |
-| `internal` | Internal Documents | Never shown to the customer *(internal)* |
 
-### Solar — unchanged
+### Solar — 10
 
-The existing 11 keys from `solar-folders.ts` move across verbatim:
-`contract`, `utility_bill`, `personal_files`, `materials`, `survey_photos`,
-`engineering`, `permits`, `interconnection`, `install_photos`, `other`,
-`internal`.
+The keys from `solar-folders.ts` move across verbatim: `contract`,
+`utility_bill`, `personal_files`, `materials`, `survey_photos`, `engineering`,
+`permits`, `interconnection`, `install_photos`, `other`. Its `internal` folder
+is dropped for the reason below.
 
 ### Why these exact keys
 
@@ -94,8 +94,8 @@ A client component with exactly two states.
 ### Grid state
 
 Pipe's layout: a responsive grid of folder tiles, each showing icon, label, file
-count badge and the one-line hint. Internal folders keep the dashed-border +
-lock treatment `SolarDocumentFolders` already uses. Clicking a tile opens it.
+count badge and the one-line hint. Every tile looks the same — there is no
+privileged or dashed-out folder. Clicking a tile opens it.
 
 ### Open state
 
@@ -134,11 +134,16 @@ cannot be injected, then revalidates the lead and project paths.
 
 ## Deal page wiring — `src/app/portal/leads/[id]/page.tsx`
 
-The `FilesSection` invocation is replaced by a `Card` containing `<DealFolders>`.
+The `FilesSection` invocation is replaced by a `Card` containing `<DealFolders>`,
+and nothing else — no sub-headings, no second list.
 
-- The e-signature `documentPackages` list stays **pinned above the grid**. These
-  are `DocumentPackage` rows, not `FileAsset` rows — they have their own status
-  and their own route, and folding them into a folder would misrepresent them.
+- The e-signature `documentPackages` render **inside the Contract folder**,
+  above its uploads, and count toward its badge. They are `DocumentPackage`
+  rows with their own status and route, so they keep their own row treatment —
+  but a proposal sent for signature and the countersigned PDF that comes back
+  are the same thing to whoever is hunting for one, and a "Documents" heading
+  sitting above a grid of document folders only ever raised the question of
+  which of the two was meant.
 - The `DealPhotos` header buttons are removed; the Survey and Install Photos
   folders are now their entry point.
 - The solar-only `Document folders` count-card is removed; the grid replaces it.
@@ -167,13 +172,29 @@ existing visual treatment.
   this gives the folder card a stable anchor, matching the `data-testid`
   convention already used by the pipeline board and stage bar.
 
-## Security
+## No customer-visibility concept
 
-`internal` is a **visual marker only** today. There is no customer-facing portal
-page in the app (`revalidatePath("/portal/customer")` in the file actions is
-vestigial), so there is nothing to hide files from yet. When a customer portal
-lands, `DealFolder.internal` is the flag it filters on — that is the whole point
-of carrying it. This spec does not add enforcement it cannot test.
+There is **no `internal` folder and no customer-visibility flag**, and no folder
+hint mentions a customer.
+
+The first draft carried an "Internal Documents · Never shown to the customer"
+folder, on the assumption that a customer portal would arrive later. That
+assumption was wrong in a way worth recording: the `customer` role cannot even
+sign in — `src/server/auth/config.ts` rejects it alongside `disabled` and
+`suspended`, and `session.ts` does the same — and no `/portal/customer` route
+exists. So there is no customer-facing surface anywhere in the app.
+
+Which makes the label actively misleading rather than merely premature: marking
+one folder "internal" implies the other ten are visible to a homeowner, and
+none of them are. Every folder is staff-only. A unit test asserts no folder key,
+label, or hint contains "customer" or "internal" so the idea cannot creep back
+without a decision.
+
+The two vestigial `revalidatePath("/portal/customer")` calls in the file actions
+are removed for the same reason — they revalidated a route that does not exist.
+
+If a customer portal is ever built, per-folder visibility is a real design
+question to answer then, against a surface that actually exists.
 
 File *access* is unchanged: `/portal/files/[id]` already enforces company scope,
 vertical isolation and per-role deal scope, and folders do not touch it.
@@ -183,8 +204,9 @@ vertical isolation and per-role deal scope, and folders do not touch it.
 **Unit — `src/lib/__tests__/deal-folders.test.ts`**
 - `foldersFor("roofing")` and `foldersFor("solar")` return their sets, and the
   sets have disjoint responsibilities where they overlap in label.
-- Both sets contain an `other` and an `internal` key — the fallback and the
-  privacy marker are structural guarantees.
+- Both sets contain an `other` key — the fallback is a structural guarantee.
+- No folder key, label, or hint mentions "customer" or "internal".
+- Exactly one folder per set hosts the e-sign packages.
 - Folder keys within a set are unique.
 - `folderLabel` returns `Other` for `null` and for an unknown key.
 

@@ -1,5 +1,6 @@
 import type { ServiceType } from "@prisma/client";
 import { serviceTypeLabel } from "@/lib/service-types";
+import { addressSearchText } from "@/lib/address";
 import type { AppointmentRow } from "@/components/portal/appointments-list";
 
 /**
@@ -37,6 +38,10 @@ type LeadForRow = {
   lastName: string;
   phone: string | null;
   email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
   serviceType: ServiceType;
   value: number;
   appointmentAt: Date | null;
@@ -61,6 +66,9 @@ export function buildAppointmentRows(
     name: `${l.firstName} ${l.lastName}`.trim(),
     phone: l.phone,
     email: l.email,
+    // Searchable only — the list has no address column, but reps look deals up
+    // by house ("the one on Oak", "75024") as often as by name.
+    address: addressSearchText(l) || null,
     typeLabel: serviceTypeLabel(l.serviceType),
     sourceName: l.source?.name ?? null,
     stage: l.stage ? { name: l.stage.name, color: l.stage.color } : null,

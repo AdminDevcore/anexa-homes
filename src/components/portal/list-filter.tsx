@@ -6,9 +6,14 @@ import { Input } from "@/components/ui/input";
 
 /**
  * Per-page search that filters the list it wraps. Any descendant marked with
- * `data-search-item` is shown/hidden by whether its text (or an explicit
- * `data-search-text`) matches the query. Works for server- AND client-rendered
- * lists (it filters the live DOM and re-applies when the list re-renders).
+ * `data-search-item` is shown/hidden by whether its text matches the query.
+ * Works for server- AND client-rendered lists (it filters the live DOM and
+ * re-applies when the list re-renders).
+ *
+ * `data-search-text` ADDS to what is matched rather than replacing it — that is
+ * how off-screen terms (a job's full address, a truncated ZIP) become
+ * searchable without having to restate every visible column.
+ *
  * Add a `data-search-empty` element to show a "no matches" message.
  */
 export function ListFilter({
@@ -32,7 +37,7 @@ export function ListFilter({
     const items = root.querySelectorAll<HTMLElement>("[data-search-item]");
     let visible = 0;
     items.forEach((el) => {
-      const text = (el.getAttribute("data-search-text") || el.textContent || "").toLowerCase();
+      const text = `${el.getAttribute("data-search-text") || ""} ${el.textContent || ""}`.toLowerCase();
       const show = !needle || text.includes(needle);
       el.style.display = show ? "" : "none";
       if (show) visible += 1;

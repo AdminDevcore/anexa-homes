@@ -17,9 +17,11 @@
  * harmless: `foldersFor` never mixes the two sets, and each spelling matches
  * what its own vertical already wrote to the database.
  *
- * `internal` folders are never shown to the homeowner. There is no customer
- * portal today, so the flag is a visual marker (dashed border + lock) and the
- * hook a future customer view filters on.
+ * There is deliberately no "internal" folder and no customer-visibility flag.
+ * The `customer` role cannot even sign in (see src/server/auth/config.ts), so
+ * there is no customer-facing surface anywhere in the app — every one of these
+ * folders is staff-only. Marking one of them "internal" implied the others
+ * were visible to a homeowner, which was never true of any of them.
  */
 import {
   Camera,
@@ -28,7 +30,6 @@ import {
   FileSignature,
   Folder,
   Hammer,
-  Lock,
   Package,
   Phone,
   Plug,
@@ -45,21 +46,27 @@ export type DealFolder = {
   label: string;
   hint: string;
   icon: LucideIcon;
-  /** Dashed border + lock. Never shown to a homeowner. */
-  internal?: boolean;
   /**
    * Opens an existing specialised UI instead of the generic file list:
    * "photos" → the slot-by-slot checklist with Compile PDF,
    * "calls"  → the one-recording-per-slot QC call uploader.
    */
   special?: "photos" | "calls";
+  /**
+   * This folder also lists the deal's e-signature packages, above its files.
+   * They are DocumentPackage rows rather than uploads, but a proposal sent for
+   * signature and the countersigned PDF that comes back are the same thing to
+   * whoever is looking for it — so they share one folder instead of sitting in
+   * a separate list beside the grid.
+   */
+  hostsPackages?: boolean;
 };
 
 /** The bucket every uncategorised or unrecognised file falls into. */
 export const FALLBACK_FOLDER_KEY = "other";
 
 export const ROOFING_FOLDERS: DealFolder[] = [
-  { key: "contract", label: "Contract", hint: "Signed agreement and any change orders", icon: FileSignature },
+  { key: "contract", label: "Contract", hint: "Proposals sent for signature, the signed agreement, change orders", icon: FileSignature, hostsPackages: true },
   { key: "insurance_docs", label: "Insurance Documents", hint: "Policy, declarations page, carrier correspondence", icon: ShieldCheck },
   { key: "adjuster_scope", label: "Adjuster Scope", hint: "Carrier scope, estimate, supplements", icon: ClipboardList },
   { key: "survey", label: "Survey Photos", hint: "Roof, elevations, damage — the inspection set", icon: Camera, special: "photos" },
@@ -70,11 +77,10 @@ export const ROOFING_FOLDERS: DealFolder[] = [
   { key: "invoices", label: "Invoices & Payments", hint: "Certificate of completion, depreciation invoice, receipts", icon: Receipt },
   { key: "qc_call", label: "Call Recordings", hint: "QC call audio", icon: Phone, special: "calls" },
   { key: FALLBACK_FOLDER_KEY, label: "Other", hint: "Anything that does not fit above", icon: Folder },
-  { key: "internal", label: "Internal Documents", hint: "Never shown to the customer", icon: Lock, internal: true },
 ];
 
 export const SOLAR_FOLDERS: DealFolder[] = [
-  { key: "contract", label: "Contract", hint: "Signed agreement and any change orders", icon: FileSignature },
+  { key: "contract", label: "Contract", hint: "Proposals sent for signature, the signed agreement, change orders", icon: FileSignature, hostsPackages: true },
   { key: "utility_bill", label: "Utility Bill", hint: "12 months of usage — the basis for the design", icon: Zap },
   { key: "personal_files", label: "Personal Files", hint: "ID, proof of income, anything the lender asked for", icon: UserRound },
   { key: "materials", label: "Materials", hint: "Spec sheets and datasheets for what is going on the roof", icon: Package },
@@ -84,7 +90,6 @@ export const SOLAR_FOLDERS: DealFolder[] = [
   { key: "interconnection", label: "Interconnection", hint: "Utility application, approval, PTO letter", icon: Plug },
   { key: "install_photos", label: "Installation Photos", hint: "Progress and completion", icon: Hammer },
   { key: FALLBACK_FOLDER_KEY, label: "Other", hint: "Anything that does not fit above", icon: Folder },
-  { key: "internal", label: "Internal Documents", hint: "Never shown to the customer", icon: Lock, internal: true },
 ];
 
 /** The folder set for a deal, chosen by its vertical. Roofing is the default. */

@@ -37,6 +37,33 @@ export type OutcomeFilterGroups = {
 
 type Filterable = { outcome: string | null; when: string | null; isPast: boolean };
 
+/** The columns the search box matches, plus the address behind the row. */
+type Searchable = {
+  name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  repName: string | null;
+  sourceName: string | null;
+  stage: { name: string } | null;
+  outcome: string | null;
+};
+
+/**
+ * Free-text match for the Appointments list. `needle` is matched against the
+ * visible columns AND the property address (street/city/state/ZIP), since reps
+ * look deals up by house as often as by name.
+ */
+export function matchesAppointmentQuery(row: Searchable, needle: string): boolean {
+  const q = needle.trim().toLowerCase();
+  if (!q) return true;
+  return [row.name, row.phone, row.email, row.address, row.repName, row.sourceName, row.stage?.name, row.outcome]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(q);
+}
+
 /** The single bucket a row belongs to. Every row lands in exactly one. */
 function bucketOf(row: Filterable): string {
   if (row.outcome) return row.outcome;

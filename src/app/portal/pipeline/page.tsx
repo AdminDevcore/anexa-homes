@@ -10,6 +10,7 @@ import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { type BoardLead } from "@/components/portal/pipeline-board";
 import { PipelineView, type ListLead } from "@/components/portal/pipeline-view";
 import { ListFilter } from "@/components/portal/list-filter";
+import { addressSearchText } from "@/lib/address";
 import { KanbanSquare } from "lucide-react";
 
 export const metadata = { title: "Pipeline" };
@@ -45,7 +46,10 @@ export default async function PipelinePage() {
       lastName: true,
       value: true,
       phone: true,
+      address: true,
       city: true,
+      state: true,
+      zip: true,
       stageId: true,
       serviceType: true,
       createdAt: true,
@@ -69,6 +73,9 @@ export default async function PipelinePage() {
   for (const l of leads) {
     const rep = l.assignedRep ? `${l.assignedRep.firstName} ${l.assignedRep.lastName}` : null;
     const name = `${l.firstName} ${l.lastName}`;
+    // Only the city is shown on a card/row; the rest of the address rides along
+    // so the page search can match a street or ZIP the card never displays.
+    const addressText = addressSearchText(l) || null;
     if (l.stageId && leadsByStage[l.stageId]) {
       leadsByStage[l.stageId].push({
         id: l.id,
@@ -76,6 +83,7 @@ export default async function PipelinePage() {
         value: l.value,
         phone: l.phone,
         city: l.city,
+        addressText,
         rep,
         ageDays: daysSince(l.appointmentAt, l.createdAt),
         stageDays: daysSince(l.stageChangedAt, l.createdAt),
@@ -89,6 +97,7 @@ export default async function PipelinePage() {
       name,
       value: l.value,
       city: l.city,
+      addressText,
       rep,
       serviceType: l.serviceType,
       stageName: st?.name ?? "—",

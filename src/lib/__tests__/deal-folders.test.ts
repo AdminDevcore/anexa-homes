@@ -34,8 +34,17 @@ describe.each([
     expect(folders.some((f) => f.key === FALLBACK_FOLDER_KEY)).toBe(true);
   });
 
-  it("has exactly one internal folder", () => {
-    expect(folders.filter((f) => f.internal)).toHaveLength(1);
+  // The `customer` role cannot sign in, so nothing on a deal is customer-facing
+  // and no folder may imply otherwise. A folder called "Internal" only made
+  // sense next to folders that were external, and there are none.
+  it("claims no customer visibility anywhere", () => {
+    for (const f of folders) {
+      expect(`${f.key} ${f.label} ${f.hint}`.toLowerCase()).not.toMatch(/customer|internal/);
+    }
+  });
+
+  it("hosts the e-sign packages in exactly one folder", () => {
+    expect(folders.filter((f) => f.hostsPackages)).toHaveLength(1);
   });
 
   it("gives every folder a label, a hint and an icon", () => {
@@ -80,7 +89,6 @@ describe("solar key compatibility", () => {
       "interconnection",
       "install_photos",
       "other",
-      "internal",
     ]) {
       expect(keys).toContain(k);
     }

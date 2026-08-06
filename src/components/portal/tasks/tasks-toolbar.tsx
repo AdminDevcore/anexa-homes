@@ -67,7 +67,7 @@ export function TasksToolbar({
         <Input
           value={filters.q}
           onChange={(e) => onChange({ q: e.target.value })}
-          placeholder="Search tasks…"
+          placeholder="Search tasks, job, address…"
           className="h-9 pl-8"
           aria-label="Search tasks"
         />

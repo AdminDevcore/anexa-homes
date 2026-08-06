@@ -34,10 +34,18 @@ test("folders: a roofing deal shows the restoration folder grid", async ({ page 
     "Personal Files",
     "Invoices & Payments",
     "Call Recordings",
-    "Internal Documents",
   ]) {
     await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
   }
+
+  // Nothing on a deal is customer-facing — the `customer` role cannot even sign
+  // in — so no folder may imply that some of it is.
+  await expect(page.getByText(/Never shown to the customer/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Internal Documents/ })).toHaveCount(0);
+
+  // The e-sign packages live in the Contract folder, not in a second list
+  // beside the grid.
+  await expect(page.getByText(/^No documents yet\.$/)).toHaveCount(0);
 
   // Solar-only folders must never leak into a roofing deal.
   await expect(page.getByRole("button", { name: /Interconnection/ })).toHaveCount(0);

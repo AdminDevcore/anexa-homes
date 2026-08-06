@@ -11,6 +11,7 @@ import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
 import { CommissionRowActions, CommissionsToolbar } from "@/components/portal/commission-actions";
 import { ListFilter } from "@/components/portal/list-filter";
 import { currentFormatters } from "@/lib/format-server";
+import { addressSearchText } from "@/lib/address";
 import {
   Table,
   TableBody,
@@ -36,9 +37,33 @@ export default async function CommissionsPage() {
     orderBy: { createdAt: "desc" },
     include: {
       user: { select: { firstName: true, lastName: true } },
-      project: { select: { id: true, projectNumber: true, lead: { select: { firstName: true, lastName: true } } } },
+      project: {
+        select: {
+          id: true,
+          projectNumber: true,
+          address: true,
+          city: true,
+          state: true,
+          zip: true,
+          lead: {
+            select: {
+              firstName: true,
+              lastName: true,
+              address: true,
+              city: true,
+              state: true,
+              zip: true,
+            },
+          },
+        },
+      },
     },
   });
+
+  // A commission row shows a project number and a name — never the job site. The
+  // address rides along in data-search-text so "Oak" or "75024" still finds it.
+  const searchText = (c: (typeof commissions)[number]) =>
+    `${c.status} ${addressSearchText(c.project)} ${addressSearchText(c.project.lead)}`;
 
   const totalPending = commissions
     .filter((c) => c.status === "pending" || c.status === "approved")
@@ -67,7 +92,7 @@ export default async function CommissionsPage() {
           description={canManage ? "Click “Generate” to compute commissions from active rules." : undefined}
         />
       ) : (
-        <ListFilter placeholder="Search project, recipient, status…">
+        <ListFilter placeholder="Search project, address, recipient…">
         {/* Desktop: table. Mobile: cards (below). */}
         <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
           <Table>
@@ -84,7 +109,7 @@ export default async function CommissionsPage() {
             </TableHeader>
             <TableBody>
               {commissions.map((c) => (
-                <TableRow key={c.id} data-search-item data-search-text={`${c.project.projectNumber} ${c.project.lead ? `${c.project.lead.firstName} ${c.project.lead.lastName}` : ""} ${c.user.firstName} ${c.user.lastName} ${c.label ?? ""} ${c.status}`}>
+                <TableRow key={c.id} data-search-item data-search-text={searchText(c)}>
                   <TableCell className="font-medium">
                     <Link href={`/portal/projects/${c.projectId}`} className="hover:text-gold-muted hover:underline">
                       {c.project.projectNumber}
@@ -120,7 +145,7 @@ export default async function CommissionsPage() {
             <div
               key={c.id}
               data-search-item
-              data-search-text={`${c.project.projectNumber} ${c.project.lead ? `${c.project.lead.firstName} ${c.project.lead.lastName}` : ""} ${c.user.firstName} ${c.user.lastName} ${c.label ?? ""} ${c.status}`}
+              data-search-text={searchText(c)}
               className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5"
             >
               <div className="flex items-start justify-between gap-3">
