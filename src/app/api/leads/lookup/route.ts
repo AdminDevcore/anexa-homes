@@ -5,6 +5,7 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { prisma } from "@/server/db/client";
+import { addressContains } from "@/lib/address";
 
 export type LeadLookupItem = {
   id: string;
@@ -47,7 +48,7 @@ export async function GET(req: Request) {
             { lastName: contains },
             { email: contains },
             { phone: contains },
-            { address: contains },
+            ...addressContains(q),
           ],
         },
       ],

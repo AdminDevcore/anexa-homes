@@ -2,6 +2,7 @@ import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { canManageAllCanvassing } from "./policies";
 import { skipTraceEnabled } from "@/server/modules/skiptrace/provider";
+import { addressContains } from "@/lib/address";
 
 export type KnockDTO = {
   id: string;
@@ -376,7 +377,14 @@ export async function getKnockList(
       ...(opts.statuses && opts.statuses.length ? [{ disposition: { in: opts.statuses as never } }] : []),
       ...(opts.range ? [rangeWhere(opts.range)] : []),
       ...(opts.q
-        ? [{ OR: [{ address: { contains: opts.q, mode: "insensitive" as const } }, { notes: { contains: opts.q, mode: "insensitive" as const } }] }]
+        ? [
+            {
+              OR: [
+                ...addressContains(opts.q),
+                { notes: { contains: opts.q, mode: "insensitive" as const } },
+              ],
+            },
+          ]
         : []),
     ],
   };
