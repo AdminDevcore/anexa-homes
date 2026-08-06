@@ -59,6 +59,20 @@ Re-run `migrate deploy` whenever new migrations land.
   first-run setup. Change all seeded passwords immediately.
 
 ## Notes / gotchas
+- **Google Maps key:** `GOOGLE_MAPS_API_KEY` backs three separate things, and each
+  needs its API switched on in the Google Cloud console:
+  - *Maps Static API* — the aerial thumbnail on a deal.
+  - *Geocoding API* — rooftop coordinates for a lead's address.
+  - *Map Tiles API* — the optional **Google** / **Google Sat** basemaps in the
+    Field Map's Layers panel. **Billed per tile loaded**, which is why they are
+    opt-in and disappear entirely when the key is unset. "Google Sat" is the one
+    reps want: Google imagery with the roadmap layer over it, so house numbers
+    are labelled on the rooftops. Tiles are proxied through `/api/map/tiles` so
+    the key and session token never reach the browser; nothing is cached our
+    side, since the Map Tiles terms forbid storing tile content.
+
+  Because every call is server-to-server, restrict the key **by IP, not by HTTP
+  referrer** — a referrer rule rejects all of them.
 - **Auth URL:** NextAuth needs the canonical prod URL set, or callbacks break.
 - **Migrations as source of truth:** never `db push` to prod — only `migrate deploy`.
 - **Uploads:** anything via `src/server/storage` requires the S3 env vars in prod.

@@ -12,6 +12,32 @@ const FILTERABLE = DISPOSITIONS.map((d) => d.value);
 
 export const MAX_SCORE = 150;
 
+/**
+ * Basemaps, in the order the Layers panel offers them.
+ *
+ * The two `google*` entries are billed per tile (Map Tiles API), so they are
+ * opt-in rather than the default, and they are only offered when the key is
+ * configured. `googleHybrid` is the one reps ask for: Google's imagery WITH the
+ * roadmap layer over it, which is what labels house numbers on the rooftops.
+ */
+export const BASEMAPS = ["satellite", "street", "google", "googleHybrid"] as const;
+
+export type Basemap = (typeof BASEMAPS)[number];
+
+export const BASEMAP_LABEL: Record<Basemap, string> = {
+  satellite: "Satellite",
+  street: "Street",
+  google: "Google",
+  googleHybrid: "Google Sat",
+};
+
+/** The Google Map Tiles map type behind a basemap, or null for the free ones. */
+export function googleMapType(b: Basemap): "roadmap" | "hybrid" | null {
+  if (b === "google") return "roadmap";
+  if (b === "googleHybrid") return "hybrid";
+  return null;
+}
+
 export type FieldMapFilters = {
   dispositions: Set<string>;
   remainingOnly: boolean;
@@ -22,7 +48,7 @@ export type FieldMapFilters = {
   dateTo: string;
   // Layer toggles ride along in the URL so a shared link restores the whole view,
   // but they are deliberately excluded from activeFilterCount.
-  basemap: "satellite" | "street";
+  basemap: Basemap;
   showZips: boolean;
   showRadar: boolean;
   showStormReports: boolean;
@@ -95,7 +121,7 @@ export function parseFilters(sp: URLSearchParams): FieldMapFilters {
     datePreset,
     dateFrom: sp.get("from") ?? DEFAULT_FILTERS.dateFrom,
     dateTo: sp.get("to") ?? DEFAULT_FILTERS.dateTo,
-    basemap: rawBasemap === "street" ? "street" : DEFAULT_FILTERS.basemap,
+    basemap: BASEMAPS.includes(rawBasemap as Basemap) ? (rawBasemap as Basemap) : DEFAULT_FILTERS.basemap,
     showZips: bool(sp.get("zips"), DEFAULT_FILTERS.showZips),
     showRadar: bool(sp.get("hail"), DEFAULT_FILTERS.showRadar),
     showStormReports: bool(sp.get("reports"), DEFAULT_FILTERS.showStormReports),

@@ -46,6 +46,8 @@ export type ManagerRailProps = {
    * storms. The caller ANDs the two, so this stays a single boolean.
    */
   canStorm: boolean;
+  /** Whether GOOGLE_MAPS_API_KEY is set — gates the billed Google basemaps. */
+  googleTiles: boolean;
 };
 
 const RAIL_KEY = "field-map-rail";
@@ -113,6 +115,7 @@ export function ManagerRail({
   onSetTerritoryReps,
   onOpenStormTab,
   canStorm,
+  googleTiles,
 }: ManagerRailProps) {
   const open = React.useSyncExternalStore(subscribeRail, getRailOpen, () => true);
   const toggleRail = () => setRailOpen(!open);
@@ -145,7 +148,7 @@ export function ManagerRail({
       </div>
 
       <Section title="Layers">
-        <LayersPanel filters={filters} set={set} canManage storm={canStorm} />
+        <LayersPanel filters={filters} set={set} canManage storm={canStorm} googleTiles={googleTiles} />
       </Section>
 
       <Section title={activeCount > 0 ? `Filters (${activeCount})` : "Filters"} defaultOpen>

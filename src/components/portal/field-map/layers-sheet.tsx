@@ -10,10 +10,11 @@ export type LayersSheetProps = {
   filters: FieldMapFilters;
   set: <K extends keyof FieldMapFilters>(key: K, value: FieldMapFilters[K]) => void;
   storm: boolean;
+  googleTiles: boolean;
 };
 
 /** Rep-only. Managers get the same panel inside the rail instead. */
-export function LayersSheet({ open, onOpenChange, filters, set, storm }: LayersSheetProps) {
+export function LayersSheet({ open, onOpenChange, filters, set, storm, googleTiles }: LayersSheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -23,7 +24,7 @@ export function LayersSheet({ open, onOpenChange, filters, set, storm }: LayersS
         <SheetHeader className="p-0 pr-8 text-left">
           <SheetTitle className="text-base font-semibold">Layers</SheetTitle>
         </SheetHeader>
-        <LayersPanel filters={filters} set={set} canManage={false} storm={storm} />
+        <LayersPanel filters={filters} set={set} canManage={false} storm={storm} googleTiles={googleTiles} />
       </SheetContent>
     </Sheet>
   );

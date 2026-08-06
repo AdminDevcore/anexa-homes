@@ -4,6 +4,8 @@ import {
   parseFilters,
   serializeFilters,
   activeFilterCount,
+  googleMapType,
+  BASEMAPS,
   type FieldMapFilters,
 } from "@/lib/field-map-filters";
 
@@ -98,5 +100,28 @@ describe("activeFilterCount", () => {
 
   it("does not count layer toggles — they are not filters", () => {
     expect(activeFilterCount({ ...DEFAULT_FILTERS, showZips: false, showHeat: false })).toBe(0);
+  });
+});
+
+describe("basemaps", () => {
+  it("round-trips every basemap through the URL", () => {
+    for (const b of BASEMAPS) {
+      const qs = serializeFilters({ ...DEFAULT_FILTERS, basemap: b });
+      expect(parseFilters(new URLSearchParams(qs)).basemap).toBe(b);
+    }
+  });
+
+  it("falls back to the default for an unknown ?base", () => {
+    expect(parseFilters(new URLSearchParams("base=bing")).basemap).toBe(DEFAULT_FILTERS.basemap);
+  });
+
+  it("maps only the Google basemaps to a billed tile type", () => {
+    // googleMapType is what gates the paid tiles, both in the Layers panel and
+    // in the tile stack — a wrong answer here either hides the feature or bills
+    // for a basemap the user did not pick.
+    expect(googleMapType("google")).toBe("roadmap");
+    expect(googleMapType("googleHybrid")).toBe("hybrid");
+    expect(googleMapType("satellite")).toBeNull();
+    expect(googleMapType("street")).toBeNull();
   });
 });

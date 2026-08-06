@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { MAX_SCORE, type FieldMapFilters } from "@/lib/field-map-filters";
+import { BASEMAPS, BASEMAP_LABEL, MAX_SCORE, googleMapType, type FieldMapFilters } from "@/lib/field-map-filters";
 
 export type LayersPanelProps = {
   filters: FieldMapFilters;
@@ -10,6 +10,8 @@ export type LayersPanelProps = {
   canManage: boolean;
   /** Whether this workspace does storm work at all — see lib/vertical-features. */
   storm: boolean;
+  /** Whether GOOGLE_MAPS_API_KEY is set — hides the billed Google basemaps otherwise. */
+  googleTiles: boolean;
 };
 
 type Toggle = { key: keyof FieldMapFilters; label: string; managerOnly?: boolean; stormOnly?: boolean };
@@ -24,21 +26,24 @@ const TOGGLES: Toggle[] = [
   { key: "showStormWarnings", label: "Warnings", managerOnly: true, stormOnly: true },
 ];
 
-export function LayersPanel({ filters, set, canManage, storm }: LayersPanelProps) {
+export function LayersPanel({ filters, set, canManage, storm, googleTiles }: LayersPanelProps) {
+  // Google tiles cost money per load, so they only appear once a key exists.
+  const basemaps = BASEMAPS.filter((b) => googleTiles || !googleMapType(b));
+
   return (
     <div className="space-y-3">
-      <div className="inline-flex w-full overflow-hidden rounded-lg border border-border">
-        {(["satellite", "street"] as const).map((b) => (
+      <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-border">
+        {basemaps.map((b) => (
           <button
             key={b}
             onClick={() => set("basemap", b)}
             aria-pressed={filters.basemap === b}
             className={cn(
-              "flex-1 px-3 py-2 text-sm font-medium capitalize transition-colors",
+              "border-border px-3 py-2 text-sm font-medium transition-colors [&:nth-child(n+3)]:border-t [&:nth-child(odd)]:border-r",
               filters.basemap === b ? "bg-foreground text-background" : "hover:bg-muted"
             )}
           >
-            {b}
+            {BASEMAP_LABEL[b]}
           </button>
         ))}
       </div>

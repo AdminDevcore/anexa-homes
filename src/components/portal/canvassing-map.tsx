@@ -6,6 +6,7 @@ import L from "leaflet";
 import { MapContainer, TileLayer, Marker, Polygon, CircleMarker, Popup, ZoomControl, useMap } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
 import { dispositionMeta, type LatLng } from "@/lib/canvassing";
+import { googleMapType, type Basemap } from "@/lib/field-map-filters";
 import type { KnockDTO, TerritoryDTO, DealDTO } from "@/server/modules/canvassing/queries";
 import type { StormSwathDTO, StormEventDTO } from "@/server/modules/storm/queries";
 import type { StormWarning } from "@/components/portal/storm/storm-map";
@@ -36,7 +37,7 @@ function scoreColor(s: number): string | null {
   return null;
 }
 
-export type Basemap = "satellite" | "street";
+export type { Basemap } from "@/lib/field-map-filters";
 
 export type Viewport = { minLat: number; minLng: number; maxLat: number; maxLng: number; zoom: number };
 
@@ -199,6 +200,91 @@ function zipLabelIcon(zcta: string): L.DivIcon {
   return L.divIcon({ html, className: "anexa-zip-label", iconSize: [0, 0], iconAnchor: [0, 0] });
 }
 
+/**
+ * Google requires the copyright line for the tiles actually on screen, and it
+ * varies by area (imagery providers differ county to county), so it is fetched
+ * from /api/map/attribution as the map settles rather than hardcoded. The tiles
+ * themselves come through our own proxy so the key and session token stay on
+ * the server — see server/modules/geo/map-tiles.
+ */
+function GoogleTiles({ mapType }: { mapType: "roadmap" | "hybrid" }) {
+  const map = useMap();
+  const [copyright, setCopyright] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const b = map.getBounds();
+        const sp = new URLSearchParams({
+          type: mapType,
+          zoom: String(map.getZoom()),
+          north: String(b.getNorth()),
+          south: String(b.getSouth()),
+          east: String(b.getEast()),
+          west: String(b.getWest()),
+        });
+        try {
+          const res = await fetch(`/api/map/attribution?${sp.toString()}`);
+          if (!res.ok || cancelled) return;
+          const data = (await res.json()) as { copyright: string | null };
+          if (!cancelled) setCopyright(data.copyright);
+        } catch {
+          // Attribution is best-effort; the "Google" credit below always shows.
+        }
+      }, 400);
+    };
+
+    refresh();
+    map.on("moveend", refresh);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      map.off("moveend", refresh);
+    };
+  }, [map, mapType]);
+
+  return (
+    <TileLayer
+      url={`/api/map/tiles/${mapType}/{z}/{x}/{y}`}
+      attribution={copyright ? `Google · ${copyright}` : "Google"}
+      maxZoom={22}
+    />
+  );
+}
+
+/** The tile stack for the selected basemap. */
+function Basemaps({ basemap }: { basemap: Basemap }) {
+  const google = googleMapType(basemap);
+  if (google) return <GoogleTiles key={google} mapType={google} />;
+
+  if (basemap === "satellite") {
+    return (
+      <>
+        <TileLayer
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics"
+          maxZoom={19}
+        />
+        {/* Street/place labels on top of the imagery */}
+        <TileLayer
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+          maxZoom={19}
+        />
+      </>
+    );
+  }
+  return (
+    <TileLayer
+      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    />
+  );
+}
+
 export type CanvassingMapProps = {
   center: LatLng;
   basemap: Basemap;
@@ -267,25 +353,7 @@ export function CanvassingMap({
     // mobile and the manager rail on desktop, and the default control hid under both.
     <MapContainer center={center} zoom={16} scrollWheelZoom zoomControl={false} className="h-full w-full">
       <ZoomControl position="bottomright" />
-      {basemap === "satellite" ? (
-        <>
-          <TileLayer
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            attribution="Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics"
-            maxZoom={19}
-          />
-          {/* Street/place labels on top of the imagery */}
-          <TileLayer
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-            maxZoom={19}
-          />
-        </>
-      ) : (
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        />
-      )}
+      <Basemaps basemap={basemap} />
 
       {/* Storm overlays (fusion) — vector layers sit in the overlay pane, beneath
           the knock/deal markers (marker pane), so pins stay clickable on top. */}

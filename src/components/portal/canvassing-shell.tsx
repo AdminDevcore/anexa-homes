@@ -18,7 +18,7 @@ import type { StormMeta } from "./storm/types";
  *   Roofing prospects off hail; solar does not, so its Field Map is territories
  *   and knocks with no storm surface anywhere on it.
  */
-export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
+export function CanvassingShell({ canStorm, googleTiles }: { canStorm: boolean; googleTiles: boolean }) {
   // Storm Intelligence is folded into the Field Map. Its tools are reachable
   // from the manager rail rather than as top-level tabs.
   const { data: stormMeta } = useQuery<StormMeta>({
@@ -71,6 +71,7 @@ export function CanvassingShell({ canStorm }: { canStorm: boolean }) {
             onChangeTab={setTab}
             onOpenStormTab={(t: StormTab) => setTab(t)}
             storm={canStorm}
+            googleTiles={googleTiles}
           />
         </TabsContent>
         <TabsContent value="list">

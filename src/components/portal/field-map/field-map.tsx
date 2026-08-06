@@ -54,9 +54,11 @@ export type FieldMapProps = {
    * lib/vertical-features) — a solar rep has no use for a hail swath.
    */
   storm: boolean;
+  /** Whether GOOGLE_MAPS_API_KEY is set — gates the billed Google basemaps. */
+  googleTiles: boolean;
 };
 
-export function FieldMap({ tab, onChangeTab, onOpenStormTab, storm }: FieldMapProps) {
+export function FieldMap({ tab, onChangeTab, onOpenStormTab, storm, googleTiles }: FieldMapProps) {
   const router = useRouter();
   const mapRef = React.useRef<LeafletMap | null>(null);
 
@@ -383,6 +385,7 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, storm }: FieldMapPr
           onSetTerritoryReps={setTerritoryReps}
           onOpenStormTab={onOpenStormTab}
           canStorm={storm}
+          googleTiles={googleTiles}
         />
       ) : (
         <StatusBar
@@ -412,7 +415,7 @@ export function FieldMap({ tab, onChangeTab, onOpenStormTab, storm }: FieldMapPr
         reps={data.reps}
         canManage={canManage}
       />
-      <LayersSheet open={layersOpen} onOpenChange={setLayersOpen} filters={filters} set={set} storm={storm} />
+      <LayersSheet open={layersOpen} onOpenChange={setLayersOpen} filters={filters} set={set} storm={storm} googleTiles={googleTiles} />
 
       {/* key: opening a different house remounts the sheet, resetting it to peek. */}
       <KnockSheet
