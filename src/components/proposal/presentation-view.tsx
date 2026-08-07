@@ -5,13 +5,14 @@ import {
   roofingTimeline,
   DAMAGE_TYPE_ITEMS,
   ROOF_CONDITION_ITEMS,
-  financingOptions,
+  paymentPlan,
   defaultFaq,
   defaultWhyAnexa,
   type ProposalSectionId,
 } from "@/lib/proposal";
 import type { ProposalView } from "@/server/modules/proposals/queries";
 import { NextStepActions } from "./next-step-actions";
+import { PaymentOptions } from "./payment-options";
 import { ProposalChrome, type ChromeNavItem } from "./proposal-chrome";
 import { PhotoCarousel } from "./photo-carousel";
 
@@ -74,6 +75,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
   const upgrades = (c.upgrades ?? []).filter((u) => u.selected);
   const fin = data.financials;
   const cashDeal = fin.dealType === "cash";
+  const plan = paymentPlan({ outOfPocketCents: fin.estimatedOutOfPocketCents, financing: c.financing });
 
   const navItems: ChromeNavItem[] = (
     [
@@ -291,7 +293,16 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
           <div className="rounded-3xl bg-[var(--proposal-accent)] p-8 text-white sm:p-10">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{cashDeal ? "Your project total" : "Your estimated out-of-pocket"}</p>
             <p className="mt-3 font-display text-6xl font-bold leading-none tracking-tight sm:text-8xl"><Money cents={fin.estimatedOutOfPocketCents} /></p>
-            <p className="mt-4 max-w-md text-white/85">{cashDeal ? "That’s your all-in price. Pay in full, or spread it into easy monthly payments below." : "That’s your deductible — the rest of the project is covered by your insurance claim."}</p>
+            {/* Only promise monthly payments when the rep actually offered them. */}
+            <p className="mt-4 max-w-md text-white/85">
+              {cashDeal
+                ? plan.financeOptions.length > 0
+                  ? "That’s your all-in price. Pay in full, or spread it into easy monthly payments below."
+                  : "That’s your all-in price for the scope shown."
+                : plan.financeOptions.length > 0
+                  ? "That’s your deductible — the rest of the project is covered by your insurance claim. Pay it in full, or monthly."
+                  : "That’s your deductible — the rest of the project is covered by your insurance claim."}
+            </p>
           </div>
 
           <dl className="mt-8 divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
@@ -335,28 +346,19 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
             </div>
           </dl>
 
-          {c.financing?.enabled && (c.financing.termsMonths?.length ?? 0) > 0 && fin.estimatedOutOfPocketCents > 0 && (
-            <div className="mt-10">
-              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">Flexible monthly payments</p>
-              <p className="mt-2 max-w-md text-white/85">
-                Prefer not to pay it all at once? Spread your <Money cents={fin.estimatedOutOfPocketCents} /> out-of-pocket into
-                interest-free monthly payments.
-              </p>
-              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {financingOptions(fin.estimatedOutOfPocketCents, c.financing.termsMonths).map((o, idx) => (
-                  <div
-                    key={o.months}
-                    data-stagger
-                    style={{ ["--i" as string]: idx } as React.CSSProperties}
-                    className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-300 hover:-translate-y-1 hover:border-[var(--proposal-accent)]/50 hover:bg-white/[0.07]"
-                  >
-                    <p className="font-display text-3xl font-bold tracking-tight text-white"><Money cents={o.monthlyCents} /><span className="text-base font-medium text-white/60">/mo</span></p>
-                    <p className="mt-1 text-sm text-neutral-300">{o.months} months · 0% interest</p>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-xs text-white/50">Estimated payments shown at 0% interest. Final financing terms are subject to approval.</p>
-            </div>
+          {plan.totalCents > 0 && (
+            <PaymentOptions
+              token={data.token}
+              mode={mode}
+              plan={plan}
+              selected={c.selectedPayment}
+              cashLabel="Pay in full"
+              cashCaption={
+                cashDeal
+                  ? "Your all-in price, due on completion."
+                  : "Your deductible, due on completion. Your carrier covers the rest."
+              }
+            />
           )}
 
           {!cashDeal && (

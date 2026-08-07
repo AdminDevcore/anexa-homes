@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   computeProposalFinancials,
   financingOptions,
+  paymentPlan,
+  activeFinanceOption,
   requiredPhotosMet,
   defaultSections,
   defaultUpgrades,
@@ -114,6 +116,79 @@ describe("financingOptions", () => {
     const [opt] = financingOptions(100_000, [12]);
     expect(opt.monthlyCents).toBe(Math.ceil(100_000 / 12));
     expect(opt.monthlyCents * 12).toBeGreaterThanOrEqual(100_000);
+  });
+});
+
+describe("paymentPlan", () => {
+  const financing = { enabled: true, termsMonths: [12, 24, 60] };
+
+  it("the headline is the LOWEST monthly — the longest term", () => {
+    const plan = paymentPlan({ outOfPocketCents: 1_800_000, financing });
+    expect(plan.headline?.months).toBe(60);
+    expect(plan.headline?.monthlyCents).toBe(Math.ceil(1_800_000 / 60));
+    // Every other option costs more per month than the headline.
+    for (const o of plan.financeOptions) {
+      expect(o.monthlyCents).toBeGreaterThanOrEqual(plan.headline!.monthlyCents);
+    }
+  });
+
+  it("chips stay ascending by term so they read 12 → 24 → 60", () => {
+    const plan = paymentPlan({ outOfPocketCents: 300_000, financing: { enabled: true, termsMonths: [60, 12, 24] } });
+    expect(plan.financeOptions.map((o) => o.months)).toEqual([12, 24, 60]);
+  });
+
+  it("no monthly column when financing is off, has no terms, or nothing is owed", () => {
+    expect(paymentPlan({ outOfPocketCents: 1_800_000, financing: { enabled: false, termsMonths: [60] } }).financeOptions).toEqual([]);
+    expect(paymentPlan({ outOfPocketCents: 1_800_000, financing: { enabled: true, termsMonths: [] } }).financeOptions).toEqual([]);
+    expect(paymentPlan({ outOfPocketCents: 0, financing }).financeOptions).toEqual([]);
+    expect(paymentPlan({ outOfPocketCents: 1_800_000 }).headline).toBeNull();
+  });
+
+  it("both columns are the same money — 0% means when, not how much", () => {
+    const plan = paymentPlan({ outOfPocketCents: 1_800_000, financing });
+    expect(plan.totalCents).toBe(1_800_000);
+    // Rounding up per month can only ever over-collect, never under-collect.
+    expect(plan.headline!.monthlyCents * plan.headline!.months).toBeGreaterThanOrEqual(plan.totalCents);
+  });
+
+  it("finances the out-of-pocket for BOTH deal types — price on cash, deductible on insurance", () => {
+    const cash = computeProposalFinancials({
+      dealType: "cash", rcvCents: 0, acvCents: 0, deductibleCents: 0, depreciationCents: 0,
+      approvedSupplementsCents: 0, upgrades: [], projectPriceCents: 1_800_000,
+    });
+    const ins = computeProposalFinancials({
+      dealType: "insurance", rcvCents: 2_400_000, acvCents: 0, deductibleCents: 250_000,
+      depreciationCents: 0, approvedSupplementsCents: 0, upgrades: [],
+    });
+    expect(paymentPlan({ outOfPocketCents: cash.estimatedOutOfPocketCents, financing }).totalCents).toBe(1_800_000);
+    // The deductible, NOT the RCV — the carrier's money is never financed.
+    expect(paymentPlan({ outOfPocketCents: ins.estimatedOutOfPocketCents, financing }).totalCents).toBe(250_000);
+  });
+
+  it("clamps a negative amount rather than quoting a negative payment", () => {
+    expect(paymentPlan({ outOfPocketCents: -5_000, financing }).totalCents).toBe(0);
+  });
+});
+
+describe("activeFinanceOption", () => {
+  const plan = paymentPlan({ outOfPocketCents: 1_800_000, financing: { enabled: true, termsMonths: [12, 24, 60] } });
+
+  it("honours the term the customer picked", () => {
+    expect(activeFinanceOption(plan, { mode: "finance", months: 24, at: "" })?.months).toBe(24);
+  });
+
+  it("falls back to the headline when the rep later removed that term", () => {
+    expect(activeFinanceOption(plan, { mode: "finance", months: 999, at: "" })?.months).toBe(60);
+  });
+
+  it("shows the headline for a cash pick or no pick at all", () => {
+    expect(activeFinanceOption(plan, { mode: "cash", at: "" })?.months).toBe(60);
+    expect(activeFinanceOption(plan, undefined)?.months).toBe(60);
+  });
+
+  it("is null when there is no financing on offer", () => {
+    const none = paymentPlan({ outOfPocketCents: 1_800_000 });
+    expect(activeFinanceOption(none, { mode: "finance", months: 24, at: "" })).toBeNull();
   });
 });
 

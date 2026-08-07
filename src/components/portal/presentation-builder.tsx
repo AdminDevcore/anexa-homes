@@ -13,6 +13,7 @@ import {
   SECTION_LABELS,
   FINANCING_TERMS,
   financingOptions,
+  paymentPlan,
   type ProposalContent,
   type ProposalSectionId,
 } from "@/lib/proposal";
@@ -81,6 +82,9 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
   const liveOutOfPocketCents = Math.max(0, liveBaseCents + liveUpgradesCents - liveDiscountCents);
   const financingEnabled = content.financing?.enabled ?? false;
   const selectedTerms = content.financing?.termsMonths ?? [];
+  // The same helper the customer page uses, so the miniature preview below can
+  // never disagree with the real thing.
+  const livePlan = paymentPlan({ outOfPocketCents: liveOutOfPocketCents, financing: content.financing });
 
   function toggleTerm(months: number, on: boolean) {
     const next = on
@@ -356,8 +360,18 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
               })}
             </div>
           </Field>
-          {/* FINANCING — optional 0% monthly options on the out-of-pocket */}
+          {/* PAYMENT OPTIONS — the close. Cash is always offered; financing is
+              the optional second column. Shown as its own group with a live
+              preview because this is what the customer actually decides on. */}
           <div className="space-y-3 rounded-lg border border-border p-4">
+            <div>
+              <h4 className="text-sm font-semibold">Payment options</h4>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                How the customer can pay their {fmtMoney(liveOutOfPocketCents)}{" "}
+                {isCash ? "total" : "out-of-pocket"}. Paying in full is always offered.
+              </p>
+            </div>
+
             <label className="flex items-center gap-2 text-sm font-medium">
               <input
                 type="checkbox"
@@ -371,14 +385,12 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
                   })
                 }
               />
-              Offer 0% financing on the out-of-pocket
+              Also offer 0% monthly payments
             </label>
-            <p className="text-xs text-muted-foreground">
-              Optional. Splits the {fmtMoney(liveOutOfPocketCents)} out-of-pocket into interest-free monthly payments
-              (max 60 months). Pick the terms to show the customer.
-            </p>
+
             {financingEnabled && (
               <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Pick the terms to show. The lowest monthly leads.</p>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {FINANCING_TERMS.map((m) => {
                     const on = selectedTerms.includes(m);
@@ -398,10 +410,37 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
                   })}
                 </div>
                 {selectedTerms.length === 0 && (
-                  <p className="text-xs text-amber-600">Select at least one term, or the financing section won&rsquo;t show.</p>
+                  <p className="text-xs text-amber-600">Select at least one term, or the monthly option won&rsquo;t show.</p>
                 )}
               </div>
             )}
+
+            {/* What the customer will see, in miniature. */}
+            <div className="rounded-lg bg-neutral-900 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-white/50">Customer sees</p>
+              <div className={`mt-2 grid gap-2 ${livePlan.financeOptions.length > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+                <div className="rounded-md border border-white/10 bg-white/[0.04] p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-white/60">Pay in full</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums text-white">{fmtMoney(livePlan.totalCents)}</p>
+                </div>
+                {livePlan.headline && (
+                  <div className="rounded-md border border-white/10 bg-white/[0.04] p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-white/60">Monthly</p>
+                    <p className="mt-1 text-xl font-bold tabular-nums text-white">
+                      {fmtMoney(livePlan.headline.monthlyCents)}
+                      <span className="text-xs font-medium text-white/60">/mo</span>
+                    </p>
+                    <p className="text-[10px] text-white/50">{livePlan.headline.months} mo · 0%</p>
+                  </div>
+                )}
+              </div>
+              {livePlan.totalCents === 0 && (
+                <p className="mt-2 text-[10px] text-amber-300">
+                  {isCash ? "Set a project price" : "Set a deductible"} above — with nothing owed there is no payment
+                  section to show.
+                </p>
+              )}
+            </div>
           </div>
           <div className="flex justify-between"><Button variant="outline" onClick={saveAndRefresh} disabled={busy}>{busy && <Loader2 className="size-4 animate-spin" />} Save</Button><Button onClick={() => setStep("upgrades")}>Next: Upgrades</Button></div>
         </div>

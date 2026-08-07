@@ -5,6 +5,12 @@
 
 export type ProposalUpgrade = { label: string; priceCents: number; selected: boolean };
 
+// The two ways a customer can pay. "cash" = the whole out-of-pocket at once;
+// "finance" = that same amount split into 0%-interest monthly payments.
+export type PaymentMode = "cash" | "finance";
+
+export type PaymentSelection = { mode: PaymentMode; months?: number; at: string };
+
 export type ProposalSectionRef = { id: ProposalSectionId; enabled: boolean; order: number };
 
 // How the deal is paid for — mirrors the Prisma DealType enum but kept as a string
@@ -28,6 +34,10 @@ export type ProposalContent = {
   projectDiscountCents?: number;
   // Optional 0%-interest financing of the out-of-pocket, presented as monthly options.
   financing?: { enabled: boolean; termsMonths: number[] };
+  // Which payment path the CUSTOMER picked on the public proposal page. Written
+  // by the token-authed select action, never by the rep. `months` is set only
+  // for "finance" and names the term they chose.
+  selectedPayment?: PaymentSelection;
   // Damage-type + roof-condition checkboxes (e.g. hail_damage, missing_shingles, …).
   conditionFlags?: Record<string, boolean>;
   // Editable hail/wind explanation paragraph for the condition section.
@@ -150,6 +160,46 @@ export function financingOptions(amountCents: number, termsMonths: number[]): Fi
     .slice()
     .sort((a, b) => a - b)
     .map((months) => ({ months, monthlyCents: Math.ceil(amountCents / months) }));
+}
+
+/** The two payment paths the customer chooses between.
+ *
+ *  `totalCents` is the same money in both columns — paying in full and financing
+ *  differ only in *when*, never in how much, because the terms are 0%.
+ *
+ *  The MONTHLY column exists only when the rep enabled financing, picked at
+ *  least one term, and there is something to finance. A $0 out-of-pocket
+ *  (insurance covering everything, or a discount that swallows the deductible)
+ *  has no monthly story to tell. */
+export type PaymentPlan = {
+  totalCents: number;
+  /** Ascending by term, so the chips read 12 → 24 → 60. Empty = no monthly column. */
+  financeOptions: FinancingOption[];
+  /** The lowest monthly of the set — the longest term. Null when there are none. */
+  headline: FinancingOption | null;
+};
+
+export function paymentPlan(i: {
+  outOfPocketCents: number;
+  financing?: { enabled: boolean; termsMonths?: number[] };
+}): PaymentPlan {
+  const totalCents = Math.max(0, i.outOfPocketCents);
+  const on = i.financing?.enabled === true && totalCents > 0;
+  const financeOptions = on ? financingOptions(totalCents, i.financing?.termsMonths ?? []) : [];
+  // financingOptions sorts ascending by months, so the last entry is the
+  // longest term and therefore the smallest monthly payment.
+  return { totalCents, financeOptions, headline: financeOptions.at(-1) ?? null };
+}
+
+/** The term the customer is looking at: their own pick if it is still on offer,
+ *  otherwise the headline. A rep can remove a term after the customer chose it —
+ *  when that happens we fall back rather than quoting a payment we no longer sell. */
+export function activeFinanceOption(plan: PaymentPlan, selected: PaymentSelection | undefined): FinancingOption | null {
+  if (selected?.mode === "finance" && selected.months) {
+    const match = plan.financeOptions.find((o) => o.months === selected.months);
+    if (match) return match;
+  }
+  return plan.headline;
 }
 
 /** True once every REQUIRED checklist slot has at least one uploaded photo.

@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_CLAIM_STATUSES,
+  DEFAULT_CLAIM_STATUS_KEY,
   claimStatusKey,
+  claimStatusOpensClaim,
   claimStatusLabel,
   claimStatusOptionsFor,
   isBuiltInClaimStatus,
@@ -82,6 +84,31 @@ describe("claimStatusOptionsFor", () => {
       { key: "filed", label: "Filed" },
       { key: "paid", label: "Paid" },
     ]);
+  });
+});
+
+describe("claimStatusOpensClaim", () => {
+  it("treats Not Filed as the one status with no claim behind it", () => {
+    expect(claimStatusOpensClaim("not_filed")).toBe(false);
+    expect(claimStatusOpensClaim(DEFAULT_CLAIM_STATUS_KEY)).toBe(false);
+  });
+
+  it("opens the claim on every other built-in, not just Filed", () => {
+    // Back-filling a deal straight to "Approved" or "Denied" must open the claim
+    // too — the office is recording a claim that already exists at the carrier.
+    for (const { key } of DEFAULT_CLAIM_STATUSES.filter((s) => s.key !== "not_filed")) {
+      expect(claimStatusOpensClaim(key)).toBe(true);
+    }
+  });
+
+  it("opens the claim on a status the company invented", () => {
+    expect(claimStatusOpensClaim(claimStatusKey("Depreciation Released"))).toBe(true);
+  });
+
+  it("is not fooled by a company renaming Not Filed", () => {
+    // The key is what's stored, so renaming the label leaves the rule intact.
+    const renamed = parseClaimStatuses([{ key: "not_filed", label: "No Claim Yet" }]);
+    expect(claimStatusOpensClaim(renamed[0].key)).toBe(false);
   });
 });
 

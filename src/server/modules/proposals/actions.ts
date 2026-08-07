@@ -8,6 +8,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
+import { runUnscoped } from "@/server/vertical/context";
 import { defaultProposalContent, requiredPhotosMet } from "@/lib/proposal";
 
 function fail(error: string) {
@@ -106,8 +107,21 @@ const replySchema = z.object({
   message: z.string().min(1, "Message is required").max(2000),
 });
 
+/**
+ * Every public reply below runs unscoped, for the same reason getPublicProposal
+ * does: the customer is anonymous. They have no session and no workspace
+ * cookie, so there is no vertical to resolve, and Proposal is a vertical-scoped
+ * model — an unwrapped read throws MissingVerticalContextError and the button
+ * appears broken to the customer. The unguessable token IS the authorization
+ * and identifies exactly one row, whose vertical is not known until it is read.
+ */
+const PUBLIC_TOKEN_REASON =
+  "public proposal reply: the unguessable token is the authorization and identifies exactly one row, whose vertical is not known until it is read";
+
 async function postCustomerNote(token: string, message: string, kind: "Change request" | "Question") {
-  const proposal = await prisma.proposal.findUnique({ where: { publicToken: token }, select: { companyId: true, leadId: true, customerName: true } });
+  const proposal = await runUnscoped(PUBLIC_TOKEN_REASON, () =>
+    prisma.proposal.findUnique({ where: { publicToken: token }, select: { companyId: true, leadId: true, customerName: true } }),
+  );
   if (!proposal) return fail("Proposal not found.");
 
   await prisma.note.create({
@@ -140,4 +154,72 @@ export async function askQuestionAction(input: z.infer<typeof replySchema>) {
   const parsed = replySchema.safeParse(input);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid request.");
   return postCustomerNote(parsed.data.token, parsed.data.message, "Question");
+}
+
+const paymentSchema = z.object({
+  token: z.string().min(1),
+  mode: z.enum(["cash", "finance"]),
+  // Only meaningful for "finance" — which term the customer picked.
+  months: z.number().int().positive().max(600).optional(),
+});
+
+/**
+ * The customer picked how they want to pay. Writes the choice onto the proposal
+ * and tells the rep, on the same Note + ActivityLog path the other public
+ * replies use — this is a buying signal, so it belongs on the deal timeline and
+ * not just in a JSON blob.
+ *
+ * Re-picking overwrites and logs again: a changed mind is information too.
+ */
+export async function selectPaymentOptionAction(input: z.infer<typeof paymentSchema>) {
+  const parsed = paymentSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid selection.");
+  const { token, mode, months } = parsed.data;
+
+  const proposal = await runUnscoped(PUBLIC_TOKEN_REASON, () =>
+    prisma.proposal.findUnique({
+      where: { publicToken: token },
+      select: { id: true, companyId: true, leadId: true, customerName: true, content: true },
+    }),
+  );
+  if (!proposal) return fail("Proposal not found.");
+
+  const content =
+    proposal.content && typeof proposal.content === "object" && !Array.isArray(proposal.content)
+      ? (proposal.content as Record<string, unknown>)
+      : {};
+
+  const selectedPayment = {
+    mode,
+    ...(mode === "finance" && months ? { months } : {}),
+    at: new Date().toISOString(),
+  };
+
+  await runUnscoped(PUBLIC_TOKEN_REASON, () =>
+    prisma.proposal.update({
+      where: { id: proposal.id },
+      data: { content: { ...content, selectedPayment } as Prisma.InputJsonValue },
+    }),
+  );
+
+  const label = mode === "finance" ? `Monthly payments${months ? ` · ${months} months` : ""}` : "Pay in full";
+  await prisma.note.create({
+    data: {
+      companyId: proposal.companyId,
+      leadId: proposal.leadId,
+      context: "proposal",
+      body: `[Proposal · Payment choice from ${proposal.customerName}] ${label}`,
+      authorId: null,
+    },
+  });
+  await prisma.activityLog.create({
+    data: {
+      companyId: proposal.companyId,
+      type: "note",
+      message: `${proposal.customerName} chose ${label.toLowerCase()} on the proposal`,
+      leadId: proposal.leadId,
+    },
+  });
+
+  return { ok: true as const };
 }

@@ -10,6 +10,7 @@ import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { getClaimStatuses } from "@/server/modules/settings/queries";
+import { claimStatusOpensClaim } from "@/lib/claim-status";
 import { VERTICAL_SERVICE_TYPE } from "@/lib/vertical";
 import { resolveStageForAppointment } from "./staging";
 import { resolveOwningRepId } from "./owning-rep";
@@ -373,13 +374,24 @@ export async function setDealTypeAction(input: z.infer<typeof dealTypeSchema>) {
 const claimStatusSchema = z.object({ leadId: z.string().min(1), status: z.string().min(1).max(60) });
 
 /**
- * Move the deal along its insurance claim.
+ * Move the deal along its insurance claim — and OPEN the claim if this is the
+ * first status that says one exists.
  *
  * The accepted values are the COMPANY's configured list (Settings → Claim
  * Statuses), not a fixed enum — so this validates against that list rather than
  * against a type. Anything not on the list is rejected: the column is plain text
  * now, and without this check a stale tab could write a status the office
  * deleted months ago.
+ *
+ * This is the ONLY way a claim gets opened. There used to be a separate "Open
+ * claim" button beside this picker, which made two controls for one idea and
+ * always slammed the status to "Filed" — so a deal whose adjuster was already
+ * scheduled had to be filed first and corrected second. Picking the status the
+ * deal is actually on now does the whole job.
+ *
+ * Going BACK to Not Filed destroys nothing: the claim row and everything typed
+ * into the worksheet stay exactly where they are. A dropdown must never be able
+ * to delete a carrier, an adjuster and an RCV.
  */
 export async function setClaimStatusAction(input: z.infer<typeof claimStatusSchema>) {
   const user = await requireUser();
@@ -391,13 +403,31 @@ export async function setClaimStatusAction(input: z.infer<typeof claimStatusSche
   const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   const lead = await prisma.lead.findFirst({
     where: { AND: [{ id: leadId }, scope] },
-    select: { id: true, vertical: true, claimStatus: true },
+    select: { id: true, companyId: true, vertical: true, claimStatus: true },
   });
   if (!lead) return { ok: false as const, error: "Deal not found." };
 
   const options = await getClaimStatuses(user.companyId, lead.vertical);
   if (!options.some((o) => o.key === status) && status !== lead.claimStatus) {
     return { ok: false as const, error: "That status is no longer available." };
+  }
+
+  const claim = await prisma.claim.findFirst({
+    where: { leadId: lead.id, companyId: lead.companyId },
+    select: { id: true },
+  });
+
+  if (!claim && claimStatusOpensClaim(status)) {
+    if (!can(user, "create", "Claim")) return { ok: false as const, error: "Not allowed to open a claim." };
+    await prisma.claim.create({
+      data: { companyId: lead.companyId, leadId: lead.id, vertical: lead.vertical, status },
+    });
+  } else if (claim) {
+    // Keep the claim's own status in step with the deal's. These drifted before:
+    // `Claim.status` was written once at creation and never again, while the
+    // homeowner's proposal reads it (proposals/queries.ts) — so a deal long since
+    // Approved still told the customer "Filed".
+    await prisma.claim.update({ where: { id: claim.id }, data: { status } });
   }
 
   await prisma.lead.update({ where: { id: lead.id }, data: { claimStatus: status } });

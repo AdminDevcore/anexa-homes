@@ -1,48 +1,53 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { PlayCircle, ShieldPlus, ShieldCheck, ClipboardCheck, Loader2, Pencil, Lock, Plus } from "lucide-react";
+import {
+  ClipboardCheck,
+  Loader2,
+  Pencil,
+  Lock,
+  Plus,
+  Check,
+  ChevronRight,
+  ChevronDown,
+  MessageSquare,
+  Presentation,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   setAppointmentDispositionAction,
   setInspectionOutcomeAction,
   addOutcomeNoteAction,
-  openClaimAction,
 } from "@/server/modules/leads/actions";
 import { DEFAULT_APPOINTMENT_DISPOSITIONS, groupDispositions, type Disposition } from "@/lib/dispositions";
 
 export type OutcomeNote = { id: string; body: string; author: string; createdAt: string };
 
-export type ClaimInfo = {
-  carrier: string | null;
-  claimNumber: string | null;
-  policyNumber: string | null;
-  adjusterName: string | null;
-  adjusterPhone: string | null;
-  adjusterEmail: string | null;
-  lossDate: string | null; // ISO
-  deductible: number;
-  rcv: number;
-  acv: number;
-  depreciation: number;
-} | null;
-
+/**
+ * The visit, as one numbered flow: appointment → inspection → claim → proposal.
+ *
+ * The claim used to sit BETWEEN the two outcomes, which split the two things a
+ * rep records in the same breath. It is downstream of the inspection, so it is
+ * step 3. Building the proposal is the terminal action and the only emphasized
+ * button here — it used to be buried in a document card below the fold.
+ */
 export function DealActionsPanel({
   leadId,
   disposition,
   appointmentNote,
   appointmentNotes,
   dispositions,
-  claim,
   isSolar = false,
   inspectionOutcome,
   inspectionNote,
   inspectionNotes,
   inspectionOutcomes,
   canEditLead,
-  canEditClaim,
+  canCreateProposal = false,
 }: {
   leadId: string;
   disposition: string | null;
@@ -52,40 +57,98 @@ export function DealActionsPanel({
   appointmentNotes: OutcomeNote[];
   // Customizable, grouped appointment outcomes (Settings → Appointment Outcomes).
   dispositions?: Disposition[];
-  claim: ClaimInfo;
   inspectionOutcome: string | null;
   inspectionNote: string | null;
   inspectionNotes: OutcomeNote[];
   // Customizable inspection outcomes (Settings → Inspection Outcomes).
   inspectionOutcomes: string[];
   canEditLead: boolean;
-  canEditClaim: boolean;
   /** Solar has no claim, no adjuster and no roof inspection. */
   isSolar?: boolean;
+  /** Roofing only — solar closes through its own Proposal hub. */
+  canCreateProposal?: boolean;
 }) {
   const groups = groupDispositions(dispositions?.length ? dispositions : DEFAULT_APPOINTMENT_DISPOSITIONS);
+  const showProposal = !isSolar && canCreateProposal;
+
   return (
-    <div className="mt-4 space-y-3 border-t border-border pt-4">
-      <AppointmentRun leadId={leadId} disposition={disposition} legacyNote={appointmentNote} notes={appointmentNotes} groups={groups} canEdit={canEditLead} isSolar={isSolar} />
-      {/* An insurance claim is a roofing concept. Solar has no carrier, no
-          adjuster and no deductible, so the section is not rendered at all. */}
-      {!isSolar && (
-        <div className="border-t border-border pt-3">
-          <ClaimSection leadId={leadId} claim={claim} canOpen={canEditLead} canEdit={canEditClaim} />
+    <div className="mt-4 border-t border-border pt-4">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">The visit</p>
+
+      <ol className="mt-3">
+        <Step n={1} done={!!disposition} title={isSolar ? "Qualification" : "Appointment"}>
+          <AppointmentRun
+            leadId={leadId}
+            disposition={disposition}
+            legacyNote={appointmentNote}
+            notes={appointmentNotes}
+            groups={groups}
+            canEdit={canEditLead}
+            isSolar={isSolar}
+          />
+        </Step>
+
+        {/* The claim is NOT a step here. It used to be step 3, with an "Open
+            claim" button — but the Summary above already carries a Claim Status
+            picker, and two controls for one claim meant the button had to guess
+            a status ("Filed") the deal might be well past. Setting the status
+            opens the claim now, so the visit ends at the inspection. */}
+        <Step n={2} done={!!inspectionOutcome} title={isSolar ? "Site survey" : "Inspection"} last>
+          <InspectionOutcome
+            leadId={leadId}
+            outcome={inspectionOutcome}
+            legacyNote={inspectionNote}
+            notes={inspectionNotes}
+            outcomes={inspectionOutcomes}
+            canEdit={canEditLead}
+            label={isSolar ? "Site survey outcome" : "Inspection outcome"}
+          />
+        </Step>
+      </ol>
+
+      {showProposal && (
+        <div className="mt-1 border-t border-border pt-3">
+          <Button asChild size="sm" className="w-full bg-gold text-gold-foreground hover:bg-gold/90">
+            <Link href={`/portal/leads/${leadId}/presentation`}>
+              <Presentation className="size-4" /> Build Proposal
+            </Link>
+          </Button>
         </div>
       )}
-      <div className="border-t border-border pt-3">
-        <InspectionOutcome
-          leadId={leadId}
-          outcome={inspectionOutcome}
-          legacyNote={inspectionNote}
-          notes={inspectionNotes}
-          outcomes={inspectionOutcomes}
-          canEdit={canEditLead}
-          label={isSolar ? "Site survey outcome" : "Inspection outcome"}
-        />
-      </div>
     </div>
+  );
+}
+
+/** One numbered row of the visit flow, with the rail connecting it to the next. */
+function Step({
+  n,
+  done,
+  title,
+  children,
+  last = false,
+}: {
+  n: number;
+  done: boolean;
+  title: string;
+  children: React.ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <li className={cn("relative flex gap-3", last ? "pb-0" : "pb-4")}>
+      {!last && <span className="absolute bottom-1 left-[11px] top-7 w-px bg-border" aria-hidden />}
+      <span
+        className={cn(
+          "relative z-10 flex size-[22px] shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+          done ? "bg-emerald-500 text-white" : "border border-border bg-background text-muted-foreground",
+        )}
+      >
+        {done ? <Check className="size-3" /> : n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+        {children}
+      </div>
+    </li>
   );
 }
 
@@ -94,8 +157,12 @@ function fmtTimestamp(iso: string): string {
 }
 
 /**
- * Append-only outcome notes. Existing entries are read-only (locked) so the
- * record can't be tampered with; users can only add new timestamped notes.
+ * Append-only outcome notes, collapsed behind their own count.
+ *
+ * Two always-open textareas made this panel twice as tall as it needed to be —
+ * on most deals there is nothing to say. Existing entries stay read-only
+ * (locked) so the record can't be tampered with; users can only add new
+ * timestamped notes.
  */
 function OutcomeNotes({
   leadId,
@@ -113,6 +180,7 @@ function OutcomeNotes({
   placeholder: string;
 }) {
   const router = useRouter();
+  const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
@@ -128,11 +196,37 @@ function OutcomeNotes({
     router.refresh();
   }
 
-  const hasAny = !!legacyNote || notes.length > 0;
+  const count = (legacyNote ? 1 : 0) + notes.length;
+
+  // Nothing recorded and nothing you're allowed to record — show no affordance.
+  if (count === 0 && !canEdit) return null;
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <MessageSquare className="size-3" />
+        {count > 0 ? `${count} note${count === 1 ? "" : "s"}` : "Add note"}
+        <ChevronRight className="size-3" />
+      </button>
+    );
+  }
 
   return (
-    <div className="mt-2 space-y-1.5">
-      {hasAny && (
+    <div className="mt-1.5 space-y-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <MessageSquare className="size-3" />
+        {count > 0 ? `${count} note${count === 1 ? "" : "s"}` : "Add note"}
+        <ChevronDown className="size-3" />
+      </button>
+      {count > 0 && (
         <ul className="space-y-1.5">
           {legacyNote && (
             <li className="rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-xs">
@@ -193,20 +287,19 @@ function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEd
 
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
       {outcome && !picking ? (
-        <div className="mt-1.5 flex items-center justify-between gap-2">
+        <div className="mt-1 flex items-center justify-between gap-2">
           <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-xs font-medium text-blue-600">
             <ClipboardCheck className="size-3" /> {outcome}
           </span>
           {canEdit && (
-            <button onClick={() => setPicking(true)} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <button onClick={() => setPicking(true)} className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <Pencil className="size-3" /> Change
             </button>
           )}
         </div>
       ) : picking ? (
-        <div className="mt-1.5 flex items-center gap-2">
+        <div className="mt-1 flex items-center gap-2">
           <select autoFocus defaultValue={outcome ?? ""} disabled={busy} onChange={(e) => setOutcome(e.target.value || null)} className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-sm">
             <option value="">Select outcome…</option>
             {options.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -214,7 +307,7 @@ function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEd
           {busy && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
         </div>
       ) : (
-        <Button size="sm" variant="outline" disabled={!canEdit} onClick={() => setPicking(true)} className="mt-1.5 w-full">
+        <Button size="sm" variant="outline" disabled={!canEdit} onClick={() => setPicking(true)} className="mt-1 w-full">
           <ClipboardCheck className="size-4" /> Set {label.toLowerCase()}
         </Button>
       )}
@@ -258,18 +351,17 @@ function AppointmentRun({
 
   return (
     <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Appointment outcome</p>
       {disposition && !picking ? (
-        <div className="mt-1.5 flex items-center justify-between gap-2">
+        <div className="mt-1 flex items-center justify-between gap-2">
           <span className="inline-flex items-center rounded-full bg-gold/15 px-2.5 py-1 text-xs font-medium text-gold-muted">{disposition}</span>
           {canEdit && (
-            <button onClick={() => setPicking(true)} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <button onClick={() => setPicking(true)} className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <Pencil className="size-3" /> Change
             </button>
           )}
         </div>
       ) : picking ? (
-        <div className="mt-1.5 flex items-center gap-2">
+        <div className="mt-1 flex items-center gap-2">
           <select
             autoFocus
             defaultValue={disposition ?? ""}
@@ -293,13 +385,8 @@ function AppointmentRun({
           {busy && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
         </div>
       ) : (
-        <Button
-          size="sm"
-          disabled={!canEdit}
-          onClick={() => setPicking(true)}
-          className="mt-1.5 w-full bg-gold text-gold-foreground hover:bg-gold/90"
-        >
-          <PlayCircle className="size-4" /> {isSolar ? "Record qualification" : "Run appointment"}
+        <Button size="sm" variant="outline" disabled={!canEdit} onClick={() => setPicking(true)} className="mt-1 w-full">
+          {isSolar ? "Record qualification" : "Run appointment"}
         </Button>
       )}
       <OutcomeNotes leadId={leadId} context="appointment_outcome" legacyNote={legacyNote} notes={notes} canEdit={canEdit} placeholder="Add an appointment note…" />
@@ -307,37 +394,3 @@ function AppointmentRun({
   );
 }
 
-function ClaimSection({ leadId, claim, canOpen, canEdit }: { leadId: string; claim: ClaimInfo; canOpen: boolean; canEdit: boolean }) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState(false);
-
-  async function open() {
-    setBusy(true);
-    const res = await openClaimAction(leadId);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Claim opened");
-    router.refresh();
-  }
-
-  if (!claim) {
-    return (
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Insurance claim</p>
-        <Button size="sm" variant="outline" disabled={!canOpen || busy} onClick={open} className="mt-1.5 w-full">
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <ShieldPlus className="size-4" />} Open claim
-        </Button>
-      </div>
-    );
-  }
-  return (
-    <div>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Insurance claim</p>
-      <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] px-3 py-2 text-sm">
-        <ShieldCheck className="size-4 shrink-0 text-emerald-600" />
-        <span className="font-medium">Claim open</span>
-        <span className="ml-auto text-xs text-muted-foreground">Edit in Claim Information</span>
-      </div>
-    </div>
-  );
-}

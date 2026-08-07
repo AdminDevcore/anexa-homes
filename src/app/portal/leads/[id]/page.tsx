@@ -46,7 +46,6 @@ import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
 import { SolarDesignPanel, SolarFinancePanel, SolarProposalGate } from "@/components/portal/solar-panels";
 import { getSolarSettings } from "@/server/modules/solar/settings";
-import { BuildPresentationButton } from "@/components/portal/build-presentation-button";
 import { CashBidButton } from "@/components/portal/cash-bid-panel";
 import { InsuranceContractButton } from "@/components/portal/insurance-contract-panel";
 import { getCashBidsForLead } from "@/server/modules/cashbid/queries";
@@ -490,7 +489,14 @@ export default async function LeadDetailPage({
     author: n.author ? `${n.author.firstName} ${n.author.lastName}` : "System",
     createdAt: n.createdAt.toISOString(),
   });
-  const generalNotes = lead.noteEntries.filter((n) => !n.context);
+  // Outcome-tagged notes are anchored under their outcome in the Summary panel.
+  // EVERYTHING else belongs in Notes & Activity — including the customer's own
+  // replies from the public proposal (context "proposal": change requests,
+  // questions, and which way they chose to pay). Filtering on `!n.context`
+  // dropped those on the floor: they were written to the database and shown to
+  // nobody, which makes a buying signal worthless.
+  const OUTCOME_NOTE_CONTEXTS = new Set(["appointment_outcome", "inspection_outcome"]);
+  const generalNotes = lead.noteEntries.filter((n) => !n.context || !OUTCOME_NOTE_CONTEXTS.has(n.context));
   const appointmentNotes = lead.noteEntries.filter((n) => n.context === "appointment_outcome").map(serializeNote);
   const inspectionNotes = lead.noteEntries.filter((n) => n.context === "inspection_outcome").map(serializeNote);
 
@@ -729,7 +735,7 @@ export default async function LeadDetailPage({
                 {!isInsurance ? (
                   <p className="text-sm text-muted-foreground">
                     This is a <strong>cash deal</strong> — the customer pays out of pocket or finances it; there&rsquo;s no
-                    insurance claim, deductible, or depreciation. Set the price in the proposal (<strong>Build Presentation</strong>).
+                    insurance claim, deductible, or depreciation. Set the price in the proposal (<strong>Build Proposal</strong>).
                   </p>
                 ) : claim ? (
                   <ClaimInfoCard
@@ -755,7 +761,8 @@ export default async function LeadDetailPage({
                   />
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    No insurance claim opened yet. Use <strong>Open claim</strong> in the Summary to start the claim worksheet.
+                    No insurance claim opened yet. Set <strong>Claim Status</strong> in the Summary — anything past
+                    &ldquo;Not Filed&rdquo; opens the claim and unlocks this worksheet.
                   </p>
                 )}
               </div>
@@ -990,21 +997,21 @@ export default async function LeadDetailPage({
 
             {/* ── Documents & files ── */}
             <section id="documents" className="scroll-mt-24 space-y-6">
-          {/* The roofing contract tools, moved out of the page header.
-              Build Presentation, Insurance Contract and Simple Cash Bid all
-              produce a customer-facing document, so they belong beside the
-              documents rather than as three same-weight buttons above a deal
-              nobody has read yet. A solar deal closes through its own Proposal
-              hub, and "Insurance Contract" is meaningless without an insurer —
-              so none of them render there. */}
+          {/* The roofing contract tools, moved out of the page header. Both
+              produce a customer-facing document for signature, so they belong
+              beside the documents rather than as same-weight buttons above a
+              deal nobody has read yet. Building a proposal is NOT one of them —
+              it is the last step of the visit and lives in the Summary panel,
+              where the rep already is. A solar deal closes through its own
+              Proposal hub, and "Insurance Contract" is meaningless without an
+              insurer — so neither renders there. */}
           {!isSolarDeal && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
             <Card
               title="Create a document"
               icon={FileSignature}
-              description="Build a proposal, or send a contract for signature."
+              description="Send a contract for signature."
             >
               <div className="flex flex-wrap items-center gap-2">
-                <BuildPresentationButton leadId={lead.id} />
                 <InsuranceContractButton
                   leadId={lead.id}
                   bids={insuranceBids}
@@ -1168,7 +1175,8 @@ export default async function LeadDetailPage({
               />
             }
             actionsSlot={
-            /* Appointment run + open claim — consolidated into the Summary card */
+            /* The visit: appointment → inspection. The claim is not here — it
+               opens from the Claim Status picker above. */
             <DealActionsPanel
               isSolar={isSolarDeal}
               leadId={lead.id}
@@ -1180,25 +1188,8 @@ export default async function LeadDetailPage({
               inspectionNote={lead.inspectionNote}
               inspectionNotes={inspectionNotes}
               inspectionOutcomes={inspectionOutcomes}
-              claim={
-                claim
-                  ? {
-                      carrier: claim.carrier,
-                      claimNumber: claim.claimNumber,
-                      policyNumber: claim.policyNumber,
-                      adjusterName: claim.adjusterName,
-                      adjusterPhone: claim.adjusterPhone,
-                      adjusterEmail: claim.adjusterEmail,
-                      lossDate: claim.lossDate ? claim.lossDate.toISOString() : null,
-                      deductible: claim.deductible,
-                      rcv: claim.rcv,
-                      acv: claim.acv,
-                      depreciation: claim.depreciation,
-                    }
-                  : null
-              }
               canEditLead={can(user, "update", "Lead")}
-              canEditClaim={can(user, "update", "Claim")}
+              canCreateProposal={can(user, "create", "Proposal") || can(user, "update", "Proposal")}
             />
             }
           />

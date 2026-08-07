@@ -40,6 +40,21 @@ export function isBuiltInClaimStatus(key: string): boolean {
 }
 
 /**
+ * Does putting a deal on this status mean a claim EXISTS?
+ *
+ * Setting the status is now the only way to open a claim — there is no separate
+ * "Open claim" button — so this is the rule that decides whether picking a
+ * status creates the Claim row and unlocks the worksheet.
+ *
+ * Every status except "Not Filed" means the office has something on file with a
+ * carrier. Note this is deliberately not `key === "filed"`: an office that
+ * back-fills a deal already at "Approved" or "Denied" has a claim too.
+ */
+export function claimStatusOpensClaim(key: string): boolean {
+  return key !== DEFAULT_CLAIM_STATUS_KEY;
+}
+
+/**
  * Derive a storage key from a label. Only ever called when an option is FIRST
  * created — renaming keeps the original key, which is the whole point.
  */

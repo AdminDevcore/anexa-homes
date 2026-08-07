@@ -320,21 +320,12 @@ export async function setInspectionOutcomeAction(input: z.infer<typeof inspectio
   return { ok: true as const };
 }
 
-/** Open an insurance claim for this deal (creates the claim record if needed). */
-export async function openClaimAction(leadId: string) {
-  const user = await requireUser();
-  if (!can(user, "create", "Claim") && !can(user, "update", "Claim")) return { ok: false as const, error: "Not allowed." };
-  const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
-  const lead = await prisma.lead.findFirst({ where: { AND: [{ id: leadId }, scope] }, select: { id: true, companyId: true } });
-  if (!lead) return { ok: false as const, error: "Deal not found." };
-  const existing = await prisma.claim.findFirst({ where: { leadId: lead.id, companyId: lead.companyId }, select: { id: true } });
-  if (!existing) {
-    await prisma.claim.create({ data: { companyId: lead.companyId, leadId: lead.id, status: "filed" } });
-    await prisma.lead.update({ where: { id: lead.id }, data: { claimStatus: "filed" } });
-  }
-  revalidatePath(`/portal/leads/${lead.id}`);
-  return { ok: true as const };
-}
+/*
+ * `openClaimAction` lived here: a button that created the claim row and forced
+ * the status to "filed". Opening a claim is now a side effect of setting the
+ * Claim Status — see `setClaimStatusAction` in ./manage.ts — so the deal has one
+ * claim control instead of two that disagreed about the status.
+ */
 
 const claimInfoSchema = z.object({
   leadId: z.string().min(1),

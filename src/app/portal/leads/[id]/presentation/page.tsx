@@ -25,7 +25,7 @@ export default async function PresentationBuilderPage({ params }: { params: Prom
         <ArrowLeft className="size-4" /> Back to deal
       </Link>
       <div className="mb-6">
-        <h1 className="font-serif text-2xl font-bold">Build Presentation</h1>
+        <h1 className="font-serif text-2xl font-bold">Build Proposal</h1>
         <p className="text-sm text-muted-foreground">{data.proposal.customerName} · {data.proposal.propertyAddress}</p>
       </div>
       <PresentationBuilder data={data} leadId={id} />
