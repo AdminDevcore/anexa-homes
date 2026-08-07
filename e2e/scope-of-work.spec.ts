@@ -16,10 +16,16 @@ async function openDeal(page: Page, query: string) {
   await page.waitForURL("**/portal/leads/**");
 }
 
+/** The scope is a slide beside Claim Info, not a section of its own. */
+async function openScopeTab(page: Page) {
+  await page.getByRole("tab", { name: "Scope of Work" }).click();
+  await expect(page.getByRole("button", { name: /Add custom line/i })).toBeVisible();
+}
+
 test("manager sees Scope of Work with profit + margin on a scope-received deal", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await openDeal(page, "Linda");
-
+  await openScopeTab(page);
 
   // Seeded insurance RCV $13,530.00. Profit pool = RCV − cost − 10% overhead.
   // Old gross margin was $3,570 (26.4%); after the $1,353 overhead the pool is
@@ -36,7 +42,7 @@ test("manager sees Scope of Work with profit + margin on a scope-received deal",
 test("sales rep sees the scope but NOT cost or profit", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await openDeal(page, "Linda");
-
+  await openScopeTab(page);
 
   // Insurance side is visible (totals render as text)
   await expect(page.getByText("$13,530.00").first()).toBeVisible();
@@ -52,7 +58,8 @@ test("no Scope of Work section before Scope Received", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await openDeal(page, "David"); // David Kim — appointment_set stage
 
-  await expect(page.getByRole("heading", { name: "Scope of Work" })).toHaveCount(0);
+  // No scope tab at all — the slide is omitted, not shown locked.
+  await expect(page.getByRole("tab", { name: "Scope of Work" })).toHaveCount(0);
 
   await page.context().clearCookies();
 });
@@ -60,6 +67,7 @@ test("no Scope of Work section before Scope Received", async ({ page }) => {
 test("scope panel exposes cost/supplement template pickers + load-from-catalog", async ({ page }) => {
   await login(page, "owner@anexahomes.com");
   await openDeal(page, "Linda");
+  await openScopeTab(page);
 
   // New template-driven controls + columns are present.
   await expect(page.getByText("Cost template").first()).toBeVisible();

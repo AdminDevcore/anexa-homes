@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   DEFAULT_CLAIM_STATUSES,
   DEFAULT_CLAIM_STATUS_KEY,
+  claimIsIncomplete,
   claimStatusKey,
   claimStatusOpensClaim,
   claimStatusLabel,
@@ -109,6 +110,33 @@ describe("claimStatusOpensClaim", () => {
     // The key is what's stored, so renaming the label leaves the rule intact.
     const renamed = parseClaimStatuses([{ key: "not_filed", label: "No Claim Yet" }]);
     expect(claimStatusOpensClaim(renamed[0].key)).toBe(false);
+  });
+});
+
+describe("claimIsIncomplete", () => {
+  const full = { carrier: "State Farm", claimNumber: "SF-2026-4471" };
+
+  it("passes a claim that names its carrier and number", () => {
+    expect(claimIsIncomplete(full)).toBe(false);
+  });
+
+  it("flags a claim opened with the dialog skipped", () => {
+    expect(claimIsIncomplete({ carrier: null, claimNumber: null })).toBe(true);
+  });
+
+  it("flags a half-filled claim either way round", () => {
+    expect(claimIsIncomplete({ ...full, claimNumber: null })).toBe(true);
+    expect(claimIsIncomplete({ ...full, carrier: null })).toBe(true);
+  });
+
+  it("does not accept whitespace as a claim number", () => {
+    expect(claimIsIncomplete({ ...full, claimNumber: "   " })).toBe(true);
+  });
+
+  it("says nothing about a deal with no claim at all", () => {
+    // Not Filed is not an incomplete claim — it is the absence of one, and
+    // warning about it would put an amber banner on every fresh deal.
+    expect(claimIsIncomplete(null)).toBe(false);
   });
 });
 

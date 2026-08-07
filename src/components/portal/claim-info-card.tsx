@@ -3,12 +3,13 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ShieldCheck, Loader2, Check, Pencil, X } from "lucide-react";
+import { ShieldCheck, Loader2, Check, Pencil, X, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ClaimPriceEditor } from "@/components/portal/claim-price-editor";
 import { useFormat } from "@/components/portal/branding-provider";
 import { updateClaimInfoAction } from "@/server/modules/leads/actions";
+import { claimIsIncomplete } from "@/lib/claim-status";
 
 // Roof info, line items, and supplement opportunities moved to Scope of Work.
 export type ClaimFull = {
@@ -130,10 +131,45 @@ export function ClaimInfoCard({
 
   const dateText = (iso: string | null) => (iso ? fmt.date(iso) : "—");
 
+  // An amount nobody has entered is zero in the column, but "$0" on screen reads
+  // as a claim someone priced at nothing. A real claim has no $0 deductible or
+  // RCV, so zero is unambiguously "not entered yet" and shows as an em-dash —
+  // matching the text fields above it.
+  const moneyText = (cents: number) => (cents ? fmt.money(cents) : "—");
+
+  const incomplete = claimIsIncomplete(claim);
+  const missingLabel =
+    !claim.carrier?.trim() && !claim.claimNumber?.trim()
+      ? "carrier and claim number"
+      : !claim.carrier?.trim()
+        ? "carrier"
+        : "claim number";
+
   // The content itself, defined once and rendered by both the bare and the
   // chromed branch below.
   const body = (
     <>
+        {/* A claim with no carrier and no claim number can't be worked by anyone
+            who didn't open it. The picker asks for both as it opens the claim;
+            this catches the ones where that was skipped, so an empty worksheet
+            never passes for a filed claim just because the status says so. */}
+        {incomplete && !editing && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-500/40 bg-amber-500/[0.08] px-4 py-3">
+            <TriangleAlert className="size-4 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">This claim is missing its {missingLabel}</p>
+              <p className="text-[11px] text-muted-foreground">
+                Nobody can call the adjuster or chase a supplement without them.
+              </p>
+            </div>
+            {canEdit && (
+              <Button size="sm" variant="outline" onClick={openEditor} className="border-amber-500/50">
+                Add claim info
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* Claim Price — the contract price from the insurance scope (Scope Received). */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 rounded-xl border border-gold/30 bg-gold/5 px-4 py-3">
           <div className="flex flex-col">
@@ -184,10 +220,10 @@ export function ClaimInfoCard({
               </>
             ) : (
               <>
-                <ReadField label="Deductible" value={fmt.money(claim.deductible)} />
-                <ReadField label="RCV" value={fmt.money(claim.rcv)} />
-                <ReadField label="ACV" value={fmt.money(claim.acv)} />
-                <ReadField label="Depreciation" value={fmt.money(claim.depreciation)} />
+                <ReadField label="Deductible" value={moneyText(claim.deductible)} />
+                <ReadField label="RCV" value={moneyText(claim.rcv)} />
+                <ReadField label="ACV" value={moneyText(claim.acv)} />
+                <ReadField label="Depreciation" value={moneyText(claim.depreciation)} />
               </>
             )}
           </div>

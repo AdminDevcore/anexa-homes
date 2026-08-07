@@ -8,7 +8,6 @@ import {
   Users,
   ClipboardCheck,
   DollarSign,
-  Calculator,
   Zap,
   Satellite,
   Landmark,
@@ -527,6 +526,10 @@ export default async function LeadDetailPage({
   // a sales rep sees two slides, not three with a locked one.
   const dealSlides: DealSlideDef[] = [
     { id: "claim", label: "Claim Info" },
+    // Scope sits next to the claim it is costed from, and is omitted entirely
+    // rather than shown locked: it is gated on the Scope resource, on the deal
+    // reaching Scope Received, and on this being an insurance deal at all.
+    ...(showScope ? [{ id: "scope", label: "Scope of Work" }] : []),
     { id: "field", label: "Field Production" },
     ...(showFinancials ? [{ id: "financials", label: "Deal Financials" }] : []),
   ];
@@ -767,6 +770,23 @@ export default async function LeadDetailPage({
                 )}
               </div>
 
+              {/* ── Scope of work: the claim's line items, costed ── */}
+              {showScope && (
+                <div data-deal-slide="scope">
+                  <p className="mb-4 text-sm text-muted-foreground">
+                    Cost the job: enter what insurance pays vs. our cost per line and see the profit and margin.
+                  </p>
+                  <ScopeOfWorkPanel
+                    leadId={lead.id}
+                    scope={scopeData}
+                    canEdit={can(user, "update", "Scope")}
+                    canSeeCosts={canSeeScopeCosts(user.role)}
+                    hasClaimLines={claimLineCount > 0}
+                    hasTemplate={scopeTemplate.length > 0}
+                  />
+                </div>
+              )}
+
               {/* ── Field production: what the crew photographs and checks off ── */}
               <div data-deal-slide="field" className="space-y-6">
                 {!project ? (
@@ -843,24 +863,10 @@ export default async function LeadDetailPage({
           )}
             </section>
 
-            {/* ── Scope of Work (job profitability) ── */}
-            {showScope && (
-              <section id="scope" className="scroll-mt-24 space-y-6">
-                <Card title="Scope of Work" icon={Calculator}>
-                  <p className="mb-4 text-sm text-muted-foreground">
-                    Cost the job: enter what insurance pays vs. our cost per line and see the profit and margin.
-                  </p>
-                  <ScopeOfWorkPanel
-                    leadId={lead.id}
-                    scope={scopeData}
-                    canEdit={can(user, "update", "Scope")}
-                    canSeeCosts={canSeeScopeCosts(user.role)}
-                    hasClaimLines={claimLineCount > 0}
-                    hasTemplate={scopeTemplate.length > 0}
-                  />
-                </Card>
-              </section>
-            )}
+            {/* Scope of Work is NOT a section of its own any more — it is a slide
+                beside Claim Info, Field Production and Deal Financials above. It
+                is another reading of the same job, and its 150-line catalog table
+                was the single longest thing on the page. */}
 
             {/* ── Proposal (solar): design → financing → generate, in order ── */}
             {isSolarDeal && (
@@ -1144,6 +1150,7 @@ export default async function LeadDetailPage({
                   value={lead.claimStatus}
                   options={claimStatusOptions}
                   canEdit={can(user, "update", "Lead")}
+                  hasClaim={!!claim}
                 />
               ) : null
             }

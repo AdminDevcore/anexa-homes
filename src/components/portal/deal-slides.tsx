@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ShieldCheck, Hammer, DollarSign, type LucideIcon } from "lucide-react";
+import { ShieldCheck, Hammer, DollarSign, Calculator, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type DealSlideDef = { id: string; label: string; icon?: string };
@@ -10,6 +10,7 @@ export type DealSlideDef = { id: string; label: string; icon?: string };
 // component across the RSC boundary as a prop.
 const SLIDE_ICONS: Record<string, LucideIcon> = {
   claim: ShieldCheck,
+  scope: Calculator,
   field: Hammer,
   financials: DollarSign,
 };
@@ -17,14 +18,14 @@ const SLIDE_ICONS: Record<string, LucideIcon> = {
 const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
 
 /**
- * Three related views of the same job, in one card, one at a time.
+ * Related views of the same job, in one card, one at a time.
  *
  * The deal page itself is deliberately ONE scrolling page — nothing important
  * is hidden behind a click. This is the exception that proves it: the claim
- * worksheet, the field photo checklists and the financial breakdown are three
- * *alternative* readings of the same job rather than three things you read in
- * sequence, and stacked they add roughly two screens of scroll to a page that
- * already has plenty.
+ * worksheet, the costed scope, the field photo checklists and the financial
+ * breakdown are *alternative* readings of the same job rather than things you
+ * read in sequence, and stacked they add several screens of scroll to a page
+ * that already has plenty. The scope table alone runs 150 catalog lines.
  *
  * Content stays server-rendered and MOUNTED — switching only toggles
  * `display`, so a half-filled claim form or a photo mid-upload survives a trip

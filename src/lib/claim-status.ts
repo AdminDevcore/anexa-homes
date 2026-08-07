@@ -55,6 +55,23 @@ export function claimStatusOpensClaim(key: string): boolean {
 }
 
 /**
+ * A claim that says "Filed" but names no carrier and no claim number.
+ *
+ * Nobody can call an adjuster, chase a supplement or reconcile a payment on a
+ * claim with neither of these, so a worksheet in this state is a deal that LOOKS
+ * handled and isn't. The picker asks for them as it opens the claim; this is
+ * what flags the ones that were skipped.
+ *
+ * The carrier and the claim number are the whole test. Deductible/RCV/ACV arrive
+ * later with the scope, and the date of loss is nice to have — none of them make
+ * the claim unworkable by their absence.
+ */
+export function claimIsIncomplete(claim: { carrier?: string | null; claimNumber?: string | null } | null): boolean {
+  if (!claim) return false;
+  return !claim.carrier?.trim() || !claim.claimNumber?.trim();
+}
+
+/**
  * Derive a storage key from a label. Only ever called when an option is FIRST
  * created — renaming keeps the original key, which is the whole point.
  */

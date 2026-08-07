@@ -371,7 +371,15 @@ export async function setDealTypeAction(input: z.infer<typeof dealTypeSchema>) {
   return { ok: true as const };
 }
 
-const claimStatusSchema = z.object({ leadId: z.string().min(1), status: z.string().min(1).max(60) });
+const claimStatusSchema = z.object({
+  leadId: z.string().min(1),
+  status: z.string().min(1).max(60),
+  // The essentials, captured in the same call that opens the claim. Optional
+  // because the rep may not have the claim number yet — see the doc comment.
+  carrier: z.string().max(120).optional(),
+  claimNumber: z.string().max(80).optional(),
+  lossDate: z.string().max(40).optional(),
+});
 
 /**
  * Move the deal along its insurance claim — and OPEN the claim if this is the
@@ -392,13 +400,21 @@ const claimStatusSchema = z.object({ leadId: z.string().min(1), status: z.string
  * Going BACK to Not Filed destroys nothing: the claim row and everything typed
  * into the worksheet stay exactly where they are. A dropdown must never be able
  * to delete a carrier, an adjuster and an RCV.
+ *
+ * `carrier` / `claimNumber` / `lossDate` are what the picker's dialog collects
+ * as it opens the claim, so the claim is born with the identifying facts instead
+ * of as an empty worksheet that merely claims to be Filed. They stay OPTIONAL:
+ * a rep who files by phone is sometimes told the claim number will follow, and
+ * refusing to record the status until the carrier calls back would just push the
+ * truth out of the CRM. Skipped claims are flagged incomplete instead — see
+ * `claimIsIncomplete`.
  */
 export async function setClaimStatusAction(input: z.infer<typeof claimStatusSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Lead")) return { ok: false as const, error: "Not allowed." };
   const parsed = claimStatusSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: "Invalid status." };
-  const { leadId, status } = parsed.data;
+  const { leadId, status, carrier, claimNumber, lossDate } = parsed.data;
 
   const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   const lead = await prisma.lead.findFirst({
@@ -417,10 +433,18 @@ export async function setClaimStatusAction(input: z.infer<typeof claimStatusSche
     select: { id: true },
   });
 
+  // Only ever written on the way IN. An existing claim's carrier is edited in the
+  // worksheet, and a blank field in the picker's dialog must not wipe it.
+  const opening = {
+    ...(carrier?.trim() ? { carrier: carrier.trim() } : {}),
+    ...(claimNumber?.trim() ? { claimNumber: claimNumber.trim() } : {}),
+    ...(lossDate?.trim() ? { lossDate: new Date(`${lossDate.trim()}T12:00:00`) } : {}),
+  };
+
   if (!claim && claimStatusOpensClaim(status)) {
     if (!can(user, "create", "Claim")) return { ok: false as const, error: "Not allowed to open a claim." };
     await prisma.claim.create({
-      data: { companyId: lead.companyId, leadId: lead.id, vertical: lead.vertical, status },
+      data: { companyId: lead.companyId, leadId: lead.id, vertical: lead.vertical, status, ...opening },
     });
   } else if (claim) {
     // Keep the claim's own status in step with the deal's. These drifted before:
