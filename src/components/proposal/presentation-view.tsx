@@ -104,7 +104,6 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
         companyName={data.branding.companyName}
         logoUrl={data.branding.logoUrl}
         navItems={navItems}
-        hasSignature={enabled("signature")}
       />
 
       {/* COVER — full-bleed editorial hero on the customer's house. On paper it

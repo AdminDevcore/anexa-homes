@@ -1,15 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { Printer, PenLine } from "lucide-react";
+import { Printer } from "lucide-react";
 
 export type ChromeNavItem = { id: string; label: string };
 
 /**
  * Sticky wayfinding for the public proposal: a slim nav with the company
- * mark, jump links that highlight the active section, a scroll-progress bar,
- * and a "Review & sign" CTA that follows the reader. Also drives the
- * scroll-reveal animation by toggling `.is-in` on `[data-reveal]` sections.
+ * mark, jump links that highlight the active section, and a scroll-progress
+ * bar. Also drives the scroll-reveal animation by toggling `.is-in` on
+ * `[data-reveal]` sections.
  *
  * Rendered once at the top of PresentationView. All effects degrade safely:
  * with no JS the content is fully visible and the page just scrolls normally.
@@ -18,12 +18,10 @@ export function ProposalChrome({
   companyName,
   logoUrl,
   navItems,
-  hasSignature,
 }: {
   companyName: string;
   logoUrl: string | null;
   navItems: ChromeNavItem[];
-  hasSignature: boolean;
 }) {
   const [progress, setProgress] = React.useState(0);
   const [activeId, setActiveId] = React.useState<string>(navItems[0]?.id ?? "");
@@ -134,14 +132,6 @@ export function ProposalChrome({
           >
             <Printer className="size-4" /> PDF
           </button>
-          {hasSignature && (
-            <button
-              onClick={() => jump("signature")}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--proposal-accent)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-95"
-            >
-              <PenLine className="size-4" /> Review &amp; sign
-            </button>
-          )}
         </div>
       </div>
     </header>
