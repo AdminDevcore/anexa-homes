@@ -4,7 +4,7 @@ import * as React from "react";
 import { Search, Loader2, CloudHail, Wind, Tornado, ShieldCheck } from "lucide-react";
 import type { AddressCheckResult, StormReportHit } from "@/server/modules/storm/queries";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -35,15 +35,17 @@ export function AddressChecker() {
   const [err, setErr] = React.useState("");
   const [showDebug, setShowDebug] = React.useState(false);
 
-  async function check(r = radius) {
-    if (q.trim().length < 4) {
+  // `query` is passed explicitly when checking straight off a dropdown pick,
+  // because `q` in that render's closure is still the half-typed text.
+  async function check(r = radius, query = q) {
+    if (query.trim().length < 4) {
       setErr("Enter a fuller address.");
       return;
     }
     setLoading(true);
     setErr("");
     try {
-      const res = await fetch(`/api/storm/address-check?q=${encodeURIComponent(q.trim())}&radius=${r}`);
+      const res = await fetch(`/api/storm/address-check?q=${encodeURIComponent(query.trim())}&radius=${r}`);
       const data = await res.json();
       if (!res.ok) {
         setErr(data.error || "Lookup failed.");
@@ -70,16 +72,20 @@ export function AddressChecker() {
           Check any property for verified storm reports by distance — date of loss, hail/wind, and a confidence level.
         </p>
         <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && check()}
-              placeholder="123 Main St, Plano, TX"
-              className="pl-8"
-            />
-          </div>
+          <AddressAutocomplete
+            className="flex-1"
+            mode="single"
+            value={q}
+            onChange={setQ}
+            // Picking an address is unambiguous intent to check it, so run the
+            // lookup rather than making the rep reach for the button.
+            onSelect={(parts) => void check(radius, parts.formatted)}
+            placeholder="123 Main St, Plano, TX"
+            inputClassName="pl-8"
+            leading={
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+            }
+          />
           <Button onClick={() => check()} disabled={loading} className="gap-1.5">
             {loading ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />} Check
           </Button>

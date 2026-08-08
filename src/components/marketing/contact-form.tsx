@@ -19,6 +19,22 @@ import {
 } from "@/components/ui/select";
 import { submitWebsiteLead } from "@/server/modules/leads/intake";
 import { SERVICES } from "@/lib/site";
+import {
+  AddressAutocomplete,
+  type SuggestTransport,
+} from "@/components/portal/address-autocomplete";
+import { publicSuggestAddresses, publicResolvePlace } from "@/server/modules/geo/public-suggest";
+
+/**
+ * The portal's address field talks to session-gated routes. This form is on the
+ * public website and has no session, so it calls the throttled server actions
+ * instead — same suggestions, a per-IP cap on top, because this is the one
+ * address field a stranger can reach and Places is metered.
+ */
+const publicTransport: SuggestTransport = {
+  suggest: (q, sessionToken, scope) => publicSuggestAddresses(q, sessionToken, scope),
+  resolve: (placeId, sessionToken) => publicResolvePlace(placeId, sessionToken),
+};
 
 const formSchema = z.object({
   firstName: z.string().min(1, "Required"),
@@ -151,7 +167,20 @@ export function ContactForm({
       {!hideProperty && (
         <>
           <Field label="Property address" error={errors.address?.message}>
-            <Input {...register("address")} placeholder="123 Oak Street" />
+            {/* Public, so it goes through the throttled server actions rather
+                than the session-gated /api/geocode routes. */}
+            <AddressAutocomplete
+              value={watch("address") ?? ""}
+              onChange={(val) => setValue("address", val, { shouldValidate: true })}
+              onSelect={(parts) => {
+                setValue("address", parts.address, { shouldValidate: true });
+                // No State field on this form — city and ZIP are all it has.
+                if (parts.city) setValue("city", parts.city, { shouldValidate: true });
+                if (parts.zip) setValue("zip", parts.zip, { shouldValidate: true });
+              }}
+              transport={publicTransport}
+              placeholder="123 Oak Street"
+            />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="City" error={errors.city?.message}>

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { saveOnboardingAction, uploadOnboardingDocAction } from "@/server/modules/onboarding/actions";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 import type { OnboardingView } from "@/server/modules/onboarding/queries";
 
 const TAX_CLASSES = [
@@ -102,7 +103,23 @@ export function OnboardingWizard({ initial, firstName, lastName, phone }: { init
           </Field>
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-4">
-          <div className="sm:col-span-2"><FieldI label="Home address" value={f.address} onChange={set("address")} /></div>
+          <div className="sm:col-span-2">
+            <Field label="Home address">
+              <AddressAutocomplete
+                value={f.address}
+                onChange={(val) => setF((s) => ({ ...s, address: val }))}
+                onSelect={(parts) =>
+                  setF((s) => ({
+                    ...s,
+                    address: parts.address,
+                    city: parts.city || s.city,
+                    state: parts.state || s.state,
+                    zip: parts.zip || s.zip,
+                  }))
+                }
+              />
+            </Field>
+          </div>
           <FieldI label="City" value={f.city} onChange={set("city")} />
           <div className="grid grid-cols-2 gap-2">
             <FieldI label="State" value={f.state} onChange={set("state")} />
@@ -125,7 +142,18 @@ export function OnboardingWizard({ initial, firstName, lastName, phone }: { init
           <Field label="Account number" secure note={initial?.accountMasked ? `On file: ${initial.accountMasked}` : undefined}>
             <Input value={f.account} onChange={set("account")} placeholder={initial?.accountMasked ?? "Account number"} inputMode="numeric" />
           </Field>
-          <div className="sm:col-span-2"><FieldI label="Address on account" value={f.accountAddress} onChange={set("accountAddress")} /></div>
+          <div className="sm:col-span-2">
+            <Field label="Address on account">
+              {/* One line, no city/state/zip beside it — so a pick writes the
+                  whole formatted address rather than just the street. */}
+              <AddressAutocomplete
+                mode="single"
+                value={f.accountAddress}
+                onChange={(val) => setF((s) => ({ ...s, accountAddress: val }))}
+                onSelect={(parts) => setF((s) => ({ ...s, accountAddress: parts.formatted }))}
+              />
+            </Field>
+          </div>
         </div>
       </Section>
 

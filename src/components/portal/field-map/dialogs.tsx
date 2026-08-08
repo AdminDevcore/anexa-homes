@@ -6,7 +6,7 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, Search, X, MapPin, UserSearch, UserPlus } from "lucide-react";
+import { Loader2, Search, UserSearch, UserPlus } from "lucide-react";
 import { KNOCKED_DISPOSITIONS, dispositionMeta, type LatLng } from "@/lib/canvassing";
 import type { KnockDTO, KnockDetailDTO, KnockEventDTO } from "@/server/modules/canvassing/queries";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 import {
   updateKnockAction,
   addKnockCommentAction,
@@ -138,112 +139,37 @@ export function PropertyInfo({
   );
 }
 
-type GeocodeResult = { label: string; lat: number; lng: number };
-
 /**
- * Address search box for the field map. Debounced forward-geocoding via
- * /api/canvassing/geocode (Nominatim proxy). Picking a result jumps the map to
- * that house and drops a pulsing highlight on the dot to tap.
+ * Address search box for the field map. Picking a result jumps the map to that
+ * house and drops a pulsing highlight on the dot to tap.
+ *
+ * Shares `AddressAutocomplete` with every other address field in the app, which
+ * is what gets house numbers into this box: the old bespoke version proxied
+ * Nominatim, and on a TIGER-only street the best it could offer was the street.
+ * Searching for a specific house then centred the map on the block.
  */
 export function AddressSearch({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
   const [term, setTerm] = React.useState("");
-  const [debounced, setDebounced] = React.useState("");
-  const [open, setOpen] = React.useState(false);
-  const boxRef = React.useRef<HTMLDivElement | null>(null);
-
-  // Debounce keystrokes so we respect Nominatim's rate limits.
-  React.useEffect(() => {
-    const t = setTimeout(() => setDebounced(term.trim()), 350);
-    return () => clearTimeout(t);
-  }, [term]);
-
-  const { data, isFetching } = useQuery<{ results: GeocodeResult[] }>({
-    queryKey: ["canvassing-geocode", debounced],
-    queryFn: async () => {
-      const res = await fetch(`/api/canvassing/geocode?q=${encodeURIComponent(debounced)}`);
-      if (!res.ok) return { results: [] };
-      return res.json();
-    },
-    enabled: debounced.length >= 3,
-    staleTime: 5 * 60 * 1000,
-  });
-  const results = data?.results ?? [];
-
-  // Close the dropdown when clicking outside.
-  React.useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  function pick(r: GeocodeResult) {
-    onSelect(r.lat, r.lng);
-    setTerm(r.label.split(",").slice(0, 2).join(", "));
-    setOpen(false);
-  }
 
   return (
-    <div ref={boxRef} className="relative w-full">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={term}
-          onChange={(e) => {
-            setTerm(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && results[0]) {
-              e.preventDefault();
-              pick(results[0]);
-            }
-            if (e.key === "Escape") setOpen(false);
-          }}
-          placeholder="Search an address…"
-          className="h-10 bg-background/95 pl-8 pr-8 shadow backdrop-blur"
-          aria-label="Search an address on the map"
-        />
-        {isFetching ? (
-          <Loader2 className="absolute right-2.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-        ) : term ? (
-          <button
-            type="button"
-            onClick={() => {
-              setTerm("");
-              setDebounced("");
-              setOpen(false);
-            }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            aria-label="Clear search"
-          >
-            <X className="size-4" />
-          </button>
-        ) : null}
-      </div>
-      {open && debounced.length >= 3 && (
-        <div className="absolute z-[1100] mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
-          {results.length === 0 ? (
-            <p className="px-2 py-2 text-sm text-muted-foreground">
-              {isFetching ? "Searching…" : "No matching address."}
-            </p>
-          ) : (
-            results.map((r, i) => (
-              <button
-                key={`${r.lat},${r.lng},${i}`}
-                onClick={() => pick(r)}
-                className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-              >
-                <MapPin className="mt-0.5 size-3.5 shrink-0 text-gold" />
-                <span className="line-clamp-2">{r.label}</span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
+    <AddressAutocomplete
+      value={term}
+      onChange={setTerm}
+      onSelect={(parts) => {
+        onSelect(parts.lat, parts.lng);
+        // Collapse to street + city; the full formatted line overflows the
+        // floating box on a phone.
+        setTerm([parts.address, parts.city].filter(Boolean).join(", ") || parts.formatted);
+      }}
+      mode="single"
+      placeholder="Search an address…"
+      aria-label="Search an address on the map"
+      className="w-full"
+      inputClassName="h-10 bg-background/95 pl-8 shadow backdrop-blur"
+      leading={
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+      }
+    />
   );
 }
 

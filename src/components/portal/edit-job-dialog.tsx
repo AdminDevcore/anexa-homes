@@ -17,6 +17,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { updateProjectAction } from "@/server/modules/projects/actions";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 import { serviceTypeOptions } from "@/lib/service-types";
 import type { ServiceType } from "@prisma/client";
 
@@ -201,7 +202,21 @@ export function EditJobDialog({ job }: { job: EditableJob }) {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="col-span-2">
                 <Fld label="Address">
-                  <Input value={f.address} onChange={(e) => set("address", e.target.value)} />
+                  <AddressAutocomplete
+                    value={f.address}
+                    onChange={(val) => set("address", val)}
+                    onSelect={(parts) =>
+                      setF((s) => ({
+                        ...s,
+                        address: parts.address,
+                        // Don't wipe a value the user already typed when the
+                        // suggestion happens not to carry that component.
+                        city: parts.city || s.city,
+                        state: parts.state || s.state,
+                        zip: parts.zip || s.zip,
+                      }))
+                    }
+                  />
                 </Fld>
               </div>
               <Fld label="City">

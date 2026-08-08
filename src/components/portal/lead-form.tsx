@@ -17,7 +17,10 @@ import {
 } from "@/components/ui/select";
 import { createLeadAction, updateLeadAction, type LeadInput } from "@/server/modules/leads/manage";
 import { uploadFileAction } from "@/server/modules/files/actions";
-import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
+import {
+  AddressAutocomplete,
+  type ResolvedAddress,
+} from "@/components/portal/address-autocomplete";
 
 type Option = { id: string; name: string };
 type FieldDef = { id: string; key: string; label: string; type: string; options: string[]; required: boolean };
@@ -72,8 +75,16 @@ export function LeadForm({
   // Files staged for upload — attached to the appointment after it's created.
   const [files, setFiles] = React.useState<File[]>([]);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  /**
+   * The rooftop point behind the address currently in the form, if the rep
+   * picked it from the dropdown rather than typing it. Kept alongside the
+   * address it describes and dropped the instant any of the four address fields
+   * is hand-edited, so a coordinate can never outlive the house it belongs to.
+   */
+  const [picked, setPicked] = React.useState<ResolvedAddress | null>(null);
 
   function set<K extends keyof typeof v>(k: K, val: (typeof v)[K]) {
+    if (k === "address" || k === "city" || k === "state" || k === "zip") setPicked(null);
     setV((s) => ({ ...s, [k]: val }));
   }
 
@@ -128,6 +139,8 @@ export function LeadForm({
       appointmentAt: v.appointmentDate,
       notes: v.notes,
       customFields: custom,
+      // Only travels when the picked address is still the one in the form.
+      ...(picked ? { lat: picked.lat, lng: picked.lng } : {}),
     };
     const res = mode === "create"
       ? await createLeadAction(payload)
@@ -176,7 +189,7 @@ export function LeadForm({
           <AddressAutocomplete
             value={v.address}
             onChange={(val) => set("address", val)}
-            onSelect={(parts) =>
+            onSelect={(parts) => {
               setV((s) => ({
                 ...s,
                 address: parts.address,
@@ -185,8 +198,10 @@ export function LeadForm({
                 city: parts.city || s.city,
                 state: parts.state || s.state,
                 zip: parts.zip || s.zip,
-              }))
-            }
+              }));
+              // Set after the fields, because `set` above clears it on address edits.
+              setPicked(parts.precision === "ROOFTOP" ? parts : null);
+            }}
           />
         </Field>
         <Grid cols={3}>
@@ -338,11 +353,23 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Grid({ children, cols = 2 }: { children: React.ReactNode; cols?: 2 | 3 }) {
   return <div className={`grid gap-4 ${cols === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>{children}</div>;
 }
+/**
+ * Label + control. The label is wired to its control with a generated id rather
+ * than left floating: without `htmlFor` the association is visual only, so a
+ * screen reader announces "edit text, blank" for City, State and ZIP, and
+ * nothing can address them by name. The child keeps its own `id` if it has one.
+ */
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  const generated = React.useId();
+  const child = React.isValidElement<{ id?: string }>(children) ? children : null;
+  const id = child?.props.id ?? generated;
+
   return (
     <div className="space-y-1.5">
-      <Label className="text-sm">{label}{required && <span className="text-destructive"> *</span>}</Label>
-      {children}
+      <Label htmlFor={child ? id : undefined} className="text-sm">
+        {label}{required && <span className="text-destructive"> *</span>}
+      </Label>
+      {child ? React.cloneElement(child, { id }) : children}
     </div>
   );
 }

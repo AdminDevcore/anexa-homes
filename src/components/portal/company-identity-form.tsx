@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { updateCompanyIdentityAction } from "@/server/modules/settings/actions";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 
 export function CompanyIdentityForm({
   initial,
@@ -62,9 +63,17 @@ export function CompanyIdentityForm({
 
       <div className="space-y-1.5">
         <Label>Address</Label>
-        <Input
+        <AddressAutocomplete
           value={address}
-          onChange={(e) => setAddress(e.target.value)}
+          onChange={setAddress}
+          onSelect={(parts) => {
+            setAddress(parts.address);
+            // City/State/ZIP have their own fields below; only overwrite the
+            // ones the suggestion actually carries.
+            if (parts.city) setCity(parts.city);
+            if (parts.state) setState(parts.state);
+            if (parts.zip) setZip(parts.zip);
+          }}
           placeholder="Street address"
         />
       </div>

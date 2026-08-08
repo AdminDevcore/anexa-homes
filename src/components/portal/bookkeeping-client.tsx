@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useFormat } from "@/components/portal/branding-provider";
 import type { BookkeepingData, BkTxn, BkVendor, BkReconciliation } from "@/server/modules/bookkeeping/queries";
 import { computeReports, resolvePeriod, type PeriodPreset } from "@/lib/bookkeeping-reports";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 import {
   createTransactionAction,
   updateTransactionAction,
@@ -976,7 +977,22 @@ function VendorDialog({ vendor, onClose, onDone }: { vendor?: BkVendor; onClose:
             <input type="checkbox" checked={f.is1099} onChange={(e) => setF((s) => ({ ...s, is1099: e.target.checked }))} className="size-4 rounded border-border" />
             1099 contractor (issue a 1099 at year-end)
           </label>
-          <Field label="Address"><Input value={f.address} onChange={upd("address")} placeholder="123 Main St" /></Field>
+          <Field label="Address">
+            <AddressAutocomplete
+              value={f.address}
+              onChange={(val) => setF((s) => ({ ...s, address: val }))}
+              onSelect={(parts) =>
+                setF((s) => ({
+                  ...s,
+                  address: parts.address,
+                  city: parts.city || s.city,
+                  state: parts.state || s.state,
+                  zip: parts.zip || s.zip,
+                }))
+              }
+              placeholder="123 Main St"
+            />
+          </Field>
           <div className="grid grid-cols-3 gap-3">
             <Field label="City"><Input value={f.city} onChange={upd("city")} placeholder="Dallas" /></Field>
             <Field label="State"><Input value={f.state} onChange={upd("state")} placeholder="TX" /></Field>

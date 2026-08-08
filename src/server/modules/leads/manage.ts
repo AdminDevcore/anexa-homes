@@ -47,9 +47,32 @@ const leadInput = z.object({
   appointmentAt: z.string().optional().or(z.literal("")),
   notes: z.string().max(4000).optional().or(z.literal("")),
   customFields: z.record(z.string(), z.string()).optional().default({}),
+  // A rooftop point the rep picked from the address dropdown, for the address
+  // in THIS payload. Optional because the field still accepts free text: type
+  // the address instead of picking it and the nightly cron geocodes it as
+  // before. Sent only while the picked address is still what's in the form —
+  // the client drops it the moment any address field is hand-edited, so these
+  // can't describe some earlier house.
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
 });
 
 export type LeadInput = z.infer<typeof leadInput>;
+
+/**
+ * Coordinates to write for a lead whose address the rep picked from the
+ * dropdown, or null to leave the cron to it.
+ *
+ * Only a rooftop pick counts. The dropdown falls back to Nominatim when Places
+ * is unavailable, and a Nominatim point is interpolated along the road
+ * centreline — accurate to the block, never to the lot. Storing one here would
+ * plant exactly the bug `geo/resolve.ts` exists to describe, with the added
+ * insult that `geocodedAt` being set stops the cron ever revisiting it.
+ */
+function pickedRooftop(d: LeadInput): { lat: number; lng: number; geocodedAt: Date } | null {
+  if (typeof d.lat !== "number" || typeof d.lng !== "number") return null;
+  return { lat: d.lat, lng: d.lng, geocodedAt: new Date() };
+}
 
 async function defaultPipeline(companyId: string, vertical: Vertical) {
   return prisma.pipeline.findFirst({
@@ -100,6 +123,10 @@ export async function createLeadAction(input: LeadInput) {
       city: d.city || null,
       state: d.state || null,
       zip: d.zip || null,
+      // A picked address arrives already geocoded, so the lead plots on the
+      // right roof immediately instead of waiting for tonight's cron to
+      // interpolate one off a road centreline.
+      ...(pickedRooftop(d) ?? {}),
       pipelineId: pipeline?.id ?? null,
       stageId,
       stageChangedAt: new Date(),
@@ -185,7 +212,10 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       city: d.city || null,
       state: d.state || null,
       zip: d.zip || null,
-      ...(moved ? { lat: null, lng: null, geocodedAt: null } : {}),
+      // Correcting an address invalidates its cached pin. If the correction came
+      // from the dropdown we already hold the new roof's coordinates, so replace
+      // rather than clear; otherwise clear and let the cron re-derive.
+      ...(moved ? (pickedRooftop(d) ?? { lat: null, lng: null, geocodedAt: null }) : {}),
       stageId,
       ...(stageChanged ? { stageChangedAt: new Date() } : {}),
       sourceId: d.sourceId || null,

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { setStormCoverageAction } from "@/server/modules/storm/actions";
+import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 
 export function StormCoverageSettings({
   initial,
@@ -53,7 +54,17 @@ export function StormCoverageSettings({
       <div className="space-y-3 rounded-xl border border-border bg-card p-4">
         <div className="space-y-1.5">
           <Label htmlFor="storm-center">Center (address, city, or ZIP)</Label>
-          <Input id="storm-center" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="e.g. Plano, TX  or  75075" />
+          {/* "broad" because this field's label offers a city or a ZIP, and the
+              default house-only restriction would suggest nothing for either. */}
+          <AddressAutocomplete
+            id="storm-center"
+            mode="single"
+            scope="broad"
+            value={address}
+            onChange={setAddress}
+            onSelect={(parts) => setAddress(parts.formatted)}
+            placeholder="e.g. Plano, TX  or  75075"
+          />
           <p className="text-xs text-muted-foreground">We geocode this to set the center point.</p>
         </div>
         <div className="space-y-1.5">
