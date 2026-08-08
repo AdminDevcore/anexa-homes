@@ -107,9 +107,11 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
         hasSignature={enabled("signature")}
       />
 
-      {/* COVER — full-bleed editorial hero on the customer's house */}
+      {/* COVER — full-bleed editorial hero on the customer's house. On paper it
+          owns its page: tall enough to fill a Letter sheet inside the @page
+          margins, never so tall it spills onto a second. */}
       {enabled("cover") && (
-        <section data-section="cover" className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden bg-neutral-950 px-6 py-14 text-white sm:px-10 print:min-h-0 print:py-16">
+        <section data-section="cover" className="relative flex min-h-[100svh] flex-col justify-end overflow-hidden bg-neutral-950 px-6 py-14 text-white sm:px-10 print:min-h-[9.5in] print:py-16">
           {/* ANEXA brand cover — the same striking, on-brand opener on every proposal */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/anexa-proposal-cover.png" alt={data.branding.companyName} className="absolute inset-0 h-full w-full object-cover [print-color-adjust:exact] [-webkit-print-color-adjust:exact]" />
@@ -188,7 +190,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
               </div>
             ))}
           </div>
-          <p className="mt-12 text-sm text-neutral-500">Tap any photo to view it full screen.</p>
+          <p className="mt-12 text-sm text-neutral-500 print:hidden">Tap any photo to view it full screen.</p>
         </Section>
       )}
 
@@ -290,7 +292,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
       {/* FINANCIAL SUMMARY — dark chapter with the out-of-pocket as the hero number */}
       {enabled("financial") && (
         <Section id="financial" eyebrow="Your Investment" title="What this project costs you" tone="dark">
-          <div className="rounded-3xl bg-[var(--proposal-accent)] p-8 text-white sm:p-10">
+          <div className="break-inside-avoid rounded-3xl bg-[var(--proposal-accent)] p-8 text-white sm:p-10">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{cashDeal ? "Your project total" : "Your estimated out-of-pocket"}</p>
             <p className="mt-3 font-display text-6xl font-bold leading-none tracking-tight sm:text-8xl"><Money cents={fin.estimatedOutOfPocketCents} /></p>
             {/* Only promise monthly payments when the rep actually offered them. */}
@@ -305,7 +307,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
             </p>
           </div>
 
-          <dl className="mt-8 divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+          <dl className="mt-8 break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
             {(cashDeal
               ? ([
                   ["Project price", fin.projectPriceCents],
@@ -362,7 +364,7 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
           )}
 
           {!cashDeal && (
-            <p className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-200">
+            <p className="mt-6 break-inside-avoid rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-200">
               <strong className="text-amber-100">Texas law:</strong> your insurance deductible is your responsibility and cannot be waived, rebated, or absorbed by the contractor. Recoverable depreciation is released by your carrier after the work is completed.
             </p>
           )}

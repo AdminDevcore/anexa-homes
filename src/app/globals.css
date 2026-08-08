@@ -597,6 +597,51 @@
   .cashbid-doc .cashbid-sig { break-inside: avoid; }
 }
 
+/* ── Proposal: printing / "Save as PDF" ───────────────────────────────────
+   The proposal IS its colour. The cover, the damage chapter, the estimate and
+   the closing are dark chapters set in white type, and Chrome's print dialog
+   ships with "Background graphics" switched OFF — which drops those backgrounds
+   and lays the white type straight onto white paper. The estimate then prints
+   invisible even though every word of it is in the document.
+   print-color-adjust:exact overrides that checkbox, so the customer's printout
+   is the proposal they were shown. */
+@media print {
+  #proposal-root,
+  #proposal-root *,
+  #proposal-root *::before,
+  #proposal-root *::after {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  /* Chapters are the unit of the document: keep a short one whole rather than
+     slicing it across the fold, and never leave its heading behind on the
+     previous page. Tall chapters (FAQ, a long scope) still flow normally —
+     `avoid` is a preference, not a promise. */
+  #proposal-root [data-section] { break-inside: avoid; }
+  #proposal-root [data-section="cover"] { break-after: page; }
+  #proposal-root h2,
+  #proposal-root h3 { break-after: avoid; }
+  #proposal-root tr,
+  #proposal-root li,
+  #proposal-root figure,
+  #proposal-root dl > div { break-inside: avoid; }
+  /* Screen chapters breathe in viewport heights. Paper has none, so the same
+     padding buys nothing but page count. (The cover is the exception — it owns
+     its page and sets its own height.) */
+  #proposal-root [data-section]:not([data-section="cover"]) {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+}
+
+/* Printables in this app are Letter portrait documents (the proposal, the cash
+   bid, the generated contracts). Saying so keeps a stale Landscape setting in
+   someone's print dialog from reflowing the whole thing. */
+@page {
+  size: letter portrait;
+  margin: 0.4in;
+}
+
 /* Hide scrollbar (used by the proposal photo carousel). */
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .hide-scrollbar::-webkit-scrollbar { display: none; }

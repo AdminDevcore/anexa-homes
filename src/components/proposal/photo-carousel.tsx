@@ -55,16 +55,19 @@ export function PhotoCarousel({ photos, label }: { photos: CarouselPhoto[]; labe
 
   return (
     <div className="relative">
-      {/* Carousel track */}
+      {/* Carousel track. On paper there is no swiping: everything past the first
+          frame is scrolled out of view and would simply never print, so the same
+          photos lay out as a grid. */}
       <div
         ref={scroller}
         onScroll={onScroll}
-        className="hide-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-2"
+        data-photo-track
+        className="hide-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-2 print:grid print:grid-cols-2 print:overflow-visible"
       >
         {photos.map((p, i) => (
           <figure
             key={p.id}
-            className={`group relative shrink-0 snap-center overflow-hidden rounded-2xl ${single ? "w-full" : "w-[86%] sm:w-[70%] lg:w-[62%]"}`}
+            className={`group relative shrink-0 snap-center overflow-hidden rounded-2xl print:w-full ${single ? "w-full" : "w-[86%] sm:w-[70%] lg:w-[62%]"}`}
           >
             <button type="button" onClick={() => setLightbox(i)} className="block w-full text-left" aria-label="Open photo full screen">
               {/* eslint-disable-next-line @next/next/no-img-element */}

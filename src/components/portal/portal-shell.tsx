@@ -98,8 +98,10 @@ export function PortalShell({
 
   return (
     <div className="portal-root flex min-h-screen bg-muted/30">
-      {/* Desktop sidebar */}
-      <aside className="dark fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-white/10 bg-[#0c0c0e] text-foreground lg:flex">
+      {/* Desktop sidebar. The shell is workspace furniture: when someone prints
+          a page from inside the portal they want the document on it, not the
+          navigation around it. */}
+      <aside className="dark fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-white/10 bg-[#0c0c0e] text-foreground lg:flex print:hidden">
         <div className="flex h-16 items-center border-b border-white/10 px-5">
           <Link href="/portal/dashboard" className="group inline-flex items-center">
             <div className="flex items-center gap-2">
@@ -138,8 +140,8 @@ export function PortalShell({
       {/* Main column — min-w-0 lets it shrink below content width so wide tables
           scroll inside their own container instead of pushing the page (and the
           header actions) past the viewport's right edge. */}
-      <div className="flex min-w-0 flex-1 flex-col lg:pl-64">
-        <header className="dark sticky top-0 z-30 flex h-16 relative items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e] px-4 text-foreground sm:px-6">
+      <div className="flex min-w-0 flex-1 flex-col lg:pl-64 print:pl-0">
+        <header className="dark sticky top-0 z-30 flex h-16 relative items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e] px-4 text-foreground sm:px-6 print:hidden">
           <div className="flex items-center gap-3">
             {/* Mobile menu */}
             <Sheet>
@@ -185,7 +187,7 @@ export function PortalShell({
           )}
         </header>
 
-        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
+        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8 print:p-0">{children}</main>
       </div>
     </div>
   );

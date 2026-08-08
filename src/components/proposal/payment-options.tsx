@@ -145,7 +145,7 @@ function Option({
 }) {
   return (
     <div
-      className={`flex flex-col rounded-2xl border p-6 transition-all duration-300 ${
+      className={`flex break-inside-avoid flex-col rounded-2xl border p-6 transition-all duration-300 ${
         chosen
           ? "border-[var(--proposal-accent)] bg-[var(--proposal-accent)]/10"
           : "border-white/10 bg-white/[0.04] hover:border-white/25"

@@ -20,11 +20,13 @@ export default async function PresentationBuilderPage({ params }: { params: Prom
   if (!data) notFound();
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
-      <Link href={`/portal/leads/${id}`} className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+    // Printing from here means printing the proposal being built, so the page's
+    // own heading and back-link step out of the way of the document.
+    <div className="mx-auto w-full max-w-4xl px-4 py-6 print:max-w-none print:p-0">
+      <Link href={`/portal/leads/${id}`} className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground print:hidden">
         <ArrowLeft className="size-4" /> Back to deal
       </Link>
-      <div className="mb-6">
+      <div className="mb-6 print:hidden">
         <h1 className="font-serif text-2xl font-bold">Build Proposal</h1>
         <p className="text-sm text-muted-foreground">{data.proposal.customerName} · {data.proposal.propertyAddress}</p>
       </div>
