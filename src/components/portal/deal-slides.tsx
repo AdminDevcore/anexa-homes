@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ShieldCheck, Hammer, DollarSign, Calculator, type LucideIcon } from "lucide-react";
+import { ShieldCheck, Hammer, DollarSign, Calculator, ReceiptText, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type DealSlideDef = { id: string; label: string; icon?: string };
@@ -10,6 +10,7 @@ export type DealSlideDef = { id: string; label: string; icon?: string };
 // component across the RSC boundary as a prop.
 const SLIDE_ICONS: Record<string, LucideIcon> = {
   claim: ShieldCheck,
+  estimate: ReceiptText,
   scope: Calculator,
   field: Hammer,
   financials: DollarSign,

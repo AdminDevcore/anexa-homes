@@ -64,8 +64,10 @@ import { FinancingTermsPanel } from "@/components/portal/solar/financing-terms";
 import { Card, Section } from "@/components/portal/deal-ui";
 import { DealSlides, type DealSlideDef } from "@/components/portal/deal-slides";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
+import { getEstimateForLead, getEstimateStarterData } from "@/server/modules/estimates/queries";
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
 import { ScopeOfWorkPanel } from "@/components/portal/scope-of-work-panel";
+import { EstimatePanel } from "@/components/portal/estimate-panel";
 import { QcChecklistEditor, CrewAssigner } from "@/components/portal/project-workflows";
 import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
@@ -472,6 +474,15 @@ export default async function LeadDetailPage({
     showScope && canSeeScopeCosts(user.role) ? await listScopeTemplate(user.companyId, lead.vertical) : [];
   const claimLineCount = claim?.lineItems.length ?? 0;
 
+  // Estimate — what we'd CHARGE for the job. Shares the Scope resource (the
+  // roles that may price a job are the roles that may work a scope) but none of
+  // its gates: no stage, no deal type. Cost/margin inside the panel is gated
+  // separately by canSeeScopeCosts, so a rep quotes without seeing our margin.
+  const showEstimate = !isSolarDeal && can(user, "read", "Scope");
+  const [estimateData, estimateStarter] = showEstimate
+    ? await Promise.all([getEstimateForLead(user, lead.id), getEstimateStarterData(user, lead.id)])
+    : [null, null];
+
   // Notes split by placement: general notes go to the Overview; outcome-tagged
   // notes are immutable logs shown under their outcome in the Summary panel.
   const serializeNote = (n: (typeof lead.noteEntries)[number]) => ({
@@ -518,6 +529,12 @@ export default async function LeadDetailPage({
   // a sales rep sees two slides, not three with a locked one.
   const dealSlides: DealSlideDef[] = [
     { id: "claim", label: "Claim Info" },
+    // Estimate sits before Scope because that is the order the work happens in:
+    // we price the job, then the carrier's scope arrives (if one ever does).
+    // Unlike Scope it has no stage gate and no deal-type gate — a cash deal has
+    // nothing else that prices it, and an insurance deal needs a number long
+    // before the carrier produces theirs.
+    ...(showEstimate ? [{ id: "estimate", label: "Estimate" }] : []),
     // Scope sits next to the claim it is costed from, and is omitted entirely
     // rather than shown locked: it is gated on the Scope resource, on the deal
     // reaching Scope Received, and on this being an insurance deal at all.
@@ -761,6 +778,20 @@ export default async function LeadDetailPage({
                   </p>
                 )}
               </div>
+
+              {/* ── Estimate: what we would charge, priced line by line ── */}
+              {showEstimate && (
+                <div data-deal-slide="estimate">
+                  <EstimatePanel
+                    leadId={lead.id}
+                    estimate={estimateData}
+                    catalog={estimateData?.catalog ?? estimateStarter?.catalog ?? []}
+                    canEdit={can(user, "update", "Scope")}
+                    dealType={isInsurance ? "insurance" : "cash"}
+                    hasProject={!!project}
+                  />
+                </div>
+              )}
 
               {/* ── Scope of work: the claim's line items, costed ── */}
               {showScope && (

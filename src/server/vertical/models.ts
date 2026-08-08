@@ -44,6 +44,7 @@ export const SCOPED_MODELS = [
   "KnowledgeCategory",
   // Product / scope catalog
   "ScopeOfWork",
+  "Estimate",
   "ScopeTemplateItem",
   "ScopeCatalogItem",
   "ScopeCostTemplate",
