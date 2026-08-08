@@ -80,6 +80,43 @@ test("photos never gate generation — an empty checklist still produces a link"
   await page.context().clearCookies();
 });
 
+test("Download PDF prints the proposal, not the wizard the rep is standing in", async ({ page }) => {
+  // window.print() would block the run on a native dialog, so record the call
+  // instead. What matters is WHAT is on screen at the moment it fires.
+  await page.addInitScript(() => {
+    (window as unknown as { __printedRootHtml: string | null }).__printedRootHtml = null;
+    window.print = () => {
+      const root = document.querySelector("#proposal-root");
+      (window as unknown as { __printedRootHtml: string | null }).__printedRootHtml =
+        root ? (root as HTMLElement).innerText.slice(0, 4000) : null;
+    };
+  });
+
+  await login(page, "admin@anexahomes.com");
+  await openDeal(page, "Linda");
+  await page.getByRole("link", { name: "Build Proposal" }).click();
+  await page.waitForURL("**/presentation");
+  await page.getByRole("button", { name: /Preview & Share/ }).click();
+
+  // From step 5 the proposal isn't rendered yet — only the wizard form is. The
+  // button has to bring the preview up before printing or the PDF comes out blank.
+  await expect(page.locator("#proposal-root")).toHaveCount(0);
+  await page.getByRole("button", { name: "Download PDF" }).first().click();
+
+  await expect(page.locator("#proposal-root")).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText("Preview (customer view)")).toBeVisible();
+
+  const printed = await page.evaluate(
+    () => (window as unknown as { __printedRootHtml: string | null }).__printedRootHtml,
+  );
+  expect(printed, "window.print fired with the proposal in the DOM").not.toBeNull();
+  expect(printed).toContain("Your new roof");
+  // The wizard's own controls must never reach the paper.
+  expect(printed).not.toContain("Email it to the customer");
+  expect(printed).not.toContain("Deal type:");
+  await page.context().clearCookies();
+});
+
 test("the proposal can be emailed to the customer, and the send lands on the deal", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await openDeal(page, "Linda");

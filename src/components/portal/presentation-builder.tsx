@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Camera, Check, ExternalLink, Eye, Mail, Share2, Trash2 } from "lucide-react";
+import { Loader2, Camera, Check, Download, ExternalLink, Eye, Mail, Share2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -44,6 +44,7 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
   const [sendTo, setSendTo] = React.useState(data.customerEmail ?? "");
   const [sendNote, setSendNote] = React.useState("");
   const [sending, setSending] = React.useState(false);
+  const [pendingPrint, setPendingPrint] = React.useState(false);
 
   const checklist = data.checklist;
   const counts: Record<string, number> = {};
@@ -172,6 +173,49 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
     router.refresh();
   }
 
+  /**
+   * Download the proposal as a PDF.
+   *
+   * The proposal is only in the DOM while the preview is up — the wizard form
+   * is what's on screen otherwise — so printing straight from step 5 would hand
+   * the customer a blank page. We switch to the preview first and let the
+   * `pendingPrint` effect below fire the dialog once it has actually painted.
+   */
+  async function downloadPdf() {
+    if (!(await save())) return;
+    if (preview) return window.print();
+    setPendingPrint(true);
+    setPreview(true);
+  }
+
+  React.useEffect(() => {
+    if (!pendingPrint || !preview) return;
+    let cancelled = false;
+    (async () => {
+      // Two frames: one for React to commit the preview, one for layout to settle.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      // Printing before the photos decode silently drops them from the PDF, so
+      // wait them out. `error` resolves too — one broken photo must not hang
+      // the download forever.
+      const imgs = Array.from(document.querySelectorAll<HTMLImageElement>("#proposal-root img"));
+      await Promise.all(
+        imgs.map((img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise<void>((res) => {
+                img.addEventListener("load", () => res(), { once: true });
+                img.addEventListener("error", () => res(), { once: true });
+              }),
+        ),
+      );
+      await document.fonts?.ready;
+      if (cancelled) return;
+      setPendingPrint(false);
+      window.print();
+    })();
+    return () => { cancelled = true; };
+  }, [pendingPrint, preview]);
+
   const shareUrl = shareToken ? `${typeof window !== "undefined" ? window.location.origin : ""}/present/${shareToken}` : null;
 
   if (preview) {
@@ -180,7 +224,12 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
         {/* Builder furniture — the rep's toolbar, never part of what prints. */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-4 py-2 print:hidden">
           <span className="text-sm font-medium text-muted-foreground">Preview (customer view)</span>
-          <Button size="sm" variant="outline" onClick={() => setPreview(false)}>Back to builder</Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={downloadPdf}>
+              <Download className="size-4" /> Download PDF
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setPreview(false)}>Back to builder</Button>
+          </div>
         </div>
         <PresentationView data={{ ...data.proposal, content }} mode="preview" />
       </div>
@@ -502,6 +551,11 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={async () => { if (await save()) setPreview(true); }}><Eye className="size-4" /> Preview</Button>
+            {/* Same document the customer gets — it opens the preview and prints
+                that, so what saves is the proposal and not this wizard. */}
+            <Button variant="outline" onClick={downloadPdf} disabled={busy || pendingPrint}>
+              {pendingPrint ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Download PDF
+            </Button>
             <Button onClick={generate} disabled={busy} className="bg-[#F4631E] text-white hover:bg-[#F4631E]/90">
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Share2 className="size-4" />} {shareToken ? "Re-generate" : "Generate presentation"}
             </Button>
