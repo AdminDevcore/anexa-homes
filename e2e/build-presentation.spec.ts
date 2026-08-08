@@ -26,16 +26,18 @@ async function uploadSlot(page: Page, labelText: string) {
   await input.first().setInputFiles({ name: `${labelText.replace(/\W+/g, "_")}.png`, mimeType: "image/png", buffer: PNG });
 }
 
-test("Build Proposal closes out the visit panel; contracts stay with the documents", async ({ page }) => {
+test("Build Proposal closes out the visit panel; nothing else makes documents", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await openDeal(page, "Linda");
   // Building the proposal is the last step of the visit, so it lives in the
   // Summary panel under the numbered outcomes — not down in the document card.
   await expect(page.getByText("The visit")).toBeVisible();
   await expect(page.getByRole("link", { name: "Build Proposal" })).toBeVisible();
-  // The contract tools still live beside the documents they produce.
-  await expect(page.getByRole("button", { name: "Insurance Contract" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Simple Cash Bid" })).toBeVisible();
+  // The old contract generators (Insurance Contract / Simple Cash Bid) are gone;
+  // the proposal is the only customer-facing document this deal produces.
+  await expect(page.getByText("Create a document")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Insurance Contract" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Simple Cash Bid" })).toHaveCount(0);
   await page.context().clearCookies();
 });
 

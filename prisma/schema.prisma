@@ -2432,50 +2432,6 @@ model StormSwath {
   @@map("storm_swaths")
 }
 
-enum CashBidStatus {
-  draft
-  sent
-  signed
-}
-
-// A simple one-page cash bid a rep sends to a cash client (no inspection): work
-// description + price + 50/50 payment terms + inline homeowner signature. Scalar
-// FKs (companyId/leadId) — no relations, to keep churn off Company/Lead/User.
-model CashBid {
-  id              String        @id @default(uuid())
-  companyId       String
-  /// Isolated per vertical: this row belongs to exactly one workspace.
-  vertical        Vertical @default(roofing)
-  leadId          String
-  token           String        @unique @default(uuid())
-  createdById     String?
-  // "cash" = out-of-pocket bid (total + deposit split); "insurance" = deductible-only
-  // repair agreement (carrier pays the approved balance).
-  kind            String        @default("cash")
-  workDescription String
-  totalCents      Int           @default(0)
-  depositPercent  Int           @default(50)
-  // Insurance contracts: homeowner owes only the deductible; carrier/claim for reference.
-  deductibleCents Int           @default(0)
-  carrier         String?
-  claimNumber     String?
-  // Warranty terms shown on the bid/contract (years). Defaults = the standard.
-  warrantyWorkmanshipYears Int   @default(5)
-  warrantyManufacturerYears Int  @default(30)
-  // "digital" = homeowner e-signs on the bid page; "physical" = print with a pen signature line.
-  signatureMode   String        @default("digital")
-  status          CashBidStatus @default(draft)
-  signerName      String?
-  signerIp        String?
-  signedAt        DateTime?
-  sentAt          DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-
-  @@index([companyId, leadId])
-  @@map("cash_bids")
-}
-
 // ---------------------------------------------------------------------------
 // Solar domain
 //

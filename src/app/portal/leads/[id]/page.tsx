@@ -14,7 +14,6 @@ import {
   MessageSquare,
   Sun,
   FolderOpen,
-  FileSignature,
 } from "lucide-react";
 import { requireUser, getSessionUser } from "@/server/auth/session";
 import { getLeadDetail, getLeadFormOptions } from "@/server/modules/leads/queries";
@@ -45,9 +44,6 @@ import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
 import { SolarDesignPanel, SolarFinancePanel, SolarProposalGate } from "@/components/portal/solar-panels";
 import { getSolarSettings } from "@/server/modules/solar/settings";
-import { CashBidButton } from "@/components/portal/cash-bid-panel";
-import { InsuranceContractButton } from "@/components/portal/insurance-contract-panel";
-import { getCashBidsForLead } from "@/server/modules/cashbid/queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { DealFolders } from "@/components/portal/deal-folders";
@@ -108,10 +104,6 @@ export default async function LeadDetailPage({
   // HIDDEN here, never deleted — Claim holds live roofing money.
   const isSolarDeal = lead.vertical === "solar";
   const isInsurance = !isSolarDeal && lead.dealType !== "cash";
-  // One table backs both cash bids and insurance contracts; split by kind.
-  const allBids = await getCashBidsForLead(user.companyId, lead.id);
-  const cashBids = allBids.filter((b) => b.kind === "cash");
-  const insuranceBids = allBids.filter((b) => b.kind === "insurance");
 
   const claim = lead.claims[0];
   const canNote = can(user, "create", "Note");
@@ -1003,35 +995,6 @@ export default async function LeadDetailPage({
 
             {/* ── Documents & files ── */}
             <section id="documents" className="scroll-mt-24 space-y-6">
-          {/* The roofing contract tools, moved out of the page header. Both
-              produce a customer-facing document for signature, so they belong
-              beside the documents rather than as same-weight buttons above a
-              deal nobody has read yet. Building a proposal is NOT one of them —
-              it is the last step of the visit and lives in the Summary panel,
-              where the rep already is. A solar deal closes through its own
-              Proposal hub, and "Insurance Contract" is meaningless without an
-              insurer — so neither renders there. */}
-          {!isSolarDeal && (can(user, "create", "Proposal") || can(user, "update", "Proposal")) && (
-            <Card
-              title="Create a document"
-              icon={FileSignature}
-              description="Send a contract for signature."
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <InsuranceContractButton
-                  leadId={lead.id}
-                  bids={insuranceBids}
-                  prefill={{
-                    carrier: claim?.carrier ?? "",
-                    claimNumber: claim?.claimNumber ?? "",
-                    deductibleDollars: claim?.deductible ? String(claim.deductible / 100) : "",
-                  }}
-                />
-                <CashBidButton leadId={lead.id} bids={cashBids} />
-              </div>
-            </Card>
-          )}
-
           {/* One card, one level: every piece of paper on this job is in a
               folder. E-signature packages live in the Contract folder rather
               than in a list beside the grid — a proposal sent for signature and

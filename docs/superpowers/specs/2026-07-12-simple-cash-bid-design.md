@@ -1,7 +1,11 @@
 # Simple Cash Bid
 
 **Date:** 2026-07-12
-**Status:** Approved — build directly.
+**Status:** REMOVED 2026-08-07 — kept as a design record only. The feature (both
+the Simple Cash Bid and the Insurance Contract that shared its table), the
+`/bid/[token]` signing page, `src/server/modules/cashbid/` and the `cash_bids`
+table are all gone. The proposal is the only customer-facing document a deal
+produces. Nothing below describes live code.
 
 ## Goal
 A stripped-down, one-page **cash bid** a rep can send to a cash client with no

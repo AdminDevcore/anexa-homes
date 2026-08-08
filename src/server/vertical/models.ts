@@ -50,7 +50,6 @@ export const SCOPED_MODELS = [
   "ScopeSupplementTemplate",
   // Customer-facing artifacts
   "Proposal",
-  "CashBid",
   "DocumentPackage",
   // Field operations
   "Territory",

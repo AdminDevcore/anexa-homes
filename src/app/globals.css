@@ -585,18 +585,6 @@
   .proposal-js [data-stagger] { opacity: 1 !important; transform: none !important; }
 }
 
-/* ── Cash-bid contract: clean page breaks when printed ────────────────────
-   Keeps each section (scope, payment, warranty, terms, signature) whole so a
-   2-page contract breaks between sections rather than slicing through a line
-   or, worst of all, splitting the signature block across pages. */
-@media print {
-  .cashbid-doc section,
-  .cashbid-doc h2 { break-inside: avoid; }
-  .cashbid-doc h2 { break-after: avoid; }
-  /* The signature area must never be split — push it to a fresh page if needed. */
-  .cashbid-doc .cashbid-sig { break-inside: avoid; }
-}
-
 /* ── Proposal: printing / "Save as PDF" ───────────────────────────────────
    The proposal IS its colour. The cover, the damage chapter, the estimate and
    the closing are dark chapters set in white type, and Chrome's print dialog
