@@ -615,19 +615,43 @@
   #proposal-root dl > div { break-inside: avoid; }
   /* Screen chapters breathe in viewport heights. Paper has none, so the same
      padding buys nothing but page count. (The cover is the exception — it owns
-     its page and sets its own height.) */
+     its page and sets its own height.)
+
+     The side padding is the document's own margin, and it has to be here
+     because @page has none: zeroing the page margin is what keeps Chrome from
+     printing the URL on the customer's proposal, so the text inset moves into
+     the document instead. 0.5in also clears the unprintable edge on a real
+     printer. Backgrounds still bleed — padding is inside the box — so the dark
+     chapters keep running to the paper edge. */
   #proposal-root [data-section]:not([data-section="cover"]) {
     padding-top: 2rem;
     padding-bottom: 2rem;
+    padding-left: 0.5in;
+    padding-right: 0.5in;
   }
 }
 
 /* Printables in this app are Letter portrait documents (the proposal, the cash
-   bid, the generated contracts). Saying so keeps a stale Landscape setting in
-   someone's print dialog from reflowing the whole thing. */
+   bid, the generated contracts).
+
+   `8.5in 11in`, NOT `letter portrait`: Chrome parses the keyword pair and
+   silently throws the orientation away — read the rule back out of the CSSOM
+   and it says `size: letter`, which names the paper and says nothing about
+   which way up it goes. A rep whose print dialog is still on Landscape from
+   some other job then prints the whole proposal sideways. Explicit dimensions
+   are a page box rather than a paper name, so there is nothing left to
+   reinterpret.
+
+   `margin: 0` is what removes the browser's own furniture. Chrome draws the
+   date, the tab title and the full page URL INSIDE the page margin, so any
+   margin at all puts "anexahomes.com/portal/leads/47727f7b-…" along the bottom
+   of a document going to a customer — which is exactly what makes a printout
+   look like a screenshot of the CRM instead of a proposal. With no margin box
+   there is nowhere for Chrome to put them. The document supplies its own
+   breathing room below, and the cover gets to bleed to the paper edge. */
 @page {
-  size: letter portrait;
-  margin: 0.4in;
+  size: 8.5in 11in;
+  margin: 0;
 }
 
 /* Hide scrollbar (used by the proposal photo carousel). */

@@ -131,3 +131,69 @@ test("every inspection photo lands on the printed page", async ({ page }) => {
   expect(clipped.length).toBeGreaterThan(0);
   for (const t of clipped) expect(t.overflowing, `track of ${t.photos} photos`).toBe(false);
 });
+
+test("the page box is a real 8.5x11 with no margin for the browser's own furniture", async ({ page }) => {
+  await login(page, "admin@anexahomes.com");
+  await openBuilder(page);
+  await page.getByRole("button", { name: /Preview & Share/ }).click();
+  await page.getByRole("button", { name: /Generate presentation|Re-generate/ }).click();
+  await expect(page.getByText("Presentation generated")).toBeVisible({ timeout: 30000 });
+  const href = await page.getByRole("link", { name: "Open" }).getAttribute("href");
+
+  await page.context().clearCookies();
+  await page.goto(href!);
+
+  // Read the rule back out of the CSSOM, not out of the source file. Chrome
+  // ACCEPTS `size: letter portrait` and silently keeps only `letter` — the
+  // orientation is discarded on parse, so a source grep would happily pass
+  // while the document printed sideways. Only the parsed rule tells the truth.
+  const rule = await page.evaluate(() => {
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules;
+      try { rules = sheet.cssRules; } catch { continue; }
+      for (const r of Array.from(rules ?? [])) if (r.cssText?.startsWith("@page")) return r.cssText;
+    }
+    return null;
+  });
+  expect(rule, "@page rule reaches the page").not.toBeNull();
+  // Explicit dimensions survive; a bare paper name does not pin orientation.
+  expect(rule).toMatch(/size:\s*8\.5in\s+11in/);
+  expect(rule).not.toMatch(/size:\s*letter/);
+  // Zero margin is the only thing that denies Chrome somewhere to draw the
+  // date, the tab title and the page URL.
+  expect(rule).toMatch(/margin:\s*0(px)?\b/);
+});
+
+test("the printed proposal carries no date, tab title or CRM url", async ({ page }) => {
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+  await login(page, "admin@anexahomes.com");
+  await openBuilder(page);
+  await page.getByRole("button", { name: /Preview & Share/ }).click();
+  await page.getByRole("button", { name: /Generate presentation|Re-generate/ }).click();
+  await expect(page.getByText("Presentation generated")).toBeVisible({ timeout: 30000 });
+  const href = await page.getByRole("link", { name: "Open" }).getAttribute("href");
+
+  await page.context().clearCookies();
+  await page.goto(href!, { waitUntil: "networkidle" });
+  await page.emulateMedia({ media: "print" });
+
+  // displayHeaderFooter asks for the SAME default templates the print dialog
+  // draws when "Headers and footers" is ticked — the worst case, not the
+  // convenient one. With no page margin there is nowhere to put them.
+  const buf = await page.pdf({ preferCSSPageSize: true, printBackground: true, displayHeaderFooter: true });
+  const doc = await getDocument({ data: new Uint8Array(buf) }).promise;
+
+  const first = await doc.getPage(1);
+  const { width, height } = first.getViewport({ scale: 1 });
+  expect(Math.round(width), "portrait Letter width in pt").toBe(612);
+  expect(Math.round(height), "portrait Letter height in pt").toBe(792);
+
+  for (let i = 1; i <= Math.min(doc.numPages, 4); i++) {
+    const text = (await (await doc.getPage(i)).getTextContent()).items
+      .map((it) => ("str" in it ? it.str : ""))
+      .join(" ");
+    expect(text, `page ${i} must not carry the CRM url`).not.toMatch(/\/portal\/leads\/|localhost:\d+|https?:\/\//);
+    expect(text, `page ${i} must not carry a print date`).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2,4},\s*\d/);
+  }
+});
