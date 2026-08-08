@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Camera, Check, Download, ExternalLink, Eye, Mail, Share2, Trash2 } from "lucide-react";
+import { Loader2, Camera, Check, Download, ExternalLink, Eye, FileSignature, Mail, Share2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,6 +21,7 @@ import { updateProposalContentAction, generateProposalAction, emailProposalActio
 import { setDealTypeAction } from "@/server/modules/leads/manage";
 import type { ProposalBuilderData } from "@/server/modules/proposals/queries";
 import { PresentationView } from "@/components/proposal/presentation-view";
+import { SendDocsDialog, type SendDocsTemplate, type SendDocsDefaults } from "@/components/esign/send-docs-dialog";
 
 type Step = "photos" | "details" | "upgrades" | "sections" | "share";
 
@@ -40,7 +41,16 @@ const STEPS: { id: Step; label: string }[] = [
 const SHELL_HEADER_PX = 64;
 const PREVIEW_TOOLBAR_PX = 48;
 
-export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderData; leadId: string }) {
+export function PresentationBuilder({
+  data,
+  leadId,
+  docs,
+}: {
+  data: ProposalBuilderData;
+  leadId: string;
+  /** Contract templates + signer defaults for "Send docs"; null when the rep can't send. */
+  docs?: { templates: SendDocsTemplate[]; defaults: SendDocsDefaults } | null;
+}) {
   const router = useRouter();
   const [step, setStep] = React.useState<Step>("photos");
   const [busy, setBusy] = React.useState(false);
@@ -582,6 +592,21 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
             <Button onClick={generate} disabled={busy} className="bg-[#F4631E] text-white hover:bg-[#F4631E]/90">
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Share2 className="size-4" />} {shareToken ? "Re-generate" : "Generate presentation"}
             </Button>
+            {/* The proposal sold the job; the paperwork closes it. Sending from
+                here means the rep never leaves the deal to hunt for a customer
+                they already have on screen. */}
+            {docs && (
+              <SendDocsDialog
+                leadId={leadId}
+                templates={docs.templates}
+                defaults={docs.defaults}
+                trigger={
+                  <Button variant="outline">
+                    <FileSignature className="size-4" /> Send docs
+                  </Button>
+                }
+              />
+            )}
           </div>
           {missingPhotos > 0 && (
             <p className="text-sm text-muted-foreground">

@@ -3,8 +3,11 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { getActiveVertical } from "@/server/auth/vertical";
+import { prisma } from "@/server/db/client";
 import { ensureProposal, getProposalForBuilder } from "@/server/modules/proposals/queries";
 import { PresentationBuilder } from "@/components/portal/presentation-builder";
+import type { SendDocsTemplate, SendDocsDefaults } from "@/components/esign/send-docs-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,36 @@ export default async function PresentationBuilderPage({ params }: { params: Prom
   const data = await getProposalForBuilder(user, id);
   if (!data) notFound();
 
+  // "Send docs" on step 5: the contract templates for this workspace, plus the
+  // signer this deal already implies. Fetched here rather than in the client so
+  // the dialog opens filled in instead of spinning. A roofing rep never sees
+  // solar paperwork — the template list is scoped to the active vertical.
+  const canSendDocs = can(user, "create", "Document");
+  let docTemplates: SendDocsTemplate[] = [];
+  let docDefaults: SendDocsDefaults | null = null;
+  if (canSendDocs) {
+    const vertical = await getActiveVertical(user);
+    const [templates, lead] = await Promise.all([
+      prisma.documentTemplate.findMany({
+        where: { companyId: user.companyId, active: true, vertical },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, type: true },
+      }),
+      prisma.lead.findUnique({
+        where: { id },
+        select: { firstName: true, lastName: true, email: true, coOwnerName: true },
+      }),
+    ]);
+    docTemplates = templates;
+    docDefaults = {
+      customerName: lead ? `${lead.firstName} ${lead.lastName}`.trim() : data.proposal.customerName,
+      customerEmail: lead?.email ?? data.customerEmail ?? "",
+      coOwnerName: lead?.coOwnerName ?? null,
+      repName: user.fullName,
+      repEmail: user.email ?? "",
+    };
+  }
+
   return (
     // Printing from here means printing the proposal being built, so the page's
     // own heading and back-link step out of the way of the document.
@@ -30,7 +63,11 @@ export default async function PresentationBuilderPage({ params }: { params: Prom
         <h1 className="font-serif text-2xl font-bold">Build Proposal</h1>
         <p className="text-sm text-muted-foreground">{data.proposal.customerName} · {data.proposal.propertyAddress}</p>
       </div>
-      <PresentationBuilder data={data} leadId={id} />
+      <PresentationBuilder
+        data={data}
+        leadId={id}
+        docs={docDefaults ? { templates: docTemplates, defaults: docDefaults } : null}
+      />
     </div>
   );
 }

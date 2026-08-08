@@ -56,6 +56,52 @@ export async function sendDocumentAction(input: SendInput) {
   }
 }
 
+const sendManySchema = z.object({
+  leadId: z.string().uuid(),
+  templateIds: z.array(z.string().uuid()).min(1),
+  signers: sendSchema.shape.signers,
+});
+
+export type SendDocumentsInput = z.infer<typeof sendManySchema>;
+
+/**
+ * Send several templates to the same deal in one go — the proposal's "Send docs".
+ *
+ * Each template becomes its own envelope, because a DocumentPackage snapshots one
+ * template. The loop catches per template so a single broken document (a missing
+ * source PDF, say) doesn't discard the ones that went out; the caller shows what
+ * sent and what didn't rather than a single all-or-nothing error.
+ */
+export async function sendDocumentsAction(input: SendDocumentsInput) {
+  const user = await requireUser();
+  const parsed = sendManySchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: "Choose at least one document and a signer." };
+
+  const sent: { templateId: string; title: string; packageId: string; links: { name: string; url: string }[] }[] = [];
+  const failed: { templateId: string; error: string }[] = [];
+
+  for (const templateId of parsed.data.templateIds) {
+    try {
+      const result = await sendForSignature(user, {
+        templateId,
+        leadId: parsed.data.leadId,
+        signers: parsed.data.signers as SendInput["signers"],
+      });
+      const template = await prisma.documentTemplate.findFirst({
+        where: { id: templateId, companyId: user.companyId },
+        select: { name: true },
+      });
+      sent.push({ templateId, title: template?.name ?? "Document", packageId: result.packageId, links: result.links });
+    } catch (e) {
+      failed.push({ templateId, error: e instanceof Error ? e.message : "Failed to send." });
+    }
+  }
+
+  revalidatePath("/portal/documents");
+  revalidatePath(`/portal/leads/${parsed.data.leadId}`);
+  return { ok: true as const, sent, failed };
+}
+
 export async function resendDocumentAction(packageId: string) {
   const user = await requireUser();
   try {
