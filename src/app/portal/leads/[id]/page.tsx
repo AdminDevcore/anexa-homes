@@ -730,7 +730,7 @@ export default async function LeadDetailPage({
                   <p className="text-sm">{n.body}</p>
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     {n.author ? `${n.author.firstName} ${n.author.lastName}` : "System"} ·{" "}
-                    {fmt.date(n.createdAt)}
+                    {fmt.dateTime(n.createdAt)}
                   </p>
                 </li>
               ))}
