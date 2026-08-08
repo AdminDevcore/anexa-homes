@@ -3,6 +3,17 @@
 // so all three agree. Money is in integer cents. NOTHING here may expose internal
 // cost, profit, commission, or supplement margin to the customer.
 
+/**
+ * Height of the proposal's sticky nav in px — ProposalChrome's `h-14` row plus
+ * its 1px bottom border. Whoever stacks against that bar, or reserves room so a
+ * jump link doesn't land behind it, measures from here.
+ *
+ * It lives in this module rather than next to the component because the
+ * component is `"use client"`: importing a plain value across that boundary
+ * from a server component hands back a client-reference proxy, not the number.
+ */
+export const PROPOSAL_NAV_PX = 57;
+
 export type ProposalUpgrade = { label: string; priceCents: number; selected: boolean };
 
 // The two ways a customer can pay. "cash" = the whole out-of-pocket at once;

@@ -18,10 +18,19 @@ export function ProposalChrome({
   companyName,
   logoUrl,
   navItems,
+  offsetTop = 0,
 }: {
   companyName: string;
   logoUrl: string | null;
   navItems: ChromeNavItem[];
+  /**
+   * Pixels of chrome already pinned above this bar. Zero on the customer's own
+   * page, where the top of the viewport is the proposal's to take. Non-zero when
+   * the rep previews the proposal inside the portal, whose shell header got
+   * there first — without an offset both bars pin to y=0 and the proposal's nav
+   * paints straight over the CRM's.
+   */
+  offsetTop?: number;
 }) {
   const [progress, setProgress] = React.useState(0);
   const [activeId, setActiveId] = React.useState<string>(navItems[0]?.id ?? "");
@@ -88,13 +97,26 @@ export function ProposalChrome({
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white/85 backdrop-blur-md print:hidden">
+    <header
+      data-testid="proposal-chrome"
+      // The z-index tracks the offset: on the customer's own page this bar
+      // outranks everything, but embedded it has to stay under the portal
+      // shell's header (z-30) so a menu opened from the CRM is never covered by
+      // a preview of the document.
+      className={
+        "sticky border-b border-neutral-200 bg-white/85 backdrop-blur-md print:hidden " +
+        (offsetTop > 0 ? "z-20" : "z-50")
+      }
+      style={{ top: offsetTop }}
+    >
       {/* scroll progress */}
       <div
         className="absolute inset-x-0 top-0 h-[3px] origin-left bg-[var(--proposal-accent)] transition-transform duration-150 ease-out"
         style={{ transform: `scaleX(${progress})` }}
         aria-hidden
       />
+      {/* h-14 + the header's 1px border is PROPOSAL_NAV_PX in lib/proposal —
+          change one and change the other, or jump links land behind this bar. */}
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-4 px-4 sm:px-6">
         {/* brand */}
         <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="flex shrink-0 items-center gap-2">

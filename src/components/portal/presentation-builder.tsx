@@ -32,6 +32,14 @@ const STEPS: { id: Step; label: string }[] = [
   { id: "share", label: "5 · Preview & Share" },
 ];
 
+/* Previewing the proposal stacks three sticky bars down the top of the screen —
+   the portal shell's header, this builder's toolbar, then the proposal's own
+   nav. Each needs to know how much chrome is pinned above it, or they all pin
+   to y=0 and paint over one another. Keep these in step with PortalShell's
+   `h-16` header and the `h-12` toolbar below. */
+const SHELL_HEADER_PX = 64;
+const PREVIEW_TOOLBAR_PX = 48;
+
 export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderData; leadId: string }) {
   const router = useRouter();
   const [step, setStep] = React.useState<Step>("photos");
@@ -221,17 +229,32 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
   if (preview) {
     return (
       <div>
-        {/* Builder furniture — the rep's toolbar, never part of what prints. */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-4 py-2 print:hidden">
-          <span className="text-sm font-medium text-muted-foreground">Preview (customer view)</span>
-          <div className="flex items-center gap-2">
+        {/* Builder furniture — the rep's toolbar, never part of what prints.
+            It pins BELOW the portal shell's header rather than at the top of the
+            viewport: the shell's header is opaque, so a toolbar at top-0 simply
+            disappeared underneath it the moment the rep scrolled, taking
+            "Back to builder" with it. */}
+        <div
+          data-testid="preview-toolbar"
+          className="sticky z-20 flex h-12 items-center justify-between border-b bg-white px-4 print:hidden"
+          style={{ top: SHELL_HEADER_PX }}
+        >
+          {/* The bar is a fixed height so the proposal's nav can stack under it,
+              which leaves no room for this label to wrap — on a phone it becomes
+              three lines in a 48px box. The two buttons say what it is. */}
+          <span className="hidden text-sm font-medium text-muted-foreground sm:inline">Preview (customer view)</span>
+          <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={downloadPdf}>
               <Download className="size-4" /> Download PDF
             </Button>
             <Button size="sm" variant="outline" onClick={() => setPreview(false)}>Back to builder</Button>
           </div>
         </div>
-        <PresentationView data={{ ...data.proposal, content }} mode="preview" />
+        <PresentationView
+          data={{ ...data.proposal, content }}
+          mode="preview"
+          chromeOffset={SHELL_HEADER_PX + PREVIEW_TOOLBAR_PX}
+        />
       </div>
     );
   }

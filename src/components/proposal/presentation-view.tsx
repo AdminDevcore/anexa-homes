@@ -8,6 +8,7 @@ import {
   paymentPlan,
   defaultFaq,
   defaultWhyAnexa,
+  PROPOSAL_NAV_PX,
   type ProposalSectionId,
 } from "@/lib/proposal";
 import type { ProposalView } from "@/server/modules/proposals/queries";
@@ -58,7 +59,18 @@ function Money({ cents }: { cents: number }) {
   return <span className="tabular-nums">{formatScopeCents(cents)}</span>;
 }
 
-export function PresentationView({ data, mode }: { data: ProposalView; mode: "public" | "preview" }) {
+export function PresentationView({
+  data,
+  mode,
+  chromeOffset = 0,
+}: {
+  data: ProposalView;
+  mode: "public" | "preview";
+  /** Pixels of surrounding app chrome already pinned above the proposal's own
+   *  nav. The embedder owns this number — the document knows nothing about the
+   *  portal it may be previewed inside. */
+  chromeOffset?: number;
+}) {
   const c = data.content;
   const sections = (c.selectedSections && c.selectedSections.length > 0
     ? [...c.selectedSections].sort((a, b) => a.order - b.order)
@@ -98,12 +110,20 @@ export function PresentationView({ data, mode }: { data: ProposalView; mode: "pu
     <div
       id="proposal-root"
       className="min-h-screen bg-[#f6f3ee] text-neutral-900"
-      style={{ ["--proposal-accent" as string]: data.branding.accentColor || "#F4631E" }}
+      style={{
+        ["--proposal-accent" as string]: data.branding.accentColor || "#F4631E",
+        // Everything pinned above a chapter, so a jump link lands the chapter
+        // below the chrome instead of behind it. Just this document's nav on the
+        // customer's page; the portal shell and the builder toolbar as well when
+        // a rep is previewing it inside the CRM.
+        ["--proposal-chrome-h" as string]: `${chromeOffset + PROPOSAL_NAV_PX}px`,
+      }}
     >
       <ProposalChrome
         companyName={data.branding.companyName}
         logoUrl={data.branding.logoUrl}
         navItems={navItems}
+        offsetTop={chromeOffset}
       />
 
       {/* COVER — full-bleed editorial hero on the customer's house. On paper it

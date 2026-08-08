@@ -550,7 +550,13 @@
    Content is visible by default and only hides once the client mounts (adds
    .proposal-js) AND motion is allowed — so no-JS / reduced-motion keeps all
    content visible. */
-[data-section] { scroll-margin-top: 76px; }
+/* A jump link scrolls a chapter's top edge to the top of the viewport, which is
+   where the sticky nav is — so the chapter has to reserve the chrome's height,
+   plus a little air, as scroll margin. PresentationView sets
+   --proposal-chrome-h to what is actually pinned above: its own nav on the
+   customer's page, and the portal shell + builder toolbar too when a rep
+   previews the proposal inside the CRM. The fallback is a bare nav. */
+[data-section] { scroll-margin-top: calc(var(--proposal-chrome-h, 57px) + 1.25rem); }
 @media (prefers-reduced-motion: no-preference) {
   .proposal-js [data-reveal] {
     opacity: 0;
