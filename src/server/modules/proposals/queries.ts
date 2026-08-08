@@ -73,13 +73,17 @@ export type ProposalView = {
 };
 
 // Builder payload: the customer-safe ProposalView PLUS the editable checklist of
-// site/inspection slots so the builder can gate on required photos.
+// site/inspection slots (advisory — an empty slot never blocks generating) and
+// the lead's contact email to prefill the send box. The email is rep-only: it
+// deliberately lives here and not on ProposalView, which is what the public
+// token page renders.
 export type ProposalBuilderData = {
   proposal: ProposalView;
   checklist: {
     templateId: string;
     items: { id: string; label: string; required: boolean; position: number; count: number }[];
   } | null;
+  customerEmail: string | null;
   canManage: boolean;
 };
 
@@ -273,8 +277,10 @@ export async function getProposalForBuilder(user: AccessUser, leadId: string): P
     };
   }
 
+  const lead = await prisma.lead.findUnique({ where: { id: leadId }, select: { email: true } });
+
   const { canManageProposals } = await import("./policies");
-  return { proposal: view, checklist, canManage: canManageProposals(user.role) };
+  return { proposal: view, checklist, customerEmail: lead?.email ?? null, canManage: canManageProposals(user.role) };
 }
 
 /** Public payload by token (no auth). Photos served via the token photo route. */

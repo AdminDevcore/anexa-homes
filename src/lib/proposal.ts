@@ -202,15 +202,6 @@ export function activeFinanceOption(plan: PaymentPlan, selected: PaymentSelectio
   return plan.headline;
 }
 
-/** True once every REQUIRED checklist slot has at least one uploaded photo.
- *  `counts` maps a checklist item id -> number of photos in that slot. */
-export function requiredPhotosMet(
-  items: { id: string; required: boolean }[],
-  counts: Record<string, number>,
-): boolean {
-  return items.filter((it) => it.required).every((it) => (counts[it.id] ?? 0) > 0);
-}
-
 export function defaultSections(): ProposalSectionRef[] {
   return PROPOSAL_SECTIONS.map((id, order) => ({ id, enabled: true, order }));
 }

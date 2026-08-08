@@ -57,22 +57,53 @@ test("the visit reads as a sequence: appointment, then inspection", async ({ pag
   await page.context().clearCookies();
 });
 
-test("builder gates generation until required photos are uploaded", async ({ page }) => {
+test("photos never gate generation — an empty checklist still produces a link", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
-  await openDeal(page, "Linda");
+  // Sarah Anderson, not Linda: this file's other tests upload to Linda's deal,
+  // and the whole point here is a deal with no photos on it at all.
+  await openDeal(page, "Sarah");
   await page.getByRole("link", { name: "Build Proposal" }).click();
   await page.waitForURL("**/presentation");
 
-  // Required photos missing initially.
-  await expect(page.getByText("Required photos missing")).toBeVisible();
+  // Empty slots are advisory, not a blocker.
+  await expect(page.getByText(/recommended slot\(s\) empty/)).toBeVisible();
 
-  // Upload the 3 required site slots; re-locate each call (the list re-renders).
-  await uploadSlot(page, "Front of house");
-  await expect(page.getByText("All required photos uploaded").or(page.getByText("Required photos missing"))).toBeVisible();
-  await uploadSlot(page, "Full roof");
-  await uploadSlot(page, "Roof damage");
+  await page.getByRole("button", { name: /Preview & Share/ }).click();
+  const generate = page.getByRole("button", { name: /Generate presentation|Re-generate/ });
+  await expect(generate).toBeEnabled();
+  await generate.click();
 
-  await expect(page.getByText("All required photos uploaded ✓")).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText("Presentation generated")).toBeVisible({ timeout: 20000 });
+  const openLink = page.getByRole("link", { name: "Open" });
+  await expect(openLink).toBeVisible({ timeout: 20000 });
+  expect(await openLink.getAttribute("href")).toContain("/present/");
+  await page.context().clearCookies();
+});
+
+test("the proposal can be emailed to the customer, and the send lands on the deal", async ({ page }) => {
+  await login(page, "admin@anexahomes.com");
+  await openDeal(page, "Linda");
+  const dealUrl = page.url();
+  await page.getByRole("link", { name: "Build Proposal" }).click();
+  await page.waitForURL("**/presentation");
+
+  await page.getByRole("button", { name: /Preview & Share/ }).click();
+  await expect(page.getByText("Email it to the customer")).toBeVisible();
+
+  await page.getByLabel("Customer email").fill("customer@example.com");
+  await page.getByLabel("Personal note").fill("Great meeting you today.");
+  await page.getByRole("button", { name: "Send to customer" }).click();
+
+  // No SMTP_*/RESEND_API_KEY in test, so delivery is logged, not sent — the UI
+  // must say so rather than claim a green success.
+  await expect(page.getByText(/emailed to customer@example\.com|no mail provider configured/)).toBeVisible({ timeout: 20000 });
+  // Sending also generates, so the share link is now on screen.
+  await expect(page.getByRole("link", { name: "Open" })).toBeVisible({ timeout: 20000 });
+
+  // The send is a timeline event — it's what a rep checks when they ask
+  // "did the customer get the price yet?".
+  await page.goto(dealUrl);
+  await expect(page.getByText(/Emailed to customer@example\.com/)).toBeVisible({ timeout: 15000 });
   await page.context().clearCookies();
 });
 
@@ -85,10 +116,13 @@ test("generate produces a public presentation with NO cost/profit leak", async (
   await uploadSlot(page, "Front of house");
   await uploadSlot(page, "Full roof");
   await uploadSlot(page, "Roof damage");
-  await expect(page.getByText("All required photos uploaded ✓")).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText("All recommended photos uploaded ✓")).toBeVisible({ timeout: 20000 });
 
   await page.getByRole("button", { name: /Preview & Share/ }).click();
-  await page.getByRole("button", { name: /Generate presentation/ }).click();
+  // The email test above already generated this deal's proposal, so the button
+  // reads "Re-generate" by now — match either rather than depend on spec order.
+  await page.getByRole("button", { name: /Generate presentation|Re-generate/ }).click();
+  await expect(page.getByText("Presentation generated")).toBeVisible({ timeout: 20000 });
 
   const openLink = page.getByRole("link", { name: "Open" });
   await expect(openLink).toBeVisible({ timeout: 20000 });
@@ -123,7 +157,7 @@ test("cash and monthly sit side by side, and the customer's pick reaches the dea
   await uploadSlot(page, "Front of house");
   await uploadSlot(page, "Full roof");
   await uploadSlot(page, "Roof damage");
-  await expect(page.getByText("All required photos uploaded ✓")).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText("All recommended photos uploaded ✓")).toBeVisible({ timeout: 20000 });
 
   // Details — give the deal an out-of-pocket and turn on monthly payments.
   // The builder's field labels aren't tied to their inputs, so target the

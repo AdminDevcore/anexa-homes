@@ -9,7 +9,11 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { runUnscoped } from "@/server/vertical/context";
-import { defaultProposalContent, requiredPhotosMet } from "@/lib/proposal";
+import { sendEmail } from "@/server/modules/notifications/delivery";
+import { emailBrandFor } from "@/server/modules/notifications/brand";
+import { defaultProposalContent } from "@/lib/proposal";
+import { getPublicProposal } from "./queries";
+import { proposalEmail } from "./email";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -74,30 +78,122 @@ export async function updateProposalContentAction(input: z.infer<typeof contentS
   return { ok: true as const };
 }
 
-/** Mark a proposal generated once all required photos are present. Returns the token. */
+/**
+ * Mark a proposal generated. Returns the token.
+ *
+ * Photos are NOT a gate. A rep is often standing on the driveway with a customer
+ * who already has their own inspection, or the roof photos land later from the
+ * inspector — blocking the price on a photo checklist stops the sale for a
+ * reason the customer never sees. The builder still shows which required slots
+ * are empty; the empty photo section simply doesn't render on the presentation.
+ */
 export async function generateProposalAction(proposalId: string) {
   const user = await requireUser();
   if (!can(user, "update", "Proposal")) return fail("Not allowed.");
 
-  const proposal = await prisma.proposal.findFirst({ where: { id: proposalId, companyId: user.companyId }, select: { id: true, leadId: true, publicToken: true } });
+  const proposal = await prisma.proposal.findFirst({ where: { id: proposalId, companyId: user.companyId }, select: { id: true, leadId: true, publicToken: true, status: true } });
   if (!proposal) return fail("Proposal not found.");
 
-  // Gate: every required site/inspection slot must have at least one photo.
-  const template = await prisma.photoTemplate.findFirst({ where: { companyId: user.companyId, kind: "site" }, include: { items: { select: { id: true, required: true } } } });
-  if (template) {
-    const counts = await prisma.fileAsset.groupBy({
-      by: ["photoTemplateItemId"],
-      where: { companyId: user.companyId, leadId: proposal.leadId, kind: "photo", photoTemplateItemId: { not: null } },
-      _count: { _all: true },
-    });
-    const countMap: Record<string, number> = {};
-    for (const c of counts) if (c.photoTemplateItemId) countMap[c.photoTemplateItemId] = c._count._all;
-    if (!requiredPhotosMet(template.items, countMap)) return fail("Upload all required photos before generating.");
+  // Never walk the status backwards: once the customer has viewed or signed it,
+  // re-generating refreshes the content, not the milestone.
+  if (proposal.status === "draft" || proposal.status === "generated") {
+    await prisma.proposal.update({ where: { id: proposal.id }, data: { status: "generated" } });
   }
-
-  await prisma.proposal.update({ where: { id: proposal.id }, data: { status: "generated" } });
   revalidatePath(`/portal/leads/${proposal.leadId}/presentation`);
   return { ok: true as const, token: proposal.publicToken };
+}
+
+const emailSchema = z.object({
+  proposalId: z.string().min(1),
+  email: z.string().trim().email("Enter a valid email address."),
+  message: z.string().trim().max(1000).optional(),
+});
+
+/**
+ * Email the customer their proposal — the same link the rep would text, wrapped
+ * in the branded template with the numbers spelled out so it reads like a copy
+ * of the proposal even before they click.
+ *
+ * Sending IS generating: a rep who types an address and hits send means the
+ * proposal is done, so we mark it generated on the way out rather than making
+ * them press two buttons in the right order.
+ */
+export async function emailProposalAction(input: z.infer<typeof emailSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Proposal")) return fail("Not allowed.");
+  const parsed = emailSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid request.");
+  const { email, message } = parsed.data;
+
+  const proposal = await prisma.proposal.findFirst({
+    where: { id: parsed.data.proposalId, companyId: user.companyId },
+    select: { id: true, leadId: true, publicToken: true, status: true, customerName: true, vertical: true },
+  });
+  if (!proposal) return fail("Proposal not found.");
+
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+  const url = `${appUrl}/present/${proposal.publicToken}`;
+
+  // The customer-safe view is the source of truth for the figures, so the email
+  // can never quote a number the presentation itself doesn't show.
+  const view = await getPublicProposal(proposal.publicToken);
+  if (!view) return fail("Proposal not found.");
+
+  const { brand, fromName } = await emailBrandFor(user.companyId, proposal.vertical);
+  const tpl = proposalEmail({
+    brand,
+    customerName: view.customerName,
+    propertyAddress: view.propertyAddress,
+    dealType: view.dealType,
+    repName: view.repName,
+    outOfPocketCents: view.financials.estimatedOutOfPocketCents,
+    financing: view.content.financing,
+    url,
+    ...(message ? { message } : {}),
+  });
+
+  const sent = await sendEmail(email, tpl.subject, tpl.text, { fromName, html: tpl.html });
+
+  // Advance the status, never walk it backwards — a proposal the customer has
+  // already viewed or signed stays at that milestone when the rep re-sends.
+  if (proposal.status === "draft" || proposal.status === "generated") {
+    await prisma.proposal.update({ where: { id: proposal.id }, data: { status: "sent" } });
+  }
+
+  // The send belongs on the deal timeline: it's the moment the customer got the
+  // price, and it's what a rep looks for when they ask "did we send it yet?".
+  await prisma.note.create({
+    data: {
+      companyId: user.companyId,
+      leadId: proposal.leadId,
+      context: "proposal",
+      body: `[Proposal · Emailed to ${email}]${message ? ` ${message}` : ""}`,
+      authorId: user.userId,
+    },
+  });
+  await prisma.activityLog.create({
+    data: {
+      companyId: user.companyId,
+      type: "note",
+      message: `Proposal emailed to ${email}`,
+      leadId: proposal.leadId,
+      actorId: user.userId,
+    },
+  });
+
+  // Fill a blank contact email from what the rep just typed — never overwrite
+  // one that's already there.
+  await prisma.lead.updateMany({ where: { id: proposal.leadId, companyId: user.companyId, email: null }, data: { email } });
+
+  revalidatePath(`/portal/leads/${proposal.leadId}/presentation`);
+  revalidatePath(`/portal/leads/${proposal.leadId}`);
+  return {
+    ok: true as const,
+    token: proposal.publicToken,
+    // False when no SMTP_*/RESEND_API_KEY is configured — the send was logged,
+    // not delivered. Surfacing it beats a green toast that lied.
+    delivered: sent,
+  };
 }
 
 // --- Public (token-authed) customer replies -------------------------------

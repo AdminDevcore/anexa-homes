@@ -3,11 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Camera, Check, ExternalLink, Eye, Share2, Trash2 } from "lucide-react";
+import { Loader2, Camera, Check, ExternalLink, Eye, Mail, Share2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  requiredPhotosMet,
   DAMAGE_TYPE_ITEMS,
   ROOF_CONDITION_ITEMS,
   SECTION_LABELS,
@@ -18,7 +17,7 @@ import {
   type ProposalSectionId,
 } from "@/lib/proposal";
 import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actions";
-import { updateProposalContentAction, generateProposalAction } from "@/server/modules/proposals/actions";
+import { updateProposalContentAction, generateProposalAction, emailProposalAction } from "@/server/modules/proposals/actions";
 import { setDealTypeAction } from "@/server/modules/leads/manage";
 import type { ProposalBuilderData } from "@/server/modules/proposals/queries";
 import { PresentationView } from "@/components/proposal/presentation-view";
@@ -42,14 +41,18 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
   const [shareToken, setShareToken] = React.useState<string | null>(
     data.proposal.status !== "draft" ? data.proposal.token : null,
   );
+  const [sendTo, setSendTo] = React.useState(data.customerEmail ?? "");
+  const [sendNote, setSendNote] = React.useState("");
+  const [sending, setSending] = React.useState(false);
 
   const checklist = data.checklist;
   const counts: Record<string, number> = {};
   for (const it of checklist?.items ?? []) counts[it.id] = it.count;
-  // Photos are OPTIONAL for cash bids — a cash customer may already have their
-  // own inspection and just wants a price, so we never block generating on
-  // required photos for cash. (An empty photos section is hidden in the view.)
-  const photosOk = data.proposal.dealType === "cash" || (checklist ? requiredPhotosMet(checklist.items, counts) : true);
+  // Photos are ADVISORY, never a gate — cash or insurance. A customer may
+  // already have their own inspection, or the roof photos land later; either
+  // way the price shouldn't wait on a checklist. We just count what's still
+  // empty so the rep knows what they're sending without.
+  const missingPhotos = (checklist?.items ?? []).filter((it) => it.required && (counts[it.id] ?? 0) === 0).length;
 
   function patch(p: Partial<ProposalContent>) {
     setContent((c) => ({ ...c, ...p }));
@@ -148,12 +151,34 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
     router.refresh();
   }
 
+  async function sendToCustomer() {
+    const to = sendTo.trim();
+    if (!to) return toast.error("Enter the customer's email address.");
+    // Save first — the email quotes the price, so it must send what's on screen.
+    if (!(await save())) return;
+    setSending(true);
+    const res = await emailProposalAction({
+      proposalId: data.proposal.id,
+      email: to,
+      ...(sendNote.trim() ? { message: sendNote.trim() } : {}),
+    });
+    setSending(false);
+    if (!res.ok) { toast.error(res.error); return; }
+    setShareToken(res.token);
+    // `delivered: false` means no mail provider is configured — the send was
+    // logged server-side, not delivered. Don't claim it landed.
+    if (res.delivered) toast.success(`Proposal emailed to ${to}`);
+    else toast.warning("Email not delivered — no mail provider configured. Copy the link below instead.");
+    router.refresh();
+  }
+
   const shareUrl = shareToken ? `${typeof window !== "undefined" ? window.location.origin : ""}/present/${shareToken}` : null;
 
   if (preview) {
     return (
       <div>
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-4 py-2">
+        {/* Builder furniture — the rep's toolbar, never part of what prints. */}
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white px-4 py-2 print:hidden">
           <span className="text-sm font-medium text-muted-foreground">Preview (customer view)</span>
           <Button size="sm" variant="outline" onClick={() => setPreview(false)}>Back to builder</Button>
         </div>
@@ -202,25 +227,15 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
       {step === "photos" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold">Site / Inspection Photos{isCash ? " (optional)" : ""}</h3>
-            <span
-              className={`text-sm ${
-                isCash ? "text-muted-foreground" : photosOk ? "text-emerald-600" : "text-amber-600"
-              }`}
-            >
-              {isCash
-                ? "Optional for cash bids"
-                : photosOk
-                  ? "All required photos uploaded ✓"
-                  : "Required photos missing"}
+            <h3 className="font-semibold">Site / Inspection Photos (optional)</h3>
+            <span className={`text-sm ${missingPhotos === 0 ? "text-emerald-600" : "text-muted-foreground"}`}>
+              {missingPhotos === 0 ? "All recommended photos uploaded ✓" : `${missingPhotos} recommended slot(s) empty`}
             </span>
           </div>
-          {isCash && (
-            <p className="rounded-lg bg-muted/50 p-2.5 text-xs text-muted-foreground">
-              Cash bid — photos are optional. If the customer already has their own inspection and just wants a price,
-              skip this step; no inspection or empty photo section will appear on the presentation.
-            </p>
-          )}
+          <p className="rounded-lg bg-muted/50 p-2.5 text-xs text-muted-foreground">
+            Photos are optional — you can generate and send the proposal without them. If the customer already has their
+            own inspection and just wants a price, skip this step; an empty photo section never appears on the presentation.
+          </p>
           {!checklist && <p className="text-sm text-muted-foreground">No site photo template configured. Add one in Settings → Photo templates.</p>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {checklist?.items.map((it) => {
@@ -235,8 +250,11 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{it.label}</span>
+                    {/* "Recommended", not "Required" — nothing here blocks the
+                        proposal, and a label that says otherwise sends reps
+                        hunting for a gate that no longer exists. */}
                     <span className="text-xs text-muted-foreground">
-                      {it.required ? "Required" : "Optional"}{has ? ` · ${counts[it.id]} photo(s)` : ""}
+                      {it.required ? "Recommended" : "Optional"}{has ? ` · ${counts[it.id]} photo(s)` : ""}
                     </span>
                   </span>
                   <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={busy} onChange={(e) => onFiles(it.id, it.label, e.target.files)} />
@@ -484,11 +502,45 @@ export function PresentationBuilder({ data, leadId }: { data: ProposalBuilderDat
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={async () => { if (await save()) setPreview(true); }}><Eye className="size-4" /> Preview</Button>
-            <Button onClick={generate} disabled={busy || !photosOk} title={!photosOk ? "Upload all required photos first" : undefined} className="bg-[#F4631E] text-white hover:bg-[#F4631E]/90">
+            <Button onClick={generate} disabled={busy} className="bg-[#F4631E] text-white hover:bg-[#F4631E]/90">
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Share2 className="size-4" />} {shareToken ? "Re-generate" : "Generate presentation"}
             </Button>
           </div>
-          {!photosOk && <p className="text-sm text-amber-600">Upload all required photos in step 1 before generating.</p>}
+          {missingPhotos > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {`${missingPhotos} recommended photo slot(s) are still empty — you can send it anyway; the photo section just won't appear.`}
+            </p>
+          )}
+
+          {/* EMAIL TO CUSTOMER — the same for cash and insurance. Sending also
+              generates, so a rep never has to press two buttons in order. */}
+          <div className="rounded-lg border border-border p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Email it to the customer</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Sends {data.proposal.customerName || "the customer"} a branded email with their price and a private link to
+              this proposal. Sending generates it too.
+            </p>
+            <div className="mt-3 space-y-2">
+              <Input
+                type="email"
+                value={sendTo}
+                onChange={(e) => setSendTo(e.target.value)}
+                placeholder="customer@email.com"
+                aria-label="Customer email"
+              />
+              <textarea
+                className="min-h-16 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                value={sendNote}
+                onChange={(e) => setSendNote(e.target.value)}
+                placeholder="Optional personal note — added to the top of the email."
+                aria-label="Personal note"
+              />
+              <Button onClick={sendToCustomer} disabled={sending || busy} className="bg-[#F4631E] text-white hover:bg-[#F4631E]/90">
+                {sending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />} Send to customer
+              </Button>
+            </div>
+          </div>
+
           {shareUrl && (
             <div className="rounded-lg border border-border p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Shareable customer link</p>

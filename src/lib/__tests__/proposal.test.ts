@@ -4,7 +4,6 @@ import {
   financingOptions,
   paymentPlan,
   activeFinanceOption,
-  requiredPhotosMet,
   defaultSections,
   defaultUpgrades,
   defaultProposalContent,
@@ -189,22 +188,6 @@ describe("activeFinanceOption", () => {
   it("is null when there is no financing on offer", () => {
     const none = paymentPlan({ outOfPocketCents: 1_800_000 });
     expect(activeFinanceOption(none, { mode: "finance", months: 24, at: "" })).toBeNull();
-  });
-});
-
-describe("requiredPhotosMet", () => {
-  it("false until every required slot has a photo", () => {
-    const items = [
-      { id: "a", required: true },
-      { id: "b", required: false },
-      { id: "c", required: true },
-    ];
-    expect(requiredPhotosMet(items, { a: 1, b: 0, c: 0 })).toBe(false);
-    expect(requiredPhotosMet(items, { a: 2, b: 0, c: 1 })).toBe(true);
-  });
-
-  it("true when there are no required items", () => {
-    expect(requiredPhotosMet([{ id: "x", required: false }], {})).toBe(true);
   });
 });
 
