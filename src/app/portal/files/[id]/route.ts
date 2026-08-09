@@ -13,8 +13,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const file = await prisma.fileAsset.findFirst({
     where: { id, companyId: user.companyId },
     include: {
-      lead: { select: { customerUserId: true, assignedRepId: true } },
-      project: { select: { lead: { select: { customerUserId: true } } } },
+      // The lead/project relations were only ever loaded to answer "is the
+      // logged-in homeowner the owner of this file". No homeowner logs in, so
+      // the ids on the row are all the scope check below needs.
       conversation: { select: { members: { where: { userId: user.userId }, select: { userId: true } } } },
     },
   });
@@ -70,12 +71,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     if (!inVertical) return new NextResponse("Not found", { status: 404 });
   }
 
-  // Customers may only access files tied to their own lead/project.
-  if (user.role === "customer") {
-    const ownsLead = file.lead?.customerUserId === user.userId;
-    const ownsProject = file.project?.lead?.customerUserId === user.userId;
-    if (!ownsLead && !ownsProject) return new NextResponse("Forbidden", { status: 403 });
-  } else if (
+  // There is no customer branch here any more. Homeowners have no accounts in
+  // this product, so every authenticated reader is staff and goes through the
+  // scope check below.
+  if (
     user.role !== "super_admin" &&
     user.role !== "admin" &&
     !file.conversationId &&

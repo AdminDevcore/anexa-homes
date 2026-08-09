@@ -101,7 +101,8 @@ async function main() {
     // Sofia manages projects (a Manager who is set as Project.managerId).
     { key: "pm", role: "manager", firstName: "Sofia", lastName: "Nguyen", title: "Project Manager" },
     { key: "office", role: "accounting", firstName: "Jordan", lastName: "Lee", title: "Office Coordinator" },
-    { key: "customer", role: "customer", firstName: "Robert", lastName: "Johnson" },
+    // No customer account. Homeowners never sign in to this product — they get
+    // public token links (proposal, e-sign, review request) instead.
   ];
 
   const users: Record<string, { id: string }> = {};
@@ -485,10 +486,10 @@ async function main() {
       },
       {
         companyId: company.id,
-        name: "Document completed → Customer & Rep",
+        name: "Document completed → Rep",
         event: "document_completed",
         conditions: {},
-        recipients: { roles: [], userIds: [], dynamic: ["customer", "assigned_rep"] },
+        recipients: { roles: [], userIds: [], dynamic: ["assigned_rep"] },
         channels: ["in_app"],
         titleTemplate: "Signed: {{document}}",
         bodyTemplate: "All parties signed {{document}}.",
@@ -678,9 +679,9 @@ async function main() {
   // Upcoming, and Unscheduled.
   const leadSeed: {
     first: string; last: string; stage: string; value: number; status: string;
-    customer?: string; service: string; apptDays?: number; outcome?: string;
+    service: string; apptDays?: number; outcome?: string;
   }[] = [
-    { first: "Robert", last: "Johnson", stage: "in_production", value: 2450000, status: "open", customer: "customer", service: "roofing", apptDays: -9, outcome: "Ran" },
+    { first: "Robert", last: "Johnson", stage: "in_production", value: 2450000, status: "open", service: "roofing", apptDays: -9, outcome: "Ran" },
     { first: "Emily", last: "Watson", stage: "new_lead", value: 1800000, status: "open", service: "solar", apptDays: -6, outcome: "Ran" },
     { first: "David", last: "Kim", stage: "appointment_set", value: 2100000, status: "open", service: "windows", apptDays: -4, outcome: "No Show" },
     { first: "Maria", last: "Garcia", stage: "claim_opened", value: 2750000, status: "open", service: "solar", apptDays: -3 },
@@ -717,7 +718,6 @@ async function main() {
         sourceId: sources[i % sources.length].id,
         assignedRepId: users.rep.id,
         createdById: users.manager.id,
-        customerUserId: l.customer ? users[l.customer].id : null,
         appointmentAt: l.apptDays === undefined ? null : daysFromNow(l.apptDays),
         appointmentDisposition: l.outcome ?? null,
         claimStatus: ["claim_opened", "scope_received", "contract_signed"].includes(l.stage)
@@ -1133,7 +1133,7 @@ async function main() {
   console.log("✅ Seed complete.");
   console.log("   Company: Anexa Homes (slug: anexa-homes)");
   console.log("   Login password for all users: Passw0rd!");
-  console.log("   Emails: owner@ admin@ manager@ rep@ pm@ installer@ office@ accounting@ customer@anexahomes.com");
+  console.log("   Emails: owner@ admin@ manager@ rep@ pm@ installer@ office@ accounting@anexahomes.com");
 }
 
 main()

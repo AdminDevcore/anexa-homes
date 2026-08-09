@@ -65,12 +65,11 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
         // Installers only see leads whose job they're assigned to (via their crew).
         return { ...base, project: installerProjectFilter(user.userId) };
       }
-      if (role === "customer") {
-        // A customer only ever sees their own deal.
-        return { ...base, customerUserId: user.userId };
-      }
       if (role === "accounting") return base; // financial role: company-wide read.
       // Any other non-privileged role sees nothing by default (deny-by-default).
+      // That includes the retired `customer` role, which used to get its own
+      // "only your own deal" branch here: homeowners have no accounts in this
+      // product, so a row that still carries the role resolves to nothing.
       return { ...base, id: "__none__" };
     }
 
@@ -86,9 +85,6 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
       }
       if (role === "installer") {
         return { ...base, ...installerProjectFilter(user.userId) };
-      }
-      if (role === "customer") {
-        return { ...base, lead: { customerUserId: user.userId } };
       }
       if (role === "manager") {
         const team = managerTeamUserFilter(user.userId);
@@ -124,9 +120,6 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
       if (role === "installer") {
         // Documents on jobs the installer's crew is assigned to.
         return { ...base, lead: { project: installerProjectFilter(user.userId) } };
-      }
-      if (role === "customer") {
-        return { ...base, lead: { customerUserId: user.userId } };
       }
       if (role === "manager") {
         const team = managerTeamUserFilter(user.userId);

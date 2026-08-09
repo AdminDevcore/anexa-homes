@@ -45,14 +45,17 @@ test("sales rep can reach dashboard and pipeline", async ({ page }) => {
   await logout(page);
 });
 
-test("customer is isolated to their own portal", async ({ page }) => {
-  await login(page, "customer@anexahomes.com");
-  await expect(page).toHaveURL(/\/portal\/customer/);
-  await expect(page.getByText(/Welcome, Robert/)).toBeVisible();
-
-  // Customer must NOT be able to view the company leads list.
-  await page.goto("/portal/leads");
-  await expect(page).not.toHaveURL(/\/portal\/leads$/);
+test("there is no homeowner account to sign in with", async ({ page }) => {
+  // This product has no customer portal: homeowners reach proposals, contracts
+  // and review requests through public token links, never a login. The seed
+  // therefore creates no customer user, and `auth/config.ts` refuses the
+  // retired role outright — so this credential cannot get past the sign-in form.
+  await page.goto("/login");
+  await page.fill("#email", "customer@anexahomes.com");
+  await page.fill("#password", PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/login/);
+  await expect(page).not.toHaveURL(/\/portal/);
   await logout(page);
 });
 

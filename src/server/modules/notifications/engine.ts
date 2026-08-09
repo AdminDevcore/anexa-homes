@@ -50,7 +50,7 @@ async function run(args: FireArgs) {
   const project = projectId
     ? await prisma.project.findUnique({
         where: { id: projectId },
-        include: { lead: { select: { id: true, firstName: true, lastName: true, customerUserId: true, assignedRepId: true, createdById: true } } },
+        include: { lead: { select: { id: true, firstName: true, lastName: true, assignedRepId: true, createdById: true } } },
       })
     : null;
 
@@ -193,7 +193,7 @@ function conditionMatches(event: NotificationEvent, conditions: Record<string, u
 function resolveDynamic(
   target: string,
   ctx: {
-    lead: { customerUserId: string | null; assignedRepId: string | null; createdById: string | null } | null;
+    lead: { assignedRepId: string | null; createdById: string | null } | null;
     project: { managerId: string | null } | null;
     task: { assigneeId: string | null } | null;
   }
@@ -203,8 +203,6 @@ function resolveDynamic(
       return ctx.lead?.assignedRepId ?? null;
     case "project_manager":
       return ctx.project?.managerId ?? null;
-    case "customer":
-      return ctx.lead?.customerUserId ?? null;
     case "lead_creator":
       return ctx.lead?.createdById ?? null;
     case "task_assignee":

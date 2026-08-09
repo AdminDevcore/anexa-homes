@@ -753,16 +753,20 @@ export async function voidPackage(user: SessionUser, packageId: string, reason?:
   });
 }
 
-/** For an authenticated owner (customer): rotate their signer token and return the signing URL. */
+/**
+ * For a signed-in staff signer (a company rep or witness on the package):
+ * rotate their signer token and return the signing URL.
+ *
+ * Matched on email alone. The second arm of this OR used to match "the
+ * logged-in homeowner who owns this deal" — homeowners have no accounts here,
+ * so that arm could only ever match a legacy row.
+ */
 export async function getSigningLinkForUser(user: SessionUser, packageId: string): Promise<string | null> {
   const signer = await prisma.documentSigner.findFirst({
     where: {
       packageId,
       companyId: user.companyId,
-      OR: [
-        { email: user.email ?? "__none__" },
-        { package: { lead: { customerUserId: user.userId } }, role: "customer" },
-      ],
+      email: user.email ?? "__none__",
     },
   });
   if (!signer) return null;

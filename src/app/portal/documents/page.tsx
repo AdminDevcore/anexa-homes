@@ -24,7 +24,6 @@ export default async function DocumentsPage() {
   const user = await requireUser();
   if (!can(user, "read", "Document")) redirect("/portal/dashboard");
 
-  const isStaff = user.role !== "customer";
   const canSend = can(user, "create", "Document");
   const docScope = listScope(user, "Document") as Prisma.DocumentPackageWhereInput;
   const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
@@ -32,12 +31,10 @@ export default async function DocumentsPage() {
   const vertical = await getActiveVertical(user);
 
   const [templates, packages, leads] = await Promise.all([
-    isStaff
-      ? prisma.documentTemplate.findMany({
-          where: { companyId: user.companyId, active: true, vertical },
-          orderBy: { name: "asc" },
-        })
-      : Promise.resolve([]),
+    prisma.documentTemplate.findMany({
+      where: { companyId: user.companyId, active: true, vertical },
+      orderBy: { name: "asc" },
+    }),
     prisma.documentPackage.findMany({
       where: { AND: [docScope, { lead: { is: { vertical } } }] },
       orderBy: { createdAt: "desc" },
@@ -84,50 +81,48 @@ export default async function DocumentsPage() {
         }
       />
 
-      {isStaff && (
-        <div className="rounded-xl border border-border bg-card">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-3.5">
-            <div className="flex items-center gap-2">
-              <FileText className="size-4 text-gold" />
-              <h2 className="font-semibold">Templates</h2>
-            </div>
-            {can(user, "update", "Document") && <NewTemplateButton />}
+      <div className="rounded-xl border border-border bg-card">
+        <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-3.5">
+          <div className="flex items-center gap-2">
+            <FileText className="size-4 text-gold" />
+            <h2 className="font-semibold">Templates</h2>
           </div>
-          {templates.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-              No contract templates in this workspace yet. Click <strong>New template</strong> to add one, then map its
-              fields to auto-fill from each deal.
-            </div>
-          ) : (
-          <ul className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
-            {templates.map((t) => (
-              <li key={t.id} className="bg-card p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="font-medium">{t.name}</div>
-                    <div className="mt-1 text-xs capitalize text-muted-foreground">
-                      {t.type.replace(/_/g, " ")}
-                    </div>
-                  </div>
-                  {can(user, "update", "Document") && (
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/portal/documents/templates/${t.id}`}
-                        className="text-muted-foreground hover:text-gold-muted"
-                        aria-label="Edit template"
-                      >
-                        <Pencil className="size-4" />
-                      </Link>
-                      <DeleteTemplateButton id={t.id} name={t.name} />
-                    </div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-          )}
+          {can(user, "update", "Document") && <NewTemplateButton />}
         </div>
-      )}
+        {templates.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+            No contract templates in this workspace yet. Click <strong>New template</strong> to add one, then map its
+            fields to auto-fill from each deal.
+          </div>
+        ) : (
+        <ul className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+          {templates.map((t) => (
+            <li key={t.id} className="bg-card p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-medium">{t.name}</div>
+                  <div className="mt-1 text-xs capitalize text-muted-foreground">
+                    {t.type.replace(/_/g, " ")}
+                  </div>
+                </div>
+                {can(user, "update", "Document") && (
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/portal/documents/templates/${t.id}`}
+                      className="text-muted-foreground hover:text-gold-muted"
+                      aria-label="Edit template"
+                    >
+                      <Pencil className="size-4" />
+                    </Link>
+                    <DeleteTemplateButton id={t.id} name={t.name} />
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+        )}
+      </div>
 
       <div className="rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-5 py-3.5">

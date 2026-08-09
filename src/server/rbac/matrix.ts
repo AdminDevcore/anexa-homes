@@ -3,6 +3,15 @@
 
 import type { Role } from "@prisma/client";
 
+/**
+ * Every role this product has. All of them are staff.
+ *
+ * `customer` is deliberately absent. It is still a value in the Postgres enum
+ * so historical rows keep validating, but homeowners do not have accounts here:
+ * there is no customer portal, no customer sign-in and no way to invite one.
+ * Anything customer-facing (proposals, e-signature, review requests) reaches
+ * them through a public token link, never a login. See LEGACY_ROLES.
+ */
 export const ROLES = [
   "super_admin",
   "admin",
@@ -12,8 +21,15 @@ export const ROLES = [
   "marketing",
   "installer",
   "accounting",
-  "customer",
 ] as const;
+
+/**
+ * Enum values Postgres still accepts but the product has retired. Nothing may
+ * be created in, promoted to, or displayed as one of these. `auth/config.ts`
+ * refuses to authenticate them, which is what makes the absence enforceable
+ * rather than merely cosmetic.
+ */
+export const LEGACY_ROLES: Role[] = ["customer"];
 
 export const RESOURCES = [
   "Company",
@@ -83,7 +99,9 @@ export function isAdmin(role: Role): boolean {
   return ADMIN_ROLES.includes(role);
 }
 
-const GRANTS: Record<Role, Grant> = {
+// Partial, not total: a retired role (see LEGACY_ROLES) has no entry at all,
+// and `roleCan` reads a missing entry as "no grants" — deny by default.
+const GRANTS: Partial<Record<Role, Grant>> = {
   super_admin: {
     Chat: ALL,
     Canvassing: ALL,
@@ -232,8 +250,6 @@ const GRANTS: Record<Role, Grant> = {
     Scope: ["read"],
     Proposal: ["read"],
   },
-
-  customer: {},
 };
 
 export function roleCan(role: Role, action: Action, resource: Resource): boolean {

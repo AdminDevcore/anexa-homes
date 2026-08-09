@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { verifyPassword } from "./password";
 import { isLoginAllowed, recordFailedLogin, clearLoginAttempts } from "./rate-limit";
+import { isStaff } from "@/server/rbac/matrix";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -45,8 +46,11 @@ export const authConfig: NextAuthConfig = {
           where: { email: email.toLowerCase().trim() },
           include: { company: { select: { slug: true } } },
         });
-        // The customer role is retired — no customer may sign in or access the app.
-        if (!user || user.status === "disabled" || user.status === "suspended" || user.role === "customer") {
+        // Staff only. Every live role is a staff role, so a row carrying a
+        // retired one (`customer`, from before homeowner accounts were dropped)
+        // is refused here — this is what makes "there is no customer portal" a
+        // property of the system rather than a missing button.
+        if (!user || user.status === "disabled" || user.status === "suspended" || !isStaff(user.role)) {
           recordFailedLogin(email);
           return null;
         }

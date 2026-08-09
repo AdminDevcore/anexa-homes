@@ -1,6 +1,10 @@
 import type { Role } from "@prisma/client";
 
-export const ROLE_LABELS: Record<Role, string> = {
+// Partial by design: `customer` is a retired enum value with no label, because
+// there is nowhere in this product that a customer is a user. `roleLabel`
+// falls back to the raw value, so a legacy row still renders something rather
+// than blank. See LEGACY_ROLES in server/rbac/matrix.ts.
+export const ROLE_LABELS: Partial<Record<Role, string>> = {
   super_admin: "Super Admin",
   admin: "Admin",
   manager: "Manager",
@@ -9,7 +13,6 @@ export const ROLE_LABELS: Record<Role, string> = {
   marketing: "Marketing",
   installer: "Installer / Crew",
   accounting: "Payroll / Accounting",
-  customer: "Customer",
 };
 
 // Roles a Super Admin / Admin can actually assign in the UI (retired ones excluded).

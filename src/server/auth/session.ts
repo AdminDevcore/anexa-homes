@@ -4,6 +4,7 @@ import type { Session } from "next-auth";
 import type { Role, Vertical } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/server/db/client";
+import { isStaff } from "@/server/rbac/matrix";
 import type { AccessUser } from "@/server/rbac/guards";
 
 export type SessionUser = AccessUser & {
@@ -53,7 +54,8 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     },
   });
 
-  if (!live || live.status === "disabled" || live.status === "suspended" || live.role === "customer") {
+  // Mirrors the credentials provider: staff only, retired roles refused.
+  if (!live || live.status === "disabled" || live.status === "suspended" || !isStaff(live.role)) {
     return null;
   }
   if (live.sessionVersion !== session.user.sessionVersion) {

@@ -211,9 +211,6 @@ export async function uploadFileAction(formData: FormData) {
  */
 export async function moveFileAction(id: string, category: string) {
   const user = await requireUser();
-  if (user.role === "customer") {
-    return { ok: false as const, error: "Customers can't move files." };
-  }
   if (!can(user, "update", "File") && !can(user, "create", "File")) {
     return { ok: false as const, error: "Not allowed." };
   }
@@ -246,10 +243,6 @@ export async function moveFileAction(id: string, category: string) {
 
 export async function deleteFileAction(id: string) {
   const user = await requireUser();
-  // Customers may upload but never delete — signed contracts must stay immutable.
-  if (user.role === "customer") {
-    return { ok: false as const, error: "Customers can't delete files." };
-  }
   if (!can(user, "update", "File") && !can(user, "create", "File")) {
     return { ok: false as const, error: "Not allowed." };
   }

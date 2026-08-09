@@ -39,7 +39,7 @@ const reportSchema = z.object({
 
 export async function submitDailyReportAction(input: z.infer<typeof reportSchema>) {
   const user = await requireUser();
-  if (user.role === "customer" || !can(user, "read", "Project")) return fail("Not allowed.");
+  if (!can(user, "read", "Project")) return fail("Not allowed.");
   const parsed = reportSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid report.");
   if (!(await projectInScope(user, parsed.data.projectId))) return fail("Project not found.");

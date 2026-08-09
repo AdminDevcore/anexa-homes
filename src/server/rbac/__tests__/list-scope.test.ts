@@ -22,6 +22,8 @@ function mentionsCompany(frag: unknown, companyId: string): boolean {
   );
 }
 
+// `customer` is included on purpose even though it is retired: a row that still
+// carries the role must still be scoped to its company, not handed the world.
 const ROLES = ["super_admin", "admin", "manager", "sales_rep", "canvasser", "marketing", "installer", "accounting", "customer"];
 const RESOURCES = ["Lead", "Project", "Commission", "Document", "Task", "Payroll"] as const;
 
@@ -62,9 +64,13 @@ describe("listScope — per-rep isolation on Lead", () => {
     });
   });
 
-  it("customer is limited to their own deal", () => {
+  it("the retired customer role sees nothing at all", () => {
+    // Homeowners have no accounts in this product. The role used to get its own
+    // "your own deal" branch; a legacy row must now fall through to
+    // deny-by-default rather than keep a working view of a deal.
     const frag = listScope(u("customer", { userId: "cust-1" }), "Lead") as Record<string, unknown>;
-    expect(frag.customerUserId).toBe("cust-1");
+    expect(frag.customerUserId).toBeUndefined();
+    expect(frag.id).toBe("__none__");
   });
 });
 

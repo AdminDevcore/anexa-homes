@@ -7,6 +7,7 @@ import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { sendEmail } from "@/server/modules/notifications/delivery";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { hashPassword } from "./password";
+import { isStaff } from "@/server/rbac/matrix";
 
 function sha256(input: string): string {
   return crypto.createHash("sha256").update(input).digest("hex");
@@ -44,7 +45,7 @@ export async function requestPasswordReset(
     !user.deletedAt &&
     user.status !== "disabled" &&
     user.status !== "suspended" &&
-    user.role !== "customer";
+    isStaff(user.role);
 
   // Always succeed to avoid leaking which emails exist.
   if (user && eligible) {
