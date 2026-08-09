@@ -92,6 +92,21 @@ function stampData(model: string, data: unknown, vertical: ActiveVertical): unkn
       );
     }
     out.vertical = vertical;
+  } else if (cls === "scopedOptional") {
+    // An EXPLICIT null is a deliberate company-scoped row (a Company task) and
+    // must survive. That is why this tests key presence rather than nullishness:
+    // `{ vertical: null }` means "company", while an absent key means "wherever
+    // I am standing". Writing into someone else's workspace is still refused.
+    if ("vertical" in out) {
+      const explicit = out.vertical;
+      if (explicit != null && explicit !== vertical) {
+        throw new CrossVerticalAccessError(
+          `Refusing to write ${model} into vertical "${String(explicit)}" while acting in "${vertical}".`
+        );
+      }
+    } else {
+      out.vertical = vertical;
+    }
   } else if (cls === "tagged") {
     // A tagged row's department is a property of the record it belongs to, not
     // of whichever workspace the user happens to have open — otherwise a
@@ -217,6 +232,34 @@ function stampWhere(model: string, where: unknown, vertical: ActiveVertical): Js
   return { ...base, vertical };
 }
 
+/**
+ * The SCOPED_OPTIONAL read filter: this workspace's rows PLUS the company-level
+ * ones (vertical NULL).
+ *
+ * Wrapped in `AND` rather than spread in as a sibling `OR` on purpose — a caller
+ * that already passes its own `OR` (the Tasks page does, for "assigned to me or
+ * created by me") would otherwise have it silently overwritten, widening the
+ * query instead of narrowing it. `AND` composes with whatever is already there.
+ *
+ * An explicit `vertical` in the caller's where still wins, so a screen can ask
+ * for only-company (`null`) or only-this-workspace rows deliberately.
+ */
+function stampWhereOptional(model: string, where: unknown, vertical: ActiveVertical): Json {
+  const base = isPlainObject(where) ? where : {};
+  if ("vertical" in base) {
+    const explicit = base.vertical;
+    if (explicit != null && typeof explicit === "string" && explicit !== vertical) {
+      throw new CrossVerticalAccessError(
+        `Refusing to read ${model} from vertical "${explicit}" while acting in "${vertical}".`
+      );
+    }
+    return { ...base };
+  }
+  return {
+    AND: [base, { OR: [{ vertical }, { vertical: null }] }],
+  };
+}
+
 /** Ops that bring a row into existence, where provenance must be resolved. */
 const CREATE_OPS = new Set(["create", "createMany", "createManyAndReturn"]);
 /** Ops that mutate an existing row. */
@@ -286,6 +329,8 @@ export function verticalExtension() {
           // the ledger stays consolidated and still breaks out by department.
           if (cls === "scoped" && WHERE_OPS.has(operation)) {
             next.where = stampWhere(model!, next.where, vertical);
+          } else if (cls === "scopedOptional" && WHERE_OPS.has(operation)) {
+            next.where = stampWhereOptional(model!, next.where, vertical);
           }
 
           if (DATA_OPS.has(operation) && next.data !== undefined) {

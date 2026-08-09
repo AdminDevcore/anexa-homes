@@ -8,6 +8,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getActiveVertical } from "@/server/auth/vertical";
+import { stampVertical } from "@/server/vertical/visibility";
 import { putObject } from "@/server/storage";
 import { TRAINING_AUDIENCE_ROLES } from "./policies";
 
@@ -65,7 +66,16 @@ function safeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "file";
 }
 
-/** Upload a training file to storage and return its FileAsset id. */
+/**
+ * Upload a training file to storage and return its FileAsset id.
+ *
+ * Knowledge files are the one parentless `workspace` case: they hang off a
+ * category rather than a deal, so there is no parent to inherit isolation from
+ * and the workspace has to be stamped on the row itself. Reads are still gated
+ * by the category (see knowledgeFileForUser), so this is defence in depth rather
+ * than the only check — training material is exactly the thing the user asked
+ * never to cross between workspaces.
+ */
 async function storeUpload(file: File, companyId: string, uploadedById: string): Promise<string> {
   const raw = Buffer.from(await file.arrayBuffer());
   const { buffer, mimeType } = file.type.startsWith("image/")
@@ -83,6 +93,8 @@ async function storeUpload(file: File, companyId: string, uploadedById: string):
       mimeType,
       size: buffer.length,
       uploadedById,
+      scope: "workspace",
+      vertical: await stampVertical(),
     },
     select: { id: true },
   });

@@ -10,6 +10,8 @@ import { setTaskStatusAction, deleteTaskAction } from "@/server/modules/tasks/ac
 import { useFormat } from "@/components/portal/branding-provider";
 import { NewTaskDialog } from "@/components/portal/tasks/new-task-dialog";
 import { TasksToolbar, DEFAULT_FILTERS, type TaskFilters } from "@/components/portal/tasks/tasks-toolbar";
+import { WorkspaceTag } from "@/components/portal/workspace-tag";
+import type { Vertical } from "@prisma/client";
 
 type Task = {
   id: string;
@@ -28,6 +30,8 @@ type Task = {
   leadName: string | null;
   /** The tagged job's address — searchable, never rendered. */
   leadAddress: string | null;
+  /** NULL = a Company task, visible from every workspace. */
+  vertical: Vertical | null;
 };
 type Option = { id: string; name: string };
 
@@ -44,6 +48,8 @@ export function TasksClient({
   canAssign,
   canCreate,
   canManage,
+  workspaceLabel,
+  multiWorkspace = false,
 }: {
   meId: string;
   tasks: Task[];
@@ -51,6 +57,10 @@ export function TasksClient({
   canAssign: boolean;
   canCreate: boolean;
   canManage: boolean;
+  /** The active workspace's name, e.g. "Roofing". */
+  workspaceLabel?: string;
+  /** True only when this user is granted more than one workspace. */
+  multiWorkspace?: boolean;
 }) {
   const fmt = useFormat();
   const router = useRouter();
@@ -159,6 +169,8 @@ export function TasksClient({
               assignees={assignees}
               canAssign={canAssign}
               onCreated={() => router.refresh()}
+              workspaceLabel={workspaceLabel}
+              canScopeToCompany={multiWorkspace}
             />
           ) : null
         }
@@ -192,7 +204,13 @@ export function TasksClient({
                     </button>
                   </td>
                   <td className="px-3 py-2">
-                    <div className={cn("font-medium", t.status === "done" && "text-muted-foreground line-through")}>{t.title}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={cn("font-medium", t.status === "done" && "text-muted-foreground line-through")}>{t.title}</span>
+                      {/* Only Company rows are marked. The list is already scoped
+                          to this workspace, so tagging the rest would put the
+                          same label on nearly every line. */}
+                      {multiWorkspace && t.vertical === null && <WorkspaceTag vertical={null} />}
+                    </div>
                     {t.leadName && <JobTag leadId={t.leadId} leadName={t.leadName} />}
                   </td>
                   <td className="hidden px-3 py-2 lg:table-cell"><Person name={t.assignedBy} /></td>
@@ -241,8 +259,11 @@ export function TasksClient({
                 )}
               </button>
               <div className="min-w-0 flex-1">
-                <div className={cn("font-medium", t.status === "done" && "text-muted-foreground line-through")}>
-                  {t.title}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={cn("font-medium", t.status === "done" && "text-muted-foreground line-through")}>
+                    {t.title}
+                  </span>
+                  {multiWorkspace && t.vertical === null && <WorkspaceTag vertical={null} />}
                 </div>
                 {t.leadName ? <JobTag leadId={t.leadId} leadName={t.leadName} /> : null}
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">

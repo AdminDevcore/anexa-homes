@@ -20,6 +20,7 @@ import { createTaskAction } from "@/server/modules/tasks/actions";
 
 type Option = { id: string; name: string };
 type Priority = "low" | "medium" | "high" | "urgent";
+type Scope = "workspace" | "company";
 
 /**
  * "New task" modal. Replaces the old inline create row so the job picker has
@@ -34,10 +35,16 @@ export function NewTaskDialog({
   assignees,
   canAssign,
   onCreated,
+  workspaceLabel,
+  canScopeToCompany = false,
 }: {
   assignees: Option[];
   canAssign: boolean;
   onCreated: () => void;
+  /** Name of the workspace being worked in, e.g. "Roofing". */
+  workspaceLabel?: string;
+  /** Only users granted more than one workspace get the Company option. */
+  canScopeToCompany?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [title, setTitle] = React.useState("");
@@ -45,7 +52,13 @@ export function NewTaskDialog({
   const [assigneeId, setAssigneeId] = React.useState("");
   const [priority, setPriority] = React.useState<Priority>("medium");
   const [dueAt, setDueAt] = React.useState("");
+  const [scope, setScope] = React.useState<Scope>("workspace");
   const [pending, setPending] = React.useState(false);
+
+  // A job-linked task always belongs to that deal's workspace — the server
+  // enforces this too, so the control is hidden rather than left to disagree
+  // with what will actually be saved.
+  const scopeLocked = !!job;
 
   function reset() {
     setTitle("");
@@ -53,6 +66,7 @@ export function NewTaskDialog({
     setAssigneeId("");
     setPriority("medium");
     setDueAt("");
+    setScope("workspace");
   }
 
   function pickJob(next: JobOption | null) {
@@ -74,6 +88,7 @@ export function NewTaskDialog({
       priority,
       dueAt,
       leadId: job?.id ?? "",
+      scope: scopeLocked ? "workspace" : scope,
     });
     setPending(false);
     if (!res.ok) return toast.error(res.error);
@@ -119,6 +134,23 @@ export function NewTaskDialog({
           <Field label="Job" hint="optional">
             <JobPicker value={job} onChange={pickJob} />
           </Field>
+
+          {canScopeToCompany && !scopeLocked && (
+            <Field
+              label="Visible in"
+              hint={scope === "company" ? "every workspace" : "this workspace only"}
+            >
+              <Select value={scope} onValueChange={(v) => setScope(v as Scope)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="workspace">{workspaceLabel ?? "This workspace"}</SelectItem>
+                  <SelectItem value="company">Company — all workspaces</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             {canAssign && assignees.length > 0 ? (

@@ -5,14 +5,34 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Search, Users, KanbanSquare, UserCog, CornerDownLeft, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import type { Vertical } from "@prisma/client";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { PORTAL_NAV } from "@/lib/nav";
+import { WorkspaceTag } from "@/components/portal/workspace-tag";
+import { VERTICAL_LABEL, type ActiveVertical } from "@/lib/vertical";
+import { setActiveVerticalAction } from "@/server/modules/vertical/actions";
 
-type Item = { id: string; title: string; subtitle: string | null; href: string };
-type SearchResponse = { leads: Item[]; projects: Item[]; team: Item[] };
-type Row = { key: string; group: string; icon: LucideIcon; title: string; subtitle?: string | null; href: string };
+type Item = { id: string; title: string; subtitle: string | null; href: string; vertical: Vertical | null };
+type SearchResponse = { leads: Item[]; projects: Item[]; team: Item[]; showWorkspace: boolean };
+type Row = {
+  key: string;
+  group: string;
+  icon: LucideIcon;
+  title: string;
+  subtitle?: string | null;
+  href: string;
+  vertical?: Vertical | null;
+};
 
-export function CommandPalette({ allowedHrefs }: { allowedHrefs: string[] }) {
+export function CommandPalette({
+  allowedHrefs,
+  activeVertical = null,
+}: {
+  allowedHrefs: string[];
+  /** The workspace currently open; null when the multi-workspace build is off. */
+  activeVertical?: ActiveVertical | null;
+}) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
@@ -39,7 +59,7 @@ export function CommandPalette({ allowedHrefs }: { allowedHrefs: string[] }) {
     queryKey: ["cmd-search", dq],
     queryFn: async () => {
       const res = await fetch(`/api/search?q=${encodeURIComponent(dq)}`);
-      if (!res.ok) return { leads: [], projects: [], team: [] };
+      if (!res.ok) return { leads: [], projects: [], team: [], showWorkspace: false };
       return res.json();
     },
     enabled: open && dq.length >= 1,
@@ -53,25 +73,45 @@ export function CommandPalette({ allowedHrefs }: { allowedHrefs: string[] }) {
   const rows: Row[] = dq
     ? [
         ...pages,
-        ...(data?.leads ?? []).map((l): Row => ({ key: `l:${l.id}`, group: "Appointments", icon: Users, title: l.title, subtitle: l.subtitle, href: l.href })),
-        ...(data?.projects ?? []).map((p): Row => ({ key: `pr:${p.id}`, group: "Projects", icon: KanbanSquare, title: p.title, subtitle: p.subtitle, href: p.href })),
-        ...(data?.team ?? []).map((u): Row => ({ key: `u:${u.id}`, group: "Team", icon: UserCog, title: u.title, subtitle: u.subtitle, href: u.href })),
+        ...(data?.leads ?? []).map((l): Row => ({ key: `l:${l.id}`, group: "Appointments", icon: Users, title: l.title, subtitle: l.subtitle, href: l.href, vertical: l.vertical })),
+        ...(data?.projects ?? []).map((p): Row => ({ key: `pr:${p.id}`, group: "Projects", icon: KanbanSquare, title: p.title, subtitle: p.subtitle, href: p.href, vertical: p.vertical })),
+        ...(data?.team ?? []).map((u): Row => ({ key: `u:${u.id}`, group: "Team", icon: UserCog, title: u.title, subtitle: u.subtitle, href: u.href, vertical: null })),
       ]
     : pages;
+
+  const showWorkspace = data?.showWorkspace ?? false;
 
   React.useEffect(() => { setActive(0); }, [dq, data]);
   React.useEffect(() => {
     listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  function go(href: string) {
+  /** True when opening this row means leaving the workspace we are standing in. */
+  const isElsewhere = (row: Row) =>
+    !!activeVertical && !!row.vertical && row.vertical !== activeVertical;
+
+  async function go(row: Row) {
     setOpen(false);
-    router.push(href);
+    // Search deliberately spans every workspace this person is granted, so a hit
+    // can live somewhere other than the one that is open. Navigating straight
+    // there would 404: the deal page reads through the isolation extension,
+    // which would still be filtering to the old workspace. Switch first, then
+    // navigate — the alternative is a search result that looks broken.
+    if (isElsewhere(row)) {
+      const res = await setActiveVerticalAction(row.vertical as ActiveVertical);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Switched to ${VERTICAL_LABEL[row.vertical as ActiveVertical]}`);
+    }
+    router.push(row.href);
+    if (isElsewhere(row)) router.refresh();
   }
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, rows.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); const r = rows[active]; if (r) go(r.href); }
+    else if (e.key === "Enter") { e.preventDefault(); const r = rows[active]; if (r) void go(r); }
   }
 
   let lastGroup = "";
@@ -110,7 +150,7 @@ export function CommandPalette({ allowedHrefs }: { allowedHrefs: string[] }) {
                     {header && <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{header}</div>}
                     <button
                       data-active={i === active}
-                      onClick={() => go(row.href)}
+                      onClick={() => void go(row)}
                       onMouseMove={() => setActive(i)}
                       className={cn(
                         "flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm",
@@ -122,6 +162,9 @@ export function CommandPalette({ allowedHrefs }: { allowedHrefs: string[] }) {
                         <span className="block truncate font-medium">{row.title}</span>
                         {row.subtitle && <span className={cn("block truncate text-xs", i === active ? "text-background/70" : "text-muted-foreground")}>{row.subtitle}</span>}
                       </span>
+                      {/* Only rows from ANOTHER workspace are tagged: opening one
+                          switches workspaces, which the user should see coming. */}
+                      {showWorkspace && isElsewhere(row) && <WorkspaceTag vertical={row.vertical ?? null} />}
                       {i === active && <CornerDownLeft className="size-3.5 shrink-0 text-background/70" />}
                     </button>
                   </React.Fragment>

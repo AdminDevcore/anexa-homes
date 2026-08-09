@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { permittedVerticalFilter } from "@/server/vertical/visibility";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -119,8 +120,12 @@ export async function markNotificationReadAction(id: string) {
 
 export async function markAllNotificationsReadAction() {
   const user = await requireUser();
+  // "All" means all the notifications this person can actually SEE. Without the
+  // filter, clearing the bell would also silently read-flag alerts from a
+  // workspace they lost access to — and if that access is ever restored those
+  // alerts come back already read, which is how a real one gets missed.
   await prisma.notification.updateMany({
-    where: { userId: user.userId, read: false },
+    where: { userId: user.userId, read: false, ...permittedVerticalFilter(user) },
     data: { read: true, readAt: new Date() },
   });
   revalidatePath("/portal/notifications");

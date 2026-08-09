@@ -3,6 +3,7 @@ import type { ActiveVertical } from "@/lib/vertical";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
 import type { AccessUser } from "@/server/rbac/guards";
+import { runInVertical } from "@/server/vertical/context";
 
 export type CalendarEventType = "appointment" | "adjuster" | "install" | "inspection";
 
@@ -38,6 +39,8 @@ export type CalendarEvent = {
   subtitle: string | null; // address or project #
   rep: string | null;
   href: string; // deal detail
+  /** Which workspace this event came from — needed once Combined mode mixes them. */
+  vertical: ActiveVertical;
 };
 
 /**
@@ -102,6 +105,7 @@ export async function getCalendarEvents(
       subtitle: [l.address, l.city].filter(Boolean).join(", ") || null,
       rep: repName(l.assignedRep),
       href: `/portal/leads/${l.id}`,
+      vertical: vertical as ActiveVertical,
     });
   }
   for (const c of adjusters) {
@@ -114,6 +118,7 @@ export async function getCalendarEvents(
       subtitle: c.lead.project?.projectNumber ?? "Adjuster meeting",
       rep: repName(c.lead.assignedRep),
       href: `/portal/leads/${c.lead.id}`,
+      vertical: vertical as ActiveVertical,
     });
   }
   for (const p of installs) {
@@ -125,6 +130,7 @@ export async function getCalendarEvents(
       subtitle: p.projectNumber,
       rep: repName(p.lead?.assignedRep),
       href: p.lead ? `/portal/leads/${p.lead.id}` : `/portal/projects/${p.id}`,
+      vertical: vertical as ActiveVertical,
     });
   }
   for (const p of inspections) {
@@ -136,7 +142,49 @@ export async function getCalendarEvents(
       subtitle: p.projectNumber,
       rep: repName(p.lead?.assignedRep),
       href: p.lead ? `/portal/leads/${p.lead.id}` : `/portal/projects/${p.id}`,
+      vertical: vertical as ActiveVertical,
     });
   }
   return events;
+}
+
+/**
+ * The calendar entry point: events for one or more workspaces.
+ *
+ * Every read goes through here, including the single-workspace case, and that is
+ * deliberate. getCalendarEvents() passes `{ vertical }` into a SCOPED query, so
+ * it only returns anything when the AMBIENT workspace matches the one asked for.
+ * That held while the calendar could only ever show the active workspace. The
+ * moment a mode switcher let someone stand in Roofing and ask for Solar, calling
+ * it directly produced `vertical = 'roofing' AND vertical = 'solar'` — a query
+ * that cannot match a row, returning an empty calendar rather than an error.
+ *
+ * Wrapping each pass in runInVertical makes the requested workspace the ambient
+ * one, so the two always agree by construction. Routing the single case through
+ * the same path costs one array allocation and removes the trap entirely; the
+ * alternative is a private helper that is correct only if every future caller
+ * remembers to wrap it.
+ *
+ * N scoped passes rather than one widened `vertical IN (...)` query is also the
+ * point: each workspace has its own event vocabulary (adjuster meetings are
+ * roofing-only, AHJ inspections solar-only), so a single query would have to
+ * re-derive per row which sources were legal for it. Per-pass, CALENDAR_EVENT_TYPES
+ * handles that for free.
+ *
+ * Callers must pass a list already checked against the user's grants — see
+ * resolveCalendarMode().
+ */
+export async function getCalendarEventsForWorkspaces(
+  user: AccessUser,
+  verticals: readonly ActiveVertical[],
+  from: Date,
+  to: Date
+): Promise<CalendarEvent[]> {
+  const perWorkspace = await Promise.all(
+    verticals.map((v) => runInVertical(v, () => getCalendarEvents(user, v, from, to)))
+  );
+  // Sorted here rather than in the client: concatenating two already-sorted
+  // lists without re-sorting is the classic way a combined view ends up
+  // interleaving wrongly at day boundaries.
+  return perWorkspace.flat().sort((a, b) => a.date.localeCompare(b.date));
 }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/server/auth/session";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
+import { stampVertical } from "@/server/vertical/visibility";
 import { getObject } from "@/server/storage";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -23,6 +24,28 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // Chat is deliberately cross-vertical, so these skip the vertical check below.
   if (file.conversationId) {
     if ((file.conversation?.members.length ?? 0) === 0) return new NextResponse("Forbidden", { status: 403 });
+  }
+
+  // PRIVATE — the uploader and admins, nobody else, in any workspace.
+  //
+  // This is checked before everything below because it is not a workspace rule
+  // at all: an onboarding SSN card should not become readable to a colleague
+  // just because they share a workspace with the person who uploaded it. It also
+  // FIXES an old gap in the opposite direction — the staff branch further down
+  // only ever allowed deal-attached files, so an employee could not open their
+  // own ID photo back.
+  if (file.scope === "private") {
+    const isOwner = file.uploadedById === user.userId;
+    const isAdmin = user.role === "super_admin" || user.role === "admin";
+    if (!isOwner && !isAdmin) return new NextResponse("Forbidden", { status: 403 });
+  }
+
+  // WORKSPACE, with no parent deal to inherit from (knowledge-base material).
+  // Deal-attached files are covered by the parent check below; these have no
+  // parent, so the row's own workspace is the only thing to compare against.
+  if (file.scope === "workspace" && file.vertical && !file.leadId && !file.projectId) {
+    const active = await stampVertical();
+    if (active && active !== file.vertical) return new NextResponse("Not found", { status: 404 });
   }
 
   // VERTICAL ISOLATION — applies to EVERY role, admins included.
@@ -52,7 +75,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const ownsLead = file.lead?.customerUserId === user.userId;
     const ownsProject = file.project?.lead?.customerUserId === user.userId;
     if (!ownsLead && !ownsProject) return new NextResponse("Forbidden", { status: 403 });
-  } else if (user.role !== "super_admin" && user.role !== "admin" && !file.conversationId) {
+  } else if (
+    user.role !== "super_admin" &&
+    user.role !== "admin" &&
+    !file.conversationId &&
+    // A private file has already passed its own owner/admin check above; falling
+    // into the staff branch would then reject the owner for not having a deal.
+    file.scope !== "private"
+  ) {
     // Staff must own the file's deal: verify its lead/project is within their scope
     // (a rep can't fetch another rep's file, an installer only their crew's jobs).
     let allowed = false;

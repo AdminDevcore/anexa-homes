@@ -166,7 +166,7 @@ export function PortalShell({
           </div>
 
           <div className="flex items-center gap-3">
-            <CommandPalette allowedHrefs={allowedHrefs} />
+            <CommandPalette allowedHrefs={allowedHrefs} activeVertical={vertical} />
             {vertical && (
               <WorkspaceSwitcher active={vertical} available={availableVerticals} />
             )}

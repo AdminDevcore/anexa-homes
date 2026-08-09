@@ -127,6 +127,10 @@ export async function uploadOnboardingDocAction(formData: FormData) {
     data: {
       companyId: user.companyId, kind: "document", name: file.name, storageKey,
       mimeType: file.type || null, size: buf.length, category: "onboarding", uploadedById: user.userId,
+      // ID photos, SSN cards and voided checks. These belong to the employee, not
+      // to a workspace and not to the company at large — this is the case the
+      // `private` scope exists for, and it had no representation before.
+      scope: "private",
     },
     select: { id: true },
   });

@@ -59,7 +59,10 @@ async function run(args: FireArgs) {
     : null;
 
   const task = args.taskId
-    ? await prisma.task.findUnique({ where: { id: args.taskId }, select: { id: true, title: true, assigneeId: true } })
+    ? await prisma.task.findUnique({
+        where: { id: args.taskId },
+        select: { id: true, title: true, assigneeId: true, vertical: true },
+      })
     : null;
 
   const stage = args.stageId
@@ -90,6 +93,14 @@ async function run(args: FireArgs) {
   };
 
   const link = buildLink(args, { leadId: lead?.id ?? leadForCtx?.id, projectId, documentId: doc?.id });
+
+  // The workspace this notification came from, taken from the entity that caused
+  // it rather than from ambient context. The two can disagree: a cron job or a
+  // webhook fires with no workspace open at all, and stamping "whatever the
+  // actor had selected" would file a Solar alert under Roofing. NULL is the
+  // honest answer for a genuinely company-level event (payroll approved), and it
+  // shows in every workspace.
+  const originVertical = lead?.vertical ?? project?.vertical ?? task?.vertical ?? null;
 
   // --- Load branding for the from-name + branded email template ---
   const { brand, fromName } = await emailBrandFor(args.companyId);
@@ -149,7 +160,7 @@ async function run(args: FireArgs) {
     for (const r of recipients) {
       if (channels.includes("in_app")) {
         await prisma.notification.create({
-          data: { companyId: args.companyId, userId: r.id, ruleId: rule.id, event: args.event, title, body, link, channel: "in_app" },
+          data: { companyId: args.companyId, userId: r.id, ruleId: rule.id, event: args.event, title, body, link, channel: "in_app", vertical: originVertical },
         });
       }
       if (channels.includes("email") && r.email) {

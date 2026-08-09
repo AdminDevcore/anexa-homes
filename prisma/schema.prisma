@@ -1086,8 +1086,13 @@ model Task {
   description     String?
   status          TaskStatus @default(todo)
   priority        Priority   @default(medium)
-  // Vertical workspace this task belongs to (isolates Roofing / Solar tasks).
-  vertical        Vertical   @default(roofing) @map("industry")
+  // Which workspace this task belongs to, or NULL for a COMPANY-scoped task.
+  //
+  // Company tasks ("submit your timesheet", "all-hands Friday") are visible from
+  // every workspace; a workspace task only appears in its own. That is why this
+  // is nullable and why Task is registered SCOPED_OPTIONAL rather than SCOPED —
+  // a plain SCOPED read would filter company tasks out of existence.
+  vertical        Vertical?  @map("industry")
   dueAt           DateTime?
   leadId          String?
   lead            Lead?      @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -1131,11 +1136,31 @@ model Note {
   @@map("notes")
 }
 
+/**
+ * Where a file is allowed to be seen.
+ *
+ * The table already isolated deal files through their PARENT lead/project, which
+ * works and is what the file-serve route enforces. What it could not express was
+ * a file with no parent: the branding logo, a GL receipt and a Solar training PDF
+ * were indistinguishable rows. This column makes the intent explicit and adds the
+ * one case that had no representation at all — `private`.
+ */
+enum FileScope {
+  company // visible from every workspace (branding, GL receipts, chat attachments)
+  workspace // isolated — via the parent deal, or via `vertical` when parentless
+  private // uploader + admins only, regardless of workspace
+}
+
 model FileAsset {
   id                  String             @id @default(uuid())
   companyId           String
   company             Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   kind                FileKind           @default(document)
+  scope               FileScope          @default(workspace)
+  // Set only for a parentless `workspace` file. A file hanging off a lead or
+  // project leaves this NULL and inherits isolation from that parent, which is
+  // the mechanism the file-serve route already proves out.
+  vertical            Vertical?          @map("industry")
   name                String
   storageKey          String
   mimeType            String?
@@ -1168,6 +1193,7 @@ model FileAsset {
   @@index([conversationId])
   @@index([messageId])
   @@index([transactionId])
+  @@index([companyId, scope, vertical], map: "files_companyId_scope_industry_idx")
   @@map("files")
 }
 
@@ -1241,10 +1267,16 @@ model ActivityLog {
   project   Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   metadata  Json         @default("{}")
   ip        String?
+  // Originating workspace. NULL = a company-level action (a payroll run, a
+  // branding change) that belongs to no workspace and is visible in all of them.
+  // Like Notification this is permission-filtered rather than SCOPED: an auditor
+  // granted both workspaces must see both without switching.
+  vertical  Vertical?    @map("industry")
   createdAt DateTime     @default(now())
 
   @@index([companyId, createdAt])
   @@index([companyId, projectId])
+  @@index([companyId, vertical, createdAt], map: "activity_logs_companyId_industry_createdAt_idx")
   @@map("activity_logs")
 }
 
@@ -1623,9 +1655,19 @@ model Notification {
   channel   NotificationChannel @default(in_app)
   read      Boolean             @default(false)
   readAt    DateTime?
+  // Originating workspace, so the bell can say where a notification came from
+  // and can be filtered to the workspaces its recipient is actually granted.
+  // NULL = company-level (payroll, announcements) and shows in every workspace.
+  //
+  // Deliberately NOT a SCOPED model: the rule here is PERMISSION, not active
+  // workspace. Someone granted both Roofing and Solar must receive both while
+  // standing in either one, which is the opposite of what the isolation
+  // extension does. Filtering is therefore explicit, via notificationScope().
+  vertical  Vertical?           @map("industry")
   createdAt DateTime            @default(now())
 
   @@index([companyId, userId, read, createdAt])
+  @@index([companyId, userId, vertical], map: "notifications_companyId_userId_industry_idx")
   @@map("notifications")
 }
 

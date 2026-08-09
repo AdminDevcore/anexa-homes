@@ -15,9 +15,19 @@ import {
   markNotificationReadAction,
   markAllNotificationsReadAction,
 } from "@/server/modules/notifications/actions";
+import { WorkspaceTag } from "@/components/portal/workspace-tag";
+import type { Vertical } from "@prisma/client";
 
-type Item = { id: string; title: string; body: string; link: string | null; read: boolean; createdAt: string };
-type Summary = { count: number; items: Item[] };
+type Item = {
+  id: string;
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
+  vertical: Vertical | null;
+};
+type Summary = { count: number; items: Item[]; showWorkspace: boolean };
 
 export function NotificationBell() {
   const qc = useQueryClient();
@@ -26,7 +36,7 @@ export function NotificationBell() {
     queryKey: ["notifications-summary"],
     queryFn: async () => {
       const res = await fetch("/api/notifications/summary");
-      if (!res.ok) return { count: 0, items: [] };
+      if (!res.ok) return { count: 0, items: [], showWorkspace: false };
       return res.json();
     },
     refetchInterval: 30000,
@@ -35,6 +45,9 @@ export function NotificationBell() {
 
   const count = data?.count ?? 0;
   const items = data?.items ?? [];
+  // The server decides this, not the client: it is a permission question, and
+  // the answer must match the filter that produced `items`.
+  const showWorkspace = data?.showWorkspace ?? false;
 
   async function open(item: Item) {
     if (!item.read) {
@@ -82,7 +95,8 @@ export function NotificationBell() {
               >
                 <span className="flex w-full items-center gap-2 text-sm font-medium">
                   {!item.read && <span className="size-1.5 shrink-0 rounded-full bg-gold" />}
-                  {item.title}
+                  <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                  {showWorkspace && <WorkspaceTag vertical={item.vertical} />}
                 </span>
                 <span className="line-clamp-2 text-xs text-muted-foreground">{item.body}</span>
               </button>

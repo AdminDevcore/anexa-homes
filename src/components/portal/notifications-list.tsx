@@ -12,10 +12,28 @@ import {
   markAllNotificationsReadAction,
 } from "@/server/modules/notifications/actions";
 import { useFormat } from "@/components/portal/branding-provider";
+import { WorkspaceTag } from "@/components/portal/workspace-tag";
+import type { Vertical } from "@prisma/client";
 
-type Item = { id: string; title: string; body: string; link: string | null; read: boolean; createdAt: string; event: string };
+type Item = {
+  id: string;
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  createdAt: string;
+  event: string;
+  vertical: Vertical | null;
+};
 
-export function NotificationsList({ items }: { items: Item[] }) {
+export function NotificationsList({
+  items,
+  showWorkspace = false,
+}: {
+  items: Item[];
+  /** Only true for users granted more than one workspace — see WorkspaceTag. */
+  showWorkspace?: boolean;
+}) {
   const fmt = useFormat();
   const router = useRouter();
   const qc = useQueryClient();
@@ -59,8 +77,11 @@ export function NotificationsList({ items }: { items: Item[] }) {
             className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition-colors hover:bg-muted/40 ${item.read ? "" : "bg-gold/5"}`}
           >
             {!item.read ? <span className="mt-1.5 size-2 shrink-0 rounded-full bg-gold" /> : <span className="mt-1.5 size-2 shrink-0" />}
-            <div className="flex-1">
-              <div className="font-medium">{item.title}</div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{item.title}</span>
+                {showWorkspace && <WorkspaceTag vertical={item.vertical} />}
+              </div>
               <div className="text-sm text-muted-foreground">{item.body}</div>
             </div>
             <span className="shrink-0 text-xs text-muted-foreground">{fmt.date(item.createdAt)}</span>

@@ -7,9 +7,26 @@ import { ChevronLeft, ChevronRight, Clock, User, ArrowRight } from "lucide-react
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import type { Vertical } from "@prisma/client";
+import { WorkspaceTag } from "@/components/portal/workspace-tag";
+import { VERTICAL_ACCENT, VERTICAL_LABEL, type ActiveVertical } from "@/lib/vertical";
+import { setActiveVerticalAction } from "@/server/modules/vertical/actions";
 
 type EventType = "appointment" | "adjuster" | "install" | "inspection";
-type Ev = { id: string; type: EventType; date: string; title: string; subtitle: string | null; rep: string | null; href: string };
+type Ev = {
+  id: string;
+  type: EventType;
+  date: string;
+  title: string;
+  subtitle: string | null;
+  rep: string | null;
+  href: string;
+  vertical: Vertical;
+};
+
+/** One entry per mode the user may pick: a workspace, or "combined". */
+export type CalendarModeOption = { value: string; label: string; types: EventType[] };
 
 const TYPE_META: Record<EventType, { label: string; dot: string; pill: string }> = {
   appointment: { label: "Appointments", dot: "bg-gold", pill: "bg-gold/15 text-gold-muted" },
@@ -34,23 +51,58 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "n
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export function WorkCalendar({ types }: { types?: EventType[] } = {}) {
+export function WorkCalendar({
+  types,
+  modes = [],
+  initialMode,
+  showWorkspace = false,
+  activeVertical = null,
+}: {
+  types?: EventType[];
+  /** Empty for a single-workspace user — the switcher then never renders. */
+  modes?: CalendarModeOption[];
+  initialMode?: string;
+  showWorkspace?: boolean;
+  /** The workspace currently open, so we know when opening an event must switch. */
+  activeVertical?: ActiveVertical | null;
+} = {}) {
   const router = useRouter();
-  const TYPES = types?.length ? types : DEFAULT_TYPES;
+  const [mode, setMode] = React.useState<string | undefined>(initialMode);
+
+  // Which chips exist depends on the mode: Combined has to offer the UNION of
+  // both workspaces' event types, because adjuster meetings only exist in
+  // roofing and AHJ inspections only in solar. Falling back to `types` keeps
+  // single-workspace callers on exactly the behaviour they had.
+  const activeMode = modes.find((m) => m.value === mode);
+  const TYPES = activeMode?.types?.length ? activeMode.types : types?.length ? types : DEFAULT_TYPES;
+
   const [anchor, setAnchor] = React.useState<Date>(() => startOfMonth(new Date()));
-  const [on, setOn] = React.useState<Record<EventType, boolean>>(() =>
-    Object.fromEntries(TYPES.map((t) => [t, true])) as Record<EventType, boolean>
-  );
   const [selected, setSelected] = React.useState<Ev | null>(null);
+
+  // Track which chips are switched OFF, not which are on.
+  //
+  // Switching mode introduces chips that did not exist a moment ago —
+  // "Inspections" appears when moving Roofing → Combined. With an on-map those
+  // arrive as `undefined`, read as off, and their events load and are then
+  // silently filtered out; keeping it correct needs an effect that syncs state
+  // to props. Storing the off-set makes "on" the absence of an entry, so a brand
+  // new chip is on by construction and there is no effect to get wrong.
+  const [off, setOff] = React.useState<Partial<Record<EventType, boolean>>>({});
+  const on = React.useMemo(
+    () => Object.fromEntries(TYPES.map((t) => [t, !off[t]])) as Record<EventType, boolean>,
+    [TYPES, off]
+  );
 
   const gridStart = startOfWeek(startOfMonth(anchor));
   const gridEnd = addDays(gridStart, 42);
   const todayKey = dayKey(new Date());
 
   const { data } = useQuery<{ events: Ev[] }>({
-    queryKey: ["calendar", gridStart.toISOString(), gridEnd.toISOString()],
+    queryKey: ["calendar", gridStart.toISOString(), gridEnd.toISOString(), mode ?? ""],
     queryFn: async () => {
-      const res = await fetch(`/api/calendar?from=${gridStart.toISOString()}&to=${gridEnd.toISOString()}`);
+      const qs = new URLSearchParams({ from: gridStart.toISOString(), to: gridEnd.toISOString() });
+      if (mode) qs.set("mode", mode);
+      const res = await fetch(`/api/calendar?${qs}`);
       if (!res.ok) return { events: [] };
       return res.json();
     },
@@ -72,6 +124,28 @@ export function WorkCalendar({ types }: { types?: EventType[] } = {}) {
   const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const monthLabel = anchor.toLocaleDateString([], { month: "long", year: "numeric" });
 
+  /**
+   * Open the deal behind an event, switching workspace first when Combined mode
+   * surfaced one from somewhere else. Without the switch the deal page reads
+   * through the isolation extension in the OLD workspace and 404s — the calendar
+   * would show you a job it then refuses to open.
+   */
+  async function openEvent(ev: Ev) {
+    const href = ev.href;
+    const needsSwitch = !!activeVertical && ev.vertical !== activeVertical;
+    setSelected(null);
+    if (needsSwitch) {
+      const res = await setActiveVerticalAction(ev.vertical as ActiveVertical);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Switched to ${VERTICAL_LABEL[ev.vertical]}`);
+    }
+    router.push(href);
+    if (needsSwitch) router.refresh();
+  }
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
@@ -90,10 +164,31 @@ export function WorkCalendar({ types }: { types?: EventType[] } = {}) {
         </div>
         {/* Type filters — toggle each; e.g. turn off Adjuster + Install to see appointments only. */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Workspace mode. Rendered only when there is a genuine choice: a
+              single-workspace user gets no control, because a switcher with one
+              option is just a label that looks clickable. */}
+          {modes.length > 1 && (
+            <div className="mr-1 inline-flex items-center rounded-full border border-border p-0.5">
+              {modes.map((m) => (
+                <button
+                  key={m.value}
+                  onClick={() => setMode(m.value)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                    mode === m.value
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:bg-muted"
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
           {TYPES.map((t) => (
             <button
               key={t}
-              onClick={() => setOn((s) => ({ ...s, [t]: !s[t] }))}
+              onClick={() => setOff((s) => ({ ...s, [t]: !s[t] }))}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                 on[t] ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:bg-muted"
@@ -136,9 +231,19 @@ export function WorkCalendar({ types }: { types?: EventType[] } = {}) {
                     <button
                       key={e.id}
                       onClick={() => setSelected(e)}
-                      title={`${TYPE_META[e.type].label.replace(/s$/, "")} · ${e.title}${e.rep ? ` · ${e.rep}` : ""}`}
+                      title={`${TYPE_META[e.type].label.replace(/s$/, "")} · ${e.title}${e.rep ? ` · ${e.rep}` : ""}${showWorkspace ? ` · ${VERTICAL_LABEL[e.vertical]}` : ""}`}
                       className={cn("flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-[11px] font-medium leading-tight hover:opacity-90", TYPE_META[e.type].pill)}
                     >
+                      {/* A day cell has no room for a full tag, so the workspace
+                          is a coloured dot here and spelled out in the tooltip
+                          and the detail dialog. */}
+                      {showWorkspace && (
+                        <span
+                          aria-hidden
+                          className="size-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: VERTICAL_ACCENT[e.vertical] }}
+                        />
+                      )}
                       <span className="tabular-nums opacity-70">{fmtTime(e.date)}</span>
                       <span className="truncate">{e.title}</span>
                     </button>
@@ -163,9 +268,12 @@ export function WorkCalendar({ types }: { types?: EventType[] } = {}) {
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-3 text-sm">
-                <span className={cn("inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-medium", TYPE_META[selected.type].pill)}>
-                  {TYPE_META[selected.type].label.replace(/s$/, "")}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={cn("inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-medium", TYPE_META[selected.type].pill)}>
+                    {TYPE_META[selected.type].label.replace(/s$/, "")}
+                  </span>
+                  {showWorkspace && <WorkspaceTag vertical={selected.vertical} />}
+                </div>
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Clock className="size-4 shrink-0" /> {fmtDateTime(selected.date)}
                 </div>
@@ -177,7 +285,7 @@ export function WorkCalendar({ types }: { types?: EventType[] } = {}) {
                 )}
               </div>
               <Button
-                onClick={() => { const href = selected.href; setSelected(null); router.push(href); }}
+                onClick={() => void openEvent(selected)}
                 className="mt-2 w-full bg-gold text-gold-foreground hover:bg-gold/90"
               >
                 Open details <ArrowRight className="size-4" />

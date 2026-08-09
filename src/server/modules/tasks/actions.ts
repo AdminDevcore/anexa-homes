@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { Prisma, TaskStatus } from "@prisma/client";
+import type { Prisma, TaskStatus, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
+import { worksAcrossVerticals } from "@/server/vertical/visibility";
 import { fireEvent } from "@/server/modules/notifications/engine";
 
 function fail(error: string) {
@@ -20,9 +21,18 @@ const createSchema = z.object({
   priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
   dueAt: z.string().optional().or(z.literal("")),
   leadId: z.string().uuid().optional().or(z.literal("")),
+  /**
+   * "workspace" = lives in one workspace and is only visible there.
+   * "company"   = belongs to no workspace and stays visible in all of them
+   *               ("submit your timesheet"). Stored as vertical NULL.
+   */
+  scope: z.enum(["workspace", "company"]).default("workspace"),
 });
 
-export async function createTaskAction(input: z.infer<typeof createSchema>) {
+// `z.input` rather than `z.infer`: fields with a `.default()` are required in the
+// OUTPUT type but optional for a caller. Using the output type here would force
+// every existing call site to pass `scope` explicitly just to restate the default.
+export async function createTaskAction(input: z.input<typeof createSchema>) {
   const user = await requireUser();
   if (!can(user, "create", "Task")) return fail("Not allowed.");
   const parsed = createSchema.safeParse(input);
@@ -63,8 +73,25 @@ export async function createTaskAction(input: z.infer<typeof createSchema>) {
     if (!allowed) return fail("That person can't be tagged on a follow-up for this deal.");
   }
 
-  // A lead-linked task lives in that deal's vertical; a standalone task in the active workspace.
-  const vertical = leadVertical ?? (await getActiveVertical(user));
+  // Workspace resolution, in priority order:
+  //  1. Linked to a deal  → that deal's workspace, always. A follow-up on a Solar
+  //     job is Solar work; letting it be filed as "Company" would put it in front
+  //     of roofing staff who have no context for it.
+  //  2. Explicitly Company → NULL, visible from every workspace.
+  //  3. Otherwise          → the workspace the creator is standing in.
+  //
+  // Company scope is refused for someone who only works in one workspace: there
+  // it would be indistinguishable from a normal task while quietly creating a
+  // row that survives being granted a second workspace later.
+  let vertical: Vertical | null;
+  if (leadVertical) {
+    vertical = leadVertical;
+  } else if (d.scope === "company") {
+    if (!worksAcrossVerticals(user)) return fail("Company tasks need access to more than one workspace.");
+    vertical = null;
+  } else {
+    vertical = await getActiveVertical(user);
+  }
 
   const task = await prisma.task.create({
     data: {

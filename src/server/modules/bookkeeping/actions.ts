@@ -347,6 +347,9 @@ export async function uploadTransactionAttachmentAction(formData: FormData) {
       storageKey: key,
       mimeType: file.type,
       size: buffer.length,
+      // One company, one general ledger — a receipt belongs to the books, not to
+      // a workspace, and accounting reconciles both departments from one screen.
+      scope: "company",
       transactionId,
       uploadedById: user!.userId,
     },

@@ -115,6 +115,11 @@ export async function uploadChatAttachmentAction(
       storageKey: key,
       mimeType,
       size: buffer.length,
+      // Chat is a company module — one set of channels for the whole business —
+      // so its attachments must be reachable from any workspace. Leaving these
+      // on the `workspace` default would make a file shared in a channel
+      // unopenable for a teammate standing in the other workspace.
+      scope: "company",
       conversationId, // messageId linked when the message is sent
       uploadedById: user.userId,
     },

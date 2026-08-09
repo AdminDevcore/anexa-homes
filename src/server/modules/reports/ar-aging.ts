@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
 import type { RenderableReport, ResolvedScope } from "./builders";
+import { ledgerVerticalFilter } from "./vertical-filter";
 
 type ReportUser = { companyId: string; userId: string; role: string };
 const usd = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
@@ -22,8 +23,20 @@ function bucketFor(daysOver: number): Bucket {
  */
 export async function buildArAgingReport(user: ReportUser, scope: ResolvedScope): Promise<RenderableReport> {
   const now = Date.now();
+  // Invoice is a TAGGED model: stamped with its workspace on write, never
+  // filtered on read, so the consolidated books still roll up. Reports show one
+  // workspace at a time, so the filter is explicit — and it is applied to BOTH
+  // branches below on purpose. The company-wide branch adds no project filter at
+  // all, and the scoped branch filters through a relation, which the isolation
+  // extension does not rewrite; without this line either one sums every
+  // workspace's receivables into a single aging table.
   const invoices = await prisma.invoice.findMany({
-    where: { companyId: user.companyId, status: "sent", ...(scope.isCompany ? {} : { project: { lead: scope.leadWhere } }) },
+    where: {
+      companyId: user.companyId,
+      status: "sent",
+      ...(await ledgerVerticalFilter()),
+      ...(scope.isCompany ? {} : { project: { lead: scope.leadWhere } }),
+    },
     select: {
       amount: true,
       dueAt: true,

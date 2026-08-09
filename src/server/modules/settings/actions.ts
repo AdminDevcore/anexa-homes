@@ -557,6 +557,8 @@ export async function uploadBrandingLogoAction(
       storageKey: key,
       mimeType: "image/png",
       size: png.length,
+      // Branding is company-level: one logo, every workspace.
+      scope: "company",
       category,
       uploadedById: user.userId,
     },

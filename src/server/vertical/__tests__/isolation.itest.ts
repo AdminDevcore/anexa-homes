@@ -514,3 +514,76 @@ describe("with the flag off the extension is inert", () => {
     }
   });
 });
+
+// ── SCOPED_OPTIONAL: workspace rows isolate, company rows are visible to all ──
+//
+// Task is the first model in this class. The guarantee has two halves and both
+// have a plausible failure mode:
+//
+//   • a workspace task must NOT leak — the normal isolation claim
+//   • a company task (vertical NULL) must appear in EVERY workspace — which the
+//     plain SCOPED filter would silently delete, because `WHERE vertical = 'x'`
+//     is never true for NULL. That failure is invisible: the list still renders,
+//     it is just quietly missing rows.
+describe("SCOPED_OPTIONAL keeps company-level rows visible everywhere", () => {
+  async function seedTasks() {
+    await raw.task.createMany({
+      data: [
+        { companyId, title: "Roof task", vertical: "roofing" },
+        { companyId, title: "Solar task", vertical: "solar" },
+        { companyId, title: "Company task", vertical: null },
+      ],
+    });
+  }
+
+  it("shows this workspace's tasks plus the company ones, in both workspaces", async () => {
+    await seedTasks();
+
+    const roofing = await runInVertical("roofing", () => db.task.findMany({ where: { companyId } }));
+    expect(roofing.map((t) => t.title).sort()).toEqual(["Company task", "Roof task"]);
+
+    const solar = await runInVertical("solar", () => db.task.findMany({ where: { companyId } }));
+    expect(solar.map((t) => t.title).sort()).toEqual(["Company task", "Solar task"]);
+  });
+
+  it("does not let a caller's own OR clause be clobbered by the filter", async () => {
+    await seedTasks();
+    // The Tasks page passes an RBAC scope shaped like this. A filter spread in
+    // as a sibling `OR` would overwrite it and WIDEN the query instead of
+    // narrowing it — the bug stampWhereOptional's AND-wrapping exists to prevent.
+    const found = await runInVertical("roofing", () =>
+      db.task.findMany({
+        where: { companyId, OR: [{ title: "Company task" }, { title: "Solar task" }] },
+      })
+    );
+    expect(found.map((t) => t.title)).toEqual(["Company task"]);
+  });
+
+  it("stamps the active workspace when the caller says nothing", async () => {
+    const created = await runInVertical("solar", () =>
+      db.task.create({ data: { companyId, title: "Ambient" } })
+    );
+    expect(created.vertical).toBe("solar");
+  });
+
+  it("honours an explicit null so a Company task can actually be created", async () => {
+    const created = await runInVertical("solar", () =>
+      db.task.create({ data: { companyId, title: "All hands", vertical: null } })
+    );
+    expect(created.vertical).toBeNull();
+
+    // …and it is then readable from the OTHER workspace.
+    const fromRoofing = await runInVertical("roofing", () =>
+      db.task.findMany({ where: { companyId, title: "All hands" } })
+    );
+    expect(fromRoofing).toHaveLength(1);
+  });
+
+  it("still refuses a write aimed at someone else's workspace", async () => {
+    await expect(
+      runInVertical("roofing", () =>
+        db.task.create({ data: { companyId, title: "Sneaky", vertical: "solar" } })
+      )
+    ).rejects.toBeInstanceOf(CrossVerticalAccessError);
+  });
+});
