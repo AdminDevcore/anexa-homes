@@ -164,19 +164,21 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("Financing & lender")).toBeVisible();
     await expect(page.getByText("GoodLeap").first()).toBeVisible();
 
-    // 4 · Feed with its three channels.
+    // 4 · One feed, no channels. Internal / External / Customer split the
+    // stream three ways to describe one audience: everything here is staff-only,
+    // because there is no customer portal for the other two to reach.
     await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
     await expect(page.getByPlaceholder(/Use @Name to notify/)).toBeVisible();
+    for (const chip of ["Internal", "External", "Customer"]) {
+      await expect(page.getByRole("button", { name: chip, exact: true })).toHaveCount(0);
+    }
 
-    // 5 · The quick-action pill row is asserted gone in the close-flow test
-    // above, which is where this page's layout is pinned.
-
-    // Deferred items are labelled, not silently missing. "Satellite roof
-    // render" is deliberately NOT among them any more — the real property view
-    // shipped and is the hero asserted above.
+    // 5 · No "coming soon" placeholders anywhere on a deal. The Project AI
+    // assistant card advertised work from another programme in the space
+    // working tools use.
+    await expect(page.getByText("Project AI assistant")).toHaveCount(0);
+    await expect(page.getByText("Coming soon")).toHaveCount(0);
     await expect(page.getByText("Satellite roof render")).toHaveCount(0);
-    await expect(page.getByText("Project AI assistant")).toBeVisible();
-    await expect(page.getByText("Coming soon").first()).toBeVisible();
 
     // 6 · Document folders sit beside the files they describe, further down the
     // same page.
@@ -205,13 +207,15 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(cards.getByText("Project manager")).toHaveCount(0);
   });
 
-  test("internal feed posts are marked as staff-only", async ({ page }) => {
+  test("the feed is one staff-only stream, unbadged", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
-    // The seeded internal note is present and badged Internal, so nobody can
-    // mistake it for something the homeowner can read.
+    // The seeded posts are all present regardless of the channel they were
+    // written under — collapsing the UI must not hide history.
     await expect(page.getByText(/Plan set submitted to the city/)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("Internal").first()).toBeVisible();
+    await expect(page.getByText(/is there anything you need from me/)).toBeVisible();
+    // And the composer says once what the badges used to say on every row.
+    await expect(page.getByText(/Staff only — notes never leave the portal/)).toBeVisible();
   });
 
   test("moving a stage from the bar actually moves the deal", async ({ page }) => {

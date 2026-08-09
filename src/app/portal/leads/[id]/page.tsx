@@ -36,7 +36,6 @@ import { SolarOpsCard } from "@/components/portal/solar-ops-card";
 import {
   SolarSystemMoneyPanel,
   SolarActivityFeed,
-  SolarDeferredPanels,
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
 import { pricePurchase } from "@/lib/solar-money";
@@ -673,7 +672,6 @@ export default async function LeadDetailPage({
                 canPost={can(user, "read", "Lead")}
                 posts={solarFeed.map((f) => ({
                   id: f.id,
-                  channel: f.channel,
                   body: f.body,
                   author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
                   createdAt: f.createdAt.toISOString(),
@@ -681,8 +679,6 @@ export default async function LeadDetailPage({
               />
             </Card>
           )}
-
-          {isSolarDeal && <SolarDeferredPanels />}
 
           {isSolarDeal && (
             <SolarOpsCard

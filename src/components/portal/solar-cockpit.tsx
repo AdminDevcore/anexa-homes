@@ -3,8 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Check, Pencil, Sparkles, Send } from "lucide-react";
-import type { FeedChannel, MilestonePayee } from "@prisma/client";
+import { Loader2, Check, Pencil, Send } from "lucide-react";
+import type { MilestonePayee } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -356,18 +356,25 @@ function SpecRow({ k, v }: { k: string; v: string }) {
 
 export type FeedPost = {
   id: string;
-  channel: FeedChannel;
   body: string;
   author: string;
   createdAt: string;
 };
 
-const CHANNELS: { value: FeedChannel; label: string; hint: string; tone: string }[] = [
-  { value: "internal", label: "Internal", hint: "Staff only — the customer never sees this", tone: "bg-slate-100 text-slate-700" },
-  { value: "external", label: "External", hint: "Visible to the customer in their portal", tone: "bg-sky-100 text-sky-700" },
-  { value: "customer", label: "Customer", hint: "From or to the homeowner", tone: "bg-amber-100 text-amber-800" },
-];
-
+/**
+ * One stream, like roofing's notes.
+ *
+ * This feed used to be split three ways — Internal / External / Customer —
+ * with a picker on the composer and a filter row above the list. Two of those
+ * audiences do not exist: there is no customer portal, so nothing here was ever
+ * shown to a homeowner, and "external" and "customer" only ever differed in the
+ * colour of their badge. Three tabs to say one thing made every post a small
+ * decision with no consequence, and made the feed read as a place you could
+ * accidentally publish something. Everything posted here is staff-only.
+ *
+ * Rows written under the old channels keep their value in the database and
+ * still appear in the stream; the column simply stopped being a UI concept.
+ */
 export function SolarActivityFeed({
   leadId,
   posts,
@@ -378,18 +385,13 @@ export function SolarActivityFeed({
   canPost: boolean;
 }) {
   const router = useRouter();
-  const [channel, setChannel] = React.useState<FeedChannel>("internal");
   const [body, setBody] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [filter, setFilter] = React.useState<FeedChannel | "all">("all");
-
-  const active = CHANNELS.find((c) => c.value === channel)!;
-  const shown = filter === "all" ? posts : posts.filter((p) => p.channel === filter);
 
   async function post() {
     if (!body.trim()) return;
     setBusy(true);
-    const res = await postDealFeedAction({ leadId, channel, body: body.trim() });
+    const res = await postDealFeedAction({ leadId, body: body.trim() });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success(res.mentioned ? `Posted · ${res.mentioned} notified` : "Posted");
@@ -401,69 +403,36 @@ export function SolarActivityFeed({
     <div className="space-y-4">
       {canPost && (
         <div className="space-y-2 rounded-lg border border-border p-3">
-          <div className="flex flex-wrap gap-1">
-            {CHANNELS.map((c) => (
-              <button
-                key={c.value}
-                onClick={() => setChannel(c.value)}
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                  channel === c.value ? c.tone : "text-muted-foreground hover:bg-muted"
-                )}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-muted-foreground">{active.hint}</p>
           <Textarea
             rows={3}
             value={body}
             onChange={(e) => setBody(e.target.value)}
             placeholder="Write an update. Use @Name to notify someone by email."
           />
-          <Button size="sm" onClick={post} disabled={busy || !body.trim()}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Post
-          </Button>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-muted-foreground">Staff only — notes never leave the portal.</p>
+            <Button size="sm" onClick={post} disabled={busy || !body.trim()}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Post
+            </Button>
+          </div>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1">
-        {(["all", "internal", "external", "customer"] as const).map((c) => (
-          <button
-            key={c}
-            onClick={() => setFilter(c)}
-            className={cn(
-              "rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize transition-colors",
-              filter === c ? "border-transparent bg-foreground text-background" : "border-border text-muted-foreground hover:bg-muted"
-            )}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
-
-      {shown.length === 0 ? (
+      {posts.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing here yet.</p>
       ) : (
         <ul className="space-y-3">
-          {shown.map((p) => {
-            const meta = CHANNELS.find((c) => c.value === p.channel)!;
-            return (
-              <li key={p.id} className="rounded-lg border border-border p-3">
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="font-medium">{p.author}</span>
-                  <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", meta.tone)}>
-                    {meta.label}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {new Date(p.createdAt).toLocaleString()}
-                  </span>
-                </div>
-                <p className="mt-1.5 whitespace-pre-wrap text-sm">{p.body}</p>
-              </li>
-            );
-          })}
+          {posts.map((p) => (
+            <li key={p.id} className="rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-medium">{p.author}</span>
+                <span className="text-muted-foreground">
+                  {new Date(p.createdAt).toLocaleString()}
+                </span>
+              </div>
+              <p className="mt-1.5 whitespace-pre-wrap text-sm">{p.body}</p>
+            </li>
+          ))}
         </ul>
       )}
     </div>
@@ -484,50 +453,11 @@ export function SolarActivityFeed({
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Deferred — clearly labelled, deliberately not built
+// The "Deferred" panel is gone.
+//
+// It held one card, "Project AI assistant — Coming soon", which described work
+// belonging to a different programme. A coming-soon tile on a deal page is a
+// permanent advert for something a rep cannot use: it takes up the same room as
+// working tools and trains people to skip that part of the page. If the
+// assistant ships, it earns its place then.
 // ---------------------------------------------------------------------------
-
-/**
- * Placeholders for work that needs something outside this codebase. Shown
- * rather than hidden so the gap is visible to whoever picks it up, and
- * explicitly NOT wired to anything.
- *
- * "Satellite roof render" used to sit here too. It was removed once the real
- * property view shipped (`solar/property-view.tsx`) and became this page's
- * hero — a "coming soon" card directly below the working feature it describes
- * teaches people to ignore the whole panel. The remaining gap, drawing the
- * PANEL LAYOUT onto that imagery, still needs a design provider and is called
- * out in the property card itself.
- */
-export function SolarDeferredPanels() {
-  return (
-    <div className="grid gap-3">
-      <DeferredCard
-        icon={Sparkles}
-        title="Project AI assistant"
-        why="Part of the separate AI-agent programme, deliberately out of scope for this work."
-      />
-    </div>
-  );
-}
-
-function DeferredCard({
-  icon: Icon, title, why,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  why: string;
-}) {
-  return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
-      <div className="flex items-center gap-2">
-        <Icon className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">{title}</span>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Coming soon
-        </span>
-      </div>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{why}</p>
-    </div>
-  );
-}

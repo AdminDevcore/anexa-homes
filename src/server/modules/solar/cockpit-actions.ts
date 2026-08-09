@@ -72,7 +72,6 @@ export async function upsertSolarMilestoneAction(input: z.infer<typeof milestone
 
 const postSchema = z.object({
   leadId: z.string().min(1),
-  channel: z.enum(["external", "internal", "customer"]),
   body: z.string().min(1).max(4000),
 });
 
@@ -84,9 +83,11 @@ function extractMentionNames(body: string): string[] {
 /**
  * Post to a deal's activity feed.
  *
- * The channel is load-bearing: `internal` posts are staff-only and must never
- * reach the homeowner, so the audience is stored on the row rather than being a
- * rendering decision somebody can get wrong later.
+ * Every post is `internal`, and the caller no longer chooses. The feed used to
+ * offer three audiences, but two of them assumed a customer portal that does
+ * not exist — nothing written here has ever been visible outside the company.
+ * Deciding the audience here rather than in the client means a future caller
+ * cannot get it wrong, and the column keeps recording what is true.
  *
  * @mentions are resolved against the staff roster and emailed. Resolution runs
  * unscoped-by-name only — a mention cannot be used to discover whether a given
@@ -123,7 +124,7 @@ export async function postDealFeedAction(input: z.infer<typeof postSchema>) {
     data: {
       companyId: user.companyId,
       leadId: d.leadId,
-      channel: d.channel,
+      channel: "internal",
       body: d.body,
       authorId: user.userId,
       mentions: mentioned.map((m) => m.id),
