@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { Vertical } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Save, Paperclip, Upload, X } from "lucide-react";
@@ -36,6 +37,7 @@ export function LeadForm({
   reps,
   canAssign,
   fieldDefs,
+  vertical,
 }: {
   mode: "create" | "edit";
   leadId?: string;
@@ -45,7 +47,13 @@ export function LeadForm({
   reps: Option[];
   canAssign: boolean;
   fieldDefs: FieldDef[];
+  /** The workspace this deal belongs to — solar hides the insurance-shaped fields. */
+  vertical: Vertical;
 }) {
+  // Solar deals are priced off the system design, not guessed at intake, so the
+  // dollar estimate has no place on the solar form. Roofing keeps it. The value
+  // itself is never dropped: existing leads post theirs straight back (below).
+  const showEstimatedValue = vertical !== "solar";
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
   const [v, setV] = React.useState({
@@ -236,9 +244,11 @@ export function LeadForm({
             </Select>
             <p className="text-xs text-muted-foreground">Insurance = filed claim (deductible, depreciation, scope). Cash = customer pays out of pocket or finances.</p>
           </Field>
-          <Field label="Estimated value (USD)">
-            <Input type="number" value={v.valueDollars} onChange={(e) => set("valueDollars", e.target.value)} placeholder="0" />
-          </Field>
+          {showEstimatedValue && (
+            <Field label="Estimated value (USD)">
+              <Input type="number" value={v.valueDollars} onChange={(e) => set("valueDollars", e.target.value)} placeholder="0" />
+            </Field>
+          )}
           <Field label="Priority">
             <Select value={v.priority} onValueChange={(val) => set("priority", val as LeadInput["priority"])}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>

@@ -310,6 +310,30 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("Approved loan terms")).toBeHidden();
   });
 
+  test("the new-appointment form drops Estimated value on solar, keeps it on roofing", async ({ page }) => {
+    // A solar deal is priced off the system design, never off a dollar guess at
+    // intake — so the field has no business on the solar form. Roofing quotes
+    // one on the spot and keeps it.
+    await login(page, "admin@anexahomes.com");
+    await page.getByRole("button", { name: "Switch workspace" }).click();
+    await page.getByRole("menuitem", { name: "Solar" }).click();
+    await page.waitForURL(/\/portal\/dashboard/, { timeout: 15000 });
+    await expect(page.getByText(/· Solar workspace/)).toBeVisible({ timeout: 15000 });
+
+    await page.goto("/portal/leads/new");
+    // Wait on the submit button, not the "Pipeline" heading — the sidebar has a
+    // Pipeline link, so that text matches before the form has rendered at all.
+    await expect(page.getByRole("button", { name: /Create Appointment/ })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Estimated value (USD)")).toHaveCount(0);
+
+    // Same form, roofing workspace: the field is back.
+    await page.getByRole("button", { name: "Switch workspace" }).click();
+    await page.getByRole("menuitem", { name: "Roofing" }).click();
+    await page.waitForURL(/\/portal\/dashboard/, { timeout: 15000 });
+    await page.goto("/portal/leads/new");
+    await expect(page.getByText("Estimated value (USD)")).toBeVisible({ timeout: 15000 });
+  });
+
   test("roofing keeps every one of those concepts", async ({ page }) => {
     // The mirror assertion: this is a strip for SOLAR, not a deletion.
     await login(page, "admin@anexahomes.com");

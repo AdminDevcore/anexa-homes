@@ -14,7 +14,8 @@ export default async function NewLeadPage() {
   const user = await requireUser();
   if (!can(user, "create", "Lead")) redirect("/portal/leads");
 
-  const options = await getLeadFormOptions(user.companyId, await getActiveVertical(user));
+  const vertical = await getActiveVertical(user);
+  const options = await getLeadFormOptions(user.companyId, vertical);
 
   return (
     <div className="space-y-6">
@@ -29,6 +30,7 @@ export default async function NewLeadPage() {
         reps={options.reps}
         canAssign={can(user, "assign", "Lead")}
         fieldDefs={options.fieldDefs}
+        vertical={vertical}
       />
     </div>
   );

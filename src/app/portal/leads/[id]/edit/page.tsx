@@ -55,6 +55,7 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
         reps={options.reps}
         canAssign={can(user, "assign", "Lead")}
         fieldDefs={options.fieldDefs}
+        vertical={lead.vertical}
       />
     </div>
   );
