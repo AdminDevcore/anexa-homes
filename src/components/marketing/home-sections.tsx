@@ -218,12 +218,21 @@ export function StormWarningSignsSection() {
   );
 }
 
-export function DigitalPortalSection() {
+/**
+ * What a homeowner actually gets: everything sent to them, nothing to log into.
+ *
+ * This section used to advertise a "Digital Customer Portal". There is no
+ * customer portal — homeowners have no accounts in this product, by design —
+ * so the copy promised a sign-in that never existed. It now describes the real
+ * mechanism: a link in a text or an email, which is genuinely less work for
+ * the customer than an account would be.
+ */
+export function StayInformedSection() {
   const features = [
-    { icon: FileSignature, title: "Sign from your phone", body: "Review and sign your agreement digitally — no printing, no waiting." },
-    { icon: Images, title: "Every photo, organized", body: "Inspection and install photos documented and saved to your project." },
-    { icon: MessageSquare, title: "Message your team", body: "Questions get answered fast, with everything in one thread." },
-    { icon: BellRing, title: "Real-time status", body: "Know exactly what's happening — from inspection to final walkthrough." },
+    { icon: FileSignature, title: "Sign from your phone", body: "Review and sign your agreement from a link — no printing, no waiting." },
+    { icon: Images, title: "Every photo, documented", body: "Inspection and install photos captured on your project and shared with you." },
+    { icon: MessageSquare, title: "One point of contact", body: "Your project manager's number, not a ticket queue. Questions get answered fast." },
+    { icon: BellRing, title: "Updates as they happen", body: "Know exactly what's happening — from inspection to final walkthrough." },
   ];
   return (
     <Section className="bg-[#0B0B0C] text-white">
@@ -231,9 +240,9 @@ export function DigitalPortalSection() {
         <div>
           <SectionHeading
             invert
-            eyebrow="Digital Customer Portal"
-            title="Your whole project, in your pocket."
-            description="Home upgrades should feel organized from inspection to completion. Our customer portal keeps your documents, photos, and project status in one place — so you always know what's happening next."
+            eyebrow="Always In The Loop"
+            title="Your whole project, sent straight to you."
+            description="Home upgrades should feel organized from inspection to completion. Your proposal, contracts, photos and status updates come straight to your phone by text and email — no app, no password to remember."
           />
           <Button asChild size="lg" className="mt-7 w-fit bg-gold text-gold-foreground hover:bg-gold/90">
             <Link href="/contact">Get Started</Link>

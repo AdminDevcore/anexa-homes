@@ -5,7 +5,7 @@ import {
   ProcessSection,
   InsuranceHelpSection,
   StormWarningSignsSection,
-  DigitalPortalSection,
+  StayInformedSection,
   FinancingSection,
   WhyAnexaSection,
   TestimonialsSection,
@@ -26,7 +26,7 @@ export default function HomePage() {
       <StormWarningSignsSection />
       <InsuranceHelpSection />
       <ProcessSection />
-      <DigitalPortalSection />
+      <StayInformedSection />
       <FinancingSection />
       <TestimonialsSection />
       <ServiceAreaSection />

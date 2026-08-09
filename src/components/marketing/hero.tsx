@@ -12,7 +12,7 @@ const TRUST_BADGES = [
   "Insured",
   "Insurance Claim Support",
   "Local Texas Team",
-  "Digital Customer Portal",
+  "Digital Contracts & Updates",
 ];
 
 export function Hero() {

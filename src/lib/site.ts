@@ -152,7 +152,7 @@ export const WHY_ANEXA: { title: string; body: string }[] = [
   { title: "Insurance Experts", body: "We negotiate directly with carriers and adjusters to maximize your approved scope." },
   { title: "Certified Crews", body: "Manufacturer-certified installers and rigorous quality control on every project." },
   { title: "Premium Materials", body: "We install industry-leading shingles and components built to withstand severe weather." },
-  { title: "Transparent Process", body: "A real-time customer portal with documents, photos, and project status at your fingertips." },
+  { title: "Transparent Process", body: "Proposals, photos and progress updates sent to your phone at every step." },
   { title: "Lifetime Warranties", body: "Workmanship and manufacturer warranties that protect your investment for the long haul." },
   { title: "Local & Trusted", body: "Hundreds of homeowners across North Texas trust Anexa Homes with their biggest asset." },
 ];

@@ -43,8 +43,8 @@ export default function AboutPage() {
                 restore them after storms, and power better living through solar, HVAC, and clean water.
               </p>
               <p>
-                Every project is backed by certified crews, premium materials, a modern customer portal,
-                and warranties that mean something.
+                Every project is backed by certified crews, premium materials, updates that reach you
+                directly, and warranties that mean something.
               </p>
             </div>
           </Reveal>
