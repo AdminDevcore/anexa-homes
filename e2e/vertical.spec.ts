@@ -153,6 +153,10 @@ test.describe("workspace switcher", () => {
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
+    // The design lives in the proposal builder now, not on the deal.
+    await page.getByRole("link", { name: /Build Proposal/ }).first().click();
+    await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
+
     // The seeded deal is complete, so break it: annual usage is the anchor for
     // offset, and without it the offset figure is meaningless. This is the
     // exact fault that produces five-figure offsets on real competitor
@@ -163,11 +167,16 @@ test.describe("workspace switcher", () => {
     await page.getByRole("button", { name: /Save design/ }).click();
     await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });
 
+    await page.getByRole("button", { name: /3 · Generate & send/ }).click();
     await page.getByRole("button", { name: /Check proposal readiness/ }).click();
     await expect(page.getByText(/Blocked/)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/annual usage/i).first()).toBeVisible();
+    // The blocking issue itself, not step 1's "Annual usage (kWh)" label — that
+    // is still in the DOM (steps are hidden, not unmounted) and would match a
+    // loose /annual usage/i while sitting invisible on another step.
+    await expect(page.getByText(/Offset cannot be calculated without it/i)).toBeVisible();
 
     // Restore it so later specs see a complete deal.
+    await page.getByRole("button", { name: /1 · System design/ }).click();
     await usage.fill("14000");
     await page.getByRole("button", { name: /Save design/ }).click();
     await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });

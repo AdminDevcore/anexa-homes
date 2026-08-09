@@ -71,7 +71,7 @@ function money(cents: number) {
 
 /** Module scope on purpose — react-hooks/static-components is an error here. */
 function TextField({
-  label, value, onChange, disabled, type = "text", step,
+  label, value, onChange, disabled, type = "text", step, placeholder,
 }: {
   label: string;
   value: string;
@@ -79,6 +79,7 @@ function TextField({
   disabled?: boolean;
   type?: string;
   step?: string;
+  placeholder?: string;
 }) {
   // Associate the label with the input: it makes the label clickable, lets a
   // screen reader announce the field, and is why getByLabel works in tests.
@@ -86,7 +87,15 @@ function TextField({
   return (
     <div className="space-y-1">
       <Label htmlFor={id} className="text-xs">{label}</Label>
-      <Input id={id} type={type} step={step} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      <Input
+        id={id}
+        type={type}
+        step={step}
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
     </div>
   );
 }
@@ -357,26 +366,21 @@ export function SolarFinancePanel({
 
       {/* The two product families take completely different inputs. Showing the
           wrong ones is how a PPA ends up quoted with a dealer fee. */}
+      {/* TextField throughout, not bare Label+Input: it wires htmlFor/id, so a
+          screen reader announces each figure, the label is clickable, and the
+          field can be addressed by name. */}
       {isPurchase ? (
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Gross $/W</Label>
-            <Input type="number" step="0.01" value={form.grossPpw} disabled={!canEdit} onChange={(e) => set("grossPpw", e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Dealer fee %</Label>
-            <Input
-              type="number"
-              value={product === "cash" ? "" : form.dealerFeePct}
-              disabled={!canEdit || product === "cash"}
-              placeholder={product === "cash" ? "n/a — no lender" : ""}
-              onChange={(e) => set("dealerFeePct", e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Adders $</Label>
-            <Input type="number" value={form.adderTotal} disabled={!canEdit} onChange={(e) => set("adderTotal", e.target.value)} />
-          </div>
+          <TextField label="Gross $/W" type="number" step="0.01" value={form.grossPpw} disabled={!canEdit} onChange={(v) => set("grossPpw", v)} />
+          <TextField
+            label="Dealer fee %"
+            type="number"
+            value={product === "cash" ? "" : form.dealerFeePct}
+            disabled={!canEdit || product === "cash"}
+            placeholder={product === "cash" ? "n/a — no lender" : undefined}
+            onChange={(v) => set("dealerFeePct", v)}
+          />
+          <TextField label="Adders $" type="number" value={form.adderTotal} disabled={!canEdit} onChange={(v) => set("adderTotal", v)} />
         </div>
       ) : null}
 
@@ -408,25 +412,13 @@ export function SolarFinancePanel({
       {!isPurchase && (
         <div className="grid gap-3 sm:grid-cols-4">
           {product === "ppa" && (
-            <div className="space-y-1">
-              <Label className="text-xs">$/kWh</Label>
-              <Input type="number" step="0.001" value={form.rate} disabled={!canEdit} onChange={(e) => set("rate", e.target.value)} />
-            </div>
+            <TextField label="$/kWh" type="number" step="0.001" value={form.rate} disabled={!canEdit} onChange={(v) => set("rate", v)} />
           )}
           {product === "lease" && (
-            <div className="space-y-1">
-              <Label className="text-xs">Monthly $</Label>
-              <Input type="number" value={form.monthly} disabled={!canEdit} onChange={(e) => set("monthly", e.target.value)} />
-            </div>
+            <TextField label="Monthly $" type="number" value={form.monthly} disabled={!canEdit} onChange={(v) => set("monthly", v)} />
           )}
-          <div className="space-y-1">
-            <Label className="text-xs">Escalator %/yr</Label>
-            <Input type="number" step="0.1" value={form.escalatorPct} disabled={!canEdit} onChange={(e) => set("escalatorPct", e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Term (years)</Label>
-            <Input type="number" value={form.termYears} disabled={!canEdit} onChange={(e) => set("termYears", e.target.value)} />
-          </div>
+          <TextField label="Escalator %/yr" type="number" step="0.1" value={form.escalatorPct} disabled={!canEdit} onChange={(v) => set("escalatorPct", v)} />
+          <TextField label="Term (years)" type="number" value={form.termYears} disabled={!canEdit} onChange={(v) => set("termYears", v)} />
         </div>
       )}
 
@@ -541,58 +533,79 @@ export function SolarProposalGate({
         </Button>
       )}
 
-      {versions.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Versions
-          </div>
-          <ul className="divide-y divide-border rounded-lg border border-border">
-            {versions.map((v) => (
-              <li key={v.id} className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
-                <span className="font-medium">v{v.version}</span>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                    v.signedAt
-                      ? "bg-emerald-100 text-emerald-700"
-                      : v.supersededAt
-                        ? "bg-muted text-muted-foreground"
-                        : "bg-sky-100 text-sky-700"
-                  )}
-                >
-                  {v.supersededAt ? "superseded" : v.status}
-                </span>
-                <span className="flex-1 text-[11px] text-muted-foreground">
-                  {new Date(v.createdAt).toLocaleDateString()}
-                  {v.viewedAt ? " · viewed" : ""}
-                  {v.signedAt ? ` · accepted ${new Date(v.signedAt).toLocaleDateString()}` : ""}
-                </span>
-                <a
-                  href={`/proposal/${v.publicToken}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs underline underline-offset-2"
-                >
-                  Open
-                </a>
-                {canEdit && !v.sentAt && !v.supersededAt && (
-                  <button
-                    className="text-xs underline underline-offset-2"
-                    onClick={async () => {
-                      const res = await markProposalSentAction(v.id);
-                      if (!res.ok) return toast.error(res.error);
-                      toast.success("Marked as sent");
-                      router.refresh();
-                    }}
-                  >
-                    Mark sent
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <ProposalVersionList versions={versions} canEdit={canEdit} />
+    </div>
+  );
+}
+
+/**
+ * The versions of a proposal, with the two things you can still do to one:
+ * open it as the customer sees it, and record that it went out.
+ *
+ * Shared with the deal page's Proposal card — generating a proposal now happens
+ * in the builder, but READING one is exactly what you want from the deal, and
+ * two copies of this list would drift.
+ */
+export function ProposalVersionList({
+  versions,
+  canEdit,
+}: {
+  versions: ProposalVersion[];
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  if (versions.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Versions
+      </div>
+      <ul className="divide-y divide-border rounded-lg border border-border">
+        {versions.map((v) => (
+          <li key={v.id} className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
+            <span className="font-medium">v{v.version}</span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                v.signedAt
+                  ? "bg-emerald-100 text-emerald-700"
+                  : v.supersededAt
+                    ? "bg-muted text-muted-foreground"
+                    : "bg-sky-100 text-sky-700"
+              )}
+            >
+              {v.supersededAt ? "superseded" : v.status}
+            </span>
+            <span className="flex-1 text-[11px] text-muted-foreground">
+              {new Date(v.createdAt).toLocaleDateString()}
+              {v.viewedAt ? " · viewed" : ""}
+              {v.signedAt ? ` · accepted ${new Date(v.signedAt).toLocaleDateString()}` : ""}
+            </span>
+            <a
+              href={`/proposal/${v.publicToken}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs underline underline-offset-2"
+            >
+              Open
+            </a>
+            {canEdit && !v.sentAt && !v.supersededAt && (
+              <button
+                className="text-xs underline underline-offset-2"
+                onClick={async () => {
+                  const res = await markProposalSentAction(v.id);
+                  if (!res.ok) return toast.error(res.error);
+                  toast.success("Marked as sent");
+                  router.refresh();
+                }}
+              >
+                Mark sent
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

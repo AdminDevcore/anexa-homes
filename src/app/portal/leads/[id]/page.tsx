@@ -40,8 +40,6 @@ import {
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
 import { pricePurchase } from "@/lib/solar-money";
 import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
-import { SolarDesignPanel, SolarFinancePanel, SolarProposalGate } from "@/components/portal/solar-panels";
-import { getSolarSettings } from "@/server/modules/solar/settings";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { DealFolders } from "@/components/portal/deal-folders";
@@ -52,7 +50,8 @@ import { ProjectSchedule } from "@/components/portal/project-schedule";
 import { DealActionsPanel } from "@/components/portal/deal-actions-panel";
 import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
-import { SolarProductToggle } from "@/components/portal/solar-product-toggle";
+import { SolarProductChip } from "@/components/portal/solar/product-chip";
+import { SolarProposalStrip } from "@/components/portal/solar/proposal-strip";
 import { PropertyView } from "@/components/portal/property-view";
 import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-summary-cards";
 import { DealSummaryPanel } from "@/components/portal/deal-summary-panel";
@@ -226,7 +225,7 @@ export default async function LeadDetailPage({
 
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
-  const [solarDesign, solarFinance, solarSettings, solarEquipment, solarProposals, creditApps] = isSolarDeal
+  const [solarDesign, solarFinance, solarProposals, creditApps] = isSolarDeal
     ? await Promise.all([
         prisma.solarDesign.findUnique({
           where: { leadId: lead.id },
@@ -237,12 +236,6 @@ export default async function LeadDetailPage({
           },
         }),
         prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
-        getSolarSettings(user.companyId),
-        prisma.solarEquipment.findMany({
-          where: { companyId: user.companyId, isActive: true },
-          orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
-          select: { id: true, kind: true, manufacturer: true, model: true, ratingW: true },
-        }),
         prisma.solarProposal.findMany({
           where: { companyId: user.companyId, leadId: lead.id },
           orderBy: { version: "desc" },
@@ -258,15 +251,7 @@ export default async function LeadDetailPage({
           orderBy: { createdAt: "desc" },
         }),
       ])
-    : [null, null, null, [], [], []];
-  const equipOptions = (kind: string) =>
-    solarEquipment
-      .filter((e) => e.kind === kind)
-      .map((e) => ({
-        id: e.id,
-        label: `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}${e.ratingW ? ` · ${e.ratingW}W` : ""}`,
-        ratingW: e.ratingW,
-      }));
+    : [null, null, [], []];
   const linkedDeal = isSolarDeal || lead.linkedDealId
     ? await getLinkedDealSummary(user.companyId, lead.linkedDealId)
     : null;
@@ -882,33 +867,23 @@ export default async function LeadDetailPage({
                 is another reading of the same job, and its 150-line catalog table
                 was the single longest thing on the page. */}
 
-            {/* ── Proposal (solar): design → financing → generate, in order ── */}
+            {/* ── Proposal (solar) ──
+                Design, financing and generation moved into the builder at
+                /solar-proposal — they are the proposal's inputs and belong with
+                it. What a deal still has to answer is what was quoted and
+                whether the customer opened it. */}
             {isSolarDeal && (
-              <section id="proposal" className="scroll-mt-24 space-y-6">
-                <Card title="1 · System Design" icon={Hammer} tone="solar">
-                  <SolarDesignPanel
+              <section id="proposal" className="scroll-mt-24">
+                <Card title="Proposal" icon={Sun} tone="solar">
+                  <SolarProposalStrip
                     leadId={lead.id}
-                    design={solarDesign}
-                    modules={equipOptions("module")}
-                    inverters={equipOptions("inverter")}
-                    batteries={equipOptions("battery")}
-                    canEdit={can(user, "update", "Lead")}
-                  />
-                </Card>
-
-                <Card title="2 · Financing" icon={Landmark} tone="solar">
-                  <SolarFinancePanel
-                    leadId={lead.id}
-                    finance={solarFinance}
-                    itcDisclaimer={solarSettings?.incentiveDisclaimer ?? ""}
-                    federalItcPct={solarSettings?.federalItcPct ?? null}
-                    canEdit={can(user, "update", "Lead")}
-                  />
-                </Card>
-
-                <Card title="3 · Generate & send" icon={Sun} tone="solar">
-                  <SolarProposalGate
-                    leadId={lead.id}
+                    product={solarFinance?.product ?? null}
+                    systemSizeKwDc={solarDesign?.systemSizeKwDc ?? null}
+                    offsetPct={solarDesign?.offsetPct ?? null}
+                    contractPriceCents={solarFinance?.contractPriceCents ?? null}
+                    monthlyPaymentCents={solarFinance?.monthlyPaymentCents ?? null}
+                    rateMillsPerKwh={solarFinance?.rateMillsPerKwh ?? null}
+                    canBuild={can(user, "create", "Proposal") || can(user, "update", "Proposal")}
                     canEdit={can(user, "create", "Proposal")}
                     versions={solarProposals.map((v) => ({
                       id: v.id,
@@ -1142,12 +1117,10 @@ export default async function LeadDetailPage({
             dealTypeSlot={
               isSolarDeal ? (
                 // On Solar a deal's type IS its financing product. There is no
-                // insurer, so Insurance-vs-Cash is meaningless here.
-                <SolarProductToggle
-                  leadId={lead.id}
-                  value={solarFinance?.product ?? null}
-                  canEdit={can(user, "update", "Lead")}
-                />
+                // insurer, so Insurance-vs-Cash is meaningless here. Stated
+                // only — it is CHOSEN in the proposal builder, beside the term
+                // and escalator it belongs with.
+                <SolarProductChip value={solarFinance?.product ?? null} />
               ) : (
                 <DealTypeToggle leadId={lead.id} value={isInsurance ? "insurance" : "cash"} canEdit={can(user, "update", "Lead")} />
               )

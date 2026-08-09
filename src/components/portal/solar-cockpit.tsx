@@ -68,7 +68,8 @@ export function SolarSystemMoneyPanel({
   if (!money) {
     return (
       <p className="text-sm text-muted-foreground">
-        Add a system design and financing in the Proposal tab and the numbers appear here.
+        Add a system design and financing with <strong>Build Proposal</strong> and the numbers
+        appear here.
       </p>
     );
   }

@@ -65,11 +65,15 @@ export function DealActionsPanel({
   canEditLead: boolean;
   /** Solar has no claim, no adjuster and no roof inspection. */
   isSolar?: boolean;
-  /** Roofing only — solar closes through its own Proposal hub. */
   canCreateProposal?: boolean;
 }) {
   const groups = groupDispositions(dispositions?.length ? dispositions : DEFAULT_APPOINTMENT_DISPOSITIONS);
-  const showProposal = !isSolar && canCreateProposal;
+  // Both verticals close the same way — one emphasized button, at the end of
+  // the visit. They just build different documents: roofing walks a photo-led
+  // presentation, solar a system design and its financing.
+  const proposalHref = isSolar
+    ? `/portal/leads/${leadId}/solar-proposal`
+    : `/portal/leads/${leadId}/presentation`;
 
   return (
     <div className="mt-4 border-t border-border pt-4">
@@ -106,10 +110,19 @@ export function DealActionsPanel({
         </Step>
       </ol>
 
-      {showProposal && (
+      {canCreateProposal && (
         <div className="mt-1 border-t border-border pt-3">
-          <Button asChild size="sm" className="w-full bg-gold text-gold-foreground hover:bg-gold/90">
-            <Link href={`/portal/leads/${leadId}/presentation`}>
+          <Button
+            asChild
+            size="sm"
+            className={cn(
+              "w-full",
+              isSolar
+                ? "bg-solar text-solar-foreground hover:bg-solar/90"
+                : "bg-gold text-gold-foreground hover:bg-gold/90"
+            )}
+          >
+            <Link href={proposalHref}>
               <Presentation className="size-4" /> Build Proposal
             </Link>
           </Button>
