@@ -1,20 +1,15 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  Loader2, Check, ChevronRight, Upload, ListTodo, UserPlus,
-  Sun, Pencil, Sparkles, Send,
-} from "lucide-react";
+import { Loader2, Check, Pencil, Sparkles, Send } from "lucide-react";
 import type { FeedChannel, MilestonePayee } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   postDealFeedAction,
-  inviteHomeownerAction,
   upsertSolarMilestoneAction,
 } from "@/server/modules/solar/cockpit-actions";
 
@@ -476,101 +471,17 @@ export function SolarActivityFeed({
 }
 
 // ---------------------------------------------------------------------------
-// 4 · Quick actions
+// The quick-action pill row that used to sit here is gone.
+//
+// Five pills under the header (View proposal / Edit design / Upload files /
+// Tasks / Invite homeowner) each duplicated a control that already lives with
+// the thing it acts on, one screen further down: the System Design card, the
+// Contracts & documents card, the Generate & send card, the activity feed's
+// follow-up. Two entry points to one action is a maintenance tax and a reading
+// tax. "Invite homeowner" was not moved but DELETED, along with its server
+// action — this product has no customer-facing portal, so there is nowhere to
+// invite a homeowner to.
 // ---------------------------------------------------------------------------
-
-/**
- * A single calm row of pills under the page header.
- *
- * This used to be a three-across grid of full-width tiles in its own card,
- * which gave five secondary actions the same visual weight as the deal's
- * financials. As a pill row it stays reachable without competing with the
- * content — the reference design's "actions live near their section, quietly".
- */
-export function SolarQuickActions({
-  leadId,
-  proposalToken,
-  canEdit,
-  homeownerInvited,
-}: {
-  leadId: string;
-  proposalToken: string | null;
-  canEdit: boolean;
-  homeownerInvited: boolean;
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState(false);
-
-  async function invite() {
-    setBusy(true);
-    const res = await inviteHomeownerAction(leadId);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Invitation sent");
-    router.refresh();
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {proposalToken ? (
-        <QuickAction href={`/proposal/${proposalToken}`} icon={Sun} label="View proposal" external />
-      ) : (
-        <QuickAction disabled icon={Sun} label="No proposal yet" />
-      )}
-      {/* The deal page is one long page; these scroll to a section on it. The
-          ids live on the <section> wrappers in the deal page. */}
-      <QuickAction href={`/portal/leads/${leadId}#proposal`} icon={Pencil} label="Edit design" />
-      <QuickAction href={`/portal/leads/${leadId}#documents`} icon={Upload} label="Upload files" />
-      <QuickAction href={`/portal/tasks?lead=${leadId}`} icon={ListTodo} label="Tasks" />
-      {canEdit && !homeownerInvited && (
-        <button
-          onClick={invite}
-          disabled={busy}
-          className={cn(QUICK_ACTION_CLS, "hover:bg-muted disabled:opacity-60")}
-        >
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5 text-muted-foreground" />}
-          Invite homeowner
-        </button>
-      )}
-      {homeownerInvited && <QuickAction disabled icon={UserPlus} label="Homeowner invited" />}
-    </div>
-  );
-}
-
-const QUICK_ACTION_CLS =
-  "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1";
-
-function QuickAction({
-  href, icon: Icon, label, external, disabled,
-}: {
-  href?: string;
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  external?: boolean;
-  disabled?: boolean;
-}) {
-  const inner = (
-    <>
-      <Icon className="size-3.5 text-muted-foreground" />
-      {label}
-    </>
-  );
-  const cls = cn(QUICK_ACTION_CLS, disabled ? "opacity-50" : "hover:bg-muted");
-  if (disabled || !href) return <span className={cls}>{inner}</span>;
-  if (external) {
-    return (
-      <a href={href} target="_blank" rel="noreferrer" className={cls}>
-        {inner}
-        <ChevronRight className="size-3.5 text-muted-foreground" />
-      </a>
-    );
-  }
-  return (
-    <Link href={href} className={cls}>
-      {inner}
-    </Link>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Deferred — clearly labelled, deliberately not built

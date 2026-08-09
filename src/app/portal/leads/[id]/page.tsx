@@ -36,7 +36,6 @@ import { SolarOpsCard } from "@/components/portal/solar-ops-card";
 import {
   SolarSystemMoneyPanel,
   SolarActivityFeed,
-  SolarQuickActions,
   SolarDeferredPanels,
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
@@ -580,16 +579,12 @@ export default async function LeadDetailPage({
         }
       />
 
-      {/* One calm row of secondary actions, replacing the five full-width tiles
-          that used to open the Overview in their own card. */}
-      {isSolarDeal && (
-        <SolarQuickActions
-          leadId={lead.id}
-          proposalToken={solarProposals[0]?.publicToken ?? null}
-          canEdit={can(user, "update", "Lead")}
-          homeownerInvited={!!lead.customerUserId}
-        />
-      )}
+      {/* No quick-action row here. Every pill it held duplicated a control that
+          already lives with the thing it acts on — the design panel edits the
+          design, the documents card uploads files, the proposal card is where a
+          proposal is generated and viewed, and follow-ups are made in the
+          activity feed further down. Homeowner invites are gone outright: this
+          product has no customer-facing portal to invite anyone into. */}
 
       <DealSummaryCards
         cards={summaryCards}

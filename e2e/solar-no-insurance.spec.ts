@@ -115,6 +115,18 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("2 · Financing")).toBeVisible();
     await expect(page.getByText("3 · Generate & send")).toBeVisible();
     await expect(page.getByText("4 · Contracts & documents")).toBeVisible();
+
+    // …and there is no pill row above it. Every pill was a second door onto a
+    // control that already sits with the thing it acts on: the design fields in
+    // card 1, the proposal in card 3, uploads in card 4, follow-ups in the feed.
+    // "Invite homeowner" is absent for a harder reason — this product has no
+    // customer-facing portal, so offering the invite promised something that
+    // does not exist. Its server action is deleted, not just unlinked.
+    for (const pill of ["No proposal yet", "View proposal", "Edit design", "Upload files", "Invite homeowner", "Homeowner invited"]) {
+      await expect(page.getByText(pill, { exact: true })).toHaveCount(0);
+    }
+    // The design is still editable in place, one card down.
+    await expect(page.getByLabel("Module quantity")).toBeVisible();
   });
 
 
@@ -156,9 +168,8 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
     await expect(page.getByPlaceholder(/Use @Name to notify/)).toBeVisible();
 
-    // 5 · Quick actions.
-    await expect(page.getByText("Edit design", { exact: true })).toBeVisible();
-    await expect(page.getByText("Upload files", { exact: true })).toBeVisible();
+    // 5 · The quick-action pill row is asserted gone in the close-flow test
+    // above, which is where this page's layout is pinned.
 
     // Deferred items are labelled, not silently missing. "Satellite roof
     // render" is deliberately NOT among them any more — the real property view
