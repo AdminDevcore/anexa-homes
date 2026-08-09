@@ -154,13 +154,23 @@
     @apply bg-background text-foreground;
     /* Never let a stray wide/positioned child create a horizontal scroll
        gutter. `clip` (unlike `hidden`) doesn't create a scroll container, so
-       the sticky site header keeps working. */
+       the sticky site header keeps working.
+
+       This must stay on <body> ALONE — putting it on <html> too breaks every
+       sticky header in the app. The viewport takes its overflow from <body>
+       only while <html> is `visible` on both axes; give <html> an overflow of
+       its own and <body> stops propagating and becomes a real scroll container
+       instead. That is invisible until something sets `overflow: hidden` on
+       <body> — which is exactly what Radix's scroll lock does whenever a
+       Select, Dialog, Sheet or modal menu opens. <body> then becomes the
+       sticky header's scrollport, its scrollport starts at the top of the
+       document rather than the top of the screen, and the header jumps out of
+       view for as long as the menu is open. */
     overflow-x: clip;
   }
   html {
     @apply font-sans;
     scroll-behavior: smooth;
-    overflow-x: clip;
   }
   h1, h2, h3, h4 {
     font-family: var(--font-display), Georgia, serif;
