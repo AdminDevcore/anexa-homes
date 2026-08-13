@@ -10,6 +10,7 @@ import {
   type ProposalUpgrade,
   computeProposalFinancials,
   defaultProposalContent,
+  resolveInsuranceFigures,
 } from "@/lib/proposal";
 
 /** Verify the lead is in the user's Lead scope (tenant + row access). */
@@ -85,6 +86,19 @@ export type ProposalBuilderData = {
   } | null;
   customerEmail: string | null;
   canManage: boolean;
+  /**
+   * The figures STORED on the claim/project, before any presentation override.
+   * `proposal.financials` carries the resolved numbers, which is the wrong thing
+   * to show next to an input: the builder needs to tell the rep what leaving a
+   * field blank would fall back to. Zeroed on cash deals.
+   */
+  claimFallback: {
+    rcvCents: number;
+    acvCents: number;
+    depreciationCents: number;
+    supplementsCents: number;
+    deductibleCents: number;
+  };
 };
 
 function asContent(json: unknown): ProposalContent {
@@ -158,14 +172,11 @@ async function assembleView(
         insuranceUnitPriceCents: l.insuranceUnitPrice,
         rcvCents: Math.round(l.quantity * l.insuranceUnitPrice),
       }));
-  // Cash deals ignore all insurance figures; the customer pays the entered project price.
-  const rcvCents = cash ? 0 : claim?.rcv ?? 0;
-  const acvCents = cash ? 0 : claim?.acv ?? 0;
-  const depreciationCents = cash ? 0 : claim?.depreciation ?? 0;
-  const approvedSupplementsCents = cash ? 0 : lead?.project?.supplementCents ?? 0;
+  // What the rep typed in the builder, else what the claim/project stores. Cash
+  // deals ignore all five; the customer pays the entered project price.
+  const { rcvCents, acvCents, depreciationCents, approvedSupplementsCents, deductibleCents } =
+    resolveInsuranceFigures({ dealType, content, claim, supplementCents: lead?.project?.supplementCents });
   const upgrades: ProposalUpgrade[] = content.upgrades ?? [];
-  // The rep can override the deductible in the presentation; fall back to the claim.
-  const deductibleCents = cash ? 0 : content.deductibleCents ?? claim?.deductible ?? 0;
   const projectPriceCents = cash ? Math.max(0, content.projectPriceCents ?? 0) : 0;
   const fin = computeProposalFinancials({
     dealType,
@@ -277,10 +288,33 @@ export async function getProposalForBuilder(user: AccessUser, leadId: string): P
     };
   }
 
-  const lead = await prisma.lead.findUnique({ where: { id: leadId }, select: { email: true } });
+  const [lead, claim] = await Promise.all([
+    prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { email: true, dealType: true, project: { select: { supplementCents: true } } },
+    }),
+    prisma.claim.findFirst({
+      where: { companyId: user.companyId, leadId },
+      orderBy: { createdAt: "desc" },
+      select: { rcv: true, acv: true, deductible: true, depreciation: true },
+    }),
+  ]);
 
+  const cash = lead?.dealType === "cash";
   const { canManageProposals } = await import("./policies");
-  return { proposal: view, checklist, customerEmail: lead?.email ?? null, canManage: canManageProposals(user.role) };
+  return {
+    proposal: view,
+    checklist,
+    customerEmail: lead?.email ?? null,
+    canManage: canManageProposals(user.role),
+    claimFallback: {
+      rcvCents: cash ? 0 : claim?.rcv ?? 0,
+      acvCents: cash ? 0 : claim?.acv ?? 0,
+      depreciationCents: cash ? 0 : claim?.depreciation ?? 0,
+      supplementsCents: cash ? 0 : lead?.project?.supplementCents ?? 0,
+      deductibleCents: cash ? 0 : claim?.deductible ?? 0,
+    },
+  };
 }
 
 /** Public payload by token (no auth). Photos served via the token photo route. */

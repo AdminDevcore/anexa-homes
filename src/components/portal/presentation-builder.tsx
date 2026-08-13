@@ -41,6 +41,9 @@ const STEPS: { id: Step; label: string }[] = [
 const SHELL_HEADER_PX = 64;
 const PREVIEW_TOOLBAR_PX = 48;
 
+const fmtMoney = (cents: number) =>
+  (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
 export function PresentationBuilder({
   data,
   leadId,
@@ -95,13 +98,22 @@ export function PresentationBuilder({
   // Live out-of-pocket preview for the financing calculator. Mirrors
   // computeProposalFinancials: cash base = project price; insurance base = deductible
   // (content override, else the saved claim value) + selected upgrades − discount.
-  const liveDeductibleCents = content.deductibleCents ?? data.proposal.financials.deductibleCents;
+  const liveDeductibleCents = content.deductibleCents ?? data.claimFallback.deductibleCents;
   const liveBaseCents = isCash ? Math.max(0, content.projectPriceCents || 0) : liveDeductibleCents;
   const liveUpgradesCents = (content.upgrades ?? [])
     .filter((u) => u.selected)
     .reduce((s, u) => s + Math.max(0, u.priceCents || 0), 0);
   const liveDiscountCents = Math.max(0, content.projectDiscountCents || 0);
   const liveOutOfPocketCents = Math.max(0, liveBaseCents + liveUpgradesCents - liveDiscountCents);
+
+  // None of the carrier figures move the out-of-pocket, so the rep needs the OTHER
+  // half of the customer's financial summary to see them land. Same rule as
+  // computeProposalFinancials: RCV + supplements + upgrades on insurance.
+  const liveRcvCents = content.rcvCents ?? data.claimFallback.rcvCents;
+  const liveSupplementsCents = content.approvedSupplementsCents ?? data.claimFallback.supplementsCents;
+  const liveTotalProjectValueCents = isCash
+    ? Math.max(0, content.projectPriceCents || 0) + liveUpgradesCents
+    : liveRcvCents + liveSupplementsCents + liveUpgradesCents;
   const financingEnabled = content.financing?.enabled ?? false;
   const selectedTerms = content.financing?.termsMonths ?? [];
   // The same helper the customer page uses, so the miniature preview below can
@@ -114,9 +126,6 @@ export function PresentationBuilder({
       : selectedTerms.filter((m) => m !== months);
     patch({ financing: { enabled: financingEnabled, termsMonths: next } });
   }
-
-  const fmtMoney = (cents: number) =>
-    (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
   async function save(): Promise<boolean> {
     setBusy(true);
@@ -397,19 +406,65 @@ export function PresentationBuilder({
               <p className="text-xs text-muted-foreground">The total cash price the customer pays. Their total = project price + upgrades − discount (optionally financed).</p>
             </Field>
           ) : (
-            <Field label="Deductible ($)">
-              <Input
-                key="ins-deductible"
-                inputMode="decimal"
-                defaultValue={content.deductibleCents != null ? String(content.deductibleCents / 100) : ""}
-                placeholder="e.g. 2500"
-                onBlur={(e) => {
-                  const v = e.target.value.trim();
-                  patch({ deductibleCents: v === "" ? undefined : Math.round((Number(v) || 0) * 100) });
-                }}
+            /* INSURANCE ESTIMATE — the five figures off the adjuster's estimate, in
+               the order the customer's financial summary prints them. Typed here so
+               a rep holding the estimate can finish the proposal without detouring
+               through the Claim tab; each field falls back to the stored claim when
+               left blank, so a deal whose claim is already filled needs no typing. */
+            <div className="space-y-3 rounded-lg border border-border p-4">
+              <div>
+                <h4 className="text-sm font-semibold">Insurance estimate</h4>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  From the adjuster&rsquo;s estimate. These print in the customer&rsquo;s financial summary.
+                  Anything left blank uses the claim.
+                </p>
+              </div>
+              <MoneyField
+                label="Insurance RCV ($)"
+                inputKey="ins-rcv"
+                cents={content.rcvCents}
+                fallbackCents={data.claimFallback.rcvCents}
+                placeholder="e.g. 28400"
+                hint="What the carrier approved to replace the roof. Drives the total project value."
+                onCommit={(rcvCents) => patch({ rcvCents })}
               />
-              <p className="text-xs text-muted-foreground">Customer&rsquo;s out-of-pocket deductible. Leave blank to use the claim&rsquo;s deductible.</p>
-            </Field>
+              <MoneyField
+                label="Actual cash value / ACV ($)"
+                inputKey="ins-acv"
+                cents={content.acvCents}
+                fallbackCents={data.claimFallback.acvCents}
+                placeholder="e.g. 21900"
+                hint="RCV minus depreciation — the carrier&rsquo;s first check."
+                onCommit={(acvCents) => patch({ acvCents })}
+              />
+              <MoneyField
+                label="Recoverable depreciation ($)"
+                inputKey="ins-depreciation"
+                cents={content.depreciationCents}
+                fallbackCents={data.claimFallback.depreciationCents}
+                placeholder="e.g. 6500"
+                hint="Released by the carrier after the work is completed. Not part of the customer&rsquo;s out-of-pocket."
+                onCommit={(depreciationCents) => patch({ depreciationCents })}
+              />
+              <MoneyField
+                label="Approved supplements ($)"
+                inputKey="ins-supplements"
+                cents={content.approvedSupplementsCents}
+                fallbackCents={data.claimFallback.supplementsCents}
+                placeholder="e.g. 3200"
+                hint="Supplements the carrier has already approved. Added to the total project value."
+                onCommit={(approvedSupplementsCents) => patch({ approvedSupplementsCents })}
+              />
+              <MoneyField
+                label="Deductible ($)"
+                inputKey="ins-deductible"
+                cents={content.deductibleCents}
+                fallbackCents={data.claimFallback.deductibleCents}
+                placeholder="e.g. 2500"
+                hint="Customer&rsquo;s out-of-pocket. Texas law prohibits waiving or rebating it."
+                onCommit={(deductibleCents) => patch({ deductibleCents })}
+              />
+            </div>
           )}
           <Field label="Project discount ($)">
             <Input
@@ -534,10 +589,22 @@ export function PresentationBuilder({
                   </div>
                 )}
               </div>
+              {/* The carrier figures never move the out-of-pocket, so without this
+                  line the two tiles above sit unchanged while the rep types and it
+                  looks like nothing saved. */}
+              <div className="mt-2 flex items-baseline justify-between border-t border-white/10 pt-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-white/50">Total project value</span>
+                <span className="text-sm font-semibold tabular-nums text-white">{fmtMoney(liveTotalProjectValueCents)}</span>
+              </div>
               {livePlan.totalCents === 0 && (
                 <p className="mt-2 text-[10px] text-amber-300">
                   {isCash ? "Set a project price" : "Set a deductible"} above — with nothing owed there is no payment
                   section to show.
+                </p>
+              )}
+              {!isCash && liveRcvCents === 0 && (
+                <p className="mt-2 text-[10px] text-amber-300">
+                  Set an RCV above — the financial summary will show $0 covered.
                 </p>
               )}
             </div>
@@ -659,11 +726,61 @@ export function PresentationBuilder({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-sm font-medium">{label}</label>
+      <label className="text-sm font-medium" htmlFor={htmlFor}>{label}</label>
       {children}
     </div>
+  );
+}
+
+/**
+ * A dollars input over a cents value that distinguishes "blank" from "zero".
+ *
+ * Clearing the box commits `undefined`, which is what makes the field fall back to
+ * the stored claim; typing `0` commits `0`, which is an override meaning "none on
+ * this claim". `||` anywhere in that chain would collapse the two, so the parse
+ * checks the string, not the number.
+ */
+function MoneyField({
+  label,
+  inputKey,
+  cents,
+  fallbackCents,
+  placeholder,
+  hint,
+  onCommit,
+}: {
+  label: string;
+  /** Doubles as the input's DOM id, so the label actually points at the box. */
+  inputKey: string;
+  cents: number | undefined;
+  /** What the customer would see if this field is left blank. */
+  fallbackCents: number;
+  placeholder: string;
+  hint: string;
+  onCommit: (cents: number | undefined) => void;
+}) {
+  return (
+    <Field label={label} htmlFor={inputKey}>
+      <Input
+        key={inputKey}
+        id={inputKey}
+        inputMode="decimal"
+        defaultValue={cents != null ? String(cents / 100) : ""}
+        placeholder={placeholder}
+        onBlur={(e) => {
+          const v = e.target.value.trim();
+          onCommit(v === "" ? undefined : Math.round((Number(v) || 0) * 100));
+        }}
+      />
+      <p className="text-xs text-muted-foreground">
+        {hint}
+        {cents == null && fallbackCents > 0 && (
+          <> Using the claim&rsquo;s <strong>{fmtMoney(fallbackCents)}</strong>.</>
+        )}
+      </p>
+    </Field>
   );
 }

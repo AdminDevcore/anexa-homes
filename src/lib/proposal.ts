@@ -36,6 +36,19 @@ export type ProposalContent = {
   // CASH deals only: the total project price the customer pays (cents). The cash
   // out-of-pocket = projectPrice + selected upgrades − discount. Ignored for insurance.
   projectPriceCents?: number;
+  // INSURANCE deals: the carrier's estimate figures, typed in the builder off the
+  // adjuster's estimate. Each one overrides the stored record for the customer-facing
+  // financial summary and falls back to it when unset — the deductible's long-standing
+  // behaviour, now applied to all five. These are presentation figures: they do NOT
+  // write back to Claim/Project, so reports and payroll keep reading the record.
+  // Falls back to claim.rcv.
+  rcvCents?: number;
+  // Falls back to claim.acv.
+  acvCents?: number;
+  // Falls back to claim.depreciation.
+  depreciationCents?: number;
+  // Falls back to project.supplementCents.
+  approvedSupplementsCents?: number;
   // Customer-paid deductible (cents). When set, overrides the claim's deductible
   // in the customer-facing financial summary; falls back to the claim if unset.
   deductibleCents?: number;
@@ -109,6 +122,47 @@ export const ROOF_CONDITION_ITEMS: { key: string; label: string }[] = [
   { key: "gutters", label: "Gutter damage" },
   { key: "screens", label: "Window screen damage" },
 ];
+
+/** The five carrier figures the customer's financial summary prints. */
+export type InsuranceFigures = {
+  rcvCents: number;
+  acvCents: number;
+  depreciationCents: number;
+  approvedSupplementsCents: number;
+  deductibleCents: number;
+};
+
+/**
+ * Resolve the carrier figures for a proposal: what the rep typed in the builder,
+ * else what the claim/project stores.
+ *
+ * `??` rather than `||` at every step, so a rep who deliberately types 0 ("no
+ * recoverable depreciation on this claim") gets 0 and not the claim's number.
+ *
+ * These overrides are presentation-only by design — nothing here writes back to
+ * Claim or Project, so the claims report and payroll keep reading the record.
+ *
+ * Cash deals have no carrier, so every figure is zero regardless of what an
+ * earlier insurance draft left behind in the content.
+ */
+export function resolveInsuranceFigures(i: {
+  dealType?: ProposalDealType;
+  content: ProposalContent;
+  claim?: { rcv?: number | null; acv?: number | null; deductible?: number | null; depreciation?: number | null } | null;
+  supplementCents?: number | null;
+}): InsuranceFigures {
+  if (i.dealType === "cash") {
+    return { rcvCents: 0, acvCents: 0, depreciationCents: 0, approvedSupplementsCents: 0, deductibleCents: 0 };
+  }
+  const { content, claim } = i;
+  return {
+    rcvCents: content.rcvCents ?? claim?.rcv ?? 0,
+    acvCents: content.acvCents ?? claim?.acv ?? 0,
+    depreciationCents: content.depreciationCents ?? claim?.depreciation ?? 0,
+    approvedSupplementsCents: content.approvedSupplementsCents ?? i.supplementCents ?? 0,
+    deductibleCents: content.deductibleCents ?? claim?.deductible ?? 0,
+  };
+}
 
 export type ProposalFinancials = {
   dealType: ProposalDealType;

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   computeProposalFinancials,
+  resolveInsuranceFigures,
   financingOptions,
   paymentPlan,
   activeFinanceOption,
@@ -78,6 +79,19 @@ describe("computeProposalFinancials", () => {
     expect(r.estimatedOutOfPocketCents).toBe(1_800_000 + 50_000 - 100_000);
   });
 
+  it("an RCV typed in the builder drives the total project value", () => {
+    // The rep has the adjuster's estimate and types it in; the claim record is
+    // still empty. The customer's total must follow what was typed.
+    const figures = resolveInsuranceFigures({
+      dealType: "insurance",
+      content: { rcvCents: 2_840_000, approvedSupplementsCents: 320_000 },
+      claim: { rcv: 0, acv: 0, deductible: 250_000, depreciation: 0 },
+    });
+    const r = computeProposalFinancials({ ...figures, upgrades: [] });
+    expect(r.totalProjectValueCents).toBe(2_840_000 + 320_000);
+    expect(r.estimatedOutOfPocketCents).toBe(250_000); // still the claim's deductible
+  });
+
   it("defaults to insurance when dealType is omitted", () => {
     const r = computeProposalFinancials({
       rcvCents: 1_000_000, acvCents: 0, deductibleCents: 100_000, depreciationCents: 0,
@@ -100,6 +114,86 @@ describe("computeProposalFinancials", () => {
     });
     expect(r.projectDiscountCents).toBe(100_000);
     expect(r.estimatedOutOfPocketCents).toBe(0);
+  });
+});
+
+describe("resolveInsuranceFigures", () => {
+  const claim = { rcv: 2_000_000, acv: 1_600_000, deductible: 250_000, depreciation: 400_000 };
+
+  it("uses the claim and project when the builder left everything blank", () => {
+    expect(
+      resolveInsuranceFigures({ dealType: "insurance", content: {}, claim, supplementCents: 300_000 })
+    ).toEqual({
+      rcvCents: 2_000_000,
+      acvCents: 1_600_000,
+      depreciationCents: 400_000,
+      approvedSupplementsCents: 300_000,
+      deductibleCents: 250_000,
+    });
+  });
+
+  it("every typed figure overrides the stored one", () => {
+    expect(
+      resolveInsuranceFigures({
+        dealType: "insurance",
+        content: {
+          rcvCents: 2_840_000,
+          acvCents: 2_190_000,
+          depreciationCents: 650_000,
+          approvedSupplementsCents: 320_000,
+          deductibleCents: 100_000,
+        },
+        claim,
+        supplementCents: 300_000,
+      })
+    ).toEqual({
+      rcvCents: 2_840_000,
+      acvCents: 2_190_000,
+      depreciationCents: 650_000,
+      approvedSupplementsCents: 320_000,
+      deductibleCents: 100_000,
+    });
+  });
+
+  it("a typed 0 is an override, not a blank", () => {
+    // "No recoverable depreciation on this claim" must not silently become the
+    // claim's $4,000. This is the whole reason the chain uses ?? and not ||.
+    const r = resolveInsuranceFigures({
+      dealType: "insurance",
+      content: { depreciationCents: 0, approvedSupplementsCents: 0 },
+      claim,
+      supplementCents: 300_000,
+    });
+    expect(r.depreciationCents).toBe(0);
+    expect(r.approvedSupplementsCents).toBe(0);
+    expect(r.rcvCents).toBe(2_000_000); // untouched fields still fall back
+  });
+
+  it("falls back to zero when there is no claim at all", () => {
+    expect(resolveInsuranceFigures({ dealType: "insurance", content: {}, claim: null })).toEqual({
+      rcvCents: 0,
+      acvCents: 0,
+      depreciationCents: 0,
+      approvedSupplementsCents: 0,
+      deductibleCents: 0,
+    });
+  });
+
+  it("cash deals zero every figure, even one left in the content by an earlier draft", () => {
+    expect(
+      resolveInsuranceFigures({
+        dealType: "cash",
+        content: { rcvCents: 2_840_000, deductibleCents: 250_000 },
+        claim,
+        supplementCents: 300_000,
+      })
+    ).toEqual({
+      rcvCents: 0,
+      acvCents: 0,
+      depreciationCents: 0,
+      approvedSupplementsCents: 0,
+      deductibleCents: 0,
+    });
   });
 });
 
