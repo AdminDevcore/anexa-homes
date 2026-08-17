@@ -23,10 +23,13 @@ export const metadata = { title: "Build Proposal" };
  */
 export default async function SolarProposalBuilderPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ step?: string }>;
 }) {
   const { id } = await params;
+  const { step } = await searchParams;
   const user = await requireUser();
   if (!can(user, "create", "Proposal") && !can(user, "update", "Proposal")) {
     redirect(`/portal/leads/${id}`);
@@ -102,9 +105,15 @@ export default async function SolarProposalBuilderPage({
 
       <SolarProposalBuilder
         leadId={lead.id}
+        initialStep={step === "financing" || step === "generate" ? step : "design"}
         canEditDeal={can(user, "update", "Lead")}
         canCreateProposal={can(user, "create", "Proposal")}
-        design={design}
+        design={
+          design && {
+            ...design,
+            layoutImageUploadedAt: design.layoutImageUploadedAt?.toISOString() ?? null,
+          }
+        }
         finance={finance}
         itcDisclaimer={settings?.incentiveDisclaimer ?? ""}
         federalItcPct={settings?.federalItcPct ?? null}

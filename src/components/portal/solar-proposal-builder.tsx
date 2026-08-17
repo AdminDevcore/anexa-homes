@@ -34,6 +34,7 @@ const STEPS: { id: StepId; label: string; icon: React.ComponentType<{ className?
  */
 export function SolarProposalBuilder({
   leadId,
+  initialStep = "design",
   canEditDeal,
   canCreateProposal,
   design,
@@ -46,6 +47,12 @@ export function SolarProposalBuilder({
   versions,
 }: {
   leadId: string;
+  /**
+   * Which step to open on. The readiness report links straight to the screen
+   * that fixes each finding, so "Open financing" has to land ON financing
+   * rather than on step 1 with the rep hunting for the tab again.
+   */
+  initialStep?: StepId;
   /** Editing the design and its financing is a Lead permission... */
   canEditDeal: boolean;
   /** ...while generating a customer-facing proposal is its own. */
@@ -59,7 +66,7 @@ export function SolarProposalBuilder({
   batteries: EquipmentOption[];
   versions: ProposalVersion[];
 }) {
-  const [step, setStep] = React.useState<StepId>("design");
+  const [step, setStep] = React.useState<StepId>(initialStep);
 
   return (
     <div className="space-y-6">

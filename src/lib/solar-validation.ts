@@ -1,5 +1,11 @@
 import type { FinanceProduct } from "@prisma/client";
-import type { SolarAssumptions } from "./solar-money";
+import {
+  deriveUtilityRateMills,
+  TSRF_MAX_PCT,
+  TSRF_MIN_PCT,
+  TSRF_WARN_PCT,
+  type SolarAssumptions,
+} from "./solar-money";
 
 /**
  * Guard rails on a solar design and its pricing.
@@ -20,15 +26,69 @@ import type { SolarAssumptions } from "./solar-money";
  *
  * Bounds are DATA (SolarSettings), not constants, because "reasonable PPW"
  * differs by market and moves with equipment costs.
+ *
+ * Every issue carries a STABLE CODE. The message is written for a rep and will
+ * be reworded; the code is what tests assert on and what the UI keys off to
+ * offer the right "take me there" link, so it must not change once shipped.
  */
 
 export type IssueSeverity = "block" | "warn";
 
+/** Which screen the rep has to go to. Drives the grouped readiness report. */
+export type IssueGroup =
+  | "customer"
+  | "utility"
+  | "design"
+  | "equipment"
+  | "pricing"
+  | "financing"
+  | "company"
+  | "incentives"
+  | "documents";
+
+export type IssueAction = { label: string; href: string };
+
 export type ValidationIssue = {
   severity: IssueSeverity;
+  /** Stable, machine-readable. Never reworded. */
+  code: string;
+  group: IssueGroup;
   field: string;
   message: string;
+  action?: IssueAction;
 };
+
+/** True when nothing blocks generation. Warnings do not block. */
+export function canGenerate(issues: ValidationIssue[]): boolean {
+  return !issues.some((i) => i.severity === "block");
+}
+
+/** Group issues for the readiness panel, preserving order within each group. */
+export const ISSUE_GROUP_LABEL: Record<IssueGroup, string> = {
+  customer: "Customer & property",
+  utility: "Utility",
+  design: "Design",
+  equipment: "Equipment",
+  pricing: "Pricing",
+  financing: "Financing",
+  company: "Company identity",
+  incentives: "Incentives & disclosures",
+  documents: "Documents",
+};
+
+export function groupIssues(issues: ValidationIssue[]): { group: IssueGroup; label: string; issues: ValidationIssue[] }[] {
+  const order: IssueGroup[] = [
+    "customer", "utility", "design", "equipment",
+    "pricing", "financing", "company", "incentives", "documents",
+  ];
+  return order
+    .map((group) => ({ group, label: ISSUE_GROUP_LABEL[group], issues: issues.filter((i) => i.group === group) }))
+    .filter((g) => g.issues.length > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------------
 
 export type DesignForValidation = {
   systemSizeKwDc: number;
@@ -37,6 +97,13 @@ export type DesignForValidation = {
   offsetPct: number;
   moduleQty: number;
   moduleRatingW: number | null;
+  /** Optional so existing callers keep working; checked when supplied. */
+  tsrfPct?: number | null;
+  avgMonthlyBillCents?: number | null;
+  hasLayoutImage?: boolean;
+  hasBattery?: boolean;
+  ratePlan?: string | null;
+  utilityProvider?: string | null;
 };
 
 export type FinanceForValidation = {
@@ -50,60 +117,168 @@ export type FinanceForValidation = {
   termYears: number | null;
   downPaymentCents: number | null;
   loanMonthlyPaymentCents: number | null;
+  aprPct?: number | null;
+  loanTermMonths?: number | null;
 };
 
-/** True when nothing blocks generation. Warnings do not block. */
-export function canGenerate(issues: ValidationIssue[]): boolean {
-  return !issues.some((i) => i.severity === "block");
-}
+export type CustomerForValidation = {
+  firstName: string | null;
+  lastName: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+};
+
+export type CompanyForValidation = {
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+};
+
+const DESIGN_HREF = (leadId: string) => `/portal/leads/${leadId}/solar-proposal?step=design`;
+const FINANCE_HREF = (leadId: string) => `/portal/leads/${leadId}/solar-proposal?step=financing`;
+
+// ---------------------------------------------------------------------------
+// Design
+// ---------------------------------------------------------------------------
 
 export function validateDesign(
   d: DesignForValidation,
-  a: SolarAssumptions
+  a: SolarAssumptions,
+  leadId?: string
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const block = (field: string, message: string) =>
-    issues.push({ severity: "block", field, message });
-  const warn = (field: string, message: string) =>
-    issues.push({ severity: "warn", field, message });
+  const to = leadId ? { label: "Open system design", href: DESIGN_HREF(leadId) } : undefined;
+  const block = (code: string, group: IssueGroup, field: string, message: string) =>
+    issues.push({ severity: "block", code, group, field, message, action: to });
+  const warn = (code: string, group: IssueGroup, field: string, message: string) =>
+    issues.push({ severity: "warn", code, group, field, message, action: to });
 
   if (d.systemSizeKwDc <= 0) {
-    block("systemSizeKwDc", "System size must be greater than zero.");
+    block("design.size_zero", "design", "systemSizeKwDc", "System size must be greater than zero. Pick a module and enter how many.");
+  }
+  if (d.moduleRatingW == null) {
+    block("equipment.no_module", "equipment", "moduleId", "No solar module selected. The system cannot be sized without one.");
+  } else if (d.moduleRatingW <= 0) {
+    block("equipment.module_rating_zero", "equipment", "moduleId", "The selected module has no wattage on it. Fix the catalogue entry before quoting it.");
+  }
+  if (d.moduleQty <= 0) {
+    block("equipment.module_qty_zero", "equipment", "moduleQty", "Module quantity must be at least one.");
   }
 
   // ── Usage is the anchor for everything downstream ──────────────────────
   if (d.annualUsageKwh == null || d.annualUsageKwh <= 0) {
     block(
+      "utility.usage_missing",
+      "utility",
       "annualUsageKwh",
       "Enter the home's annual usage from the utility bill. Offset cannot be calculated without it — this is how a proposal ends up claiming a five-figure offset."
     );
   }
 
+  // The bill is what today's rate is derived from, and today's rate is what the
+  // entire savings projection stands on. Without it there is nothing to compare
+  // solar against, so this blocks rather than warns.
+  if (d.avgMonthlyBillCents !== undefined) {
+    if (d.avgMonthlyBillCents == null || d.avgMonthlyBillCents <= 0) {
+      block(
+        "utility.bill_missing",
+        "utility",
+        "avgMonthlyBillCents",
+        "Enter the average monthly bill. The customer's current rate is derived from it, and savings cannot be projected without a real rate."
+      );
+    } else if (deriveUtilityRateMills(d.avgMonthlyBillCents, d.annualUsageKwh) === null) {
+      block("utility.rate_underivable", "utility", "avgMonthlyBillCents", "The current utility rate cannot be derived from the bill and usage entered.");
+    } else {
+      const rate = deriveUtilityRateMills(d.avgMonthlyBillCents, d.annualUsageKwh)!;
+      // Nowhere in the US retails residential power below ~5c or above ~60c.
+      if (rate < 50 || rate > 600) {
+        warn(
+          "utility.rate_implausible",
+          "utility",
+          "avgMonthlyBillCents",
+          `The bill and usage imply $${(rate / 1000).toFixed(3)}/kWh, which is outside the normal US retail range. Check both figures.`
+        );
+      }
+    }
+  }
+
+  if (d.utilityProvider !== undefined && !d.utilityProvider?.trim()) {
+    warn("utility.provider_missing", "utility", "utilityProvider", "No utility provider recorded.");
+  }
+  if (d.ratePlan !== undefined && !d.ratePlan?.trim()) {
+    warn("utility.rate_plan_missing", "utility", "ratePlan", "No rate plan / tariff recorded. Optional, but it is what the customer's bill is priced on.");
+  }
+
+  // ── TSRF ───────────────────────────────────────────────────────────────
+  if (d.tsrfPct !== undefined) {
+    if (d.tsrfPct == null) {
+      warn("design.tsrf_missing", "design", "tsrfPct", "No TSRF recorded. Production is being modelled as an unshaded roof, which will overstate output on a shaded one.");
+    } else if (d.tsrfPct < TSRF_MIN_PCT || d.tsrfPct > TSRF_MAX_PCT) {
+      block(
+        "design.tsrf_out_of_range",
+        "design",
+        "tsrfPct",
+        `TSRF of ${d.tsrfPct}% is outside the defensible range of ${TSRF_MIN_PCT}–${TSRF_MAX_PCT}%.`
+      );
+    } else if (d.tsrfPct < TSRF_WARN_PCT) {
+      warn(
+        "design.tsrf_shaded",
+        "design",
+        "tsrfPct",
+        `TSRF of ${d.tsrfPct}% means the array is materially shaded. Confirm the survey before quoting this production.`
+      );
+    }
+  }
+
   // ── Offset ─────────────────────────────────────────────────────────────
   if (d.offsetPct < a.minOffsetPct) {
-    block("offsetPct", `Offset of ${d.offsetPct.toFixed(0)}% is below the minimum of ${a.minOffsetPct}%.`);
+    block("design.offset_below_min", "design", "offsetPct", `Offset of ${d.offsetPct.toFixed(0)}% is below the minimum of ${a.minOffsetPct}%.`);
   }
   if (d.offsetPct > a.maxOffsetPct) {
     block(
+      "design.offset_above_max",
+      "design",
       "offsetPct",
       `Offset of ${d.offsetPct.toFixed(0)}% exceeds the maximum of ${a.maxOffsetPct}%. Check the annual usage figure — an offset this high almost always means the usage is wrong, not that the system is huge.`
     );
   } else if (d.offsetPct > 110) {
     warn(
+      "design.offset_high",
+      "design",
       "offsetPct",
       `Offset is ${d.offsetPct.toFixed(0)}%. Most utilities do not credit production far beyond usage — confirm the customer is adding load (EV, pool, addition).`
+    );
+  }
+  // A minimum of 0 is not a guard rail, it is the absence of one: it permits a
+  // proposal that offsets nothing. Surfaced so it gets configured rather than
+  // silently passing every deal.
+  if (a.minOffsetPct <= 0) {
+    warn(
+      "config.min_offset_unset",
+      "design",
+      "minOffsetPct",
+      "No minimum offset is configured (currently 0%), so an undersized system cannot be caught. Set one in Solar settings.",
     );
   }
 
   // ── Production must track usage and size ───────────────────────────────
   if (d.year1ProductionKwh <= 0 && d.systemSizeKwDc > 0) {
-    block("year1ProductionKwh", "Year-one production has not been calculated.");
+    block("design.production_zero", "design", "year1ProductionKwh", "Year-one production has not been calculated.");
   }
   if (d.systemSizeKwDc > 0 && d.year1ProductionKwh > 0) {
-    const impliedKwhPerKw = d.year1ProductionKwh / d.systemSizeKwDc;
+    // Compare against the UNSHADED equivalent: a legitimately shaded roof
+    // (TSRF 60) produces less per kW by design, and must not be reported as a
+    // physically impossible system.
+    const tsrfFraction = d.tsrfPct == null ? 1 : Math.max(0.01, d.tsrfPct / 100);
+    const impliedKwhPerKw = d.year1ProductionKwh / d.systemSizeKwDc / tsrfFraction;
     // Nowhere on earth is outside roughly 700-2200 kWh/kW/yr for a fixed array.
     if (impliedKwhPerKw < 700 || impliedKwhPerKw > 2200) {
       block(
+        "design.production_implausible",
+        "design",
         "year1ProductionKwh",
         `Production of ${Math.round(impliedKwhPerKw)} kWh per kW/year is outside any real-world range (700–2200). The system size and production do not agree.`
       );
@@ -115,112 +290,257 @@ export function validateDesign(
     const impliedKw = (d.moduleQty * d.moduleRatingW) / 1000;
     if (Math.abs(impliedKw - d.systemSizeKwDc) > 0.5) {
       block(
+        "design.size_mismatch",
+        "design",
         "systemSizeKwDc",
         `${d.moduleQty} × ${d.moduleRatingW}W is ${impliedKw.toFixed(2)} kW, but the system is recorded as ${d.systemSizeKwDc.toFixed(2)} kW.`
       );
     }
   }
 
+  // ── Documents ──────────────────────────────────────────────────────────
+  if (d.hasLayoutImage === false) {
+    warn(
+      "documents.no_layout",
+      "documents",
+      "layoutImageFileId",
+      "No panel layout attached. The proposal will go out without showing the customer where the panels go."
+    );
+  }
+  if (d.hasBattery === false) {
+    warn("equipment.no_battery", "equipment", "batteryId", "No battery on this design. Fine for a grid-tied system — the proposal will say the system shuts off in an outage.");
+  }
+
   return issues;
 }
 
+// ---------------------------------------------------------------------------
+// Finance
+// ---------------------------------------------------------------------------
+
 export function validateFinance(
   f: FinanceForValidation,
-  a: SolarAssumptions
+  a: SolarAssumptions,
+  leadId?: string
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const block = (field: string, message: string) =>
-    issues.push({ severity: "block", field, message });
-  const warn = (field: string, message: string) =>
-    issues.push({ severity: "warn", field, message });
+  const to = leadId ? { label: "Open financing", href: FINANCE_HREF(leadId) } : undefined;
+  const block = (code: string, group: IssueGroup, field: string, message: string) =>
+    issues.push({ severity: "block", code, group, field, message, action: to });
+  const warn = (code: string, group: IssueGroup, field: string, message: string) =>
+    issues.push({ severity: "warn", code, group, field, message, action: to });
 
   if (f.product === "cash" || f.product === "loan") {
     if (f.grossPpwCents < a.minPpwCents || f.grossPpwCents > a.maxPpwCents) {
       block(
+        "pricing.ppw_out_of_range",
+        "pricing",
         "grossPpwCents",
         `$${(f.grossPpwCents / 100).toFixed(2)}/W is outside the allowed range of $${(a.minPpwCents / 100).toFixed(2)}–$${(a.maxPpwCents / 100).toFixed(2)}/W.`
       );
     }
     // A cash deal has no lender, so it cannot carry a lender's fee.
     if (f.product === "cash" && f.dealerFeePct > 0) {
-      block("dealerFeePct", "A cash deal has no lender and therefore no dealer fee.");
+      block("pricing.cash_dealer_fee", "pricing", "dealerFeePct", "A cash deal has no lender and therefore no dealer fee.");
     }
     if (f.product === "loan" && f.dealerFeePct <= 0) {
-      warn("dealerFeePct", "This loan has no dealer fee. Confirm with the lender — that is unusual.");
+      warn("pricing.loan_no_dealer_fee", "pricing", "dealerFeePct", "This loan has no dealer fee. Confirm with the lender — that is unusual.");
     }
     if (f.dealerFeePct >= 50) {
-      block("dealerFeePct", `A dealer fee of ${f.dealerFeePct}% is not plausible.`);
+      block("pricing.dealer_fee_implausible", "pricing", "dealerFeePct", `A dealer fee of ${f.dealerFeePct}% is not plausible.`);
     }
     if (f.contractPriceCents <= 0) {
-      block("contractPriceCents", "Contract price has not been calculated.");
+      block("pricing.contract_price_zero", "pricing", "contractPriceCents", "Contract price has not been calculated.");
     }
     // A down payment at or above the system price means there is nothing left
     // to finance — almost always a stray decimal, and it would put a nonsense
     // "amount financed" in front of a customer.
     if (f.downPaymentCents && f.contractPriceCents > 0 && f.downPaymentCents >= f.contractPriceCents) {
       block(
+        "financing.down_payment_exceeds_price",
+        "financing",
         "downPaymentCents",
         `A down payment of $${(f.downPaymentCents / 100).toLocaleString()} is not less than the $${(f.contractPriceCents / 100).toLocaleString()} system price — there would be nothing to finance.`
       );
     }
     // Cash is paid in full and has no lender, so neither figure can apply.
     if (f.product === "cash" && f.downPaymentCents) {
-      block("downPaymentCents", "A cash deal is paid in full — it has no down payment.");
+      block("financing.cash_down_payment", "financing", "downPaymentCents", "A cash deal is paid in full — it has no down payment.");
     }
     if (f.product === "cash" && f.loanMonthlyPaymentCents) {
-      block("loanMonthlyPaymentCents", "A cash deal has no lender and no monthly payment.");
+      block("financing.cash_monthly", "financing", "loanMonthlyPaymentCents", "A cash deal has no lender and no monthly payment.");
+    }
+
+    // A loan is not "complete" without the three figures the lender issued. The
+    // proposal quotes a monthly payment; quoting one we never received, or
+    // omitting it entirely, is the difference between a quote and a guess.
+    if (f.product === "loan") {
+      if (!f.loanMonthlyPaymentCents || f.loanMonthlyPaymentCents <= 0) {
+        block("financing.loan_monthly_missing", "financing", "loanMonthlyPaymentCents", "Enter the lender's monthly payment from the approval.");
+      }
+      if (f.aprPct == null || f.aprPct <= 0) {
+        block("financing.loan_apr_missing", "financing", "aprPct", "Enter the loan's APR from the approval.");
+      }
+      if (!f.loanTermMonths || f.loanTermMonths <= 0) {
+        block("financing.loan_term_missing", "financing", "loanTermMonths", "Enter the loan term in months from the approval.");
+      }
     }
   } else {
     // Lease and PPA carry their own payment model; a loan payment here would be
     // a leftover from a product switch.
     if (f.loanMonthlyPaymentCents) {
       block(
+        "financing.tpo_loan_monthly",
+        "financing",
         "loanMonthlyPaymentCents",
         "A loan monthly payment does not belong on a lease or PPA. Use the lease's own monthly."
       );
     }
     if (f.downPaymentCents) {
-      block("downPaymentCents", "A lease or PPA is third-party owned — there is no down payment on a system you do not buy.");
+      block("financing.tpo_down_payment", "financing", "downPaymentCents", "A lease or PPA is third-party owned — there is no down payment on a system you do not buy.");
+    }
+    if (f.aprPct != null) {
+      block("financing.tpo_apr", "financing", "aprPct", "A lease or PPA has no APR. Clear the loan terms before quoting it.");
     }
     // Lease / PPA
     if (!f.termYears || f.termYears < 5 || f.termYears > 30) {
-      block("termYears", "Lease and PPA terms run 5–30 years.");
+      block("financing.tpo_term_range", "financing", "termYears", "Lease and PPA terms run 5–30 years.");
     }
     if (f.escalatorPct == null || f.escalatorPct < 0 || f.escalatorPct > 5) {
-      block("escalatorPct", "Annual escalator must be between 0% and 5%.");
+      block("financing.escalator_range", "financing", "escalatorPct", "Annual escalator must be between 0% and 5%.");
     }
     if (f.product === "ppa") {
       if (!f.rateMillsPerKwh || f.rateMillsPerKwh <= 0) {
-        block("rateMillsPerKwh", "A PPA needs a price per kWh.");
+        block("financing.ppa_rate_missing", "financing", "rateMillsPerKwh", "A PPA needs a price per kWh.");
       } else if (f.rateMillsPerKwh > 400) {
-        block("rateMillsPerKwh", `$${(f.rateMillsPerKwh / 1000).toFixed(3)}/kWh is above any plausible retail rate.`);
+        block("financing.ppa_rate_implausible", "financing", "rateMillsPerKwh", `$${(f.rateMillsPerKwh / 1000).toFixed(3)}/kWh is above any plausible retail rate.`);
       }
       if (f.monthlyPaymentCents) {
-        block("monthlyPaymentCents", "A PPA is billed per kWh, not as a fixed monthly. Use a Lease for a fixed payment.");
+        block("financing.ppa_has_monthly", "financing", "monthlyPaymentCents", "A PPA is billed per kWh, not as a fixed monthly. Use a Lease for a fixed payment.");
       }
     }
     if (f.product === "lease") {
       if (!f.monthlyPaymentCents || f.monthlyPaymentCents <= 0) {
-        block("monthlyPaymentCents", "A lease needs a fixed monthly payment.");
+        block("financing.lease_monthly_missing", "financing", "monthlyPaymentCents", "A lease needs a fixed monthly payment.");
       }
       if (f.rateMillsPerKwh) {
-        block("rateMillsPerKwh", "A lease is a fixed monthly, not a per-kWh rate. Use a PPA for per-kWh billing.");
+        block("financing.lease_has_rate", "financing", "rateMillsPerKwh", "A lease is a fixed monthly, not a per-kWh rate. Use a PPA for per-kWh billing.");
       }
     }
     // PPW and gross price are meaningless on a third-party-owned system.
     if (f.grossPpwCents > 0) {
-      warn("grossPpwCents", "Price per watt does not apply to a lease or PPA and will not be shown to the customer.");
+      warn("pricing.tpo_ppw", "pricing", "grossPpwCents", "Price per watt does not apply to a lease or PPA and will not be shown to the customer.");
     }
   }
 
   return issues;
 }
 
+// ---------------------------------------------------------------------------
+// Customer & company identity
+// ---------------------------------------------------------------------------
+
+export function validateCustomer(c: CustomerForValidation, leadId?: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const to = leadId ? { label: "Open the deal", href: `/portal/leads/${leadId}` } : undefined;
+  const push = (code: string, field: string, message: string) =>
+    issues.push({ severity: "block", code, group: "customer", field, message, action: to });
+
+  if (!`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim()) {
+    push("customer.name_missing", "name", "The deal has no customer name. A proposal cannot be addressed to nobody.");
+  }
+  if (!c.address?.trim()) {
+    push("customer.address_missing", "address", "The property address is missing.");
+  }
+  if (!c.city?.trim() || !c.state?.trim() || !c.zip?.trim()) {
+    push("customer.address_incomplete", "address", "The property address is incomplete — city, state and ZIP are all required on the proposal.");
+  }
+  return issues;
+}
+
+/**
+ * The company identity that has to appear on a customer-facing document.
+ *
+ * Blocking, not cosmetic: a proposal with no phone number on it is a document
+ * the homeowner cannot act on, and one with no company address is not a
+ * business record. These are configured once in Settings and then never think
+ * about again — which is exactly why nobody notices they are blank.
+ */
+export function validateCompanyIdentity(c: CompanyForValidation): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const to = { label: "Open company settings", href: "/portal/settings/company" };
+  const push = (code: string, field: string, message: string) =>
+    issues.push({ severity: "block", code, group: "company", field, message, action: to });
+
+  if (!c.name?.trim()) push("company.name_missing", "name", "Company name is not set. It has to appear on the proposal.");
+  if (!c.phone?.trim()) push("company.phone_missing", "phone", "No company phone number is set. The customer needs a way to reach you from the document.");
+  if (!c.email?.trim()) push("company.email_missing", "email", "No company email is set.");
+  if (!c.address?.trim()) push("company.address_missing", "address", "No company address is set. A customer-facing quote has to carry the business's address.");
+  return issues;
+}
+
+/** Incentive configuration. Never blocks: showing no credit is a valid choice. */
+export function validateIncentives(a: SolarAssumptions, disclaimer: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const to = { label: "Open solar settings", href: "/portal/settings/solar" };
+  if (a.federalItcPct == null) {
+    issues.push({
+      severity: "warn",
+      code: "incentives.itc_unset",
+      group: "incentives",
+      field: "federalItcPct",
+      message: "No federal credit percentage is configured, so the proposal will omit the incentive section entirely.",
+      action: to,
+    });
+  }
+  if (!disclaimer.trim()) {
+    issues.push({
+      severity: "block",
+      code: "incentives.disclaimer_missing",
+      group: "incentives",
+      field: "incentiveDisclaimer",
+      message: "The incentive disclaimer is empty. An estimated credit cannot be shown to a customer without it.",
+      action: to,
+    });
+  }
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Everything, together
+// ---------------------------------------------------------------------------
+
 /** Everything wrong with a deal, design and money together. */
 export function validateSolarDeal(
   design: DesignForValidation,
   finance: FinanceForValidation,
-  a: SolarAssumptions
+  a: SolarAssumptions,
+  leadId?: string
 ): ValidationIssue[] {
-  return [...validateDesign(design, a), ...validateFinance(finance, a)];
+  return [...validateDesign(design, a, leadId), ...validateFinance(finance, a, leadId)];
+}
+
+/**
+ * The full readiness report — the one generation is gated on.
+ *
+ * Deliberately a superset of validateSolarDeal rather than a replacement: the
+ * design and money rules are the same rules, and having two copies that drift
+ * is how a proposal gets generated around its own guard rails.
+ */
+export function validateProposalReadiness(args: {
+  leadId?: string;
+  customer: CustomerForValidation;
+  design: DesignForValidation;
+  finance: FinanceForValidation;
+  company: CompanyForValidation;
+  assumptions: SolarAssumptions;
+  incentiveDisclaimer: string;
+}): ValidationIssue[] {
+  return [
+    ...validateCustomer(args.customer, args.leadId),
+    ...validateDesign(args.design, args.assumptions, args.leadId),
+    ...validateFinance(args.finance, args.assumptions, args.leadId),
+    ...validateCompanyIdentity(args.company),
+    ...validateIncentives(args.assumptions, args.incentiveDisclaimer),
+  ];
 }

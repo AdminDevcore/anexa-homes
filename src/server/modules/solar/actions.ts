@@ -6,8 +6,10 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getSolarSettings } from "./settings";
-import { year1Production, offsetPct, pricePurchase, itcEstimateCents } from "@/lib/solar-money";
-import { validateSolarDeal, canGenerate } from "@/lib/solar-validation";
+import { year1Production, offsetPct } from "@/lib/solar-money";
+import { canGenerate } from "@/lib/solar-validation";
+import { readSolarReadiness } from "./readiness";
+import { financeRowForProduct } from "@/lib/solar-finance-row";
 
 const fail = (error: string) => ({ ok: false as const, error });
 const ok = () => ({ ok: true as const });
@@ -102,16 +104,54 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
 
   const assumptions = await getSolarSettings(user.companyId);
 
-  const module_ = d.moduleId
-    ? await prisma.solarEquipment.findFirst({
-        where: { companyId: user.companyId, id: d.moduleId, kind: "module" },
-        select: { ratingW: true },
-      })
-    : null;
+  /**
+   * Resolve a selected catalogue item, refusing anything that is not this
+   * company's, not of the right kind, or retired.
+   *
+   * All three selectors go through this. Only the module used to be checked,
+   * and only for kind — so a battery id posted into `inverterId` was written
+   * straight through, and a product deactivated last month could still be
+   * attached to a brand-new design. `allowExistingId` keeps an ALREADY-SAVED
+   * choice readable after the catalogue item is retired: an existing draft
+   * keeps rendering, but the deactivated item cannot be newly selected.
+   */
+  async function resolveEquipment(
+    id: string | null | undefined,
+    kind: "module" | "inverter" | "battery",
+    allowExistingId: string | null
+  ): Promise<{ ok: true; row: { id: string; ratingW: number | null } | null } | { ok: false; error: string }> {
+    if (!id) return { ok: true, row: null };
+    const row = await prisma.solarEquipment.findFirst({
+      where: { companyId: user.companyId, id, kind },
+      select: { id: true, ratingW: true, isActive: true, model: true },
+    });
+    if (!row) return { ok: false, error: `That ${kind} is not in your catalogue.` };
+    if (!row.isActive && id !== allowExistingId) {
+      return { ok: false, error: `“${row.model}” has been retired and cannot be added to a new design.` };
+    }
+    return { ok: true, row: { id: row.id, ratingW: row.ratingW } };
+  }
+
+  const existing = await prisma.solarDesign.findUnique({
+    where: { leadId: d.leadId },
+    select: { moduleId: true, inverterId: true, batteryId: true },
+  });
+
+  const [mod, inv, bat] = await Promise.all([
+    resolveEquipment(d.moduleId, "module", existing?.moduleId ?? null),
+    resolveEquipment(d.inverterId, "inverter", existing?.inverterId ?? null),
+    resolveEquipment(d.batteryId, "battery", existing?.batteryId ?? null),
+  ]);
+  for (const r of [mod, inv, bat]) if (!r.ok) return fail(r.error);
+
+  const module_ = mod.ok ? mod.row : null;
 
   const moduleQty = d.moduleQty ?? 0;
   const systemSizeKwDc = module_?.ratingW ? (moduleQty * module_.ratingW) / 1000 : 0;
-  const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions);
+  // TSRF belongs in the production maths. It was being collected on this very
+  // form and then ignored, so a shaded roof and a perfect one produced the same
+  // headline kWh — a difference the customer only discovers from their bill.
+  const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions, d.tsrfPct);
 
   // Annual usage: explicit value wins, else sum the 12 monthly readings.
   const monthly = d.monthlyUsageKwh ?? [];
@@ -184,62 +224,36 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
   const assumptions = await getSolarSettings(user.companyId);
+
   const design = await prisma.solarDesign.findUnique({
     where: { leadId: f.leadId },
     select: { systemSizeKwDc: true },
   });
 
-  const isPurchase = f.product === "cash" || f.product === "loan";
-  const isLoan = f.product === "loan";
-  // Cash has no lender, so it can never carry a dealer fee.
-  const dealerFeePct = f.product === "loan" ? (f.dealerFeePct ?? assumptions.defaultDealerFeePct) : 0;
+  // Every product-specific column is gated on the product — see
+  // financeRowForProduct for why "most of them" was a customer-facing defect.
+  const data = financeRowForProduct(f, {
+    systemSizeKwDc: design?.systemSizeKwDc ?? 0,
+    assumptions,
+  });
 
-  let contractPriceCents = 0;
-  let itcCents = 0;
-  if (f.product === "cash" || f.product === "loan") {
-    const breakdown = pricePurchase({
-      product: f.product,
-      systemSizeKwDc: design?.systemSizeKwDc ?? 0,
-      grossPpwCents: f.grossPpwCents ?? assumptions.defaultGrossPpwCents,
-      dealerFeePct,
-      adderTotalCents: f.adderTotalCents ?? 0,
-    });
-    contractPriceCents = breakdown.contractPriceCents;
-    itcCents = itcEstimateCents(contractPriceCents, assumptions);
-  }
-
-  const data = {
-    product: f.product,
-    // Purchase block — zeroed for lease/PPA so nothing stale leaks onto a
-    // third-party-owned proposal.
-    grossPpwCents: isPurchase ? (f.grossPpwCents ?? assumptions.defaultGrossPpwCents) : 0,
-    dealerFeePct,
-    adderTotalCents: isPurchase ? (f.adderTotalCents ?? 0) : 0,
-    contractPriceCents,
-    itcEstimateCents: itcCents,
-    // Rate block — nulled for cash/loan for the same reason.
-    rateMillsPerKwh: isPurchase ? null : (f.rateMillsPerKwh ?? null),
-    monthlyPaymentCents: isPurchase ? null : (f.monthlyPaymentCents ?? null),
-    escalatorPct: isPurchase ? null : (f.escalatorPct ?? null),
-    termYears: f.termYears ?? null,
-    aprPct: f.aprPct ?? null,
-    loanTermMonths: f.loanTermMonths ?? null,
-    // Loan block — nulled for every other product, the same way the rate block
-    // is nulled for purchases. A down payment on a cash deal is a contradiction
-    // (cash IS paid in full), and a loan payment left behind after switching to
-    // a lease would show the wrong monthly on the proposal.
-    downPaymentCents: isLoan ? (f.downPaymentCents ?? null) : null,
-    loanMonthlyPaymentCents: isLoan ? (f.loanMonthlyPaymentCents ?? null) : null,
-  };
-
-  await prisma.solarFinance.upsert({
+  const saved = await prisma.solarFinance.upsert({
     where: { leadId: f.leadId },
     create: { companyId: user.companyId, leadId: f.leadId, ...data },
     update: data,
+    select: {
+      product: true, grossPpwCents: true, dealerFeePct: true, adderTotalCents: true,
+      contractPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
+      monthlyPaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,
+      loanTermMonths: true, downPaymentCents: true, loanMonthlyPaymentCents: true,
+    },
   });
 
   revalidatePath(`/portal/leads/${f.leadId}`);
-  return ok();
+  // Return what was actually STORED, so the panel re-seeds from the database
+  // rather than from what it hoped it sent. A save that silently dropped a
+  // field now shows up immediately instead of at the next hard reload.
+  return { ok: true as const, finance: saved };
 }
 
 /**
@@ -251,58 +265,9 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 export async function validateSolarDealAction(leadId: string) {
   const user = await requireUser();
   if (!can(user, "read", "Lead")) return fail("Not allowed.");
-
-  const [design, finance, assumptions] = await Promise.all([
-    prisma.solarDesign.findUnique({
-      where: { leadId },
-      select: {
-        systemSizeKwDc: true, year1ProductionKwh: true, annualUsageKwh: true,
-        offsetPct: true, moduleQty: true, module: { select: { ratingW: true } },
-      },
-    }),
-    prisma.solarFinance.findUnique({ where: { leadId } }),
-    getSolarSettings(user.companyId),
-  ]);
-
-  if (!design || !finance) {
-    return {
-      ok: true as const,
-      issues: [
-        {
-          severity: "block" as const,
-          field: "design",
-          message: "Complete the system design and financing before generating a proposal.",
-        },
-      ],
-      canGenerate: false,
-    };
-  }
-
-  const issues = validateSolarDeal(
-    {
-      systemSizeKwDc: design.systemSizeKwDc,
-      year1ProductionKwh: design.year1ProductionKwh,
-      annualUsageKwh: design.annualUsageKwh,
-      offsetPct: design.offsetPct,
-      moduleQty: design.moduleQty,
-      moduleRatingW: design.module?.ratingW ?? null,
-    },
-    {
-      product: finance.product,
-      grossPpwCents: finance.grossPpwCents,
-      dealerFeePct: finance.dealerFeePct,
-      contractPriceCents: finance.contractPriceCents,
-      rateMillsPerKwh: finance.rateMillsPerKwh,
-      monthlyPaymentCents: finance.monthlyPaymentCents,
-      escalatorPct: finance.escalatorPct,
-      termYears: finance.termYears,
-      downPaymentCents: finance.downPaymentCents,
-      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
-    },
-    assumptions
-  );
-
-  return { ok: true as const, issues, canGenerate: canGenerate(issues) };
+  const readiness = await readSolarReadiness(user.companyId, leadId);
+  if (!readiness.ok) return fail(readiness.error);
+  return { ok: true as const, issues: readiness.issues, canGenerate: canGenerate(readiness.issues) };
 }
 
 // ---------------------------------------------------------------------------
@@ -321,8 +286,24 @@ const equipmentSchema = z.object({
   // raises the flag on the deal instead of quietly becoming a line item.
   crossoverKind: z.enum(["reroof", "mpu"]).nullable().optional(),
   isActive: z.boolean().optional(),
+  isDefault: z.boolean().optional(),
 });
 
+/**
+ * Create or edit a catalogue item.
+ *
+ * Three integrity rules the catalogue did not have:
+ *
+ *  1. A MODULE must carry a wattage above zero. Every downstream number —
+ *     system size, production, offset, price — is derived from it, and a 0W
+ *     module produces a proposal for a system that generates nothing.
+ *  2. Identity (kind + manufacturer + model + rating) is unique per company,
+ *     so a rep picking from a dropdown of three identical "Powerwall 3" rows
+ *     cannot pick the wrong one. Checked here for a readable error; the
+ *     database enforces it regardless.
+ *  3. At most one ACTIVE default per kind, applied by demoting the incumbent
+ *     in the same transaction rather than by rejecting the edit.
+ */
 export async function upsertSolarEquipmentAction(
   id: string | null,
   input: z.infer<typeof equipmentSchema>
@@ -331,19 +312,86 @@ export async function upsertSolarEquipmentAction(
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const parsed = equipmentSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid equipment.");
+  const d = parsed.data;
 
-  if (id) {
-    const existing = await prisma.solarEquipment.findFirst({
-      where: { companyId: user.companyId, id },
-      select: { id: true },
-    });
-    if (!existing) return fail("Not found.");
-    await prisma.solarEquipment.update({ where: { id }, data: parsed.data });
-  } else {
-    await prisma.solarEquipment.create({
-      data: { companyId: user.companyId, ...parsed.data },
-    });
+  if (d.kind === "module" && !(d.ratingW && d.ratingW > 0)) {
+    return fail("A module needs a wattage above zero — system size is calculated from it.");
   }
+
+  // Identity clash, in the same terms a rep would recognise.
+  const clash = await prisma.solarEquipment.findFirst({
+    where: {
+      companyId: user.companyId,
+      kind: d.kind,
+      model: { equals: d.model, mode: "insensitive" },
+      ratingW: d.ratingW ?? null,
+      ...(d.manufacturer
+        ? { manufacturer: { equals: d.manufacturer, mode: "insensitive" as const } }
+        : { manufacturer: null }),
+      ...(id ? { NOT: { id } } : {}),
+    },
+    select: { id: true },
+  });
+  if (clash) {
+    return fail(
+      `${[d.manufacturer, d.model].filter(Boolean).join(" ")}${d.ratingW ? ` · ${d.ratingW}W` : ""} is already in the catalogue.`
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Only one active default per kind. Demote first so the partial unique
+    // index never sees two.
+    if (d.isDefault && d.isActive !== false) {
+      await tx.solarEquipment.updateMany({
+        where: { companyId: user.companyId, kind: d.kind, isDefault: true, ...(id ? { NOT: { id } } : {}) },
+        data: { isDefault: false },
+      });
+    }
+    if (id) {
+      const existing = await tx.solarEquipment.findFirst({
+        where: { companyId: user.companyId, id },
+        select: { id: true },
+      });
+      if (!existing) throw new Error("Not found.");
+      await tx.solarEquipment.update({ where: { id }, data: d });
+    } else {
+      await tx.solarEquipment.create({ data: { companyId: user.companyId, ...d } });
+    }
+  });
+
+  revalidatePath("/portal/settings/solar-equipment");
+  return ok();
+}
+
+/**
+ * Promote one catalogue item to be the default for its kind.
+ *
+ * Its own action rather than a flag on the upsert, because "make this the
+ * default" is a one-click operation on an existing row and should not require
+ * re-posting every field. Demotes the incumbent in the same transaction so the
+ * partial unique index never sees two.
+ */
+export async function setDefaultSolarEquipmentAction(id: string, isDefault: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const item = await prisma.solarEquipment.findFirst({
+    where: { companyId: user.companyId, id },
+    select: { id: true, kind: true, isActive: true },
+  });
+  if (!item) return fail("Not found.");
+  if (isDefault && !item.isActive) {
+    return fail("A retired product cannot be the default. Reactivate it first.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (isDefault) {
+      await tx.solarEquipment.updateMany({
+        where: { companyId: user.companyId, kind: item.kind, isDefault: true, NOT: { id } },
+        data: { isDefault: false },
+      });
+    }
+    await tx.solarEquipment.update({ where: { id }, data: { isDefault } });
+  });
   revalidatePath("/portal/settings/solar-equipment");
   return ok();
 }

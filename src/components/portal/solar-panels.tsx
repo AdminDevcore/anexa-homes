@@ -1,15 +1,18 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, TriangleAlert, CircleAlert, Sun, Info } from "lucide-react";
+import {
+  Loader2, TriangleAlert, CircleAlert, Sun, Info, ImageUp, Trash2,
+} from "lucide-react";
 import type { FinanceProduct, MountType } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { ValidationIssue } from "@/lib/solar-validation";
+import { groupIssues, type ValidationIssue } from "@/lib/solar-validation";
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
@@ -18,9 +21,134 @@ import {
 import {
   generateSolarProposalAction,
   markProposalSentAction,
+  uploadPanelLayoutAction,
+  removePanelLayoutAction,
 } from "@/server/modules/solar/proposal-actions";
 
 type EquipmentOption = { id: string; label: string; ratingW: number | null };
+
+/**
+ * Attach the panel layout drawn in an external design tool.
+ *
+ * Interim by design: Anexa has no roof designer yet, and a proposal that cannot
+ * show a homeowner where the panels go is a weaker document. Explicitly NOT the
+ * aerial property photo — a satellite view with no array on it is a picture of a
+ * roof, and presenting it as a design is something the customer discovers at the
+ * site survey.
+ */
+function PanelLayoutPanel({
+  leadId,
+  fileId,
+  provider,
+  externalRef,
+  uploadedAt,
+  canEdit,
+}: {
+  leadId: string;
+  fileId: string | null;
+  provider: string | null;
+  externalRef: string | null;
+  uploadedAt: string | null;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [meta, setMeta] = React.useState({ provider: provider ?? "", externalRef: externalRef ?? "" });
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  async function upload(file: File) {
+    setBusy(true);
+    const fd = new FormData();
+    fd.set("leadId", leadId);
+    fd.set("file", file);
+    fd.set("designProvider", meta.provider);
+    fd.set("designExternalRef", meta.externalRef);
+    const res = await uploadPanelLayoutAction(fd);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Panel layout attached");
+    router.refresh();
+  }
+
+  async function remove() {
+    setBusy(true);
+    const res = await removePanelLayoutAction(leadId);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Layout removed");
+    router.refresh();
+  }
+
+  return (
+    <section className="space-y-3">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Panel layout
+      </h4>
+
+      {fileId ? (
+        <div className="space-y-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/portal/files/${fileId}`}
+            alt="Panel layout"
+            className="w-full rounded-lg border border-border bg-muted/30 object-contain"
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Shown on the proposal, labelled as a preliminary design.
+            {uploadedAt ? ` Attached ${new Date(uploadedAt).toLocaleDateString()}.` : ""}
+          </p>
+        </div>
+      ) : (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+          No layout attached. The proposal will not show the customer where the panels go — it
+          omits the section rather than showing a placeholder.
+        </p>
+      )}
+
+      {canEdit && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <TextField
+              label="Design tool (optional)"
+              value={meta.provider}
+              placeholder="e.g. Aurora"
+              onChange={(v) => setMeta((m) => ({ ...m, provider: v }))}
+            />
+            <TextField
+              label="Design reference (optional)"
+              value={meta.externalRef}
+              placeholder="Provider's project id"
+              onChange={(v) => setMeta((m) => ({ ...m, externalRef: v }))}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void upload(f);
+                e.target.value = "";
+              }}
+            />
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <ImageUp className="size-4" />}
+              {fileId ? "Replace layout" : "Upload layout"}
+            </Button>
+            {fileId && (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={remove}>
+                <Trash2 className="size-4" /> Remove
+              </Button>
+            )}
+            <span className="text-[11px] text-muted-foreground">JPG, PNG or WebP · max 15MB</span>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
 
 export type SolarDesignView = {
   utilityProvider: string | null;
@@ -39,6 +167,10 @@ export type SolarDesignView = {
   systemSizeKwDc: number;
   year1ProductionKwh: number;
   offsetPct: number;
+  layoutImageFileId: string | null;
+  layoutImageUploadedAt: string | null;
+  designProvider: string | null;
+  designExternalRef: string | null;
 } | null;
 
 export type SolarFinanceView = {
@@ -68,6 +200,20 @@ const PRODUCTS: { value: FinanceProduct; label: string; blurb: string }[] = [
 function money(cents: number) {
   return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
+
+/**
+ * Seed a text input from a stored figure, keeping ZERO distinct from "unset".
+ *
+ * `x ? fmt(x) : ""` looks harmless and is not: a stored 0 is falsy, so a $0 down
+ * payment or a 0% escalator came back as an EMPTY box, and the next save then
+ * wrote null over a value the rep had deliberately entered. Only null/undefined
+ * mean "nothing here".
+ */
+const num = (v: number | null | undefined, scale = 1, digits?: number): string => {
+  if (v == null) return "";
+  const n = v / scale;
+  return digits == null ? n.toString() : n.toFixed(digits);
+};
 
 /** Module scope on purpose — react-hooks/static-components is an error here. */
 function TextField({
@@ -100,30 +246,61 @@ function TextField({
   );
 }
 
-/** Blocking issues stop generation; warnings must be seen but can be accepted. */
+/**
+ * The readiness report: blocking issues stop generation, warnings must be seen
+ * but can be accepted.
+ *
+ * Grouped by the screen that fixes them, and every finding carries a link to
+ * that screen. A flat list of twelve sentences is a puzzle; "Utility: 2 things,
+ * here they are, click to go and fix them" is a task list.
+ */
 export function ValidationList({ issues }: { issues: ValidationIssue[] }) {
   if (issues.length === 0) return null;
+  const groups = groupIssues(issues);
   return (
-    <ul className="space-y-1.5">
-      {issues.map((i, n) => (
-        <li
-          key={`${i.field}-${n}`}
-          className={cn(
-            "flex items-start gap-2 rounded-lg border p-2.5 text-xs",
-            i.severity === "block"
-              ? "border-red-200 bg-red-50 text-red-900"
-              : "border-amber-200 bg-amber-50 text-amber-900"
-          )}
-        >
-          {i.severity === "block" ? (
-            <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
-          ) : (
-            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-          )}
-          <span>{i.message}</span>
-        </li>
+    <div className="space-y-3">
+      {groups.map((g) => (
+        <div key={g.group} className="space-y-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {g.label}
+          </div>
+          <ul className="space-y-1.5">
+            {g.issues.map((i, n) => (
+              <li
+                key={`${i.code}-${n}`}
+                data-issue-code={i.code}
+                className={cn(
+                  "flex items-start gap-2 rounded-lg border p-2.5 text-xs",
+                  i.severity === "block"
+                    ? "border-red-200 bg-red-50 text-red-900"
+                    : "border-amber-200 bg-amber-50 text-amber-900"
+                )}
+              >
+                {i.severity === "block" ? (
+                  <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+                ) : (
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                )}
+                <span className="flex-1">
+                  {i.message}
+                  {i.action && (
+                    <>
+                      {" "}
+                      <Link
+                        href={i.action.href}
+                        className="whitespace-nowrap font-medium underline underline-offset-2"
+                      >
+                        {i.action.label} →
+                      </Link>
+                    </>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }
 
@@ -150,12 +327,12 @@ export function SolarDesignPanel({
     utilityAccountNo: design?.utilityAccountNo ?? "",
     meterNo: design?.meterNo ?? "",
     netMeteringProgram: design?.netMeteringProgram ?? "",
-    annualUsageKwh: design?.annualUsageKwh?.toString() ?? "",
-    avgMonthlyBill: design?.avgMonthlyBillCents ? (design.avgMonthlyBillCents / 100).toString() : "",
+    annualUsageKwh: num(design?.annualUsageKwh),
+    avgMonthlyBill: num(design?.avgMonthlyBillCents, 100),
     mountType: (design?.mountType ?? "roof") as MountType,
-    tsrfPct: design?.tsrfPct?.toString() ?? "",
+    tsrfPct: num(design?.tsrfPct),
     moduleId: design?.moduleId ?? "",
-    moduleQty: design?.moduleQty?.toString() ?? "0",
+    moduleQty: num(design?.moduleQty) || "0",
     inverterId: design?.inverterId ?? "",
     batteryId: design?.batteryId ?? "",
   });
@@ -243,7 +420,7 @@ export function SolarDesignPanel({
               <select
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                 value={form[key] as string}
-                disabled={!canEdit}
+                disabled={!canEdit || options.length === 0}
                 onChange={(e) => set(key, e.target.value)}
               >
                 <option value="">— none —</option>
@@ -251,6 +428,17 @@ export function SolarDesignPanel({
                   <option key={o.id} value={o.id}>{o.label}</option>
                 ))}
               </select>
+              {/* An empty dropdown is indistinguishable from a broken one. Say
+                  which it is, and where to go. */}
+              {options.length === 0 && (
+                <p className="text-[11px] text-amber-700">
+                  No active {label.toLowerCase()}s in the catalogue.{" "}
+                  <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
+                    Add one
+                  </Link>
+                  .
+                </p>
+              )}
             </div>
           ))}
           <TextField label="Module quantity" value={form.moduleQty} disabled={!canEdit} onChange={(v) => set("moduleQty", v)} type="number" />
@@ -275,6 +463,15 @@ export function SolarDesignPanel({
           </div>
         </div>
       </section>
+
+      <PanelLayoutPanel
+        leadId={leadId}
+        fileId={design?.layoutImageFileId ?? null}
+        provider={design?.designProvider ?? null}
+        externalRef={design?.designExternalRef ?? null}
+        uploadedAt={design?.layoutImageUploadedAt ?? null}
+        canEdit={canEdit}
+      />
 
       {canEdit && (
         <Button onClick={save} disabled={busy}>
@@ -301,46 +498,65 @@ export function SolarFinancePanel({
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [product, setProduct] = React.useState<FinanceProduct>(finance?.product ?? "cash");
-  const [form, setForm] = React.useState({
-    grossPpw: finance?.grossPpwCents ? (finance.grossPpwCents / 100).toFixed(2) : "",
-    dealerFeePct: finance?.dealerFeePct?.toString() ?? "",
-    adderTotal: finance?.adderTotalCents ? (finance.adderTotalCents / 100).toString() : "",
-    rate: finance?.rateMillsPerKwh ? (finance.rateMillsPerKwh / 1000).toFixed(3) : "",
-    monthly: finance?.monthlyPaymentCents ? (finance.monthlyPaymentCents / 100).toString() : "",
-    escalatorPct: finance?.escalatorPct?.toString() ?? "",
-    termYears: finance?.termYears?.toString() ?? "",
-    aprPct: finance?.aprPct?.toString() ?? "",
-    loanTermMonths: finance?.loanTermMonths?.toString() ?? "",
-    downPayment: finance?.downPaymentCents ? (finance.downPaymentCents / 100).toString() : "",
-    loanMonthly: finance?.loanMonthlyPaymentCents
-      ? (finance.loanMonthlyPaymentCents / 100).toString()
-      : "",
+  const seed = (f: SolarFinanceView) => ({
+    grossPpw: num(f?.grossPpwCents, 100, 2),
+    dealerFeePct: num(f?.dealerFeePct),
+    adderTotal: num(f?.adderTotalCents, 100),
+    rate: num(f?.rateMillsPerKwh, 1000, 3),
+    monthly: num(f?.monthlyPaymentCents, 100),
+    escalatorPct: num(f?.escalatorPct),
+    termYears: num(f?.termYears),
+    aprPct: num(f?.aprPct),
+    loanTermMonths: num(f?.loanTermMonths),
+    downPayment: num(f?.downPaymentCents, 100),
+    loanMonthly: num(f?.loanMonthlyPaymentCents, 100),
   });
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const [form, setForm] = React.useState(() => seed(finance));
+  const set = (k: keyof ReturnType<typeof seed>, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const isPurchase = product === "cash" || product === "loan";
   const isLoan = product === "loan";
 
+  // A blank box means "not set" (null); a typed "0" is a real zero and is sent
+  // as one. `form.x ? … : null` is safe here ONLY because these are STRINGS —
+  // "0" is truthy — which is exactly why the read side above needs its own
+  // null-vs-zero helper rather than the same-looking ternary.
+  const numOrNull = (s: string, scale = 1) =>
+    s.trim() === "" ? null : Math.round(Number(s) * scale);
+  const rawOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
+
   async function save() {
+    // Catch a non-numeric entry here rather than posting NaN and getting the
+    // generic "Invalid financing." back with no idea which box was wrong.
+    const bad = Object.entries(form).find(
+      ([, v]) => v.trim() !== "" && !Number.isFinite(Number(v))
+    );
+    if (bad) return toast.error(`"${bad[1]}" is not a number.`);
+
     setBusy(true);
     const res = await saveSolarFinanceAction({
       leadId,
       product,
-      grossPpwCents: form.grossPpw ? Math.round(Number(form.grossPpw) * 100) : undefined,
-      dealerFeePct: form.dealerFeePct ? Number(form.dealerFeePct) : undefined,
-      adderTotalCents: form.adderTotal ? Math.round(Number(form.adderTotal) * 100) : undefined,
-      rateMillsPerKwh: form.rate ? Math.round(Number(form.rate) * 1000) : null,
-      monthlyPaymentCents: form.monthly ? Math.round(Number(form.monthly) * 100) : null,
-      escalatorPct: form.escalatorPct ? Number(form.escalatorPct) : null,
-      termYears: form.termYears ? Number(form.termYears) : null,
-      aprPct: form.aprPct ? Number(form.aprPct) : null,
-      loanTermMonths: form.loanTermMonths ? Number(form.loanTermMonths) : null,
-      downPaymentCents: form.downPayment ? Math.round(Number(form.downPayment) * 100) : null,
-      loanMonthlyPaymentCents: form.loanMonthly
-        ? Math.round(Number(form.loanMonthly) * 100)
-        : null,
+      grossPpwCents: numOrNull(form.grossPpw, 100) ?? undefined,
+      dealerFeePct: rawOrNull(form.dealerFeePct) ?? undefined,
+      adderTotalCents: numOrNull(form.adderTotal, 100) ?? undefined,
+      rateMillsPerKwh: numOrNull(form.rate, 1000),
+      monthlyPaymentCents: numOrNull(form.monthly, 100),
+      escalatorPct: rawOrNull(form.escalatorPct),
+      termYears: rawOrNull(form.termYears),
+      aprPct: rawOrNull(form.aprPct),
+      loanTermMonths: rawOrNull(form.loanTermMonths),
+      downPaymentCents: numOrNull(form.downPayment, 100),
+      loanMonthlyPaymentCents: numOrNull(form.loanMonthly, 100),
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
+    // Re-seed from what was actually STORED, not from what we hoped we sent.
+    // A field the server gated off for this product (a lease has no APR) empties
+    // here immediately, instead of looking saved until the next hard reload.
+    if ("finance" in res && res.finance) {
+      setForm(seed(res.finance));
+      setProduct(res.finance.product);
+    }
     toast.success("Financing saved");
     router.refresh();
   }

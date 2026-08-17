@@ -2660,6 +2660,11 @@ model SolarEquipment {
   crossoverKind String?
   specs         Json               @default("{}")
   isActive      Boolean            @default(true)
+  /// The item a new design starts on for this kind. At most one ACTIVE default
+  /// per (company, kind) — enforced by a partial unique index in the migration,
+  /// not just in the action, because two defaults means the builder silently
+  /// picks whichever the sort happens to return first.
+  isDefault     Boolean            @default(false)
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
@@ -2668,6 +2673,11 @@ model SolarEquipment {
   designsAsBattery  SolarDesign[] @relation("DesignBattery")
 
   @@index([companyId, kind, isActive])
+  // Catalogue identity is (kind, manufacturer, model, rating) within a company.
+  // Declared here for intent; the ENFORCED index is functional (lower() +
+  // COALESCE over the two nullable columns) and lives in the migration, because
+  // Postgres treats NULLs as distinct and would otherwise let "Qcells / 400W"
+  // be entered twice with a null manufacturer.
   @@map("solar_equipment")
 }
 
@@ -2723,6 +2733,25 @@ model SolarDesign {
   planSetFileId    String?
   singleLineFileId String?
   loadCalcFileId   String?
+
+  // ── Panel layout (interim workflow) ─────────────────────────────────────
+  // Anexa does not draw roofs yet. Until it does, the panel layout is produced
+  // in an external design tool and attached here as an IMAGE, so a proposal can
+  // show the customer where the panels actually go.
+  //
+  // Deliberately NOT the aerial property photo: a satellite view with no array
+  // on it is a picture of a roof, and presenting it as a design is a lie the
+  // customer only discovers at the site survey. `layoutImageFileId` is null
+  // until someone uploads a real layout, and the proposal omits the section
+  // rather than rendering a placeholder.
+  layoutImageFileId       String?
+  layoutImageUploadedById String?
+  layoutImageUploadedAt   DateTime?
+  /// Who produced the layout ("Aurora", "Pipe Solar", …). Free text: this is a
+  /// provenance note on the document, not an integration.
+  designProvider          String?
+  /// The provider's own design/project id, so the drawing can be found again.
+  designExternalRef       String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

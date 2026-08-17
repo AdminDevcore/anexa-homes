@@ -3,8 +3,15 @@
 import Link from "next/link";
 import { Presentation } from "lucide-react";
 import type { FinanceProduct } from "@prisma/client";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ProposalVersionList, type ProposalVersion } from "@/components/portal/solar-panels";
+import {
+  SOLAR_PROPOSAL_STATE_CTA,
+  SOLAR_PROPOSAL_STATE_LABEL,
+  SOLAR_PROPOSAL_STATE_TONE,
+  type SolarProposalState,
+} from "@/lib/solar-proposal-state";
 
 const PRODUCT_LABEL: Record<FinanceProduct, string> = {
   cash: "Cash",
@@ -31,6 +38,8 @@ function usd(cents: number) {
  */
 export function SolarProposalStrip({
   leadId,
+  state,
+  blockingCount,
   product,
   systemSizeKwDc,
   offsetPct,
@@ -45,6 +54,10 @@ export function SolarProposalStrip({
   canEdit,
 }: {
   leadId: string;
+  /** Where the proposal stands. Derived — see lib/solar-proposal-state.ts. */
+  state: SolarProposalState;
+  /** How many blocking issues stand between this deal and a proposal. */
+  blockingCount: number;
   product: FinanceProduct | null;
   systemSizeKwDc: number | null;
   offsetPct: number | null;
@@ -78,8 +91,33 @@ export function SolarProposalStrip({
     offsetPct ? `${offsetPct.toFixed(0)}% offset` : null,
   ].filter(Boolean);
 
+  // "View proposal" has to go somewhere different from "Build proposal": once
+  // one exists, the thing a rep wants is to READ it, and the internal preview
+  // does that without recording a customer view or handling the share token.
+  const generated = state === "generated" || state === "sent" || state === "viewed" || state === "accepted";
+  const href = generated
+    ? `/portal/leads/${leadId}/solar-proposal/preview`
+    : `/portal/leads/${leadId}/solar-proposal`;
+
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          data-proposal-state={state}
+          className={cn(
+            "rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+            TONE_CLASS[SOLAR_PROPOSAL_STATE_TONE[state]]
+          )}
+        >
+          {SOLAR_PROPOSAL_STATE_LABEL[state]}
+        </span>
+        {state === "draft" && blockingCount > 0 && (
+          <span className="text-[11px] text-muted-foreground">
+            {blockingCount} {blockingCount === 1 ? "thing" : "things"} left to fix
+          </span>
+        )}
+      </div>
+
       {headline.length > 0 ? (
         <p className="text-sm font-medium">{headline.join(" · ")}</p>
       ) : (
@@ -92,11 +130,18 @@ export function SolarProposalStrip({
 
       {canBuild && (
         <Button asChild className="w-full bg-solar text-solar-foreground hover:bg-solar/90 sm:w-auto">
-          <Link href={`/portal/leads/${leadId}/solar-proposal`}>
-            <Presentation className="size-4" /> Build Proposal
+          <Link href={href}>
+            <Presentation className="size-4" /> {SOLAR_PROPOSAL_STATE_CTA[state]}
           </Link>
         </Button>
       )}
     </div>
   );
 }
+
+const TONE_CLASS: Record<"neutral" | "progress" | "ready" | "done", string> = {
+  neutral: "bg-muted text-muted-foreground",
+  progress: "bg-sky-100 text-sky-700",
+  ready: "bg-amber-100 text-amber-800",
+  done: "bg-emerald-100 text-emerald-700",
+};

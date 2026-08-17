@@ -52,6 +52,9 @@ import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
 import { SolarProductChip } from "@/components/portal/solar/product-chip";
 import { SolarProposalStrip } from "@/components/portal/solar/proposal-strip";
+import { readSolarReadiness } from "@/server/modules/solar/readiness";
+import { canGenerate } from "@/lib/solar-validation";
+import { solarProposalState } from "@/lib/solar-proposal-state";
 import { PropertyView } from "@/components/portal/property-view";
 import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-summary-cards";
 import { DealSummaryPanel } from "@/components/portal/deal-summary-panel";
@@ -252,6 +255,20 @@ export default async function LeadDetailPage({
         }),
       ])
     : [null, null, [], []];
+
+  // Where the proposal stands, as one value. Derived rather than stored — see
+  // src/lib/solar-proposal-state.ts for why a column would go stale.
+  const solarReadiness = isSolarDeal
+    ? await readSolarReadiness(user.companyId, lead.id)
+    : null;
+  const solarState = isSolarDeal
+    ? solarProposalState({
+        hasDesign: !!solarDesign,
+        hasFinance: !!solarFinance,
+        isReady: !!solarReadiness?.ok && canGenerate(solarReadiness.issues),
+        latestProposal: solarProposals[0] ?? null,
+      })
+    : "not_started";
   const linkedDeal = isSolarDeal || lead.linkedDealId
     ? await getLinkedDealSummary(user.companyId, lead.linkedDealId)
     : null;
@@ -877,6 +894,12 @@ export default async function LeadDetailPage({
                 <Card title="Proposal" icon={Sun} tone="solar">
                   <SolarProposalStrip
                     leadId={lead.id}
+                    state={solarState}
+                    blockingCount={
+                      solarReadiness?.ok
+                        ? solarReadiness.issues.filter((i) => i.severity === "block").length
+                        : 0
+                    }
                     product={solarFinance?.product ?? null}
                     systemSizeKwDc={solarDesign?.systemSizeKwDc ?? null}
                     offsetPct={solarDesign?.offsetPct ?? null}
