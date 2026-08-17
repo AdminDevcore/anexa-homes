@@ -3,14 +3,34 @@ import { runUnscoped, runInVertical, asActiveVertical } from "@/server/vertical/
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
+ * Statuses that make a proposal publicly readable.
+ *
+ * A token is NOT authorization on its own. `draft` and `generated` mean nobody
+ * has decided to show this to the customer yet, and until that decision is made
+ * the document has no public existence — even if a token somehow sits on the
+ * row (an old one minted by the previous generate-mints-a-token behaviour, a
+ * restored backup, a hand-written UPDATE).
+ *
+ * Belt AND braces on purpose: the send action is what mints a token, so an
+ * unsent proposal should have none to try. This check is what makes that a
+ * guarantee rather than an assumption.
+ */
+const PUBLICLY_READABLE = ["sent", "viewed", "signed"] as const;
+
+/**
  * Public read of a proposal by its share token.
  *
- * The token is the authorization and identifies exactly one row, whose
- * workspace is not known until it is read — the same pattern as the other
- * public token pages. Returns the FROZEN snapshot, never a recomputation, so
- * the customer always sees exactly what was generated for them.
+ * The token identifies exactly one row, whose workspace is not known until it
+ * is read — the same pattern as the other public token pages. Returns the
+ * FROZEN snapshot, never a recomputation, so the customer always sees exactly
+ * what was generated for them.
+ *
+ * Returns null for anything not yet sent, which the route renders as a 404 —
+ * deliberately indistinguishable from a bad token, so probing cannot tell the
+ * difference between "no such proposal" and "exists but not sent yet".
  */
 export async function getPublicSolarProposal(token: string) {
+  if (!token) return null;
   const proposal = await runUnscoped(
     "public proposal page: resolve by share token before the workspace is known",
     () =>
@@ -18,11 +38,16 @@ export async function getPublicSolarProposal(token: string) {
         where: { publicToken: token },
         select: {
           id: true, leadId: true, version: true, status: true, signedAt: true,
-          supersededAt: true, snapshot: true, lead: { select: { vertical: true } },
+          sentAt: true, supersededAt: true, snapshot: true,
+          lead: { select: { vertical: true } },
         },
       })
   );
   if (!proposal) return null;
+  // The gate. Both conditions, because status and sentAt are written together
+  // and either one being wrong should close the door rather than open it.
+  if (!PUBLICLY_READABLE.includes(proposal.status as (typeof PUBLICLY_READABLE)[number])) return null;
+  if (!proposal.sentAt) return null;
   return { ...proposal, snapshot: proposal.snapshot as unknown as SolarProposalSnapshot };
 }
 
@@ -31,8 +56,12 @@ export async function recordProposalView(token: string, ip: string | null) {
   const proposal = await getPublicSolarProposal(token);
   if (!proposal) return;
   await runInVertical(asActiveVertical(proposal.lead.vertical), async () => {
+    // Only a SENT proposal can transition to viewed. `generated` used to be in
+    // this list, which meant an internal preview could mark a document the
+    // customer had never received as "viewed" — destroying the one signal that
+    // says whether they actually opened it.
     await prisma.solarProposal.updateMany({
-      where: { id: proposal.id, status: { in: ["generated", "sent"] } },
+      where: { id: proposal.id, status: "sent" },
       data: { status: "viewed", viewedAt: new Date() },
     });
     await prisma.solarProposalEvent.create({
@@ -54,6 +83,8 @@ export async function acceptSolarProposal(
   token: string,
   meta: { name: string; ip: string | null }
 ): Promise<{ ok: boolean; error?: string }> {
+  // getPublicSolarProposal already refuses anything not sent, so acceptance is
+  // unreachable for a draft or an internally-generated preview.
   const proposal = await getPublicSolarProposal(token);
   if (!proposal) return { ok: false, error: "This proposal link is not valid." };
   if (proposal.supersededAt) {

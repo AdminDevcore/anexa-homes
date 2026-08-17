@@ -910,6 +910,7 @@ export default async function LeadDetailPage({
                     canEdit={can(user, "create", "Proposal")}
                     versions={solarProposals.map((v) => ({
                       id: v.id,
+                      leadId: lead.id,
                       version: v.version,
                       status: v.status,
                       publicToken: v.publicToken,

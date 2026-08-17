@@ -2747,6 +2747,13 @@ model SolarDesign {
   layoutImageFileId       String?
   layoutImageUploadedById String?
   layoutImageUploadedAt   DateTime?
+  /// False = the drawing is still preliminary and the proposal says so. Only an
+  /// authorised user marks it final, and only then does the caveat come off —
+  /// a layout is preliminary until somebody accountable says otherwise, not by
+  /// default because nobody got round to it.
+  layoutApproved          Boolean   @default(false)
+  layoutApprovedById      String?
+  layoutApprovedAt        DateTime?
   /// Who produced the layout ("Aurora", "Pipe Solar", …). Free text: this is a
   /// provenance note on the document, not an integration.
   designProvider          String?
@@ -2870,8 +2877,22 @@ model SolarProposal {
 
   version     Int
   status      ProposalStatus @default(draft)
-  /// Unguessable public token = the shareable customer link (/proposal/[token]).
-  publicToken String         @unique
+  /**
+   * The shareable customer link (/proposal/[token]).
+   *
+   * NULL until the proposal is actually SENT. Generating one is an internal act
+   * — a rep checking their own work — and it used to mint a live, unguessable
+   * but fully working public URL as a side effect. Every draft anybody had ever
+   * generated was already on the public internet, waiting to be guessed or
+   * leaked through a screenshot; nobody had to click "share" for that to be
+   * true. Minting on send instead means an unsent proposal has no public
+   * surface at all.
+   *
+   * Unique still holds: Postgres treats NULLs as distinct, so any number of
+   * unsent proposals can sit at NULL while every real token stays one-to-one.
+   * The public route ALSO checks status, so a token alone is not access.
+   */
+  publicToken String?        @unique
 
   /// The frozen document. See SolarProposalSnapshot in src/lib/solar-proposal.ts.
   snapshot Json

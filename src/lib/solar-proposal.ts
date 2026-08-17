@@ -247,14 +247,21 @@ export type SolarProposalSnapshot = {
     battery: SnapshotEquipment | null;
   };
   /**
-   * The panel layout drawing. Null means no layout was attached — the section is
+   * The panel layout drawing. Null means no usable layout — the section is
    * OMITTED rather than rendered with a placeholder or an aerial photo.
+   *
+   * Holds the FILE ID, not a URL. A URL would have had to embed the public
+   * share token, which would then be frozen into the snapshot and leak into
+   * every internal preview of it. Each renderer builds its own URL from this id:
+   * the portal uses the authenticated file route, the customer's copy uses the
+   * token-scoped one. The id is an identity, not a secret.
    */
   layout: {
-    imageUrl: string;
+    fileId: string;
     provider: string | null;
     externalRef: string | null;
-    preliminary: true;
+    /** True until an authorised user marks the drawing final. */
+    preliminary: boolean;
   } | null;
   financing: {
     product: FinanceProduct;
@@ -319,7 +326,7 @@ export function buildProposalSnapshot(args: {
     inverter?: SnapshotEquipment | null;
     battery?: SnapshotEquipment | null;
   };
-  layout?: { imageUrl: string; provider: string | null; externalRef: string | null } | null;
+  layout?: { fileId: string; provider: string | null; externalRef: string | null; preliminary: boolean } | null;
   finance: {
     product: FinanceProduct;
     grossPpwCents: number;
@@ -432,7 +439,7 @@ export function buildProposalSnapshot(args: {
       inverter: design.inverter ?? null,
       battery: design.battery ?? null,
     },
-    layout: args.layout ? { ...args.layout, preliminary: true } : null,
+    layout: args.layout ?? null,
     financing: {
       product: finance.product,
       contractPriceCents: purchase?.contractPriceCents ?? null,

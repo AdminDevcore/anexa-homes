@@ -108,3 +108,36 @@ export async function getObject(key: string): Promise<Buffer> {
   if (DRIVER === "db") return getDb(key);
   return getLocal(key);
 }
+
+/**
+ * Is the stored object actually there?
+ *
+ * A FileAsset row and the bytes it points at are two different things, and they
+ * can drift: a bucket lifecycle rule expires an object, a restore brings the
+ * database back without the storage, a local dev tree gets wiped. Asking the
+ * row alone would say "yes" and then hand a customer a broken image.
+ *
+ * Metadata-only on every driver — HEAD on S3, a stat on disk, a size lookup in
+ * Postgres — so checking is cheap enough to do before every proposal render.
+ * Never throws: anything unexpected reads as "not available", because the
+ * caller's job is to decide whether to show a section, not to handle an outage.
+ */
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    if (DRIVER === "s3") {
+      const { HeadObjectCommand } = await import("@aws-sdk/client-s3");
+      const { client, bucket } = await s3();
+      await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      return true;
+    }
+    if (DRIVER === "db") {
+      const { prisma } = await import("@/server/db/client");
+      const row = await prisma.storedFile.findUnique({ where: { key }, select: { size: true } });
+      return !!row && row.size > 0;
+    }
+    const stat = await fs.stat(path.join(root(), key));
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}

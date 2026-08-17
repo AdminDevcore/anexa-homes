@@ -6,6 +6,7 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder";
+import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,14 @@ export default async function SolarProposalBuilderPage({
         ratingW: e.ratingW,
       }));
 
+  // The layout is only shown as present when the file row AND its bytes both
+  // resolve. A dangling reference gets the rep a warning, never a broken image.
+  const layoutAvailable = !!(await resolveLayoutAsset(
+    user.companyId,
+    lead.id,
+    design?.layoutImageFileId
+  ));
+
   const address = [lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
     .filter(Boolean)
     .join(" · ");
@@ -120,8 +129,11 @@ export default async function SolarProposalBuilderPage({
         modules={equipOptions("module")}
         inverters={equipOptions("inverter")}
         batteries={equipOptions("battery")}
+        layoutAvailable={layoutAvailable}
+        canApproveLayout={can(user, "update", "Settings")}
         versions={proposals.map((v) => ({
           id: v.id,
+          leadId: lead.id,
           version: v.version,
           status: v.status,
           publicToken: v.publicToken,

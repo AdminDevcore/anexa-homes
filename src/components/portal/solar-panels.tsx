@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Loader2, TriangleAlert, CircleAlert, Sun, Info, ImageUp, Trash2,
+  Loader2, TriangleAlert, CircleAlert, Sun, Info, ImageUp, Trash2, BadgeCheck,
 } from "lucide-react";
 import type { FinanceProduct, MountType } from "@prisma/client";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,7 @@ import {
   markProposalSentAction,
   uploadPanelLayoutAction,
   removePanelLayoutAction,
+  setLayoutApprovalAction,
 } from "@/server/modules/solar/proposal-actions";
 
 type EquipmentOption = { id: string; label: string; ratingW: number | null };
@@ -39,6 +40,9 @@ type EquipmentOption = { id: string; label: string; ratingW: number | null };
 function PanelLayoutPanel({
   leadId,
   fileId,
+  available,
+  approved,
+  canApprove,
   provider,
   externalRef,
   uploadedAt,
@@ -46,6 +50,10 @@ function PanelLayoutPanel({
 }: {
   leadId: string;
   fileId: string | null;
+  /** The file row AND its bytes both resolved server-side. */
+  available: boolean;
+  approved: boolean;
+  canApprove: boolean;
   provider: string | null;
   externalRef: string | null;
   uploadedAt: string | null;
@@ -75,7 +83,17 @@ function PanelLayoutPanel({
     const res = await removePanelLayoutAction(leadId);
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
-    toast.success("Layout removed");
+    // Detaches the reference only. The uploaded file stays on the deal.
+    toast.success("Layout removed from the proposal");
+    router.refresh();
+  }
+
+  async function approve(next: boolean) {
+    setBusy(true);
+    const res = await setLayoutApprovalAction(leadId, next);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success(next ? "Layout marked final" : "Layout back to preliminary");
     router.refresh();
   }
 
@@ -85,19 +103,46 @@ function PanelLayoutPanel({
         Panel layout
       </h4>
 
-      {fileId ? (
+      {fileId && available ? (
         <div className="space-y-2">
+          {/* object-contain in an auto-height box: the uploaded drawing is
+              rendered exactly as designed, never cropped or stretched. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`/portal/files/${fileId}`}
             alt="Panel layout"
-            className="w-full rounded-lg border border-border bg-muted/30 object-contain"
+            className="h-auto w-full rounded-lg border border-border bg-muted/30 object-contain"
           />
-          <p className="text-[11px] text-muted-foreground">
-            Shown on the proposal, labelled as a preliminary design.
-            {uploadedAt ? ` Attached ${new Date(uploadedAt).toLocaleDateString()}.` : ""}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                approved ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+              )}
+            >
+              {approved ? "Final design" : "Preliminary design"}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              {approved
+                ? "The proposal drops the may-change caveat."
+                : "The proposal tells the customer this may change at the site survey."}
+              {uploadedAt ? ` Attached ${new Date(uploadedAt).toLocaleDateString()}.` : ""}
+            </span>
+          </div>
+          {canApprove && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => approve(!approved)}>
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <BadgeCheck className="size-4" />}
+              {approved ? "Mark preliminary again" : "Mark this layout final"}
+            </Button>
+          )}
         </div>
+      ) : fileId && !available ? (
+        // The design still references a drawing, but the file or its bytes are
+        // gone. The customer's copy omits the section entirely; this is the
+        // rep's cue to fix it before that matters.
+        <p className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
+          The panel-layout image is unavailable. Upload or replace it before sending.
+        </p>
       ) : (
         <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
           No layout attached. The proposal will not show the customer where the panels go — it
@@ -171,6 +216,7 @@ export type SolarDesignView = {
   layoutImageUploadedAt: string | null;
   designProvider: string | null;
   designExternalRef: string | null;
+  layoutApproved: boolean;
 } | null;
 
 export type SolarFinanceView = {
@@ -311,6 +357,8 @@ export function SolarDesignPanel({
   inverters,
   batteries,
   canEdit,
+  layoutAvailable,
+  canApproveLayout,
 }: {
   leadId: string;
   design: SolarDesignView;
@@ -318,6 +366,9 @@ export function SolarDesignPanel({
   inverters: EquipmentOption[];
   batteries: EquipmentOption[];
   canEdit: boolean;
+  /** Resolved server-side: the file row AND its bytes both exist. */
+  layoutAvailable: boolean;
+  canApproveLayout: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -467,6 +518,9 @@ export function SolarDesignPanel({
       <PanelLayoutPanel
         leadId={leadId}
         fileId={design?.layoutImageFileId ?? null}
+        available={layoutAvailable}
+        approved={design?.layoutApproved ?? false}
+        canApprove={canApproveLayout}
         provider={design?.designProvider ?? null}
         externalRef={design?.designExternalRef ?? null}
         uploadedAt={design?.layoutImageUploadedAt ?? null}
@@ -677,9 +731,11 @@ export function SolarFinancePanel({
  */
 export type ProposalVersion = {
   id: string;
+  leadId: string;
   version: number;
   status: string;
-  publicToken: string;
+  /** NULL until the proposal is sent — an unsent one has no public link. */
+  publicToken: string | null;
   supersededAt: string | null;
   sentAt: string | null;
   viewedAt: string | null;
@@ -798,14 +854,26 @@ export function ProposalVersionList({
               {v.viewedAt ? " · viewed" : ""}
               {v.signedAt ? ` · accepted ${new Date(v.signedAt).toLocaleDateString()}` : ""}
             </span>
-            <a
-              href={`/proposal/${v.publicToken}`}
-              target="_blank"
-              rel="noreferrer"
+            {/* The public link is offered ONLY once the proposal has actually
+                been sent. Before that there is no token and no public surface;
+                reviewing your own work goes through the internal preview, which
+                does not mint a customer view or handle the token. */}
+            <Link
+              href={`/portal/leads/${v.leadId}/solar-proposal/preview?v=${v.version}`}
               className="text-xs underline underline-offset-2"
             >
-              Open
-            </a>
+              Preview
+            </Link>
+            {v.publicToken && (
+              <a
+                href={`/proposal/${v.publicToken}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs underline underline-offset-2"
+              >
+                Customer link
+              </a>
+            )}
             {canEdit && !v.sentAt && !v.supersededAt && (
               <button
                 className="text-xs underline underline-offset-2"

@@ -8,6 +8,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
+import { resolveLayoutAsset } from "./layout-asset";
 import { getSolarSettings } from "./settings";
 import { readSolarReadiness } from "./readiness";
 import { buildProposalSnapshot, type SnapshotEquipment } from "@/lib/solar-proposal";
@@ -111,15 +112,19 @@ export async function generateSolarProposalAction(leadId: string) {
   });
   const version = (latest?.version ?? 0) + 1;
 
-  // The layout drawing, if one has been attached. Served through the proposal's
-  // own token-scoped route so the image is readable by the customer without
-  // exposing the portal's authenticated file endpoint.
-  const publicToken = randomBytes(24).toString("base64url");
-  const layout = design.layoutImageFileId
+  // The layout drawing — included ONLY if the file row AND the bytes behind it
+  // are both really there. A FileAsset whose object has since gone (a bucket
+  // lifecycle rule, a database restored without its storage) would otherwise be
+  // frozen into the snapshot and render as a broken image in front of a
+  // customer. Verified now, and verified again at render.
+  const layoutAsset = await resolveLayoutAsset(user.companyId, leadId, design.layoutImageFileId);
+  const layout = layoutAsset
     ? {
-        imageUrl: `/proposal/${publicToken}/layout-image`,
+        fileId: layoutAsset.id,
         provider: design.designProvider,
         externalRef: design.designExternalRef,
+        // Preliminary unless somebody accountable has marked it final.
+        preliminary: !design.layoutApproved,
       }
     : null;
 
@@ -199,7 +204,9 @@ export async function generateSolarProposalAction(leadId: string) {
       leadId,
       version,
       status: "generated",
-      publicToken,
+      // NO public token. Generating is internal; a token is minted only when the
+      // proposal is actually sent. See the note on SolarProposal.publicToken.
+      publicToken: null,
       snapshot: snapshot as never,
       createdById: user.userId,
       events: {
@@ -239,22 +246,46 @@ export async function generateSolarProposalAction(leadId: string) {
   return { ok: true as const, ...proposal, warnings: readiness.issues };
 }
 
-/** Record that the proposal was sent to the customer. */
+/**
+ * Record that the proposal was sent, and mint its public link.
+ *
+ * THIS is where a proposal acquires a public surface — not generation. The
+ * token is created here, once, and never rotated afterwards: a customer may be
+ * holding that URL, and re-issuing it would break a live document.
+ *
+ * Nothing is emailed or texted from here. This records that a send happened and
+ * activates the link; wiring an actual delivery channel is a separate piece of
+ * work behind its own review.
+ */
 export async function markProposalSentAction(proposalId: string) {
   const user = await requireUser();
   if (!can(user, "update", "Proposal")) return fail("Not allowed.");
   const p = await prisma.solarProposal.findFirst({
     where: { companyId: user.companyId, id: proposalId },
-    select: { id: true, leadId: true, version: true },
+    select: { id: true, leadId: true, version: true, publicToken: true, supersededAt: true, signedAt: true },
   });
   if (!p) return fail("Proposal not found.");
+  if (p.supersededAt) return fail("This version has been superseded. Send the current one.");
+
+  // 24 random bytes from the CSPRNG — the same source the rest of the app uses
+  // for share tokens. Kept if one already exists so a re-send does not
+  // invalidate a link the customer already has.
+  const publicToken = p.publicToken ?? randomBytes(24).toString("base64url");
 
   await prisma.solarProposal.update({
     where: { id: p.id },
     data: {
       status: "sent",
       sentAt: new Date(),
-      events: { create: { type: "sent", actorId: user.userId, actorName: user.fullName } },
+      publicToken,
+      events: {
+        create: {
+          type: "sent",
+          actorId: user.userId,
+          actorName: user.fullName,
+          detail: p.publicToken ? "re-sent (existing link kept)" : "public link activated",
+        },
+      },
     },
   });
   await prisma.activityLog.create({
@@ -356,12 +387,68 @@ export async function uploadPanelLayoutAction(formData: FormData) {
       layoutImageUploadedAt: new Date(),
       designProvider: provider,
       designExternalRef: externalRef,
+      // A REPLACEMENT drawing is not the approved one. Carrying the old
+      // approval across would let a new layout inherit "final" status from a
+      // decision nobody made about it.
+      layoutApproved: false,
+      layoutApprovedById: null,
+      layoutApprovedAt: null,
     },
   });
 
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   revalidatePath(`/portal/leads/${leadId}`);
   return { ok: true as const, fileId: asset.id };
+}
+
+/**
+ * Mark the attached layout final, or send it back to preliminary.
+ *
+ * A drawing stays PRELIMINARY until somebody accountable says otherwise — the
+ * proposal carries the "may change at your site survey" caveat until then. The
+ * failure mode of getting this backwards is telling a homeowner a layout is
+ * final when nobody has checked it, so the default is the cautious one and
+ * clearing the caveat is a deliberate act with a name attached to it.
+ *
+ * Gated on Settings rather than Lead: approving a design is an authority call,
+ * not part of ordinary deal editing.
+ */
+export async function setLayoutApprovalAction(leadId: string, approved: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) {
+    return fail("Only a manager or admin can mark a layout final.");
+  }
+
+  const lead = await prisma.lead.findFirst({
+    where: { companyId: user.companyId, id: leadId },
+    select: { id: true, vertical: true },
+  });
+  if (!lead) return fail("Deal not found.");
+  if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  const design = await prisma.solarDesign.findUnique({
+    where: { leadId },
+    select: { layoutImageFileId: true },
+  });
+  if (!design?.layoutImageFileId) return fail("There is no layout to approve.");
+  if (approved) {
+    // Approving a drawing whose bytes have gone would put "Final design" on a
+    // proposal with no image in it.
+    const asset = await resolveLayoutAsset(user.companyId, leadId, design.layoutImageFileId);
+    if (!asset) return fail("The panel-layout image is unavailable. Upload or replace it before sending.");
+  }
+
+  await prisma.solarDesign.updateMany({
+    where: { leadId, companyId: user.companyId },
+    data: {
+      layoutApproved: approved,
+      layoutApprovedById: approved ? user.userId : null,
+      layoutApprovedAt: approved ? new Date() : null,
+    },
+  });
+
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  return { ok: true as const };
 }
 
 /** Detach the layout. The FileAsset stays — removing it from the draft is not a delete. */

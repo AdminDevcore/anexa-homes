@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, TriangleAlert } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
+import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { SolarProposalView } from "@/components/proposal/solar-proposal-view";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
@@ -53,20 +54,18 @@ export default async function SolarProposalPreviewPage({
 
   const snapshot = proposal.snapshot as unknown as SolarProposalSnapshot;
 
-  // The snapshot points the layout image at /proposal/<token>/layout-image,
-  // because that is the URL the CUSTOMER's copy has to use. Rendering it here
-  // would put the share token into this page's HTML — the one thing this route
-  // exists to avoid. Swap in the authenticated file URL for the preview only;
-  // no customer-visible figure is touched.
-  if (snapshot.layout) {
-    const design = await prisma.solarDesign.findUnique({
-      where: { leadId: id },
-      select: { layoutImageFileId: true },
-    });
-    snapshot.layout = design?.layoutImageFileId
-      ? { ...snapshot.layout, imageUrl: `/portal/files/${design.layoutImageFileId}` }
-      : null;
-  }
+  // The snapshot stores the layout's FILE ID, not a URL, so the preview serves
+  // it through the authenticated portal route — no share token is involved, and
+  // none appears in this page's HTML.
+  //
+  // Resolved rather than assumed: if the drawing has since been deleted, or its
+  // bytes are gone, the section is omitted and the rep is told, instead of a
+  // broken image sitting in a document about to go to a customer.
+  const layoutAsset = snapshot.layout
+    ? await resolveLayoutAsset(user.companyId, id, snapshot.layout.fileId)
+    : null;
+  const layoutImageUrl = layoutAsset ? `/portal/files/${layoutAsset.id}` : null;
+  const layoutMissing = !!snapshot.layout && !layoutAsset;
 
   return (
     <div className="min-h-screen bg-background">
@@ -82,6 +81,25 @@ export default async function SolarProposalPreviewPage({
         </span>
       </div>
 
+      {/* Internal only — the customer's copy simply omits the section. This is
+          the rep's cue to fix it BEFORE the proposal goes anywhere. */}
+      {layoutMissing && (
+        <div className="mx-auto mt-4 max-w-3xl px-4 print:hidden sm:px-6">
+          <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+            <span>
+              The panel-layout image is unavailable. Upload or replace it before sending.{" "}
+              <Link
+                href={`/portal/leads/${id}/solar-proposal?step=design`}
+                className="font-medium underline underline-offset-2"
+              >
+                Open system design →
+              </Link>
+            </span>
+          </div>
+        </div>
+      )}
+
       <SolarProposalView
         snapshot={snapshot}
         // No token is handed to the preview: acceptance is disabled, so there is
@@ -90,6 +108,7 @@ export default async function SolarProposalPreviewPage({
         alreadySigned={!!proposal.signedAt}
         superseded={!!proposal.supersededAt}
         previewMode
+        layoutImageUrl={layoutImageUrl}
       />
     </div>
   );

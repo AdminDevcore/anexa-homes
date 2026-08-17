@@ -76,11 +76,23 @@ export function SolarProposalView({
   alreadySigned,
   superseded,
   previewMode = false,
+  layoutImageUrl = null,
 }: {
   snapshot: SolarProposalSnapshot;
   token: string;
   alreadySigned: boolean;
   superseded: boolean;
+  /**
+   * Where to fetch the panel layout, resolved by the CALLER — the portal uses
+   * the authenticated file route, the customer's copy the token-scoped one.
+   *
+   * Null means the drawing is not available (never uploaded, deleted, or its
+   * bytes are gone) and the whole section is omitted. The component never
+   * builds this URL itself, because doing so would mean guessing whether the
+   * file still exists and emitting an <img> that resolves to a broken icon in
+   * front of a homeowner.
+   */
+  layoutImageUrl?: string | null;
   /**
    * Renders the document exactly as the customer would see it, with acceptance
    * DISABLED. Used to inspect a proposal before signing is switched on — the
@@ -225,20 +237,27 @@ export function SolarProposalView({
       </Section>
 
       {/* ── 4 · Panel layout ─────────────────────────────────────────────── */}
-      {/* Rendered ONLY when a real layout was attached. No layout means no
-          section — never a placeholder, and never the aerial property photo
-          standing in for a design that was not done. */}
-      {s.layout && (
+      {/* Rendered ONLY when the drawing is genuinely fetchable. Both conditions
+          are required: the snapshot recorded a layout AND the caller resolved a
+          live URL for it. No layout means no section — never a placeholder,
+          never an empty frame, and never the aerial property photo standing in
+          for a design that was not done. */}
+      {s.layout && layoutImageUrl && (
         <Section title="Where the panels go">
+          {/* The uploaded drawing, rendered EXACTLY as designed: `object-contain`
+              inside an auto-height box, so it is never cropped, stretched or
+              repositioned. The panel positions are the design — distorting them
+              would misrepresent where the array actually goes. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={s.layout.imageUrl}
-            alt={`Preliminary panel layout for ${s.customer.address}`}
-            className="w-full rounded-xl border border-border bg-muted/30 object-contain"
+            src={layoutImageUrl}
+            alt={`${s.layout.preliminary ? "Preliminary panel" : "Panel"} layout for ${s.customer.address}`}
+            className="h-auto max-h-[70vh] w-full rounded-xl border border-border bg-muted/30 object-contain"
           />
           <p className="mt-2 text-xs text-muted-foreground">
-            Preliminary design. The final layout is confirmed at your site survey and may change
-            once the roof and electrical panel have been measured.
+            {s.layout.preliminary
+              ? "Preliminary design. The final layout is confirmed at your site survey and may change once the roof and electrical panel have been measured."
+              : "Final design, confirmed by your project team. Minor adjustments can still arise during installation."}
             {s.layout.provider ? ` Produced in ${s.layout.provider}.` : ""}
           </p>
         </Section>

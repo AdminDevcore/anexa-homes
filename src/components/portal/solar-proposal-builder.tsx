@@ -45,6 +45,8 @@ export function SolarProposalBuilder({
   inverters,
   batteries,
   versions,
+  layoutAvailable,
+  canApproveLayout,
 }: {
   leadId: string;
   /**
@@ -65,6 +67,9 @@ export function SolarProposalBuilder({
   inverters: EquipmentOption[];
   batteries: EquipmentOption[];
   versions: ProposalVersion[];
+  /** Resolved server-side: the layout file row AND its bytes both exist. */
+  layoutAvailable: boolean;
+  canApproveLayout: boolean;
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
 
@@ -98,6 +103,8 @@ export function SolarProposalBuilder({
           inverters={inverters}
           batteries={batteries}
           canEdit={canEditDeal}
+          layoutAvailable={layoutAvailable}
+          canApproveLayout={canApproveLayout}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

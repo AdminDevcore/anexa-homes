@@ -223,14 +223,36 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
   it("records the layout only when one was actually attached", () => {
     expect(build().layout).toBeNull();
     const withLayout = build({
-      layout: { imageUrl: "/proposal/tok/layout-image", provider: "Aurora", externalRef: "A-1" },
+      layout: { fileId: "file-1", provider: "Aurora", externalRef: "A-1", preliminary: true },
     });
     expect(withLayout.layout).toEqual({
-      imageUrl: "/proposal/tok/layout-image",
+      fileId: "file-1",
       provider: "Aurora",
       externalRef: "A-1",
       preliminary: true,
     });
+  });
+
+  it("stores the layout's file id, never a URL carrying the share token", () => {
+    // A URL would have had to embed the public token, freezing it into the
+    // snapshot and leaking it into every internal preview of that proposal.
+    const s = build({
+      layout: { fileId: "file-1", provider: null, externalRef: null, preliminary: true },
+    });
+    expect(JSON.stringify(s)).not.toMatch(/\/proposal\//);
+    expect(s.layout).toHaveProperty("fileId");
+    expect(s.layout).not.toHaveProperty("imageUrl");
+  });
+
+  it("carries the approved flag through, so a final design drops the caveat", () => {
+    const prelim = build({
+      layout: { fileId: "f", provider: null, externalRef: null, preliminary: true },
+    });
+    const final = build({
+      layout: { fileId: "f", provider: null, externalRef: null, preliminary: false },
+    });
+    expect(prelim.layout!.preliminary).toBe(true);
+    expect(final.layout!.preliminary).toBe(false);
   });
 
   it("carries the energy profile the savings were built from", () => {

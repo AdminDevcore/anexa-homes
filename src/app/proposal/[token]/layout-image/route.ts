@@ -17,34 +17,39 @@ export async function GET(
 ) {
   const { token } = await params;
 
+  if (!token) return new NextResponse("Not found", { status: 404 });
+
   // The token identifies exactly one proposal, whose workspace is not known
-  // until it has been read.
+  // until it has been read. SENT-ONLY, exactly like the proposal page itself:
+  // an unsent proposal must not leak its layout drawing either, and a route
+  // that only checked the token would have been the way around the page's gate.
   const proposal = await runUnscoped(
     "public proposal layout image: resolve the proposal by its token",
     () =>
       prisma.solarProposal.findUnique({
         where: { publicToken: token },
-        select: { companyId: true, leadId: true },
+        select: { companyId: true, leadId: true, status: true, sentAt: true, snapshot: true },
       })
   );
   if (!proposal) return new NextResponse("Not found", { status: 404 });
+  if (!proposal.sentAt) return new NextResponse("Not found", { status: 404 });
+  if (!["sent", "viewed", "signed"].includes(proposal.status)) {
+    return new NextResponse("Not found", { status: 404 });
+  }
 
-  const design = await runUnscoped(
-    "public proposal layout image: read the layout attached to that design",
-    () =>
-      prisma.solarDesign.findUnique({
-        where: { leadId: proposal.leadId },
-        select: { layoutImageFileId: true },
-      })
-  );
-  if (!design?.layoutImageFileId) return new NextResponse("Not found", { status: 404 });
+  // Serve the file the SNAPSHOT froze, not whatever the design points at today.
+  // The customer's document is a record of what they were shown; swapping the
+  // drawing under it after the fact would quietly rewrite that record.
+  const snapshot = proposal.snapshot as unknown as { layout?: { fileId?: string } | null };
+  const fileId = snapshot?.layout?.fileId;
+  if (!fileId) return new NextResponse("Not found", { status: 404 });
 
   const file = await runUnscoped(
     "public proposal layout image: read the file row",
     () =>
       prisma.fileAsset.findFirst({
         where: {
-          id: design.layoutImageFileId!,
+          id: fileId,
           companyId: proposal.companyId,
           leadId: proposal.leadId,
           kind: "photo",
