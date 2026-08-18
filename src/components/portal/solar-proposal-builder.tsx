@@ -34,6 +34,7 @@ const STEPS: { id: StepId; label: string; icon: React.ComponentType<{ className?
  */
 export function SolarProposalBuilder({
   leadId,
+  initialStep = "design",
   canEditDeal,
   canCreateProposal,
   design,
@@ -44,8 +45,16 @@ export function SolarProposalBuilder({
   inverters,
   batteries,
   versions,
+  layoutAvailable,
+  canApproveLayout,
 }: {
   leadId: string;
+  /**
+   * Which step to open on. The readiness report links straight to the screen
+   * that fixes each finding, so "Open financing" has to land ON financing
+   * rather than on step 1 with the rep hunting for the tab again.
+   */
+  initialStep?: StepId;
   /** Editing the design and its financing is a Lead permission... */
   canEditDeal: boolean;
   /** ...while generating a customer-facing proposal is its own. */
@@ -58,8 +67,11 @@ export function SolarProposalBuilder({
   inverters: EquipmentOption[];
   batteries: EquipmentOption[];
   versions: ProposalVersion[];
+  /** Resolved server-side: the layout file row AND its bytes both exist. */
+  layoutAvailable: boolean;
+  canApproveLayout: boolean;
 }) {
-  const [step, setStep] = React.useState<StepId>("design");
+  const [step, setStep] = React.useState<StepId>(initialStep);
 
   return (
     <div className="space-y-6">
@@ -91,6 +103,8 @@ export function SolarProposalBuilder({
           inverters={inverters}
           batteries={batteries}
           canEdit={canEditDeal}
+          layoutAvailable={layoutAvailable}
+          canApproveLayout={canApproveLayout}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

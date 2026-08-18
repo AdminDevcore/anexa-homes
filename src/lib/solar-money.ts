@@ -39,10 +39,56 @@ export type SolarAssumptions = {
 // Production
 // ---------------------------------------------------------------------------
 
-/** Year-one kWh from system size, local irradiance and system losses. */
-export function year1Production(systemSizeKwDc: number, a: SolarAssumptions): number {
+/**
+ * The physical ceiling on TSRF, and the point below which a site is a shading
+ * problem rather than a design. Both are sanity rails, not business policy —
+ * a TSRF of 0 or 140 is a typo, and the proposal must not price it.
+ */
+export const TSRF_MIN_PCT = 30;
+export const TSRF_MAX_PCT = 100;
+/** Below this, the array is materially shaded and the rep should be told. */
+export const TSRF_WARN_PCT = 75;
+
+/**
+ * Year-one kWh from system size, local irradiance, system losses and TSRF.
+ *
+ * TSRF (Total Solar Resource Fraction) is the share of the ideal annual
+ * irradiance this particular roof plane actually receives once its tilt,
+ * azimuth and shading are accounted for. It was being COLLECTED on the design
+ * and then ignored, which meant a heavily shaded north-facing roof produced the
+ * same headline number as a perfect south-facing one — the customer finds out
+ * twelve months later, from their bill.
+ *
+ * Null TSRF means "not surveyed yet" and is treated as 100% (no shading
+ * deduction) so an early estimate is not silently penalised; the readiness
+ * validator asks for the real figure before a proposal can be generated.
+ */
+export function year1Production(
+  systemSizeKwDc: number,
+  a: SolarAssumptions,
+  tsrfPct?: number | null
+): number {
   if (systemSizeKwDc <= 0) return 0;
-  return Math.round(systemSizeKwDc * a.kwhPerKwYear * a.derateFactor);
+  const tsrf = tsrfPct == null ? 100 : tsrfPct;
+  return Math.round(systemSizeKwDc * a.kwhPerKwYear * a.derateFactor * (tsrf / 100));
+}
+
+/**
+ * The customer's current blended rate, derived from their OWN bill.
+ *
+ * Returns null when it cannot be derived. That is the whole point: this used to
+ * fall back to a hardcoded 150 mills ($0.15/kWh), which meant a proposal missing
+ * a utility bill still produced a confident 25-year savings figure built on a
+ * number nobody had ever seen. A null here becomes a blocking validation issue,
+ * not an invented assumption.
+ */
+export function deriveUtilityRateMills(
+  avgMonthlyBillCents: number | null | undefined,
+  annualUsageKwh: number | null | undefined
+): number | null {
+  if (!avgMonthlyBillCents || avgMonthlyBillCents <= 0) return null;
+  if (!annualUsageKwh || annualUsageKwh <= 0) return null;
+  return Math.round(((avgMonthlyBillCents * 12) / annualUsageKwh) * 10);
 }
 
 /** What share of the home's usage the system covers. */
@@ -74,7 +120,7 @@ export type PurchaseInput = {
 
 export type PurchaseBreakdown = {
   systemWatts: number;
-  /** Sticker price before adders, cents. */
+  /** Sticker price before adders, cents. The "base system price". */
   grossPriceCents: number;
   /** The lender's cut, embedded in gross. Zero for cash. */
   dealerFeeCents: number;
@@ -84,6 +130,13 @@ export type PurchaseBreakdown = {
   adderTotalCents: number;
   /** What the customer signs for. */
   contractPriceCents: number;
+  /**
+   * Contract price per installed watt, cents. This is the figure a rep is
+   * actually checked against, and it differs from `grossPpwCents` whenever
+   * there are adders — quoting the sticker PPW on a job carrying a $14.5k
+   * re-roof understates what the customer is paying per watt.
+   */
+  finalPpwCents: number;
   /** Contract minus our cost. Only meaningful when cost is known. */
   marginCents: number;
 };
@@ -121,6 +174,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     netPriceCents,
     adderTotalCents: input.adderTotalCents,
     contractPriceCents,
+    finalPpwCents: systemWatts > 0 ? contractPriceCents / systemWatts : 0,
     marginCents,
   };
 }

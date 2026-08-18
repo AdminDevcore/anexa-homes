@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Home, Zap } from "lucide-react";
+import { Loader2, Plus, Trash2, Home, Zap, Star } from "lucide-react";
 import type { SolarEquipmentKind } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   upsertSolarEquipmentAction,
   deleteSolarEquipmentAction,
+  setDefaultSolarEquipmentAction,
 } from "@/server/modules/solar/actions";
 
 type Item = {
@@ -24,6 +25,7 @@ type Item = {
   rank: number;
   crossoverKind: string | null;
   isActive: boolean;
+  isDefault: boolean;
 };
 
 const KINDS: { value: SolarEquipmentKind; label: string; ratingLabel: string }[] = [
@@ -105,8 +107,33 @@ function Row({ item, canEdit }: { item: Item; canEdit: boolean }) {
       {item.kind === "adder" && (
         <span className="text-[11px] text-muted-foreground">rank {item.rank}</span>
       )}
+      {item.isDefault && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+          <Star className="size-3" /> default
+        </span>
+      )}
       <span className="tabular-nums text-muted-foreground">cost {money(item.costCents)}</span>
       <span className="tabular-nums font-medium">{money(item.priceCents)}</span>
+      {/* One default per kind — promoting this one demotes the incumbent, so
+          the builder always has exactly one obvious starting choice. */}
+      {canEdit && item.kind !== "adder" && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          title={item.isDefault ? "Stop being the default" : "Make this the default"}
+          onClick={async () => {
+            setBusy(true);
+            const res = await setDefaultSolarEquipmentAction(item.id, !item.isDefault);
+            setBusy(false);
+            if (!res.ok) return toast.error(res.error);
+            toast.success(item.isDefault ? "No longer the default" : "Set as default");
+            router.refresh();
+          }}
+        >
+          <Star className={item.isDefault ? "size-4 fill-current" : "size-4"} />
+        </Button>
+      )}
       {canEdit && (
         <Button variant="ghost" size="icon" onClick={remove} disabled={busy}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}

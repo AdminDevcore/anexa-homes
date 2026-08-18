@@ -6,6 +6,7 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder";
+import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +24,13 @@ export const metadata = { title: "Build Proposal" };
  */
 export default async function SolarProposalBuilderPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ step?: string }>;
 }) {
   const { id } = await params;
+  const { step } = await searchParams;
   const user = await requireUser();
   if (!can(user, "create", "Proposal") && !can(user, "update", "Proposal")) {
     redirect(`/portal/leads/${id}`);
@@ -80,6 +84,14 @@ export default async function SolarProposalBuilderPage({
         ratingW: e.ratingW,
       }));
 
+  // The layout is only shown as present when the file row AND its bytes both
+  // resolve. A dangling reference gets the rep a warning, never a broken image.
+  const layoutAvailable = !!(await resolveLayoutAsset(
+    user.companyId,
+    lead.id,
+    design?.layoutImageFileId
+  ));
+
   const address = [lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
     .filter(Boolean)
     .join(" · ");
@@ -102,17 +114,26 @@ export default async function SolarProposalBuilderPage({
 
       <SolarProposalBuilder
         leadId={lead.id}
+        initialStep={step === "financing" || step === "generate" ? step : "design"}
         canEditDeal={can(user, "update", "Lead")}
         canCreateProposal={can(user, "create", "Proposal")}
-        design={design}
+        design={
+          design && {
+            ...design,
+            layoutImageUploadedAt: design.layoutImageUploadedAt?.toISOString() ?? null,
+          }
+        }
         finance={finance}
         itcDisclaimer={settings?.incentiveDisclaimer ?? ""}
         federalItcPct={settings?.federalItcPct ?? null}
         modules={equipOptions("module")}
         inverters={equipOptions("inverter")}
         batteries={equipOptions("battery")}
+        layoutAvailable={layoutAvailable}
+        canApproveLayout={can(user, "update", "Settings")}
         versions={proposals.map((v) => ({
           id: v.id,
+          leadId: lead.id,
           version: v.version,
           status: v.status,
           publicToken: v.publicToken,

@@ -45,6 +45,7 @@ export default async function SolarEquipmentPage() {
           rank: i.rank,
           crossoverKind: i.crossoverKind,
           isActive: i.isActive,
+          isDefault: i.isDefault,
         }))}
       />
     </div>

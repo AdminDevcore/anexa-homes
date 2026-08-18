@@ -227,10 +227,13 @@ describe("a rep cannot generate a nonsense proposal", () => {
   });
 
   it("BLOCKS a down payment that leaves nothing to finance", () => {
+    // A COMPLETE loan — APR, term and the lender's monthly are all present —
+    // so what this test isolates is the down-payment rule and nothing else.
     const base: FinanceForValidation = {
       product: "loan", grossPpwCents: 350, dealerFeePct: 18, contractPriceCents: 3_885_000,
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
-      downPaymentCents: null, loanMonthlyPaymentCents: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: 27_400,
+      aprPct: 6.99, loanTermMonths: 300,
     };
     // A real down payment is fine.
     expect(canGenerate(validateFinance({ ...base, downPaymentCents: 500_000 }, A))).toBe(true);
@@ -277,10 +280,53 @@ describe("a rep cannot generate a nonsense proposal", () => {
     const f: FinanceForValidation = {
       product: "loan", grossPpwCents: 900, dealerFeePct: 18, contractPriceCents: 5_000_000,
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
-      downPaymentCents: null, loanMonthlyPaymentCents: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: 27_400,
+      aprPct: 6.99, loanTermMonths: 300,
     };
     expect(canGenerate(validateFinance(f, A))).toBe(false);
     expect(canGenerate(validateFinance(f, { ...A, maxPpwCents: 1000 }))).toBe(true);
+  });
+
+  it("BLOCKS a loan that is missing the figures the lender issued", () => {
+    // A loan quotes a monthly payment to the customer. Generating one without
+    // the lender's own APR, term and payment means quoting a number nobody
+    // issued — the proposal would be a guess wearing a lender's name.
+    const bare: FinanceForValidation = {
+      product: "loan", grossPpwCents: 350, dealerFeePct: 18, contractPriceCents: 3_885_000,
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: null,
+    };
+    const issues = validateFinance(bare, A);
+    expect(canGenerate(issues)).toBe(false);
+    expect(issues.map((i) => i.code)).toEqual(
+      expect.arrayContaining([
+        "financing.loan_monthly_missing",
+        "financing.loan_apr_missing",
+        "financing.loan_term_missing",
+      ])
+    );
+
+    const complete: FinanceForValidation = {
+      ...bare, loanMonthlyPaymentCents: 27_400, aprPct: 6.99, loanTermMonths: 300,
+    };
+    expect(canGenerate(validateFinance(complete, A))).toBe(true);
+  });
+
+  it("BLOCKS an APR left behind on a lease by a product switch", () => {
+    // The defect this guards: switching Loan -> Lease used to leave aprPct on
+    // the row, and the customer-facing proposal renders an APR whenever one is
+    // present. A homeowner was one product switch away from being quoted an
+    // interest rate on a lease, which has none.
+    const lease: FinanceForValidation = {
+      product: "lease", grossPpwCents: 0, dealerFeePct: 0, contractPriceCents: 0,
+      rateMillsPerKwh: null, monthlyPaymentCents: 17_500, escalatorPct: 2.9, termYears: 25,
+      downPaymentCents: null, loanMonthlyPaymentCents: null, aprPct: 6.99,
+    };
+    const issues = validateFinance(lease, A);
+    expect(canGenerate(issues)).toBe(false);
+    expect(issues.map((i) => i.code)).toContain("financing.tpo_apr");
+
+    expect(canGenerate(validateFinance({ ...lease, aprPct: null }, A))).toBe(true);
   });
 });
 

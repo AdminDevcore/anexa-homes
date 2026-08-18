@@ -53,6 +53,8 @@ const LOAN = {
 
 const build = (over: Partial<Parameters<typeof buildProposalSnapshot>[0]> = {}) =>
   buildProposalSnapshot({
+    reference: "SP-TEST-V1",
+    generatedById: "user-1",
     customer: { name: "Priya Raman", address: "902 Solaris Way, Dallas TX" },
     company: { name: "Anexa Homes", phone: "(866) 650-9996", email: null, logoUrl: null },
     design: DESIGN,
