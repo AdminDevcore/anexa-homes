@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "./settings";
-import { validateProposalReadiness, type ValidationIssue } from "@/lib/solar-validation";
+import { builderHref, validateProposalReadiness, type ValidationIssue } from "@/lib/solar-validation";
 
 /**
  * The one readiness computation, shared by the builder's check button and by
@@ -44,20 +44,34 @@ export async function readSolarReadiness(
   if (!lead) return { ok: false, error: "Deal not found." };
   if (lead.vertical !== "solar") return { ok: false, error: "This is not a solar deal." };
 
+  // Nothing saved yet on one side or the other. Reported as one finding PER
+  // missing half, each pointing at the step that fixes it and worded the way
+  // every other finding is — "complete the design and financing" told a rep
+  // standing in the builder to go to the builder, and said so even when only
+  // the financing was missing.
   if (!design || !finance) {
-    return {
-      ok: true,
-      issues: [
-        {
-          severity: "block",
-          code: "design.not_started",
-          group: "design",
-          field: "design",
-          message: "Complete the system design and financing before generating a proposal.",
-          action: { label: "Open the builder", href: `/portal/leads/${leadId}/solar-proposal` },
-        },
-      ],
-    };
+    const issues: ValidationIssue[] = [];
+    if (!design) {
+      issues.push({
+        severity: "block",
+        code: "design.not_started",
+        group: "design",
+        field: "design",
+        message: "The system design has not been started. Pick a module, how many, and the annual usage.",
+        action: { label: "Open system design", href: builderHref(leadId, "design") },
+      });
+    }
+    if (!finance) {
+      issues.push({
+        severity: "block",
+        code: "finance.not_started",
+        group: "financing",
+        field: "finance",
+        message: "No financing has been set up. Choose the product and its terms.",
+        action: { label: "Open financing", href: builderHref(leadId, "financing") },
+      });
+    }
+    return { ok: true, issues };
   }
 
   return {

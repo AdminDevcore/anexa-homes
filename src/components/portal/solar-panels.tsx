@@ -12,7 +12,12 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { groupIssues, type ValidationIssue } from "@/lib/solar-validation";
+import {
+  builderStepFromHref,
+  groupIssues,
+  type BuilderStep,
+  type ValidationIssue,
+} from "@/lib/solar-validation";
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
@@ -299,8 +304,22 @@ function TextField({
  * Grouped by the screen that fixes them, and every finding carries a link to
  * that screen. A flat list of twelve sentences is a puzzle; "Utility: 2 things,
  * here they are, click to go and fix them" is a task list.
+ *
+ * `onOpenStep` is what makes those links work from inside the builder. This
+ * report is rendered on the builder's third step, so "Open system design" is a
+ * link to the page the rep is already standing on: the route does not change,
+ * the builder never remounts, and the step it seeded once from the URL never
+ * moves — the rep clicks and nothing happens. Given the callback, a finding
+ * that points at another step of THIS builder switches to it directly; links
+ * that genuinely lead elsewhere stay links.
  */
-export function ValidationList({ issues }: { issues: ValidationIssue[] }) {
+export function ValidationList({
+  issues,
+  onOpenStep,
+}: {
+  issues: ValidationIssue[];
+  onOpenStep?: (step: BuilderStep) => void;
+}) {
   if (issues.length === 0) return null;
   const groups = groupIssues(issues);
   return (
@@ -329,17 +348,7 @@ export function ValidationList({ issues }: { issues: ValidationIssue[] }) {
                 )}
                 <span className="flex-1">
                   {i.message}
-                  {i.action && (
-                    <>
-                      {" "}
-                      <Link
-                        href={i.action.href}
-                        className="whitespace-nowrap font-medium underline underline-offset-2"
-                      >
-                        {i.action.label} →
-                      </Link>
-                    </>
-                  )}
+                  {i.action && <IssueAction action={i.action} onOpenStep={onOpenStep} />}
                 </span>
               </li>
             ))}
@@ -347,6 +356,41 @@ export function ValidationList({ issues }: { issues: ValidationIssue[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * The "take me there" affordance on one finding — a step switch when it points
+ * back into this builder, a real link when it points anywhere else.
+ */
+function IssueAction({
+  action,
+  onOpenStep,
+}: {
+  action: NonNullable<ValidationIssue["action"]>;
+  onOpenStep?: (step: BuilderStep) => void;
+}) {
+  const className = "whitespace-nowrap font-medium underline underline-offset-2";
+  const step = onOpenStep ? builderStepFromHref(action.href) : null;
+
+  if (step && onOpenStep) {
+    return (
+      <>
+        {" "}
+        <button type="button" className={className} onClick={() => onOpenStep(step)}>
+          {action.label} →
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {" "}
+      <Link href={action.href} className={className}>
+        {action.label} →
+      </Link>
+    </>
   );
 }
 
@@ -747,10 +791,13 @@ export function SolarProposalGate({
   leadId,
   versions,
   canEdit,
+  onOpenStep,
 }: {
   leadId: string;
   versions: ProposalVersion[];
   canEdit: boolean;
+  /** Sends the rep to the builder step that fixes a finding. See ValidationList. */
+  onOpenStep?: (step: BuilderStep) => void;
 }) {
   const [issues, setIssues] = React.useState<ValidationIssue[] | null>(null);
   const [canGen, setCanGen] = React.useState<boolean | null>(null);
@@ -793,7 +840,7 @@ export function SolarProposalGate({
         {canGen === true && <span className="text-xs text-emerald-600">Ready to generate</span>}
         {canGen === false && <span className="text-xs text-red-600">Blocked — fix the issues below</span>}
       </div>
-      {issues && <ValidationList issues={issues} />}
+      {issues && <ValidationList issues={issues} onOpenStep={onOpenStep} />}
       {issues && issues.length === 0 && (
         <p className="text-xs text-muted-foreground">No issues found.</p>
       )}

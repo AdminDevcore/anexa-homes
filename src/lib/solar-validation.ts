@@ -137,8 +137,38 @@ export type CompanyForValidation = {
   address: string | null;
 };
 
-const DESIGN_HREF = (leadId: string) => `/portal/leads/${leadId}/solar-proposal?step=design`;
-const FINANCE_HREF = (leadId: string) => `/portal/leads/${leadId}/solar-proposal?step=financing`;
+/**
+ * Which step of the proposal builder fixes a given finding.
+ *
+ * The builder and this file have to agree on the vocabulary: the report MINTS
+ * these links and the builder READS them back to switch steps in place, so the
+ * builder and the parser live next to the builder that produces them.
+ */
+export type BuilderStep = "design" | "financing";
+
+export const builderHref = (leadId: string, step: BuilderStep) =>
+  `/portal/leads/${leadId}/solar-proposal?step=${step}`;
+
+/**
+ * The step a "take me there" link points at, or null when it leads somewhere
+ * else entirely (the deal, company settings, solar settings).
+ *
+ * The readiness report is rendered INSIDE the builder, where a link to another
+ * step of that same builder is a link to the page you are already on: the route
+ * does not change, so the builder never remounts and its step never moves. The
+ * report uses this to turn those particular links into a direct step switch and
+ * leave every other one a real navigation.
+ */
+export function builderStepFromHref(href: string): BuilderStep | null {
+  const [path, query = ""] = href.split("?");
+  if (!path.endsWith("/solar-proposal")) return null;
+  const step = new URLSearchParams(query).get("step");
+  // A bare builder link — no step — starts at the beginning, same as the page.
+  return step === "financing" ? "financing" : "design";
+}
+
+const DESIGN_HREF = (leadId: string) => builderHref(leadId, "design");
+const FINANCE_HREF = (leadId: string) => builderHref(leadId, "financing");
 
 // ---------------------------------------------------------------------------
 // Design

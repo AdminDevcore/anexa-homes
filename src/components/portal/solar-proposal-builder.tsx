@@ -125,7 +125,12 @@ export function SolarProposalBuilder({
       </StepPanel>
 
       <StepPanel active={step === "generate"} title="Generate & send">
-        <SolarProposalGate leadId={leadId} canEdit={canCreateProposal} versions={versions} />
+        <SolarProposalGate
+          leadId={leadId}
+          canEdit={canCreateProposal}
+          versions={versions}
+          onOpenStep={setStep}
+        />
       </StepPanel>
     </div>
   );
