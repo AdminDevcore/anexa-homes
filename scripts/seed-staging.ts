@@ -144,6 +144,16 @@ async function main() {
     update: {},
   });
 
+  // Mark onboarding complete. The portal redirects any user without a finished
+  // onboarding record straight to /onboarding, so a seeded test login would
+  // never reach the app. No identity or bank fields are set — this records that
+  // the step is done, nothing more, and staging holds no real personal data.
+  await prisma.userOnboarding.upsert({
+    where: { userId: owner.id },
+    create: { userId: owner.id, completedAt: new Date() },
+    update: { completedAt: new Date() },
+  });
+
   // ── Solar pipeline + one stage, so a deal can exist ─────────────────────
   const pipeline = await prisma.pipeline.upsert({
     where: { id: "zz-test-solar-pipeline" },
