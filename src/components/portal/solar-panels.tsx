@@ -200,6 +200,9 @@ function PanelLayoutPanel({
   );
 }
 
+export type LenderOption = { id: string; name: string; isActive: boolean };
+export type HiddenByLender = { module: number; inverter: number; battery: number };
+
 export type SolarDesignView = {
   utilityProvider: string | null;
   ratePlan: string | null;
@@ -222,6 +225,7 @@ export type SolarDesignView = {
   designProvider: string | null;
   designExternalRef: string | null;
   layoutApproved: boolean;
+  lenderId: string | null;
 } | null;
 
 export type SolarFinanceView = {
@@ -403,6 +407,8 @@ export function SolarDesignPanel({
   canEdit,
   layoutAvailable,
   canApproveLayout,
+  lenders,
+  hiddenByLender,
 }: {
   leadId: string;
   design: SolarDesignView;
@@ -410,6 +416,8 @@ export function SolarDesignPanel({
   inverters: EquipmentOption[];
   batteries: EquipmentOption[];
   canEdit: boolean;
+  lenders: LenderOption[];
+  hiddenByLender: HiddenByLender;
   /** Resolved server-side: the file row AND its bytes both exist. */
   layoutAvailable: boolean;
   canApproveLayout: boolean;
@@ -426,6 +434,7 @@ export function SolarDesignPanel({
     avgMonthlyBill: num(design?.avgMonthlyBillCents, 100),
     mountType: (design?.mountType ?? "roof") as MountType,
     tsrfPct: num(design?.tsrfPct),
+    lenderId: design?.lenderId ?? "",
     moduleId: design?.moduleId ?? "",
     moduleQty: num(design?.moduleQty) || "0",
     inverterId: design?.inverterId ?? "",
@@ -447,6 +456,7 @@ export function SolarDesignPanel({
       avgMonthlyBillCents: form.avgMonthlyBill ? Math.round(Number(form.avgMonthlyBill) * 100) : null,
       mountType: form.mountType,
       tsrfPct: form.tsrfPct ? Number(form.tsrfPct) : null,
+      lenderId: form.lenderId || null,
       moduleId: form.moduleId || null,
       moduleQty: Number(form.moduleQty) || 0,
       inverterId: form.inverterId || null,
@@ -504,6 +514,42 @@ export function SolarDesignPanel({
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           System
         </h4>
+        {/* The lender goes here, not with the financing terms, because it is
+            what decides which equipment is offered three fields below. Picking
+            it after choosing equipment would mean discovering the mismatch
+            afterwards. */}
+        <div className="space-y-1">
+          <Label className="text-xs">Lender / approved-vendor list</Label>
+          <select
+            className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:max-w-sm"
+            value={form.lenderId}
+            disabled={!canEdit || lenders.length === 0}
+            onChange={(e) => set("lenderId", e.target.value)}
+          >
+            <option value="">— any lender (no filtering) —</option>
+            {lenders.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}{l.isActive ? "" : " · retired"}
+              </option>
+            ))}
+          </select>
+          {lenders.length === 0 ? (
+            <p className="text-[11px] text-amber-700">
+              No lenders set up yet.{" "}
+              <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
+                Add your lenders
+              </Link>{" "}
+              to filter equipment by an approved-vendor list.
+            </p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              {form.lenderId
+                ? "Only equipment on this lender's approved list is offered below. Save to apply a change."
+                : "Pick a lender to narrow the equipment below to its approved list."}
+            </p>
+          )}
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           {([
             ["Module", "moduleId", modules],
@@ -527,11 +573,28 @@ export function SolarDesignPanel({
                   which it is, and where to go. */}
               {options.length === 0 && (
                 <p className="text-[11px] text-amber-700">
-                  No active {label.toLowerCase()}s in the catalogue.{" "}
-                  <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
-                    Add one
-                  </Link>
-                  .
+                  {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] > 0 ? (
+                    <>
+                      No {label.toLowerCase()} on this lender&rsquo;s approved list.{" "}
+                      {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender]}{" "}in the catalogue{" "}
+                      {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] === 1 ? "is" : "are"} hidden
+                      because {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] === 1 ? "it is" : "they are"} not approved for it.
+                    </>
+                  ) : (
+                    <>
+                      No active {label.toLowerCase()}s in the catalogue.{" "}
+                      <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
+                        Add one
+                      </Link>
+                      .
+                    </>
+                  )}
+                </p>
+              )}
+              {options.length > 0 && hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender]}{" "}
+                  hidden &mdash; not on this lender&rsquo;s list.
                 </p>
               )}
             </div>

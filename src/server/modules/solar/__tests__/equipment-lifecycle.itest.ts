@@ -176,3 +176,97 @@ describe("deleting an in-use item is the thing that destroys history", () => {
     expect(await db.solarEquipment.findUnique({ where: { id: m.id } })).toBeNull();
   });
 });
+
+describe("lender approved-vendor lists decide what a rep may pick", () => {
+  /** The exact query the builder runs for one component. */
+  const offeredFor = async (kind: "module" | "inverter" | "battery", lenderId: string | null, chosen: string[] = []) => {
+    const rows = await db.solarEquipment.findMany({
+      where: {
+        companyId,
+        kind,
+        OR: [{ isActive: true }, { id: { in: chosen } }],
+      },
+      select: { id: true, model: true, isActive: true, lenderApprovals: { select: { lenderId: true } } },
+    });
+    const pick = new Set(chosen);
+    return rows.filter(
+      (e) => !lenderId || e.lenderApprovals.some((a) => a.lenderId === lenderId) || pick.has(e.id)
+    );
+  };
+
+  let creditHuman: string, goodLeap: string;
+
+  beforeEach(async () => {
+    await db.solarLender.deleteMany({ where: { companyId } });
+    creditHuman = (await db.solarLender.create({ data: { companyId, name: "Credit Human" } })).id;
+    goodLeap = (await db.solarLender.create({ data: { companyId, name: "GoodLeap" } })).id;
+  });
+
+  it("an item approved by two lenders shows for BOTH", async () => {
+    // The case that motivated this: most equipment is on more than one AVL, and
+    // being on someone else's list must not stop it showing for yours.
+    const both = await mod({ model: "OnTwoLists" });
+    await db.solarEquipmentLender.createMany({
+      data: [{ equipmentId: both.id, lenderId: creditHuman }, { equipmentId: both.id, lenderId: goodLeap }],
+    });
+    expect((await offeredFor("module", creditHuman)).map((e) => e.id)).toContain(both.id);
+    expect((await offeredFor("module", goodLeap)).map((e) => e.id)).toContain(both.id);
+  });
+
+  it("an item approved by one lender is hidden from the other", async () => {
+    const only = await mod({ model: "GoodLeapOnly" });
+    await db.solarEquipmentLender.create({ data: { equipmentId: only.id, lenderId: goodLeap } });
+    expect((await offeredFor("module", goodLeap)).map((e) => e.id)).toContain(only.id);
+    expect((await offeredFor("module", creditHuman)).map((e) => e.id)).not.toContain(only.id);
+  });
+
+  it("STRICT: an untagged item is hidden as soon as any lender is selected", async () => {
+    // The deliberate choice. An item nobody has tagged cannot be quoted into a
+    // submission that would bounce; the builder says how many are hidden so the
+    // short list is explained rather than mysterious.
+    const untagged = await mod({ model: "NeverTagged" });
+    expect((await offeredFor("module", null)).map((e) => e.id)).toContain(untagged.id);
+    expect((await offeredFor("module", creditHuman)).map((e) => e.id)).not.toContain(untagged.id);
+  });
+
+  it("no lender selected means no filtering at all", async () => {
+    const a = await mod();
+    const b = await mod();
+    await db.solarEquipmentLender.create({ data: { equipmentId: a.id, lenderId: goodLeap } });
+    const ids = (await offeredFor("module", null)).map((e) => e.id);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(b.id);
+  });
+
+  it("an item this design already uses survives a lender switch", async () => {
+    // Otherwise choosing a lender silently blanks equipment the deal already
+    // had — the same failure mode as retiring, and the same fix.
+    const chosen = await mod({ model: "AlreadyOnTheDeal" });
+    await db.solarEquipmentLender.create({ data: { equipmentId: chosen.id, lenderId: goodLeap } });
+    const offered = await offeredFor("module", creditHuman, [chosen.id]);
+    expect(offered.map((e) => e.id)).toContain(chosen.id);
+  });
+
+  it("lender names are unique per company, case-insensitively", async () => {
+    // Two "Credit Human" rows would split one AVL in half and hide approved
+    // equipment from whoever picked the wrong one.
+    await expect(db.solarLender.create({ data: { companyId, name: "credit human" } })).rejects.toThrow();
+  });
+
+  it("deleting a lender clears its approvals but never touches the equipment", async () => {
+    const m = await mod();
+    await db.solarEquipmentLender.create({ data: { equipmentId: m.id, lenderId: goodLeap } });
+    await db.solarLender.delete({ where: { id: goodLeap } });
+    expect(await db.solarEquipmentLender.count({ where: { equipmentId: m.id } })).toBe(0);
+    expect(await db.solarEquipment.findUnique({ where: { id: m.id } })).not.toBeNull();
+  });
+
+  it("deleting a lender a design is built for would blank that design's lender", async () => {
+    // Which is why the action refuses while any design references it.
+    const m = await mod();
+    await db.solarDesign.create({ data: { companyId, leadId, moduleId: m.id, lenderId: creditHuman } });
+    expect(await db.solarDesign.count({ where: { companyId, lenderId: creditHuman } })).toBe(1);
+    await db.solarLender.delete({ where: { id: creditHuman } });
+    expect((await db.solarDesign.findUniqueOrThrow({ where: { leadId } })).lenderId).toBeNull();
+  });
+});
