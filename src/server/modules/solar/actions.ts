@@ -287,6 +287,9 @@ const equipmentSchema = z.object({
   crossoverKind: z.enum(["reroof", "mpu"]).nullable().optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
+  // The AVL turns over annually. Bounded to a sane window so a typo cannot file
+  // a product under the year 202 or 20260.
+  avlYear: z.number().int().min(2000).max(2100).nullable().optional(),
 });
 
 /**
@@ -396,14 +399,89 @@ export async function setDefaultSolarEquipmentAction(id: string, isDefault: bool
   return ok();
 }
 
+/**
+ * How many designs still point at this catalogue item.
+ *
+ * The three foreign keys are ON DELETE SET NULL, which is the quiet failure
+ * mode this guards: deleting a module does not error, it silently blanks the
+ * module on every design that used it. Those deals then show no equipment, and
+ * their system size no longer reconciles with anything.
+ */
+async function equipmentUsage(companyId: string, id: string) {
+  const [asModule, asInverter, asBattery] = await Promise.all([
+    prisma.solarDesign.count({ where: { companyId, moduleId: id } }),
+    prisma.solarDesign.count({ where: { companyId, inverterId: id } }),
+    prisma.solarDesign.count({ where: { companyId, batteryId: id } }),
+  ]);
+  return { asModule, asInverter, asBattery, total: asModule + asInverter + asBattery };
+}
+
+/**
+ * Retire a catalogue item, or bring it back.
+ *
+ * RETIRING IS THE ANSWER TO "we do not sell this any more", not deleting. A
+ * retired item disappears from the selectors a rep builds new systems with,
+ * while every design that already chose it keeps rendering exactly as before —
+ * the deal page, the project detail and any generated proposal are untouched.
+ * That is the whole point: last year's approved-vendor list has to stop being
+ * sellable without rewriting last year's deals.
+ *
+ * Also clears `isDefault`: a product nobody can pick must not stay the default
+ * a new design starts on.
+ */
+export async function setSolarEquipmentActiveAction(id: string, isActive: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const item = await prisma.solarEquipment.findFirst({
+    where: { companyId: user.companyId, id },
+    select: { id: true, model: true, manufacturer: true },
+  });
+  if (!item) return fail("Not found.");
+
+  await prisma.solarEquipment.update({
+    where: { id },
+    data: { isActive, ...(isActive ? {} : { isDefault: false }) },
+  });
+  revalidatePath("/portal/settings/solar-equipment");
+  const name = [item.manufacturer, item.model].filter(Boolean).join(" ");
+  return { ok: true as const, message: isActive ? `${name} is sellable again.` : `${name} retired.` };
+}
+
+/**
+ * Delete a catalogue item outright.
+ *
+ * REFUSED while any design still references it. The foreign keys are ON DELETE
+ * SET NULL, so this would not fail loudly — it would blank the equipment on
+ * every historical deal and leave their system sizes unexplainable. Retiring
+ * does what the person almost always meant, and is offered by name in the
+ * error rather than left for them to discover.
+ *
+ * Deleting is still allowed for an item nothing has ever used — a typo, a
+ * duplicate, a product added and never sold.
+ */
 export async function deleteSolarEquipmentAction(id: string) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const existing = await prisma.solarEquipment.findFirst({
     where: { companyId: user.companyId, id },
-    select: { id: true },
+    select: { id: true, model: true, manufacturer: true },
   });
   if (!existing) return fail("Not found.");
+
+  const use = await equipmentUsage(user.companyId, id);
+  if (use.total > 0) {
+    const where = [
+      use.asModule && `${use.asModule} as the module`,
+      use.asInverter && `${use.asInverter} as the inverter`,
+      use.asBattery && `${use.asBattery} as the battery`,
+    ].filter(Boolean).join(", ");
+    return fail(
+      `${use.total} ${use.total === 1 ? "design uses" : "designs use"} this (${where}). ` +
+        `Deleting it would blank the equipment on those deals. Retire it instead — it disappears ` +
+        `from new designs and every existing one keeps its equipment.`
+    );
+  }
+
   await prisma.solarEquipment.delete({ where: { id } });
   revalidatePath("/portal/settings/solar-equipment");
   return ok();

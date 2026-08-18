@@ -56,14 +56,32 @@ export default async function SolarProposalBuilderPage({
   // builder rather than staring at an empty solar design form.
   if (lead.vertical !== "solar") redirect(`/portal/leads/${id}/presentation`);
 
-  const [design, finance, settings, equipment, proposals] = await Promise.all([
-    prisma.solarDesign.findUnique({ where: { leadId: lead.id } }),
+  // The design is read FIRST because the catalogue query depends on it — see
+  // the `OR` below.
+  const design = await prisma.solarDesign.findUnique({ where: { leadId: lead.id } });
+
+  const [finance, settings, equipment, proposals] = await Promise.all([
     prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
     getSolarSettings(user.companyId),
     prisma.solarEquipment.findMany({
-      where: { companyId: user.companyId, isActive: true },
+      // Sellable items, PLUS whatever this design already chose even if it has
+      // since been retired.
+      //
+      // Filtering to isActive alone looks right and quietly destroys data: a
+      // retired module would drop out of the dropdown, the select would fall
+      // back to "— none —", and the next save would write moduleId: null onto a
+      // deal that had a perfectly good module. The rep would see the equipment
+      // vanish from a deal they never edited. Last year's AVL has to stop being
+      // SELLABLE without becoming unrenderable.
+      where: {
+        companyId: user.companyId,
+        OR: [
+          { isActive: true },
+          { id: { in: [design?.moduleId, design?.inverterId, design?.batteryId].filter((x): x is string => !!x) } },
+        ],
+      },
       orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
-      select: { id: true, kind: true, manufacturer: true, model: true, ratingW: true },
+      select: { id: true, kind: true, manufacturer: true, model: true, ratingW: true, isActive: true },
     }),
     prisma.solarProposal.findMany({
       where: { companyId: user.companyId, leadId: lead.id },
@@ -80,7 +98,11 @@ export default async function SolarProposalBuilderPage({
       .filter((e) => e.kind === kind)
       .map((e) => ({
         id: e.id,
-        label: `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}${e.ratingW ? ` · ${e.ratingW}W` : ""}`,
+        // A retired item that is only here because this design uses it says so,
+        // rather than sitting in the list looking like something still sold.
+        label:
+          `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` +
+          `${e.ratingW ? ` · ${e.ratingW}W` : ""}${e.isActive ? "" : " · retired"}`,
         ratingW: e.ratingW,
       }));
 

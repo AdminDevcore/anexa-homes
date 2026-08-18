@@ -17,7 +17,8 @@ export default async function SolarEquipmentPage() {
 
   const items = await prisma.solarEquipment.findMany({
     where: { companyId: user.companyId },
-    orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
+    // Sellable first, then newest AVL year, so the current list leads.
+    orderBy: [{ kind: "asc" }, { isActive: "desc" }, { avlYear: "desc" }, { rank: "asc" }, { model: "asc" }],
   });
 
   return (
@@ -46,6 +47,7 @@ export default async function SolarEquipmentPage() {
           crossoverKind: i.crossoverKind,
           isActive: i.isActive,
           isDefault: i.isDefault,
+          avlYear: i.avlYear,
         }))}
       />
     </div>
