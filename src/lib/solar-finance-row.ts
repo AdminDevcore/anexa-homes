@@ -1,7 +1,6 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
   pricePurchase,
-  itcEstimateCents,
   grossPpwFromNet,
   leaseMonthlyCents,
   type SolarAssumptions,
@@ -133,7 +132,6 @@ export function financeRowForProduct(
   const grossPpwCents = derivedGrossPpw ?? f.grossPpwCents ?? assumptions.defaultGrossPpwCents;
 
   let contractPriceCents = 0;
-  let itcCents = 0;
   if (isPurchase) {
     const breakdown = pricePurchase({
       product: f.product as "cash" | "loan",
@@ -143,7 +141,6 @@ export function financeRowForProduct(
       adderTotalCents: f.adderTotalCents ?? 0,
     });
     contractPriceCents = breakdown.contractPriceCents;
-    itcCents = itcEstimateCents(contractPriceCents, assumptions);
   }
 
   return {
@@ -154,7 +151,9 @@ export function financeRowForProduct(
     dealerFeePct,
     adderTotalCents: isPurchase ? (f.adderTotalCents ?? 0) : 0,
     contractPriceCents,
-    itcEstimateCents: itcCents,
+    // No incentive is quoted anywhere, so the column exists only to keep the
+    // NOT NULL contract on rows written before incentives were removed.
+    itcEstimateCents: 0,
     // Rate block — each figure belongs to exactly one product.
     rateMillsPerKwh: f.product === "ppa" ? (lp?.rateMillsPerKwh ?? f.rateMillsPerKwh ?? null) : null,
     // A lease product prices per kW-month; the row stores this system's actual

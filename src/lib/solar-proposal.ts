@@ -4,7 +4,6 @@ import { resolveUtilityRateMills } from "./solar-energy";
 import {
   pricePurchase,
   priceThirdParty,
-  itcEstimateCents,
   productionInYear,
   loanPaymentCents,
   type SolarAssumptions,
@@ -316,17 +315,21 @@ export type SolarProposalSnapshot = {
      */
     applyUrl: string | null;
     lender: string | null;
-    /** Null when the company has not configured a credit — the line is omitted. */
+    /**
+     * Legacy incentive fields. No credit is quoted anywhere in the product, so
+     * these are always null on anything generated now; the keys stay so that
+     * proposals issued while incentives existed still parse and render.
+     */
     itcEstimateCents: number | null;
     itcPct: number | null;
-    /** Free-text state/local incentive summary. Null = section omitted. */
     stateIncentiveNote: string | null;
   };
   savings: SavingsModel;
   environmental: ReturnType<typeof environmentalImpact>;
   /** Every assumption, recorded so the document explains its own numbers. */
   assumptions: SolarAssumptions & { currentRateMillsPerKwh: number };
-  disclaimers: { incentive: string; estimate: string };
+  /** `incentive` only ever appears on legacy snapshots; nothing renders it. */
+  disclaimers: { incentive?: string; estimate: string };
 };
 
 /** The standing non-binding-estimate wording. Shown on every proposal. */
@@ -386,8 +389,6 @@ export function buildProposalSnapshot(args: {
   /** The lender's CUSTOMER application link. Never the dealer portal. */
   lenderApplyUrl?: string | null;
   assumptions: SolarAssumptions;
-  incentiveDisclaimer: string;
-  stateIncentiveNote?: string | null;
   now: Date;
 }): SolarProposalSnapshot {
   const { design, finance, assumptions: a } = args;
@@ -441,7 +442,6 @@ export function buildProposalSnapshot(args: {
   });
 
   const lifetimeKwh = savings.years.reduce((n, y) => n + y.productionKwh, 0);
-  const itc = purchase ? itcEstimateCents(purchase.contractPriceCents, a) : 0;
 
   /**
    * What a payment factor gets applied to: the contract price less anything the
@@ -542,15 +542,15 @@ export function buildProposalSnapshot(args: {
       lender: finance.product === "loan" ? args.lender : null,
       // Loan only: a cash, lease or PPA deal has no credit to pre-qualify for.
       applyUrl: finance.product === "loan" ? (args.lenderApplyUrl ?? null) : null,
-      // Null, not zero: an unconfigured credit omits the line entirely rather
-      // than showing the customer "$0 federal credit".
-      itcEstimateCents: a.federalItcPct == null ? null : itc,
-      itcPct: a.federalItcPct,
-      stateIncentiveNote: args.stateIncentiveNote ?? null,
+      // Always null: no incentive is quoted, so nothing to record. Kept as
+      // keys rather than dropped so older snapshots stay type-compatible.
+      itcEstimateCents: null,
+      itcPct: null,
+      stateIncentiveNote: null,
     },
     savings,
     environmental: environmentalImpact(lifetimeKwh),
     assumptions: { ...a, currentRateMillsPerKwh },
-    disclaimers: { incentive: args.incentiveDisclaimer, estimate: ESTIMATE_DISCLAIMER },
+    disclaimers: { estimate: ESTIMATE_DISCLAIMER },
   };
 }

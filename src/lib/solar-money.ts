@@ -17,8 +17,8 @@ import type { FinanceProduct } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
 // Assumptions — every one of these is DATA from SolarSettings, never a constant
-// in this file. The federal credit in particular changed in 2025 and is still
-// moving; it belongs to the company's CPA, not to a developer.
+// in this file. No tax credit or incentive appears here or anywhere else: this
+// company quotes none, so a proposal never nets one out of a price.
 // ---------------------------------------------------------------------------
 export type SolarAssumptions = {
   derateFactor: number;
@@ -27,8 +27,6 @@ export type SolarAssumptions = {
   kwhPerKwYear: number;
   defaultGrossPpwCents: number;
   defaultDealerFeePct: number;
-  /** Null = this company shows no federal credit at all. */
-  federalItcPct: number | null;
   minOffsetPct: number;
   maxOffsetPct: number;
   minPpwCents: number;
@@ -299,18 +297,6 @@ export function grossPpwFromNet(netPpwCents: number, dealerFeePct: number): numb
  */
 export function leaseMonthlyCents(rateCentsPerKwMonth: number, systemSizeKwDc: number): number {
   return Math.round(rateCentsPerKwMonth * systemSizeKwDc);
-}
-
-/**
- * Estimated federal credit.
- *
- * Returns 0 when the company has not set a percentage — we would rather show
- * nothing than show a number nobody has confirmed. Always paired with the
- * disclaimer from SolarSettings at every render site.
- */
-export function itcEstimateCents(contractPriceCents: number, a: SolarAssumptions): number {
-  if (a.federalItcPct == null || a.federalItcPct <= 0) return 0;
-  return Math.round(contractPriceCents * (a.federalItcPct / 100));
 }
 
 // ---------------------------------------------------------------------------

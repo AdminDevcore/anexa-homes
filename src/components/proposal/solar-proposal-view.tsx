@@ -389,27 +389,7 @@ export function SolarProposalView({
         )}
       </Section>
 
-      {/* ── 7 · Incentives ───────────────────────────────────────────────── */}
-      {/* The whole section disappears when nothing is configured. An "Incentives"
-          heading over an empty box, or a labelled tile reading $0, is worse than
-          silence — it reads as "you get nothing" rather than "not calculated". */}
-      {(f.itcEstimateCents != null || f.stateIncentiveNote) && (
-        <Section title="Incentives">
-          <dl className="divide-y divide-border text-sm">
-            {f.itcEstimateCents != null && f.itcPct != null && (
-              <Row k={`Estimated federal credit (${pct(f.itcPct)})`} v={usd(f.itcEstimateCents)} />
-            )}
-          </dl>
-          {f.stateIncentiveNote && (
-            <p className="mt-3 text-sm text-muted-foreground">{f.stateIncentiveNote}</p>
-          )}
-          <p className="mt-3 rounded-lg bg-muted/50 p-3 text-[11px] leading-relaxed text-muted-foreground">
-            {s.disclaimers.incentive}
-          </p>
-        </Section>
-      )}
-
-      {/* ── 8 · Savings & projections ────────────────────────────────────── */}
+      {/* ── 7 · Savings & projections ────────────────────────────────────── */}
       <Section title="Staying with the utility vs going solar">
         <div className="grid gap-3 sm:grid-cols-2">
           <Callout
@@ -487,7 +467,7 @@ export function SolarProposalView({
         </div>
       </Section>
 
-      {/* ── 9 · Process ──────────────────────────────────────────────────── */}
+      {/* ── 8 · Process ──────────────────────────────────────────────────── */}
       <Section title="What happens next">
         <ol className="space-y-3">
           {SOLAR_TIMELINE.map((step, i) => (
@@ -522,7 +502,7 @@ export function SolarProposalView({
         </div>
       </Section>
 
-      {/* ── 12 · Next step ───────────────────────────────────────────────── */}
+      {/* ── 11 · Next step ───────────────────────────────────────────────── */}
       <Section title="Ready to go ahead?">
         {signed ? (
           <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -542,7 +522,7 @@ export function SolarProposalView({
         )}
       </Section>
 
-      {/* ── 10 · Company & representative ────────────────────────────────── */}
+      {/* ── 9 · Company & representative ─────────────────────────────────── */}
       <Section title="Who is doing the work">
         <dl className="divide-y divide-border text-sm">
           {s.company.name && <Row k="Company" v={s.company.name} />}
@@ -555,7 +535,7 @@ export function SolarProposalView({
         </dl>
       </Section>
 
-      {/* ── 11 · Disclosures ─────────────────────────────────────────────── */}
+      {/* ── 10 · Disclosures ─────────────────────────────────────────────── */}
       <footer className="mt-10 space-y-3 border-t border-border pt-6">
         <h2 className="font-display text-sm font-semibold">Important disclosures</h2>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -576,9 +556,6 @@ export function SolarProposalView({
                 Current utility rate: ${(s.assumptions.currentRateMillsPerKwh / 1000).toFixed(3)} per
                 kWh, derived from your bill
               </li>
-            )}
-            {s.assumptions.federalItcPct != null && (
-              <li>Federal credit: {pct(s.assumptions.federalItcPct)}</li>
             )}
           </ul>
         </details>

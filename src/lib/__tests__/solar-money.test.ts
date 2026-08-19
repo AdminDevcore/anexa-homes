@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   pricePurchase,
   priceThirdParty,
-  itcEstimateCents,
   solarCommissionCents,
   year1Production,
   offsetPct,
@@ -23,7 +23,6 @@ const A: SolarAssumptions = {
   kwhPerKwYear: 1450,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
-  federalItcPct: null,
   minOffsetPct: 0,
   maxOffsetPct: 150,
   minPpwCents: 150,
@@ -132,25 +131,15 @@ describe("commission bases differ per product", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Incentives are configuration, never code
+// No incentive exists anywhere in the money layer
 // ---------------------------------------------------------------------------
-describe("the federal credit is never hardcoded", () => {
-  it("shows nothing when the company has not set a percentage", () => {
-    expect(A.federalItcPct).toBeNull();
-    expect(itcEstimateCents(3_500_000, A)).toBe(0);
-  });
-
-  it("uses whatever the company's CPA configured", () => {
-    expect(itcEstimateCents(3_500_000, { ...A, federalItcPct: 30 })).toBe(1_050_000);
-    expect(itcEstimateCents(3_500_000, { ...A, federalItcPct: 22 })).toBe(770_000);
-  });
-
-  it("has no percentage literal anywhere in the money module", async () => {
-    // Guards against someone "helpfully" restoring a 30% constant.
-    const src = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("../solar-money.ts", import.meta.url), "utf8")
-    );
-    expect(src).not.toMatch(/federalItcPct\s*[=:]\s*\d/);
+describe("no tax credit or incentive is quoted", () => {
+  it("has no credit percentage, helper or literal in the money module", () => {
+    // The company quotes no federal, state or local incentive. This guards
+    // against someone "helpfully" restoring a 30% constant or an ITC helper.
+    const src = readFileSync(new URL("../solar-money.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/federalItcPct/);
+    expect(src).not.toMatch(/itcEstimateCents/);
     expect(src).not.toMatch(/\b0\.30\b|\bITC_PCT\b/);
   });
 });

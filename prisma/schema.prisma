@@ -2654,15 +2654,13 @@ model SolarSettings {
   /// somebody sets it.
   targetNetPpwCents    Int?
 
-  // ── Incentives ──────────────────────────────────────────────────────────
-  /// Federal credit %, as an ESTIMATE. NOT hardcoded anywhere in code: the
-  /// rules changed in 2025 and are still in flux, so this is set by the
-  /// company's CPA. Null = do not show a federal credit at all.
+  // ── Incentives — RETIRED ────────────────────────────────────────────────
+  /// No incentive is quoted anywhere: nothing sets these, nothing reads them,
+  /// and saving solar settings force-nulls the first two. Kept as columns
+  /// rather than dropped so historic rows stay readable; delete them only in a
+  /// migration that also rewrites the proposals which referenced them.
   federalItcPct       Float?
-  /// Free-text state/local incentive summary shown on the proposal.
   stateIncentiveNote  String?
-  /// The disclaimer rendered anywhere an incentive figure appears. Seeded with
-  /// the standard not-a-guarantee wording; editable per company.
   incentiveDisclaimer String  @default("Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.")
 
   // ── Utility programme ───────────────────────────────────────────────────
@@ -3191,7 +3189,7 @@ enum MilestonePayee {
 /// (base PPW, adders, dealer fee, final PPW) is all derived from figures we
 /// already store, but *when the money actually arrives* was not modelled
 /// anywhere: commission tranches and financier draws both pay out against
-/// milestones (contract, install, PTO), and that schedule is what a rep and a
+/// milestones (install, then PTO), and that schedule is what a rep and a
 /// controller actually want to see on the deal.
 model SolarMilestone {
   id        String   @id @default(uuid())
@@ -3203,7 +3201,8 @@ model SolarMilestone {
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   payee       MilestonePayee
-  /// 1, 2, 3 — M1/M2/M3 for the rep, 1st/2nd/3rd for the financier.
+  /// 1 or 2 — M1/M2 for the rep, 1st/2nd payment for the financier. Both pay
+  /// on the same two events: install complete, then PTO granted.
   sequence    Int
   label       String
   amountCents Int            @default(0)

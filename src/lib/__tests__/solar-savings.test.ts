@@ -14,7 +14,6 @@ const A: SolarAssumptions = {
   kwhPerKwYear: 1450,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
-  federalItcPct: null,
   minOffsetPct: 0,
   maxOffsetPct: 150,
   minPpwCents: 150,
@@ -189,7 +188,6 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
       },
       lender: null,
       assumptions: A,
-      incentiveDisclaimer: "Estimated only…",
       now: new Date("2026-08-16T12:00:00Z"),
       ...over,
     });
@@ -199,7 +197,7 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
     expect(build().financing.adderTotalCents).toBeNull();
   });
 
-  it("omits the federal credit when the company has not configured one", () => {
+  it("never quotes an incentive — no credit is offered at all", () => {
     expect(build().financing.itcEstimateCents).toBeNull();
     expect(build().financing.itcPct).toBeNull();
   });
@@ -301,8 +299,6 @@ describe("the snapshot stops carrying what nobody sets", () => {
       },
       lender: null,
       assumptions: A,
-      incentiveDisclaimer: "Estimated only.",
-      stateIncentiveNote: null,
       now: new Date("2026-08-18T00:00:00Z"),
     });
 

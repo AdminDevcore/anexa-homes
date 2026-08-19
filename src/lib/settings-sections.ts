@@ -103,7 +103,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     icon: Sun,
     title: "Solar Settings",
-    body: "Production and pricing assumptions, incentive %, validation bounds, and stage owners.",
+    body: "Production and pricing assumptions, validation bounds, and stage owners.",
     href: "/portal/settings/solar",
     verticals: ["solar"],
   },

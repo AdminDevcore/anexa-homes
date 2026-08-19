@@ -29,12 +29,7 @@ const settingsSchema = z.object({
   // Null is meaningful and is the default: derive nothing, leave the sticker as
   // the rep typed it. Set, and gross is computed from the product's dealer fee.
   targetNetPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
-  // Nullable ON PURPOSE: unset means "show no federal credit", which is the
-  // right default while the 2025 rule changes settle. Never defaulted to 30.
-  federalItcPct: z.number().min(0).max(100).nullable(),
-  stateIncentiveNote: z.string().max(1000).nullable(),
   netMeteringProgram: z.string().max(120).nullable(),
-  incentiveDisclaimer: z.string().min(1).max(1000),
   minOffsetPct: z.number().min(0).max(200),
   maxOffsetPct: z.number().min(0).max(500),
   minPpwCents: z.number().int().min(0).max(2000),
@@ -50,10 +45,14 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
   if (d.minOffsetPct >= d.maxOffsetPct) return fail("Minimum offset must be below the maximum.");
   if (d.minPpwCents >= d.maxPpwCents) return fail("Minimum PPW must be below the maximum.");
 
+  // No incentive is quoted anywhere in the product, so saving settings also
+  // clears anything a legacy row still carries. Leaving a stale 30% sitting in
+  // the column is how it reappears the day someone renders that field again.
+  const incentives = { federalItcPct: null, stateIncentiveNote: null };
   await prisma.solarSettings.upsert({
     where: { companyId: user.companyId },
-    create: { companyId: user.companyId, ...d },
-    update: d,
+    create: { companyId: user.companyId, ...d, ...incentives },
+    update: { ...d, ...incentives },
   });
   revalidatePath("/portal/settings/solar");
   return ok();

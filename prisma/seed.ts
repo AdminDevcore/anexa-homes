@@ -265,11 +265,10 @@ async function main() {
     });
   }
 
-  // Solar assumptions. federalItcPct is left NULL on purpose: the 2025 federal
-  // rule changes are still settling, so the company's CPA sets it. Until then
-  // no credit figure is shown anywhere.
+  // Solar assumptions. The incentive columns stay NULL: no federal, state or
+  // local credit is quoted anywhere in the product, and nothing can set them.
   await prisma.solarSettings.create({
-    data: { companyId: company.id, federalItcPct: null, stateIncentiveNote: null },
+    data: { companyId: company.id },
   });
 
   // A small starter catalog so a rep can build a system on day one.

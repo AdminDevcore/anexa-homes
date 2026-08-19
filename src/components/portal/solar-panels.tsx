@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Loader2, TriangleAlert, CircleAlert, Sun, Info, ImageUp, Trash2, BadgeCheck, ExternalLink,
+  Loader2, TriangleAlert, CircleAlert, Sun, ImageUp, Trash2, BadgeCheck, ExternalLink,
 } from "lucide-react";
 import type { FinanceProduct, MountType } from "@prisma/client";
 import { cn } from "@/lib/utils";
@@ -683,8 +683,6 @@ function LenderProductPicker({
 export function SolarFinancePanel({
   leadId,
   finance,
-  itcDisclaimer,
-  federalItcPct,
   canEdit,
   lenderName,
   lenderPortalUrl,
@@ -695,8 +693,6 @@ export function SolarFinancePanel({
 }: {
   leadId: string;
   finance: SolarFinanceView;
-  itcDisclaimer: string;
-  federalItcPct: number | null;
   canEdit: boolean;
   /** The lender chosen in step 1. Null when the design has not picked one. */
   lenderName: string | null;
@@ -1083,18 +1079,6 @@ export function SolarFinancePanel({
             <span className="text-muted-foreground">Contract price</span>
             <span className="font-display text-lg font-semibold">{money(finance.contractPriceCents)}</span>
           </div>
-          <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">
-              Estimated federal credit{federalItcPct ? ` (${federalItcPct}%)` : ""}
-            </span>
-            <span className="tabular-nums">
-              {federalItcPct ? money(finance.itcEstimateCents) : "not configured"}
-            </span>
-          </div>
-          <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
-            <Info className="mt-0.5 size-3 shrink-0" />
-            {itcDisclaimer}
-          </p>
         </div>
       )}
 

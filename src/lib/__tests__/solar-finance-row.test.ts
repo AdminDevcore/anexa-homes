@@ -9,7 +9,6 @@ const A: SolarAssumptions = {
   kwhPerKwYear: 1450,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
-  federalItcPct: null,
   minOffsetPct: 0,
   maxOffsetPct: 150,
   minPpwCents: 150,
@@ -142,15 +141,11 @@ describe("defaults come from settings, never from a constant", () => {
     expect(row.dealerFeePct).toBe(A.defaultDealerFeePct);
   });
 
-  it("shows no federal credit at all when the company has not configured one", () => {
-    const row = financeRowForProduct({ product: "cash" }, CTX);
-    expect(row.itcEstimateCents).toBe(0);
-
-    const configured = financeRowForProduct(
-      { product: "cash" },
-      { ...CTX, assumptions: { ...A, federalItcPct: 30 } }
-    );
-    expect(configured.itcEstimateCents).toBe(Math.round(configured.contractPriceCents * 0.3));
+  it("writes a zero credit, because no incentive is quoted anywhere", () => {
+    // The column is only still written to satisfy its NOT NULL default; there
+    // is no configuration that can turn it into a number.
+    expect(financeRowForProduct({ product: "cash" }, CTX).itcEstimateCents).toBe(0);
+    expect(financeRowForProduct({ product: "loan" }, CTX).itcEstimateCents).toBe(0);
   });
 });
 

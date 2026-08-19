@@ -225,8 +225,6 @@ export async function generateSolarProposalAction(leadId: string) {
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
     assumptions,
-    incentiveDisclaimer: assumptions.incentiveDisclaimer,
-    stateIncentiveNote: assumptions.stateIncentiveNote ?? null,
     now: new Date(),
   });
 

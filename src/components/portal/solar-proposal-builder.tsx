@@ -45,8 +45,6 @@ export function SolarProposalBuilder({
   canCreateProposal,
   design,
   finance,
-  itcDisclaimer,
-  federalItcPct,
   lenderName,
   lenderPortalUrl,
   lenderCreditInstructions,
@@ -80,8 +78,6 @@ export function SolarProposalBuilder({
   canCreateProposal: boolean;
   design: SolarDesignView;
   finance: SolarFinanceView;
-  itcDisclaimer: string;
-  federalItcPct: number | null;
   /** The lender step 1 designed this system for, if one was chosen. */
   lenderName: string | null;
   /** Dealer portal, rep-facing. Never the customer application link. */
@@ -187,8 +183,6 @@ export function SolarProposalBuilder({
         <SolarFinancePanel
           leadId={leadId}
           finance={finance}
-          itcDisclaimer={itcDisclaimer}
-          federalItcPct={federalItcPct}
           canEdit={canEditDeal}
           lenderName={lenderName}
           lenderPortalUrl={lenderPortalUrl}

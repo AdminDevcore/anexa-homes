@@ -17,7 +17,6 @@ const A: SolarAssumptions = {
   kwhPerKwYear: 1450,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
-  federalItcPct: null,
   minOffsetPct: 0,
   maxOffsetPct: 150,
   minPpwCents: 150,
@@ -61,7 +60,6 @@ const build = (over: Partial<Parameters<typeof buildProposalSnapshot>[0]> = {}) 
     finance: LOAN,
     lender: "GoodLeap",
     assumptions: A,
-    incentiveDisclaimer: "Estimated only…",
     now: new Date("2026-07-30T12:00:00Z"),
     ...over,
   });
@@ -94,23 +92,22 @@ describe("the proposal snapshot is self-contained and frozen", () => {
   });
 });
 
-describe("the incentive line only appears when configured", () => {
-  it("is null — not zero — when the company has set no percentage", () => {
+describe("no incentive ever reaches a proposal", () => {
+  it("leaves every incentive field null on a purchase", () => {
     const s = build();
-    // Null omits the row entirely; 0 would render "$0 federal credit".
+    // Null, not zero: nothing renders, rather than rendering "$0 credit".
     expect(s.financing.itcEstimateCents).toBeNull();
     expect(s.financing.itcPct).toBeNull();
+    expect(s.financing.stateIncentiveNote).toBeNull();
   });
 
-  it("appears with whatever the CPA configured", () => {
-    const s = build({ assumptions: { ...A, federalItcPct: 30 } });
-    expect(s.financing.itcPct).toBe(30);
-    expect(s.financing.itcEstimateCents).toBe(Math.round(3_500_000 * 0.3));
+  it("carries no incentive disclaimer, because no incentive is shown", () => {
+    expect(build().disclaimers.incentive).toBeUndefined();
   });
 
-  it("has no percentage literal in the proposal module either", () => {
+  it("has no credit percentage literal in the proposal module either", () => {
     const src = readFileSync(new URL("../solar-proposal.ts", import.meta.url), "utf8");
-    expect(src).not.toMatch(/federalItcPct\s*[=:]\s*\d/);
+    expect(src).not.toMatch(/federalItcPct/);
     expect(src).not.toMatch(/utilityEscalationPct\s*[=:]\s*\d/);
     expect(src).not.toMatch(/annualDegradationPct\s*[=:]\s*\d/);
   });
@@ -135,8 +132,6 @@ describe("financing summary matches the product", () => {
     });
     expect(s.financing.contractPriceCents).toBeNull();
     expect(s.financing.rateMillsPerKwh).toBe(145);
-    // No system price means no credit to estimate against.
-    expect(s.financing.itcEstimateCents).toBeNull();
   });
 });
 

@@ -3,11 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Info } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { updateSolarSettingsAction } from "@/server/modules/solar/actions";
 import type { SolarSettingsView } from "@/server/modules/solar/settings";
 
@@ -15,10 +14,9 @@ import type { SolarSettingsView } from "@/server/modules/solar/settings";
  * Solar assumptions. Everything a quote is built from lives here rather than in
  * code, so the numbers can move without a deploy.
  *
- * The federal credit is the reason this page exists: the residential-solar
- * rules changed in 2025 and are still moving, so it is deliberately UNSET by
- * default and owned by the company's CPA. Leaving it blank shows no credit at
- * all, which is the safe state — better to show nothing than a stale rate.
+ * There is no incentive configuration here on purpose: this company quotes no
+ * federal, state or local credit, so nothing in the product asks for one and
+ * nothing prints one. Saving this form clears any legacy value still on the row.
  */
 /** Module scope on purpose — react-hooks/static-components is an error here. */
 function NumField({
@@ -51,10 +49,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     defaultGrossPpw: (settings.defaultGrossPpwCents / 100).toFixed(2),
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
-    federalItcPct: settings.federalItcPct == null ? "" : String(settings.federalItcPct),
-    stateIncentiveNote: settings.stateIncentiveNote ?? "",
     netMeteringProgram: settings.netMeteringProgram ?? "",
-    incentiveDisclaimer: settings.incentiveDisclaimer,
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
     minPpw: (settings.minPpwCents / 100).toFixed(2),
@@ -75,12 +70,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       // it, which is how every company behaves until somebody sets a target.
       targetNetPpwCents:
         f.targetNetPpw.trim() === "" ? null : Math.round(Number(f.targetNetPpw) * 100),
-      // Blank means "no federal credit", not "zero percent" — the distinction
-      // matters, because a configured 0% would still render a $0 credit line.
-      federalItcPct: f.federalItcPct.trim() === "" ? null : Number(f.federalItcPct),
-      stateIncentiveNote: f.stateIncentiveNote.trim() || null,
       netMeteringProgram: f.netMeteringProgram.trim() || null,
-      incentiveDisclaimer: f.incentiveDisclaimer,
       minOffsetPct: Number(f.minOffsetPct),
       maxOffsetPct: Number(f.maxOffsetPct),
       minPpwCents: Math.round(Number(f.minPpw) * 100),
@@ -133,40 +123,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           <NumField label="Target net $/W" value={f.targetNetPpw} onChange={(v) => set("targetNetPpw", v)}
             step="0.01"
             hint="What you keep per watt after the lender's cut. Set it and the sticker is derived from the chosen product's dealer fee, so cheaper money raises the price instead of costing margin. Blank leaves gross exactly as typed." />
-        </div>
-      </section>
-
-      <section className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/50 p-5">
-        <h3 className="font-semibold">Incentives</h3>
-        <p className="flex items-start gap-1.5 text-xs text-amber-900">
-          <Info className="mt-0.5 size-3.5 shrink-0" />
-          The federal residential-solar credit changed in 2025 and the rules are still moving. This
-          percentage is <strong>not</strong> set anywhere in code — confirm the current federal and
-          state position with your CPA and enter it here. Leave it blank to show no credit at all.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label className="text-xs">Federal credit %</Label>
-            <Input
-              type="number"
-              step="0.1"
-              placeholder="blank = do not show a credit"
-              value={f.federalItcPct}
-              onChange={(e) => set("federalItcPct", e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">State / local incentive note</Label>
-            <Input value={f.stateIncentiveNote} onChange={(e) => set("stateIncentiveNote", e.target.value)} />
-          </div>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Disclaimer shown wherever an incentive appears</Label>
-          <Textarea
-            rows={3}
-            value={f.incentiveDisclaimer}
-            onChange={(e) => set("incentiveDisclaimer", e.target.value)}
-          />
         </div>
       </section>
 

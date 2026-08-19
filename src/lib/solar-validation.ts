@@ -40,7 +40,6 @@ export type IssueGroup =
   | "pricing"
   | "financing"
   | "company"
-  | "incentives"
   | "documents";
 
 export type IssueAction = { label: string; href: string };
@@ -69,14 +68,13 @@ export const ISSUE_GROUP_LABEL: Record<IssueGroup, string> = {
   pricing: "Pricing",
   financing: "Financing",
   company: "Company identity",
-  incentives: "Incentives & disclosures",
   documents: "Documents",
 };
 
 export function groupIssues(issues: ValidationIssue[]): { group: IssueGroup; label: string; issues: ValidationIssue[] }[] {
   const order: IssueGroup[] = [
     "customer", "utility", "design", "equipment",
-    "pricing", "financing", "company", "incentives", "documents",
+    "pricing", "financing", "company", "documents",
   ];
   return order
     .map((group) => ({ group, label: ISSUE_GROUP_LABEL[group], issues: issues.filter((i) => i.group === group) }))
@@ -498,33 +496,6 @@ export function validateCompanyIdentity(c: CompanyForValidation): ValidationIssu
   return issues;
 }
 
-/** Incentive configuration. Never blocks: showing no credit is a valid choice. */
-export function validateIncentives(a: SolarAssumptions, disclaimer: string): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  const to = { label: "Open solar settings", href: "/portal/settings/solar" };
-  if (a.federalItcPct == null) {
-    issues.push({
-      severity: "warn",
-      code: "incentives.itc_unset",
-      group: "incentives",
-      field: "federalItcPct",
-      message: "No federal credit percentage is configured, so the proposal will omit the incentive section entirely.",
-      action: to,
-    });
-  }
-  if (!disclaimer.trim()) {
-    issues.push({
-      severity: "block",
-      code: "incentives.disclaimer_missing",
-      group: "incentives",
-      field: "incentiveDisclaimer",
-      message: "The incentive disclaimer is empty. An estimated credit cannot be shown to a customer without it.",
-      action: to,
-    });
-  }
-  return issues;
-}
-
 // ---------------------------------------------------------------------------
 // Everything, together
 // ---------------------------------------------------------------------------
@@ -553,13 +524,11 @@ export function validateProposalReadiness(args: {
   finance: FinanceForValidation;
   company: CompanyForValidation;
   assumptions: SolarAssumptions;
-  incentiveDisclaimer: string;
 }): ValidationIssue[] {
   return [
     ...validateCustomer(args.customer, args.leadId),
     ...validateDesign(args.design, args.assumptions, args.leadId),
     ...validateFinance(args.finance, args.assumptions, args.leadId),
     ...validateCompanyIdentity(args.company),
-    ...validateIncentives(args.assumptions, args.incentiveDisclaimer),
   ];
 }

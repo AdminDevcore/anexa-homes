@@ -148,7 +148,6 @@ export async function readSolarReadiness(
         address: company?.address ?? null,
       },
       assumptions,
-      incentiveDisclaimer: assumptions.incentiveDisclaimer,
     })],
   };
 }

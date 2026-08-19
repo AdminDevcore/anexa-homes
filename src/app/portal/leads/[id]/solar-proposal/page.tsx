@@ -170,8 +170,6 @@ export default async function SolarProposalBuilderPage({
           }
         }
         finance={finance}
-        itcDisclaimer={settings?.incentiveDisclaimer ?? ""}
-        federalItcPct={settings?.federalItcPct ?? null}
         lenderName={lender?.name ?? null}
         lenderPortalUrl={lender?.portalUrl ?? null}
         lenderCreditInstructions={lender?.creditInstructions ?? null}
