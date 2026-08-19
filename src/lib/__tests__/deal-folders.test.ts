@@ -119,6 +119,33 @@ describe("solar key compatibility", () => {
   });
 });
 
+// The solar install agreement's paperwork is solar's alone. A roofing deal
+// must not grow a PTO folder or a lien waiver because someone edited the wrong
+// array, and a roofing file that somehow carries one of those categories must
+// land in Other rather than conjuring a folder that vertical never had.
+describe("solar paperwork stays out of roofing", () => {
+  const SOLAR_ONLY = [
+    "proposal",
+    "certificate_acceptance",
+    "attestation_payment",
+    "lien_waiver_progress",
+    "lien_waiver_final",
+    "pto",
+  ];
+
+  it("gives roofing none of those folders", () => {
+    const keys = ROOFING_FOLDERS.map((f) => f.key);
+    for (const k of SOLAR_ONLY) expect(keys).not.toContain(k);
+  });
+
+  it("routes those categories to Other on a roofing deal", () => {
+    for (const k of SOLAR_ONLY) {
+      expect(folderKeyFor("roofing", k)).toBe(FALLBACK_FOLDER_KEY);
+      expect(folderKeyFor("solar", k)).toBe(k);
+    }
+  });
+});
+
 describe("folderKeyFor", () => {
   it("keeps a category this vertical recognises", () => {
     expect(folderKeyFor("roofing", "permits")).toBe("permits");
