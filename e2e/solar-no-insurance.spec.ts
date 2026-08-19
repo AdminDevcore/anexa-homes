@@ -127,12 +127,15 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByRole("button", { name: "Overview", exact: true })).toHaveCount(0);
 
     // The design, its financing and generation are the proposal's INPUTS and
-    // moved into the builder with it. What the deal keeps is the status.
-    // The card's heading, not any text: f9f76e7 added a "Proposal" document
-    // folder whose tile label matches the same string.
+    // moved into the builder with it. On a deal with NO proposal yet there is
+    // no Proposal card either — it duplicated the Summary's Build Proposal
+    // button, and one screen must not carry two doors onto the same builder.
+    // The card comes back once a proposal exists, to show its versions.
+    // The heading, not any text: f9f76e7 added a "Proposal" document folder
+    // whose tile label matches the same string.
     await expect(
       page.getByRole("heading", { name: "Proposal", exact: true })
-    ).toBeVisible({ timeout: 15000 });
+    ).toHaveCount(0);
     await expect(page.getByText("4 · Contracts & documents")).toBeVisible();
     await expect(page.getByLabel("Module quantity")).toHaveCount(0);
 

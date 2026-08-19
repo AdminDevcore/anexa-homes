@@ -962,8 +962,15 @@ export default async function LeadDetailPage({
                 Design, financing and generation moved into the builder at
                 /solar-proposal — they are the proposal's inputs and belong with
                 it. What a deal still has to answer is what was quoted and
-                whether the customer opened it. */}
-            {isSolarDeal && (
+                whether the customer opened it.
+
+                Only once a proposal EXISTS. Before that this card said nothing
+                the Summary's Build Proposal button doesn't already say, and two
+                entry points to the same builder on one screen is one too many.
+                A generated proposal is a different question — "what did we
+                quote, did they open it" — and the version list below is the
+                only place on the deal that answers it. */}
+            {isSolarDeal && solarProposals.length > 0 && (
               <section id="proposal" className="scroll-mt-24">
                 <Card title="Proposal" icon={Sun} tone="solar">
                   <SolarProposalStrip
