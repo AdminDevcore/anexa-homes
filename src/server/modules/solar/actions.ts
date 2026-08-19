@@ -253,6 +253,74 @@ export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDet
 }
 
 // ---------------------------------------------------------------------------
+// Providers — the utilities and retailers a company sells against
+// ---------------------------------------------------------------------------
+
+const providerSchema = z.object({
+  id: z.string().optional(),
+  kind: z.enum(["utility", "retail"]),
+  name: z.string().min(1).max(120),
+  position: z.number().int().min(0).max(999).optional(),
+});
+
+/** Create or rename one provider. Names are unique per company and kind. */
+export async function saveSolarProviderAction(input: z.infer<typeof providerSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = providerSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid provider.");
+  const d = parsed.data;
+  const name = d.name.trim();
+
+  if (d.id) {
+    const existing = await prisma.solarProvider.findFirst({
+      where: { id: d.id, companyId: user.companyId },
+      select: { id: true },
+    });
+    if (!existing) return fail("Provider not found.");
+  }
+
+  try {
+    if (d.id) {
+      await prisma.solarProvider.update({
+        where: { id: d.id },
+        data: { name, ...(d.position == null ? {} : { position: d.position }) },
+      });
+    } else {
+      await prisma.solarProvider.create({
+        data: { companyId: user.companyId, kind: d.kind, name, position: d.position ?? 0 },
+      });
+    }
+  } catch {
+    // The unique index is the enforcement; this is the message for it.
+    return fail(`“${name}” is already on that list.`);
+  }
+
+  revalidatePath("/portal/settings/solar-providers");
+  return ok();
+}
+
+/**
+ * Retire a provider rather than deleting it.
+ *
+ * Designs store the provider's NAME, so a delete leaves deals naming something
+ * the company no longer recognises — and the name on a sent proposal has to
+ * keep meaning what it meant.
+ */
+export async function setSolarProviderActiveAction(id: string, active: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const row = await prisma.solarProvider.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!row) return fail("Provider not found.");
+  await prisma.solarProvider.update({ where: { id }, data: { active } });
+  revalidatePath("/portal/settings/solar-providers");
+  return ok();
+}
+
+// ---------------------------------------------------------------------------
 // Finance
 // ---------------------------------------------------------------------------
 

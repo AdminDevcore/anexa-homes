@@ -13,7 +13,9 @@ import {
   Star,
   CloudLightning,
   Sun,
-  PanelsTopLeft, Landmark
+  PanelsTopLeft,
+  Landmark,
+  Zap,
 } from "lucide-react";
 import type { ActiveVertical } from "./vertical";
 
@@ -110,6 +112,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     title: "Lenders",
     body: "Financing partners, the equipment each approves, and the terms they finance on.",
     href: "/portal/settings/solar-lenders",
+    verticals: ["solar"],
+  },
+  {
+    icon: Zap,
+    title: "Energy providers",
+    body: "The utilities and retail electric providers your reps pick from when working out a customer's usage.",
+    href: "/portal/settings/solar-providers",
     verticals: ["solar"],
   },
   {
