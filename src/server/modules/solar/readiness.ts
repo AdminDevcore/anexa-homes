@@ -29,6 +29,7 @@ export async function readSolarReadiness(
       select: {
         systemSizeKwDc: true, year1ProductionKwh: true, annualUsageKwh: true,
         offsetPct: true, moduleQty: true, tsrfPct: true, avgMonthlyBillCents: true,
+        utilityRateMills: true,
         ratePlan: true, utilityProvider: true, batteryId: true, layoutImageFileId: true,
         lenderId: true,
         module: { select: { ratingW: true } },
@@ -121,6 +122,7 @@ export async function readSolarReadiness(
         moduleQty: design.moduleQty,
         moduleRatingW: design.module?.ratingW ?? null,
         avgMonthlyBillCents: design.avgMonthlyBillCents,
+        utilityRateMills: design.utilityRateMills,
         utilityProvider: design.utilityProvider,
         hasLayoutImage: !!design.layoutImageFileId,
         hasBattery: !!design.batteryId,

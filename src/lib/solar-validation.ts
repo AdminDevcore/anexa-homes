@@ -1,8 +1,8 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
-  deriveUtilityRateMills,
   type SolarAssumptions,
 } from "./solar-money";
+import { resolveUtilityRateMills } from "./solar-energy";
 
 /**
  * Guard rails on a solar design and its pricing.
@@ -95,6 +95,8 @@ export type DesignForValidation = {
   moduleQty: number;
   moduleRatingW: number | null;
   avgMonthlyBillCents?: number | null;
+  /** The rate a rep was told, when there is one. See resolveUtilityRateMills. */
+  utilityRateMills?: number | null;
   hasLayoutImage?: boolean;
   hasBattery?: boolean;
   utilityProvider?: string | null;
@@ -223,27 +225,26 @@ export function validateDesign(
   // The bill is what today's rate is derived from, and today's rate is what the
   // entire savings projection stands on. Without it there is nothing to compare
   // solar against, so this blocks rather than warns.
+  // What matters is that a RATE exists, not which of the two routes produced it.
+  // A deal filled in from the bill and the rate has no derivable bill ÷ usage
+  // and must still pass; judging the bill alone failed exactly those deals.
   if (d.avgMonthlyBillCents !== undefined) {
-    if (d.avgMonthlyBillCents == null || d.avgMonthlyBillCents <= 0) {
+    const rate = resolveUtilityRateMills(d);
+    if (rate == null) {
       block(
-        "utility.bill_missing",
+        "utility.rate_missing",
         "utility",
         "avgMonthlyBillCents",
-        "Enter the average monthly bill. The customer's current rate is derived from it, and savings cannot be projected without a real rate."
+        "No utility rate. Enter the bill and the annual usage, or the bill and the rate per kWh — savings cannot be projected without one."
       );
-    } else if (deriveUtilityRateMills(d.avgMonthlyBillCents, d.annualUsageKwh) === null) {
-      block("utility.rate_underivable", "utility", "avgMonthlyBillCents", "The current utility rate cannot be derived from the bill and usage entered.");
-    } else {
-      const rate = deriveUtilityRateMills(d.avgMonthlyBillCents, d.annualUsageKwh)!;
+    } else if (rate < 50 || rate > 600) {
       // Nowhere in the US retails residential power below ~5c or above ~60c.
-      if (rate < 50 || rate > 600) {
-        warn(
-          "utility.rate_implausible",
-          "utility",
-          "avgMonthlyBillCents",
-          `The bill and usage imply $${(rate / 1000).toFixed(3)}/kWh, which is outside the normal US retail range. Check both figures.`
-        );
-      }
+      warn(
+        "utility.rate_implausible",
+        "utility",
+        "avgMonthlyBillCents",
+        `That works out at $${(rate / 1000).toFixed(3)}/kWh, which is outside the normal US retail range. Check the figures.`
+      );
     }
   }
 
