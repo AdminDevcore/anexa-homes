@@ -1,9 +1,6 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
   deriveUtilityRateMills,
-  TSRF_MAX_PCT,
-  TSRF_MIN_PCT,
-  TSRF_WARN_PCT,
   type SolarAssumptions,
 } from "./solar-money";
 
@@ -97,12 +94,9 @@ export type DesignForValidation = {
   offsetPct: number;
   moduleQty: number;
   moduleRatingW: number | null;
-  /** Optional so existing callers keep working; checked when supplied. */
-  tsrfPct?: number | null;
   avgMonthlyBillCents?: number | null;
   hasLayoutImage?: boolean;
   hasBattery?: boolean;
-  ratePlan?: string | null;
   utilityProvider?: string | null;
 };
 
@@ -169,6 +163,8 @@ export function builderStepFromHref(href: string): BuilderStep | null {
 
 const DESIGN_HREF = (leadId: string) => builderHref(leadId, "design");
 const FINANCE_HREF = (leadId: string) => builderHref(leadId, "financing");
+/** Not deal-scoped: the catalogue is company-wide, and so is its fix. */
+const EQUIPMENT_HREF = "/portal/settings/solar-equipment";
 
 // ---------------------------------------------------------------------------
 // Design
@@ -187,12 +183,28 @@ export function validateDesign(
     issues.push({ severity: "warn", code, group, field, message, action: to });
 
   if (d.systemSizeKwDc <= 0) {
-    block("design.size_zero", "design", "systemSizeKwDc", "System size must be greater than zero. Pick a module and enter how many.");
+    block("design.size_zero", "design", "systemSizeKwDc", "System size must be greater than zero.");
   }
+  // The panel is no longer a rep's choice, so neither of these is their fault.
+  // Both findings send whoever CAN fix it to the catalogue instead.
   if (d.moduleRatingW == null) {
-    block("equipment.no_module", "equipment", "moduleId", "No solar module selected. The system cannot be sized without one.");
+    issues.push({
+      severity: "block",
+      code: "equipment.no_module",
+      group: "equipment",
+      field: "moduleId",
+      message: "No default solar panel is set in the catalogue, so a system cannot be sized.",
+      action: { label: "Open the equipment catalogue", href: EQUIPMENT_HREF },
+    });
   } else if (d.moduleRatingW <= 0) {
-    block("equipment.module_rating_zero", "equipment", "moduleId", "The selected module has no wattage on it. Fix the catalogue entry before quoting it.");
+    issues.push({
+      severity: "block",
+      code: "equipment.module_rating_zero",
+      group: "equipment",
+      field: "moduleId",
+      message: "The default panel has no wattage on it. Fix the catalogue entry before quoting it.",
+      action: { label: "Open the equipment catalogue", href: EQUIPMENT_HREF },
+    });
   }
   if (d.moduleQty <= 0) {
     block("equipment.module_qty_zero", "equipment", "moduleQty", "Module quantity must be at least one.");
@@ -238,31 +250,6 @@ export function validateDesign(
   if (d.utilityProvider !== undefined && !d.utilityProvider?.trim()) {
     warn("utility.provider_missing", "utility", "utilityProvider", "No utility provider recorded.");
   }
-  if (d.ratePlan !== undefined && !d.ratePlan?.trim()) {
-    warn("utility.rate_plan_missing", "utility", "ratePlan", "No rate plan / tariff recorded. Optional, but it is what the customer's bill is priced on.");
-  }
-
-  // ── TSRF ───────────────────────────────────────────────────────────────
-  if (d.tsrfPct !== undefined) {
-    if (d.tsrfPct == null) {
-      warn("design.tsrf_missing", "design", "tsrfPct", "No TSRF recorded. Production is being modelled as an unshaded roof, which will overstate output on a shaded one.");
-    } else if (d.tsrfPct < TSRF_MIN_PCT || d.tsrfPct > TSRF_MAX_PCT) {
-      block(
-        "design.tsrf_out_of_range",
-        "design",
-        "tsrfPct",
-        `TSRF of ${d.tsrfPct}% is outside the defensible range of ${TSRF_MIN_PCT}–${TSRF_MAX_PCT}%.`
-      );
-    } else if (d.tsrfPct < TSRF_WARN_PCT) {
-      warn(
-        "design.tsrf_shaded",
-        "design",
-        "tsrfPct",
-        `TSRF of ${d.tsrfPct}% means the array is materially shaded. Confirm the survey before quoting this production.`
-      );
-    }
-  }
-
   // ── Offset ─────────────────────────────────────────────────────────────
   if (d.offsetPct < a.minOffsetPct) {
     block("design.offset_below_min", "design", "offsetPct", `Offset of ${d.offsetPct.toFixed(0)}% is below the minimum of ${a.minOffsetPct}%.`);
@@ -299,11 +286,9 @@ export function validateDesign(
     block("design.production_zero", "design", "year1ProductionKwh", "Year-one production has not been calculated.");
   }
   if (d.systemSizeKwDc > 0 && d.year1ProductionKwh > 0) {
-    // Compare against the UNSHADED equivalent: a legitimately shaded roof
-    // (TSRF 60) produces less per kW by design, and must not be reported as a
-    // physically impossible system.
-    const tsrfFraction = d.tsrfPct == null ? 1 : Math.max(0.01, d.tsrfPct / 100);
-    const impliedKwhPerKw = d.year1ProductionKwh / d.systemSizeKwDc / tsrfFraction;
+    // Production is now modelled from system size and the company-wide derate
+    // alone — there is no per-deal shading factor to divide back out.
+    const impliedKwhPerKw = d.year1ProductionKwh / d.systemSizeKwDc;
     // Nowhere on earth is outside roughly 700-2200 kWh/kW/yr for a fixed array.
     if (impliedKwhPerKw < 700 || impliedKwhPerKw > 2200) {
       block(
