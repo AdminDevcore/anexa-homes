@@ -403,7 +403,6 @@ export function SolarDesignPanel({
   moduleMm,
   moduleRatingW,
   initialBlocks,
-  targetPanels,
 }: {
   leadId: string;
   design: SolarDesignView;
@@ -415,7 +414,6 @@ export function SolarDesignPanel({
   moduleMm: { widthMm: number; heightMm: number };
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
-  targetPanels: number | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -507,7 +505,6 @@ export function SolarDesignPanel({
           moduleMm={moduleMm}
           moduleRatingW={moduleRatingW}
           initialBlocks={initialBlocks}
-          targetPanels={targetPanels}
           canEdit={canEdit}
         />
       </section>

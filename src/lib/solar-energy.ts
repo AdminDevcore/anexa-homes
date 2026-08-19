@@ -78,37 +78,15 @@ export function resolveUtilityRateMills(d: {
   return deriveUtilityRateMills(d.avgMonthlyBillCents, d.annualUsageKwh);
 }
 
-export type TargetAssumptions = {
-  kwhPerKwYear: number;
-  derateFactor: number;
-  targetOffsetPct: number;
-};
-
 /**
- * How big a system this house needs, and roughly how many panels that is.
+ * There is deliberately no "how big a system does this house need" here.
  *
- * A TARGET, not a decision. It tells a rep what to aim for while drawing; what
- * gets quoted is still the array actually on the roof, because what fits beats
- * what the arithmetic wants.
+ * Usage alone cannot answer that: what a kW produces on THIS roof depends on
+ * which way the planes face, their pitch and what shades them. A flat
+ * kWh-per-kW divided into a year's usage quotes a south-facing roof and a
+ * north-facing one the same size, and it is wrong on at least one of them.
+ *
+ * Size comes out of the array a rep actually draws — see `year1Production` in
+ * `solar-money.ts`, which sizes from the drawn panels and the site's solar
+ * resource, and only then compares that production against the usage above.
  */
-export function targetSystem(args: {
-  annualUsageKwh: number | null | undefined;
-  assumptions: TargetAssumptions;
-  panelWatts: number | null | undefined;
-}): { kwDc: number; panels: number | null } | null {
-  const usage = args.annualUsageKwh;
-  if (!usage || usage <= 0) return null;
-
-  const { kwhPerKwYear, derateFactor, targetOffsetPct } = args.assumptions;
-  const kwhPerKw = kwhPerKwYear * derateFactor;
-  if (!Number.isFinite(kwhPerKw) || kwhPerKw <= 0) return null;
-
-  const kwDc = (usage * (targetOffsetPct / 100)) / kwhPerKw;
-  if (!Number.isFinite(kwDc) || kwDc <= 0) return null;
-
-  // Up, always: a tenth of a panel is not a thing anybody can install.
-  const panels =
-    args.panelWatts && args.panelWatts > 0 ? Math.ceil((kwDc * 1000) / args.panelWatts) : null;
-
-  return { kwDc, panels };
-}

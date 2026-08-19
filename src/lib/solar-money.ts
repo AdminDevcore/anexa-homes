@@ -25,8 +25,6 @@ export type SolarAssumptions = {
   annualDegradationPct: number;
   utilityEscalationPct: number;
   kwhPerKwYear: number;
-  /** What share of a customer's usage a system is sized toward, as a %. */
-  targetOffsetPct: number;
   defaultGrossPpwCents: number;
   defaultDealerFeePct: number;
   /** Null = this company shows no federal credit at all. */

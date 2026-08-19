@@ -5,16 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  annualFromMonthlyKwh,
-  annualUsageFromBill,
-  targetSystem,
-  type TargetAssumptions,
-} from "@/lib/solar-energy";
+import { annualFromMonthlyKwh, annualUsageFromBill } from "@/lib/solar-energy";
 import { deriveUtilityRateMills } from "@/lib/solar-money";
 import { saveSolarEnergyAction } from "@/server/modules/solar/energy-actions";
 import type { ProviderOption } from "@/server/modules/solar/providers";
@@ -49,17 +43,12 @@ export function SolarEnergyPanel({
   energy,
   utilities,
   retailers,
-  assumptions,
-  panelWatts,
   canEdit,
 }: {
   leadId: string;
   energy: SolarEnergyView;
   utilities: ProviderOption[];
   retailers: ProviderOption[];
-  assumptions: TargetAssumptions;
-  /** The catalogue's default panel, for turning a target kW into panels. */
-  panelWatts: number | null;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -91,7 +80,6 @@ export function SolarEnergyPanel({
       : (Number(annualUsage) || null) ?? annualFromMonthlyKwh(Number(monthlyUsage) || null);
 
   const resolvedRate = basis === "bill" ? rateMills : deriveUtilityRateMills(billCents, annual);
-  const target = targetSystem({ annualUsageKwh: annual, assumptions, panelWatts });
 
   async function save() {
     setBusy(true);
@@ -237,23 +225,17 @@ export function SolarEnergyPanel({
               {basis === "usage" && <span className="text-[11px]"> (calculated)</span>}
             </span>
           ) : null}
-          {target ? (
-            <span className={cn("ml-2 font-medium")}>
-              · needs ≈{target.kwDc.toFixed(1)} kW
-              {target.panels ? ` ≈ ${target.panels} panels` : ""}
-            </span>
-          ) : null}
-          {!target && (
+          {!annual && (
             <span className="ml-2 text-[11px] text-muted-foreground">
-              Enter consumption to size the system.
+              Enter consumption to anchor the offset.
             </span>
           )}
         </div>
 
         <p className="text-[11px] text-muted-foreground">
-          Annual usage anchors the offset on the proposal, and the target tells you how many panels
-          to aim for on the next step. What gets quoted is still the array you draw — what fits the
-          roof wins.
+          Annual usage is what the offset on the proposal is measured against. It does not size the
+          system: how much this roof can make depends on which way its planes face, their pitch and
+          what shades them, so the size is whatever array you draw on the next step.
         </p>
       </section>
 

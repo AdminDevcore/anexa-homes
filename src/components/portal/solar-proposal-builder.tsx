@@ -16,7 +16,6 @@ import {
 } from "@/components/portal/solar-panels";
 import { SolarCustomerPanel, type SolarCustomerView } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
-import type { TargetAssumptions } from "@/lib/solar-energy";
 import type { ProviderOption } from "@/server/modules/solar/providers";
 
 export type StepId = "customer" | "energy" | "design" | "financing" | "generate";
@@ -64,9 +63,7 @@ export function SolarProposalBuilder({
   energy,
   utilities,
   retailers,
-  assumptions,
   hasLayout,
-  targetPanels,
 }: {
   leadId: string;
   /**
@@ -105,11 +102,8 @@ export function SolarProposalBuilder({
   energy: SolarEnergyView;
   utilities: ProviderOption[];
   retailers: ProviderOption[];
-  assumptions: TargetAssumptions;
   /** Whether a layout already exists — an address change would invalidate it. */
   hasLayout: boolean;
-  /** How many panels the Energy step says this house needs. Null = unknown. */
-  targetPanels: number | null;
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
 
@@ -159,8 +153,6 @@ export function SolarProposalBuilder({
           energy={energy}
           utilities={utilities}
           retailers={retailers}
-          assumptions={assumptions}
-          panelWatts={moduleRatingW}
           canEdit={canEditDeal}
         />
         <NextStep label="Next: System design" onClick={() => setStep("design")} />
@@ -177,7 +169,6 @@ export function SolarProposalBuilder({
           moduleMm={moduleMm}
           moduleRatingW={moduleRatingW}
           initialBlocks={initialBlocks}
-          targetPanels={targetPanels}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

@@ -2633,9 +2633,10 @@ model SolarSettings {
   utilityEscalationPct Float @default(3.5)
   /// kWh produced per kW-DC per year in this market. Set from local irradiance.
   kwhPerKwYear         Int   @default(1450)
-  /// What share of a customer's usage a system is sized toward. Drives the
-  /// target shown on the Energy step and on the designer's counter. It does NOT
-  /// constrain what a rep may draw — what fits the roof wins.
+  /// RETIRED, and read by nothing. It used to size a target system from usage
+  /// alone, which cannot be done: what a kW makes on a roof depends on how its
+  /// planes face, their pitch and what shades them. Size now comes out of the
+  /// array a rep draws. Column kept so no migration is needed to drop it.
   targetOffsetPct      Float @default(100)
 
   // ── Pricing defaults ────────────────────────────────────────────────────

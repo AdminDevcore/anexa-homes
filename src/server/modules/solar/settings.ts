@@ -15,7 +15,6 @@ export const SOLAR_ASSUMPTION_DEFAULTS: SolarAssumptions = {
   annualDegradationPct: 0.5,
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
-  targetOffsetPct: 100,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
   federalItcPct: null, // unset on purpose — see above
@@ -57,7 +56,6 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     annualDegradationPct: row.annualDegradationPct,
     utilityEscalationPct: row.utilityEscalationPct,
     kwhPerKwYear: row.kwhPerKwYear,
-    targetOffsetPct: row.targetOffsetPct,
     defaultGrossPpwCents: row.defaultGrossPpwCents,
     defaultDealerFeePct: row.defaultDealerFeePct,
     federalItcPct: row.federalItcPct,

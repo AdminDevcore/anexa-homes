@@ -48,7 +48,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     annualDegradationPct: String(settings.annualDegradationPct),
     utilityEscalationPct: String(settings.utilityEscalationPct),
     kwhPerKwYear: String(settings.kwhPerKwYear),
-    targetOffsetPct: String(settings.targetOffsetPct),
     defaultGrossPpw: (settings.defaultGrossPpwCents / 100).toFixed(2),
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
@@ -70,7 +69,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       annualDegradationPct: Number(f.annualDegradationPct),
       utilityEscalationPct: Number(f.utilityEscalationPct),
       kwhPerKwYear: Number(f.kwhPerKwYear),
-      targetOffsetPct: Number(f.targetOffsetPct),
       defaultGrossPpwCents: Math.round(Number(f.defaultGrossPpw) * 100),
       defaultDealerFeePct: Number(f.defaultDealerFeePct),
       // Blank means "derive nothing" — the sticker stays exactly as a rep types
@@ -103,12 +101,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           <NumField label="Annual degradation %" value={f.annualDegradationPct} onChange={(v) => set("annualDegradationPct", v)} step="0.1" />
           <NumField label="Utility escalation %/yr" value={f.utilityEscalationPct} onChange={(v) => set("utilityEscalationPct", v)} step="0.1" />
           <NumField label="kWh per kW / year" value={f.kwhPerKwYear} onChange={(v) => set("kwhPerKwYear", v)} hint="Local irradiance" />
-          <NumField
-            label="Target offset %"
-            value={f.targetOffsetPct}
-            onChange={(v) => set("targetOffsetPct", v)}
-            hint="What the Energy step sizes toward. Does not limit what a rep may draw."
-          />
         </div>
       </section>
 

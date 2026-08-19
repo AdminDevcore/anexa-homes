@@ -10,7 +10,6 @@ import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
-import { targetSystem } from "@/lib/solar-energy";
 
 export const dynamic = "force-dynamic";
 
@@ -227,23 +226,7 @@ export default async function SolarProposalBuilderPage({
         }
         utilities={utilities}
         retailers={retailers}
-        assumptions={{
-          kwhPerKwYear: settings.kwhPerKwYear,
-          derateFactor: settings.derateFactor,
-          targetOffsetPct: settings.targetOffsetPct,
-        }}
         hasLayout={!!design?.layoutImageFileId}
-        targetPanels={
-          targetSystem({
-            annualUsageKwh: design?.annualUsageKwh,
-            assumptions: {
-              kwhPerKwYear: settings.kwhPerKwYear,
-              derateFactor: settings.derateFactor,
-              targetOffsetPct: settings.targetOffsetPct,
-            },
-            panelWatts: sizingModule?.ratingW,
-          })?.panels ?? null
-        }
         versions={proposals.map((v) => ({
           id: v.id,
           leadId: lead.id,
