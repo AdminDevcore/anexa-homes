@@ -29,6 +29,7 @@ const settingsSchema = z.object({
   // right default while the 2025 rule changes settle. Never defaulted to 30.
   federalItcPct: z.number().min(0).max(100).nullable(),
   stateIncentiveNote: z.string().max(1000).nullable(),
+  netMeteringProgram: z.string().max(120).nullable(),
   incentiveDisclaimer: z.string().min(1).max(1000),
   minOffsetPct: z.number().min(0).max(200),
   maxOffsetPct: z.number().min(0).max(500),
