@@ -405,7 +405,7 @@ export function SolarActivityFeed({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="solar-activity-feed">
       {canPost && (
         <div className="space-y-2 rounded-lg border border-border p-3">
           <Textarea

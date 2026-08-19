@@ -45,7 +45,10 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
   test("no claim, adjuster, deductible, RCV/ACV or supplement anywhere on the deal", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
-    await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible({ timeout: 15000 });
+    // Gate on the stage bar, not on a heading: two sections are titled
+    // "Operations" on a solar deal, and the strict-mode violation that caused
+    // meant every leak assertion below silently never ran.
+    await expect(page.getByTestId("deal-stage-bar")).toBeVisible({ timeout: 15000 });
 
     // The deal is one page, so every panel is already rendered — assert on the
     // whole document and a leak anywhere on it fails this.
@@ -159,12 +162,12 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
     // Two lines: where the deal is, and what is next. Twenty-five stage labels
-    // on the page were a wall; they live in the Change dropdown now.
+    // on the page were a wall; they live in the header's Move dropdown now.
     await expect(bar.getByText("Permit Submitted")).toBeVisible();
-    await expect(bar.getByText(/\d+\/25/)).toBeVisible();
-    await expect(bar.getByText(/^Next:/)).toBeVisible();
+    await expect(bar.getByText(/Step \d+ of 25/)).toBeVisible();
+    await expect(bar.getByText(/Next:/)).toBeVisible();
     // The full list is one click away, and it is the whole pipeline.
-    await bar.getByRole("button", { name: /Change/ }).click();
+    await page.getByTestId("deal-stage-actions").getByRole("button", { name: /Move/ }).click();
     await expect(page.getByRole("menuitem", { name: /New Lead/ })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: /Utility PTO/ })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -190,8 +193,12 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // because there is no customer portal for the other two to reach.
     await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
     await expect(page.getByPlaceholder(/Use @Name to notify/)).toBeVisible();
+    // Scoped to the feed. Page-wide, "Customer" also matches the Operations
+    // card's who-are-we-waiting-on picker, which is a different control that
+    // should exist — the unscoped version failed on it.
+    const feed = page.getByTestId("solar-activity-feed");
     for (const chip of ["Internal", "External", "Customer"]) {
-      await expect(page.getByRole("button", { name: chip, exact: true })).toHaveCount(0);
+      await expect(feed.getByRole("button", { name: chip, exact: true })).toHaveCount(0);
     }
 
     // 5 · No "coming soon" placeholders anywhere on a deal. The Project AI
@@ -203,7 +210,9 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
 
     // 6 · Document folders sit beside the files they describe, further down the
     // same page.
-    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets", "Permits", "Internal Documents"]) {
+    // "Internal Documents" is deliberately gone: f56373c dropped the
+    // internal/external split along with the customer-visibility fiction.
+    for (const folder of ["Contract", "Utility Bill", "Engineering Plan Sets", "Permits", "Interconnection"]) {
       await expect(page.getByText(folder, { exact: true })).toBeVisible();
     }
   });
@@ -261,7 +270,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
 
     const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
-    await bar.getByRole("button", { name: /Change/ }).click();
+    await page.getByTestId("deal-stage-actions").getByRole("button", { name: /Move/ }).click();
     await page.getByRole("menuitem", { name: /Permit Approved/ }).click();
     await expect(page.getByText(/Stage updated/)).toBeVisible({ timeout: 15000 });
 
