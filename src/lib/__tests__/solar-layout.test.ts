@@ -7,6 +7,9 @@ import {
   panelCorners,
   metresToImagePx,
   parseLayoutBlocks,
+  blockLocalToGround,
+  groundToBlockLocal,
+  blockSpanM,
   PANEL_GAP_M,
   MODULE_FALLBACK_MM,
   type LayoutBlock,
@@ -181,5 +184,46 @@ describe("reading a stored layout", () => {
   it("reads a missing or non-array value as an empty drawing", () => {
     expect(parseLayoutBlocks(undefined)).toEqual([]);
     expect(parseLayoutBlocks({})).toEqual([]);
+  });
+});
+
+describe("the block's own frame", () => {
+  it("round-trips a point through ground metres at any rotation", () => {
+    // The resize grip converts a pointer BACK into the block frame. If the two
+    // directions disagree, dragging a rotated block resizes it along north
+    // instead of along its own rows.
+    for (const rotationDeg of [0, 37, 90, -128, 355]) {
+      const b = block({ rotationDeg, originE: 3, originN: -7 });
+      const g = blockLocalToGround(b, 2.5, 1.25);
+      const back = groundToBlockLocal(b, g.e, g.n);
+      expect(back.x).toBeCloseTo(2.5, 9);
+      expect(back.y).toBeCloseTo(1.25, 9);
+    }
+  });
+
+  it("puts the block's own origin at its origin", () => {
+    const b = block({ rotationDeg: 61, originE: 4, originN: 9 });
+    const g = blockLocalToGround(b, 0, 0);
+    expect(g.e).toBeCloseTo(4, 9);
+    expect(g.n).toBeCloseTo(9, 9);
+  });
+
+  it("agrees with the panel corners it positions", () => {
+    // The grips are placed with blockLocalToGround and the panels with
+    // panelCorners. This is the assertion that keeps them on the same roof.
+    const b = block({ rotationDeg: 24, cols: 3, rows: 2 });
+    const corners = panelCorners(b, MODULE_FALLBACK_MM);
+    const { spanX, spanY } = blockSpanM(b, MODULE_FALLBACK_MM);
+    const bottomRight = blockLocalToGround(b, spanX, spanY);
+    const lastPanelBottomRight = corners[corners.length - 1][2];
+    expect(bottomRight.e).toBeCloseTo(lastPanelBottomRight.e, 9);
+    expect(bottomRight.n).toBeCloseTo(lastPanelBottomRight.n, 9);
+  });
+
+  it("measures a span as panels plus the gaps between them", () => {
+    const { w, h } = panelSizeM(MODULE_FALLBACK_MM, "portrait");
+    const { spanX, spanY } = blockSpanM(block({ cols: 3, rows: 2 }), MODULE_FALLBACK_MM);
+    expect(spanX).toBeCloseTo(3 * w + 2 * PANEL_GAP_M, 9);
+    expect(spanY).toBeCloseTo(2 * h + 1 * PANEL_GAP_M, 9);
   });
 });

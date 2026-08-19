@@ -7,6 +7,8 @@ import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
+import { resolveSizingModule } from "@/server/modules/solar/sizing";
+import { parseLayoutBlocks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +49,10 @@ export default async function SolarProposalBuilderPage({
       city: true,
       state: true,
       zip: true,
+      // The designer frames the roof on these. Null means no rooftop
+      // coordinate yet, and it says so rather than drawing an empty canvas.
+      lat: true,
+      lng: true,
     },
   });
   if (!lead) notFound();
@@ -69,6 +75,11 @@ export default async function SolarProposalBuilderPage({
       },
     }),
   ]);
+
+  // The panel the design is sized from, for the designer's live kW figure and
+  // for true-scale panels. A catalogue entry with no dimensions falls back to a
+  // standard 60-cell module rather than drawing nothing.
+  const sizingModule = await resolveSizingModule(user.companyId, design?.moduleId ?? null);
 
   // The layout is only shown as present when the file row AND its bytes both
   // resolve. A dangling reference gets the rep a warning, never a broken image.
@@ -114,6 +125,13 @@ export default async function SolarProposalBuilderPage({
         federalItcPct={settings?.federalItcPct ?? null}
         layoutAvailable={layoutAvailable}
         canApproveLayout={can(user, "update", "Settings")}
+        lat={lead.lat}
+        moduleRatingW={sizingModule?.ratingW ?? null}
+        moduleMm={{
+          widthMm: sizingModule?.widthMm ?? MODULE_FALLBACK_MM.widthMm,
+          heightMm: sizingModule?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
+        }}
+        initialBlocks={parseLayoutBlocks(design?.layoutBlocks)}
         versions={proposals.map((v) => ({
           id: v.id,
           leadId: lead.id,

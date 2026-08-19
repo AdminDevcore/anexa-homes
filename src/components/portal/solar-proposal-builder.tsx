@@ -3,6 +3,7 @@
 import * as React from "react";
 import { ArrowRight, Hammer, Landmark, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { LayoutBlock } from "@/lib/solar-layout";
 import { Button } from "@/components/ui/button";
 import {
   SolarDesignPanel,
@@ -42,6 +43,10 @@ export function SolarProposalBuilder({
   versions,
   layoutAvailable,
   canApproveLayout,
+  lat,
+  moduleMm,
+  moduleRatingW,
+  initialBlocks,
 }: {
   leadId: string;
   /**
@@ -62,6 +67,11 @@ export function SolarProposalBuilder({
   /** Resolved server-side: the layout file row AND its bytes both exist. */
   layoutAvailable: boolean;
   canApproveLayout: boolean;
+  /** Null when the deal has no rooftop coordinate — see SolarLayoutDesigner. */
+  lat: number | null;
+  moduleMm: { widthMm: number; heightMm: number };
+  moduleRatingW: number | null;
+  initialBlocks: LayoutBlock[];
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
 
@@ -94,6 +104,10 @@ export function SolarProposalBuilder({
           canEdit={canEditDeal}
           layoutAvailable={layoutAvailable}
           canApproveLayout={canApproveLayout}
+          lat={lat}
+          moduleMm={moduleMm}
+          moduleRatingW={moduleRatingW}
+          initialBlocks={initialBlocks}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

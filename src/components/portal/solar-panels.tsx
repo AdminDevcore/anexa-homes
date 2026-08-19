@@ -18,6 +18,8 @@ import {
   type BuilderStep,
   type ValidationIssue,
 } from "@/lib/solar-validation";
+import type { LayoutBlock } from "@/lib/solar-layout";
+import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
@@ -391,6 +393,10 @@ export function SolarDesignPanel({
   canEdit,
   layoutAvailable,
   canApproveLayout,
+  lat,
+  moduleMm,
+  moduleRatingW,
+  initialBlocks,
 }: {
   leadId: string;
   design: SolarDesignView;
@@ -398,6 +404,10 @@ export function SolarDesignPanel({
   /** Resolved server-side: the file row AND its bytes both exist. */
   layoutAvailable: boolean;
   canApproveLayout: boolean;
+  lat: number | null;
+  moduleMm: { widthMm: number; heightMm: number };
+  moduleRatingW: number | null;
+  initialBlocks: LayoutBlock[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -406,7 +416,6 @@ export function SolarDesignPanel({
     annualUsageKwh: num(design?.annualUsageKwh),
     avgMonthlyBill: num(design?.avgMonthlyBillCents, 100),
     mountType: (design?.mountType ?? "roof") as MountType,
-    moduleQty: num(design?.moduleQty) || "0",
   });
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -419,7 +428,6 @@ export function SolarDesignPanel({
       annualUsageKwh: form.annualUsageKwh ? Number(form.annualUsageKwh) : null,
       avgMonthlyBillCents: form.avgMonthlyBill ? Math.round(Number(form.avgMonthlyBill) * 100) : null,
       mountType: form.mountType,
-      moduleQty: Number(form.moduleQty) || 0,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -472,10 +480,15 @@ export function SolarDesignPanel({
             approved-vendor list decides which panel it is built from, and the
             inverter and battery are settled when the job is built — both live
             on the deal's Operations card now, with the lender whose list gates
-            them. What stays is the one number that sizes the system. */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <TextField label="Module quantity" value={form.moduleQty} disabled={!canEdit} onChange={(v) => set("moduleQty", v)} type="number" />
-        </div>
+            them.
+
+            The module count is not typed either: it is how many panels were
+            drawn on the roof below, which is the only way to know how many fit. */}
+        <p className="text-sm">
+          <span className="font-display text-lg font-semibold">{design?.moduleQty ?? 0}</span>{" "}
+          {design?.moduleQty === 1 ? "panel" : "panels"}
+          <span className="text-muted-foreground"> · drawn on the roof below</span>
+        </p>
 
         {/* Computed server-side from module count × rating and the company's
             assumptions — never typed in, so it cannot be faked. */}
@@ -495,6 +508,20 @@ export function SolarDesignPanel({
             <div className="text-[11px] text-muted-foreground">offset</div>
           </div>
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Panel layout
+        </h4>
+        <SolarLayoutDesigner
+          leadId={leadId}
+          lat={lat}
+          moduleMm={moduleMm}
+          moduleRatingW={moduleRatingW}
+          initialBlocks={initialBlocks}
+          canEdit={canEdit}
+        />
       </section>
 
       <PanelLayoutPanel

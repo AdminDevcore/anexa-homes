@@ -82,12 +82,54 @@ export function panelCount(blocks: LayoutBlock[]): number {
   }, 0);
 }
 
-/** Rotate a block-local offset into ground metres. Clockwise from north. */
+/** Rotate a ground offset clockwise from north. */
 function rotate(dE: number, dN: number, deg: number): { e: number; n: number } {
   const r = (deg * Math.PI) / 180;
   const cos = Math.cos(r);
   const sin = Math.sin(r);
   return { e: dE * cos + dN * sin, n: -dE * sin + dN * cos };
+}
+
+/**
+ * A point in the block's OWN frame → ground metres.
+ *
+ * The block frame is the natural one to think in: +x runs along a row, +y runs
+ * down the rows, both in metres from the block's first panel's top-left corner.
+ *
+ * The single implementation on purpose. The panels and the on-canvas grips are
+ * positioned by different code paths, and a grip drawn where the hit test does
+ * not look is a control that silently does nothing.
+ */
+export function blockLocalToGround(
+  b: Pick<LayoutBlock, "originE" | "originN" | "rotationDeg">,
+  x: number,
+  y: number
+): { e: number; n: number } {
+  const r = rotate(x, -y, b.rotationDeg);
+  return { e: b.originE + r.e, n: b.originN + r.n };
+}
+
+/** How far a block reaches along its own rows and columns, in metres. */
+export function blockSpanM(b: LayoutBlock, m: ModuleMm): { spanX: number; spanY: number } {
+  const { w, h } = panelSizeM(m, b.orientation);
+  return {
+    spanX: Math.max(0, b.cols) * w + Math.max(0, b.cols - 1) * PANEL_GAP_M,
+    spanY: Math.max(0, b.rows) * h + Math.max(0, b.rows - 1) * PANEL_GAP_M,
+  };
+}
+
+/**
+ * A ground point → the block's own frame. The inverse of blockLocalToGround,
+ * used when a rotated block is resized so it grows along its own rows rather
+ * than along north.
+ */
+export function groundToBlockLocal(
+  b: Pick<LayoutBlock, "originE" | "originN" | "rotationDeg">,
+  e: number,
+  n: number
+): { x: number; y: number } {
+  const inv = rotate(e - b.originE, n - b.originN, -b.rotationDeg);
+  return { x: inv.e, y: -inv.n };
 }
 
 /**
@@ -102,22 +144,18 @@ export function panelCorners(b: LayoutBlock, m: ModuleMm): { e: number; n: numbe
   for (let row = 0; row < b.rows; row++) {
     for (let col = 0; col < b.cols; col++) {
       if (skip.has(row * b.cols + col)) continue;
+      // Block frame: +x along a row, +y down the rows.
       const x = col * (w + PANEL_GAP_M);
       const y = row * (h + PANEL_GAP_M);
-      // Local frame: +x east, +y SOUTH (screen-natural), so a panel's top edge
-      // sits at -y in ground north.
       out.push(
         (
           [
-            [x, -y],
-            [x + w, -y],
-            [x + w, -y - h],
-            [x, -y - h],
+            [x, y],
+            [x + w, y],
+            [x + w, y + h],
+            [x, y + h],
           ] as const
-        ).map(([dx, dy]) => {
-          const r = rotate(dx, dy, b.rotationDeg);
-          return { e: b.originE + r.e, n: b.originN + r.n };
-        })
+        ).map(([lx, ly]) => blockLocalToGround(b, lx, ly))
       );
     }
   }
