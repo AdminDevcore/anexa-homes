@@ -74,6 +74,7 @@ const designSchema = z.object({
   setbackNotes: z.string().max(2000).nullable().optional(),
   structuralNotes: z.string().max(2000).nullable().optional(),
   electricalNotes: z.string().max(2000).nullable().optional(),
+  lenderId: z.string().nullable().optional(),
   moduleId: z.string().nullable().optional(),
   moduleQty: z.number().int().min(0).max(500).optional(),
   inverterId: z.string().nullable().optional(),
@@ -130,6 +131,15 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
       return { ok: false, error: `“${row.model}” has been retired and cannot be added to a new design.` };
     }
     return { ok: true, row: { id: row.id, ratingW: row.ratingW } };
+  }
+
+  // A lender id from another company must never attach to this design.
+  if (d.lenderId) {
+    const l = await prisma.solarLender.findFirst({
+      where: { companyId: user.companyId, id: d.lenderId },
+      select: { id: true },
+    });
+    if (!l) return fail("That lender is not in your list.");
   }
 
   const existing = await prisma.solarDesign.findUnique({
@@ -287,6 +297,9 @@ const equipmentSchema = z.object({
   crossoverKind: z.enum(["reroof", "mpu"]).nullable().optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
+  // The AVL turns over annually. Bounded to a sane window so a typo cannot file
+  // a product under the year 202 or 20260.
+  avlYear: z.number().int().min(2000).max(2100).nullable().optional(),
 });
 
 /**
@@ -396,17 +409,225 @@ export async function setDefaultSolarEquipmentAction(id: string, isDefault: bool
   return ok();
 }
 
+/**
+ * How many designs still point at this catalogue item.
+ *
+ * The three foreign keys are ON DELETE SET NULL, which is the quiet failure
+ * mode this guards: deleting a module does not error, it silently blanks the
+ * module on every design that used it. Those deals then show no equipment, and
+ * their system size no longer reconciles with anything.
+ */
+async function equipmentUsage(companyId: string, id: string) {
+  const [asModule, asInverter, asBattery] = await Promise.all([
+    prisma.solarDesign.count({ where: { companyId, moduleId: id } }),
+    prisma.solarDesign.count({ where: { companyId, inverterId: id } }),
+    prisma.solarDesign.count({ where: { companyId, batteryId: id } }),
+  ]);
+  return { asModule, asInverter, asBattery, total: asModule + asInverter + asBattery };
+}
+
+/**
+ * Retire a catalogue item, or bring it back.
+ *
+ * RETIRING IS THE ANSWER TO "we do not sell this any more", not deleting. A
+ * retired item disappears from the selectors a rep builds new systems with,
+ * while every design that already chose it keeps rendering exactly as before —
+ * the deal page, the project detail and any generated proposal are untouched.
+ * That is the whole point: last year's approved-vendor list has to stop being
+ * sellable without rewriting last year's deals.
+ *
+ * Also clears `isDefault`: a product nobody can pick must not stay the default
+ * a new design starts on.
+ */
+export async function setSolarEquipmentActiveAction(id: string, isActive: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const item = await prisma.solarEquipment.findFirst({
+    where: { companyId: user.companyId, id },
+    select: { id: true, model: true, manufacturer: true },
+  });
+  if (!item) return fail("Not found.");
+
+  await prisma.solarEquipment.update({
+    where: { id },
+    data: { isActive, ...(isActive ? {} : { isDefault: false }) },
+  });
+  revalidatePath("/portal/settings/solar-equipment");
+  const name = [item.manufacturer, item.model].filter(Boolean).join(" ");
+  return { ok: true as const, message: isActive ? `${name} is sellable again.` : `${name} retired.` };
+}
+
+/**
+ * Delete a catalogue item outright.
+ *
+ * REFUSED while any design still references it. The foreign keys are ON DELETE
+ * SET NULL, so this would not fail loudly — it would blank the equipment on
+ * every historical deal and leave their system sizes unexplainable. Retiring
+ * does what the person almost always meant, and is offered by name in the
+ * error rather than left for them to discover.
+ *
+ * Deleting is still allowed for an item nothing has ever used — a typo, a
+ * duplicate, a product added and never sold.
+ */
 export async function deleteSolarEquipmentAction(id: string) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const existing = await prisma.solarEquipment.findFirst({
     where: { companyId: user.companyId, id },
-    select: { id: true },
+    select: { id: true, model: true, manufacturer: true },
   });
   if (!existing) return fail("Not found.");
+
+  const use = await equipmentUsage(user.companyId, id);
+  if (use.total > 0) {
+    const where = [
+      use.asModule && `${use.asModule} as the module`,
+      use.asInverter && `${use.asInverter} as the inverter`,
+      use.asBattery && `${use.asBattery} as the battery`,
+    ].filter(Boolean).join(", ");
+    return fail(
+      `${use.total} ${use.total === 1 ? "design uses" : "designs use"} this (${where}). ` +
+        `Deleting it would blank the equipment on those deals. Retire it instead — it disappears ` +
+        `from new designs and every existing one keeps its equipment.`
+    );
+  }
+
   await prisma.solarEquipment.delete({ where: { id } });
   revalidatePath("/portal/settings/solar-equipment");
   return ok();
+}
+
+// ---------------------------------------------------------------------------
+// Lenders and their approved-vendor lists
+// ---------------------------------------------------------------------------
+
+const lenderSchema = z.object({
+  name: z.string().min(1).max(120),
+  rank: z.number().int().min(0).max(999).optional(),
+  notes: z.string().max(1000).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+/**
+ * Add or rename a lender.
+ *
+ * Names are unique per company, case-insensitively. Two "Credit Human" rows
+ * would split one approved-vendor list across two lenders, and equipment tagged
+ * against the wrong one would silently disappear from the selectors — which
+ * looks exactly like equipment that was never approved.
+ */
+export async function upsertSolarLenderAction(id: string | null, input: z.infer<typeof lenderSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = lenderSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid lender.");
+  const d = parsed.data;
+
+  const clash = await prisma.solarLender.findFirst({
+    where: {
+      companyId: user.companyId,
+      name: { equals: d.name, mode: "insensitive" },
+      ...(id ? { NOT: { id } } : {}),
+    },
+    select: { id: true },
+  });
+  if (clash) return fail(`"${d.name}" is already in your lender list.`);
+
+  if (id) {
+    const existing = await prisma.solarLender.findFirst({
+      where: { companyId: user.companyId, id },
+      select: { id: true },
+    });
+    if (!existing) return fail("Not found.");
+    await prisma.solarLender.update({ where: { id }, data: d });
+  } else {
+    await prisma.solarLender.create({ data: { companyId: user.companyId, ...d } });
+  }
+  revalidatePath("/portal/settings/solar-equipment");
+  return ok();
+}
+
+/**
+ * Retire a lender, or bring it back.
+ *
+ * Same reasoning as retiring equipment: designs point at it. Retiring keeps
+ * every existing deal readable while removing the lender from new work.
+ */
+export async function setSolarLenderActiveAction(id: string, isActive: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const l = await prisma.solarLender.findFirst({
+    where: { companyId: user.companyId, id },
+    select: { id: true, name: true },
+  });
+  if (!l) return fail("Not found.");
+  await prisma.solarLender.update({ where: { id }, data: { isActive } });
+  revalidatePath("/portal/settings/solar-equipment");
+  return { ok: true as const, message: isActive ? `${l.name} is available again.` : `${l.name} retired.` };
+}
+
+/**
+ * Delete a lender outright. Refused while any design is being built for it —
+ * the FK is ON DELETE SET NULL, so this would silently unset the lender on
+ * those deals and widen their equipment lists without anyone noticing.
+ *
+ * Equipment approvals are NOT a blocker: those are just list membership and
+ * cascade away cleanly with the lender.
+ */
+export async function deleteSolarLenderAction(id: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const l = await prisma.solarLender.findFirst({
+    where: { companyId: user.companyId, id },
+    select: { id: true, name: true },
+  });
+  if (!l) return fail("Not found.");
+
+  const inUse = await prisma.solarDesign.count({ where: { companyId: user.companyId, lenderId: id } });
+  if (inUse > 0) {
+    return fail(
+      `${inUse} ${inUse === 1 ? "design is" : "designs are"} being built for ${l.name}. ` +
+        `Deleting it would clear the lender on ${inUse === 1 ? "that deal" : "those deals"} and widen ` +
+        `their equipment lists. Retire it instead.`
+    );
+  }
+  await prisma.solarLender.delete({ where: { id } });
+  revalidatePath("/portal/settings/solar-equipment");
+  return ok();
+}
+
+/**
+ * Set exactly which lenders approve one catalogue item.
+ *
+ * Replaces the whole set in a transaction rather than diffing: the caller sends
+ * the checkboxes as they now stand, and a partial failure that left an item
+ * half-approved would be worse than either outcome.
+ */
+export async function setEquipmentLendersAction(equipmentId: string, lenderIds: string[]) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+
+  const item = await prisma.solarEquipment.findFirst({
+    where: { companyId: user.companyId, id: equipmentId },
+    select: { id: true },
+  });
+  if (!item) return fail("Not found.");
+
+  // Only this company's lenders, so an id from elsewhere cannot be attached.
+  const valid = await prisma.solarLender.findMany({
+    where: { companyId: user.companyId, id: { in: lenderIds } },
+    select: { id: true },
+  });
+
+  await prisma.$transaction([
+    prisma.solarEquipmentLender.deleteMany({ where: { equipmentId } }),
+    prisma.solarEquipmentLender.createMany({
+      data: valid.map((l) => ({ equipmentId, lenderId: l.id })),
+      skipDuplicates: true,
+    }),
+  ]);
+  revalidatePath("/portal/settings/solar-equipment");
+  return { ok: true as const, count: valid.length };
 }
 
 // ---------------------------------------------------------------------------

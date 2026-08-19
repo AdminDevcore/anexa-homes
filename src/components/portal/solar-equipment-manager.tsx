@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Home, Zap, Star } from "lucide-react";
+import { Loader2, Plus, Trash2, Home, Zap, Star, Archive, RotateCcw, Landmark, Check } from "lucide-react";
 import type { SolarEquipmentKind } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,11 @@ import {
   upsertSolarEquipmentAction,
   deleteSolarEquipmentAction,
   setDefaultSolarEquipmentAction,
+  setSolarEquipmentActiveAction,
+  upsertSolarLenderAction,
+  setSolarLenderActiveAction,
+  deleteSolarLenderAction,
+  setEquipmentLendersAction,
 } from "@/server/modules/solar/actions";
 
 type Item = {
@@ -26,7 +31,11 @@ type Item = {
   crossoverKind: string | null;
   isActive: boolean;
   isDefault: boolean;
+  avlYear: number | null;
+  lenderIds: string[];
 };
+
+export type Lender = { id: string; name: string; isActive: boolean; rank: number; notes: string | null };
 
 const KINDS: { value: SolarEquipmentKind; label: string; ratingLabel: string }[] = [
   { value: "module", label: "Modules", ratingLabel: "W per panel" },
@@ -38,9 +47,10 @@ const KINDS: { value: SolarEquipmentKind; label: string; ratingLabel: string }[]
 const money = (c: number) =>
   (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
-export function SolarEquipmentManager({ items, canEdit }: { items: Item[]; canEdit: boolean }) {
+export function SolarEquipmentManager({ items, lenders, canEdit }: { items: Item[]; lenders: Lender[]; canEdit: boolean }) {
   return (
     <div className="space-y-6">
+      <LenderSection lenders={lenders} canEdit={canEdit} />
       {KINDS.map((k) => (
         <section key={k.value} className="space-y-3 rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
@@ -54,41 +64,117 @@ export function SolarEquipmentManager({ items, canEdit }: { items: Item[]; canEd
               Roofing job, instead of quietly becoming a line item nobody follows up.
             </p>
           )}
-          <div className="divide-y divide-border">
-            {items.filter((i) => i.kind === k.value).length === 0 && (
-              <p className="py-2 text-sm text-muted-foreground">Nothing yet.</p>
-            )}
-            {items
-              .filter((i) => i.kind === k.value)
-              .map((i) => (
-                <Row key={i.id} item={i} canEdit={canEdit} />
-              ))}
-          </div>
+          {(() => {
+            const mine = items.filter((i) => i.kind === k.value);
+            const live = mine.filter((i) => i.isActive);
+            const retired = mine.filter((i) => !i.isActive);
+            return (
+              <>
+                <div className="divide-y divide-border">
+                  {mine.length === 0 && (
+                    <p className="py-2 text-sm text-muted-foreground">Nothing yet.</p>
+                  )}
+                  {mine.length > 0 && live.length === 0 && (
+                    <p className="py-2 text-sm text-muted-foreground">
+                      Nothing sellable — everything here is retired.
+                    </p>
+                  )}
+                  {live.map((i) => (
+                    <Row key={i.id} item={i} lenders={lenders} canEdit={canEdit} />
+                  ))}
+                </div>
+
+                {/* Retired items stay listed, and stay readable. They are what
+                    last year's deals point at, so hiding them would make those
+                    deals harder to explain, not tidier. */}
+                {retired.length > 0 && (
+                  <details className="mt-3 rounded-lg border border-dashed border-border">
+                    <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
+                      {retired.length} retired — still shown on the deals that already use{" "}
+                      {retired.length === 1 ? "it" : "them"}
+                    </summary>
+                    <div className="divide-y divide-border px-3 pb-2">
+                      {retired.map((i) => (
+                        <Row key={i.id} item={i} lenders={lenders} canEdit={canEdit} />
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </>
+            );
+          })()}
         </section>
       ))}
     </div>
   );
 }
 
-function Row({ item, canEdit }: { item: Item; canEdit: boolean }) {
+function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdit: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
+  const [editingLenders, setEditingLenders] = React.useState(false);
+  const [picked, setPicked] = React.useState<string[]>(item.lenderIds);
 
   async function remove() {
     setBusy(true);
     const res = await deleteSolarEquipmentAction(item.id);
     setBusy(false);
+    if (!res.ok) return toast.error(res.error, { duration: 9000 });
+    toast.success("Deleted");
+    router.refresh();
+  }
+
+  async function setActive(next: boolean) {
+    setBusy(true);
+    const res = await setSolarEquipmentActiveAction(item.id, next);
+    setBusy(false);
     if (!res.ok) return toast.error(res.error);
-    toast.success("Removed");
+    toast.success(res.message ?? (next ? "Restored" : "Retired"));
+    router.refresh();
+  }
+
+  const named = lenders.filter((l) => item.lenderIds.includes(l.id));
+
+  async function saveLenders() {
+    setBusy(true);
+    const res = await setEquipmentLendersAction(item.id, picked);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    setEditingLenders(false);
+    toast.success(res.count === 0 ? "No lender approvals — this will be hidden whenever a lender is selected" : `Approved for ${res.count} lender${res.count === 1 ? "" : "s"}`);
     router.refresh();
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 py-2.5 text-sm">
+    <>
+    <div className={`flex flex-wrap items-center gap-2 py-2.5 text-sm ${item.isActive ? "" : "opacity-60"}`}>
       <span className="min-w-[14rem] flex-1 font-medium">
         {item.manufacturer ? `${item.manufacturer} ` : ""}
         {item.model}
       </span>
+      {item.avlYear != null && (
+        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">
+          AVL {item.avlYear}
+        </span>
+      )}
+      {!item.isActive && (
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          retired
+        </span>
+      )}
+      {named.map((l) => (
+        <span key={l.id} className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800">
+          {l.name}
+        </span>
+      ))}
+      {lenders.length > 0 && named.length === 0 && (
+        <span
+          className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+          title="Not on any lender's approved list, so it is hidden whenever a lender is selected on a deal"
+        >
+          no lender
+        </span>
+      )}
       {item.ratingW ? (
         <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
           {item.ratingW}W
@@ -116,7 +202,7 @@ function Row({ item, canEdit }: { item: Item; canEdit: boolean }) {
       <span className="tabular-nums font-medium">{money(item.priceCents)}</span>
       {/* One default per kind — promoting this one demotes the incumbent, so
           the builder always has exactly one obvious starting choice. */}
-      {canEdit && item.kind !== "adder" && (
+      {canEdit && item.kind !== "adder" && item.isActive && (
         <Button
           variant="ghost"
           size="sm"
@@ -134,12 +220,201 @@ function Row({ item, canEdit }: { item: Item; canEdit: boolean }) {
           <Star className={item.isDefault ? "size-4 fill-current" : "size-4"} />
         </Button>
       )}
+      {canEdit && lenders.length > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          title="Which lenders approve this"
+          onClick={() => { setPicked(item.lenderIds); setEditingLenders((v) => !v); }}
+        >
+          <Landmark className="size-4" />
+        </Button>
+      )}
+      {/* Retiring is the safe move and sits before delete on purpose: it stops
+          new designs picking the item while leaving every existing deal intact. */}
       {canEdit && (
-        <Button variant="ghost" size="icon" onClick={remove} disabled={busy}>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={busy}
+          title={item.isActive ? "Retire — hide from new designs, keep it on existing deals" : "Make sellable again"}
+          onClick={() => setActive(!item.isActive)}
+        >
+          {item.isActive ? <Archive className="size-4" /> : <RotateCcw className="size-4" />}
+        </Button>
+      )}
+      {canEdit && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={remove}
+          disabled={busy}
+          title="Delete permanently — refused if any design uses it"
+        >
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
         </Button>
       )}
     </div>
+
+    {editingLenders && (
+      <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3">
+        <p className="mb-2 text-xs font-medium">Approved by</p>
+        <div className="flex flex-wrap gap-2">
+          {lenders.map((l) => {
+            const on = picked.includes(l.id);
+            return (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setPicked((p) => (on ? p.filter((x) => x !== l.id) : [...p, l.id]))}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                  on ? "border-violet-300 bg-violet-100 text-violet-900" : "border-border hover:bg-muted"
+                }`}
+              >
+                {on && <Check className="size-3" />}
+                {l.name}
+                {!l.isActive && " · retired"}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          A rep who selects one of these on a deal will see this item. Tick every list it appears on —
+          most equipment is approved by more than one.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <Button size="sm" onClick={saveLenders} disabled={busy}>
+            {busy && <Loader2 className="size-4 animate-spin" />} Save approvals
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setEditingLenders(false)} disabled={busy}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )}
+    </>
+  );
+}
+
+/**
+ * The lenders whose approved-vendor lists constrain the catalogue.
+ *
+ * Managed here rather than typed on a deal, because the whole mechanism depends
+ * on one lender being one row: "Credit Human" and "credit human" as two rows
+ * would split one AVL in half and hide approved equipment from a rep who picked
+ * the wrong one.
+ */
+function LenderSection({ lenders, canEdit }: { lenders: Lender[]; canEdit: boolean }) {
+  const router = useRouter();
+  const [name, setName] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  async function add() {
+    if (!name.trim()) return;
+    setBusy(true);
+    const res = await upsertSolarLenderAction(null, { name: name.trim() });
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    setName("");
+    toast.success("Lender added");
+    router.refresh();
+  }
+
+  const live = lenders.filter((l) => l.isActive);
+  const retired = lenders.filter((l) => !l.isActive);
+
+  return (
+    <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+      <h3 className="font-semibold">Lenders</h3>
+      <p className="text-xs text-muted-foreground">
+        Each lender keeps its own approved-vendor list. Tag equipment with the lenders that approve it,
+        and a rep who picks that lender on a deal sees only what it will actually finance.
+      </p>
+
+      {lenders.length === 0 && <p className="py-1 text-sm text-muted-foreground">Nothing yet.</p>}
+
+      <div className="flex flex-wrap gap-2">
+        {live.map((l) => (
+          <LenderChip key={l.id} lender={l} canEdit={canEdit} />
+        ))}
+      </div>
+
+      {retired.length > 0 && (
+        <details className="rounded-lg border border-dashed border-border">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
+            {retired.length} retired
+          </summary>
+          <div className="flex flex-wrap gap-2 px-3 pb-3">
+            {retired.map((l) => (
+              <LenderChip key={l.id} lender={l} canEdit={canEdit} />
+            ))}
+          </div>
+        </details>
+      )}
+
+      {canEdit && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Add a lender</Label>
+            <Input
+              className="sm:w-64"
+              value={name}
+              placeholder="e.g. Credit Human"
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
+            />
+          </div>
+          <Button size="sm" onClick={add} disabled={busy || !name.trim()}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LenderChip({ lender, canEdit }: { lender: Lender; canEdit: boolean }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const act = async (fn: () => Promise<{ ok: boolean; error?: string; message?: string }>) => {
+    setBusy(true);
+    const res = await fn();
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error, { duration: 9000 });
+    toast.success(res.message ?? "Updated");
+    router.refresh();
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm ${
+        lender.isActive ? "border-border" : "border-dashed border-border opacity-60"
+      }`}
+    >
+      <Landmark className="size-3.5 text-muted-foreground" />
+      {lender.name}
+      {canEdit && (
+        <>
+          <button
+            className="ml-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
+            disabled={busy}
+            title={lender.isActive ? "Retire — keeps existing deals intact" : "Make available again"}
+            onClick={() => act(() => setSolarLenderActiveAction(lender.id, !lender.isActive))}
+          >
+            {lender.isActive ? <Archive className="size-3.5" /> : <RotateCcw className="size-3.5" />}
+          </button>
+          <button
+            className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+            disabled={busy}
+            title="Delete — refused if any design is being built for it"
+            onClick={() => act(() => deleteSolarLenderAction(lender.id))}
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </>
+      )}
+    </span>
   );
 }
 
@@ -154,6 +429,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     cost: "",
     price: "",
     rank: "0",
+    avlYear: "",
     crossoverKind: "",
   });
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -169,12 +445,13 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
       costCents: f.cost ? Math.round(Number(f.cost) * 100) : 0,
       priceCents: f.price ? Math.round(Number(f.price) * 100) : 0,
       rank: Number(f.rank) || 0,
+      avlYear: f.avlYear.trim() === "" ? null : Number(f.avlYear),
       crossoverKind: (f.crossoverKind || null) as "reroof" | "mpu" | null,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success("Added");
-    setF({ manufacturer: "", model: "", ratingW: "", cost: "", price: "", rank: "0", crossoverKind: "" });
+    setF({ manufacturer: "", model: "", ratingW: "", cost: "", price: "", rank: "0", avlYear: "", crossoverKind: "" });
     setOpen(false);
     router.refresh();
   }
@@ -204,6 +481,18 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
             <Input type="number" value={f.ratingW} onChange={(e) => set("ratingW", e.target.value)} />
           </div>
         )}
+        {/* Which approved-vendor list this belongs to. Optional: plenty of
+            items are not year-scoped, and a blank is honest about that. */}
+        <div className="space-y-1">
+          <Label className="text-xs">AVL year</Label>
+          <Input
+            type="number"
+            inputMode="numeric"
+            placeholder="e.g. 2026"
+            value={f.avlYear}
+            onChange={(e) => set("avlYear", e.target.value)}
+          />
+        </div>
         <div className="space-y-1">
           <Label className="text-xs">Cost $</Label>
           <Input type="number" value={f.cost} onChange={(e) => set("cost", e.target.value)} />

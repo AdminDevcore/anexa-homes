@@ -15,9 +15,17 @@ export default async function SolarEquipmentPage() {
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
   if ((await getActiveVertical(user)) !== "solar") redirect("/portal/settings");
 
+  const lenders = await prisma.solarLender.findMany({
+    where: { companyId: user.companyId },
+    orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
+    select: { id: true, name: true, isActive: true, rank: true, notes: true },
+  });
+
   const items = await prisma.solarEquipment.findMany({
     where: { companyId: user.companyId },
-    orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
+    // Sellable first, then newest AVL year, so the current list leads.
+    orderBy: [{ kind: "asc" }, { isActive: "desc" }, { avlYear: "desc" }, { rank: "asc" }, { model: "asc" }],
+    include: { lenderApprovals: { select: { lenderId: true } } },
   });
 
   return (
@@ -34,6 +42,7 @@ export default async function SolarEquipmentPage() {
       />
       <SolarEquipmentManager
         canEdit={can(user, "update", "Settings")}
+        lenders={lenders}
         items={items.map((i) => ({
           id: i.id,
           kind: i.kind,
@@ -46,6 +55,8 @@ export default async function SolarEquipmentPage() {
           crossoverKind: i.crossoverKind,
           isActive: i.isActive,
           isDefault: i.isDefault,
+          avlYear: i.avlYear,
+          lenderIds: i.lenderApprovals.map((a) => a.lenderId),
         }))}
       />
     </div>
