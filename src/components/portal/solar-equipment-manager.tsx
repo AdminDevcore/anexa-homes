@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Home, Zap, Star, Archive, RotateCcw, Landmark, Check } from "lucide-react";
@@ -13,9 +14,6 @@ import {
   deleteSolarEquipmentAction,
   setDefaultSolarEquipmentAction,
   setSolarEquipmentActiveAction,
-  upsertSolarLenderAction,
-  setSolarLenderActiveAction,
-  deleteSolarLenderAction,
   setEquipmentLendersAction,
 } from "@/server/modules/solar/actions";
 
@@ -50,7 +48,15 @@ const money = (c: number) =>
 export function SolarEquipmentManager({ items, lenders, canEdit }: { items: Item[]; lenders: Lender[]; canEdit: boolean }) {
   return (
     <div className="space-y-6">
-      <LenderSection lenders={lenders} canEdit={canEdit} />
+      {lenders.length === 0 && (
+        <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+          No lenders set up yet. Add them under{" "}
+          <Link href="/portal/settings/solar-lenders" className="underline underline-offset-2">
+            Settings &rarr; Lenders
+          </Link>{" "}
+          to tag which approved-vendor lists each item appears on.
+        </p>
+      )}
       {KINDS.map((k) => (
         <section key={k.value} className="space-y-3 rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between">
@@ -294,127 +300,6 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
       </div>
     )}
     </>
-  );
-}
-
-/**
- * The lenders whose approved-vendor lists constrain the catalogue.
- *
- * Managed here rather than typed on a deal, because the whole mechanism depends
- * on one lender being one row: "Credit Human" and "credit human" as two rows
- * would split one AVL in half and hide approved equipment from a rep who picked
- * the wrong one.
- */
-function LenderSection({ lenders, canEdit }: { lenders: Lender[]; canEdit: boolean }) {
-  const router = useRouter();
-  const [name, setName] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-
-  async function add() {
-    if (!name.trim()) return;
-    setBusy(true);
-    const res = await upsertSolarLenderAction(null, { name: name.trim() });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    setName("");
-    toast.success("Lender added");
-    router.refresh();
-  }
-
-  const live = lenders.filter((l) => l.isActive);
-  const retired = lenders.filter((l) => !l.isActive);
-
-  return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-5">
-      <h3 className="font-semibold">Lenders</h3>
-      <p className="text-xs text-muted-foreground">
-        Each lender keeps its own approved-vendor list. Tag equipment with the lenders that approve it,
-        and a rep who picks that lender on a deal sees only what it will actually finance.
-      </p>
-
-      {lenders.length === 0 && <p className="py-1 text-sm text-muted-foreground">Nothing yet.</p>}
-
-      <div className="flex flex-wrap gap-2">
-        {live.map((l) => (
-          <LenderChip key={l.id} lender={l} canEdit={canEdit} />
-        ))}
-      </div>
-
-      {retired.length > 0 && (
-        <details className="rounded-lg border border-dashed border-border">
-          <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
-            {retired.length} retired
-          </summary>
-          <div className="flex flex-wrap gap-2 px-3 pb-3">
-            {retired.map((l) => (
-              <LenderChip key={l.id} lender={l} canEdit={canEdit} />
-            ))}
-          </div>
-        </details>
-      )}
-
-      {canEdit && (
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label className="text-xs">Add a lender</Label>
-            <Input
-              className="sm:w-64"
-              value={name}
-              placeholder="e.g. Credit Human"
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
-            />
-          </div>
-          <Button size="sm" onClick={add} disabled={busy || !name.trim()}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add
-          </Button>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function LenderChip({ lender, canEdit }: { lender: Lender; canEdit: boolean }) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState(false);
-  const act = async (fn: () => Promise<{ ok: boolean; error?: string; message?: string }>) => {
-    setBusy(true);
-    const res = await fn();
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error, { duration: 9000 });
-    toast.success(res.message ?? "Updated");
-    router.refresh();
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm ${
-        lender.isActive ? "border-border" : "border-dashed border-border opacity-60"
-      }`}
-    >
-      <Landmark className="size-3.5 text-muted-foreground" />
-      {lender.name}
-      {canEdit && (
-        <>
-          <button
-            className="ml-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
-            disabled={busy}
-            title={lender.isActive ? "Retire — keeps existing deals intact" : "Make available again"}
-            onClick={() => act(() => setSolarLenderActiveAction(lender.id, !lender.isActive))}
-          >
-            {lender.isActive ? <Archive className="size-3.5" /> : <RotateCcw className="size-3.5" />}
-          </button>
-          <button
-            className="text-muted-foreground hover:text-foreground disabled:opacity-50"
-            disabled={busy}
-            title="Delete — refused if any design is being built for it"
-            onClick={() => act(() => deleteSolarLenderAction(lender.id))}
-          >
-            <Trash2 className="size-3.5" />
-          </button>
-        </>
-      )}
-    </span>
   );
 }
 
