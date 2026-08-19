@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { runInVertical } from "@/server/vertical/context";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
+import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 
 /**
  * Where the watts come from once a rep no longer picks equipment.
@@ -118,5 +119,42 @@ describe("build details never move a quoted number", () => {
     // sizes the system, so nothing on the ops card may move these.
     expect(after?.systemSizeKwDc).toBe(8);
     expect(after?.year1ProductionKwh).toBe(9760);
+  });
+});
+
+describe("the drawing is what sets the module count", () => {
+  const blocks: LayoutBlock[] = [
+    { id: "b1", originE: 0, originN: 0, rotationDeg: 12, cols: 5, rows: 4, orientation: "portrait", omitted: [3] },
+  ];
+
+  it("sizes the system from the geometry, not from anything a client says", async () => {
+    const p = await panel({ ratingW: 400, isDefault: true });
+    await db.solarDesign.create({ data: { companyId, leadId, moduleQty: 0, annualUsageKwh: 14_000 } });
+
+    // 5 x 4 with one knocked out for a vent.
+    expect(panelCount(blocks)).toBe(19);
+
+    await db.solarDesign.update({
+      where: { leadId },
+      data: {
+        layoutBlocks: blocks,
+        moduleQty: panelCount(blocks),
+        moduleId: p.id,
+        systemSizeKwDc: (panelCount(blocks) * 400) / 1000,
+      },
+    });
+
+    const after = await db.solarDesign.findUnique({ where: { leadId } });
+    expect(after?.moduleQty).toBe(19);
+    expect(after?.systemSizeKwDc).toBeCloseTo(7.6, 6);
+  });
+
+  it("round-trips the blocks through JSONB unchanged, rotation included", async () => {
+    // The drawing is the record of what was quoted. If a rotation or an
+    // omission does not survive storage, a reopened design is a different roof.
+    await db.solarDesign.create({ data: { companyId, leadId, layoutBlocks: blocks } });
+
+    const after = await db.solarDesign.findUnique({ where: { leadId } });
+    expect(after?.layoutBlocks).toEqual(blocks);
   });
 });
