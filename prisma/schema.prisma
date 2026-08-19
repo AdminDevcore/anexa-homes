@@ -2677,6 +2677,18 @@ model SolarLender {
   rank     Int     @default(0)
   notes    String?
 
+  /// Where YOUR team runs credit for this partner — the dealer portal login.
+  /// Rep-facing only: it never reaches a customer-facing document.
+  portalUrl          String?
+  /// The customer-facing application link. This, and only this, is what the
+  /// proposal's Qualify button opens, which is why it is a separate column
+  /// from `portalUrl` rather than one "link" field used for both. Confusing
+  /// them would put your dealer portal in front of a homeowner.
+  applyUrl           String?
+  /// How to run credit with this partner, in your own words. Free text because
+  /// every lender's process is different and none of them fit a schema.
+  creditInstructions String?
+
   approvals SolarEquipmentLender[]
   designs   SolarDesign[]
   /// What this lender actually finances, and on what terms.
@@ -2726,6 +2738,26 @@ model SolarLenderProduct {
   termMonths   Int?
   /// The lender's cut, as a % of gross. Drives the derived sticker price.
   dealerFeePct Float?
+
+  // ── Payment factors ─────────────────────────────────────────────────────
+  // Solar lenders publish a PAYMENT FACTOR rather than expecting the dealer to
+  // amortise: monthly = amount financed × factor. The factor already carries
+  // the promotional structure, so it does NOT generally equal the amortised
+  // figure — and where one exists it is the lender's own published number,
+  // which is why it outranks `loanPaymentCents` everywhere.
+  //
+  // Stored in MILLIONTHS as integers for the same reason money is stored in
+  // cents: 0.005712 has no exact binary representation, and a factor that
+  // drifts in the sixth decimal moves a real customer's payment.
+  /// Factor assuming the borrower applies the paydown. 5712 = 0.005712.
+  factorWithPaydownMicros    Int?
+  /// Factor if the paydown is never applied — the higher of the two.
+  factorWithoutPaydownMicros Int?
+  /// % of the financed amount the borrower is expected to pay down, typically
+  /// the federal credit. Null when the program has no paydown structure.
+  paydownPct                 Float?
+  /// Month the paydown is due, after which the payment re-sets. Usually 18.
+  paydownMonths              Int?
 
   // ── Lease ───────────────────────────────────────────────────────────────
   /// Price per kW-DC per month, cents. Multiplied by system size to get the

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Loader2, TriangleAlert, CircleAlert, Sun, Info, ImageUp, Trash2, BadgeCheck,
+  Loader2, TriangleAlert, CircleAlert, Sun, Info, ImageUp, Trash2, BadgeCheck, ExternalLink,
 } from "lucide-react";
 import type { FinanceProduct, MountType } from "@prisma/client";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,7 @@ import type { LayoutBlock } from "@/lib/solar-layout";
 import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
 import { loanPaymentCents, grossPpwFromNet, leaseMonthlyCents } from "@/lib/solar-money";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
+import { factorQuote, factorMonthlyCents, hasPaymentFactor, formatFactor } from "@/lib/solar-loan";
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
@@ -561,6 +562,11 @@ export type LenderProductOption = {
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
+  /** Payment factors in millionths. Loan only; null when the sheet quotes none. */
+  factorWithPaydownMicros: number | null;
+  factorWithoutPaydownMicros: number | null;
+  paydownPct: number | null;
+  paydownMonths: number | null;
   isActive: boolean;
 };
 
@@ -656,6 +662,8 @@ export function SolarFinancePanel({
   federalItcPct,
   canEdit,
   lenderName,
+  lenderPortalUrl,
+  lenderCreditInstructions,
   products,
   targetNetPpwCents,
   systemSizeKwDc,
@@ -667,6 +675,9 @@ export function SolarFinancePanel({
   canEdit: boolean;
   /** The lender chosen in step 1. Null when the design has not picked one. */
   lenderName: string | null;
+  /** Dealer portal, rep-facing. Deliberately not the customer application link. */
+  lenderPortalUrl: string | null;
+  lenderCreditInstructions: string | null;
   /** That lender's rate sheet: sellable rows, plus whatever this deal quotes. */
   products: LenderProductOption[];
   targetNetPpwCents: number | null;
@@ -721,9 +732,32 @@ export function SolarFinancePanel({
    * same numbers because both sides compute them the same way.
    */
   const quote = React.useMemo(() => {
+    // The sheet's own factor arithmetic, computed BEFORE the approved-figure
+    // short-circuit. An approval outranks it as the quoted payment, but a rep
+    // still needs to see what the sheet said next to what the lender came back
+    // with — hiding it the moment an approval lands is how a mismatch goes
+    // unnoticed.
+    const principalNow =
+      isLoan && chosen
+        ? (numOrNullPure(form.grossPpw, 100) ?? 0) * systemSizeKwDc * 1000 +
+          (numOrNullPure(form.adderTotal, 100) ?? 0) -
+          (numOrNullPure(form.downPayment, 100) ?? 0)
+        : 0;
+    const factors =
+      isLoan && chosen && hasPaymentFactor(chosen)
+        ? factorQuote(chosen, Math.round(principalNow))
+        : null;
+
     const approvedCents = numOrNullPure(form.loanMonthly, 100);
     if (isLoan && approvedCents != null) {
-      return { monthlyCents: approvedCents, approved: true, grossPpwCents: null, derivedGross: false };
+      return {
+        monthlyCents: approvedCents,
+        approved: true,
+        fromFactor: false,
+        factors,
+        grossPpwCents: null,
+        derivedGross: false,
+      };
     }
     if (!chosen) return null;
 
@@ -731,6 +765,8 @@ export function SolarFinancePanel({
       return {
         monthlyCents: leaseMonthlyCents(chosen.leaseRateCentsPerKwMonth, systemSizeKwDc),
         approved: false,
+        fromFactor: false,
+        factors: null,
         grossPpwCents: null,
         derivedGross: false,
       };
@@ -751,15 +787,26 @@ export function SolarFinancePanel({
     const contractCents =
       Math.round(systemSizeKwDc * 1000 * grossPpwCents) + (numOrNullPure(form.adderTotal, 100) ?? 0);
     const principal = contractCents - (numOrNullPure(form.downPayment, 100) ?? 0);
-    const monthlyCents = loanPaymentCents({
-      principalCents: principal,
-      aprPct: chosen.aprPct,
-      termMonths: chosen.termMonths,
-    });
+
+    // A PUBLISHED payment factor outranks our amortisation. The factor already
+    // carries the fee and whatever promotional structure the program has, so it
+    // does not equal `loanPaymentCents` for the same APR and term — and quoting
+    // the derived figure when the lender printed a factor misquotes the
+    // customer. Programs with no factor on file fall through unchanged.
+    const monthlyCents =
+      (factors && factorMonthlyCents(factors)) ??
+      loanPaymentCents({
+        principalCents: principal,
+        aprPct: chosen.aprPct,
+        termMonths: chosen.termMonths,
+      });
     if (monthlyCents == null) return null;
     return {
       monthlyCents,
       approved: false,
+      /** True when the figure came off the sheet rather than out of a formula. */
+      fromFactor: factors != null && factorMonthlyCents(factors) != null,
+      factors,
       grossPpwCents,
       derivedGross: derived != null && derived === grossPpwCents,
     };
@@ -872,8 +919,55 @@ export function SolarFinancePanel({
           <p className="mt-1 text-[11px] text-muted-foreground">
             {quote.approved
               ? "The lender's own figure from the approval. This is what the customer sees."
-              : "Estimated from the product's terms. The lender's approved figure replaces it below."}
+              : quote.fromFactor
+                ? "From the rate sheet's payment factor — the lender's own published figure. The approved figure replaces it below."
+                : "Estimated from the product's terms. The lender's approved figure replaces it below."}
           </p>
+
+          {/* Both payments, never just the flattering one: the low figure is
+              conditional on a paydown the customer has to actually make, and a
+              customer who never applies the credit finds out from a bank
+              statement. */}
+          {quote.factors && (
+            <dl className="mt-2 space-y-1 border-t border-border/60 pt-2 text-[11px]">
+              {quote.factors.withPaydownMonthlyCents != null && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">
+                    With paydown
+                    <span className="ml-1 opacity-70">
+                      (&times;&nbsp;{formatFactor(chosen?.factorWithPaydownMicros)})
+                    </span>
+                  </dt>
+                  <dd className="tabular-nums font-medium">
+                    ${(quote.factors.withPaydownMonthlyCents / 100).toFixed(2)}/mo
+                  </dd>
+                </div>
+              )}
+              {quote.factors.withoutPaydownMonthlyCents != null && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">
+                    Without paydown
+                    <span className="ml-1 opacity-70">
+                      (&times;&nbsp;{formatFactor(chosen?.factorWithoutPaydownMicros)})
+                    </span>
+                  </dt>
+                  <dd className="tabular-nums font-medium">
+                    ${(quote.factors.withoutPaydownMonthlyCents / 100).toFixed(2)}/mo
+                  </dd>
+                </div>
+              )}
+              {quote.factors.paydownCents != null && quote.factors.paydownMonths != null && (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">
+                    Paydown due by month {quote.factors.paydownMonths} ({quote.factors.paydownPct}%)
+                  </dt>
+                  <dd className="tabular-nums font-medium">
+                    {money(quote.factors.paydownCents)}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
         </div>
       )}
 
@@ -905,8 +999,20 @@ export function SolarFinancePanel({
           quoted must be the number the lender issued. */}
       {isLoan && (
         <div className="space-y-2 rounded-lg border border-border p-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Approved loan terms
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Approved loan terms
+            </div>
+            {lenderPortalUrl && (
+              <a
+                href={lenderPortalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                Run credit{lenderName ? ` at ${lenderName}` : ""} <ExternalLink className="size-3" />
+              </a>
+            )}
           </div>
           {/* TextField, not bare Label+Input: it wires htmlFor/id, so a screen
               reader announces each figure and the label is clickable. */}
@@ -919,6 +1025,17 @@ export function SolarFinancePanel({
           <p className="text-[11px] text-muted-foreground">
             Enter the lender&rsquo;s own figures from the approval — these are never calculated here.
           </p>
+
+          {lenderCreditInstructions && (
+            <details className="rounded-lg border border-border/70 p-2">
+              <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
+                How to run credit{lenderName ? ` at ${lenderName}` : ""}
+              </summary>
+              <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                {lenderCreditInstructions}
+              </p>
+            </details>
+          )}
         </div>
       )}
 

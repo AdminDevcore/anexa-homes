@@ -81,7 +81,7 @@ export default async function SolarProposalBuilderPage({
     design?.lenderId
       ? prisma.solarLender.findFirst({
           where: { companyId: user.companyId, id: design.lenderId },
-          select: { name: true },
+          select: { name: true, portalUrl: true, creditInstructions: true },
         })
       : Promise.resolve(null),
     // That lender's rate sheet: sellable rows, PLUS whatever this deal is
@@ -157,6 +157,8 @@ export default async function SolarProposalBuilderPage({
         itcDisclaimer={settings?.incentiveDisclaimer ?? ""}
         federalItcPct={settings?.federalItcPct ?? null}
         lenderName={lender?.name ?? null}
+        lenderPortalUrl={lender?.portalUrl ?? null}
+        lenderCreditInstructions={lender?.creditInstructions ?? null}
         lenderProducts={lenderProducts.map((p) => ({
           id: p.id,
           product: p.product,
@@ -168,6 +170,10 @@ export default async function SolarProposalBuilderPage({
           rateMillsPerKwh: p.rateMillsPerKwh,
           escalatorPct: p.escalatorPct,
           termYears: p.termYears,
+          factorWithPaydownMicros: p.factorWithPaydownMicros,
+          factorWithoutPaydownMicros: p.factorWithoutPaydownMicros,
+          paydownPct: p.paydownPct,
+          paydownMonths: p.paydownMonths,
           isActive: p.isActive,
         }))}
         targetNetPpwCents={settings?.targetNetPpwCents ?? null}

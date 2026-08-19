@@ -42,6 +42,8 @@ export function SolarProposalBuilder({
   itcDisclaimer,
   federalItcPct,
   lenderName,
+  lenderPortalUrl,
+  lenderCreditInstructions,
   lenderProducts,
   targetNetPpwCents,
   systemSizeKwDc,
@@ -70,6 +72,9 @@ export function SolarProposalBuilder({
   federalItcPct: number | null;
   /** The lender step 1 designed this system for, if one was chosen. */
   lenderName: string | null;
+  /** Dealer portal, rep-facing. Never the customer application link. */
+  lenderPortalUrl: string | null;
+  lenderCreditInstructions: string | null;
   /** That lender's rate sheet — see SolarFinancePanel. */
   lenderProducts: LenderProductOption[];
   targetNetPpwCents: number | null;
@@ -135,6 +140,8 @@ export function SolarProposalBuilder({
           federalItcPct={federalItcPct}
           canEdit={canEditDeal}
           lenderName={lenderName}
+          lenderPortalUrl={lenderPortalUrl}
+          lenderCreditInstructions={lenderCreditInstructions}
           products={lenderProducts}
           targetNetPpwCents={targetNetPpwCents}
           systemSizeKwDc={systemSizeKwDc}

@@ -587,11 +587,42 @@ export async function deleteSolarEquipmentAction(id: string) {
 // Lenders and their approved-vendor lists
 // ---------------------------------------------------------------------------
 
+/**
+ * A link a rep or a customer will actually click.
+ *
+ * http(s) only, and validated rather than trusted: an unchecked string here
+ * becomes an `href`, and `javascript:` in the proposal's Qualify button would
+ * be stored XSS aimed at the homeowner reading it. Empty string normalises to
+ * null so clearing the box clears the field.
+ *
+ * `z.optional(...)` wraps the transform rather than the other way round: an
+ * `.optional().transform()` chain is a ZodEffects, and an effects-typed key is
+ * REQUIRED on the object even when its value may be undefined — which would
+ * force every caller that does not touch links to send them.
+ */
+const urlField = z.optional(
+  z
+    .string()
+    .trim()
+    .max(500)
+    .nullable()
+    .transform((v) => (v ? v : null))
+    .refine(
+      (v) => v === null || /^https?:\/\//i.test(v),
+      "Links must start with http:// or https://"
+    )
+);
+
 const lenderSchema = z.object({
   name: z.string().min(1).max(120),
   rank: z.number().int().min(0).max(999).optional(),
   notes: z.string().max(1000).nullable().optional(),
   isActive: z.boolean().optional(),
+  /** Rep-facing dealer portal. Never rendered to a customer. */
+  portalUrl: urlField,
+  /** Customer-facing application link — the proposal's Qualify button. */
+  applyUrl: urlField,
+  creditInstructions: z.string().max(4000).nullable().optional(),
 });
 
 /**
@@ -606,7 +637,10 @@ export async function upsertSolarLenderAction(id: string | null, input: z.infer<
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const parsed = lenderSchema.safeParse(input);
-  if (!parsed.success) return fail("Invalid lender.");
+  // The message, not a flat "Invalid lender.": the only ways this fails are a
+  // name that is too long and a link that is not http(s), and both are things
+  // the person typing can fix once they are told which.
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid lender.");
   const d = parsed.data;
 
   const clash = await prisma.solarLender.findFirst({

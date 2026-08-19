@@ -4,12 +4,14 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Archive, RotateCcw, Landmark, Pencil, Check, X } from "lucide-react";
+import { Loader2, Plus, Trash2, Archive, RotateCcw, Landmark, Pencil, Check, X, ExternalLink } from "lucide-react";
 import type { FinanceProduct } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { formatFactor } from "@/lib/solar-loan";
 import {
   upsertSolarLenderProductAction,
   setSolarLenderProductActiveAction,
@@ -33,6 +35,11 @@ export type LenderRow = {
   isActive: boolean;
   rank: number;
   notes: string | null;
+  /** Rep-facing dealer portal. Never rendered to a customer. */
+  portalUrl: string | null;
+  /** Customer-facing application link — the proposal's Qualify button. */
+  applyUrl: string | null;
+  creditInstructions: string | null;
   /** How many catalogue items this lender approves. */
   approvedCount: number;
   /** How many designs are being built for it. */
@@ -53,6 +60,11 @@ export type LenderProduct = {
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
+  /** Payment factors in millionths. Loan only; null when the sheet quotes none. */
+  factorWithPaydownMicros: number | null;
+  factorWithoutPaydownMicros: number | null;
+  paydownPct: number | null;
+  paydownMonths: number | null;
   isActive: boolean;
 };
 
@@ -104,8 +116,9 @@ export function SolarLenderManager({
           <h3 className="font-semibold">Add a lender</h3>
           <div className="grid gap-3 sm:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_auto] sm:items-end">
             <div className="space-y-1">
-              <Label className="text-xs">Name</Label>
+              <Label className="text-xs" htmlFor="new-lender-name">Name</Label>
               <Input
+                id="new-lender-name"
                 value={name}
                 placeholder="e.g. Credit Human"
                 onChange={(e) => setName(e.target.value)}
@@ -113,8 +126,9 @@ export function SolarLenderManager({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Notes (optional)</Label>
+              <Label className="text-xs" htmlFor="new-lender-notes">Notes (optional)</Label>
               <Input
+                id="new-lender-notes"
                 value={notes}
                 placeholder="Anything worth remembering about this partner"
                 onChange={(e) => setNotes(e.target.value)}
@@ -327,6 +341,16 @@ function ProductRow({
           {lenderProductLabel({ ...product, name: null })}
         </span>
       )}
+      {/* A factor-priced row prices differently from an amortised one, so the
+          sheet has to show which this is at a glance. */}
+      {product.factorWithPaydownMicros != null && (
+        <span className="text-xs text-muted-foreground">
+          factor {formatFactor(product.factorWithPaydownMicros)}
+          {product.factorWithoutPaydownMicros != null &&
+            ` / ${formatFactor(product.factorWithoutPaydownMicros)}`}
+          {product.paydownPct != null && ` · ${product.paydownPct}% by mo ${product.paydownMonths}`}
+        </span>
+      )}
       {canEdit && (
         <div className="ml-auto flex items-center gap-1">
           <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy} title="Edit these terms">
@@ -403,6 +427,10 @@ function ProductForm({
     rate: str(existing?.rateMillsPerKwh, 1000),
     escalatorPct: str(existing?.escalatorPct),
     termYears: str(existing?.termYears),
+    factorWithPaydown: formatFactor(existing?.factorWithPaydownMicros),
+    factorWithoutPaydown: formatFactor(existing?.factorWithoutPaydownMicros),
+    paydownPct: str(existing?.paydownPct),
+    paydownMonths: str(existing?.paydownMonths),
   });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -419,6 +447,10 @@ function ProductForm({
       rateMillsPerKwh: intOrNull(form.rate, 1000),
       escalatorPct: floatOrNull(form.escalatorPct),
       termYears: intOrNull(form.termYears),
+      factorWithPaydown: floatOrNull(form.factorWithPaydown),
+      factorWithoutPaydown: floatOrNull(form.factorWithoutPaydown),
+      paydownPct: floatOrNull(form.paydownPct),
+      paydownMonths: intOrNull(form.paydownMonths),
     });
     setBusy(false);
     // The action names the missing field, so the message is worth showing.
@@ -466,6 +498,49 @@ function ProductForm({
         )}
         <TextField label="Name (optional)" value={form.name} onChange={(v) => set("name", v)} />
       </div>
+
+      {/* The sheet's own payment arithmetic. A factor is NOT the amortised
+          figure — it bakes in the fee and the promotional structure — so where
+          one exists it outranks anything derived from the APR. Leave these
+          blank and the payment is amortised from APR and term as before. */}
+      {kind === "loan" && (
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Payment factors (optional)
+          </div>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <NumField
+              label="PMT factor — with paydown"
+              step="0.000001"
+              value={form.factorWithPaydown}
+              onChange={(v) => set("factorWithPaydown", v)}
+            />
+            <NumField
+              label="PMT factor — without paydown"
+              step="0.000001"
+              value={form.factorWithoutPaydown}
+              onChange={(v) => set("factorWithoutPaydown", v)}
+            />
+            <NumField
+              label="Paydown %"
+              step="0.01"
+              value={form.paydownPct}
+              onChange={(v) => set("paydownPct", v)}
+            />
+            <NumField
+              label="Paydown due by month"
+              value={form.paydownMonths}
+              onChange={(v) => set("paydownMonths", v)}
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Monthly payment = amount financed × factor, exactly as the rate sheet prints it. Both
+            are shown on the deal, so a customer sees what the payment becomes if the paydown is
+            never applied.
+          </p>
+        </div>
+      )}
+
       <div className="flex gap-2">
         <Button size="sm" onClick={save} disabled={busy}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : null}
@@ -503,7 +578,9 @@ function TextField({
   label,
   value,
   onChange,
+  placeholder = "falls back to the terms",
 }: {
+  placeholder?: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -512,8 +589,21 @@ function TextField({
   return (
     <div className="space-y-1">
       <Label className="text-xs" htmlFor={id}>{label}</Label>
-      <Input id={id} value={value} placeholder="falls back to the terms" onChange={(e) => onChange(e.target.value)} />
+      <Input id={id} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
     </div>
+  );
+}
+
+function LinkChip({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+    >
+      {label} <ExternalLink className="size-3" />
+    </a>
   );
 }
 
@@ -529,7 +619,21 @@ function LenderCard({
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState({ name: lender.name, notes: lender.notes ?? "" });
+  const [draft, setDraft] = React.useState({
+    name: lender.name,
+    notes: lender.notes ?? "",
+    portalUrl: lender.portalUrl ?? "",
+    applyUrl: lender.applyUrl ?? "",
+    creditInstructions: lender.creditInstructions ?? "",
+  });
+  const resetDraft = () =>
+    setDraft({
+      name: lender.name,
+      notes: lender.notes ?? "",
+      portalUrl: lender.portalUrl ?? "",
+      applyUrl: lender.applyUrl ?? "",
+      creditInstructions: lender.creditInstructions ?? "",
+    });
 
   type ActionResult = { ok: boolean; error?: string; message?: string };
   const act = async (fn: () => Promise<ActionResult>, fallback: string): Promise<ActionResult> => {
@@ -548,7 +652,14 @@ function LenderCard({
   async function save() {
     if (!draft.name.trim()) return toast.error("A lender needs a name.");
     const res = await act(
-      () => upsertSolarLenderAction(lender.id, { name: draft.name.trim(), notes: draft.notes.trim() || null }),
+      () =>
+        upsertSolarLenderAction(lender.id, {
+          name: draft.name.trim(),
+          notes: draft.notes.trim() || null,
+          portalUrl: draft.portalUrl.trim() || null,
+          applyUrl: draft.applyUrl.trim() || null,
+          creditInstructions: draft.creditInstructions.trim() || null,
+        }),
       "Saved"
     );
     if (res.ok) setEditing(false);
@@ -562,17 +673,50 @@ function LenderCard({
     >
       {editing ? (
         <div className="space-y-2">
-          <Input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
-          <Input
-            value={draft.notes}
-            placeholder="Notes (optional)"
-            onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+          <TextField
+            label="Lender name"
+            value={draft.name}
+            onChange={(v) => setDraft((d) => ({ ...d, name: v }))}
           />
+          <TextField
+            label="Notes"
+            value={draft.notes}
+            onChange={(v) => setDraft((d) => ({ ...d, notes: v }))}
+          />
+          {/* Two links, never one. The portal is your dealer login; the apply
+              link is what a homeowner opens from the proposal. One shared
+              field is how a back office ends up in front of a customer. */}
+          <TextField
+            label="Dealer portal — where your team runs credit"
+            value={draft.portalUrl}
+            onChange={(v) => setDraft((d) => ({ ...d, portalUrl: v }))}
+          />
+          <TextField
+            label="Customer application link — the proposal's Qualify button"
+            value={draft.applyUrl}
+            onChange={(v) => setDraft((d) => ({ ...d, applyUrl: v }))}
+          />
+          <div className="space-y-1">
+            <Label className="text-xs" htmlFor={`ld-${lender.id}-credit`}>
+              How to run credit with this partner
+            </Label>
+            <Textarea
+              id={`ld-${lender.id}-credit`}
+              rows={3}
+              value={draft.creditInstructions}
+              placeholder="The steps a rep needs — which portal, what to have ready, who to call when it stips."
+              onChange={(e) => setDraft((d) => ({ ...d, creditInstructions: e.target.value }))}
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Only the customer application link ever reaches a proposal. The dealer portal stays
+            inside the CRM.
+          </p>
           <div className="flex gap-2">
             <Button size="sm" onClick={save} disabled={busy}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Save
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => { setDraft({ name: lender.name, notes: lender.notes ?? "" }); setEditing(false); }}>
+            <Button size="sm" variant="ghost" onClick={() => { resetDraft(); setEditing(false); }}>
               <X className="size-4" /> Cancel
             </Button>
           </div>
@@ -592,6 +736,24 @@ function LenderCard({
           </div>
 
           {lender.notes && <p className="mt-1.5 text-xs text-muted-foreground">{lender.notes}</p>}
+
+          {(lender.portalUrl || lender.applyUrl) && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {lender.portalUrl && <LinkChip href={lender.portalUrl} label="Dealer portal" />}
+              {lender.applyUrl && <LinkChip href={lender.applyUrl} label="Customer application" />}
+            </div>
+          )}
+
+          {lender.creditInstructions && (
+            <details className="mt-2 rounded-lg border border-border/70 p-2">
+              <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
+                How to run credit
+              </summary>
+              <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                {lender.creditInstructions}
+              </p>
+            </details>
+          )}
 
           <dl className="mt-3 space-y-1 text-xs">
             <div className="flex justify-between gap-2">
@@ -624,7 +786,7 @@ function LenderCard({
 
           {canEdit && (
             <div className="mt-3 flex flex-wrap gap-1">
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)} title="Rename or edit notes">
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)} title="Edit name, links and credit instructions">
                 <Pencil className="size-4" />
               </Button>
               <Button

@@ -274,3 +274,98 @@ describe("the loan payment on the proposal", () => {
     expect(s.financing.loanMonthlyPaymentCents).toBeNull();
   });
 });
+
+describe("a published payment factor outranks our amortisation", () => {
+  const FACTORS = {
+    factorWithPaydownMicros: 5712,
+    factorWithoutPaydownMicros: 8140,
+    paydownPct: 30,
+    paydownMonths: 18,
+  };
+
+  it("quotes the factor's payment, not the one derived from APR and term", () => {
+    // The factor bakes in the dealer fee and the promotional structure, so it
+    // does not agree with amortising the same APR over the same term. Printing
+    // the derived one when the lender published a factor misquotes the customer.
+    const withFactor = build({
+      finance: { ...LOAN, loanTermMonths: 300, downPaymentCents: null },
+      loanFactors: FACTORS,
+    });
+    const withoutFactor = build({
+      finance: { ...LOAN, loanTermMonths: 300, downPaymentCents: null },
+    });
+    expect(withFactor.financing.loanMonthlyPaymentCents).not.toBe(
+      withoutFactor.financing.loanMonthlyPaymentCents
+    );
+    const principal = withFactor.financing.contractPriceCents ?? 0;
+    expect(withFactor.financing.loanMonthlyPaymentCents).toBe(
+      Math.round((principal * 5712) / 1_000_000)
+    );
+  });
+
+  it("still yields to the lender's own figure from a real approval", () => {
+    const s = build({
+      finance: {
+        ...LOAN,
+        loanTermMonths: 300,
+        loanMonthlyPaymentCents: 27_400,
+        downPaymentCents: null,
+      },
+      loanFactors: FACTORS,
+    });
+    expect(s.financing.loanMonthlyPaymentCents).toBe(27_400);
+    expect(s.financing.loanPaymentApproved).toBe(true);
+  });
+
+  it("freezes the payment WITHOUT the paydown next to the one with it", () => {
+    // A document showing only the low, paydown-contingent figure is the most
+    // misleading thing a solar proposal can do.
+    const s = build({
+      finance: { ...LOAN, loanTermMonths: 300, downPaymentCents: null },
+      loanFactors: FACTORS,
+    });
+    expect(s.financing.loanMonthlyWithoutPaydownCents).not.toBeNull();
+    expect(s.financing.loanMonthlyWithoutPaydownCents!).toBeGreaterThan(
+      s.financing.loanMonthlyPaymentCents!
+    );
+    expect(s.financing.loanPaydownMonths).toBe(18);
+    expect(s.financing.loanPaydownPct).toBe(30);
+  });
+
+  it("applies the factor to the FINANCED amount, not the gross", () => {
+    // A down payment is not borrowed; applying the factor to it quotes a
+    // payment on money nobody owes.
+    const noDown = build({
+      finance: { ...LOAN, loanTermMonths: 300, downPaymentCents: null },
+      loanFactors: FACTORS,
+    });
+    const withDown = build({
+      finance: { ...LOAN, loanTermMonths: 300, downPaymentCents: 500_000 },
+      loanFactors: FACTORS,
+    });
+    expect(withDown.financing.loanMonthlyPaymentCents!).toBeLessThan(
+      noDown.financing.loanMonthlyPaymentCents!
+    );
+  });
+
+  it("carries no factor figures for a program that publishes none", () => {
+    const s = build({ finance: { ...LOAN, loanTermMonths: 300 } });
+    expect(s.financing.loanMonthlyWithoutPaydownCents).toBeNull();
+    expect(s.financing.loanPaydownCents).toBeNull();
+  });
+});
+
+describe("the Qualify link is loan-only and never the dealer portal", () => {
+  it("freezes the lender's CUSTOMER application link on a loan", () => {
+    const s = build({ lenderApplyUrl: "https://apply.example.com/abc" });
+    expect(s.financing.applyUrl).toBe("https://apply.example.com/abc");
+  });
+
+  it("omits it on cash, which has no lender to qualify with", () => {
+    const s = build({
+      finance: { ...LOAN, product: "cash" as const, aprPct: null },
+      lenderApplyUrl: "https://apply.example.com/abc",
+    });
+    expect(s.financing.applyUrl).toBeNull();
+  });
+});

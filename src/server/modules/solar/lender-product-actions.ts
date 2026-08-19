@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { factorToMicros } from "@/lib/solar-loan";
 
 /**
  * A lender's rate sheet: what it will finance, and on what terms.
@@ -40,6 +41,14 @@ const productSchema = z
     // At 100% the lender takes the entire sticker; the gross-up divides by zero.
     dealerFeePct: z.number().min(0).max(99).nullable().optional(),
 
+    // Factors arrive as the decimal the sheet prints (0.005712) and are stored
+    // in millionths. 0.05 is an absurd factor and 0 is not a payment, so both
+    // ends are bounded rather than trusted.
+    factorWithPaydown: z.number().min(0).max(0.05).nullable().optional(),
+    factorWithoutPaydown: z.number().min(0).max(0.05).nullable().optional(),
+    paydownPct: z.number().min(0).max(100).nullable().optional(),
+    paydownMonths: z.number().int().min(1).max(120).nullable().optional(),
+
     leaseRateCentsPerKwMonth: z.number().int().min(1).max(100_000).nullable().optional(),
     rateMillsPerKwh: z.number().int().min(1).max(10_000).nullable().optional(),
 
@@ -69,6 +78,38 @@ const productSchema = z
       need("rateMillsPerKwh", "Rate per kWh");
       need("escalatorPct", "Escalator");
       need("termYears", "Term");
+    }
+
+    // A paydown is two facts that only mean anything together: how much, and
+    // by when. Half of it configured prints "pay down 30% by month null".
+    if ((d.paydownPct == null) !== (d.paydownMonths == null)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["paydownPct"],
+        message: "A paydown needs both a percentage and the month it is due.",
+      });
+    }
+    // The whole point of two factors is that skipping the paydown costs MORE.
+    // Inverted, they quote a customer a reward for never paying it down.
+    if (
+      d.factorWithPaydown != null &&
+      d.factorWithoutPaydown != null &&
+      d.factorWithoutPaydown < d.factorWithPaydown
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["factorWithoutPaydown"],
+        message: "The factor without the paydown should be the higher of the two — check the rate sheet.",
+      });
+    }
+    // Factors are a LOAN's arithmetic. A lease or PPA carrying one would price
+    // a monthly twice, by two different rules.
+    if (d.product !== "loan" && (d.factorWithPaydown != null || d.factorWithoutPaydown != null)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["factorWithPaydown"],
+        message: "Payment factors belong to a loan.",
+      });
     }
   });
 
@@ -114,6 +155,12 @@ export async function upsertSolarLenderProductAction(
     rateMillsPerKwh: d.product === "ppa" ? (d.rateMillsPerKwh ?? null) : null,
     escalatorPct: d.product === "loan" ? null : (d.escalatorPct ?? null),
     termYears: d.product === "loan" ? null : (d.termYears ?? null),
+    // Gated on the product like every other term: a row switched from loan to
+    // PPA must not keep a factor that would price its monthly twice.
+    factorWithPaydownMicros: d.product === "loan" ? factorToMicros(d.factorWithPaydown) : null,
+    factorWithoutPaydownMicros: d.product === "loan" ? factorToMicros(d.factorWithoutPaydown) : null,
+    paydownPct: d.product === "loan" ? (d.paydownPct ?? null) : null,
+    paydownMonths: d.product === "loan" ? (d.paydownMonths ?? null) : null,
     ...(d.rank === undefined ? {} : { rank: d.rank }),
     ...(d.isActive === undefined ? {} : { isActive: d.isActive }),
   };

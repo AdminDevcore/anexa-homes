@@ -130,3 +130,56 @@ describe("a lender's rate sheet over time", () => {
     ]);
   });
 });
+
+describe("payment factors and credit routing", () => {
+  it("stores both factors and the paydown as published", async () => {
+    const p = await loanProduct({
+      aprPct: 3.99,
+      termMonths: 300,
+      dealerFeePct: 28,
+      factorWithPaydownMicros: 5712,
+      factorWithoutPaydownMicros: 8140,
+      paydownPct: 30,
+      paydownMonths: 18,
+    });
+    const row = await db.solarLenderProduct.findUniqueOrThrow({ where: { id: p.id } });
+    expect(row.factorWithPaydownMicros).toBe(5712);
+    expect(row.factorWithoutPaydownMicros).toBe(8140);
+    expect(row.paydownPct).toBe(30);
+    expect(row.paydownMonths).toBe(18);
+  });
+
+  it("leaves them null for a product whose sheet quotes an APR only", async () => {
+    // Nothing derives a factor: no factor means the payment is amortised, and
+    // an invented one would move a real customer's payment.
+    const p = await loanProduct({ aprPct: 6.99, termMonths: 144, dealerFeePct: 12 });
+    const row = await db.solarLenderProduct.findUniqueOrThrow({ where: { id: p.id } });
+    expect(row.factorWithPaydownMicros).toBeNull();
+    expect(row.factorWithoutPaydownMicros).toBeNull();
+    expect(row.paydownPct).toBeNull();
+  });
+
+  it("keeps the dealer portal and the customer application as separate columns", async () => {
+    // One "link" field used for both is how a dealer portal ends up in front of
+    // a homeowner.
+    await db.solarLender.update({
+      where: { id: lenderId },
+      data: {
+        portalUrl: "https://portal.example.com/dealer",
+        applyUrl: "https://apply.example.com/abc",
+        creditInstructions: "Log in, pick the dealer code, run soft pull first.",
+      },
+    });
+    const l = await db.solarLender.findUniqueOrThrow({ where: { id: lenderId } });
+    expect(l.portalUrl).toBe("https://portal.example.com/dealer");
+    expect(l.applyUrl).toBe("https://apply.example.com/abc");
+    expect(l.creditInstructions).toContain("soft pull");
+  });
+
+  it("leaves all three unset by default rather than inventing a link", async () => {
+    const l = await db.solarLender.findUniqueOrThrow({ where: { id: lenderId } });
+    expect(l.portalUrl).toBeNull();
+    expect(l.applyUrl).toBeNull();
+    expect(l.creditInstructions).toBeNull();
+  });
+});

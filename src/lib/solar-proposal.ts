@@ -1,4 +1,5 @@
 import type { FinanceProduct } from "@prisma/client";
+import { factorQuote, factorMonthlyCents, hasPaymentFactor, type PaymentFactors } from "./solar-loan";
 import {
   pricePurchase,
   priceThirdParty,
@@ -292,6 +293,28 @@ export type SolarProposalSnapshot = {
      * homeowner reading a payment is entitled to know whether it is settled.
      */
     loanPaymentApproved: boolean;
+    /**
+     * What the payment becomes if the paydown is never made.
+     *
+     * Frozen next to the quoted payment ON PURPOSE. A document that prints only
+     * the low, paydown-contingent figure is the most misleading thing a solar
+     * proposal can do, and a customer who never applies the credit finds out
+     * from a bank statement.
+     */
+    loanMonthlyWithoutPaydownCents: number | null;
+    loanPaydownCents: number | null;
+    loanPaydownMonths: number | null;
+    loanPaydownPct: number | null;
+    /**
+     * The lender's CUSTOMER application link, frozen at generation.
+     *
+     * Frozen like everything else here: the document has to keep working as
+     * issued. Change a lender's link and already-sent proposals keep the old
+     * one until they are regenerated — the same trade every other figure in
+     * this snapshot makes. Never the dealer portal: that one is not put in a
+     * document a homeowner can open.
+     */
+    applyUrl: string | null;
     lender: string | null;
     /** Null when the company has not configured a credit — the line is omitted. */
     itcEstimateCents: number | null;
@@ -356,6 +379,10 @@ export function buildProposalSnapshot(args: {
     downPaymentCents?: number | null;
   };
   lender: string | null;
+  /** The quoted product's payment factors, when its rate sheet publishes any. */
+  loanFactors?: PaymentFactors | null;
+  /** The lender's CUSTOMER application link. Never the dealer portal. */
+  lenderApplyUrl?: string | null;
   assumptions: SolarAssumptions;
   incentiveDisclaimer: string;
   stateIncentiveNote?: string | null;
@@ -413,6 +440,18 @@ export function buildProposalSnapshot(args: {
 
   const lifetimeKwh = savings.years.reduce((n, y) => n + y.productionKwh, 0);
   const itc = purchase ? itcEstimateCents(purchase.contractPriceCents, a) : 0;
+
+  /**
+   * What a payment factor gets applied to: the contract price less anything the
+   * customer puts down. Never the gross — a down payment is not borrowed, and
+   * applying the factor to it quotes a payment on money nobody owes.
+   */
+  const loanPrincipalCents =
+    (purchase?.contractPriceCents ?? 0) - (finance.downPaymentCents ?? 0);
+  const loanFactorQuote =
+    finance.product === "loan" && args.loanFactors && hasPaymentFactor(args.loanFactors)
+      ? factorQuote(args.loanFactors, loanPrincipalCents)
+      : null;
 
   return {
     schemaVersion: 2,
@@ -474,15 +513,19 @@ export function buildProposalSnapshot(args: {
       escalatorPct: isPurchase ? null : finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.product === "loan" ? finance.aprPct : null,
-      // The lender's approved figure if there is one; otherwise the product's
-      // own terms, amortised. Never both, and never a stale one from a product
-      // this deal has since moved off.
+      // Three sources, in order of authority:
+      //   1. the lender's own figure from a real approval
+      //   2. the rate sheet's PUBLISHED payment factor
+      //   3. our amortisation of the quoted APR and term
+      // (2) beats (3) because a factor bakes in the dealer fee and the
+      // promotional structure, so the two disagree — and quoting the derived
+      // one when the lender printed a factor misquotes the customer.
       loanMonthlyPaymentCents:
         finance.product === "loan"
           ? (finance.loanMonthlyPaymentCents ??
+            (loanFactorQuote && factorMonthlyCents(loanFactorQuote)) ??
             loanPaymentCents({
-              principalCents:
-                (purchase?.contractPriceCents ?? 0) - (finance.downPaymentCents ?? 0),
+              principalCents: loanPrincipalCents,
               aprPct: finance.aprPct,
               termMonths: finance.loanTermMonths ?? null,
             }) ??
@@ -490,7 +533,13 @@ export function buildProposalSnapshot(args: {
           : null,
       loanPaymentApproved:
         finance.product === "loan" && finance.loanMonthlyPaymentCents != null,
+      loanMonthlyWithoutPaydownCents: loanFactorQuote?.withoutPaydownMonthlyCents ?? null,
+      loanPaydownCents: loanFactorQuote?.paydownCents ?? null,
+      loanPaydownMonths: loanFactorQuote?.paydownMonths ?? null,
+      loanPaydownPct: loanFactorQuote?.paydownPct ?? null,
       lender: finance.product === "loan" ? args.lender : null,
+      // Loan only: a cash, lease or PPA deal has no credit to pre-qualify for.
+      applyUrl: finance.product === "loan" ? (args.lenderApplyUrl ?? null) : null,
       // Null, not zero: an unconfigured credit omits the line entirely rather
       // than showing the customer "$0 federal credit".
       itcEstimateCents: a.federalItcPct == null ? null : itc,

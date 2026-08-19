@@ -3,7 +3,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import {
-  Sun, Leaf, TreePine, Factory, Check, Loader2, ChevronDown, Lock,
+  Sun, Leaf, TreePine, Factory, Check, Loader2, ChevronDown, Lock, ExternalLink,
 } from "lucide-react";
 import type { SolarProposalSnapshot, SavingsYear } from "@/lib/solar-proposal";
 import { SOLAR_TIMELINE, SOLAR_FAQS } from "@/lib/solar-proposal";
@@ -331,7 +331,62 @@ export function SolarProposalView({
               strong
             />
           )}
+
+          {/* The payment if the paydown is never made, directly beneath the one
+              that assumes it is. Printing only the low figure is the most
+              misleading thing a solar document can do — a customer who never
+              applies the credit finds out from a bank statement. */}
+          {f.loanMonthlyWithoutPaydownCents != null && (
+            <Row
+              k={
+                f.loanPaydownMonths != null
+                  ? `Monthly if the paydown is not made by month ${f.loanPaydownMonths}`
+                  : "Monthly without the paydown"
+              }
+              v={usd(f.loanMonthlyWithoutPaydownCents, 2)}
+            />
+          )}
+          {f.loanPaydownCents != null && (
+            <Row
+              k={
+                f.loanPaydownMonths != null
+                  ? `Paydown due by month ${f.loanPaydownMonths}`
+                  : "Paydown"
+              }
+              v={usd(f.loanPaydownCents)}
+            />
+          )}
         </dl>
+
+        {f.loanPaydownCents != null && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            The lower payment assumes the paydown shown above is applied to the loan by the month
+            stated. If it is not, the payment becomes the higher figure for the rest of the term.
+            Whether you receive the federal credit, and how much, depends on your own tax situation.
+          </p>
+        )}
+
+        {/* Pre-qualification. A LINK to the lender's own application — nothing
+            is submitted from here, and no information leaves this page. */}
+        {f.applyUrl && (
+          <div className="mt-4 rounded-lg border border-border bg-muted/40 p-4 print:hidden">
+            <p className="text-sm font-medium">
+              See what you qualify for{f.lender ? ` with ${f.lender}` : ""}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Opens {f.lender ?? "the lender"}&rsquo;s own secure application. Nothing is submitted
+              from this page.
+            </p>
+            <a
+              href={f.applyUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
+            >
+              Qualify <ExternalLink className="size-4" />
+            </a>
+          </div>
+        )}
       </Section>
 
       {/* ── 7 · Incentives ───────────────────────────────────────────────── */}

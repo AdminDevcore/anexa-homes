@@ -105,6 +105,29 @@ export async function generateSolarProposalAction(leadId: string) {
         })
       : null;
 
+  // The partner this deal is on, and the rate-sheet row it was quoted from.
+  // Read at generation and FROZEN into the snapshot: rate sheets change every
+  // quarter, and a document that looked its own terms up later would silently
+  // re-quote a customer who has already been shown a number.
+  const dealLender =
+    finance.product === "loan" && design.lenderId
+      ? await prisma.solarLender.findFirst({
+          where: { companyId: user.companyId, id: design.lenderId },
+          select: { name: true, applyUrl: true },
+        })
+      : null;
+
+  const quotedProduct =
+    finance.product === "loan" && finance.lenderProductId
+      ? await prisma.solarLenderProduct.findFirst({
+          where: { companyId: user.companyId, id: finance.lenderProductId },
+          select: {
+            factorWithPaydownMicros: true, factorWithoutPaydownMicros: true,
+            paydownPct: true, paydownMonths: true,
+          },
+        })
+      : null;
+
   const latest = await prisma.solarProposal.findFirst({
     where: { companyId: user.companyId, leadId },
     orderBy: { version: "desc" },
@@ -195,7 +218,11 @@ export async function generateSolarProposalAction(leadId: string) {
       loanTermMonths: finance.loanTermMonths,
       downPaymentCents: finance.downPaymentCents,
     },
-    lender: approvedCredit?.lender ?? null,
+    // The lender chosen on the design wins over whatever a credit application
+    // recorded: the design is the current answer, the application is history.
+    lender: dealLender?.name ?? approvedCredit?.lender ?? null,
+    loanFactors: quotedProduct,
+    lenderApplyUrl: dealLender?.applyUrl ?? null,
     assumptions,
     incentiveDisclaimer: assumptions.incentiveDisclaimer,
     stateIncentiveNote: assumptions.stateIncentiveNote ?? null,

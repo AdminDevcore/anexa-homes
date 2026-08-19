@@ -29,6 +29,7 @@ export default async function SolarLendersPage() {
     orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
     select: {
       id: true, name: true, isActive: true, rank: true, notes: true,
+      portalUrl: true, applyUrl: true, creditInstructions: true,
       _count: { select: { approvals: true, designs: true } },
       products: {
         orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
@@ -70,6 +71,9 @@ export default async function SolarLendersPage() {
           isActive: l.isActive,
           rank: l.rank,
           notes: l.notes,
+          portalUrl: l.portalUrl,
+          applyUrl: l.applyUrl,
+          creditInstructions: l.creditInstructions,
           approvedCount: l._count.approvals,
           dealCount: l._count.designs,
           products: l.products.map((p) => ({
@@ -84,6 +88,10 @@ export default async function SolarLendersPage() {
             rateMillsPerKwh: p.rateMillsPerKwh,
             escalatorPct: p.escalatorPct,
             termYears: p.termYears,
+            factorWithPaydownMicros: p.factorWithPaydownMicros,
+            factorWithoutPaydownMicros: p.factorWithoutPaydownMicros,
+            paydownPct: p.paydownPct,
+            paydownMonths: p.paydownMonths,
             isActive: p.isActive,
           })),
         }))}
