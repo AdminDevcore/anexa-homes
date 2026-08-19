@@ -167,7 +167,7 @@ test.describe("workspace switcher", () => {
     await page.getByRole("button", { name: /Save design/ }).click();
     await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: /3 · Generate & send/ }).click();
+    await page.getByRole("button", { name: /5 · Generate & send/ }).click();
     await page.getByRole("button", { name: /Check proposal readiness/ }).click();
     await expect(page.getByText(/Blocked/)).toBeVisible({ timeout: 15000 });
     // The blocking issue itself, not step 1's "Annual usage (kWh)" label — that
@@ -176,7 +176,7 @@ test.describe("workspace switcher", () => {
     await expect(page.getByText(/Offset cannot be calculated without it/i)).toBeVisible();
 
     // Restore it so later specs see a complete deal.
-    await page.getByRole("button", { name: /1 · System design/ }).click();
+    await page.getByRole("button", { name: /3 · System design/ }).click();
     await usage.fill("14000");
     await page.getByRole("button", { name: /Save design/ }).click();
     await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });
