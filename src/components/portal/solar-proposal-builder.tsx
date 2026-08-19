@@ -11,11 +11,7 @@ import {
   type ProposalVersion,
   type SolarDesignView,
   type SolarFinanceView,
-  type LenderOption,
-  type HiddenByLender,
 } from "@/components/portal/solar-panels";
-
-type EquipmentOption = { id: string; label: string; ratingW: number | null };
 
 type StepId = "design" | "financing" | "generate";
 
@@ -43,14 +39,9 @@ export function SolarProposalBuilder({
   finance,
   itcDisclaimer,
   federalItcPct,
-  modules,
-  inverters,
-  batteries,
   versions,
   layoutAvailable,
   canApproveLayout,
-  lenders,
-  hiddenByLender,
 }: {
   leadId: string;
   /**
@@ -67,15 +58,10 @@ export function SolarProposalBuilder({
   finance: SolarFinanceView;
   itcDisclaimer: string;
   federalItcPct: number | null;
-  modules: EquipmentOption[];
-  inverters: EquipmentOption[];
-  batteries: EquipmentOption[];
   versions: ProposalVersion[];
   /** Resolved server-side: the layout file row AND its bytes both exist. */
   layoutAvailable: boolean;
   canApproveLayout: boolean;
-  lenders: LenderOption[];
-  hiddenByLender: HiddenByLender;
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
 
@@ -105,14 +91,9 @@ export function SolarProposalBuilder({
         <SolarDesignPanel
           leadId={leadId}
           design={design}
-          modules={modules}
-          inverters={inverters}
-          batteries={batteries}
           canEdit={canEditDeal}
           layoutAvailable={layoutAvailable}
           canApproveLayout={canApproveLayout}
-          lenders={lenders}
-          hiddenByLender={hiddenByLender}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

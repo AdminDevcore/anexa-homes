@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getSolarSettings } from "./settings";
+import { resolveSizingModule } from "./sizing";
 import { year1Production, offsetPct } from "@/lib/solar-money";
 import { canGenerate } from "@/lib/solar-validation";
 import { readSolarReadiness } from "./readiness";
@@ -59,29 +60,59 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
 // Design
 // ---------------------------------------------------------------------------
 
+/**
+ * What the system-design step still collects.
+ *
+ * Everything else it used to ask for has moved to where the decision is
+ * actually made: interconnection details and the equipment a job is built from
+ * live on the deal's Operations card, the net-metering programme is one company
+ * setting, and the panel comes from the catalogue's default. What is left is
+ * what every number on the proposal is derived from.
+ */
 const designSchema = z.object({
   leadId: z.string().min(1),
   utilityProvider: z.string().max(120).nullable().optional(),
-  ratePlan: z.string().max(120).nullable().optional(),
-  utilityAccountNo: z.string().max(60).nullable().optional(),
-  meterNo: z.string().max(60).nullable().optional(),
-  netMeteringProgram: z.string().max(120).nullable().optional(),
   monthlyUsageKwh: z.array(z.number().min(0)).max(12).optional(),
   annualUsageKwh: z.number().int().min(0).nullable().optional(),
   avgMonthlyBillCents: z.number().int().min(0).nullable().optional(),
   mountType: z.enum(["roof", "ground"]).optional(),
   roofPlanes: z.array(z.record(z.string(), z.unknown())).optional(),
-  tsrfPct: z.number().min(0).max(100).nullable().optional(),
   setbackNotes: z.string().max(2000).nullable().optional(),
   structuralNotes: z.string().max(2000).nullable().optional(),
   electricalNotes: z.string().max(2000).nullable().optional(),
-  lenderId: z.string().nullable().optional(),
-  moduleId: z.string().nullable().optional(),
   moduleQty: z.number().int().min(0).max(500).optional(),
-  inverterId: z.string().nullable().optional(),
-  batteryId: z.string().nullable().optional(),
-  batteryQty: z.number().int().min(0).max(20).optional(),
 });
+
+/**
+ * Resolve a selected catalogue item, refusing anything that is not this
+ * company's, not of the right kind, or retired.
+ *
+ * `allowExistingId` keeps an ALREADY-SAVED choice readable after the catalogue
+ * item is retired: an existing deal keeps rendering, but the deactivated item
+ * cannot be newly selected. Without the kind check, a battery id posted into
+ * `inverterId` would be written straight through.
+ *
+ * Module scope rather than a closure inside one action: the design step no
+ * longer picks equipment, so its callers are now the Operations card, where the
+ * decision actually gets made.
+ */
+export async function resolveEquipment(
+  companyId: string,
+  id: string | null | undefined,
+  kind: "module" | "inverter" | "battery",
+  allowExistingId: string | null
+): Promise<{ ok: true; row: { id: string; ratingW: number | null } | null } | { ok: false; error: string }> {
+  if (!id) return { ok: true, row: null };
+  const row = await prisma.solarEquipment.findFirst({
+    where: { companyId, id, kind },
+    select: { id: true, ratingW: true, isActive: true, model: true },
+  });
+  if (!row) return { ok: false, error: `That ${kind} is not in your catalogue.` };
+  if (!row.isActive && id !== allowExistingId) {
+    return { ok: false, error: `“${row.model}” has been retired and cannot be added to a new design.` };
+  }
+  return { ok: true, row: { id: row.id, ratingW: row.ratingW } };
+}
 
 /**
  * Save the design and recompute the derived numbers SERVER-SIDE.
@@ -106,63 +137,23 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
 
   const assumptions = await getSolarSettings(user.companyId);
 
-  /**
-   * Resolve a selected catalogue item, refusing anything that is not this
-   * company's, not of the right kind, or retired.
-   *
-   * All three selectors go through this. Only the module used to be checked,
-   * and only for kind — so a battery id posted into `inverterId` was written
-   * straight through, and a product deactivated last month could still be
-   * attached to a brand-new design. `allowExistingId` keeps an ALREADY-SAVED
-   * choice readable after the catalogue item is retired: an existing draft
-   * keeps rendering, but the deactivated item cannot be newly selected.
-   */
-  async function resolveEquipment(
-    id: string | null | undefined,
-    kind: "module" | "inverter" | "battery",
-    allowExistingId: string | null
-  ): Promise<{ ok: true; row: { id: string; ratingW: number | null } | null } | { ok: false; error: string }> {
-    if (!id) return { ok: true, row: null };
-    const row = await prisma.solarEquipment.findFirst({
-      where: { companyId: user.companyId, id, kind },
-      select: { id: true, ratingW: true, isActive: true, model: true },
-    });
-    if (!row) return { ok: false, error: `That ${kind} is not in your catalogue.` };
-    if (!row.isActive && id !== allowExistingId) {
-      return { ok: false, error: `“${row.model}” has been retired and cannot be added to a new design.` };
-    }
-    return { ok: true, row: { id: row.id, ratingW: row.ratingW } };
-  }
-
-  // A lender id from another company must never attach to this design.
-  if (d.lenderId) {
-    const l = await prisma.solarLender.findFirst({
-      where: { companyId: user.companyId, id: d.lenderId },
-      select: { id: true },
-    });
-    if (!l) return fail("That lender is not in your list.");
-  }
-
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
-    select: { moduleId: true, inverterId: true, batteryId: true },
+    select: { moduleId: true, moduleQty: true },
   });
 
-  const [mod, inv, bat] = await Promise.all([
-    resolveEquipment(d.moduleId, "module", existing?.moduleId ?? null),
-    resolveEquipment(d.inverterId, "inverter", existing?.inverterId ?? null),
-    resolveEquipment(d.batteryId, "battery", existing?.batteryId ?? null),
-  ]);
-  for (const r of [mod, inv, bat]) if (!r.ok) return fail(r.error);
+  // The panel is not a rep's decision any more — the approved-vendor list makes
+  // it once a year, and an existing design keeps whatever it was quoted on.
+  const module_ = await resolveSizingModule(user.companyId, existing?.moduleId ?? null);
 
-  const module_ = mod.ok ? mod.row : null;
-
-  const moduleQty = d.moduleQty ?? 0;
+  const moduleQty = d.moduleQty ?? existing?.moduleQty ?? 0;
   const systemSizeKwDc = module_?.ratingW ? (moduleQty * module_.ratingW) / 1000 : 0;
-  // TSRF belongs in the production maths. It was being collected on this very
-  // form and then ignored, so a shaded roof and a perfect one produced the same
-  // headline kWh — a difference the customer only discovers from their bill.
-  const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions, d.tsrfPct);
+  // TSRF is gone. It was a shading figure typed from memory on this very form,
+  // and it multiplied straight into the customer's quoted kWh — 85 vs 100 is a
+  // 17% difference in what a homeowner is promised. System losses are the
+  // company-wide derate in Solar Settings, which one person sets from real
+  // production data instead of each rep guessing per roof.
+  const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions);
 
   // Annual usage: explicit value wins, else sum the 12 monthly readings.
   const monthly = d.monthlyUsageKwh ?? [];
@@ -174,6 +165,7 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   const { leadId, moduleQty: _q, ...rest } = d;
   const data = {
     ...rest,
+    moduleId: module_?.id ?? null,
     moduleQty,
     monthlyUsageKwh: monthly,
     annualUsageKwh,

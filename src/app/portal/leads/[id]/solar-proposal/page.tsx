@@ -56,44 +56,10 @@ export default async function SolarProposalBuilderPage({
   // builder rather than staring at an empty solar design form.
   if (lead.vertical !== "solar") redirect(`/portal/leads/${id}/presentation`);
 
-  // The design is read FIRST because the catalogue query depends on it — see
-  // the `OR` below.
-  const design = await prisma.solarDesign.findUnique({ where: { leadId: lead.id } });
-
-  const [finance, settings, equipment, lenders, proposals] = await Promise.all([
+  const [design, finance, settings, proposals] = await Promise.all([
+    prisma.solarDesign.findUnique({ where: { leadId: lead.id } }),
     prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
     getSolarSettings(user.companyId),
-    prisma.solarEquipment.findMany({
-      // Sellable items, PLUS whatever this design already chose even if it has
-      // since been retired.
-      //
-      // Filtering to isActive alone looks right and quietly destroys data: a
-      // retired module would drop out of the dropdown, the select would fall
-      // back to "— none —", and the next save would write moduleId: null onto a
-      // deal that had a perfectly good module. The rep would see the equipment
-      // vanish from a deal they never edited. Last year's AVL has to stop being
-      // SELLABLE without becoming unrenderable.
-      where: {
-        companyId: user.companyId,
-        OR: [
-          { isActive: true },
-          { id: { in: [design?.moduleId, design?.inverterId, design?.batteryId].filter((x): x is string => !!x) } },
-        ],
-      },
-      orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
-      select: {
-        id: true, kind: true, manufacturer: true, model: true, ratingW: true, isActive: true,
-        lenderApprovals: { select: { lenderId: true } },
-      },
-    }),
-    prisma.solarLender.findMany({
-      where: {
-        companyId: user.companyId,
-        OR: [{ isActive: true }, ...(design?.lenderId ? [{ id: design.lenderId }] : [])],
-      },
-      orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
-      select: { id: true, name: true, isActive: true },
-    }),
     prisma.solarProposal.findMany({
       where: { companyId: user.companyId, leadId: lead.id },
       orderBy: { version: "desc" },
@@ -103,42 +69,6 @@ export default async function SolarProposalBuilderPage({
       },
     }),
   ]);
-
-  /**
-   * What a rep may pick for one component.
-   *
-   * When a lender is chosen, the list narrows to that lender's approved-vendor
-   * list — STRICTLY, so an item nobody has tagged for this lender does not
-   * appear and cannot be quoted into a submission that would bounce.
-   *
-   * The one exception is whatever this design has ALREADY chosen. Dropping a
-   * selected item out of its own dropdown is how a save quietly writes null
-   * over a deal's equipment; the same reasoning as a retired item, and the same
-   * fix. It is labelled so the mismatch is visible rather than assumed fine.
-   */
-  const lenderId = design?.lenderId ?? null;
-  const chosen = new Set([design?.moduleId, design?.inverterId, design?.batteryId].filter(Boolean));
-  const approvedFor = (e: { id: string; lenderApprovals: { lenderId: string }[] }) =>
-    !lenderId || e.lenderApprovals.some((a) => a.lenderId === lenderId);
-
-  /** How many items this lender filter is holding back, per kind. */
-  const hiddenByLender = (kind: string) =>
-    equipment.filter((e) => e.kind === kind && e.isActive && !approvedFor(e) && !chosen.has(e.id)).length;
-
-  const equipOptions = (kind: string) =>
-    equipment
-      .filter((e) => e.kind === kind)
-      .filter((e) => approvedFor(e) || chosen.has(e.id))
-      .map((e) => ({
-        id: e.id,
-        // A retired item that is only here because this design uses it says so,
-        // rather than sitting in the list looking like something still sold.
-        label:
-          `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` +
-          `${e.ratingW ? ` · ${e.ratingW}W` : ""}${e.isActive ? "" : " · retired"}` +
-          `${approvedFor(e) ? "" : " · not on this lender's list"}`,
-        ratingW: e.ratingW,
-      }));
 
   // The layout is only shown as present when the file row AND its bytes both
   // resolve. A dangling reference gets the rep a warning, never a broken image.
@@ -177,21 +107,11 @@ export default async function SolarProposalBuilderPage({
           design && {
             ...design,
             layoutImageUploadedAt: design.layoutImageUploadedAt?.toISOString() ?? null,
-            lenderId: design.lenderId,
           }
         }
         finance={finance}
         itcDisclaimer={settings?.incentiveDisclaimer ?? ""}
         federalItcPct={settings?.federalItcPct ?? null}
-        modules={equipOptions("module")}
-        inverters={equipOptions("inverter")}
-        batteries={equipOptions("battery")}
-        lenders={lenders}
-        hiddenByLender={{
-          module: hiddenByLender("module"),
-          inverter: hiddenByLender("inverter"),
-          battery: hiddenByLender("battery"),
-        }}
         layoutAvailable={layoutAvailable}
         canApproveLayout={can(user, "update", "Settings")}
         versions={proposals.map((v) => ({
