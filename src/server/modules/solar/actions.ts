@@ -75,10 +75,7 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
  */
 const designSchema = z.object({
   leadId: z.string().min(1),
-  utilityProvider: z.string().max(120).nullable().optional(),
   monthlyUsageKwh: z.array(z.number().min(0)).max(12).optional(),
-  annualUsageKwh: z.number().int().min(0).nullable().optional(),
-  avgMonthlyBillCents: z.number().int().min(0).nullable().optional(),
   mountType: z.enum(["roof", "ground"]).optional(),
   roofPlanes: z.array(z.record(z.string(), z.unknown())).optional(),
   setbackNotes: z.string().max(2000).nullable().optional(),
@@ -143,11 +140,12 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
 
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
-    select: { moduleId: true, moduleQty: true },
+    select: { moduleId: true, moduleQty: true, annualUsageKwh: true },
   });
 
   // The panel is not a rep's decision any more — the approved-vendor list makes
   // it once a year, and an existing design keeps whatever it was quoted on.
+  const existingUsage = existing;
   const module_ = await resolveSizingModule(user.companyId, existing?.moduleId ?? null);
 
   const moduleQty = d.moduleQty ?? existing?.moduleQty ?? 0;
@@ -159,11 +157,10 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   // production data instead of each rep guessing per roof.
   const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions);
 
-  // Annual usage: explicit value wins, else sum the 12 monthly readings.
-  const monthly = d.monthlyUsageKwh ?? [];
-  const annualUsageKwh =
-    d.annualUsageKwh ?? (monthly.length ? Math.round(monthly.reduce((n, m) => n + m, 0)) : null);
-
+  // Usage belongs to the Energy step now, so this reads it rather than taking
+  // it from the client. Offset still has to be recomputed here, because it
+  // depends on the production that the module count just changed.
+  const annualUsageKwh = existingUsage?.annualUsageKwh ?? null;
   const computedOffset = annualUsageKwh ? offsetPct(year1ProductionKwh, annualUsageKwh) : 0;
 
   const { leadId, moduleQty: _q, ...rest } = d;
@@ -171,8 +168,6 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
     ...rest,
     moduleId: module_?.id ?? null,
     moduleQty,
-    monthlyUsageKwh: monthly,
-    annualUsageKwh,
     systemSizeKwDc,
     year1ProductionKwh,
     offsetPct: computedOffset,

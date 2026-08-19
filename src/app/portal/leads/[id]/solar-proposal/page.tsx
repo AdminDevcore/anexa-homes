@@ -9,6 +9,8 @@ import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
+import { listSolarProviders } from "@/server/modules/solar/providers";
+import { targetSystem } from "@/lib/solar-energy";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,9 @@ export default async function SolarProposalBuilderPage({
       vertical: true,
       firstName: true,
       lastName: true,
+      coOwnerName: true,
+      email: true,
+      phone: true,
       address: true,
       city: true,
       state: true,
@@ -114,6 +119,14 @@ export default async function SolarProposalBuilderPage({
   // standard 60-cell module rather than drawing nothing.
   const sizingModule = await resolveSizingModule(user.companyId, design?.moduleId ?? null);
 
+  // A provider a design already names stays in its own list even after being
+  // retired — otherwise the select falls back to "not set" and the next save
+  // blanks a value nobody meant to touch.
+  const [utilities, retailers] = await Promise.all([
+    listSolarProviders(user.companyId, "utility", design?.utilityProvider),
+    listSolarProviders(user.companyId, "retail", design?.electricProvider),
+  ]);
+
   // The layout is only shown as present when the file row AND its bytes both
   // resolve. A dangling reference gets the rep a warning, never a broken image.
   const layoutAvailable = !!(await resolveLayoutAsset(
@@ -144,7 +157,11 @@ export default async function SolarProposalBuilderPage({
 
       <SolarProposalBuilder
         leadId={lead.id}
-        initialStep={step === "financing" || step === "generate" ? step : "design"}
+        initialStep={
+          step === "energy" || step === "design" || step === "financing" || step === "generate"
+            ? step
+            : "customer"
+        }
         canEditDeal={can(user, "update", "Lead")}
         canCreateProposal={can(user, "create", "Proposal")}
         design={
@@ -187,6 +204,46 @@ export default async function SolarProposalBuilderPage({
           heightMm: sizingModule?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
         }}
         initialBlocks={parseLayoutBlocks(design?.layoutBlocks)}
+        customer={{
+          firstName: lead.firstName,
+          lastName: lead.lastName,
+          coOwnerName: lead.coOwnerName,
+          email: lead.email,
+          phone: lead.phone,
+          address: lead.address,
+          city: lead.city,
+          state: lead.state,
+          zip: lead.zip,
+        }}
+        energy={
+          design && {
+            utilityProvider: design.utilityProvider,
+            electricProvider: design.electricProvider,
+            annualUsageKwh: design.annualUsageKwh,
+            avgMonthlyBillCents: design.avgMonthlyBillCents,
+            utilityRateMills: design.utilityRateMills,
+            usageBasis: design.usageBasis,
+          }
+        }
+        utilities={utilities}
+        retailers={retailers}
+        assumptions={{
+          kwhPerKwYear: settings.kwhPerKwYear,
+          derateFactor: settings.derateFactor,
+          targetOffsetPct: settings.targetOffsetPct,
+        }}
+        hasLayout={!!design?.layoutImageFileId}
+        targetPanels={
+          targetSystem({
+            annualUsageKwh: design?.annualUsageKwh,
+            assumptions: {
+              kwhPerKwYear: settings.kwhPerKwYear,
+              derateFactor: settings.derateFactor,
+              targetOffsetPct: settings.targetOffsetPct,
+            },
+            panelWatts: sizingModule?.ratingW,
+          })?.panels ?? null
+        }
         versions={proposals.map((v) => ({
           id: v.id,
           leadId: lead.id,

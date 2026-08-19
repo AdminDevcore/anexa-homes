@@ -79,6 +79,7 @@ export function SolarLayoutDesigner({
   moduleMm,
   moduleRatingW,
   initialBlocks,
+  targetPanels,
   canEdit,
 }: {
   leadId: string;
@@ -87,6 +88,8 @@ export function SolarLayoutDesigner({
   moduleMm: ModuleMm;
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
+  /** How many panels this house needs, from the Energy step. Null = unknown. */
+  targetPanels: number | null;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -514,6 +517,21 @@ export function SolarLayoutDesigner({
           <span data-testid="panel-count" className="font-display text-lg font-semibold">
             {count} {count === 1 ? "panel" : "panels"}
           </span>
+          {/* Kept OUT of the panel-count element on purpose: the e2e asserts
+              that element's exact text, and folding the target in breaks it. */}
+          {targetPanels ? (
+            <span
+              data-testid="panel-target"
+              className={cn(
+                "ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                count >= targetPanels
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800"
+              )}
+            >
+              of ~{targetPanels} needed
+            </span>
+          ) : null}
           <span className="ml-2 text-xs text-muted-foreground">
             {moduleRatingW
               ? `${kwDc.toFixed(2)} kW-DC at ${moduleRatingW}W each`
