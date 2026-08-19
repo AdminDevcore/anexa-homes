@@ -122,13 +122,55 @@ export function SolarLayoutDesigner({
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
 
-  const [blocks, setBlocks] = React.useState<LayoutBlock[]>(initialBlocks);
+  /**
+   * THE GESTURE STATE LIVES IN A REF AS WELL AS IN STATE, and the ref is the
+   * one the pointer handlers read.
+   *
+   * A browser can deliver the last `pointermove` and the `pointerup` of a drag
+   * in the SAME task, and React does not re-render in between. A handler that
+   * reads the `drag` it closed over at render time therefore sees the drag as
+   * it was BEFORE the gesture: corner never moved, rectangle zero. That was
+   * the whole of "That is 0.0 m x 0.0 m — one panel needs 1.13 m x 1.76 m" on
+   * a rectangle drawn across half a roof. The drag was fine; the measurement
+   * was taken from a stale copy. Anyone quick with a mouse hit it every time,
+   * anyone slow enough for a repaint between the two events never did, which
+   * is what made it look like the tool worked for some people and not others.
+   *
+   * Writing the ref synchronously means every event in a gesture sees what the
+   * events before it did, whatever React has or has not committed yet. State
+   * is still set, because state is what paints.
+   */
+  const [blocks, setBlocksState] = React.useState<LayoutBlock[]>(initialBlocks);
+  const blocksRef = React.useRef<LayoutBlock[]>(initialBlocks);
+  const setBlocks = React.useCallback(
+    (next: LayoutBlock[] | ((prev: LayoutBlock[]) => LayoutBlock[])) => {
+      const value = typeof next === "function" ? next(blocksRef.current) : next;
+      blocksRef.current = value;
+      setBlocksState(value);
+    },
+    []
+  );
+
+  const [drag, setDragState] = React.useState<Drag>(null);
+  const dragRef = React.useRef<Drag>(null);
+  const setDrag = React.useCallback((next: Drag) => {
+    dragRef.current = next;
+    setDragState(next);
+  }, []);
+
+  /**
+   * The layout as it was when the current gesture began, so one drag is one
+   * undo step — and undoing a move puts the array back where it started.
+   * Recording the blocks at pointerup, as this used to, records them as they
+   * already are: an undo that restores the drag you were trying to undo.
+   */
+  const gestureBeforeRef = React.useRef<LayoutBlock[] | null>(null);
+
   const [history, setHistory] = React.useState<LayoutBlock[][]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [tool, setTool] = React.useState<Tool>("draw");
   const [zoom, setZoom] = React.useState<Zoom>(21);
   const [viewScale, setViewScale] = React.useState(1);
-  const [drag, setDrag] = React.useState<Drag>(null);
   // Which zoom's imagery has resolved, how, and AT WHAT SIZE. The size is part
   // of the answer because the canvas and the metres-per-pixel are both derived
   // from it — Google clamps a Static Maps request to 640 a side and says
@@ -162,9 +204,9 @@ export function SolarLayoutDesigner({
 
   /** Every mutation goes through here, so undo has one place to record. */
   const commit = React.useCallback((next: LayoutBlock[]) => {
-    setHistory((h) => [...h.slice(-49), blocks]);
+    setHistory((h) => [...h.slice(-49), blocksRef.current]);
     setBlocks(next);
-  }, [blocks]);
+  }, [setBlocks]);
 
   const undo = React.useCallback(() => {
     setHistory((h) => {
@@ -172,7 +214,7 @@ export function SolarLayoutDesigner({
       setBlocks(h[h.length - 1]);
       return h.slice(0, -1);
     });
-  }, []);
+  }, [setBlocks]);
 
   /** Patch the selected array. Every property control goes through one path. */
   const patchSelected = React.useCallback(
@@ -193,7 +235,7 @@ export function SolarLayoutDesigner({
    * plane and retyping the pitch three times is how people stop bothering.
    */
   const inheritedOrientation = (): Pick<LayoutBlock, "azimuthDeg" | "tiltDeg"> => {
-    const source = selected ?? blocks[blocks.length - 1];
+    const source = selected ?? blocksRef.current[blocksRef.current.length - 1];
     if (!source) return { azimuthDeg: null, tiltDeg: null };
     return { azimuthDeg: source.azimuthDeg ?? null, tiltDeg: source.tiltDeg ?? null };
   };
@@ -320,8 +362,9 @@ export function SolarLayoutDesigner({
 
   /** Which panel, if any, is under this point. */
   const hit = (m: { e: number; n: number }) => {
-    for (let bi = blocks.length - 1; bi >= 0; bi--) {
-      const b = blocks[bi];
+    const current = blocksRef.current;
+    for (let bi = current.length - 1; bi >= 0; bi--) {
+      const b = current[bi];
       const quads = panelCorners(b, moduleMm);
       // panelCorners skips omitted cells, so walk the grid to keep indices true.
       let q = 0;
@@ -372,6 +415,10 @@ export function SolarLayoutDesigner({
       /* capture is an optimisation, not a requirement */
     }
 
+    // Everything this gesture is about to change, so pointerup can record one
+    // undo step for the whole of it rather than one per stage.
+    gestureBeforeRef.current = blocksRef.current;
+
     if (tool === "erase") {
       const h = hit(m);
       if (h) {
@@ -379,8 +426,8 @@ export function SolarLayoutDesigner({
         // leaves an empty block on the canvas that can still be clicked.
         commit(
           h.block.cols === 1 && h.block.rows === 1
-            ? blocks.filter((b) => b.id !== h.block.id)
-            : blocks.map((b) =>
+            ? blocksRef.current.filter((b) => b.id !== h.block.id)
+            : blocksRef.current.map((b) =>
                 b.id === h.block.id ? { ...b, omitted: [...b.omitted, h.index] } : b
               )
         );
@@ -392,9 +439,11 @@ export function SolarLayoutDesigner({
     if (tool === "panel") {
       // Match whatever is already up there, so a panel added to a rotated array
       // lands square with it instead of pointing north.
-      const near = selected ?? blocks[blocks.length - 1];
+      const near = selected ?? blocksRef.current[blocksRef.current.length - 1];
       const b = lonePanelAt(m, near?.rotationDeg ?? 0, near?.orientation ?? "portrait");
-      commit([...blocks, b]);
+      // No history entry here — pointerup records one for the whole gesture, so
+      // a single undo takes back the panel AND the slide that positioned it.
+      setBlocks([...blocksRef.current, b]);
       setSelectedId(b.id);
       return setDrag({
         kind: "move",
@@ -412,9 +461,10 @@ export function SolarLayoutDesigner({
       // Detaching on grab is what makes "slide this one to the right" a single
       // gesture: the panel leaves the grid and follows the pointer, and the
       // hole it came from stays knocked out.
-      const res = detachPanel(blocks, h.block.id, h.index, moduleMm, uid());
+      const res = detachPanel(blocksRef.current, h.block.id, h.index, moduleMm, uid());
       if (!res) return;
-      commit(res.blocks);
+      // As above: the detach and the slide are one gesture, so one undo step.
+      setBlocks(res.blocks);
       const loose = res.blocks.find((b) => b.id === res.detachedId)!;
       setSelectedId(loose.id);
       return setDrag({
@@ -461,21 +511,23 @@ export function SolarLayoutDesigner({
   }
 
   function onPointerMove(ev: React.PointerEvent) {
-    if (!drag || lat == null) return;
+    // The ref, not the state — see the note where it is declared.
+    const d = dragRef.current;
+    if (!d || lat == null) return;
     const p = toCanvas(ev);
     const m = toMetres(p);
 
-    if (drag.kind === "new") return setDrag({ ...drag, toX: p.x, toY: p.y });
+    if (d.kind === "new") return setDrag({ ...d, toX: p.x, toY: p.y });
 
-    const b = blocks.find((x) => x.id === drag.id);
+    const b = blocksRef.current.find((x) => x.id === d.id);
     if (!b) return;
 
-    if (drag.kind === "move") {
-      const next = { ...b, originE: drag.originE + (m.e - drag.fromE), originN: drag.originN + (m.n - drag.fromN) };
+    if (d.kind === "move") {
+      const next = { ...b, originE: d.originE + (m.e - d.fromE), originN: d.originN + (m.n - d.fromN) };
       return setBlocks((bs) => bs.map((x) => (x.id === b.id ? next : x)));
     }
 
-    if (drag.kind === "rotate") {
+    if (d.kind === "rotate") {
       // Bearing from the block's origin to the pointer, clockwise from north.
       const deg = (Math.atan2(m.e - b.originE, m.n - b.originN) * 180) / Math.PI;
       const snapped = ev.shiftKey ? deg : Math.round(deg / 5) * 5;
@@ -484,7 +536,7 @@ export function SolarLayoutDesigner({
       );
     }
 
-    if (drag.kind === "resize") {
+    if (d.kind === "resize") {
       // Back into the block's own frame, so a rotated block grows along its own
       // rows rather than along north.
       const local = groundToBlockLocal(b, m.e, m.n);
@@ -499,24 +551,34 @@ export function SolarLayoutDesigner({
     }
   }
 
-  function onPointerUp() {
-    if (!drag) return;
-    if (drag.kind === "new") {
-      const wM = Math.abs(drag.toX - drag.fromX) * mpp;
-      const hM = Math.abs(drag.toY - drag.fromY) * mpp;
+  function onPointerUp(ev: React.PointerEvent) {
+    const d = dragRef.current;
+    if (!d) return;
+    setDrag(null);
+    const before = gestureBeforeRef.current;
+    gestureBeforeRef.current = null;
+
+    if (d.kind === "new") {
+      // THE RELEASE POINT COMES FROM THIS EVENT, not from whichever
+      // `pointermove` we last had a render for. A drag whose move and release
+      // arrive in one task has a perfectly good rectangle in the pointerup
+      // itself; it was only ever the stale copy that measured zero. It also
+      // covers the case where a fast flick delivers no `pointermove` at all.
+      const to = toCanvas(ev);
+      const wM = Math.abs(to.x - d.fromX) * mpp;
+      const hM = Math.abs(to.y - d.fromY) * mpp;
       // Both ways round. Rejecting a shallow band because a PORTRAIT panel
       // would not fit in it — while a landscape one would have sat there
       // happily — is what "Too small for a panel" used to mean.
       const fit = bestFitBlock({ widthM: wM, heightM: hM }, moduleMm);
       if (fit.cols === 0 || fit.rows === 0) {
-        setDrag(null);
         const { w, h } = panelSizeM(moduleMm, "portrait");
         const need = Math.min(w, h);
         return toast.error(
           `That is ${wM.toFixed(1)} m x ${hM.toFixed(1)} m — one panel needs ${need.toFixed(2)} m x ${Math.max(w, h).toFixed(2)} m. Drag a bigger area, or use Add panel to place one by hand.`
         );
       }
-      const topLeft = toMetres({ x: Math.min(drag.fromX, drag.toX), y: Math.min(drag.fromY, drag.toY) });
+      const topLeft = toMetres({ x: Math.min(d.fromX, to.x), y: Math.min(d.fromY, to.y) });
       const b: LayoutBlock = {
         id: uid(),
         originE: topLeft.e,
@@ -528,14 +590,30 @@ export function SolarLayoutDesigner({
         omitted: [],
         ...inheritedOrientation(),
       };
-      commit([...blocks, b]);
+      commit([...blocksRef.current, b]);
       setSelectedId(b.id);
       setTool("select");
-    } else {
-      // move/rotate/resize edited `blocks` live; record one undo step for it.
-      setHistory((h) => [...h.slice(-49), blocks]);
+      return;
     }
+
+    // move/rotate/resize edited the layout live, so the undo step is the
+    // layout as it was when the gesture STARTED. Recording it here, as this
+    // used to, records the finished drag as the thing to go back to.
+    if (before) setHistory((h) => [...h.slice(-49), before]);
+  }
+
+  /**
+   * A cancelled gesture is not a drawn array — the browser takes the pointer
+   * away for a scroll or a window switch, and finishing the rectangle there
+   * would drop panels somewhere the rep never released the mouse.
+   */
+  function onPointerCancel() {
+    const d = dragRef.current;
+    if (!d) return;
     setDrag(null);
+    const before = gestureBeforeRef.current;
+    gestureBeforeRef.current = null;
+    if (d.kind !== "new" && before) setHistory((h) => [...h.slice(-49), before]);
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
@@ -685,7 +763,7 @@ export function SolarLayoutDesigner({
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+          onPointerCancel={onPointerCancel}
           style={{ width: `${100 * viewScale}%`, height: "auto", touchAction: "none" }}
           className={cn(
             "block max-w-none",

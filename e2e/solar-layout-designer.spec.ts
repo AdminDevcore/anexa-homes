@@ -137,6 +137,71 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await expect(page.getByText(/drawn on the roof below/)).toBeVisible();
   });
 
+  /**
+   * The regression that every other drag test in this file was too slow to
+   * catch.
+   *
+   * `page.mouse.move(..., { steps: 12 })` sends a dozen separate moves with a
+   * render between each, so by the time the release arrives React has long
+   * since committed the rectangle. A real mouse does not do that: release the
+   * button in the same frame as the last movement — which is most drags, and
+   * every quick one — and the move and the up land in ONE task with no render
+   * between them. The handlers read `drag` from the render closure, so they
+   * measured the rectangle as it was before it was dragged: 0.0 m x 0.0 m, on
+   * a rectangle covering half a roof.
+   *
+   * Dispatching the gesture by hand is the only way to pin the timing down;
+   * asking Playwright for a fast drag still gives you a slow one.
+   */
+  test("a drag whose release lands in the same task still draws the array", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    const leadId = await openDesignerDeal(page);
+    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=design`);
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
+
+    /** The whole gesture in one task, optionally without any move at all. */
+    const gesture = (withMove: boolean) =>
+      page.evaluate((move: boolean) => {
+        const c = document.querySelector('[data-testid="layout-canvas"]') as HTMLCanvasElement;
+        const r = c.getBoundingClientRect();
+        const at = (fx: number, fy: number) => ({
+          clientX: r.left + r.width * fx,
+          clientY: r.top + r.height * fy,
+        });
+        const fire = (type: string, pos: { clientX: number; clientY: number }) =>
+          c.dispatchEvent(
+            new PointerEvent(type, {
+              ...pos,
+              bubbles: true,
+              pointerId: 1,
+              isPrimary: true,
+              button: 0,
+              buttons: type === "pointerup" ? 0 : 1,
+            })
+          );
+        fire("pointerdown", at(0.3, 0.3));
+        if (move) fire("pointermove", at(0.62, 0.68));
+        fire("pointerup", at(0.62, 0.68));
+      }, withMove);
+
+    await pickTool(page, "Draw array");
+    const start = await panelsOnRoof(page);
+    await gesture(true);
+    await expect
+      .poll(() => panelsOnRoof(page), { timeout: 10000 })
+      .toBeGreaterThan(start);
+    const afterMove = await panelsOnRoof(page);
+
+    // And with no `pointermove` at all, which is what a flick across a
+    // trackpad delivers: the release position is on the pointerup event, so
+    // there is a rectangle whether or not a move was ever processed.
+    await pickTool(page, "Draw array");
+    await gesture(false);
+    await expect
+      .poll(() => panelsOnRoof(page), { timeout: 10000 })
+      .toBeGreaterThan(afterMove);
+  });
+
   test("a single panel can be placed, slid and nudged", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     const leadId = await openDesignerDeal(page);
