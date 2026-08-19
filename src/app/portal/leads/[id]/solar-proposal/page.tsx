@@ -203,6 +203,10 @@ export default async function SolarProposalBuilderPage({
           heightMm: sizingModule?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
         }}
         initialBlocks={parseLayoutBlocks(design?.layoutBlocks)}
+        assumptions={{
+          kwhPerKwYear: settings.kwhPerKwYear,
+          derateFactor: settings.derateFactor,
+        }}
         customer={{
           firstName: lead.firstName,
           lastName: lead.lastName,

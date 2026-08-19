@@ -8,7 +8,8 @@ import { can } from "@/server/rbac/guards";
 import { getSolarSettings } from "./settings";
 import { resolveSizingModule } from "./sizing";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
-import { year1Production, offsetPct } from "@/lib/solar-money";
+import { systemTotals } from "@/lib/solar-arrays";
+import { offsetPct } from "@/lib/solar-money";
 
 // `actions.ts` is a "use server" module, so its helpers cannot be shared —
 // every export there has to be an async server function.
@@ -25,6 +26,13 @@ const blockSchema = z.object({
   rows: z.number().int().min(0).max(60),
   orientation: z.enum(["portrait", "landscape"]),
   omitted: z.array(z.number().int()).max(3600),
+  // Which way the plane FACES and how steep it is — the only two fields here
+  // that change the kWh. Nullable rather than defaulted: an array nobody has
+  // described is priced on the flat company yield, exactly as before
+  // orientation existed, and the designer asks for it rather than the server
+  // inventing a south-facing roof.
+  azimuthDeg: z.number().finite().min(-360).max(360).nullish(),
+  tiltDeg: z.number().finite().min(0).max(90).nullish(),
 });
 
 const layoutSchema = z.object({
@@ -49,7 +57,9 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
 
   const lead = await prisma.lead.findFirst({
     where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
+    // `lat` drives the sun's path, so the orientation penalty is this house's
+    // and not a national average.
+    select: { id: true, vertical: true, lat: true },
   });
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
@@ -65,8 +75,15 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
   const assumptions = await getSolarSettings(user.companyId);
   const module_ = await resolveSizingModule(user.companyId, existing?.moduleId ?? null);
 
-  const systemSizeKwDc = module_?.ratingW ? (moduleQty * module_.ratingW) / 1000 : 0;
-  const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions);
+  // Production is weighted array by array now. A south plane and a north plane
+  // of the same size used to contribute identical kWh, which is the difference
+  // between an estimate and a guess dressed up as one.
+  const totals = systemTotals(blocks as LayoutBlock[], {
+    lat: lead.lat,
+    moduleRatingW: module_?.ratingW ?? null,
+    assumptions,
+  });
+  const { systemSizeKwDc, year1ProductionKwh } = totals;
   const computedOffset = existing?.annualUsageKwh
     ? offsetPct(year1ProductionKwh, existing.annualUsageKwh)
     : 0;

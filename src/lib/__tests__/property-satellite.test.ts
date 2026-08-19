@@ -4,6 +4,9 @@ import {
   satelliteConfigured,
   parseZoomParam,
   DEFAULT_ZOOM,
+  clampSide,
+  staticMapPixelSize,
+  STATIC_MAP_MAX_PX,
 } from "@/server/modules/property/satellite";
 // Geocoding moved to geo/ — it answers "where is this house" for the canvassing
 // map and the skip-trace too, not just for this picture.
@@ -189,5 +192,53 @@ describe("the design canvas gets an unmarked image", () => {
 
   it("still pins by default, because every other surface needs it", () => {
     expect(staticMapUrl("k", { lat: 32.7, lng: -96.8 })).toContain("markers");
+  });
+});
+
+describe("Google's undocumented size clamp", () => {
+  /**
+   * The bug this guards. `size=1280x720` came back 200 OK as a 1280x1280
+   * image: Google clamps EACH side to 640 independently, then scale=2 doubles
+   * both. The designer drew that square into a 16:9 canvas, so every roof was
+   * stretched 1.78x wide and the metres-per-pixel the panels were sized by was
+   * wrong on both axes. Nothing in the response says it happened, so the only
+   * defence is never to ask for more than will be given.
+   */
+  it("never asks for a side Google will silently shrink", () => {
+    // BOTH sides of the old 1280x720 request are over the cap, which is why
+    // the answer came back square: 640x640, doubled by scale=2 to 1280x1280.
+    // Asking for it outright is the same picture, minus the surprise.
+    const url = staticMapUrl("k", { lat: 32.7, lng: -96.8, width: 1280, height: 720 });
+    expect(url).toContain(`size=${STATIC_MAP_MAX_PX}x${STATIC_MAP_MAX_PX}`);
+  });
+
+  it("passes a size within the cap through untouched", () => {
+    const url = staticMapUrl("k", { lat: 32.7, lng: -96.8, width: 640, height: 640 });
+    expect(url).toContain("size=640x640");
+  });
+
+  it("clamps a side rather than rejecting it", () => {
+    expect(clampSide(2000)).toBe(STATIC_MAP_MAX_PX);
+    expect(clampSide(400)).toBe(400);
+    expect(clampSide(0)).toBe(1);
+    expect(clampSide(Number.NaN)).toBe(STATIC_MAP_MAX_PX);
+  });
+
+  it("predicts the DEVICE pixels that will come back", () => {
+    // The designer sizes its canvas and its ground scale from this, before the
+    // picture has loaded.
+    expect(staticMapPixelSize({ width: 640, height: 640, scale: 2 })).toEqual({
+      widthPx: 1280,
+      heightPx: 1280,
+    });
+    // The shape Google actually served for the designer's old request.
+    expect(staticMapPixelSize({ width: 1280, height: 720, scale: 2 })).toEqual({
+      widthPx: 1280,
+      heightPx: 1280,
+    });
+    expect(staticMapPixelSize({ width: 400, height: 300, scale: 1 })).toEqual({
+      widthPx: 400,
+      heightPx: 300,
+    });
   });
 });

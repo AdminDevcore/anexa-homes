@@ -27,6 +27,26 @@ export type MapType = "satellite" | "roadmap";
 export const DEFAULT_ZOOM = 20;
 
 /**
+ * Google's hard cap on EACH side of a Static Maps image, in logical pixels.
+ *
+ * Discovered the expensive way. This module used to ask for `size=1280x720`
+ * and Google answered 200 OK with a 1280x1280 image: it clamps each dimension
+ * to 640 independently — 640x640 — and `scale=2` doubles both. Nothing in the
+ * response says it happened.
+ *
+ * The panel designer then drew that square into a 16:9 canvas, so every roof
+ * on it was stretched 1.78x wide, and the metres-per-pixel the panels were
+ * sized by was wrong on both axes: half the true value across, an eighth out
+ * down. Panels laid on a distorted roof at the wrong scale cannot be made to
+ * line up, however carefully a rep drags them.
+ *
+ * Clamping here rather than trusting the caller keeps the returned image the
+ * shape that was asked for, which is the property the designer's geometry
+ * rests on.
+ */
+export const STATIC_MAP_MAX_PX = 640;
+
+/**
  * Read a `?zoom=` query parameter, falling back to DEFAULT_ZOOM.
  *
  * A pure function with tests rather than three lines inline in the route,
@@ -84,7 +104,7 @@ export function staticMapUrl(key: string, o: StaticMapOptions): string {
   const params = new URLSearchParams({
     center: `${lat},${lng}`,
     zoom: String(zoom),
-    size: `${width}x${height}`,
+    size: `${clampSide(width)}x${clampSide(height)}`,
     scale: String(scale),
     maptype: type,
     format: "png",
@@ -97,6 +117,31 @@ export function staticMapUrl(key: string, o: StaticMapOptions): string {
   // The marker at least says "here, as well as Google knows".
   if (marker) params.append("markers", `color:0xF4631E|${lat},${lng}`);
   return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+}
+
+/** One side of a Static Maps request, inside Google's limits. See STATIC_MAP_MAX_PX. */
+export function clampSide(px: number): number {
+  if (!Number.isFinite(px)) return STATIC_MAP_MAX_PX;
+  return Math.max(1, Math.min(STATIC_MAP_MAX_PX, Math.round(px)));
+}
+
+/**
+ * The image Google will actually return for a request, in DEVICE pixels.
+ *
+ * The designer needs this before the picture arrives, because its canvas and
+ * its metres-per-pixel both depend on it — and asking for one shape and being
+ * silently handed another is exactly the bug this exists to prevent.
+ */
+export function staticMapPixelSize(o: {
+  width?: number;
+  height?: number;
+  scale?: 1 | 2;
+}): { widthPx: number; heightPx: number } {
+  const scale = o.scale ?? 2;
+  return {
+    widthPx: clampSide(o.width ?? 1280) * scale,
+    heightPx: clampSide(o.height ?? 720) * scale,
+  };
 }
 
 /** Is the integration configured at all? Drives the placeholder vs the image. */

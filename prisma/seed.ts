@@ -275,8 +275,12 @@ async function main() {
   // A small starter catalog so a rep can build a system on day one.
   await prisma.solarEquipment.createMany({
     data: [
-      { companyId: company.id, kind: "module", manufacturer: "Qcells", model: "Q.PEAK DUO BLK ML-G10+", ratingW: 400, costCents: 21000, priceCents: 0 },
-      { companyId: company.id, kind: "module", manufacturer: "REC", model: "Alpha Pure-R 430", ratingW: 430, costCents: 25000, priceCents: 0 },
+      // The default module, with its real laminate size. Both matter: without a
+      // DEFAULT nothing sizes (kW, production and offset are all structurally
+      // zero, and the design step can only say so), and without DIMENSIONS the
+      // roof designer lays out a generic panel instead of this one.
+      { companyId: company.id, kind: "module", manufacturer: "Qcells", model: "Q.PEAK DUO BLK ML-G10+", ratingW: 400, widthMm: 1045, heightMm: 1879, costCents: 21000, priceCents: 0, isDefault: true },
+      { companyId: company.id, kind: "module", manufacturer: "REC", model: "Alpha Pure-R 430", ratingW: 430, widthMm: 1118, heightMm: 1730, costCents: 25000, priceCents: 0 },
       { companyId: company.id, kind: "inverter", manufacturer: "Enphase", model: "IQ8+ Microinverter", ratingW: 290, costCents: 15000, priceCents: 0 },
       { companyId: company.id, kind: "inverter", manufacturer: "SolarEdge", model: "SE7600H-US", ratingW: 7600, costCents: 130000, priceCents: 0 },
       { companyId: company.id, kind: "battery", manufacturer: "Enphase", model: "IQ Battery 5P", ratingW: 5000, costCents: 480000, priceCents: 720000 },

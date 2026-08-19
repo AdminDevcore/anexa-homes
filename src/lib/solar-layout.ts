@@ -24,6 +24,19 @@ export type LayoutBlock = {
   orientation: Orientation;
   /** Grid indices knocked out: chimneys, vents, setbacks. Row-major. */
   omitted: number[];
+  /**
+   * Which way these panels FACE, degrees clockwise from true north — 180 is due
+   * south. NOT the same as `rotationDeg`, which only turns the grid in plan
+   * view so its rows line up with the ridge; a rep can align an array perfectly
+   * and still have it pointing north.
+   *
+   * Undefined means nobody has said, and production falls back to the
+   * company-wide yield exactly as it did before orientation existed. Guessing
+   * a south roof here would be the one lie this whole module exists to stop.
+   */
+  azimuthDeg?: number | null;
+  /** The plane's slope off horizontal, degrees. 0 is flat. Undefined = unknown. */
+  tiltDeg?: number | null;
 };
 
 export type ModuleMm = { widthMm: number; heightMm: number };
@@ -62,6 +75,35 @@ export function fitBlock(
   return { cols: fit(rect.widthM, w), rows: fit(rect.heightM, h) };
 }
 
+/**
+ * The best way to fill a dragged rectangle: whichever way round fits more.
+ *
+ * `fitBlock` with a fixed orientation is what produced "Too small for a
+ * panel — drag a bigger area" on a rectangle that a landscape module would
+ * have sat in happily. A shallow band along a ridge is 1.1 m deep, so portrait
+ * (1.76 m tall) fits zero rows and the drag was rejected, with nothing in the
+ * message to suggest turning the panel sideways would have worked.
+ */
+export function bestFitBlock(
+  rect: { widthM: number; heightM: number },
+  m: ModuleMm
+): { cols: number; rows: number; orientation: Orientation } {
+  const portrait = fitBlock(rect, m, "portrait");
+  const landscape = fitBlock(rect, m, "landscape");
+  const pn = portrait.cols * portrait.rows;
+  const ln = landscape.cols * landscape.rows;
+  // Ties go to portrait: it is how residential arrays are laid up by default,
+  // and a tie means the rectangle was square enough for it not to matter.
+  return ln > pn ? { ...landscape, orientation: "landscape" } : { ...portrait, orientation: "portrait" };
+}
+
+/** The smallest rectangle that holds one module, either way round. Drives the
+ *  "drag at least this big" hint rather than a bare rejection. */
+export function smallestPanelRectM(m: ModuleMm): { widthM: number; heightM: number } {
+  const { w, h } = panelSizeM(m, "portrait");
+  return { widthM: Math.min(w, h), heightM: Math.min(w, h) };
+}
+
 /** Cells knocked out of one block, de-duplicated and clamped to the grid. */
 function omittedInRange(b: LayoutBlock): Set<number> {
   const cells = Math.max(0, b.cols) * Math.max(0, b.rows);
@@ -76,10 +118,19 @@ function omittedInRange(b: LayoutBlock): Set<number> {
  * to come from something nobody in the browser can retype.
  */
 export function panelCount(blocks: LayoutBlock[]): number {
-  return blocks.reduce((n, b) => {
-    const cells = Math.max(0, b.cols) * Math.max(0, b.rows);
-    return n + cells - omittedInRange(b).size;
-  }, 0);
+  return blocks.reduce((n, b) => n + blockPanelCount(b), 0);
+}
+
+/**
+ * How many panels are in ONE block.
+ *
+ * Split out of `panelCount` because production is no longer a single sum: each
+ * array faces its own way, so the kW on each plane has to be weighted by that
+ * plane's orientation before the totals are added up.
+ */
+export function blockPanelCount(b: LayoutBlock): number {
+  const cells = Math.max(0, b.cols) * Math.max(0, b.rows);
+  return cells - omittedInRange(b).size;
 }
 
 /** Rotate a ground offset clockwise from north. */
@@ -180,10 +231,80 @@ export function metresToImagePx(
   return { x: image.widthPx / 2 + e / mpp, y: image.heightPx / 2 - n / mpp };
 }
 
+/**
+ * Where one grid cell sits, in the block's own frame — its top-left corner.
+ *
+ * The single place that knows a cell's offset, so detaching a panel puts the
+ * loose copy exactly where the grid one was rather than a rail-gap off.
+ */
+export function cellLocalXY(
+  b: Pick<LayoutBlock, "cols" | "orientation">,
+  m: ModuleMm,
+  index: number
+): { x: number; y: number } {
+  const { w, h } = panelSizeM(m, b.orientation);
+  const cols = Math.max(1, b.cols);
+  return { x: (index % cols) * (w + PANEL_GAP_M), y: Math.floor(index / cols) * (h + PANEL_GAP_M) };
+}
+
+/**
+ * Pull one panel out of a grid so it can be moved on its own.
+ *
+ * A single panel is just a 1x1 block — the same shape, the same maths, the same
+ * count — so "slide this one over" needs no new model and no migration. The
+ * cell is knocked out of the parent and a loose block is placed on top of where
+ * it was, inheriting the parent's rotation and orientation so the detach itself
+ * moves nothing on screen.
+ */
+export function detachPanel(
+  blocks: LayoutBlock[],
+  blockId: string,
+  index: number,
+  m: ModuleMm,
+  newId: string
+): { blocks: LayoutBlock[]; detachedId: string } | null {
+  const parent = blocks.find((b) => b.id === blockId);
+  if (!parent) return null;
+  if (index < 0 || index >= Math.max(0, parent.cols) * Math.max(0, parent.rows)) return null;
+  if (parent.omitted.includes(index)) return null;
+
+  // Already a lone panel: nothing to detach, it IS the loose one.
+  if (parent.cols === 1 && parent.rows === 1) return { blocks, detachedId: parent.id };
+
+  const local = cellLocalXY(parent, m, index);
+  const ground = blockLocalToGround(parent, local.x, local.y);
+  const loose: LayoutBlock = {
+    id: newId,
+    originE: ground.e,
+    originN: ground.n,
+    rotationDeg: parent.rotationDeg,
+    cols: 1,
+    rows: 1,
+    orientation: parent.orientation,
+    omitted: [],
+    azimuthDeg: parent.azimuthDeg ?? null,
+    tiltDeg: parent.tiltDeg ?? null,
+  };
+  return {
+    blocks: [
+      ...blocks.map((b) =>
+        b.id === blockId ? { ...b, omitted: [...b.omitted, index] } : b
+      ),
+      loose,
+    ],
+    detachedId: newId,
+  };
+}
+
+/** An angle from the database, or null. Keeps NaN and Infinity out of the maths. */
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
 /** Parse `SolarDesign.layoutBlocks` from the database. Bad data reads as empty. */
 export function parseLayoutBlocks(raw: unknown): LayoutBlock[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter((b): b is LayoutBlock => {
+  const shaped = raw.filter((b): b is LayoutBlock => {
     if (!b || typeof b !== "object") return false;
     const x = b as Record<string, unknown>;
     return (
@@ -200,4 +321,13 @@ export function parseLayoutBlocks(raw: unknown): LayoutBlock[] {
       Array.isArray(x.omitted)
     );
   });
+
+  // Orientation arrived after the first designs were saved, so it is optional
+  // on the wire and normalised here — an older row simply has none, which the
+  // production model already reads as "unknown", not as "zero".
+  return shaped.map((b) => ({
+    ...b,
+    azimuthDeg: finiteOrNull((b as LayoutBlock).azimuthDeg),
+    tiltDeg: finiteOrNull((b as LayoutBlock).tiltDeg),
+  }));
 }

@@ -74,6 +74,60 @@ export function year1Production(
 }
 
 /**
+ * The only two assumptions production needs.
+ *
+ * Narrower than `SolarAssumptions` on purpose: this is the shape that crosses
+ * the wire to the designer, and a company's pricing floors and dealer fees have
+ * no business being in a browser to draw a roof.
+ */
+export type YieldAssumptions = Pick<SolarAssumptions, "kwhPerKwYear" | "derateFactor">;
+
+/**
+ * Year-one kWh when the arrays face different ways, which on a real house they
+ * almost always do.
+ *
+ * `year1Production` above answers "how much does N kW make here" — one number
+ * for the whole system, and therefore the same answer whichever side of the
+ * ridge the panels are on. This one weights each array by the plane it is
+ * actually mounted on before adding them up, so a south array and a north array
+ * of the same size no longer contribute the same kWh.
+ *
+ * An array with no orientation recorded weighs 1 — the pre-orientation answer,
+ * unchanged. That is what lets this replace the old call everywhere without
+ * moving a single already-quoted number.
+ */
+export function year1ProductionFromArrays(
+  arrays: { kwDc: number; orientationFactor: number }[],
+  a: YieldAssumptions
+): number {
+  const kwh = arrays.reduce((sum, arr) => {
+    if (!(arr.kwDc > 0)) return sum;
+    const factor = Number.isFinite(arr.orientationFactor) ? arr.orientationFactor : 1;
+    return sum + arr.kwDc * a.kwhPerKwYear * a.derateFactor * Math.max(0, factor);
+  }, 0);
+  return Math.round(kwh);
+}
+
+/**
+ * The whole system's orientation factor: the production actually expected as a
+ * share of what the same kW would make on this site's best plane.
+ *
+ * Shown to the rep rather than kept internal, because "your roof is at 84% of
+ * ideal" is the sentence that explains why the panel count went up.
+ */
+export function blendedOrientationFactor(
+  arrays: { kwDc: number; orientationFactor: number }[]
+): number | null {
+  const totalKw = arrays.reduce((n, arr) => n + Math.max(0, arr.kwDc), 0);
+  if (totalKw <= 0) return null;
+  const weighted = arrays.reduce(
+    (n, arr) => n + Math.max(0, arr.kwDc) * Math.max(0, arr.orientationFactor),
+    0
+  );
+  return weighted / totalKw;
+}
+
+/**
  * The customer's current blended rate, derived from their OWN bill.
  *
  * Returns null when it cannot be derived. That is the whole point: this used to

@@ -311,6 +311,8 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     manufacturer: "",
     model: "",
     ratingW: "",
+    widthMm: "",
+    heightMm: "",
     cost: "",
     price: "",
     rank: "0",
@@ -327,6 +329,8 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
       manufacturer: f.manufacturer || null,
       model: f.model,
       ratingW: f.ratingW ? Number(f.ratingW) : null,
+      widthMm: f.widthMm ? Number(f.widthMm) : null,
+      heightMm: f.heightMm ? Number(f.heightMm) : null,
       costCents: f.cost ? Math.round(Number(f.cost) * 100) : 0,
       priceCents: f.price ? Math.round(Number(f.price) * 100) : 0,
       rank: Number(f.rank) || 0,
@@ -336,7 +340,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success("Added");
-    setF({ manufacturer: "", model: "", ratingW: "", cost: "", price: "", rank: "0", avlYear: "", crossoverKind: "" });
+    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", rank: "0", avlYear: "", crossoverKind: "" });
     setOpen(false);
     router.refresh();
   }
@@ -365,6 +369,33 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
             <Label className="text-xs">{ratingLabel}</Label>
             <Input type="number" value={f.ratingW} onChange={(e) => set("ratingW", e.target.value)} />
           </div>
+        )}
+        {/* The laminate's real size. The roof designer lays panels out at true
+            scale against satellite imagery, so this is what decides how many
+            fit between a ridge and a setback — leave it blank and every roof is
+            planned with a generic 1134 x 1762 module instead of the one on the
+            approved-vendor list. Off a spec sheet in millimetres. */}
+        {kind === "module" && (
+          <>
+            <div className="space-y-1">
+              <Label className="text-xs">Width (mm)</Label>
+              <Input
+                type="number"
+                placeholder="1134"
+                value={f.widthMm}
+                onChange={(e) => set("widthMm", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Length (mm)</Label>
+              <Input
+                type="number"
+                placeholder="1762"
+                value={f.heightMm}
+                onChange={(e) => set("heightMm", e.target.value)}
+              />
+            </div>
+          </>
         )}
         {/* Which approved-vendor list this belongs to. Optional: plenty of
             items are not year-scoped, and a blank is honest about that. */}

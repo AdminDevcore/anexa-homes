@@ -18,9 +18,14 @@ import {
   type BuilderStep,
   type ValidationIssue,
 } from "@/lib/solar-validation";
-import type { LayoutBlock } from "@/lib/solar-layout";
+import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
-import { loanPaymentCents, grossPpwFromNet, leaseMonthlyCents } from "@/lib/solar-money";
+import {
+  loanPaymentCents,
+  grossPpwFromNet,
+  leaseMonthlyCents,
+  type YieldAssumptions,
+} from "@/lib/solar-money";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor, formatFactor } from "@/lib/solar-loan";
 import {
@@ -403,6 +408,7 @@ export function SolarDesignPanel({
   moduleMm,
   moduleRatingW,
   initialBlocks,
+  assumptions,
 }: {
   leadId: string;
   design: SolarDesignView;
@@ -414,6 +420,8 @@ export function SolarDesignPanel({
   moduleMm: { widthMm: number; heightMm: number };
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
+  /** The company's yield and derate, so the live preview matches the save. */
+  assumptions: YieldAssumptions;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -422,6 +430,11 @@ export function SolarDesignPanel({
   });
 
   const setMountType = (v: MountType) => setForm({ mountType: v });
+
+  // Counted from the geometry, the same way the server counts it on save —
+  // never read back off `design.moduleQty`, which is only ever a cached copy.
+  const drawnPanels = panelCount(initialBlocks);
+  const staleCount = (design?.moduleQty ?? 0) > 0 && drawnPanels === 0;
 
   async function save() {
     setBusy(true);
@@ -470,10 +483,42 @@ export function SolarDesignPanel({
             The module count is not typed either: it is how many panels were
             drawn on the roof below, which is the only way to know how many fit. */}
         <p className="text-sm">
-          <span className="font-display text-lg font-semibold">{design?.moduleQty ?? 0}</span>{" "}
-          {design?.moduleQty === 1 ? "panel" : "panels"}
+          <span className="font-display text-lg font-semibold">{drawnPanels}</span>{" "}
+          {drawnPanels === 1 ? "panel" : "panels"}
           <span className="text-muted-foreground"> · drawn on the roof below</span>
         </p>
+
+        {/* The drawing is the source of truth; `moduleQty` is a copy of it that
+            the save action refreshes. They disagree in exactly one situation,
+            and it is not a rare one: a design created before the designer
+            existed carries a count that was typed into a box with no geometry
+            behind it. Showing that stale number next to an empty roof read as
+            "the tool has lost my array", which is the opposite of what had
+            happened — nothing was ever drawn. */}
+        {staleCount ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+            The figures below were built on <strong>{design?.moduleQty} panels</strong> entered
+            before this deal had a drawing. Nothing is on the roof yet, so they no longer describe
+            anything. Draw the array and press <strong>Save layout</strong> to replace them.
+          </p>
+        ) : null}
+
+        {/* Without a panel in the catalogue there is no wattage, so kW,
+            production and offset are all structurally zero — and the old UI
+            said so in grey type at the end of a sentence. It is the single
+            thing standing between this deal and a quote. */}
+        {!moduleRatingW ? (
+          <p className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-900">
+            <strong>No default panel in the equipment catalogue.</strong> Every figure below stays
+            at zero until there is one, because a panel count without a wattage is not a system
+            size.{" "}
+            <Link href="/portal/settings/solar-equipment" className="font-medium underline">
+              Add a module in Settings → Solar equipment
+            </Link>{" "}
+            and star it as the default. Give it a width and length too — that is what the roof
+            below draws panels at.
+          </p>
+        ) : null}
 
         {/* Computed server-side from module count × rating and the company's
             assumptions — never typed in, so it cannot be faked. */}
@@ -505,6 +550,7 @@ export function SolarDesignPanel({
           moduleMm={moduleMm}
           moduleRatingW={moduleRatingW}
           initialBlocks={initialBlocks}
+          assumptions={assumptions}
           canEdit={canEdit}
         />
       </section>

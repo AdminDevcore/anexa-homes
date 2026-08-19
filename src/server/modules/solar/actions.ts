@@ -438,6 +438,11 @@ const equipmentSchema = z.object({
   manufacturer: z.string().max(120).nullable().optional(),
   model: z.string().min(1).max(160),
   ratingW: z.number().int().min(0).nullable().optional(),
+  // The module's PHYSICAL size, which the roof designer draws it at. Bounded
+  // to the range a laminate is actually made in, so a millimetre figure typed
+  // in inches cannot put a 44-metre panel on a customer's roof.
+  widthMm: z.number().int().min(300).max(3000).nullable().optional(),
+  heightMm: z.number().int().min(300).max(3000).nullable().optional(),
   costCents: z.number().int().min(0).optional(),
   priceCents: z.number().int().min(0).optional(),
   rank: z.number().int().min(0).max(999).optional(),

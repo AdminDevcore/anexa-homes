@@ -4,6 +4,7 @@ import * as React from "react";
 import { ArrowRight, Hammer, Landmark, Sun, User, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LayoutBlock } from "@/lib/solar-layout";
+import type { YieldAssumptions } from "@/lib/solar-money";
 import { Button } from "@/components/ui/button";
 import {
   SolarDesignPanel,
@@ -59,6 +60,7 @@ export function SolarProposalBuilder({
   moduleMm,
   moduleRatingW,
   initialBlocks,
+  assumptions,
   customer,
   energy,
   utilities,
@@ -98,6 +100,9 @@ export function SolarProposalBuilder({
   moduleMm: { widthMm: number; heightMm: number };
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
+  /** The company's yield and derate. The designer previews production with the
+   *  same two figures the save action uses, so the two cannot disagree. */
+  assumptions: YieldAssumptions;
   customer: SolarCustomerView;
   energy: SolarEnergyView;
   utilities: ProviderOption[];
@@ -169,6 +174,7 @@ export function SolarProposalBuilder({
           moduleMm={moduleMm}
           moduleRatingW={moduleRatingW}
           initialBlocks={initialBlocks}
+          assumptions={assumptions}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

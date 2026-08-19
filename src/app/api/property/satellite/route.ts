@@ -5,6 +5,7 @@ import {
   staticMapUrl,
   satelliteConfigured,
   parseZoomParam,
+  STATIC_MAP_MAX_PX,
   type MapType,
 } from "@/server/modules/property/satellite";
 import { resolveLeadLocation } from "@/server/modules/geo/resolve";
@@ -38,6 +39,12 @@ export async function GET(req: Request) {
   // `?pin=0` for the panel-layout designer: the pin lands on the roof the rep
   // is drawing on, and would be baked into the customer's layout picture.
   const marker = url.searchParams.get("pin") !== "0";
+  // `?square=1`, also the designer. Google clamps each side of a Static Maps
+  // image to 640 independently, so a 16:9 request comes back SQUARE with a 200
+  // and no warning — and a designer that assumes 16:9 then stretches the roof
+  // and mis-scales every panel on it. Asking for the square outright is the
+  // only way to be sure the picture has the shape the geometry expects.
+  const square = url.searchParams.get("square") === "1";
 
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!satelliteConfigured(key)) return new NextResponse("Not configured", { status: 404 });
@@ -70,9 +77,17 @@ export async function GET(req: Request) {
     });
   }
 
-  const upstream = await fetch(staticMapUrl(key!, { lat, lng, type, zoom, marker }), {
-    cache: "no-store",
-  });
+  const upstream = await fetch(
+    staticMapUrl(key!, {
+      lat,
+      lng,
+      type,
+      zoom,
+      marker,
+      ...(square ? { width: STATIC_MAP_MAX_PX, height: STATIC_MAP_MAX_PX } : {}),
+    }),
+    { cache: "no-store" }
+  );
   if (!upstream.ok) return new NextResponse("Imagery unavailable", { status: 404 });
 
   const body = Buffer.from(await upstream.arrayBuffer());

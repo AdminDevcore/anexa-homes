@@ -40,6 +40,35 @@ async function openDesignerDeal(page: Page): Promise<string> {
   return page.url().split("/").pop()!;
 }
 
+/**
+ * Pick a tool, THEN measure the canvas.
+ *
+ * In that order on purpose. `page.mouse` works in viewport coordinates and
+ * does not scroll, and clicking a toolbar button above the fold scrolls the
+ * page under it — so a box measured before the click points at whatever has
+ * slid into that spot since. The drag then lands on nothing and the count
+ * stays 0, which reads as "the tool is broken" rather than "the test is".
+ */
+async function pickTool(page: Page, name: string) {
+  await page.getByRole("button", { name, exact: true }).click();
+  const canvas = page.getByTestId("layout-canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  return (await canvas.boundingBox())!;
+}
+
+/**
+ * How many panels are on the roof right now.
+ *
+ * The specs in this file share one deal and each of them SAVES, so the roof a
+ * test opens is whatever the test before it left. Assertions are therefore
+ * deltas, never absolutes — "0 panels" is only true for whichever test happens
+ * to run first, and pinning it makes the suite order-dependent.
+ */
+async function panelsOnRoof(page: Page): Promise<number> {
+  const text = (await page.getByTestId("panel-count").textContent())!;
+  return parseInt(text.trim(), 10);
+}
+
 test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer (flag off — skipped)", () => {
   test.skip(!FLAG_ON, "Needs the solar workspace enabled.");
 
@@ -106,5 +135,108 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await page.reload();
     await expect(page.getByTestId("panel-count")).toHaveText(drawn, { timeout: 15000 });
     await expect(page.getByText(/drawn on the roof below/)).toBeVisible();
+  });
+
+  test("a single panel can be placed, slid and nudged", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    const leadId = await openDesignerDeal(page);
+    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=design`);
+
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
+
+    const before = await panelsOnRoof(page);
+
+    // ONE panel, placed by clicking. The whole reason this tool grew a
+    // per-panel mode: a rectangle drag cannot put a module beside a vent.
+    const box = await pickTool(page, "Add panel");
+    await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.4);
+    expect(await panelsOnRoof(page)).toBe(before + 1);
+    await expect(page.getByText("Selected panel")).toBeVisible();
+
+    // Placing it selects it, so the arrow keys have something to move. The
+    // count must not change — a nudge that duplicates or drops a panel is a
+    // nudge that silently reprices the deal.
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Shift+ArrowDown");
+    expect(await panelsOnRoof(page)).toBe(before + 1);
+
+    await page.getByRole("button", { name: "Save layout" }).click();
+    await expect(page.getByText(/panels? saved/)).toBeVisible({ timeout: 15000 });
+
+    await page.reload();
+    await expect(page.getByTestId("panel-count")).toBeVisible({ timeout: 15000 });
+    expect(await panelsOnRoof(page)).toBe(before + 1);
+  });
+
+  test("pulling one panel out of an array keeps the count the same", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    const leadId = await openDesignerDeal(page);
+    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=design`);
+
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
+
+    const drawBox = await pickTool(page, "Draw array");
+    await page.mouse.move(drawBox.x + drawBox.width * 0.3, drawBox.y + drawBox.height * 0.3);
+    await page.mouse.down();
+    await page.mouse.move(drawBox.x + drawBox.width * 0.6, drawBox.y + drawBox.height * 0.6, { steps: 12 });
+    await page.mouse.up();
+    const drawn = await panelsOnRoof(page);
+    expect(drawn).toBeGreaterThan(0);
+
+    // Grab a module out of the middle of the grid and drag it clear. It leaves
+    // the array and becomes its own panel; the total is untouched, because the
+    // hole it came from is knocked out at the same moment.
+    const box = await pickTool(page, "Move panel");
+    await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.45);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.75, { steps: 10 });
+    await page.mouse.up();
+
+    expect(await panelsOnRoof(page)).toBe(drawn);
+    await expect(page.getByText("Selected panel")).toBeVisible();
+  });
+
+  test("which way the roof faces changes the production, and is asked for", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    const leadId = await openDesignerDeal(page);
+    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=design`);
+
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
+
+    const box = await pickTool(page, "Draw array");
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6, { steps: 12 });
+    await page.mouse.up();
+
+    // An array nobody has described is chased for its orientation rather than
+    // quietly priced as though it faced south.
+    await expect(page.getByText(/no facing or pitch set/)).toBeVisible();
+
+    // South at a 6/12 pitch: as good as this site gets. Asserted on the
+    // SELECTED array's own line rather than on the roof-wide warning, which
+    // stays up while any OTHER array left by an earlier spec is still
+    // undescribed.
+    await page.getByLabel("Facing (azimuth)").fill("180");
+    await page.getByLabel("Roof pitch").selectOption("6");
+    await expect(page.getByText(/Facing S \(180°\) at 26\.6°/)).toBeVisible();
+    const south = parseInt((await page.getByTestId("orientation-factor").textContent())!, 10);
+
+    // Turn the same array to face north and the number has to fall. This is
+    // the whole point of the model: identical panels, different roof.
+    await page.getByLabel("Facing (azimuth)").fill("0");
+    await expect(page.getByText(/Facing N \(0°\) at 26\.6°/)).toBeVisible();
+    const north = parseInt((await page.getByTestId("orientation-factor").textContent())!, 10);
+    expect(north).toBeLessThan(south);
+
+    // And it survives the round trip through the database, because the
+    // production the customer is quoted is computed server-side from it.
+    await page.getByRole("button", { name: "Save layout" }).click();
+    await expect(page.getByText(/panels? saved/)).toBeVisible({ timeout: 15000 });
+    await page.reload();
+    await expect(page.getByTestId("orientation-factor")).toBeVisible({ timeout: 15000 });
+    const reloaded = parseInt((await page.getByTestId("orientation-factor").textContent())!, 10);
+    expect(reloaded).toBe(north);
   });
 });
