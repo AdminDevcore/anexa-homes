@@ -180,3 +180,14 @@ describe("graceful degradation when the key is absent", () => {
     expect(satelliteConfigured("AIza-whatever")).toBe(true);
   });
 });
+
+describe("the design canvas gets an unmarked image", () => {
+  it("drops the pin when asked, so it cannot sit on the array", () => {
+    const url = staticMapUrl("k", { lat: 32.7, lng: -96.8, marker: false });
+    expect(url).not.toContain("markers");
+  });
+
+  it("still pins by default, because every other surface needs it", () => {
+    expect(staticMapUrl("k", { lat: 32.7, lng: -96.8 })).toContain("markers");
+  });
+});

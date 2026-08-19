@@ -35,6 +35,9 @@ export async function GET(req: Request) {
 
   const type: MapType = url.searchParams.get("type") === "roadmap" ? "roadmap" : "satellite";
   const zoom = parseZoomParam(url.searchParams.get("zoom"));
+  // `?pin=0` for the panel-layout designer: the pin lands on the roof the rep
+  // is drawing on, and would be baked into the customer's layout picture.
+  const marker = url.searchParams.get("pin") !== "0";
 
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!satelliteConfigured(key)) return new NextResponse("Not configured", { status: 404 });
@@ -67,7 +70,9 @@ export async function GET(req: Request) {
     });
   }
 
-  const upstream = await fetch(staticMapUrl(key!, { lat, lng, type, zoom }), { cache: "no-store" });
+  const upstream = await fetch(staticMapUrl(key!, { lat, lng, type, zoom, marker }), {
+    cache: "no-store",
+  });
   if (!upstream.ok) return new NextResponse("Imagery unavailable", { status: 404 });
 
   const body = Buffer.from(await upstream.arrayBuffer());

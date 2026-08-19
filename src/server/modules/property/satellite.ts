@@ -55,6 +55,14 @@ export type StaticMapOptions = {
   height?: number;
   /** 2 on HiDPI; Google bills scale=2 as one extra request, not four. */
   scale?: 1 | 2;
+  /**
+   * Draw the "this house" pin. Default true.
+   *
+   * The panel-layout designer turns it OFF: the pin sits exactly where the
+   * array goes, hiding the roof a rep is drawing on — and it would be baked
+   * into the layout picture the customer is sent.
+   */
+  marker?: boolean;
 };
 
 /**
@@ -71,6 +79,7 @@ export function staticMapUrl(key: string, o: StaticMapOptions): string {
     width = 1280,
     height = 720,
     scale = 2,
+    marker = true,
   } = o;
   const params = new URLSearchParams({
     center: `${lat},${lng}`,
@@ -86,7 +95,7 @@ export function staticMapUrl(key: string, o: StaticMapOptions): string {
   // interpolate an address along the road (RANGE_INTERPOLATED, common on newer
   // subdivisions), the centre IS the road, so the picture looks plain wrong.
   // The marker at least says "here, as well as Google knows".
-  params.append("markers", `color:0xF4631E|${lat},${lng}`);
+  if (marker) params.append("markers", `color:0xF4631E|${lat},${lng}`);
   return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
 }
 

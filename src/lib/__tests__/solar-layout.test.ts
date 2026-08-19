@@ -139,18 +139,27 @@ describe("rotation is rigid", () => {
 });
 
 describe("metres survive a change of zoom", () => {
+  // What the imagery route actually serves.
+  const IMG = { widthPx: 1280, heightPx: 720 };
+
   it("moves a ground point twice as far from centre when the zoom doubles", () => {
-    const size = 1280;
-    const a = metresToImagePx(10, -4, metresPerPixel(32.7, 20, 2), size);
-    const b = metresToImagePx(10, -4, metresPerPixel(32.7, 21, 2), size);
-    expect(b.x - size / 2).toBeCloseTo((a.x - size / 2) * 2, 6);
-    expect(b.y - size / 2).toBeCloseTo((a.y - size / 2) * 2, 6);
+    const a = metresToImagePx(10, -4, metresPerPixel(32.7, 20, 2), IMG);
+    const b = metresToImagePx(10, -4, metresPerPixel(32.7, 21, 2), IMG);
+    expect(b.x - IMG.widthPx / 2).toBeCloseTo((a.x - IMG.widthPx / 2) * 2, 6);
+    expect(b.y - IMG.heightPx / 2).toBeCloseTo((a.y - IMG.heightPx / 2) * 2, 6);
   });
 
   it("puts north above centre and east to the right", () => {
-    const px = metresToImagePx(10, 10, metresPerPixel(32.7, 20, 2), 1280);
-    expect(px.x).toBeGreaterThan(640);
-    expect(px.y).toBeLessThan(640);
+    const px = metresToImagePx(10, 10, metresPerPixel(32.7, 20, 2), IMG);
+    expect(px.x).toBeGreaterThan(IMG.widthPx / 2);
+    expect(px.y).toBeLessThan(IMG.heightPx / 2);
+  });
+
+  it("centres on the image it was given, not on a square guess", () => {
+    // 1280x720 halves to (640, 360). Assuming a square would put the origin at
+    // (640, 640) and drop the whole array 280px below the roof.
+    const px = metresToImagePx(0, 0, metresPerPixel(32.7, 20, 2), IMG);
+    expect(px).toEqual({ x: 640, y: 360 });
   });
 });
 

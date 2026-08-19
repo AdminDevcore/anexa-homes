@@ -124,17 +124,22 @@ export function panelCorners(b: LayoutBlock, m: ModuleMm): { e: number; n: numbe
   return out;
 }
 
-/** Ground metres → pixel on a square static map centred on the deal. */
+/**
+ * Ground metres → pixel on a static map centred on the deal.
+ *
+ * Takes both dimensions rather than one "size": the imagery route serves
+ * 1280x720, and halving the wrong edge puts the whole array off the roof.
+ */
 export function metresToImagePx(
   e: number,
   n: number,
   mpp: number,
-  imageSizePx: number
+  image: { widthPx: number; heightPx: number }
 ): { x: number; y: number } {
   // Mercator's cos(lat) stretch is already in `mpp`, and a residential roof
   // spans tens of metres, so treating north as a straight vertical here is
   // accurate to well under a pixel.
-  return { x: imageSizePx / 2 + e / mpp, y: imageSizePx / 2 - n / mpp };
+  return { x: image.widthPx / 2 + e / mpp, y: image.heightPx / 2 - n / mpp };
 }
 
 /** Parse `SolarDesign.layoutBlocks` from the database. Bad data reads as empty. */
