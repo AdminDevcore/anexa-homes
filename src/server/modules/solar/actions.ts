@@ -198,9 +198,10 @@ const buildDetailsSchema = z.object({
  * system, and only the design step sets that. So an ops edit weeks after the
  * sale cannot move a number the customer has already signed against.
  *
- * The lender lives here too, with the approved-vendor list it gates. It used to
- * sit on the design step above the equipment dropdowns; the equipment moved, so
- * it moved with it rather than staying behind to filter nothing.
+ * The lender lives here too, with the approved-vendor list it gates, so ops can
+ * correct it from the deal without opening the builder. The Financing step
+ * writes the same field through `setSolarDealLenderAction` — see the note there
+ * for why one field is worth two controls.
  */
 export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDetailsSchema>) {
   const user = await requireUser();
@@ -243,6 +244,87 @@ export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDet
 
   revalidatePath(`/portal/leads/${d.leadId}`);
   return ok();
+}
+
+const dealLenderSchema = z.object({
+  leadId: z.string().min(1),
+  lenderId: z.string().nullable(),
+});
+
+/**
+ * Who is financing this deal, set from the Financing step.
+ *
+ * The lender lives on the DESIGN because it gates the approved-vendor list, and
+ * ops still set it on the deal alongside the equipment it filters. But it is
+ * also the first thing the Financing step needs — with no lender there is no
+ * rate sheet to quote — and sending a rep out of the builder to a card on
+ * another page to set it is why every design in production had none.
+ *
+ * Both controls write this one field through this one action, and both re-read
+ * it on load, so the later edit wins rather than two screens disagreeing.
+ *
+ * Changing the lender CLEARS the quoted product: a rate sheet belongs to the
+ * lender that published it, and leaving the old id behind would quote Climate
+ * First's money on an Amos deal. Equipment is deliberately left alone — the
+ * deal page labels an item that has fallen off the new lender's list rather
+ * than silently blanking what someone already ordered.
+ */
+export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  const parsed = dealLenderSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid lender.");
+  const { leadId, lenderId } = parsed.data;
+
+  const lead = await prisma.lead.findFirst({
+    where: { id: leadId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!lead) return fail("Deal not found.");
+
+  // A lender id from another company must never attach to this design.
+  if (lenderId) {
+    const l = await prisma.solarLender.findFirst({
+      where: { companyId: user.companyId, id: lenderId },
+      select: { id: true },
+    });
+    if (!l) return fail("That lender is not in your list.");
+  }
+
+  // Upsert rather than update: the Financing step can be opened before the
+  // design has ever been saved, and refusing to record the lender because a row
+  // does not exist yet would be an error the rep cannot act on.
+  await prisma.solarDesign.upsert({
+    where: { leadId },
+    create: { companyId: user.companyId, leadId, lenderId },
+    update: { lenderId },
+  });
+
+  // Drop a quote that belonged to the lender we just left.
+  const finance = await prisma.solarFinance.findUnique({
+    where: { leadId },
+    select: { lenderProductId: true },
+  });
+  let clearedProduct = false;
+  if (finance?.lenderProductId) {
+    const stillOurs = lenderId
+      ? await prisma.solarLenderProduct.findFirst({
+          where: { companyId: user.companyId, id: finance.lenderProductId, lenderId },
+          select: { id: true },
+        })
+      : null;
+    if (!stillOurs) {
+      await prisma.solarFinance.update({
+        where: { leadId },
+        data: { lenderProductId: null },
+      });
+      clearedProduct = true;
+    }
+  }
+
+  revalidatePath(`/portal/leads/${leadId}`);
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  return { ok: true as const, clearedProduct };
 }
 
 // ---------------------------------------------------------------------------

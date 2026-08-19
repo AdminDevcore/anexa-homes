@@ -66,43 +66,43 @@ export default async function SolarProposalBuilderPage({
   // builder rather than staring at an empty solar design form.
   if (lead.vertical !== "solar") redirect(`/portal/leads/${id}/presentation`);
 
-  // The design is read FIRST: which lender this system is being built for
-  // decides whose rate sheet step 2 may quote from. The lender itself is chosen
-  // on the deal, alongside the equipment it constrains.
+  // The design is read FIRST: it carries the lender this system is being built
+  // for, which is what the Financing step seeds its picker from.
   const design = await prisma.solarDesign.findUnique({ where: { leadId: lead.id } });
 
-  // Read before the batch for the same reason: the rate-sheet query needs to
-  // know which product this deal already quotes, so a retired one stays
-  // selectable rather than silently falling back to "— none —".
+  // Read before the batch: the rate-sheet query needs to know which product
+  // this deal already quotes, so a retired one stays selectable rather than
+  // silently falling back to "— none —".
   const finance0 = await prisma.solarFinance.findUnique({
     where: { leadId: lead.id },
     select: { lenderProductId: true },
   });
 
-  const [finance, settings, lender, lenderProducts, proposals] = await Promise.all([
+  const [finance, settings, lenders, lenderProducts, proposals] = await Promise.all([
     prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
     getSolarSettings(user.companyId),
-    design?.lenderId
-      ? prisma.solarLender.findFirst({
-          where: { companyId: user.companyId, id: design.lenderId },
-          select: { name: true, portalUrl: true, creditInstructions: true },
-        })
-      : Promise.resolve(null),
-    // That lender's rate sheet: sellable rows, PLUS whatever this deal is
-    // already quoted from even if it has since been retired.
-    design?.lenderId
-      ? prisma.solarLenderProduct.findMany({
-          where: {
-            companyId: user.companyId,
-            lenderId: design.lenderId,
-            OR: [
-              { isActive: true },
-              ...(finance0?.lenderProductId ? [{ id: finance0.lenderProductId }] : []),
-            ],
-          },
-          orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
-        })
-      : Promise.resolve([]),
+    // Every lender, retired ones included: a deal that already names one has to
+    // keep showing it, or the select falls back to "— none —" and the next save
+    // strips a lender nobody meant to touch.
+    prisma.solarLender.findMany({
+      where: { companyId: user.companyId },
+      orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, isActive: true, portalUrl: true, creditInstructions: true },
+    }),
+    // EVERY lender's rate sheet, not just the chosen one's: the Financing step
+    // switches lender in the browser, and re-fetching a sheet per change would
+    // put a spinner between a rep and the terms they are quoting. Sellable rows,
+    // PLUS whatever this deal quotes even if it has since been retired.
+    prisma.solarLenderProduct.findMany({
+      where: {
+        companyId: user.companyId,
+        OR: [
+          { isActive: true },
+          ...(finance0?.lenderProductId ? [{ id: finance0.lenderProductId }] : []),
+        ],
+      },
+      orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
+    }),
     prisma.solarProposal.findMany({
       where: { companyId: user.companyId, leadId: lead.id },
       orderBy: { version: "desc" },
@@ -170,11 +170,11 @@ export default async function SolarProposalBuilderPage({
           }
         }
         finance={finance}
-        lenderName={lender?.name ?? null}
-        lenderPortalUrl={lender?.portalUrl ?? null}
-        lenderCreditInstructions={lender?.creditInstructions ?? null}
+        lenders={lenders}
+        lenderId={design?.lenderId ?? null}
         lenderProducts={lenderProducts.map((p) => ({
           id: p.id,
+          lenderId: p.lenderId,
           product: p.product,
           name: p.name,
           aprPct: p.aprPct,

@@ -10,6 +10,7 @@ import {
   SolarDesignPanel,
   SolarFinancePanel,
   SolarProposalGate,
+  type LenderOption,
   type LenderProductOption,
   type ProposalVersion,
   type SolarDesignView,
@@ -45,9 +46,8 @@ export function SolarProposalBuilder({
   canCreateProposal,
   design,
   finance,
-  lenderName,
-  lenderPortalUrl,
-  lenderCreditInstructions,
+  lenders,
+  lenderId,
   lenderProducts,
   targetNetPpwCents,
   systemSizeKwDc,
@@ -78,12 +78,11 @@ export function SolarProposalBuilder({
   canCreateProposal: boolean;
   design: SolarDesignView;
   finance: SolarFinanceView;
-  /** The lender step 1 designed this system for, if one was chosen. */
-  lenderName: string | null;
-  /** Dealer portal, rep-facing. Never the customer application link. */
-  lenderPortalUrl: string | null;
-  lenderCreditInstructions: string | null;
-  /** That lender's rate sheet — see SolarFinancePanel. */
+  /** Every lender the company works with — the Financing step picks one. */
+  lenders: LenderOption[];
+  /** The one on the design, if it has been chosen. */
+  lenderId: string | null;
+  /** Every lender's rate sheet — see SolarFinancePanel. */
   lenderProducts: LenderProductOption[];
   targetNetPpwCents: number | null;
   systemSizeKwDc: number;
@@ -178,15 +177,14 @@ export function SolarProposalBuilder({
       <StepPanel
         active={step === "financing"}
         title="Financing"
-        blurb="The product and its terms travel with the quote the customer signs — pick them here, not on the deal."
+        blurb="The lender, the product and its terms travel with the quote the customer signs — pick them here, not on the deal."
       >
         <SolarFinancePanel
           leadId={leadId}
           finance={finance}
           canEdit={canEditDeal}
-          lenderName={lenderName}
-          lenderPortalUrl={lenderPortalUrl}
-          lenderCreditInstructions={lenderCreditInstructions}
+          lenders={lenders}
+          lenderId={lenderId}
           products={lenderProducts}
           targetNetPpwCents={targetNetPpwCents}
           systemSizeKwDc={systemSizeKwDc}

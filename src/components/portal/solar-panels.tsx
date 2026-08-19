@@ -31,6 +31,7 @@ import { factorQuote, factorMonthlyCents, hasPaymentFactor, formatFactor } from 
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
+  setSolarDealLenderAction,
   validateSolarDealAction,
 } from "@/server/modules/solar/actions";
 import {
@@ -576,8 +577,21 @@ export function SolarDesignPanel({
   );
 }
 
+export type LenderOption = {
+  id: string;
+  name: string;
+  isActive: boolean;
+  /** Dealer portal, rep-facing. Never the customer application link. */
+  portalUrl: string | null;
+  creditInstructions: string | null;
+};
+
 export type LenderProductOption = {
   id: string;
+  /** Whose sheet this row is off. The panel holds every lender's rate sheet so
+   *  changing lender re-offers terms without a round trip, so each row has to
+   *  say which one it belongs to. */
+  lenderId: string;
   product: FinanceProduct;
   name: string | null;
   aprPct: number | null;
@@ -604,41 +618,89 @@ const numOrNullPure = (s: string, scale = 1) =>
   s.trim() === "" ? null : Number.isFinite(Number(s)) ? Math.round(Number(s) * scale) : null;
 
 /**
- * Which of the lender's terms this deal is quoted on.
+ * Who is financing this deal, and on which of their terms.
  *
- * The lender itself is chosen in step 1, where it also decides what equipment
- * the design may use. Offering a second lender control here would be two
- * controls writing one field, and a rep could quote Credit Human's money
- * against panels only Sunlight approves.
+ * Both live here because this is where a rep needs them. The lender is a
+ * property of the DESIGN — it gates the approved-vendor list, and ops still set
+ * it on the deal — but a rate sheet with no lender behind it quotes nothing, so
+ * sending someone to another page to unlock this screen is how every design in
+ * production ended up with no lender at all.
+ *
+ * The two controls write the one field through one action and both re-read it
+ * on load, so the later edit wins rather than the two screens disagreeing.
  */
+function LenderPicker({
+  lenders,
+  value,
+  onChange,
+  busy,
+  canEdit,
+}: {
+  lenders: LenderOption[];
+  value: string;
+  onChange: (v: string) => void;
+  busy: boolean;
+  canEdit: boolean;
+}) {
+  const id = React.useId();
+
+  if (lenders.length === 0) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        No lenders set up yet, so there are no terms to quote.{" "}
+        <Link
+          href="/portal/settings/solar-lenders"
+          className="font-medium underline underline-offset-2"
+        >
+          Add your lenders →
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id} className="flex items-center gap-1.5 text-xs">
+        Lender
+        {busy && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+      </Label>
+      <select
+        id={id}
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
+        value={value}
+        disabled={!canEdit || busy}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">— none —</option>
+        {lenders.map((l) => (
+          <option key={l.id} value={l.id}>
+            {l.name}
+            {l.isActive ? "" : " · retired"}
+          </option>
+        ))}
+      </select>
+      <p className="text-[11px] text-muted-foreground">
+        Saved to the deal as you pick it — it also decides which equipment this system can use.
+      </p>
+    </div>
+  );
+}
+
+/** Which of that lender's terms this deal is quoted on. */
 function LenderProductPicker({
-  leadId,
   lenderName,
   products,
   value,
   onChange,
   canEdit,
 }: {
-  leadId: string;
-  lenderName: string | null;
+  lenderName: string;
   products: LenderProductOption[];
   value: string;
   onChange: (v: string) => void;
   canEdit: boolean;
 }) {
   const id = React.useId();
-
-  if (!lenderName) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-        No lender chosen yet, so there are no terms to quote. Pick one on the deal — it also decides
-        which equipment this system can use.{" "}
-        <Link href={`/portal/leads/${leadId}`} className="font-medium underline underline-offset-2">
-          Open the deal →
-        </Link>
-      </div>
-    );
-  }
 
   if (products.length === 0) {
     return (
@@ -684,9 +746,8 @@ export function SolarFinancePanel({
   leadId,
   finance,
   canEdit,
-  lenderName,
-  lenderPortalUrl,
-  lenderCreditInstructions,
+  lenders,
+  lenderId: initialLenderId,
   products,
   targetNetPpwCents,
   systemSizeKwDc,
@@ -694,12 +755,13 @@ export function SolarFinancePanel({
   leadId: string;
   finance: SolarFinanceView;
   canEdit: boolean;
-  /** The lender chosen in step 1. Null when the design has not picked one. */
-  lenderName: string | null;
-  /** Dealer portal, rep-facing. Deliberately not the customer application link. */
-  lenderPortalUrl: string | null;
-  lenderCreditInstructions: string | null;
-  /** That lender's rate sheet: sellable rows, plus whatever this deal quotes. */
+  /** Every lender the company works with, retired ones included — a deal that
+   *  already names one must keep showing it rather than falling back to none. */
+  lenders: LenderOption[];
+  /** The lender on the design. Null when nobody has chosen one yet. */
+  lenderId: string | null;
+  /** Every lender's rate sheet: sellable rows, plus whatever this deal quotes.
+   *  Held whole so switching lender re-offers terms without a round trip. */
   products: LenderProductOption[];
   targetNetPpwCents: number | null;
   /** Needed to price a lease, which is quoted per kW-month. */
@@ -708,7 +770,10 @@ export function SolarFinancePanel({
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [product, setProduct] = React.useState<FinanceProduct>(finance?.product ?? "cash");
+  const [lenderId, setLenderId] = React.useState<string>(initialLenderId ?? "");
+  const [lenderBusy, setLenderBusy] = React.useState(false);
   const [lenderProductId, setLenderProductId] = React.useState<string>(finance?.lenderProductId ?? "");
+  const lender = lenders.find((l) => l.id === lenderId) ?? null;
   const seed = (f: SolarFinanceView) => ({
     grossPpw: num(f?.grossPpwCents, 100, 2),
     dealerFeePct: num(f?.dealerFeePct),
@@ -727,7 +792,36 @@ export function SolarFinancePanel({
   const isPurchase = product === "cash" || product === "loan";
   const isLoan = product === "loan";
 
-  const chosen = products.find((p) => p.id === lenderProductId && p.product === product) ?? null;
+  const forThisDeal = products.filter((p) => p.lenderId === lenderId && p.product === product);
+  const chosen = forThisDeal.find((p) => p.id === lenderProductId) ?? null;
+
+  /**
+   * Changing the lender is saved on the spot, not held for the Save button.
+   *
+   * Everything under it is that lender's: the products offered, the terms a
+   * pick writes into the boxes. Letting the design still say Amos while the
+   * screen offers Climate First's sheet is how a deal gets saved quoting money
+   * nobody approved, so the field that gates the rest is written first.
+   */
+  async function chooseLender(id: string) {
+    const prevLender = lenderId;
+    const prevProduct = lenderProductId;
+    setLenderId(id);
+    // A rate sheet belongs to the lender that published it.
+    setLenderProductId("");
+    setLenderBusy(true);
+    const res = await setSolarDealLenderAction({ leadId, lenderId: id || null });
+    setLenderBusy(false);
+    if (!res.ok) {
+      setLenderId(prevLender);
+      setLenderProductId(prevProduct);
+      return toast.error(res.error);
+    }
+    toast.success(
+      id ? `Financing through ${lenders.find((l) => l.id === id)?.name ?? "this lender"}.` : "Lender cleared."
+    );
+    router.refresh();
+  }
 
   /**
    * Choosing a product writes the derived sticker straight into the box.
@@ -739,7 +833,7 @@ export function SolarFinancePanel({
    */
   const applyProduct = (id: string) => {
     setLenderProductId(id);
-    const p = products.find((x) => x.id === id && x.product === product);
+    const p = forThisDeal.find((x) => x.id === id);
     if (!p || targetNetPpwCents == null || p.dealerFeePct == null) return;
     const gross = grossPpwFromNet(targetNetPpwCents, p.dealerFeePct);
     if (gross != null) setForm((f) => ({ ...f, grossPpw: (gross / 100).toFixed(2) }));
@@ -902,18 +996,28 @@ export function SolarFinancePanel({
         ))}
       </div>
 
-      {/* The lender's rate sheet. Only for products a lender actually finances —
-          cash has none — and only for the lender step 1 designed the system for,
-          because that lender already decided what equipment is on the roof. */}
+      {/* Who finances it, then on which of their terms. Only for products a
+          lender actually finances — the Cash card says it in as many words —
+          and the sheet stays hidden until there is a lender behind it. */}
       {product !== "cash" && (
-        <LenderProductPicker
-          leadId={leadId}
-          lenderName={lenderName}
-          products={products.filter((p) => p.product === product)}
-          value={lenderProductId}
-          onChange={applyProduct}
-          canEdit={canEdit}
-        />
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <LenderPicker
+            lenders={lenders}
+            value={lenderId}
+            onChange={chooseLender}
+            busy={lenderBusy}
+            canEdit={canEdit}
+          />
+          {lender && (
+            <LenderProductPicker
+              lenderName={lender.name}
+              products={forThisDeal}
+              value={lenderProductId}
+              onChange={applyProduct}
+              canEdit={canEdit}
+            />
+          )}
+        </div>
       )}
 
       {quote && (
@@ -1024,14 +1128,14 @@ export function SolarFinancePanel({
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Approved loan terms
             </div>
-            {lenderPortalUrl && (
+            {lender?.portalUrl && (
               <a
-                href={lenderPortalUrl}
+                href={lender.portalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
               >
-                Run credit{lenderName ? ` at ${lenderName}` : ""} <ExternalLink className="size-3" />
+                Run credit{lender ? ` at ${lender.name}` : ""} <ExternalLink className="size-3" />
               </a>
             )}
           </div>
@@ -1047,13 +1151,13 @@ export function SolarFinancePanel({
             Enter the lender&rsquo;s own figures from the approval — these are never calculated here.
           </p>
 
-          {lenderCreditInstructions && (
+          {lender?.creditInstructions && (
             <details className="rounded-lg border border-border/70 p-2">
               <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
-                How to run credit{lenderName ? ` at ${lenderName}` : ""}
+                How to run credit{lender ? ` at ${lender.name}` : ""}
               </summary>
               <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
-                {lenderCreditInstructions}
+                {lender.creditInstructions}
               </p>
             </details>
           )}
