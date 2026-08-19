@@ -36,7 +36,7 @@ const milestoneSchema = z.object({
   paid: z.boolean().optional(),
 });
 
-/** Create or update one payment milestone (M1/M2/M3, or a financier draw). */
+/** Create or update one payment milestone (M1/M2, or a financier draw). */
 export async function upsertSolarMilestoneAction(input: z.infer<typeof milestoneSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Lead")) return fail("Not allowed.");

@@ -276,8 +276,9 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await openSolarDeal(page);
     await expect(page.getByText("Commission milestones")).toBeVisible({ timeout: 15000 });
 
-    // M3 is seeded unpaid with a future date — edit the amount and mark it paid.
-    await page.getByRole("button", { name: /Edit M3/ }).click();
+    // M2 (PTO granted) is seeded unpaid with a future date — edit the amount
+    // and mark it paid.
+    await page.getByRole("button", { name: /Edit M2/ }).click();
     // Scope to the form: other tabs stay mounted (hidden), so a bare
     // input[type=number] selector can silently fill the wrong field.
     const form = page.getByTestId("milestone-form");
@@ -293,7 +294,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText(/paid \d/).first()).toBeVisible();
 
     // Put it back so the panel reads sensibly for the next walkthrough.
-    await page.getByRole("button", { name: /Edit M3/ }).click();
+    await page.getByRole("button", { name: /Edit M2/ }).click();
     const form2 = page.getByTestId("milestone-form");
     await form2.getByLabel("Amount").fill("900");
     await form2.getByLabel("Paid").uncheck();
@@ -304,10 +305,12 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
   test("an unset financier slot reads as not-set rather than being hidden", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
-    // All three slots always render, so an incomplete schedule is visible as
-    // incomplete instead of silently absent.
+    // Both slots always render, so an incomplete schedule is visible as
+    // incomplete instead of silently absent. There is no third slot: the money
+    // arrives on install complete and on PTO, and nothing pays before that.
     await expect(page.getByText("Financier payments")).toBeVisible({ timeout: 15000 });
-    for (const label of ["1st payment", "2nd payment", "3rd payment"]) {
+    await expect(page.getByText("3rd payment")).toHaveCount(0);
+    for (const label of ["1st payment", "2nd payment"]) {
       await expect(page.getByText(label, { exact: true })).toBeVisible();
     }
   });

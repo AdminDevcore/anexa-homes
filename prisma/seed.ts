@@ -424,15 +424,15 @@ async function main() {
 
     // Payment schedule — the one thing the cockpit needed that we did not
     // previously capture. Commission tranches and financier draws both pay
-    // against project events, not on a fixed date.
+    // against project events, not on a fixed date. Two events pay: install
+    // complete, then PTO granted. Contract signing and NTP approval move the
+    // job along but release no money, so they are not milestones here.
     await prisma.solarMilestone.createMany({
       data: [
-        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 1, label: "M1", amountCents: 120000, trigger: "Contract signed", paidAt: new Date(Date.now() - 20 * 86_400_000) },
-        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 2, label: "M2", amountCents: 180000, trigger: "Install complete", expectedAt: new Date(Date.now() + 25 * 86_400_000) },
-        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 3, label: "M3", amountCents: 90000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
-        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 1, label: "1st payment", amountCents: 1260000, trigger: "NTP approved", paidAt: new Date(Date.now() - 14 * 86_400_000) },
-        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 2, label: "2nd payment", amountCents: 1575000, trigger: "Install complete", expectedAt: new Date(Date.now() + 25 * 86_400_000) },
-        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 3, label: "3rd payment", amountCents: 315000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 1, label: "M1", amountCents: 300000, trigger: "Install complete", paidAt: new Date(Date.now() - 20 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "rep", sequence: 2, label: "M2", amountCents: 90000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 1, label: "1st payment", amountCents: 2835000, trigger: "Install complete", paidAt: new Date(Date.now() - 14 * 86_400_000) },
+        { companyId: company.id, leadId: solarLead.id, payee: "financier", sequence: 2, label: "2nd payment", amountCents: 315000, trigger: "PTO granted", expectedAt: new Date(Date.now() + 70 * 86_400_000) },
       ],
     });
 

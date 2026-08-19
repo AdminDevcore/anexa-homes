@@ -119,8 +119,8 @@ export function SolarSystemMoneyPanel({
           title="Commission milestones"
           rows={rep}
           canEdit={canEdit}
-          defaultLabels={["M1", "M2", "M3"]}
-          defaultTriggers={["Contract signed", "Install complete", "PTO granted"]}
+          defaultLabels={["M1", "M2"]}
+          defaultTriggers={["Install complete", "PTO granted"]}
         />
         <MilestoneList
           leadId={leadId}
@@ -128,8 +128,8 @@ export function SolarSystemMoneyPanel({
           title="Financier payments"
           rows={fin}
           canEdit={canEdit}
-          defaultLabels={["1st payment", "2nd payment", "3rd payment"]}
-          defaultTriggers={["NTP approved", "Install complete", "PTO granted"]}
+          defaultLabels={["1st payment", "2nd payment"]}
+          defaultTriggers={["Install complete", "PTO granted"]}
         />
       </div>
     </div>
@@ -139,11 +139,15 @@ export function SolarSystemMoneyPanel({
 /**
  * The payment schedule, editable in place.
  *
- * Three fixed slots per payee, because that is how these deals are actually
- * structured — a coordinator fills in the amounts and dates rather than
- * inventing rows. An empty slot shows as "not set" instead of being hidden, so
- * a schedule that has never been entered is visibly incomplete rather than
- * silently absent.
+ * Two fixed slots per payee — one per event we actually get paid on: install
+ * complete, then PTO granted. There used to be a third, opening on contract
+ * signing (NTP approval for the financier), but no money ever arrives then, so
+ * the slot only ever sat empty and made a fully-entered schedule look
+ * unfinished. The slot count follows `defaultLabels`, so the two stay in step.
+ *
+ * A coordinator fills in the amounts and dates rather than inventing rows, and
+ * an empty slot shows as "not set" instead of being hidden, so a schedule that
+ * has never been entered is visibly incomplete rather than silently absent.
  */
 function MilestoneList({
   leadId, payee, title, rows, canEdit, defaultLabels, defaultTriggers,
@@ -157,7 +161,7 @@ function MilestoneList({
   defaultTriggers: string[];
 }) {
   const [editing, setEditing] = React.useState<number | null>(null);
-  const slots = [1, 2, 3];
+  const slots = defaultLabels.map((_, i) => i + 1);
 
   return (
     <div>
