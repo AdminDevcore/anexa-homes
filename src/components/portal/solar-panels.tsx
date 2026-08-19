@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LenderMark } from "@/components/ui/lender-mark";
 import {
   builderStepFromHref,
   groupIssues,
@@ -584,6 +585,8 @@ export type LenderOption = {
   /** Dealer portal, rep-facing. Never the customer application link. */
   portalUrl: string | null;
   creditInstructions: string | null;
+  /** The partner's mark. Null falls back to a monogram, never to nothing. */
+  logoUrl: string | null;
 };
 
 export type LenderProductOption = {
@@ -643,6 +646,7 @@ function LenderPicker({
   canEdit: boolean;
 }) {
   const id = React.useId();
+  const selected = lenders.find((l) => l.id === value) ?? null;
 
   if (lenders.length === 0) {
     return (
@@ -664,6 +668,11 @@ function LenderPicker({
         Lender
         {busy && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
       </Label>
+      {/* The mark sits beside the select rather than inside it: a native
+          <option> cannot hold an image, and replacing the select with a custom
+          listbox would cost a rep the keyboard behaviour they already have. */}
+      <div className="flex items-center gap-2">
+        {selected && <LenderMark name={selected.name} logoUrl={selected.logoUrl} size="md" />}
       <select
         id={id}
         className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
@@ -679,6 +688,7 @@ function LenderPicker({
           </option>
         ))}
       </select>
+      </div>
       <p className="text-[11px] text-muted-foreground">
         Saved to the deal as you pick it — it also decides which equipment this system can use.
       </p>
@@ -1125,8 +1135,11 @@ export function SolarFinancePanel({
       {isLoan && (
         <div className="space-y-2 rounded-lg border border-border p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Approved loan terms
+            <div className="flex items-center gap-2">
+              {lender && <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="sm" />}
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Approved loan terms
+              </div>
             </div>
             {lender?.portalUrl && (
               <a

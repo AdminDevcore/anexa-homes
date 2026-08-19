@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { LenderMark } from "@/components/ui/lender-mark";
 
 /**
  * The lender side of a solar deal: who is funding it and on what terms.
@@ -17,6 +19,8 @@ export type FinancingTerms = {
   /** cash | loan | lease | ppa */
   product: string | null;
   lender: string | null;
+  /** The mark for that lender, when the name matches one of your partners. */
+  lenderLogoUrl: string | null;
   creditStatus: string | null;
   amountFinancedCents: number | null;
   aprPct: number | null;
@@ -59,10 +63,22 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 export function FinancingTermsPanel({ terms }: { terms: FinancingTerms }) {
-  const rows: { k: string; v: string }[] = [];
+  // ReactNode rather than string: the lender is a mark plus a name, and every
+  // other row stays a plain string.
+  const rows: { k: string; v: ReactNode }[] = [];
 
   if (terms.product) rows.push({ k: "Product", v: PRODUCT_LABEL[terms.product] ?? terms.product });
-  if (terms.lender) rows.push({ k: "Lender", v: terms.lender });
+  if (terms.lender) {
+    rows.push({
+      k: "Lender",
+      v: (
+        <span className="flex items-center justify-end gap-2">
+          <LenderMark name={terms.lender} logoUrl={terms.lenderLogoUrl} size="sm" />
+          {terms.lender}
+        </span>
+      ),
+    });
+  }
   if (terms.downPaymentCents) {
     rows.push({ k: "Down payment", v: usd(terms.downPaymentCents) });
   }

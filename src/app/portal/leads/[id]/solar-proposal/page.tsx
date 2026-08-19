@@ -6,6 +6,7 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder";
+import { lenderLogoUrl } from "@/lib/lender-mark";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
@@ -87,7 +88,10 @@ export default async function SolarProposalBuilderPage({
     prisma.solarLender.findMany({
       where: { companyId: user.companyId },
       orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
-      select: { id: true, name: true, isActive: true, portalUrl: true, creditInstructions: true },
+      select: {
+        id: true, name: true, isActive: true, portalUrl: true, creditInstructions: true,
+        logoUpdatedAt: true,
+      },
     }),
     // EVERY lender's rate sheet, not just the chosen one's: the Financing step
     // switches lender in the browser, and re-fetching a sheet per change would
@@ -170,7 +174,14 @@ export default async function SolarProposalBuilderPage({
           }
         }
         finance={finance}
-        lenders={lenders}
+        lenders={lenders.map((l) => ({
+          id: l.id,
+          name: l.name,
+          isActive: l.isActive,
+          portalUrl: l.portalUrl,
+          creditInstructions: l.creditInstructions,
+          logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
+        }))}
         lenderId={design?.lenderId ?? null}
         lenderProducts={lenderProducts.map((p) => ({
           id: p.id,

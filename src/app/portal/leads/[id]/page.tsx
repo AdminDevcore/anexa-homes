@@ -33,6 +33,7 @@ import {
 } from "@/server/modules/settings/queries";
 import { claimStatusLabel, claimStatusOptionsFor } from "@/lib/claim-status";
 import { SolarOpsCard } from "@/components/portal/solar-ops-card";
+import { lenderLogoUrl } from "@/lib/lender-mark";
 import {
   SolarSystemMoneyPanel,
   SolarActivityFeed,
@@ -270,7 +271,7 @@ export default async function LeadDetailPage({
         prisma.solarLender.findMany({
           where: { companyId: user.companyId },
           orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
-          select: { id: true, name: true, isActive: true },
+          select: { id: true, name: true, isActive: true, logoUpdatedAt: true },
         }),
       ])
     : [null, null, [], [], [], []];
@@ -308,7 +309,12 @@ export default async function LeadDetailPage({
       lenderId,
       inverterId: solarDesign?.inverterId ?? null,
       batteryId: solarDesign?.batteryId ?? null,
-      lenders: solarLenders,
+      lenders: solarLenders.map((l) => ({
+        id: l.id,
+        name: l.name,
+        isActive: l.isActive,
+        logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
+      })),
       inverters: options("inverter"),
       batteries: options("battery"),
     };
@@ -401,6 +407,15 @@ export default async function LeadDetailPage({
     ? {
         product: solarFinance?.product ?? null,
         lender: creditApp?.lender ?? null,
+        // The credit application records the lender as free text, because that
+        // is what the webhook sends. Matched back to a partner by name so it can
+        // wear that partner's logo; unmatched, the name still gets a monogram.
+        lenderLogoUrl: (() => {
+          const named = creditApp?.lender?.trim().toLowerCase();
+          if (!named) return null;
+          const match = solarLenders.find((l) => l.name.trim().toLowerCase() === named);
+          return match ? lenderLogoUrl(match.id, match.logoUpdatedAt) : null;
+        })(),
         creditStatus: creditApp?.status ?? null,
         amountFinancedCents: creditApp?.amountCents || null,
         aprPct: creditApp?.aprPct ?? solarFinance?.aprPct ?? null,

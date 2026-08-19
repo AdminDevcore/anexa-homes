@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { setDealBlockerAction, logFollowUpAction } from "@/server/modules/pipeline/blocker-actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LenderMark } from "@/components/ui/lender-mark";
 import { saveSolarBuildDetailsAction } from "@/server/modules/solar/actions";
 import { setCrossoverFlagsAction, createCrossoverDealAction } from "@/server/modules/vertical/crossover";
 import type { LinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
@@ -53,7 +54,7 @@ export type SolarOpsProps = {
     lenderId: string | null;
     inverterId: string | null;
     batteryId: string | null;
-    lenders: { id: string; name: string; isActive: boolean }[];
+    lenders: { id: string; name: string; isActive: boolean; logoUrl: string | null }[];
     inverters: { id: string; label: string }[];
     batteries: { id: string; label: string }[];
   };
@@ -79,6 +80,7 @@ export function SolarOpsCard(props: SolarOpsProps) {
     batteryId: props.build.batteryId ?? "",
   });
   const setB = (k: keyof typeof build, v: string) => setBuild((b) => ({ ...b, [k]: v }));
+  const chosenLender = props.build.lenders.find((l) => l.id === build.lenderId) ?? null;
 
   const blocked = stage?.stageType === "externally_blocked";
   const timing = blocked
@@ -327,6 +329,13 @@ export function SolarOpsCard(props: SolarOpsProps) {
 
             <div className="space-y-1">
               <Label htmlFor="solar-lender" className="text-xs">Lender / approved-vendor list</Label>
+              {/* The mark sits beside the select because a native <option>
+                  cannot carry an image, and a custom listbox here would cost
+                  ops the keyboard behaviour they already have. */}
+              <div className="flex items-center gap-2">
+                {chosenLender && (
+                  <LenderMark name={chosenLender.name} logoUrl={chosenLender.logoUrl} size="md" />
+                )}
               <select
                 id="solar-lender"
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
@@ -341,6 +350,7 @@ export function SolarOpsCard(props: SolarOpsProps) {
                   </option>
                 ))}
               </select>
+              </div>
               {props.build.lenders.length === 0 ? (
                 <p className="text-[11px] text-amber-700">
                   No lenders set up yet.{" "}

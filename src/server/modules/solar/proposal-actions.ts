@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
 import { prisma } from "@/server/db/client";
+import { lenderLogoUrl } from "@/lib/lender-mark";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
@@ -113,7 +114,7 @@ export async function generateSolarProposalAction(leadId: string) {
     finance.product === "loan" && design.lenderId
       ? await prisma.solarLender.findFirst({
           where: { companyId: user.companyId, id: design.lenderId },
-          select: { name: true, applyUrl: true },
+          select: { id: true, name: true, applyUrl: true, logoUpdatedAt: true },
         })
       : null;
 
@@ -222,6 +223,10 @@ export async function generateSolarProposalAction(leadId: string) {
     // The lender chosen on the design wins over whatever a credit application
     // recorded: the design is the current answer, the application is history.
     lender: dealLender?.name ?? approvedCredit?.lender ?? null,
+    // Only the partner on the design has a logo to show: the credit
+    // application records its lender as free text from a webhook, which is a
+    // name and nothing more.
+    lenderLogoUrl: dealLender ? lenderLogoUrl(dealLender.id, dealLender.logoUpdatedAt) : null,
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
     assumptions,

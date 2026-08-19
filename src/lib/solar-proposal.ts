@@ -316,6 +316,19 @@ export type SolarProposalSnapshot = {
     applyUrl: string | null;
     lender: string | null;
     /**
+     * The lender's mark, as a URL to our own serving route.
+     *
+     * A URL rather than the bytes, and our route rather than the bank's, for
+     * the same two reasons the company logo is: a snapshot with images inlined
+     * would be a megabyte of JSON per proposal, and hotlinking a bank's own CDN
+     * would let someone else's cache-bust break a document a customer keeps.
+     * Null when the partner has no logo — the view falls back to a monogram.
+     * Optional rather than required because proposals generated before logos
+     * existed have no such key at all, and their JSON is not rewritten: the
+     * view treats a missing key exactly as it treats null.
+     */
+    lenderLogoUrl?: string | null;
+    /**
      * Legacy incentive fields. No credit is quoted anywhere in the product, so
      * these are always null on anything generated now; the keys stay so that
      * proposals issued while incentives existed still parse and render.
@@ -384,6 +397,8 @@ export function buildProposalSnapshot(args: {
     downPaymentCents?: number | null;
   };
   lender: string | null;
+  /** The lender's mark at generation time. Null falls back to a monogram. */
+  lenderLogoUrl?: string | null;
   /** The quoted product's payment factors, when its rate sheet publishes any. */
   loanFactors?: PaymentFactors | null;
   /** The lender's CUSTOMER application link. Never the dealer portal. */
@@ -540,6 +555,7 @@ export function buildProposalSnapshot(args: {
       loanPaydownMonths: loanFactorQuote?.paydownMonths ?? null,
       loanPaydownPct: loanFactorQuote?.paydownPct ?? null,
       lender: finance.product === "loan" ? args.lender : null,
+      lenderLogoUrl: finance.product === "loan" ? (args.lenderLogoUrl ?? null) : null,
       // Loan only: a cash, lease or PPA deal has no credit to pre-qualify for.
       applyUrl: finance.product === "loan" ? (args.lenderApplyUrl ?? null) : null,
       // Always null: no incentive is quoted, so nothing to record. Kept as

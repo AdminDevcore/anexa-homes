@@ -364,3 +364,24 @@ describe("the Qualify link is loan-only and never the dealer portal", () => {
     expect(s.financing.applyUrl).toBeNull();
   });
 });
+
+describe("the lender's logo travels with the document", () => {
+  it("freezes the mark alongside the name on a loan", () => {
+    const s = build({ lenderLogoUrl: "/api/solar/lender-logo?lender=abc&v=17" });
+    expect(s.financing.lender).toBe("GoodLeap");
+    expect(s.financing.lenderLogoUrl).toBe("/api/solar/lender-logo?lender=abc&v=17");
+  });
+
+  it("omits it on cash, which has no lender at all", () => {
+    const s = build({
+      finance: { ...LOAN, product: "cash" as const, aprPct: null },
+      lenderLogoUrl: "/api/solar/lender-logo?lender=abc&v=17",
+    });
+    expect(s.financing.lender).toBeNull();
+    expect(s.financing.lenderLogoUrl).toBeNull();
+  });
+
+  it("is null when the partner has no logo, so the view falls back to a monogram", () => {
+    expect(build().financing.lenderLogoUrl).toBeNull();
+  });
+});

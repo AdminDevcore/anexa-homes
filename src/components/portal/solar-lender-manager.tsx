@@ -4,10 +4,11 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Archive, RotateCcw, Landmark, Pencil, Check, X, ExternalLink } from "lucide-react";
+import { Loader2, Plus, Trash2, Archive, RotateCcw, Pencil, Check, X, ExternalLink, Upload, Globe, ImageOff } from "lucide-react";
 import type { FinanceProduct } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { LenderMark } from "@/components/ui/lender-mark";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,6 +29,11 @@ import {
   setSolarLenderActiveAction,
   deleteSolarLenderAction,
 } from "@/server/modules/solar/actions";
+import {
+  uploadSolarLenderLogoAction,
+  fetchSolarLenderLogoAction,
+  removeSolarLenderLogoAction,
+} from "@/server/modules/solar/lender-logo-actions";
 
 export type LenderRow = {
   id: string;
@@ -40,6 +46,8 @@ export type LenderRow = {
   /** Customer-facing application link — the proposal's Qualify button. */
   applyUrl: string | null;
   creditInstructions: string | null;
+  /** The partner's own mark, when one has been uploaded or fetched. */
+  logoUrl: string | null;
   /** How many catalogue items this lender approves. */
   approvedCount: number;
   /** How many designs are being built for it. */
@@ -236,7 +244,7 @@ function RateSheet({ lender, canEdit }: { lender: LenderRow; canEdit: boolean })
   return (
     <div className="space-y-3 rounded-xl border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Landmark className="size-4 text-muted-foreground" />
+        <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="sm" />
         <h4 className="font-medium">{lender.name}</h4>
         <span className="text-xs text-muted-foreground">
           {live.length === 0 ? "no terms yet" : `${live.length} ${live.length === 1 ? "product" : "products"}`}
@@ -607,6 +615,126 @@ function LinkChip({ href, label }: { href: string; label: string }) {
   );
 }
 
+/**
+ * Giving a lender its logo.
+ *
+ * Two ways in, because both are the fastest way in different situations. Most
+ * partners already publish a perfectly good mark on their own website, so one
+ * button reads it off there — and when that fails, or when the marketing team
+ * hands you the proper asset, the file picker is right beside it.
+ *
+ * Lives inside the edit panel rather than on the face of the card: a logo is
+ * set once per partner and then never touched, and a permanent upload control
+ * on every card would be eight buttons nobody clicks.
+ */
+function LogoControl({ lender }: { lender: LenderRow }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState<null | "upload" | "fetch" | "remove">(null);
+  const [site, setSite] = React.useState("");
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const anyBusy = busy !== null;
+
+  async function upload(file: File) {
+    setBusy("upload");
+    const fd = new FormData();
+    fd.set("file", file);
+    const res = await uploadSolarLenderLogoAction(lender.id, fd);
+    setBusy(null);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Logo updated");
+    router.refresh();
+  }
+
+  async function grab() {
+    setBusy("fetch");
+    const res = await fetchSolarLenderLogoAction(lender.id, site.trim() || null);
+    setBusy(null);
+    // A refusal here explains where we looked and what we found, so it needs
+    // long enough to read before it disappears.
+    if (!res.ok) return toast.error(res.error, { duration: 9000 });
+    toast.success(`Took ${res.source} from ${res.from}`);
+    setSite("");
+    router.refresh();
+  }
+
+  async function remove() {
+    setBusy("remove");
+    const res = await removeSolarLenderLogoAction(lender.id);
+    setBusy(null);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Logo removed");
+    router.refresh();
+  }
+
+  const spinner = (which: typeof busy) =>
+    busy === which ? <Loader2 className="size-4 animate-spin" /> : null;
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/70 p-3">
+      <div className="flex items-center gap-3">
+        <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="lg" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium">Logo</p>
+          <p className="text-[11px] text-muted-foreground">
+            {lender.logoUrl
+              ? "Shown next to this lender everywhere, including the customer's proposal."
+              : "None yet — this lender shows its initials until one is set."}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          aria-label={`Logo file for ${lender.name}`}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            // Reset first: picking the same file twice must fire onChange twice.
+            e.target.value = "";
+            if (f) void upload(f);
+          }}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={anyBusy}
+          onClick={() => fileRef.current?.click()}
+        >
+          {spinner("upload") ?? <Upload className="size-4" />} Upload
+        </Button>
+        <Button size="sm" variant="outline" disabled={anyBusy} onClick={grab}>
+          {spinner("fetch") ?? <Globe className="size-4" />} Grab from website
+        </Button>
+        {lender.logoUrl && (
+          <Button size="sm" variant="ghost" disabled={anyBusy} onClick={remove}>
+            {spinner("remove") ?? <ImageOff className="size-4" />} Remove
+          </Button>
+        )}
+      </div>
+
+      <Input
+        value={site}
+        placeholder="goodleap.com — optional, only if the links above are not the right site"
+        aria-label={`Website to take ${lender.name}'s logo from`}
+        onChange={(e) => setSite(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void grab();
+          }
+        }}
+      />
+      <p className="text-[11px] text-muted-foreground">
+        PNG, JPG or WebP, up to 5MB. Left blank, &ldquo;Grab from website&rdquo; uses the
+        application link, or the dealer portal if there is no application link.
+      </p>
+    </div>
+  );
+}
+
 function LenderCard({
   lender,
   sellableEquipment,
@@ -673,6 +801,7 @@ function LenderCard({
     >
       {editing ? (
         <div className="space-y-2">
+          <LogoControl lender={lender} />
           <TextField
             label="Lender name"
             value={draft.name}
@@ -725,7 +854,7 @@ function LenderCard({
         <>
           <div className="flex items-start justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <Landmark className="size-4 shrink-0 text-muted-foreground" />
+              <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="md" />
               <span className="truncate font-medium">{lender.name}</span>
             </div>
             {!lender.isActive && (

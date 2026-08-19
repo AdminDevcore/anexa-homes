@@ -2720,6 +2720,16 @@ model SolarLender {
   /// every lender's process is different and none of them fit a schema.
   creditInstructions String?
 
+  /// The partner's own logo, as bytes we hold rather than a link to their site.
+  /// Hotlinking a bank's image would put a document a homeowner keeps at the
+  /// mercy of someone else's URL, and this one has to still render a year from
+  /// now. Normalised to PNG on the way in, so no mime column is needed.
+  logoKey            String?
+  /// When the logo last changed — the cache-buster in the serving URL. A column
+  /// rather than `updatedAt` because renaming a lender must not invalidate
+  /// every cached copy of an image that did not change.
+  logoUpdatedAt      DateTime?
+
   approvals SolarEquipmentLender[]
   designs   SolarDesign[]
   /// What this lender actually finances, and on what terms.

@@ -8,6 +8,7 @@ import {
 import type { SolarProposalSnapshot, SavingsYear } from "@/lib/solar-proposal";
 import { SOLAR_TIMELINE, SOLAR_FAQS } from "@/lib/solar-proposal";
 import { acceptSolarProposalAction } from "@/server/modules/solar/proposal-sign-action";
+import { LenderMark } from "@/components/ui/lender-mark";
 
 /**
  * Money, always from cents. `maximumFractionDigits: 0` on the big numbers so a
@@ -294,7 +295,17 @@ export function SolarProposalView({
       <Section title="How you pay for it">
         <dl className="divide-y divide-border text-sm">
           <Row k="Option" v={PRODUCT_LABEL[f.product] ?? f.product} />
-          {f.lender && <Row k="Lender" v={f.lender} />}
+          {f.lender && (
+            <Row
+              k="Lender"
+              v={
+                <span className="flex items-center justify-end gap-2">
+                  <LenderMark name={f.lender} logoUrl={f.lenderLogoUrl} size="sm" />
+                  {f.lender}
+                </span>
+              }
+            />
+          )}
 
           {/* Purchase block — only the figures that belong to cash/loan. */}
           {isPurchase && f.basePriceCents != null && (
@@ -369,7 +380,9 @@ export function SolarProposalView({
         {/* Pre-qualification. A LINK to the lender's own application — nothing
             is submitted from here, and no information leaves this page. */}
         {f.applyUrl && (
-          <div className="mt-4 rounded-lg border border-border bg-muted/40 p-4 print:hidden">
+          <div className="mt-4 flex items-start gap-3 rounded-lg border border-border bg-muted/40 p-4 print:hidden">
+            {f.lender && <LenderMark name={f.lender} logoUrl={f.lenderLogoUrl} size="lg" />}
+            <div className="min-w-0 flex-1">
             <p className="text-sm font-medium">
               See what you qualify for{f.lender ? ` with ${f.lender}` : ""}
             </p>
@@ -385,6 +398,7 @@ export function SolarProposalView({
             >
               Qualify <ExternalLink className="size-4" />
             </a>
+            </div>
           </div>
         )}
       </Section>
@@ -779,7 +793,7 @@ function Impact({
   );
 }
 
-function Row({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
+function Row({ k, v, strong }: { k: string; v: React.ReactNode; strong?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2">
       <dt className="text-muted-foreground">{k}</dt>

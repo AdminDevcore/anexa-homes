@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/portal/ui";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarLenderManager } from "@/components/portal/solar-lender-manager";
+import { lenderLogoUrl } from "@/lib/lender-mark";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function SolarLendersPage() {
     select: {
       id: true, name: true, isActive: true, rank: true, notes: true,
       portalUrl: true, applyUrl: true, creditInstructions: true,
+      logoUpdatedAt: true,
       _count: { select: { approvals: true, designs: true } },
       products: {
         orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
@@ -74,6 +76,7 @@ export default async function SolarLendersPage() {
           portalUrl: l.portalUrl,
           applyUrl: l.applyUrl,
           creditInstructions: l.creditInstructions,
+          logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
           approvedCount: l._count.approvals,
           dealCount: l._count.designs,
           products: l.products.map((p) => ({
