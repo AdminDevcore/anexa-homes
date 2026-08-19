@@ -314,12 +314,15 @@ export function validateDesign(
   }
 
   // ── Documents ──────────────────────────────────────────────────────────
+  // Blocking, not a warning: the module count — and therefore the price — is
+  // how many panels were drawn on the roof, so a proposal without the drawing
+  // is quoting a system nobody has shown will fit.
   if (d.hasLayoutImage === false) {
-    warn(
+    block(
       "documents.no_layout",
       "documents",
       "layoutImageFileId",
-      "No panel layout attached. The proposal will go out without showing the customer where the panels go."
+      "No panel layout has been drawn. The module count, and therefore the price, comes from it."
     );
   }
   if (d.hasBattery === false) {

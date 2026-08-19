@@ -66,3 +66,17 @@ describe("a design is judged only on what the form still collects", () => {
     expect(blocking).toEqual([]);
   });
 });
+
+describe("a quote needs a drawing", () => {
+  it("blocks generation when no layout has been drawn or attached", () => {
+    const issues = validateDesign(design({ hasLayoutImage: false }), SOLAR_ASSUMPTION_DEFAULTS, "lead-1");
+    const found = issues.find((i) => i.code === "documents.no_layout");
+    expect(found?.severity).toBe("block");
+    expect(found?.action?.href).toContain("step=design");
+  });
+
+  it("says nothing when a layout is there", () => {
+    const codes = validateDesign(design({ hasLayoutImage: true }), SOLAR_ASSUMPTION_DEFAULTS).map((i) => i.code);
+    expect(codes).not.toContain("documents.no_layout");
+  });
+});
