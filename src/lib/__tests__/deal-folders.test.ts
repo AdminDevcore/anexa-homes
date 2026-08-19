@@ -37,9 +37,16 @@ describe.each([
   // The `customer` role cannot sign in, so nothing on a deal is customer-facing
   // and no folder may imply otherwise. A folder called "Internal" only made
   // sense next to folders that were external, and there are none.
+  //
+  // This matches visibility CLAIMS, not the bare word "customer" — a folder
+  // named for a legal document that happens to say customer ("Attestation of
+  // Customer Payment") is a document title, not a promise that a homeowner can
+  // see it.
   it("claims no customer visibility anywhere", () => {
     for (const f of folders) {
-      expect(`${f.key} ${f.label} ${f.hint}`.toLowerCase()).not.toMatch(/customer|internal/);
+      expect(`${f.key} ${f.label} ${f.hint}`.toLowerCase()).not.toMatch(
+        /customer[ _-]?(facing|visible|view|portal|access)|(^|\W)internal(\W|$)|share[d]? with the customer/,
+      );
     }
   });
 
@@ -89,6 +96,23 @@ describe("solar key compatibility", () => {
       "interconnection",
       "install_photos",
       "other",
+    ]) {
+      expect(keys).toContain(k);
+    }
+  });
+
+  // The completion paperwork the install agreement names, each in its own
+  // folder so "where is the signed acceptance?" has one answer. PTO left
+  // Interconnection's hint and became a folder of its own for the same reason.
+  it("has a folder for every document the install agreement names", () => {
+    const keys = SOLAR_FOLDERS.map((f) => f.key);
+    for (const k of [
+      "proposal",
+      "certificate_acceptance",
+      "attestation_payment",
+      "lien_waiver_progress",
+      "lien_waiver_final",
+      "pto",
     ]) {
       expect(keys).toContain(k);
     }

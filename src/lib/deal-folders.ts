@@ -24,16 +24,22 @@
  * were visible to a homeowner, which was never true of any of them.
  */
 import {
+  BadgeCheck,
   Camera,
   ClipboardList,
   DraftingCompass,
+  FileCheck,
   FileSignature,
+  FileText,
   Folder,
   Hammer,
+  HandCoins,
   Package,
   Phone,
   Plug,
+  PlugZap,
   Receipt,
+  ScrollText,
   ShieldCheck,
   Stamp,
   UserRound,
@@ -80,6 +86,7 @@ export const ROOFING_FOLDERS: DealFolder[] = [
 ];
 
 export const SOLAR_FOLDERS: DealFolder[] = [
+  { key: "proposal", label: "Proposal", hint: "The proposal as presented — the copy of what was sold", icon: FileText },
   { key: "contract", label: "Contract", hint: "Proposals sent for signature, the signed agreement, change orders", icon: FileSignature, hostsPackages: true },
   { key: "utility_bill", label: "Utility Bill", hint: "12 months of usage — the basis for the design", icon: Zap },
   { key: "personal_files", label: "Personal Files", hint: "ID, proof of income, anything the lender asked for", icon: UserRound },
@@ -87,8 +94,13 @@ export const SOLAR_FOLDERS: DealFolder[] = [
   { key: "survey_photos", label: "Survey Photos", hint: "Roof, attic, main panel, meter", icon: Camera },
   { key: "engineering", label: "Engineering Plan Sets", hint: "Stamped plan set, single-line, load calc", icon: DraftingCompass },
   { key: "permits", label: "Permits", hint: "Applications, corrections, approvals", icon: Stamp },
-  { key: "interconnection", label: "Interconnection", hint: "Utility application, approval, PTO letter", icon: Plug },
+  { key: "interconnection", label: "Interconnection", hint: "Utility application and approval", icon: Plug },
   { key: "install_photos", label: "Installation Photos", hint: "Progress and completion", icon: Hammer },
+  { key: "certificate_acceptance", label: "Certificate of Acceptance", hint: "Signed off that the system was installed as sold", icon: BadgeCheck },
+  { key: "attestation_payment", label: "Attestation of Customer Payment", hint: "Signed attestation that the amount due was paid", icon: HandCoins },
+  { key: "lien_waiver_progress", label: "Conditional Progress Lien Waiver", hint: "Waiver released against a progress payment", icon: FileCheck },
+  { key: "lien_waiver_final", label: "Conditional Waiver & Release (Final Payment)", hint: "Waiver released against the final payment", icon: ScrollText },
+  { key: "pto", label: "PTO", hint: "Permission to operate — the utility letter that turns the system on", icon: PlugZap },
   { key: FALLBACK_FOLDER_KEY, label: "Other", hint: "Anything that does not fit above", icon: Folder },
 ];
 
