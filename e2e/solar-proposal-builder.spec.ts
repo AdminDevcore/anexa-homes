@@ -38,7 +38,7 @@ async function openSolarDeal(page: Page): Promise<string> {
 test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag off — skipped)", () => {
   test.skip(!FLAG_ON, "Needs the solar workspace enabled.");
 
-  test("the Summary button opens a builder holding all three steps", async ({ page }) => {
+  test("the Summary button opens a builder holding every step", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
 
@@ -50,10 +50,11 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
 
     await expect(page.getByRole("heading", { name: "Build Proposal" })).toBeVisible();
 
-    // Step 1 is open; its fields are the design's.
-    await expect(page.getByLabel("Annual usage (kWh)")).toBeVisible({ timeout: 15000 });
+    // Step 1 is open, and it is the customer — check who we are quoting before
+    // quoting them.
+    await expect(page.getByLabel("First name")).toBeVisible({ timeout: 15000 });
 
-    // Step 2 carries the financing the customer signs: the product, and the
+    // Financing carries the terms the customer signs: the product, and the
     // terms that come with it. The seeded deal is a loan, so the escalator is
     // correctly absent until a lease is picked — which is the point of keeping
     // these together rather than out on the deal.
@@ -64,17 +65,17 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     await expect(page.getByLabel("Escalator %/yr")).toBeVisible();
     await expect(page.getByLabel("Term (years)")).toBeVisible();
 
-    // Step 3 generates.
+    // And the last step generates.
     await page.getByRole("button", { name: "5 · Generate & send" }).click();
     await expect(page.getByRole("button", { name: /Check proposal readiness/ })).toBeVisible();
   });
 
-  test("an unsaved design survives a trip to another step", async ({ page }) => {
-    // The steps are hidden, never unmounted. Unmounting step 1 to show step 2
-    // would silently bin a design a rep had typed but not yet saved.
+  test("an unsaved entry survives a trip to another step", async ({ page }) => {
+    // The steps are hidden, never unmounted. Unmounting one to show another
+    // would silently bin what a rep had typed but not yet saved.
     await login(page, "admin@anexahomes.com");
     const id = await openSolarDeal(page);
-    await page.goto(`/portal/leads/${id}/solar-proposal`);
+    await page.goto(`/portal/leads/${id}/solar-proposal?step=energy`);
 
     const usage = page.getByLabel("Annual usage (kWh)");
     await expect(usage).toBeVisible({ timeout: 15000 });
@@ -82,7 +83,7 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
 
     await page.getByRole("button", { name: "4 · Financing" }).click();
     await expect(page.getByRole("button", { name: /Lease.*Fixed monthly payment/ })).toBeVisible();
-    await page.getByRole("button", { name: "3 · System design" }).click();
+    await page.getByRole("button", { name: "2 · Energy" }).click();
 
     await expect(usage).toHaveValue("17250");
   });
