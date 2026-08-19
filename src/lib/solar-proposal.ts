@@ -1,11 +1,11 @@
 import type { FinanceProduct } from "@prisma/client";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor, type PaymentFactors } from "./solar-loan";
+import { resolveUtilityRateMills } from "./solar-energy";
 import {
   pricePurchase,
   priceThirdParty,
   itcEstimateCents,
   productionInYear,
-  deriveUtilityRateMills,
   loanPaymentCents,
   type SolarAssumptions,
   type PurchaseBreakdown,
@@ -358,6 +358,8 @@ export function buildProposalSnapshot(args: {
     utilityProvider: string | null;
     netMeteringProgram: string | null;
     avgMonthlyBillCents: number | null;
+    /** The rate a rep was told, when there is one. See resolveUtilityRateMills. */
+    utilityRateMills?: number | null;
     module?: SnapshotEquipment | null;
     inverter?: SnapshotEquipment | null;
     battery?: SnapshotEquipment | null;
@@ -422,7 +424,7 @@ export function buildProposalSnapshot(args: {
   // ever seen. The readiness validator blocks generation when it cannot be
   // derived, so by the time we get here it is a real number.
   const currentRateMillsPerKwh =
-    deriveUtilityRateMills(design.avgMonthlyBillCents, design.annualUsageKwh) ?? 0;
+    resolveUtilityRateMills(design) ?? 0;
 
   const savings = savingsModel({
     product: finance.product,

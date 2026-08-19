@@ -48,12 +48,11 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     const leadId = await openDesignerDeal(page);
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=design`);
 
-    // What still drives every number on the proposal.
-    await expect(page.getByLabel("Annual usage (kWh)")).toBeVisible();
-    await expect(page.getByLabel("Average monthly bill ($)")).toBeVisible();
+    // The design step is the roof now.
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
 
     // Interconnection paperwork, a shading figure typed from memory, and
-    // equipment nobody has ordered yet.
+    // equipment nobody has ordered yet: gone from the app entirely.
     for (const gone of [
       "Utility account #",
       "Meter #",
@@ -63,6 +62,13 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
       "Module quantity",
     ]) {
       await expect(page.getByLabel(gone)).toHaveCount(0);
+    }
+
+    // Usage and the bill still EXIST — they moved to the Energy step, which owns
+    // them. Every step stays mounted and is hidden with display:none, so the
+    // assertion here is that they are not on this one, not that they are absent.
+    for (const moved of ["Annual usage (kWh)", "Average monthly bill ($)"]) {
+      await expect(page.getByLabel(moved)).not.toBeVisible();
     }
   });
 

@@ -16,6 +16,7 @@ import { resolveStageForAppointment } from "./staging";
 import { resolveOwningRepId } from "./owning-rep";
 import { zonedWallClockToUtc } from "@/lib/tz";
 import { addressChanged } from "@/server/modules/geo/resolve";
+import { leadContactFields } from "./contact-fields";
 
 /** The company's appointment timezone (defaults to Central if unset). */
 async function companyTimeZone(companyId: string): Promise<string> {
@@ -24,16 +25,10 @@ async function companyTimeZone(companyId: string): Promise<string> {
 }
 
 const leadInput = z.object({
-  firstName: z.string().min(1).max(80),
-  lastName: z.string().min(1).max(80),
-  coOwnerName: z.string().max(80).optional().or(z.literal("")),
+  // The contact half is shared with the solar builder's Customer step — see
+  // leadContactFields. One definition of a valid name, not two.
+  ...leadContactFields,
   preferredLanguage: z.string().max(40).optional().or(z.literal("")),
-  email: z.string().email().optional().or(z.literal("")),
-  phone: z.string().max(30).optional().or(z.literal("")),
-  address: z.string().max(160).optional().or(z.literal("")),
-  city: z.string().max(80).optional().or(z.literal("")),
-  state: z.string().max(40).optional().or(z.literal("")),
-  zip: z.string().max(12).optional().or(z.literal("")),
   sourceId: z.string().uuid().optional().or(z.literal("")),
   stageId: z.string().uuid().optional().or(z.literal("")),
   assignedRepId: z.string().uuid().optional().or(z.literal("")),

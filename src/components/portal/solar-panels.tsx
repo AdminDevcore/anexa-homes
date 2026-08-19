@@ -403,6 +403,7 @@ export function SolarDesignPanel({
   moduleMm,
   moduleRatingW,
   initialBlocks,
+  targetPanels,
 }: {
   leadId: string;
   design: SolarDesignView;
@@ -414,25 +415,20 @@ export function SolarDesignPanel({
   moduleMm: { widthMm: number; heightMm: number };
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
+  targetPanels: number | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [form, setForm] = React.useState({
-    utilityProvider: design?.utilityProvider ?? "",
-    annualUsageKwh: num(design?.annualUsageKwh),
-    avgMonthlyBill: num(design?.avgMonthlyBillCents, 100),
     mountType: (design?.mountType ?? "roof") as MountType,
   });
 
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const setMountType = (v: MountType) => setForm({ mountType: v });
 
   async function save() {
     setBusy(true);
     const res = await saveSolarDesignAction({
       leadId,
-      utilityProvider: form.utilityProvider || null,
-      annualUsageKwh: form.annualUsageKwh ? Number(form.annualUsageKwh) : null,
-      avgMonthlyBillCents: form.avgMonthlyBill ? Math.round(Number(form.avgMonthlyBill) * 100) : null,
       mountType: form.mountType,
     });
     setBusy(false);
@@ -445,21 +441,6 @@ export function SolarDesignPanel({
     <div className="space-y-5">
       <section className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Utility &amp; usage
-        </h4>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <TextField label="Utility provider" value={form.utilityProvider} disabled={!canEdit} onChange={(v) => set("utilityProvider", v)} />
-          <TextField label="Annual usage (kWh)" value={form.annualUsageKwh} disabled={!canEdit} onChange={(v) => set("annualUsageKwh", v)} type="number" />
-          <TextField label="Average monthly bill ($)" value={form.avgMonthlyBill} disabled={!canEdit} onChange={(v) => set("avgMonthlyBill", v)} type="number" />
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          Annual usage is the anchor for offset. Without it the offset figure is meaningless — that
-          is how proposals end up quoting five-figure percentages.
-        </p>
-      </section>
-
-      <section className="space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Site
         </h4>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -469,7 +450,7 @@ export function SolarDesignPanel({
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
               value={form.mountType}
               disabled={!canEdit}
-              onChange={(e) => set("mountType", e.target.value)}
+              onChange={(e) => setMountType(e.target.value as MountType)}
             >
               <option value="roof">Roof</option>
               <option value="ground">Ground</option>
@@ -526,6 +507,7 @@ export function SolarDesignPanel({
           moduleMm={moduleMm}
           moduleRatingW={moduleRatingW}
           initialBlocks={initialBlocks}
+          targetPanels={targetPanels}
           canEdit={canEdit}
         />
       </section>

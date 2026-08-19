@@ -24,6 +24,7 @@ const settingsSchema = z.object({
   annualDegradationPct: z.number().min(0).max(3),
   utilityEscalationPct: z.number().min(0).max(15),
   kwhPerKwYear: z.number().int().min(500).max(2500),
+  targetOffsetPct: z.number().min(50).max(200),
   defaultGrossPpwCents: z.number().int().min(50).max(2000),
   defaultDealerFeePct: z.number().min(0).max(50),
   // Null is meaningful and is the default: derive nothing, leave the sticker as
@@ -74,10 +75,7 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
  */
 const designSchema = z.object({
   leadId: z.string().min(1),
-  utilityProvider: z.string().max(120).nullable().optional(),
   monthlyUsageKwh: z.array(z.number().min(0)).max(12).optional(),
-  annualUsageKwh: z.number().int().min(0).nullable().optional(),
-  avgMonthlyBillCents: z.number().int().min(0).nullable().optional(),
   mountType: z.enum(["roof", "ground"]).optional(),
   roofPlanes: z.array(z.record(z.string(), z.unknown())).optional(),
   setbackNotes: z.string().max(2000).nullable().optional(),
@@ -142,11 +140,12 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
 
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
-    select: { moduleId: true, moduleQty: true },
+    select: { moduleId: true, moduleQty: true, annualUsageKwh: true },
   });
 
   // The panel is not a rep's decision any more — the approved-vendor list makes
   // it once a year, and an existing design keeps whatever it was quoted on.
+  const existingUsage = existing;
   const module_ = await resolveSizingModule(user.companyId, existing?.moduleId ?? null);
 
   const moduleQty = d.moduleQty ?? existing?.moduleQty ?? 0;
@@ -158,11 +157,10 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   // production data instead of each rep guessing per roof.
   const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions);
 
-  // Annual usage: explicit value wins, else sum the 12 monthly readings.
-  const monthly = d.monthlyUsageKwh ?? [];
-  const annualUsageKwh =
-    d.annualUsageKwh ?? (monthly.length ? Math.round(monthly.reduce((n, m) => n + m, 0)) : null);
-
+  // Usage belongs to the Energy step now, so this reads it rather than taking
+  // it from the client. Offset still has to be recomputed here, because it
+  // depends on the production that the module count just changed.
+  const annualUsageKwh = existingUsage?.annualUsageKwh ?? null;
   const computedOffset = annualUsageKwh ? offsetPct(year1ProductionKwh, annualUsageKwh) : 0;
 
   const { leadId, moduleQty: _q, ...rest } = d;
@@ -170,8 +168,6 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
     ...rest,
     moduleId: module_?.id ?? null,
     moduleQty,
-    monthlyUsageKwh: monthly,
-    annualUsageKwh,
     systemSizeKwDc,
     year1ProductionKwh,
     offsetPct: computedOffset,
@@ -248,6 +244,74 @@ export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDet
   });
 
   revalidatePath(`/portal/leads/${d.leadId}`);
+  return ok();
+}
+
+// ---------------------------------------------------------------------------
+// Providers — the utilities and retailers a company sells against
+// ---------------------------------------------------------------------------
+
+const providerSchema = z.object({
+  id: z.string().optional(),
+  kind: z.enum(["utility", "retail"]),
+  name: z.string().min(1).max(120),
+  position: z.number().int().min(0).max(999).optional(),
+});
+
+/** Create or rename one provider. Names are unique per company and kind. */
+export async function saveSolarProviderAction(input: z.infer<typeof providerSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = providerSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid provider.");
+  const d = parsed.data;
+  const name = d.name.trim();
+
+  if (d.id) {
+    const existing = await prisma.solarProvider.findFirst({
+      where: { id: d.id, companyId: user.companyId },
+      select: { id: true },
+    });
+    if (!existing) return fail("Provider not found.");
+  }
+
+  try {
+    if (d.id) {
+      await prisma.solarProvider.update({
+        where: { id: d.id },
+        data: { name, ...(d.position == null ? {} : { position: d.position }) },
+      });
+    } else {
+      await prisma.solarProvider.create({
+        data: { companyId: user.companyId, kind: d.kind, name, position: d.position ?? 0 },
+      });
+    }
+  } catch {
+    // The unique index is the enforcement; this is the message for it.
+    return fail(`“${name}” is already on that list.`);
+  }
+
+  revalidatePath("/portal/settings/solar-providers");
+  return ok();
+}
+
+/**
+ * Retire a provider rather than deleting it.
+ *
+ * Designs store the provider's NAME, so a delete leaves deals naming something
+ * the company no longer recognises — and the name on a sent proposal has to
+ * keep meaning what it meant.
+ */
+export async function setSolarProviderActiveAction(id: string, active: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const row = await prisma.solarProvider.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!row) return fail("Provider not found.");
+  await prisma.solarProvider.update({ where: { id }, data: { active } });
+  revalidatePath("/portal/settings/solar-providers");
   return ok();
 }
 

@@ -352,6 +352,7 @@ model Company {
   reviews                  Review[]
   solarSettings            SolarSettings?
   solarEquipment           SolarEquipment[]
+  solarProviders           SolarProvider[]
   solarDesigns             SolarDesign[]
   solarFinance             SolarFinance[]
   creditApplications       CreditApplication[]
@@ -565,6 +566,33 @@ model PasswordResetToken {
 // ---------------------------------------------------------------------------
 // CRM: leads, pipeline, projects
 // ---------------------------------------------------------------------------
+
+enum SolarProviderKind {
+  utility
+  retail
+}
+
+/// The utilities and retail electric providers a company sells against.
+///
+/// Same shape as LeadSource: a per-company ordered list, deactivated rather
+/// than deleted, because a design stores the provider's NAME and has to keep
+/// rendering after that provider stops being offered.
+model SolarProvider {
+  id        String            @id @default(uuid())
+  companyId String
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical          @default(solar)
+  kind      SolarProviderKind
+  name      String
+  position  Int               @default(0)
+  active    Boolean           @default(true)
+  createdAt DateTime          @default(now())
+
+  @@unique([companyId, kind, name])
+  @@index([companyId, kind, active])
+  @@map("solar_providers")
+}
 
 model LeadSource {
   id        String   @id @default(uuid())
@@ -2605,6 +2633,10 @@ model SolarSettings {
   utilityEscalationPct Float @default(3.5)
   /// kWh produced per kW-DC per year in this market. Set from local irradiance.
   kwhPerKwYear         Int   @default(1450)
+  /// What share of a customer's usage a system is sized toward. Drives the
+  /// target shown on the Energy step and on the designer's counter. It does NOT
+  /// constrain what a rep may draw — what fits the roof wins.
+  targetOffsetPct      Float @default(100)
 
   // ── Pricing defaults ────────────────────────────────────────────────────
   /// Default gross price per watt, in cents (e.g. 350 = $3.50/W).
@@ -2877,6 +2909,16 @@ model SolarDesign {
 
   // ── Utility & usage ─────────────────────────────────────────────────────
   utilityProvider     String?
+  /// The retailer that BILLS the customer, where that differs from the utility
+  /// that delivers the power — the TDU/REP split Texas runs on. Stored as text
+  /// like utilityProvider, filled from the company's managed list.
+  electricProvider    String?
+  /// The rate the rep was TOLD, in mills per kWh. Null means derive it from
+  /// bill ÷ usage, which is what every design before this one does.
+  utilityRateMills    Int?
+  /// Which method the Energy step was filled in with, so it reopens the way it
+  /// was left: "usage" | "bill".
+  usageBasis          String?
   ratePlan            String?
   utilityAccountNo    String?
   meterNo             String?
@@ -3017,6 +3059,10 @@ model SolarFinance {
   updatedAt DateTime @updatedAt
 
   @@index([companyId, vertical])
+  // Declared here because the migration that added lenderProductId also created
+  // this index. Without the declaration Prisma sees drift and generates a DROP
+  // on every `migrate dev` — which is how an index quietly leaves production.
+  @@index([lenderProductId])
   @@map("solar_finance")
 }
 

@@ -161,13 +161,17 @@ test.describe("workspace switcher", () => {
     // offset, and without it the offset figure is meaningless. This is the
     // exact fault that produces five-figure offsets on real competitor
     // proposals, so it must block generation.
+    //
+    // Usage lives on the Energy step, which owns it — the design step is the
+    // roof now.
+    await page.getByRole("button", { name: /2 · Energy/ }).click();
     const usage = page.getByLabel("Annual usage (kWh)");
     await expect(usage).toBeVisible({ timeout: 15000 });
     await usage.fill("");
-    await page.getByRole("button", { name: /Save design/ }).click();
-    await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });
+    await page.getByRole("button", { name: /Save energy/ }).click();
+    await expect(page.getByText(/Energy saved/)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: /3 · Generate & send/ }).click();
+    await page.getByRole("button", { name: /5 · Generate & send/ }).click();
     await page.getByRole("button", { name: /Check proposal readiness/ }).click();
     await expect(page.getByText(/Blocked/)).toBeVisible({ timeout: 15000 });
     // The blocking issue itself, not step 1's "Annual usage (kWh)" label — that
@@ -176,10 +180,10 @@ test.describe("workspace switcher", () => {
     await expect(page.getByText(/Offset cannot be calculated without it/i)).toBeVisible();
 
     // Restore it so later specs see a complete deal.
-    await page.getByRole("button", { name: /1 · System design/ }).click();
+    await page.getByRole("button", { name: /2 · Energy/ }).click();
     await usage.fill("14000");
-    await page.getByRole("button", { name: /Save design/ }).click();
-    await expect(page.getByText(/Design saved/)).toBeVisible({ timeout: 15000 });
+    await page.getByRole("button", { name: /Save energy/ }).click();
+    await expect(page.getByText(/Energy saved/)).toBeVisible({ timeout: 15000 });
   });
 });
 

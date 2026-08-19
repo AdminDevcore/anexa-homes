@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Hammer, Landmark, Sun } from "lucide-react";
+import { ArrowRight, Hammer, Landmark, Sun, User, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LayoutBlock } from "@/lib/solar-layout";
 import { Button } from "@/components/ui/button";
@@ -14,27 +14,33 @@ import {
   type SolarDesignView,
   type SolarFinanceView,
 } from "@/components/portal/solar-panels";
+import { SolarCustomerPanel, type SolarCustomerView } from "@/components/portal/solar-customer-panel";
+import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
+import type { TargetAssumptions } from "@/lib/solar-energy";
+import type { ProviderOption } from "@/server/modules/solar/providers";
 
-type StepId = "design" | "financing" | "generate";
+export type StepId = "customer" | "energy" | "design" | "financing" | "generate";
 
 const STEPS: { id: StepId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: "design", label: "1 · System design", icon: Hammer },
-  { id: "financing", label: "2 · Financing", icon: Landmark },
-  { id: "generate", label: "3 · Generate & send", icon: Sun },
+  { id: "customer", label: "1 · Customer", icon: User },
+  { id: "energy", label: "2 · Energy", icon: Zap },
+  { id: "design", label: "3 · System design", icon: Hammer },
+  { id: "financing", label: "4 · Financing", icon: Landmark },
+  { id: "generate", label: "5 · Generate & send", icon: Sun },
 ];
 
 /**
- * The three things that make a solar proposal, in the order they happen.
+ * The five things that make a solar proposal, in the order they happen.
  *
  * Every step stays MOUNTED and is hidden with `display:none` rather than
  * unmounted on switch. The panels hold their edits in local state behind an
  * explicit Save button, so unmounting step 1 to show step 2 would throw away a
  * design a rep had typed but not yet saved — silently, which is the worst way
- * to lose work. Three small forms cost nothing to keep in the tree.
+ * to lose work. A handful of small forms cost nothing to keep in the tree.
  */
 export function SolarProposalBuilder({
   leadId,
-  initialStep = "design",
+  initialStep = "customer",
   canEditDeal,
   canCreateProposal,
   design,
@@ -54,6 +60,13 @@ export function SolarProposalBuilder({
   moduleMm,
   moduleRatingW,
   initialBlocks,
+  customer,
+  energy,
+  utilities,
+  retailers,
+  assumptions,
+  hasLayout,
+  targetPanels,
 }: {
   leadId: string;
   /**
@@ -88,6 +101,15 @@ export function SolarProposalBuilder({
   moduleMm: { widthMm: number; heightMm: number };
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
+  customer: SolarCustomerView;
+  energy: SolarEnergyView;
+  utilities: ProviderOption[];
+  retailers: ProviderOption[];
+  assumptions: TargetAssumptions;
+  /** Whether a layout already exists — an address change would invalidate it. */
+  hasLayout: boolean;
+  /** How many panels the Energy step says this house needs. Null = unknown. */
+  targetPanels: number | null;
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
 
@@ -113,6 +135,37 @@ export function SolarProposalBuilder({
         ))}
       </div>
 
+      <StepPanel
+        active={step === "customer"}
+        title="Customer"
+        blurb="Check we are quoting the right person at the right house before anything else."
+      >
+        <SolarCustomerPanel
+          leadId={leadId}
+          customer={customer}
+          hasLayout={hasLayout}
+          canEdit={canEditDeal}
+        />
+        <NextStep label="Next: Energy" onClick={() => setStep("energy")} />
+      </StepPanel>
+
+      <StepPanel
+        active={step === "energy"}
+        title="Energy"
+        blurb="What the house uses and what they pay for it — from their usage, or from their bill and rate."
+      >
+        <SolarEnergyPanel
+          leadId={leadId}
+          energy={energy}
+          utilities={utilities}
+          retailers={retailers}
+          assumptions={assumptions}
+          panelWatts={moduleRatingW}
+          canEdit={canEditDeal}
+        />
+        <NextStep label="Next: System design" onClick={() => setStep("design")} />
+      </StepPanel>
+
       <StepPanel active={step === "design"} title="System design">
         <SolarDesignPanel
           leadId={leadId}
@@ -124,6 +177,7 @@ export function SolarProposalBuilder({
           moduleMm={moduleMm}
           moduleRatingW={moduleRatingW}
           initialBlocks={initialBlocks}
+          targetPanels={targetPanels}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

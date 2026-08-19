@@ -80,3 +80,32 @@ describe("a quote needs a drawing", () => {
     expect(codes).not.toContain("documents.no_layout");
   });
 });
+
+describe("a rate can come from either direction", () => {
+  it("passes a design that entered the bill and the rate, with no derivable usage split", () => {
+    // The whole reason utility.bill_missing had to go: this deal has a rate, it
+    // just did not get one by dividing the bill by the usage.
+    const codes = validateDesign(
+      design({ utilityRateMills: 200, avgMonthlyBillCents: 20_000, annualUsageKwh: 12_000 }),
+      SOLAR_ASSUMPTION_DEFAULTS
+    ).map((i) => i.code);
+    expect(codes).not.toContain("utility.rate_missing");
+    expect(codes).not.toContain("utility.rate_implausible");
+  });
+
+  it("blocks when neither route gives a rate", () => {
+    const codes = validateDesign(
+      design({ utilityRateMills: null, avgMonthlyBillCents: null }),
+      SOLAR_ASSUMPTION_DEFAULTS
+    ).map((i) => i.code);
+    expect(codes).toContain("utility.rate_missing");
+  });
+
+  it("warns on a rate nobody in the US actually pays", () => {
+    const codes = validateDesign(
+      design({ utilityRateMills: 900, avgMonthlyBillCents: 20_000 }),
+      SOLAR_ASSUMPTION_DEFAULTS
+    ).map((i) => i.code);
+    expect(codes).toContain("utility.rate_implausible");
+  });
+});
