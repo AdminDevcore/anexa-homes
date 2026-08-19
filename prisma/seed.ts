@@ -309,6 +309,12 @@ async function main() {
         city: "Dallas",
         state: "TX",
         zip: "75204",
+        // Pre-geocoded so the deal page can frame the roof. Every real deal
+        // gets these from the ROOFTOP geocoder; a fixture cannot, because the
+        // seed has no Maps key and must not need one.
+        lat: 32.7995,
+        lng: -96.7981,
+        geocodedAt: new Date(),
         serviceType: "solar",
         dealType: "cash",
         value: 3150000,
@@ -433,6 +439,39 @@ async function main() {
         { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "external", body: "Your permit is with the city. Typical review here runs 2-3 weeks — we will chase it weekly and let you know the moment it clears.", authorId: users.rep.id },
         { companyId: company.id, vertical: "solar", leadId: solarLead.id, channel: "customer", body: "Thanks — is there anything you need from me in the meantime?", authorId: null },
       ],
+    });
+
+    // A SECOND solar deal, owned by the panel-layout designer's E2E spec.
+    //
+    // Drawing an array rewrites the deal's module count and system size, and
+    // solar-no-insurance.spec.ts asserts Priya's deal is exactly 10.00 kW. One
+    // spec mutating another's fixture is a failure that looks like a product
+    // bug and is not one, so the designer gets a deal it is free to change.
+    await prisma.lead.create({
+      data: {
+        companyId: company.id,
+        vertical: "solar",
+        firstName: "Marcus",
+        lastName: "Webb",
+        email: "marcus.webb@example.com",
+        phone: "(555) 404-2260",
+        address: "17 Array Court",
+        city: "Dallas",
+        state: "TX",
+        zip: "75204",
+        // Pre-geocoded: the designer frames the roof on these, and the seed has
+        // no Maps key to resolve an address with — nor should it need one.
+        lat: 32.8005,
+        lng: -96.7969,
+        geocodedAt: new Date(),
+        serviceType: "solar",
+        dealType: "cash",
+        value: 2900000,
+        pipelineId: solarPipelineId,
+        stageId: solarStageByKey.permit_submitted,
+        assignedRepId: users.rep.id,
+        createdById: users.rep.id,
+      },
     });
   }
 
