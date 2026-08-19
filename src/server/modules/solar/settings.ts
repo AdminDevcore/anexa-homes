@@ -27,6 +27,10 @@ export const SOLAR_ASSUMPTION_DEFAULTS: SolarAssumptions = {
 export type SolarSettingsView = SolarAssumptions & {
   stateIncentiveNote: string | null;
   incentiveDisclaimer: string;
+  /// The utility's programme, company-wide. See the schema comment: it is set
+  /// by the utility rather than by the house, so it is one value here instead
+  /// of one retyped onto every design.
+  netMeteringProgram: string | null;
 };
 
 export async function getSolarSettings(companyId: string): Promise<SolarSettingsView> {
@@ -35,6 +39,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     return {
       ...SOLAR_ASSUMPTION_DEFAULTS,
       stateIncentiveNote: null,
+      netMeteringProgram: null,
       incentiveDisclaimer:
         "Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.",
     };
@@ -52,6 +57,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     minPpwCents: row.minPpwCents,
     maxPpwCents: row.maxPpwCents,
     stateIncentiveNote: row.stateIncentiveNote,
+    netMeteringProgram: row.netMeteringProgram,
     incentiveDisclaimer: row.incentiveDisclaimer,
   };
 }

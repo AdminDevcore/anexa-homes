@@ -166,10 +166,10 @@ export async function generateSolarProposalAction(leadId: string) {
       batteryLabel: label(design.battery),
       mountType: design.mountType,
       utilityProvider: design.utilityProvider,
-      ratePlan: design.ratePlan,
-      netMeteringProgram: design.netMeteringProgram,
+      // Company-level now: the programme is set by the utility, not by the
+      // house, so it is one value per company rather than one per deal.
+      netMeteringProgram: assumptions.netMeteringProgram,
       avgMonthlyBillCents: design.avgMonthlyBillCents,
-      tsrfPct: design.tsrfPct,
       module: equip(design.module, design.moduleQty),
       inverter: equip(design.inverter, 1),
       battery: equip(design.battery, design.batteryQty || (design.battery ? 1 : 0)),

@@ -52,6 +52,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     federalItcPct: settings.federalItcPct == null ? "" : String(settings.federalItcPct),
     stateIncentiveNote: settings.stateIncentiveNote ?? "",
+    netMeteringProgram: settings.netMeteringProgram ?? "",
     incentiveDisclaimer: settings.incentiveDisclaimer,
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
@@ -73,6 +74,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       // matters, because a configured 0% would still render a $0 credit line.
       federalItcPct: f.federalItcPct.trim() === "" ? null : Number(f.federalItcPct),
       stateIncentiveNote: f.stateIncentiveNote.trim() || null,
+      netMeteringProgram: f.netMeteringProgram.trim() || null,
       incentiveDisclaimer: f.incentiveDisclaimer,
       minOffsetPct: Number(f.minOffsetPct),
       maxOffsetPct: Number(f.maxOffsetPct),
@@ -94,6 +96,25 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           <NumField label="Annual degradation %" value={f.annualDegradationPct} onChange={(v) => set("annualDegradationPct", v)} step="0.1" />
           <NumField label="Utility escalation %/yr" value={f.utilityEscalationPct} onChange={(v) => set("utilityEscalationPct", v)} step="0.1" />
           <NumField label="kWh per kW / year" value={f.kwhPerKwYear} onChange={(v) => set("kwhPerKwYear", v)} hint="Local irradiance" />
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+        <h3 className="font-semibold">Utility programme</h3>
+        <div className="space-y-1">
+          <Label className="text-xs" htmlFor="net-metering-programme">
+            Net-metering / buyback programme
+          </Label>
+          <Input
+            id="net-metering-programme"
+            value={f.netMeteringProgram}
+            placeholder="e.g. Oncor 1:1 net metering"
+            onChange={(e) => set("netMeteringProgram", e.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            Printed on every proposal, and what the FAQ answer about surplus production points at.
+            The utility sets this, not the house — so it lives here rather than on each design.
+          </p>
         </div>
       </section>
 

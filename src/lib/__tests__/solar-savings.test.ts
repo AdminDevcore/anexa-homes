@@ -22,10 +22,11 @@ const A: SolarAssumptions = {
 };
 
 describe("production accounts for the roof it is actually going on", () => {
-  it("applies TSRF, so a shaded roof does not quote an unshaded number", () => {
-    // TSRF was being collected on the design form and then ignored: a heavily
-    // shaded north-facing roof produced the same headline kWh as a perfect
-    // south-facing one, and the customer found out from their bill.
+  it("still de-rates for shading when a caller supplies it", () => {
+    // Nothing supplies TSRF today — it was a figure typed from memory on the
+    // design form and it moved a customer's quoted kWh by up to 17%, so the
+    // form stopped asking and system losses became the company-wide derate.
+    // The capability stays here for the day roof faces are traced properly.
     const unshaded = year1Production(8, A, 100);
     const shaded = year1Production(8, A, 85);
     expect(unshaded).toBe(Math.round(8 * 1450 * 0.84));
@@ -179,7 +180,7 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
         annualUsageKwh: 14_000, moduleLabel: "Qcells · 400W", moduleQty: 20,
         inverterLabel: "Enphase", batteryLabel: null, mountType: "roof",
         utilityProvider: "ZZ TEST", netMeteringProgram: null,
-        avgMonthlyBillCents: 18_000, tsrfPct: 85,
+        avgMonthlyBillCents: 18_000,
       },
       finance: {
         product: "cash", grossPpwCents: 350, dealerFeePct: 0, adderTotalCents: 0,
@@ -274,5 +275,49 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
     };
     walk(build(), "snapshot");
     expect(bad).toEqual([]);
+  });
+});
+
+describe("the snapshot stops carrying what nobody sets", () => {
+  const design = {
+    systemSizeKwDc: 8, year1ProductionKwh: 9_744, offsetPct: 69.6,
+    annualUsageKwh: 14_000, moduleLabel: "Qcells · 400W", moduleQty: 20,
+    inverterLabel: null, batteryLabel: null, mountType: "roof",
+    utilityProvider: "ZZ TEST", netMeteringProgram: "Oncor 1:1",
+    avgMonthlyBillCents: 18_000,
+  };
+
+  const snap = () =>
+    buildProposalSnapshot({
+      reference: "SP-TEST-1",
+      generatedById: null,
+      customer: { name: "Test Customer", address: "1 Test Way" },
+      company: { name: "Anexa Homes", phone: null, email: null, logoUrl: null, address: null },
+      design,
+      finance: {
+        product: "cash", grossPpwCents: 350, dealerFeePct: 0, adderTotalCents: 0,
+        rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null,
+        termYears: null, aprPct: null,
+      },
+      lender: null,
+      assumptions: A,
+      incentiveDisclaimer: "Estimated only.",
+      stateIncentiveNote: null,
+      now: new Date("2026-08-18T00:00:00Z"),
+    });
+
+  it("nulls the rate plan and TSRF, so the proposal omits both rows", () => {
+    // The renderer guards every one of these on null, which is why a field the
+    // form stopped collecting disappears from the document rather than printing
+    // blank — and why a proposal already SENT still shows what it showed.
+    const s = snap();
+    expect(s.energy.ratePlan).toBeNull();
+    expect(s.system.tsrfPct).toBeNull();
+  });
+
+  it("still carries the net-metering programme it was handed", () => {
+    // It comes from company settings now rather than the design, but the
+    // customer-facing document is unchanged.
+    expect(snap().system.netMeteringProgram).toBe("Oncor 1:1");
   });
 });

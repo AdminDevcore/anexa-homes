@@ -228,7 +228,8 @@ export default async function LeadDetailPage({
 
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
-  const [solarDesign, solarFinance, solarProposals, creditApps] = isSolarDeal
+  const [solarDesign, solarFinance, solarProposals, creditApps, solarEquipment, solarLenders] =
+    isSolarDeal
     ? await Promise.all([
         prisma.solarDesign.findUnique({
           where: { leadId: lead.id },
@@ -253,8 +254,65 @@ export default async function LeadDetailPage({
           where: { companyId: user.companyId, leadId: lead.id },
           orderBy: { createdAt: "desc" },
         }),
+        // Sellable inverters and batteries, PLUS whatever this deal already
+        // chose even if it has since been retired. Filtering to isActive alone
+        // would drop a retired item out of its own dropdown, the select would
+        // fall back to "— none —", and the next save would blank equipment on a
+        // deal nobody meant to edit.
+        prisma.solarEquipment.findMany({
+          where: { companyId: user.companyId, kind: { in: ["inverter", "battery"] } },
+          orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
+          select: {
+            id: true, kind: true, manufacturer: true, model: true, ratingW: true, isActive: true,
+            lenderApprovals: { select: { lenderId: true } },
+          },
+        }),
+        prisma.solarLender.findMany({
+          where: { companyId: user.companyId },
+          orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
+          select: { id: true, name: true, isActive: true },
+        }),
       ])
-    : [null, null, [], []];
+    : [null, null, [], [], [], []];
+
+  /**
+   * The Operations card's equipment half.
+   *
+   * When a lender is chosen the list narrows to that lender's approved-vendor
+   * list, with one exception: whatever this deal has ALREADY chosen stays
+   * visible and is labelled, because dropping a selected item out of its own
+   * dropdown is how a save quietly writes null over a deal's equipment.
+   */
+  const solarBuild = (() => {
+    const chosen = new Set([solarDesign?.inverterId, solarDesign?.batteryId].filter(Boolean));
+    const lenderId = solarDesign?.lenderId ?? null;
+    const approvedFor = (e: { id: string; lenderApprovals: { lenderId: string }[] }) =>
+      !lenderId || e.lenderApprovals.some((a) => a.lenderId === lenderId);
+
+    const options = (kind: string) =>
+      solarEquipment
+        .filter((e) => e.kind === kind)
+        .filter((e) => approvedFor(e) || chosen.has(e.id))
+        .map((e) => ({
+          id: e.id,
+          label:
+            `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` +
+            `${e.ratingW ? ` · ${e.ratingW}W` : ""}${e.isActive ? "" : " · retired"}` +
+            `${approvedFor(e) ? "" : " · not on this lender's list"}`,
+        }));
+
+    return {
+      hasDesign: !!solarDesign,
+      utilityAccountNo: solarDesign?.utilityAccountNo ?? null,
+      meterNo: solarDesign?.meterNo ?? null,
+      lenderId,
+      inverterId: solarDesign?.inverterId ?? null,
+      batteryId: solarDesign?.batteryId ?? null,
+      lenders: solarLenders,
+      inverters: options("inverter"),
+      batteries: options("battery"),
+    };
+  })();
 
   // Where the proposal stands, as one value. Derived rather than stored — see
   // src/lib/solar-proposal-state.ts for why a column would go stale.
@@ -697,6 +755,7 @@ export default async function LeadDetailPage({
                     }
                   : null
               }
+              build={solarBuild}
               stageChangedAt={lead.stageChangedAt ? lead.stageChangedAt.toISOString() : null}
               createdAt={lead.createdAt.toISOString()}
               blockedBy={lead.blockedBy}

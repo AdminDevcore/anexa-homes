@@ -223,6 +223,12 @@ export type SolarProposalSnapshot = {
   /** Section 2 — what the customer pays for power today. */
   energy: {
     utilityProvider: string | null;
+    /**
+     * HISTORICAL. Nothing collects a rate plan any more, so this is null on
+     * every new snapshot — but proposals already sent carry a value, and the
+     * snapshot is what those customers were shown. Kept so old documents keep
+     * rendering exactly as they did.
+     */
     ratePlan: string | null;
     annualUsageKwh: number;
     avgMonthlyBillCents: number | null;
@@ -240,7 +246,7 @@ export type SolarProposalSnapshot = {
     mountType: string;
     utilityProvider: string | null;
     netMeteringProgram: string | null;
-    /** Null when the site has not been surveyed. */
+    /** HISTORICAL, like `energy.ratePlan`. Null on every new snapshot. */
     tsrfPct: number | null;
     module: SnapshotEquipment | null;
     inverter: SnapshotEquipment | null;
@@ -318,10 +324,8 @@ export function buildProposalSnapshot(args: {
     batteryLabel: string | null;
     mountType: string;
     utilityProvider: string | null;
-    ratePlan?: string | null;
     netMeteringProgram: string | null;
     avgMonthlyBillCents: number | null;
-    tsrfPct?: number | null;
     module?: SnapshotEquipment | null;
     inverter?: SnapshotEquipment | null;
     battery?: SnapshotEquipment | null;
@@ -413,7 +417,7 @@ export function buildProposalSnapshot(args: {
     representative: args.representative ?? null,
     energy: {
       utilityProvider: design.utilityProvider,
-      ratePlan: design.ratePlan ?? null,
+      ratePlan: null,
       annualUsageKwh: design.annualUsageKwh,
       avgMonthlyBillCents: design.avgMonthlyBillCents,
       // usage × today's rate. Null rather than 0 when the rate is unknown, so
@@ -434,7 +438,7 @@ export function buildProposalSnapshot(args: {
       mountType: design.mountType,
       utilityProvider: design.utilityProvider,
       netMeteringProgram: design.netMeteringProgram,
-      tsrfPct: design.tsrfPct ?? null,
+      tsrfPct: null,
       module: design.module ?? null,
       inverter: design.inverter ?? null,
       battery: design.battery ?? null,

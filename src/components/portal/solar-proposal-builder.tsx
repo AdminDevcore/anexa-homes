@@ -3,6 +3,7 @@
 import * as React from "react";
 import { ArrowRight, Hammer, Landmark, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { LayoutBlock } from "@/lib/solar-layout";
 import { Button } from "@/components/ui/button";
 import {
   SolarDesignPanel,
@@ -11,11 +12,7 @@ import {
   type ProposalVersion,
   type SolarDesignView,
   type SolarFinanceView,
-  type LenderOption,
-  type HiddenByLender,
 } from "@/components/portal/solar-panels";
-
-type EquipmentOption = { id: string; label: string; ratingW: number | null };
 
 type StepId = "design" | "financing" | "generate";
 
@@ -43,14 +40,13 @@ export function SolarProposalBuilder({
   finance,
   itcDisclaimer,
   federalItcPct,
-  modules,
-  inverters,
-  batteries,
   versions,
   layoutAvailable,
   canApproveLayout,
-  lenders,
-  hiddenByLender,
+  lat,
+  moduleMm,
+  moduleRatingW,
+  initialBlocks,
 }: {
   leadId: string;
   /**
@@ -67,15 +63,15 @@ export function SolarProposalBuilder({
   finance: SolarFinanceView;
   itcDisclaimer: string;
   federalItcPct: number | null;
-  modules: EquipmentOption[];
-  inverters: EquipmentOption[];
-  batteries: EquipmentOption[];
   versions: ProposalVersion[];
   /** Resolved server-side: the layout file row AND its bytes both exist. */
   layoutAvailable: boolean;
   canApproveLayout: boolean;
-  lenders: LenderOption[];
-  hiddenByLender: HiddenByLender;
+  /** Null when the deal has no rooftop coordinate — see SolarLayoutDesigner. */
+  lat: number | null;
+  moduleMm: { widthMm: number; heightMm: number };
+  moduleRatingW: number | null;
+  initialBlocks: LayoutBlock[];
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
 
@@ -105,14 +101,13 @@ export function SolarProposalBuilder({
         <SolarDesignPanel
           leadId={leadId}
           design={design}
-          modules={modules}
-          inverters={inverters}
-          batteries={batteries}
           canEdit={canEditDeal}
           layoutAvailable={layoutAvailable}
           canApproveLayout={canApproveLayout}
-          lenders={lenders}
-          hiddenByLender={hiddenByLender}
+          lat={lat}
+          moduleMm={moduleMm}
+          moduleRatingW={moduleRatingW}
+          initialBlocks={initialBlocks}
         />
         <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
       </StepPanel>

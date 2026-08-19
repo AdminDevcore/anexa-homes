@@ -2623,6 +2623,13 @@ model SolarSettings {
   /// the standard not-a-guarantee wording; editable per company.
   incentiveDisclaimer String  @default("Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.")
 
+  // ── Utility programme ───────────────────────────────────────────────────
+  /// Net-metering / buyback programme, e.g. "Oncor 1:1 net metering". Set by
+  /// the utility and the same for every house on it, so it belongs to the
+  /// company rather than being retyped on each design. Printed on every
+  /// proposal; the FAQ answer about surplus production points at it.
+  netMeteringProgram String?
+
   // ── Validation bounds ───────────────────────────────────────────────────
   // A rep must not be able to generate a physically impossible proposal.
   // These are the guard rails; see src/lib/solar-validation.ts.
@@ -2702,6 +2709,11 @@ model SolarEquipment {
   model         String
   /// Modules: watts per panel. Inverters: rated output W. Batteries: usable Wh.
   ratingW       Int?
+  /// Modules only: physical size in mm, so a panel can be drawn on a roof at
+  /// true scale. Null falls back to a standard 60-cell residential module —
+  /// see MODULE_FALLBACK_MM in src/lib/solar-layout.ts.
+  widthMm       Int?
+  heightMm      Int?
   /// Unit cost to us, cents.
   costCents     Int                @default(0)
   /// What the customer pays, cents. For adders this is the adder price.
@@ -2811,6 +2823,10 @@ model SolarDesign {
   // customer only discovers at the site survey. `layoutImageFileId` is null
   // until someone uploads a real layout, and the proposal omits the section
   // rather than rendering a placeholder.
+  /// The array as drawn in the designer: LayoutBlock[], positions in ground
+  /// metres east/north of the lead's coordinate. NOT pixels — a pixel layout
+  /// reopened at a different zoom is a layout in the wrong place.
+  layoutBlocks            Json      @default("[]")
   layoutImageFileId       String?
   layoutImageUploadedById String?
   layoutImageUploadedAt   DateTime?

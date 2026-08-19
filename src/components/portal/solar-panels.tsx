@@ -18,6 +18,8 @@ import {
   type BuilderStep,
   type ValidationIssue,
 } from "@/lib/solar-validation";
+import type { LayoutBlock } from "@/lib/solar-layout";
+import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
@@ -30,8 +32,6 @@ import {
   removePanelLayoutAction,
   setLayoutApprovalAction,
 } from "@/server/modules/solar/proposal-actions";
-
-type EquipmentOption = { id: string; label: string; ratingW: number | null };
 
 /**
  * Attach the panel layout drawn in an external design tool.
@@ -200,23 +200,13 @@ function PanelLayoutPanel({
   );
 }
 
-export type LenderOption = { id: string; name: string; isActive: boolean };
-export type HiddenByLender = { module: number; inverter: number; battery: number };
 
 export type SolarDesignView = {
   utilityProvider: string | null;
-  ratePlan: string | null;
-  utilityAccountNo: string | null;
-  meterNo: string | null;
-  netMeteringProgram: string | null;
   annualUsageKwh: number | null;
   avgMonthlyBillCents: number | null;
   mountType: MountType;
-  tsrfPct: number | null;
-  moduleId: string | null;
   moduleQty: number;
-  inverterId: string | null;
-  batteryId: string | null;
   systemSizeKwDc: number;
   year1ProductionKwh: number;
   offsetPct: number;
@@ -225,7 +215,6 @@ export type SolarDesignView = {
   designProvider: string | null;
   designExternalRef: string | null;
   layoutApproved: boolean;
-  lenderId: string | null;
 } | null;
 
 export type SolarFinanceView = {
@@ -401,44 +390,32 @@ function IssueAction({
 export function SolarDesignPanel({
   leadId,
   design,
-  modules,
-  inverters,
-  batteries,
   canEdit,
   layoutAvailable,
   canApproveLayout,
-  lenders,
-  hiddenByLender,
+  lat,
+  moduleMm,
+  moduleRatingW,
+  initialBlocks,
 }: {
   leadId: string;
   design: SolarDesignView;
-  modules: EquipmentOption[];
-  inverters: EquipmentOption[];
-  batteries: EquipmentOption[];
   canEdit: boolean;
-  lenders: LenderOption[];
-  hiddenByLender: HiddenByLender;
   /** Resolved server-side: the file row AND its bytes both exist. */
   layoutAvailable: boolean;
   canApproveLayout: boolean;
+  lat: number | null;
+  moduleMm: { widthMm: number; heightMm: number };
+  moduleRatingW: number | null;
+  initialBlocks: LayoutBlock[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [form, setForm] = React.useState({
     utilityProvider: design?.utilityProvider ?? "",
-    ratePlan: design?.ratePlan ?? "",
-    utilityAccountNo: design?.utilityAccountNo ?? "",
-    meterNo: design?.meterNo ?? "",
-    netMeteringProgram: design?.netMeteringProgram ?? "",
     annualUsageKwh: num(design?.annualUsageKwh),
     avgMonthlyBill: num(design?.avgMonthlyBillCents, 100),
     mountType: (design?.mountType ?? "roof") as MountType,
-    tsrfPct: num(design?.tsrfPct),
-    lenderId: design?.lenderId ?? "",
-    moduleId: design?.moduleId ?? "",
-    moduleQty: num(design?.moduleQty) || "0",
-    inverterId: design?.inverterId ?? "",
-    batteryId: design?.batteryId ?? "",
   });
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -448,19 +425,9 @@ export function SolarDesignPanel({
     const res = await saveSolarDesignAction({
       leadId,
       utilityProvider: form.utilityProvider || null,
-      ratePlan: form.ratePlan || null,
-      utilityAccountNo: form.utilityAccountNo || null,
-      meterNo: form.meterNo || null,
-      netMeteringProgram: form.netMeteringProgram || null,
       annualUsageKwh: form.annualUsageKwh ? Number(form.annualUsageKwh) : null,
       avgMonthlyBillCents: form.avgMonthlyBill ? Math.round(Number(form.avgMonthlyBill) * 100) : null,
       mountType: form.mountType,
-      tsrfPct: form.tsrfPct ? Number(form.tsrfPct) : null,
-      lenderId: form.lenderId || null,
-      moduleId: form.moduleId || null,
-      moduleQty: Number(form.moduleQty) || 0,
-      inverterId: form.inverterId || null,
-      batteryId: form.batteryId || null,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -476,10 +443,6 @@ export function SolarDesignPanel({
         </h4>
         <div className="grid gap-3 sm:grid-cols-2">
           <TextField label="Utility provider" value={form.utilityProvider} disabled={!canEdit} onChange={(v) => set("utilityProvider", v)} />
-          <TextField label="Rate plan / tariff" value={form.ratePlan} disabled={!canEdit} onChange={(v) => set("ratePlan", v)} />
-          <TextField label="Utility account #" value={form.utilityAccountNo} disabled={!canEdit} onChange={(v) => set("utilityAccountNo", v)} />
-          <TextField label="Meter #" value={form.meterNo} disabled={!canEdit} onChange={(v) => set("meterNo", v)} />
-          <TextField label="Net metering programme" value={form.netMeteringProgram} disabled={!canEdit} onChange={(v) => set("netMeteringProgram", v)} />
           <TextField label="Annual usage (kWh)" value={form.annualUsageKwh} disabled={!canEdit} onChange={(v) => set("annualUsageKwh", v)} type="number" />
           <TextField label="Average monthly bill ($)" value={form.avgMonthlyBill} disabled={!canEdit} onChange={(v) => set("avgMonthlyBill", v)} type="number" />
         </div>
@@ -506,7 +469,6 @@ export function SolarDesignPanel({
               <option value="ground">Ground</option>
             </select>
           </div>
-          <TextField label="TSRF %" value={form.tsrfPct} disabled={!canEdit} onChange={(v) => set("tsrfPct", v)} type="number" />
         </div>
       </section>
 
@@ -514,93 +476,19 @@ export function SolarDesignPanel({
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           System
         </h4>
-        {/* The lender goes here, not with the financing terms, because it is
-            what decides which equipment is offered three fields below. Picking
-            it after choosing equipment would mean discovering the mismatch
-            afterwards. */}
-        <div className="space-y-1">
-          <Label className="text-xs">Lender / approved-vendor list</Label>
-          <select
-            className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:max-w-sm"
-            value={form.lenderId}
-            disabled={!canEdit || lenders.length === 0}
-            onChange={(e) => set("lenderId", e.target.value)}
-          >
-            <option value="">— any lender (no filtering) —</option>
-            {lenders.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}{l.isActive ? "" : " · retired"}
-              </option>
-            ))}
-          </select>
-          {lenders.length === 0 ? (
-            <p className="text-[11px] text-amber-700">
-              No lenders set up yet.{" "}
-              <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
-                Add your lenders
-              </Link>{" "}
-              to filter equipment by an approved-vendor list.
-            </p>
-          ) : (
-            <p className="text-[11px] text-muted-foreground">
-              {form.lenderId
-                ? "Only equipment on this lender's approved list is offered below. Save to apply a change."
-                : "Pick a lender to narrow the equipment below to its approved list."}
-            </p>
-          )}
-        </div>
+        {/* Equipment is no longer chosen here. A rep sells a system; the
+            approved-vendor list decides which panel it is built from, and the
+            inverter and battery are settled when the job is built — both live
+            on the deal's Operations card now, with the lender whose list gates
+            them.
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          {([
-            ["Module", "moduleId", modules],
-            ["Inverter", "inverterId", inverters],
-            ["Battery", "batteryId", batteries],
-          ] as const).map(([label, key, options]) => (
-            <div key={key} className="space-y-1">
-              <Label className="text-xs">{label}</Label>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                value={form[key] as string}
-                disabled={!canEdit || options.length === 0}
-                onChange={(e) => set(key, e.target.value)}
-              >
-                <option value="">— none —</option>
-                {options.map((o) => (
-                  <option key={o.id} value={o.id}>{o.label}</option>
-                ))}
-              </select>
-              {/* An empty dropdown is indistinguishable from a broken one. Say
-                  which it is, and where to go. */}
-              {options.length === 0 && (
-                <p className="text-[11px] text-amber-700">
-                  {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] > 0 ? (
-                    <>
-                      No {label.toLowerCase()} on this lender&rsquo;s approved list.{" "}
-                      {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender]}{" "}in the catalogue{" "}
-                      {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] === 1 ? "is" : "are"} hidden
-                      because {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] === 1 ? "it is" : "they are"} not approved for it.
-                    </>
-                  ) : (
-                    <>
-                      No active {label.toLowerCase()}s in the catalogue.{" "}
-                      <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
-                        Add one
-                      </Link>
-                      .
-                    </>
-                  )}
-                </p>
-              )}
-              {options.length > 0 && hiddenByLender[key.replace("Id", "") as keyof HiddenByLender] > 0 && (
-                <p className="text-[11px] text-muted-foreground">
-                  {hiddenByLender[key.replace("Id", "") as keyof HiddenByLender]}{" "}
-                  hidden &mdash; not on this lender&rsquo;s list.
-                </p>
-              )}
-            </div>
-          ))}
-          <TextField label="Module quantity" value={form.moduleQty} disabled={!canEdit} onChange={(v) => set("moduleQty", v)} type="number" />
-        </div>
+            The module count is not typed either: it is how many panels were
+            drawn on the roof below, which is the only way to know how many fit. */}
+        <p className="text-sm">
+          <span className="font-display text-lg font-semibold">{design?.moduleQty ?? 0}</span>{" "}
+          {design?.moduleQty === 1 ? "panel" : "panels"}
+          <span className="text-muted-foreground"> · drawn on the roof below</span>
+        </p>
 
         {/* Computed server-side from module count × rating and the company's
             assumptions — never typed in, so it cannot be faked. */}
@@ -620,6 +508,20 @@ export function SolarDesignPanel({
             <div className="text-[11px] text-muted-foreground">offset</div>
           </div>
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Panel layout
+        </h4>
+        <SolarLayoutDesigner
+          leadId={leadId}
+          lat={lat}
+          moduleMm={moduleMm}
+          moduleRatingW={moduleRatingW}
+          initialBlocks={initialBlocks}
+          canEdit={canEdit}
+        />
       </section>
 
       <PanelLayoutPanel
