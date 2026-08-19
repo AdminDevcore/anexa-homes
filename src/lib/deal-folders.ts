@@ -119,6 +119,31 @@ export function folderKeyFor(vertical: string | null | undefined, category: stri
   return foldersFor(vertical).some((f) => f.key === category) ? category : FALLBACK_FOLDER_KEY;
 }
 
+/**
+ * The files the folder grid should show.
+ *
+ * A completed e-signature package stores its countersigned PDF as a FileAsset
+ * with category "signed_contract" — a key neither folder set has, so it fell
+ * into "Other". Every signed contract ever produced therefore sat filed under
+ * "anything that does not fit above" while the Contract folder it belonged to
+ * was one tile away.
+ *
+ * Filing it into Contract would have listed the same document twice: once as
+ * the package row, once as a loose PDF. So the file is dropped and the row
+ * kept — the row links to the same PDF and carries the signing status a bare
+ * file cannot. A signed PDF whose package is gone has no row to stand in for
+ * it, so it stays visible in "Other" rather than disappearing.
+ */
+export function visibleFiles<T extends { id: string }>(
+  files: T[],
+  packages: { signedFileId: string | null }[],
+): T[] {
+  const signed = new Set(
+    packages.map((p) => p.signedFileId).filter((id): id is string => Boolean(id)),
+  );
+  return signed.size === 0 ? files : files.filter((f) => !signed.has(f.id));
+}
+
 export function folderLabel(vertical: string | null | undefined, key: string | null): string {
   return foldersFor(vertical).find((f) => f.key === key)?.label ?? "Other";
 }

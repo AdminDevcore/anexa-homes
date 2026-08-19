@@ -6,6 +6,7 @@ import {
   folderKeyFor,
   folderLabel,
   foldersFor,
+  visibleFiles,
 } from "../deal-folders";
 
 describe("foldersFor", () => {
@@ -173,5 +174,41 @@ describe("folderLabel", () => {
   it("falls back to Other for null and unknown keys", () => {
     expect(folderLabel("roofing", null)).toBe("Other");
     expect(folderLabel("roofing", "nonsense")).toBe("Other");
+  });
+});
+
+// The countersigned PDF is stored with category "signed_contract", which is in
+// neither folder set — so before this it landed in "Other" on every deal, on
+// both verticals, while the Contract folder sat one tile away. It is not filed
+// into Contract either: the package row already represents it there, and two
+// rows for one contract is its own kind of wrong.
+describe("visibleFiles", () => {
+  const pdf = { id: "f1", category: "signed_contract" };
+  const bill = { id: "f2", category: "utility_bill" };
+
+  it("drops the PDF that a package already represents", () => {
+    const out = visibleFiles([pdf, bill], [{ signedFileId: "f1" }]);
+    expect(out).toEqual([bill]);
+  });
+
+  it("leaves every other file alone", () => {
+    expect(visibleFiles([bill], [{ signedFileId: "f1" }])).toEqual([bill]);
+  });
+
+  it("keeps a signed PDF whose package is gone, rather than hiding it", () => {
+    // No row stands in for it, so it must stay reachable — in "Other", where
+    // an unrecognised category belongs.
+    expect(visibleFiles([pdf], [])).toEqual([pdf]);
+    expect(folderKeyFor("solar", pdf.category)).toBe(FALLBACK_FOLDER_KEY);
+    expect(folderKeyFor("roofing", pdf.category)).toBe(FALLBACK_FOLDER_KEY);
+  });
+
+  it("ignores packages that have not been signed yet", () => {
+    expect(visibleFiles([pdf, bill], [{ signedFileId: null }])).toEqual([pdf, bill]);
+  });
+
+  it("returns the same list untouched when nothing is signed", () => {
+    const files = [pdf, bill];
+    expect(visibleFiles(files, [])).toBe(files);
   });
 });

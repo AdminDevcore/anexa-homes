@@ -12,6 +12,7 @@ import {
   FALLBACK_FOLDER_KEY,
   folderKeyFor,
   foldersFor,
+  visibleFiles,
   type DealFolder,
 } from "@/lib/deal-folders";
 import type { PhotoGroup } from "@/lib/photo-groups";
@@ -33,6 +34,12 @@ export type FolderPackage = {
   id: string;
   title: string;
   status: string;
+  /**
+   * The countersigned PDF, once the package completes. The e-sign flow stores
+   * it as a FileAsset, so without this the same contract arrives twice: once as
+   * the package row, once as a loose file. See `signedFileIds` below.
+   */
+  signedFileId: string | null;
 };
 
 /**
@@ -65,18 +72,23 @@ export function DealFolders({
   const folders = foldersFor(vertical);
   const [openKey, setOpenKey] = React.useState<string | null>(null);
 
-  // Every file lands in exactly one folder; anything uncategorised or carrying a
-  // key this vertical doesn't know falls into "Other" rather than vanishing.
+  // A completed package's PDF is already on screen as the package row that
+  // produced it, so it is not also listed as a loose file. See visibleFiles.
+  const shown = React.useMemo(() => visibleFiles(files, packages), [files, packages]);
+
+  // Every remaining file lands in exactly one folder; anything uncategorised or
+  // carrying a key this vertical doesn't know falls into "Other" rather than
+  // vanishing.
   const byFolder = React.useMemo(() => {
     const map = new Map<string, FolderFile[]>();
-    for (const f of files) {
+    for (const f of shown) {
       const key = folderKeyFor(vertical, f.category);
       const bucket = map.get(key);
       if (bucket) bucket.push(f);
       else map.set(key, [f]);
     }
     return map;
-  }, [files, vertical]);
+  }, [shown, vertical]);
 
   const open = openKey ? folders.find((f) => f.key === openKey) ?? null : null;
 

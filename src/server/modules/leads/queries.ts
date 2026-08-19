@@ -65,7 +65,10 @@ export async function getLeadDetail(user: SessionUser, id: string) {
       },
       documentPackages: {
         orderBy: { createdAt: "desc" },
-        select: { id: true, title: true, status: true },
+        // signedFileId identifies the countersigned PDF the e-sign flow stores
+        // as a FileAsset. The folder grid needs it to recognise that file as
+        // this package rather than listing it a second time.
+        select: { id: true, title: true, status: true, signedFileId: true },
       },
     },
   });
