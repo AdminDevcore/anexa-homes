@@ -108,7 +108,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     icon: Landmark,
     title: "Lenders",
-    body: "Financing partners and the equipment each one approves.",
+    body: "Financing partners, the equipment each approves, and the terms they finance on.",
     href: "/portal/settings/solar-lenders",
     verticals: ["solar"],
   },

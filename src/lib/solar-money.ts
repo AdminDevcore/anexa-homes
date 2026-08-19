@@ -179,6 +179,74 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Lender products — what the money costs, and what it therefore has to sticker
+// ---------------------------------------------------------------------------
+
+/**
+ * The monthly payment on a loan, from the product's own terms.
+ *
+ * An ESTIMATE, and labelled as one wherever it is shown. Once a credit
+ * application comes back, `SolarFinance.loanMonthlyPaymentCents` holds the
+ * lender's own figure and that one wins everywhere — promotional periods, fees
+ * and re-amortisation all mean a computed number can differ from the one the
+ * customer is actually held to. This exists because a rep still has to quote a
+ * payment on the day, before any approval exists, and typing one from memory is
+ * how a transposed digit reaches a signed proposal.
+ *
+ * Returns null rather than a number whenever the terms cannot produce one. A
+ * payment of NaN or Infinity rendered to a homeowner is worse than no payment.
+ */
+export function loanPaymentCents(input: {
+  /** Contract price minus any down payment, cents. */
+  principalCents: number;
+  /** Null is read as 0% — the interest-free promotional case. */
+  aprPct: number | null;
+  termMonths: number | null;
+}): number | null {
+  const { principalCents, termMonths } = input;
+  const aprPct = input.aprPct ?? 0;
+
+  if (!termMonths || termMonths <= 0) return null;
+  if (!(principalCents > 0)) return null;
+  if (aprPct < 0) return null;
+
+  // r = 0 makes the amortisation formula 0/0, so interest-free is its own case
+  // rather than a limit the formula is trusted to reach.
+  if (aprPct === 0) return Math.round(principalCents / termMonths);
+
+  const r = aprPct / 100 / 12;
+  const payment = (principalCents * r) / (1 - Math.pow(1 + r, -termMonths));
+  return Number.isFinite(payment) ? Math.round(payment) : null;
+}
+
+/**
+ * The sticker price per watt that leaves `netPpwCents` after the lender's cut.
+ *
+ * The dealer fee is a percentage OF GROSS, not a markup on net, so this is
+ * `net / (1 - fee)` and not `net * (1 + fee)`. Getting that backwards
+ * under-prices an 18% fee by about three cents a watt — roughly $300 on a
+ * 10 kW system, silently, on every deal.
+ *
+ * Null when the arithmetic has no honest answer: a fee at or above 100% divides
+ * by zero or goes negative, and a sticker price of -$4.20/W would otherwise be
+ * quoted without complaint.
+ */
+export function grossPpwFromNet(netPpwCents: number, dealerFeePct: number): number | null {
+  if (!(netPpwCents > 0)) return null;
+  if (dealerFeePct < 0 || dealerFeePct >= 100) return null;
+  return Math.round(netPpwCents / (1 - dealerFeePct / 100));
+}
+
+/**
+ * A lease product prices per kW-DC per month; `priceThirdParty` takes a fixed
+ * monthly. This is the one line between them, kept here so the conversion is
+ * not re-derived at each call site.
+ */
+export function leaseMonthlyCents(rateCentsPerKwMonth: number, systemSizeKwDc: number): number {
+  return Math.round(rateCentsPerKwMonth * systemSizeKwDc);
+}
+
 /**
  * Estimated federal credit.
  *

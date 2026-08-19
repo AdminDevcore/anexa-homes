@@ -185,11 +185,15 @@ export async function generateSolarProposalAction(leadId: string) {
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.aprPct,
-      // NOTE: downPaymentCents / loanMonthlyPaymentCents are deliberately NOT
-      // in this snapshot. The snapshot is what the customer was shown, frozen;
-      // putting a figure in it that the public proposal does not render would
-      // freeze something nobody saw. Add both here and to the proposal layout
-      // together, or not at all.
+      // These three arrived together with the loan payment row on the customer
+      // proposal, which is the condition the previous note here set: the
+      // snapshot is what the customer was SHOWN, frozen, so a figure goes in
+      // only once the layout renders it. The proposal now shows a monthly for a
+      // loan — the lender's approved figure when one exists, otherwise the
+      // product's terms amortised — and these are what it is computed from.
+      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
+      loanTermMonths: finance.loanTermMonths,
+      downPaymentCents: finance.downPaymentCents,
     },
     lender: approvedCredit?.lender ?? null,
     assumptions,

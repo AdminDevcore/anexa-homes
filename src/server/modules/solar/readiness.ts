@@ -30,6 +30,7 @@ export async function readSolarReadiness(
         systemSizeKwDc: true, year1ProductionKwh: true, annualUsageKwh: true,
         offsetPct: true, moduleQty: true, tsrfPct: true, avgMonthlyBillCents: true,
         ratePlan: true, utilityProvider: true, batteryId: true, layoutImageFileId: true,
+        lenderId: true,
         module: { select: { ratingW: true } },
       },
     }),
@@ -74,9 +75,39 @@ export async function readSolarReadiness(
     return { ok: true, issues };
   }
 
+  // Quoted from the rate sheet, or from memory?
+  //
+  // Only asked when there IS a rate sheet to quote from: a company that has not
+  // entered its lenders' terms yet still sells deals, and blocking every one of
+  // them on a catalogue nobody has filled in would be a migration that broke
+  // production. So the finding appears exactly when the terms exist and the deal
+  // ignores them.
+  const productIssues: ValidationIssue[] = [];
+  if (finance.product !== "cash" && !finance.lenderProductId && design.lenderId) {
+    const available = await prisma.solarLenderProduct.count({
+      where: {
+        companyId,
+        lenderId: design.lenderId,
+        product: finance.product,
+        isActive: true,
+      },
+    });
+    if (available > 0) {
+      productIssues.push({
+        severity: "block",
+        code: "finance.no_product",
+        group: "financing",
+        field: "lenderProductId",
+        message:
+          "This deal is not quoted from any of the lender's products, so its terms are typed rather than priced.",
+        action: { label: "Open financing", href: builderHref(leadId, "financing") },
+      });
+    }
+  }
+
   return {
     ok: true,
-    issues: validateProposalReadiness({
+    issues: [...productIssues, ...validateProposalReadiness({
       leadId,
       customer: {
         firstName: lead.firstName, lastName: lead.lastName, address: lead.address,
@@ -116,6 +147,6 @@ export async function readSolarReadiness(
       },
       assumptions,
       incentiveDisclaimer: assumptions.incentiveDisclaimer,
-    }),
+    })],
   };
 }

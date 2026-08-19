@@ -31,6 +31,12 @@ export type SolarSettingsView = SolarAssumptions & {
   /// by the utility rather than by the house, so it is one value here instead
   /// of one retyped onto every design.
   netMeteringProgram: string | null;
+  /// What the company must keep per watt after the lender's cut, cents.
+  ///
+  /// NOT part of SolarAssumptions: those are the physics-and-incentives inputs
+  /// every pure calculation shares, and this one only ever reaches the sticker
+  /// price. Null — the default — means derive nothing and leave gross as typed.
+  targetNetPpwCents: number | null;
 };
 
 export async function getSolarSettings(companyId: string): Promise<SolarSettingsView> {
@@ -40,6 +46,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
       ...SOLAR_ASSUMPTION_DEFAULTS,
       stateIncentiveNote: null,
       netMeteringProgram: null,
+      targetNetPpwCents: null,
       incentiveDisclaimer:
         "Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.",
     };
@@ -58,6 +65,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     maxPpwCents: row.maxPpwCents,
     stateIncentiveNote: row.stateIncentiveNote,
     netMeteringProgram: row.netMeteringProgram,
+    targetNetPpwCents: row.targetNetPpwCents,
     incentiveDisclaimer: row.incentiveDisclaimer,
   };
 }

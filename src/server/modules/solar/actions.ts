@@ -26,6 +26,9 @@ const settingsSchema = z.object({
   kwhPerKwYear: z.number().int().min(500).max(2500),
   defaultGrossPpwCents: z.number().int().min(50).max(2000),
   defaultDealerFeePct: z.number().min(0).max(50),
+  // Null is meaningful and is the default: derive nothing, leave the sticker as
+  // the rep typed it. Set, and gross is computed from the product's dealer fee.
+  targetNetPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
   // Nullable ON PURPOSE: unset means "show no federal credit", which is the
   // right default while the 2025 rule changes settle. Never defaulted to 30.
   federalItcPct: z.number().min(0).max(100).nullable(),
@@ -266,6 +269,9 @@ const financeSchema = z.object({
   loanTermMonths: z.number().int().min(0).max(600).nullable().optional(),
   downPaymentCents: z.number().int().min(0).nullable().optional(),
   loanMonthlyPaymentCents: z.number().int().min(0).nullable().optional(),
+  /// Which catalogue product this is quoted from. Its terms are read from the
+  /// database, never from the client — see below.
+  lenderProductId: z.string().nullable().optional(),
 });
 
 /**
@@ -294,14 +300,36 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 
   const design = await prisma.solarDesign.findUnique({
     where: { leadId: f.leadId },
-    select: { systemSizeKwDc: true },
+    select: { systemSizeKwDc: true, lenderId: true },
   });
+
+  // The quoted product's terms are READ HERE, from the row, and never taken
+  // from the request. A rate sheet a caller can post arbitrary terms against is
+  // not a rate sheet — the APR a customer is quoted has to be one this lender
+  // actually offers. Scoped to the company, and to the lender the system was
+  // designed for, so a product id from elsewhere resolves to nothing.
+  const lenderProduct = f.lenderProductId
+    ? await prisma.solarLenderProduct.findFirst({
+        where: {
+          id: f.lenderProductId,
+          companyId: user.companyId,
+          ...(design?.lenderId ? { lenderId: design.lenderId } : {}),
+        },
+        select: {
+          id: true, product: true, aprPct: true, termMonths: true, dealerFeePct: true,
+          leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true, escalatorPct: true,
+          termYears: true,
+        },
+      })
+    : null;
 
   // Every product-specific column is gated on the product — see
   // financeRowForProduct for why "most of them" was a customer-facing defect.
   const data = financeRowForProduct(f, {
     systemSizeKwDc: design?.systemSizeKwDc ?? 0,
     assumptions,
+    lenderProduct,
+    targetNetPpwCents: assumptions.targetNetPpwCents,
   });
 
   const saved = await prisma.solarFinance.upsert({
@@ -313,6 +341,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       contractPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
       monthlyPaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,
       loanTermMonths: true, downPaymentCents: true, loanMonthlyPaymentCents: true,
+      lenderProductId: true,
     },
   });
 

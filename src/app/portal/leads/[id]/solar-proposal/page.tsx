@@ -62,10 +62,43 @@ export default async function SolarProposalBuilderPage({
   // builder rather than staring at an empty solar design form.
   if (lead.vertical !== "solar") redirect(`/portal/leads/${id}/presentation`);
 
-  const [design, finance, settings, proposals] = await Promise.all([
-    prisma.solarDesign.findUnique({ where: { leadId: lead.id } }),
+  // The design is read FIRST: which lender this system is being built for
+  // decides whose rate sheet step 2 may quote from. The lender itself is chosen
+  // on the deal, alongside the equipment it constrains.
+  const design = await prisma.solarDesign.findUnique({ where: { leadId: lead.id } });
+
+  // Read before the batch for the same reason: the rate-sheet query needs to
+  // know which product this deal already quotes, so a retired one stays
+  // selectable rather than silently falling back to "— none —".
+  const finance0 = await prisma.solarFinance.findUnique({
+    where: { leadId: lead.id },
+    select: { lenderProductId: true },
+  });
+
+  const [finance, settings, lender, lenderProducts, proposals] = await Promise.all([
     prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
     getSolarSettings(user.companyId),
+    design?.lenderId
+      ? prisma.solarLender.findFirst({
+          where: { companyId: user.companyId, id: design.lenderId },
+          select: { name: true },
+        })
+      : Promise.resolve(null),
+    // That lender's rate sheet: sellable rows, PLUS whatever this deal is
+    // already quoted from even if it has since been retired.
+    design?.lenderId
+      ? prisma.solarLenderProduct.findMany({
+          where: {
+            companyId: user.companyId,
+            lenderId: design.lenderId,
+            OR: [
+              { isActive: true },
+              ...(finance0?.lenderProductId ? [{ id: finance0.lenderProductId }] : []),
+            ],
+          },
+          orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
+        })
+      : Promise.resolve([]),
     prisma.solarProposal.findMany({
       where: { companyId: user.companyId, leadId: lead.id },
       orderBy: { version: "desc" },
@@ -123,6 +156,22 @@ export default async function SolarProposalBuilderPage({
         finance={finance}
         itcDisclaimer={settings?.incentiveDisclaimer ?? ""}
         federalItcPct={settings?.federalItcPct ?? null}
+        lenderName={lender?.name ?? null}
+        lenderProducts={lenderProducts.map((p) => ({
+          id: p.id,
+          product: p.product,
+          name: p.name,
+          aprPct: p.aprPct,
+          termMonths: p.termMonths,
+          dealerFeePct: p.dealerFeePct,
+          leaseRateCentsPerKwMonth: p.leaseRateCentsPerKwMonth,
+          rateMillsPerKwh: p.rateMillsPerKwh,
+          escalatorPct: p.escalatorPct,
+          termYears: p.termYears,
+          isActive: p.isActive,
+        }))}
+        targetNetPpwCents={settings?.targetNetPpwCents ?? null}
+        systemSizeKwDc={design?.systemSizeKwDc ?? 0}
         layoutAvailable={layoutAvailable}
         canApproveLayout={can(user, "update", "Settings")}
         lat={lead.lat}

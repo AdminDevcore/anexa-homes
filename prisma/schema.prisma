@@ -358,6 +358,7 @@ model Company {
   solarProposals           SolarProposal[]
   solarMilestones          SolarMilestone[]
   solarLenders             SolarLender[]
+  solarLenderProducts      SolarLenderProduct[]
   dealFeedPosts            DealFeedPost[]
 
   @@map("companies")
@@ -1139,7 +1140,6 @@ model Note {
 
 /**
  * Where a file is allowed to be seen.
- *
  * The table already isolated deal files through their PARENT lead/project, which
  * works and is what the file-serve route enforces. What it could not express was
  * a file with no parent: the branding logo, a GL receipt and a Solar training PDF
@@ -2610,7 +2610,16 @@ model SolarSettings {
   /// Default gross price per watt, in cents (e.g. 350 = $3.50/W).
   defaultGrossPpwCents Int   @default(350)
   /// Lender dealer fee as a % of gross. Applies to LOAN only — cash has none.
+  /// The fallback when a deal quotes no lender product; a product's own fee wins.
   defaultDealerFeePct  Float @default(18)
+  /// What the company must keep per watt after the lender's cut, cents.
+  ///
+  /// Set this and the sticker is DERIVED from the chosen product's dealer fee —
+  /// `gross = net / (1 - fee)` — so moving a deal onto cheaper money raises the
+  /// price instead of quietly costing margin. Null = derive nothing and leave
+  /// gross exactly as typed, which is how every existing company behaves until
+  /// somebody sets it.
+  targetNetPpwCents    Int?
 
   // ── Incentives ──────────────────────────────────────────────────────────
   /// Federal credit %, as an ESTIMATE. NOT hardcoded anywhere in code: the
@@ -2660,22 +2669,90 @@ model SolarLender {
   /// Isolated per vertical: this row belongs to exactly one workspace.
   vertical  Vertical @default(solar)
 
-  name      String
+  name     String
   /// Retired rather than deleted, for the same reason equipment is: designs
   /// point at it, and last year's deals have to keep explaining themselves.
-  isActive  Boolean  @default(true)
+  isActive Boolean @default(true)
   /// Display order, so the lenders you use most lead.
-  rank      Int      @default(0)
-  notes     String?
+  rank     Int     @default(0)
+  notes    String?
 
   approvals SolarEquipmentLender[]
   designs   SolarDesign[]
+  /// What this lender actually finances, and on what terms.
+  products  SolarLenderProduct[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([companyId, isActive])
   @@map("solar_lenders")
+}
+
+/// One thing a lender will actually finance, on stated terms.
+///
+/// A rate sheet is a list of these: 25 years at 4.99% costs an 18% dealer fee,
+/// the same term at 3.99% costs 28%. Each combination is a row, because each is
+/// separately sellable and separately priced.
+///
+/// The terms are COPIED onto a deal when a rep picks the product, never read
+/// through the relation at render time. Next quarter's rate sheet must not
+/// silently re-term a proposal a customer already signed — the same reasoning
+/// that made retiring equipment the answer instead of deleting it.
+///
+/// One table with per-product columns rather than three tables, matching
+/// SolarFinance, which holds the same four products the same way. Which columns
+/// a row must carry is enforced where it is written, not by the column types.
+model SolarLenderProduct {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+
+  lenderId String
+  lender   SolarLender @relation(fields: [lenderId], references: [id], onDelete: Cascade)
+
+  /// Which finance product this prices. Never `cash`: cash has no lender, and a
+  /// cash deal quoted with a dealer fee is simply overpriced.
+  product FinanceProduct
+
+  /// Optional label. Empty falls back to a name derived from the terms, so a
+  /// rate sheet can be entered without inventing names for forty rows.
+  name String?
+
+  // ── Loan ────────────────────────────────────────────────────────────────
+  aprPct       Float?
+  termMonths   Int?
+  /// The lender's cut, as a % of gross. Drives the derived sticker price.
+  dealerFeePct Float?
+
+  // ── Lease ───────────────────────────────────────────────────────────────
+  /// Price per kW-DC per month, cents. Multiplied by system size to get the
+  /// fixed monthly that priceThirdParty already consumes.
+  leaseRateCentsPerKwMonth Int?
+
+  // ── PPA ─────────────────────────────────────────────────────────────────
+  /// Price per kWh in mills (tenths of a cent), matching SolarFinance.
+  rateMillsPerKwh Int?
+
+  // ── Lease & PPA ─────────────────────────────────────────────────────────
+  escalatorPct Float?
+  termYears    Int?
+
+  /// Retired rather than deleted while any deal quotes it.
+  isActive Boolean @default(true)
+  /// Display order, so the products you lead with lead.
+  rank     Int     @default(0)
+
+  quotedOn SolarFinance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, isActive])
+  @@index([lenderId, product, isActive])
+  @@map("solar_lender_products")
 }
 
 /// Which lenders approve which equipment. Many-to-many, because a panel is
@@ -2740,9 +2817,9 @@ model SolarEquipment {
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
-  designsAsModule   SolarDesign[] @relation("DesignModule")
-  designsAsInverter SolarDesign[] @relation("DesignInverter")
-  designsAsBattery  SolarDesign[] @relation("DesignBattery")
+  designsAsModule   SolarDesign[]          @relation("DesignModule")
+  designsAsInverter SolarDesign[]          @relation("DesignInverter")
+  designsAsBattery  SolarDesign[]          @relation("DesignBattery")
   /// Which lenders' approved-vendor lists this item appears on.
   lenderApprovals   SolarEquipmentLender[]
 
@@ -2864,6 +2941,13 @@ model SolarFinance {
 
   product FinanceProduct @default(cash)
 
+  /// The catalogue product this was quoted from, for provenance only. The terms
+  /// below are COPIES taken when the rep picked it: re-reading them through this
+  /// relation would let a rate-sheet edit re-term a signed proposal.
+  /// Null on cash, and on any deal quoted before the catalogue existed.
+  lenderProductId String?
+  lenderProduct   SolarLenderProduct? @relation(fields: [lenderProductId], references: [id], onDelete: SetNull)
+
   // ── Cash / Loan ─────────────────────────────────────────────────────────
   /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
   grossPpwCents      Int   @default(0)
@@ -2962,7 +3046,6 @@ model SolarProposal {
   status      ProposalStatus @default(draft)
   /**
    * The shareable customer link (/proposal/[token]).
-   *
    * NULL until the proposal is actually SENT. Generating one is an internal act
    * — a rep checking their own work — and it used to mint a live, unguessable
    * but fully working public URL as a side effect. Every draft anybody had ever
@@ -2970,7 +3053,6 @@ model SolarProposal {
    * leaked through a screenshot; nobody had to click "share" for that to be
    * true. Minting on send instead means an unsent proposal has no public
    * surface at all.
-   *
    * Unique still holds: Postgres treats NULLs as distinct, so any number of
    * unsent proposals can sit at NULL while every real token stays one-to-one.
    * The public route ALSO checks status, so a token alone is not access.

@@ -5,6 +5,7 @@ import {
   itcEstimateCents,
   productionInYear,
   deriveUtilityRateMills,
+  loanPaymentCents,
   type SolarAssumptions,
   type PurchaseBreakdown,
   type ThirdPartyBreakdown,
@@ -283,6 +284,14 @@ export type SolarProposalSnapshot = {
     escalatorPct: number | null;
     termYears: number | null;
     aprPct: number | null;
+    /** Loan only: what the customer pays each month. */
+    loanMonthlyPaymentCents: number | null;
+    /**
+     * True when that figure is the lender's own from an approval, false when it
+     * is amortised from the quoted product. The document says which, because a
+     * homeowner reading a payment is entitled to know whether it is settled.
+     */
+    loanPaymentApproved: boolean;
     lender: string | null;
     /** Null when the company has not configured a credit — the line is omitted. */
     itcEstimateCents: number | null;
@@ -341,6 +350,10 @@ export function buildProposalSnapshot(args: {
     escalatorPct: number | null;
     termYears: number | null;
     aprPct: number | null;
+    /** Loan only. The lender's own figure once an approval exists. */
+    loanMonthlyPaymentCents?: number | null;
+    loanTermMonths?: number | null;
+    downPaymentCents?: number | null;
   };
   lender: string | null;
   assumptions: SolarAssumptions;
@@ -461,6 +474,22 @@ export function buildProposalSnapshot(args: {
       escalatorPct: isPurchase ? null : finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.product === "loan" ? finance.aprPct : null,
+      // The lender's approved figure if there is one; otherwise the product's
+      // own terms, amortised. Never both, and never a stale one from a product
+      // this deal has since moved off.
+      loanMonthlyPaymentCents:
+        finance.product === "loan"
+          ? (finance.loanMonthlyPaymentCents ??
+            loanPaymentCents({
+              principalCents:
+                (purchase?.contractPriceCents ?? 0) - (finance.downPaymentCents ?? 0),
+              aprPct: finance.aprPct,
+              termMonths: finance.loanTermMonths ?? null,
+            }) ??
+            null)
+          : null,
+      loanPaymentApproved:
+        finance.product === "loan" && finance.loanMonthlyPaymentCents != null,
       lender: finance.product === "loan" ? args.lender : null,
       // Null, not zero: an unconfigured credit omits the line entirely rather
       // than showing the customer "$0 federal credit".

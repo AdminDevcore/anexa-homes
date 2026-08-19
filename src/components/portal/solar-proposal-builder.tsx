@@ -9,6 +9,7 @@ import {
   SolarDesignPanel,
   SolarFinancePanel,
   SolarProposalGate,
+  type LenderProductOption,
   type ProposalVersion,
   type SolarDesignView,
   type SolarFinanceView,
@@ -40,6 +41,10 @@ export function SolarProposalBuilder({
   finance,
   itcDisclaimer,
   federalItcPct,
+  lenderName,
+  lenderProducts,
+  targetNetPpwCents,
+  systemSizeKwDc,
   versions,
   layoutAvailable,
   canApproveLayout,
@@ -63,6 +68,12 @@ export function SolarProposalBuilder({
   finance: SolarFinanceView;
   itcDisclaimer: string;
   federalItcPct: number | null;
+  /** The lender step 1 designed this system for, if one was chosen. */
+  lenderName: string | null;
+  /** That lender's rate sheet — see SolarFinancePanel. */
+  lenderProducts: LenderProductOption[];
+  targetNetPpwCents: number | null;
+  systemSizeKwDc: number;
   versions: ProposalVersion[];
   /** Resolved server-side: the layout file row AND its bytes both exist. */
   layoutAvailable: boolean;
@@ -123,6 +134,10 @@ export function SolarProposalBuilder({
           itcDisclaimer={itcDisclaimer}
           federalItcPct={federalItcPct}
           canEdit={canEditDeal}
+          lenderName={lenderName}
+          products={lenderProducts}
+          targetNetPpwCents={targetNetPpwCents}
+          systemSizeKwDc={systemSizeKwDc}
         />
         <NextStep label="Next: Generate & send" onClick={() => setStep("generate")} />
       </StepPanel>

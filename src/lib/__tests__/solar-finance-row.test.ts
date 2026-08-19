@@ -153,3 +153,139 @@ describe("defaults come from settings, never from a constant", () => {
     expect(configured.itcEstimateCents).toBe(Math.round(configured.contractPriceCents * 0.3));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lender products
+// ---------------------------------------------------------------------------
+
+const LOAN_PRODUCT = {
+  id: "prod-loan",
+  product: "loan" as const,
+  aprPct: 4.99,
+  termMonths: 300,
+  dealerFeePct: 18,
+  leaseRateCentsPerKwMonth: null,
+  rateMillsPerKwh: null,
+  escalatorPct: null,
+  termYears: null,
+};
+
+const PPA_PRODUCT = {
+  id: "prod-ppa",
+  product: "ppa" as const,
+  aprPct: null,
+  termMonths: null,
+  dealerFeePct: null,
+  leaseRateCentsPerKwMonth: null,
+  rateMillsPerKwh: 145,
+  escalatorPct: 2.9,
+  termYears: 25,
+};
+
+const LEASE_PRODUCT = {
+  id: "prod-lease",
+  product: "lease" as const,
+  aprPct: null,
+  termMonths: null,
+  dealerFeePct: null,
+  leaseRateCentsPerKwMonth: 1240,
+  rateMillsPerKwh: null,
+  escalatorPct: 2.9,
+  termYears: 25,
+};
+
+/**
+ * A quoted product is a rate sheet, so its terms are the terms. What the client
+ * sent for those particular fields is ignored — otherwise the catalogue would
+ * be a suggestion and every deal could carry an APR no lender ever offered.
+ */
+describe("financeRowForProduct with a lender product", () => {
+  it("takes the loan's terms from the product, not from the form", () => {
+    const row = financeRowForProduct(
+      { product: "loan", aprPct: 1.99, loanTermMonths: 60, dealerFeePct: 0 },
+      { ...CTX, lenderProduct: LOAN_PRODUCT }
+    );
+    expect(row.aprPct).toBe(4.99);
+    expect(row.loanTermMonths).toBe(300);
+    expect(row.dealerFeePct).toBe(18);
+    expect(row.lenderProductId).toBe("prod-loan");
+  });
+
+  it("derives the sticker from the net target and the product's fee", () => {
+    // 287 net at an 18% fee has to sticker at 350.
+    const row = financeRowForProduct(
+      { product: "loan" },
+      { ...CTX, lenderProduct: LOAN_PRODUCT, targetNetPpwCents: 287 }
+    );
+    expect(row.grossPpwCents).toBe(350);
+  });
+
+  it("lets a typed price beat the derived one", () => {
+    // Overriding has to mean something. Saving 350 over a rep's 375 without
+    // saying so is worse than not offering the field.
+    const row = financeRowForProduct(
+      { product: "loan", grossPpwCents: 375 },
+      { ...CTX, lenderProduct: LOAN_PRODUCT, targetNetPpwCents: 287 }
+    );
+    expect(row.grossPpwCents).toBe(375);
+  });
+
+  it("leaves the sticker as typed when no net target is set", () => {
+    const row = financeRowForProduct(
+      { product: "loan", grossPpwCents: 365 },
+      { ...CTX, lenderProduct: LOAN_PRODUCT }
+    );
+    expect(row.grossPpwCents).toBe(365);
+  });
+
+  it("turns a lease product's per-kW rate into this system's monthly", () => {
+    // $12.40/kW-month on a 10 kW system is $124.00.
+    const row = financeRowForProduct(
+      { product: "lease", monthlyPaymentCents: 1 },
+      { ...CTX, lenderProduct: LEASE_PRODUCT }
+    );
+    expect(row.monthlyPaymentCents).toBe(12_400);
+    expect(row.escalatorPct).toBe(2.9);
+    expect(row.termYears).toBe(25);
+  });
+
+  it("takes a PPA's rate and escalator from the product", () => {
+    const row = financeRowForProduct(
+      { product: "ppa", rateMillsPerKwh: 999, escalatorPct: 9 },
+      { ...CTX, lenderProduct: PPA_PRODUCT }
+    );
+    expect(row.rateMillsPerKwh).toBe(145);
+    expect(row.escalatorPct).toBe(2.9);
+    expect(row.termYears).toBe(25);
+  });
+
+  it("ignores a product of the wrong type rather than mixing the two", () => {
+    // The rep switched product after choosing; a PPA rate must never reach a
+    // loan row, and the stale pointer must not survive either.
+    const row = financeRowForProduct(
+      { product: "loan", aprPct: 3.5, loanTermMonths: 120 },
+      { ...CTX, lenderProduct: PPA_PRODUCT }
+    );
+    expect(row.lenderProductId).toBeNull();
+    expect(row.rateMillsPerKwh).toBeNull();
+    expect(row.aprPct).toBe(3.5);
+  });
+
+  it("never carries a product onto a cash deal", () => {
+    // Cash has no lender, so it can have no lender product.
+    const row = financeRowForProduct({ product: "cash" }, { ...CTX, lenderProduct: LOAN_PRODUCT });
+    expect(row.lenderProductId).toBeNull();
+    expect(row.dealerFeePct).toBe(0);
+    expect(row.aprPct).toBeNull();
+  });
+
+  it("keeps the approved monthly payment, which is not the product's to set", () => {
+    // The product prices an ESTIMATE; this figure came back from a real credit
+    // approval and outranks it.
+    const row = financeRowForProduct(
+      { product: "loan", loanMonthlyPaymentCents: 20_113 },
+      { ...CTX, lenderProduct: LOAN_PRODUCT }
+    );
+    expect(row.loanMonthlyPaymentCents).toBe(20_113);
+  });
+});

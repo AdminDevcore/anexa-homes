@@ -20,6 +20,8 @@ import {
 } from "@/lib/solar-validation";
 import type { LayoutBlock } from "@/lib/solar-layout";
 import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
+import { loanPaymentCents, grossPpwFromNet, leaseMonthlyCents } from "@/lib/solar-money";
+import { lenderProductLabel } from "@/lib/solar-lender-product";
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
@@ -232,6 +234,9 @@ export type SolarFinanceView = {
   loanTermMonths: number | null;
   downPaymentCents: number | null;
   loanMonthlyPaymentCents: number | null;
+  /// Which rate-sheet row this was quoted from. Provenance: the terms above are
+  /// copies taken when the rep chose it.
+  lenderProductId: string | null;
 } | null;
 
 const PRODUCTS: { value: FinanceProduct; label: string; blurb: string }[] = [
@@ -545,22 +550,133 @@ export function SolarDesignPanel({
   );
 }
 
+export type LenderProductOption = {
+  id: string;
+  product: FinanceProduct;
+  name: string | null;
+  aprPct: number | null;
+  termMonths: number | null;
+  dealerFeePct: number | null;
+  leaseRateCentsPerKwMonth: number | null;
+  rateMillsPerKwh: number | null;
+  escalatorPct: number | null;
+  termYears: number | null;
+  isActive: boolean;
+};
+
+/**
+ * A blank box is "not set"; a typed 0 is a real zero. Module scope so the live
+ * quote can use the same rule as the save path — two readings of "0" is how a
+ * 0% escalator becomes an empty column.
+ */
+const numOrNullPure = (s: string, scale = 1) =>
+  s.trim() === "" ? null : Number.isFinite(Number(s)) ? Math.round(Number(s) * scale) : null;
+
+/**
+ * Which of the lender's terms this deal is quoted on.
+ *
+ * The lender itself is chosen in step 1, where it also decides what equipment
+ * the design may use. Offering a second lender control here would be two
+ * controls writing one field, and a rep could quote Credit Human's money
+ * against panels only Sunlight approves.
+ */
+function LenderProductPicker({
+  leadId,
+  lenderName,
+  products,
+  value,
+  onChange,
+  canEdit,
+}: {
+  leadId: string;
+  lenderName: string | null;
+  products: LenderProductOption[];
+  value: string;
+  onChange: (v: string) => void;
+  canEdit: boolean;
+}) {
+  const id = React.useId();
+
+  if (!lenderName) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        No lender chosen yet, so there are no terms to quote. Pick one on the deal — it also decides
+        which equipment this system can use.{" "}
+        <Link href={`/portal/leads/${leadId}`} className="font-medium underline underline-offset-2">
+          Open the deal →
+        </Link>
+      </div>
+    );
+  }
+
+  if (products.length === 0) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        {lenderName} has no products of this type on its rate sheet. Add them in{" "}
+        <a className="font-medium underline underline-offset-2" href="/portal/settings/solar-lenders">
+          Settings › Lenders
+        </a>
+        , or keep entering the terms by hand below.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id} className="text-xs">
+        {lenderName} product
+      </Label>
+      <select
+        id={id}
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
+        value={value}
+        disabled={!canEdit}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">— none —</option>
+        {products.map((p) => (
+          <option key={p.id} value={p.id}>
+            {lenderProductLabel(p)}
+            {p.isActive ? "" : " · retired"}
+          </option>
+        ))}
+      </select>
+      <p className="text-[11px] text-muted-foreground">
+        Its terms are the terms: APR, term and dealer fee come from the rate sheet, not from this
+        screen.
+      </p>
+    </div>
+  );
+}
+
 export function SolarFinancePanel({
   leadId,
   finance,
   itcDisclaimer,
   federalItcPct,
   canEdit,
+  lenderName,
+  products,
+  targetNetPpwCents,
+  systemSizeKwDc,
 }: {
   leadId: string;
   finance: SolarFinanceView;
   itcDisclaimer: string;
   federalItcPct: number | null;
   canEdit: boolean;
+  /** The lender chosen in step 1. Null when the design has not picked one. */
+  lenderName: string | null;
+  /** That lender's rate sheet: sellable rows, plus whatever this deal quotes. */
+  products: LenderProductOption[];
+  targetNetPpwCents: number | null;
+  /** Needed to price a lease, which is quoted per kW-month. */
+  systemSizeKwDc: number;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [product, setProduct] = React.useState<FinanceProduct>(finance?.product ?? "cash");
+  const [lenderProductId, setLenderProductId] = React.useState<string>(finance?.lenderProductId ?? "");
   const seed = (f: SolarFinanceView) => ({
     grossPpw: num(f?.grossPpwCents, 100, 2),
     dealerFeePct: num(f?.dealerFeePct),
@@ -578,6 +694,79 @@ export function SolarFinancePanel({
   const set = (k: keyof ReturnType<typeof seed>, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const isPurchase = product === "cash" || product === "loan";
   const isLoan = product === "loan";
+
+  const chosen = products.find((p) => p.id === lenderProductId && p.product === product) ?? null;
+
+  /**
+   * Choosing a product writes the derived sticker straight into the box.
+   *
+   * The box has to show what will be saved. Leaving the rep's old $3.50 on
+   * screen while the quote beside it prices $3.99 is two numbers for one field,
+   * and only one of them survives Save. Typing over it afterwards still wins —
+   * the server keeps a price it is sent and derives only when it is sent none.
+   */
+  const applyProduct = (id: string) => {
+    setLenderProductId(id);
+    const p = products.find((x) => x.id === id && x.product === product);
+    if (!p || targetNetPpwCents == null || p.dealerFeePct == null) return;
+    const gross = grossPpwFromNet(targetNetPpwCents, p.dealerFeePct);
+    if (gross != null) setForm((f) => ({ ...f, grossPpw: (gross / 100).toFixed(2) }));
+  };
+
+  /**
+   * What this deal costs a month, live, before anything is saved.
+   *
+   * Mirrors the server rather than reading a stored figure: the rep changes the
+   * product, the sticker and the payment move with it, and Save then writes the
+   * same numbers because both sides compute them the same way.
+   */
+  const quote = React.useMemo(() => {
+    const approvedCents = numOrNullPure(form.loanMonthly, 100);
+    if (isLoan && approvedCents != null) {
+      return { monthlyCents: approvedCents, approved: true, grossPpwCents: null, derivedGross: false };
+    }
+    if (!chosen) return null;
+
+    if (product === "lease" && chosen.leaseRateCentsPerKwMonth != null) {
+      return {
+        monthlyCents: leaseMonthlyCents(chosen.leaseRateCentsPerKwMonth, systemSizeKwDc),
+        approved: false,
+        grossPpwCents: null,
+        derivedGross: false,
+      };
+    }
+    if (product === "ppa") return null; // priced per kWh produced, not per month
+
+    if (!isLoan) return null;
+
+    // Read from the box, which applyProduct has already filled with the derived
+    // figure. One number on screen, and it is the one that saves.
+    const grossPpwCents = numOrNullPure(form.grossPpw, 100);
+    if (grossPpwCents == null) return null;
+    const derived =
+      targetNetPpwCents != null && chosen.dealerFeePct != null
+        ? grossPpwFromNet(targetNetPpwCents, chosen.dealerFeePct)
+        : null;
+
+    const contractCents =
+      Math.round(systemSizeKwDc * 1000 * grossPpwCents) + (numOrNullPure(form.adderTotal, 100) ?? 0);
+    const principal = contractCents - (numOrNullPure(form.downPayment, 100) ?? 0);
+    const monthlyCents = loanPaymentCents({
+      principalCents: principal,
+      aprPct: chosen.aprPct,
+      termMonths: chosen.termMonths,
+    });
+    if (monthlyCents == null) return null;
+    return {
+      monthlyCents,
+      approved: false,
+      grossPpwCents,
+      derivedGross: derived != null && derived === grossPpwCents,
+    };
+  }, [
+    chosen, product, isLoan, systemSizeKwDc, targetNetPpwCents,
+    form.grossPpw, form.adderTotal, form.downPayment, form.loanMonthly,
+  ]);
 
   // A blank box means "not set" (null); a typed "0" is a real zero and is sent
   // as one. `form.x ? … : null` is safe here ONLY because these are STRINGS —
@@ -610,6 +799,7 @@ export function SolarFinancePanel({
       loanTermMonths: rawOrNull(form.loanTermMonths),
       downPaymentCents: numOrNull(form.downPayment, 100),
       loanMonthlyPaymentCents: numOrNull(form.loanMonthly, 100),
+      lenderProductId: lenderProductId || null,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -619,6 +809,7 @@ export function SolarFinancePanel({
     if ("finance" in res && res.finance) {
       setForm(seed(res.finance));
       setProduct(res.finance.product);
+      setLenderProductId(res.finance.lenderProductId ?? "");
     }
     toast.success("Financing saved");
     router.refresh();
@@ -642,6 +833,49 @@ export function SolarFinancePanel({
           </button>
         ))}
       </div>
+
+      {/* The lender's rate sheet. Only for products a lender actually finances —
+          cash has none — and only for the lender step 1 designed the system for,
+          because that lender already decided what equipment is on the roof. */}
+      {product !== "cash" && (
+        <LenderProductPicker
+          leadId={leadId}
+          lenderName={lenderName}
+          products={products.filter((p) => p.product === product)}
+          value={lenderProductId}
+          onChange={applyProduct}
+          canEdit={canEdit}
+        />
+      )}
+
+      {quote && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            {quote.grossPpwCents != null && (
+              <span className="text-xs text-muted-foreground">
+                gross{" "}
+                <span className="font-medium text-foreground">
+                  ${(quote.grossPpwCents / 100).toFixed(2)}/W
+                </span>
+                {quote.derivedGross && " · derived from the net target"}
+              </span>
+            )}
+            <span className="ml-auto">
+              <span className="text-xs text-muted-foreground">
+                {quote.approved ? "Monthly (approved)" : "Monthly (est.)"}
+              </span>{" "}
+              <span className="text-lg font-semibold tabular-nums">
+                ${(quote.monthlyCents / 100).toFixed(2)}
+              </span>
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {quote.approved
+              ? "The lender's own figure from the approval. This is what the customer sees."
+              : "Estimated from the product's terms. The lender's approved figure replaces it below."}
+          </p>
+        </div>
+      )}
 
       {/* The two product families take completely different inputs. Showing the
           wrong ones is how a PPA ends up quoted with a dealer fee. */}

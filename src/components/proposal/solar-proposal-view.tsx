@@ -321,6 +321,16 @@ export function SolarProposalView({
           {f.escalatorPct != null && <Row k="Annual increase" v={pct(f.escalatorPct)} />}
           {f.termYears != null && <Row k="Term" v={`${f.termYears} years`} />}
           {f.aprPct != null && <Row k="APR" v={pct(f.aprPct)} />}
+          {/* A loan's monthly. Labelled "estimated" until a credit approval
+              settles it, because quoting an amortised figure as final is how a
+              homeowner is surprised at signing. */}
+          {f.loanMonthlyPaymentCents != null && (
+            <Row
+              k={f.loanPaymentApproved ? "Monthly payment" : "Estimated monthly payment"}
+              v={usd(f.loanMonthlyPaymentCents, 2)}
+              strong
+            />
+          )}
         </dl>
       </Section>
 

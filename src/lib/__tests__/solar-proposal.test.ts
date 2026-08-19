@@ -218,3 +218,59 @@ describe("environmental impact", () => {
     expect(environmentalImpact(0).tonsCo2Avoided).toBe(0);
   });
 });
+
+/**
+ * The payment a homeowner reads off the proposal.
+ *
+ * Two figures can fill this line and they are not equal in standing: one is
+ * amortised from the quoted product so a rep can sell today, the other came
+ * back from a real credit approval. The document has to show the approved one
+ * whenever it exists, and say which of the two it is showing.
+ */
+describe("the loan payment on the proposal", () => {
+  it("amortises the quoted terms before an approval exists", () => {
+    const s = build({
+      finance: { ...LOAN, aprPct: 4.99, loanTermMonths: 300, loanMonthlyPaymentCents: null },
+    });
+    expect(s.financing.loanPaymentApproved).toBe(false);
+    expect(s.financing.loanMonthlyPaymentCents).toBeGreaterThan(0);
+  });
+
+  it("shows the lender's own figure once there is one, not the estimate", () => {
+    const s = build({
+      finance: { ...LOAN, aprPct: 4.99, loanTermMonths: 300, loanMonthlyPaymentCents: 20_113 },
+    });
+    expect(s.financing.loanMonthlyPaymentCents).toBe(20_113);
+    expect(s.financing.loanPaymentApproved).toBe(true);
+  });
+
+  it("takes the down payment out of the financed amount", () => {
+    const withDown = build({
+      finance: { ...LOAN, aprPct: 4.99, loanTermMonths: 300, downPaymentCents: 1_000_000 },
+    });
+    const without = build({ finance: { ...LOAN, aprPct: 4.99, loanTermMonths: 300 } });
+    expect(withDown.financing.loanMonthlyPaymentCents!).toBeLessThan(
+      without.financing.loanMonthlyPaymentCents!
+    );
+  });
+
+  it("quotes no monthly at all when the term is missing", () => {
+    // Better a proposal with no payment line than one with a fabricated payment.
+    const s = build({ finance: { ...LOAN, aprPct: 4.99, loanTermMonths: null } });
+    expect(s.financing.loanMonthlyPaymentCents).toBeNull();
+  });
+
+  it("never puts a loan payment on a lease", () => {
+    const s = build({
+      finance: {
+        ...LOAN,
+        product: "lease" as const,
+        monthlyPaymentCents: 17_500,
+        escalatorPct: 2.9,
+        aprPct: null,
+        loanMonthlyPaymentCents: 20_113,
+      },
+    });
+    expect(s.financing.loanMonthlyPaymentCents).toBeNull();
+  });
+});

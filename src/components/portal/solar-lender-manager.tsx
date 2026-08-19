@@ -5,9 +5,22 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Archive, RotateCcw, Landmark, Pencil, Check, X } from "lucide-react";
+import type { FinanceProduct } from "@prisma/client";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  upsertSolarLenderProductAction,
+  setSolarLenderProductActiveAction,
+  deleteSolarLenderProductAction,
+} from "@/server/modules/solar/lender-product-actions";
+import {
+  lenderProductLabel,
+  LENDER_PRODUCT_KINDS,
+  PRODUCT_LABEL,
+  type LenderProductKind,
+} from "@/lib/solar-lender-product";
 import {
   upsertSolarLenderAction,
   setSolarLenderActiveAction,
@@ -24,6 +37,23 @@ export type LenderRow = {
   approvedCount: number;
   /** How many designs are being built for it. */
   dealCount: number;
+  /** The terms this lender finances on. Empty until somebody enters them. */
+  products: LenderProduct[];
+};
+
+export type LenderProduct = {
+  id: string;
+  lenderId: string;
+  product: FinanceProduct;
+  name: string | null;
+  aprPct: number | null;
+  termMonths: number | null;
+  dealerFeePct: number | null;
+  leaseRateCentsPerKwMonth: number | null;
+  rateMillsPerKwh: number | null;
+  escalatorPct: number | null;
+  termYears: number | null;
+  isActive: boolean;
 };
 
 /**
@@ -37,10 +67,13 @@ export function SolarLenderManager({
   lenders,
   sellableEquipment,
   canEdit,
+  targetNetPpwCents,
 }: {
   lenders: LenderRow[];
   sellableEquipment: number;
   canEdit: boolean;
+  /** From Solar Settings. Null = the sticker is not derived from a dealer fee. */
+  targetNetPpwCents: number | null;
 }) {
   const router = useRouter();
   const [name, setName] = React.useState("");
@@ -131,6 +164,355 @@ export function SolarLenderManager({
           </div>
         </section>
       )}
+
+      {/* ── Rate sheets ─────────────────────────────────────────────────────
+          Full width, below the cards, because a rate sheet is a table and a
+          third of a grid row is not enough to read one in. The cards above
+          answer "who finances us"; this answers "on what terms". */}
+      {live.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="font-semibold">Rate sheets</h3>
+          <p className="text-xs text-muted-foreground">
+            What each lender will finance, and on what terms. A rep picks one of these on a deal and
+            the payment is quoted from it — the APR, term and dealer fee come from here, never from
+            the deal screen.
+            {targetNetPpwCents == null ? (
+              <>
+                {" "}No target net $/W is set, so the sticker price stays exactly as a rep types it.
+                Set one in{" "}
+                <Link href="/portal/settings/solar" className="underline underline-offset-2">
+                  Solar Settings
+                </Link>{" "}
+                and it is derived from each product&rsquo;s dealer fee instead, so cheaper money
+                raises the price rather than costing you margin.
+              </>
+            ) : (
+              <>
+                {" "}Target net{" "}
+                <span className="font-medium text-foreground">
+                  ${(targetNetPpwCents / 100).toFixed(2)}/W
+                </span>
+                , so the sticker is derived from the chosen product&rsquo;s dealer fee.
+              </>
+            )}
+          </p>
+          {live.map((l) => (
+            <RateSheet key={l.id} lender={l} canEdit={canEdit} />
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+/** One lender's terms, grouped by the product they price. */
+function RateSheet({ lender, canEdit }: { lender: LenderRow; canEdit: boolean }) {
+  const router = useRouter();
+  const [adding, setAdding] = React.useState<LenderProductKind | null>(null);
+  const [editing, setEditing] = React.useState<string | null>(null);
+
+  const live = lender.products.filter((p) => p.isActive);
+  const retired = lender.products.filter((p) => !p.isActive);
+  const done = () => {
+    setAdding(null);
+    setEditing(null);
+    router.refresh();
+  };
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Landmark className="size-4 text-muted-foreground" />
+        <h4 className="font-medium">{lender.name}</h4>
+        <span className="text-xs text-muted-foreground">
+          {live.length === 0 ? "no terms yet" : `${live.length} ${live.length === 1 ? "product" : "products"}`}
+        </span>
+      </div>
+
+      {LENDER_PRODUCT_KINDS.map((kind) => {
+        const rows = live.filter((p) => p.product === kind);
+        if (rows.length === 0) return null;
+        return (
+          <div key={kind} className="space-y-1.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {PRODUCT_LABEL[kind]}
+            </div>
+            <ul className="divide-y divide-border rounded-lg border border-border">
+              {rows.map((p) =>
+                editing === p.id ? (
+                  <li key={p.id} className="p-3">
+                    <ProductForm lenderId={lender.id} kind={kind} existing={p} onDone={done} />
+                  </li>
+                ) : (
+                  <ProductRow key={p.id} product={p} canEdit={canEdit} onEdit={() => setEditing(p.id)} />
+                )
+              )}
+            </ul>
+          </div>
+        );
+      })}
+
+      {retired.length > 0 && (
+        <details className="rounded-lg border border-dashed border-border">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
+            {retired.length} retired
+          </summary>
+          <ul className="divide-y divide-border">
+            {retired.map((p) =>
+              editing === p.id ? (
+                <li key={p.id} className="p-3">
+                  <ProductForm
+                    lenderId={lender.id}
+                    kind={p.product as LenderProductKind}
+                    existing={p}
+                    onDone={done}
+                  />
+                </li>
+              ) : (
+                <ProductRow key={p.id} product={p} canEdit={canEdit} onEdit={() => setEditing(p.id)} />
+              )
+            )}
+          </ul>
+        </details>
+      )}
+
+      {canEdit && adding && (
+        <div className="rounded-lg border border-border p-3">
+          <ProductForm lenderId={lender.id} kind={adding} onDone={done} />
+        </div>
+      )}
+
+      {canEdit && !adding && (
+        <div className="flex flex-wrap gap-2">
+          {LENDER_PRODUCT_KINDS.map((k) => (
+            <Button key={k} size="sm" variant="outline" onClick={() => setAdding(k)}>
+              <Plus className="size-4" /> {PRODUCT_LABEL[k]}
+            </Button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductRow({
+  product,
+  canEdit,
+  onEdit,
+}: {
+  product: LenderProduct;
+  canEdit: boolean;
+  onEdit: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const act = async (fn: () => Promise<{ ok: boolean; error?: string; message?: string }>) => {
+    setBusy(true);
+    const res = await fn();
+    setBusy(false);
+    // A refusal here explains a data consequence — "12 deals were quoted from
+    // this" — so it gets long enough to read.
+    if (!res.ok) return toast.error(res.error, { duration: 9000 });
+    toast.success(res.message ?? "Updated");
+    router.refresh();
+  };
+
+  return (
+    <li className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
+      <span className={cn("font-medium", !product.isActive && "text-muted-foreground line-through")}>
+        {lenderProductLabel(product)}
+      </span>
+      {product.name && (
+        <span className="text-xs text-muted-foreground">
+          {lenderProductLabel({ ...product, name: null })}
+        </span>
+      )}
+      {canEdit && (
+        <div className="ml-auto flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy} title="Edit these terms">
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            title={
+              product.isActive
+                ? "Retire — deals already quoted from it keep their terms"
+                : "Offer it again"
+            }
+            onClick={() => act(() => setSolarLenderProductActiveAction(product.id, !product.isActive))}
+          >
+            {product.isActive ? <Archive className="size-3.5" /> : <RotateCcw className="size-3.5" />}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            title="Delete — refused if any deal was quoted from it"
+            onClick={() => act(() => deleteSolarLenderProductAction(product.id))}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** Empty string, not 0 — a real 0% escalator has to stay typeable. */
+const str = (n: number | null | undefined, div = 1) => (n == null ? "" : String(n / div));
+const intOrNull = (v: string, mul = 1) => {
+  const t = v.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.round(n * mul) : null;
+};
+const floatOrNull = (v: string) => {
+  const t = v.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * One product's terms.
+ *
+ * Which fields it asks for is decided by the kind, because a loan and a PPA
+ * share nothing but a term. One form of every field would invite an APR onto a
+ * PPA — the same defect the deal side already guards against, one level up.
+ */
+function ProductForm({
+  lenderId,
+  kind,
+  existing,
+  onDone,
+}: {
+  lenderId: string;
+  kind: LenderProductKind;
+  existing?: LenderProduct;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [form, setForm] = React.useState({
+    name: existing?.name ?? "",
+    aprPct: str(existing?.aprPct),
+    termMonths: str(existing?.termMonths),
+    dealerFeePct: str(existing?.dealerFeePct),
+    leaseRate: str(existing?.leaseRateCentsPerKwMonth, 100),
+    rate: str(existing?.rateMillsPerKwh, 1000),
+    escalatorPct: str(existing?.escalatorPct),
+    termYears: str(existing?.termYears),
+  });
+  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function save() {
+    setBusy(true);
+    const res = await upsertSolarLenderProductAction(existing?.id ?? null, {
+      lenderId,
+      product: kind,
+      name: form.name.trim() || null,
+      aprPct: floatOrNull(form.aprPct),
+      termMonths: intOrNull(form.termMonths),
+      dealerFeePct: floatOrNull(form.dealerFeePct),
+      leaseRateCentsPerKwMonth: intOrNull(form.leaseRate, 100),
+      rateMillsPerKwh: intOrNull(form.rate, 1000),
+      escalatorPct: floatOrNull(form.escalatorPct),
+      termYears: intOrNull(form.termYears),
+    });
+    setBusy(false);
+    // The action names the missing field, so the message is worth showing.
+    if (!res.ok) return toast.error(res.error, { duration: 9000 });
+    toast.success(existing ? "Product updated" : "Product added");
+    onDone();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-4">
+        {kind === "loan" && (
+          <>
+            <NumField label="APR %" step="0.01" value={form.aprPct} onChange={(v) => set("aprPct", v)} />
+            <NumField label="Term (months)" value={form.termMonths} onChange={(v) => set("termMonths", v)} />
+            <NumField
+              label="Dealer fee %"
+              step="0.1"
+              value={form.dealerFeePct}
+              onChange={(v) => set("dealerFeePct", v)}
+            />
+          </>
+        )}
+        {kind === "lease" && (
+          <NumField
+            label="$/kW per month"
+            step="0.01"
+            value={form.leaseRate}
+            onChange={(v) => set("leaseRate", v)}
+          />
+        )}
+        {kind === "ppa" && (
+          <NumField label="$/kWh" step="0.001" value={form.rate} onChange={(v) => set("rate", v)} />
+        )}
+        {kind !== "loan" && (
+          <>
+            <NumField
+              label="Escalator %/yr"
+              step="0.1"
+              value={form.escalatorPct}
+              onChange={(v) => set("escalatorPct", v)}
+            />
+            <NumField label="Term (years)" value={form.termYears} onChange={(v) => set("termYears", v)} />
+          </>
+        )}
+        <TextField label="Name (optional)" value={form.name} onChange={(v) => set("name", v)} />
+      </div>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={save} disabled={busy}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+          {existing ? "Save" : "Add product"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDone} disabled={busy}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function NumField({
+  label,
+  value,
+  onChange,
+  step,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  step?: string;
+}) {
+  const id = React.useId();
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs" htmlFor={id}>{label}</Label>
+      <Input id={id} type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const id = React.useId();
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs" htmlFor={id}>{label}</Label>
+      <Input id={id} value={value} placeholder="falls back to the terms" onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }

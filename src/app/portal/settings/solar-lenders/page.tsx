@@ -6,6 +6,7 @@ import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { PageHeader } from "@/components/portal/ui";
 import { prisma } from "@/server/db/client";
+import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarLenderManager } from "@/components/portal/solar-lender-manager";
 
 export const dynamic = "force-dynamic";
@@ -29,8 +30,13 @@ export default async function SolarLendersPage() {
     select: {
       id: true, name: true, isActive: true, rank: true, notes: true,
       _count: { select: { approvals: true, designs: true } },
+      products: {
+        orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
+      },
     },
   });
+
+  const settings = await getSolarSettings(user.companyId);
 
   // How much of the catalogue each lender covers. A lender approving nothing is
   // a lender whose deals will show empty equipment lists, which is worth seeing
@@ -52,11 +58,12 @@ export default async function SolarLendersPage() {
       </Link>
       <PageHeader
         title="Lenders"
-        description="Who finances your deals, and which equipment each one approves. Pick a lender on a deal and the equipment list narrows to that lender's approved-vendor list."
+        description="Who finances your deals, which equipment each one approves, and the terms they finance on. Pick a lender on a deal and the equipment narrows to its approved-vendor list; pick one of its products and the payment is quoted from it."
       />
       <SolarLenderManager
         canEdit={can(user, "update", "Settings")}
         sellableEquipment={sellable}
+        targetNetPpwCents={settings.targetNetPpwCents}
         lenders={lenders.map((l) => ({
           id: l.id,
           name: l.name,
@@ -65,6 +72,20 @@ export default async function SolarLendersPage() {
           notes: l.notes,
           approvedCount: l._count.approvals,
           dealCount: l._count.designs,
+          products: l.products.map((p) => ({
+            id: p.id,
+            lenderId: p.lenderId,
+            product: p.product,
+            name: p.name,
+            aprPct: p.aprPct,
+            termMonths: p.termMonths,
+            dealerFeePct: p.dealerFeePct,
+            leaseRateCentsPerKwMonth: p.leaseRateCentsPerKwMonth,
+            rateMillsPerKwh: p.rateMillsPerKwh,
+            escalatorPct: p.escalatorPct,
+            termYears: p.termYears,
+            isActive: p.isActive,
+          })),
         }))}
       />
     </div>

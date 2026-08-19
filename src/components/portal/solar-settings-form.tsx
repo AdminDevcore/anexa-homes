@@ -50,6 +50,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     kwhPerKwYear: String(settings.kwhPerKwYear),
     defaultGrossPpw: (settings.defaultGrossPpwCents / 100).toFixed(2),
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
+    targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
     federalItcPct: settings.federalItcPct == null ? "" : String(settings.federalItcPct),
     stateIncentiveNote: settings.stateIncentiveNote ?? "",
     netMeteringProgram: settings.netMeteringProgram ?? "",
@@ -70,6 +71,10 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       kwhPerKwYear: Number(f.kwhPerKwYear),
       defaultGrossPpwCents: Math.round(Number(f.defaultGrossPpw) * 100),
       defaultDealerFeePct: Number(f.defaultDealerFeePct),
+      // Blank means "derive nothing" — the sticker stays exactly as a rep types
+      // it, which is how every company behaves until somebody sets a target.
+      targetNetPpwCents:
+        f.targetNetPpw.trim() === "" ? null : Math.round(Number(f.targetNetPpw) * 100),
       // Blank means "no federal credit", not "zero percent" — the distinction
       // matters, because a configured 0% would still render a $0 credit line.
       federalItcPct: f.federalItcPct.trim() === "" ? null : Number(f.federalItcPct),
@@ -124,7 +129,10 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           <NumField label="Default gross $/W" value={f.defaultGrossPpw} onChange={(v) => set("defaultGrossPpw", v)} step="0.01" />
           <NumField label="Default dealer fee %" value={f.defaultDealerFeePct} onChange={(v) => set("defaultDealerFeePct", v)}
             step="0.1"
-            hint="Loans only — a cash deal has no lender and therefore no fee." />
+            hint="Loans only — a cash deal has no lender and therefore no fee. A chosen lender product's own fee wins over this." />
+          <NumField label="Target net $/W" value={f.targetNetPpw} onChange={(v) => set("targetNetPpw", v)}
+            step="0.01"
+            hint="What you keep per watt after the lender's cut. Set it and the sticker is derived from the chosen product's dealer fee, so cheaper money raises the price instead of costing margin. Blank leaves gross exactly as typed." />
         </div>
       </section>
 
