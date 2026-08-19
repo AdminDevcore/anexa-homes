@@ -95,3 +95,28 @@ describe("the default panel sizes the system", () => {
     await db.company.deleteMany({ where: { id: other.id } });
   });
 });
+
+describe("build details never move a quoted number", () => {
+  it("records the inverter and interconnection details without touching system size", async () => {
+    const p = await panel({ ratingW: 400, isDefault: true });
+    const inv = await db.solarEquipment.create({
+      data: { companyId, kind: "inverter", model: "INV-1", ratingW: 7600 },
+    });
+    await db.solarDesign.create({
+      data: { companyId, leadId, moduleId: p.id, moduleQty: 20, systemSizeKwDc: 8, year1ProductionKwh: 9760 },
+    });
+
+    await db.solarDesign.update({
+      where: { leadId },
+      data: { inverterId: inv.id, utilityAccountNo: "ACCT-9", meterNo: "MTR-3" },
+    });
+
+    const after = await db.solarDesign.findUnique({ where: { leadId } });
+    expect(after?.inverterId).toBe(inv.id);
+    expect(after?.utilityAccountNo).toBe("ACCT-9");
+    // The invariant saveSolarBuildDetailsAction must preserve: only the module
+    // sizes the system, so nothing on the ops card may move these.
+    expect(after?.systemSizeKwDc).toBe(8);
+    expect(after?.year1ProductionKwh).toBe(9760);
+  });
+});

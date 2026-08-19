@@ -184,6 +184,70 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   return { ok: true as const, systemSizeKwDc, year1ProductionKwh, offsetPct: computedOffset };
 }
 
+const buildDetailsSchema = z.object({
+  leadId: z.string().min(1),
+  utilityAccountNo: z.string().max(60).nullable(),
+  meterNo: z.string().max(60).nullable(),
+  lenderId: z.string().nullable(),
+  inverterId: z.string().nullable(),
+  batteryId: z.string().nullable(),
+});
+
+/**
+ * What the job is actually built from, recorded when it is being built.
+ *
+ * Deliberately separate from the design action, and deliberately unable to
+ * change `systemSizeKwDc`, production or offset: only the module sizes the
+ * system, and only the design step sets that. So an ops edit weeks after the
+ * sale cannot move a number the customer has already signed against.
+ *
+ * The lender lives here too, with the approved-vendor list it gates. It used to
+ * sit on the design step above the equipment dropdowns; the equipment moved, so
+ * it moved with it rather than staying behind to filter nothing.
+ */
+export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDetailsSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  const parsed = buildDetailsSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid build details.");
+  const d = parsed.data;
+
+  const design = await prisma.solarDesign.findFirst({
+    where: { leadId: d.leadId, companyId: user.companyId },
+    select: { inverterId: true, batteryId: true },
+  });
+  if (!design) return fail("Save the system design before recording build details.");
+
+  // A lender id from another company must never attach to this design.
+  if (d.lenderId) {
+    const l = await prisma.solarLender.findFirst({
+      where: { companyId: user.companyId, id: d.lenderId },
+      select: { id: true },
+    });
+    if (!l) return fail("That lender is not in your list.");
+  }
+
+  const [inv, bat] = await Promise.all([
+    resolveEquipment(user.companyId, d.inverterId, "inverter", design.inverterId),
+    resolveEquipment(user.companyId, d.batteryId, "battery", design.batteryId),
+  ]);
+  for (const r of [inv, bat]) if (!r.ok) return fail(r.error);
+
+  await prisma.solarDesign.update({
+    where: { leadId: d.leadId },
+    data: {
+      utilityAccountNo: d.utilityAccountNo,
+      meterNo: d.meterNo,
+      lenderId: d.lenderId,
+      inverterId: inv.ok ? (inv.row?.id ?? null) : null,
+      batteryId: bat.ok ? (bat.row?.id ?? null) : null,
+    },
+  });
+
+  revalidatePath(`/portal/leads/${d.leadId}`);
+  return ok();
+}
+
 // ---------------------------------------------------------------------------
 // Finance
 // ---------------------------------------------------------------------------

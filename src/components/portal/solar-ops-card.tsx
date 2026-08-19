@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, PhoneCall, TriangleAlert, ArrowUpRight, Home, Zap } from "lucide-react";
+import { Loader2, PhoneCall, TriangleAlert, ArrowUpRight, Home, Zap, Wrench } from "lucide-react";
 import type { BlockerParty, StageType } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { BLOCKER_LABEL, BLOCKER_TONE, stageOwnerLabel } from "@/lib/solar-pipeline";
@@ -13,6 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { setDealBlockerAction, logFollowUpAction } from "@/server/modules/pipeline/blocker-actions";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { saveSolarBuildDetailsAction } from "@/server/modules/solar/actions";
 import { setCrossoverFlagsAction, createCrossoverDealAction } from "@/server/modules/vertical/crossover";
 import type { LinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
 
@@ -37,6 +40,23 @@ export type SolarOpsProps = {
   needsMpu: boolean;
   linkedDeal: LinkedDealSummary | null;
   canEdit: boolean;
+  /**
+   * What the job is built from. Recorded here rather than on the proposal:
+   * equipment is committed when a crew orders it, not when a rep sells.
+   * Null `design` means no system design exists yet, so there is nothing to
+   * attach these to.
+   */
+  build: {
+    hasDesign: boolean;
+    utilityAccountNo: string | null;
+    meterNo: string | null;
+    lenderId: string | null;
+    inverterId: string | null;
+    batteryId: string | null;
+    lenders: { id: string; name: string; isActive: boolean }[];
+    inverters: { id: string; label: string }[];
+    batteries: { id: string; label: string }[];
+  };
 };
 
 /**
@@ -51,6 +71,14 @@ export function SolarOpsCard(props: SolarOpsProps) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState(props.blockerNote ?? "");
+  const [build, setBuild] = React.useState({
+    utilityAccountNo: props.build.utilityAccountNo ?? "",
+    meterNo: props.build.meterNo ?? "",
+    lenderId: props.build.lenderId ?? "",
+    inverterId: props.build.inverterId ?? "",
+    batteryId: props.build.batteryId ?? "",
+  });
+  const setB = (k: keyof typeof build, v: string) => setBuild((b) => ({ ...b, [k]: v }));
 
   const blocked = stage?.stageType === "externally_blocked";
   const timing = blocked
@@ -255,6 +283,139 @@ export function SolarOpsCard(props: SolarOpsProps) {
               </Button>
             </div>
           )
+        )}
+      </div>
+
+      {/* ── Interconnection & equipment ─────────────────────────────────── */}
+      <div className="space-y-3 rounded-lg border border-dashed border-border p-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Interconnection &amp; equipment
+          </div>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Recorded when the job is built. None of this changes the customer&rsquo;s quote — only
+            the panel count does that, and it lives on the proposal.
+          </p>
+        </div>
+
+        {!props.build.hasDesign ? (
+          <p className="text-xs text-muted-foreground">
+            No system design on this deal yet. Build the proposal first and these will attach to it.
+          </p>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="solar-utility-account" className="text-xs">Utility account #</Label>
+                <Input
+                  id="solar-utility-account"
+                  value={build.utilityAccountNo}
+                  disabled={!props.canEdit}
+                  onChange={(e) => setB("utilityAccountNo", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="solar-meter-no" className="text-xs">Meter #</Label>
+                <Input
+                  id="solar-meter-no"
+                  value={build.meterNo}
+                  disabled={!props.canEdit}
+                  onChange={(e) => setB("meterNo", e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="solar-lender" className="text-xs">Lender / approved-vendor list</Label>
+              <select
+                id="solar-lender"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                value={build.lenderId}
+                disabled={!props.canEdit || props.build.lenders.length === 0}
+                onChange={(e) => setB("lenderId", e.target.value)}
+              >
+                <option value="">— any lender (no filtering) —</option>
+                {props.build.lenders.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}{l.isActive ? "" : " · retired"}
+                  </option>
+                ))}
+              </select>
+              {props.build.lenders.length === 0 ? (
+                <p className="text-[11px] text-amber-700">
+                  No lenders set up yet.{" "}
+                  <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
+                    Add your lenders
+                  </Link>{" "}
+                  to filter equipment by an approved-vendor list.
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  {build.lenderId
+                    ? "Only equipment on this lender's approved list is offered below. Save to apply a change."
+                    : "Pick a lender to narrow the equipment below to its approved list."}
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                ["Inverter", "inverterId", props.build.inverters],
+                ["Battery", "batteryId", props.build.batteries],
+              ] as const).map(([label, key, options]) => (
+                <div key={key} className="space-y-1">
+                  <Label htmlFor={`solar-${key}`} className="text-xs">{label}</Label>
+                  <select
+                    id={`solar-${key}`}
+                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                    value={build[key]}
+                    disabled={!props.canEdit || options.length === 0}
+                    onChange={(e) => setB(key, e.target.value)}
+                  >
+                    <option value="">— none —</option>
+                    {options.map((o) => (
+                      <option key={o.id} value={o.id}>{o.label}</option>
+                    ))}
+                  </select>
+                  {/* An empty dropdown is indistinguishable from a broken one. */}
+                  {options.length === 0 && (
+                    <p className="text-[11px] text-amber-700">
+                      No {label.toLowerCase()}s available.{" "}
+                      <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
+                        Open the catalogue
+                      </Link>
+                      .
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {props.canEdit && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  run(
+                    () =>
+                      saveSolarBuildDetailsAction({
+                        leadId: props.leadId,
+                        utilityAccountNo: build.utilityAccountNo.trim() || null,
+                        meterNo: build.meterNo.trim() || null,
+                        lenderId: build.lenderId || null,
+                        inverterId: build.inverterId || null,
+                        batteryId: build.batteryId || null,
+                      }),
+                    "Build details saved"
+                  )
+                }
+              >
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <Wrench className="size-4" />}
+                Save build details
+              </Button>
+            )}
+          </>
         )}
       </div>
     </div>
