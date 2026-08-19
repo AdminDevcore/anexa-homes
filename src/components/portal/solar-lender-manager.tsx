@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Archive, RotateCcw, Pencil, Check, X, ExternalLink, Upload, Globe, ImageOff } from "lucide-react";
+import { Loader2, Plus, Trash2, Archive, RotateCcw, Pencil, Check, X, ExternalLink, Upload, Globe, ImageOff, ImagePlus } from "lucide-react";
 import type { FinanceProduct } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -854,7 +854,25 @@ function LenderCard({
         <>
           <div className="flex items-start justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="md" />
+              {/* The mark is the button. Hiding "add a logo" behind the pencil
+                  meant the answer to "can we put the bank's logo here?" was
+                  yes and invisible, so the thing you would click anyway is
+                  what opens it. */}
+              {canEdit ? (
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  title={lender.logoUrl ? `Change ${lender.name}'s logo` : `Add ${lender.name}'s logo`}
+                  className="group relative shrink-0 rounded-lg ring-offset-2 ring-offset-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="md" />
+                  <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-foreground/70 opacity-0 transition-opacity group-hover:opacity-100">
+                    <ImagePlus className="size-4 text-background" />
+                  </span>
+                </button>
+              ) : (
+                <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="md" />
+              )}
               <span className="truncate font-medium">{lender.name}</span>
             </div>
             {!lender.isActive && (
@@ -914,7 +932,16 @@ function LenderCard({
           )}
 
           {canEdit && (
-            <div className="mt-3 flex flex-wrap gap-1">
+            <div className="mt-3 flex flex-wrap items-center gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setEditing(true)}
+                className="px-2 text-xs text-muted-foreground"
+              >
+                <ImagePlus className="size-4" /> {lender.logoUrl ? "Change logo" : "Add logo"}
+              </Button>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(true)} title="Edit name, links and credit instructions">
                 <Pencil className="size-4" />
               </Button>

@@ -153,14 +153,22 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
     await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
-    const leadId = page.url().split("/").pop()!;
-
-    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
-    const picker = page.getByLabel("Lender", { exact: true });
+    // Asserted on the deal's own lender control rather than the builder's:
+    // the two set the same field, and this one is not being rebuilt underneath
+    // the spec. Beside the select, because a native <option> holds no image.
+    const picker = page.getByLabel("Lender / approved-vendor list");
     await expect(picker).toBeVisible({ timeout: 15000 });
     await picker.selectOption({ label: name });
 
-    // Beside the picker, because a native <option> cannot hold an image.
+    const mark = page.locator('img[src*="/api/solar/lender-logo"]');
+    await expect(mark.first()).toBeVisible({ timeout: 15000 });
+
+    // And it survives the save — the mark has to be read back from the deal,
+    // not just left over from the click that chose it.
+    await page.getByRole("button", { name: "Save build details" }).click();
+    await expect(page.getByText("Build details saved")).toBeVisible({ timeout: 15000 });
+    await page.reload();
+    await expect(page.locator("#solar-lender option:checked")).toHaveText(name, { timeout: 15000 });
     await expect(page.locator('img[src*="/api/solar/lender-logo"]').first()).toBeVisible({
       timeout: 15000,
     });
