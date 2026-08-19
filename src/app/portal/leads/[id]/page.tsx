@@ -984,12 +984,17 @@ export default async function LeadDetailPage({
               </section>
             )}
 
-            {/* ── Operations (solar only) ──
+            {/* ── Installation (solar only) ──
                 Roofing's equivalent is the "Field production" slide above; a
-                roofing deal must not render this section twice. */}
+                roofing deal must not render this section twice.
+
+                Named for the crew going out, not "Operations": the ops-chase
+                card further up already owns that word, and two sections with
+                one name on a single scrolling page told the reader nothing
+                about which was which. */}
             {isSolarDeal && (
             <section id="production" className="scroll-mt-24 space-y-6">
-              <Card title="Operations" icon={Hammer} tone="solar">
+              <Card title="Installation" icon={Hammer} tone="solar">
                 {!project ? (
                   canManageProd ? (
                     <StartProductionButton leadId={lead.id} />

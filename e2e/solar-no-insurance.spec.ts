@@ -45,9 +45,10 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
   test("no claim, adjuster, deductible, RCV/ACV or supplement anywhere on the deal", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
-    // Gate on the stage bar, not on a heading: two sections are titled
-    // "Operations" on a solar deal, and the strict-mode violation that caused
-    // meant every leak assertion below silently never ran.
+    // Gate on the stage bar, not on a section heading. Two sections were both
+    // titled "Operations" (the install one is "Installation" now), and the
+    // strict-mode violation that caused meant every leak assertion below
+    // silently never ran. A testid cannot rot the same way.
     await expect(page.getByTestId("deal-stage-bar")).toBeVisible({ timeout: 15000 });
 
     // The deal is one page, so every panel is already rendered — assert on the
@@ -127,7 +128,11 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
 
     // The design, its financing and generation are the proposal's INPUTS and
     // moved into the builder with it. What the deal keeps is the status.
-    await expect(page.getByText("Proposal", { exact: true })).toBeVisible({ timeout: 15000 });
+    // The card's heading, not any text: f9f76e7 added a "Proposal" document
+    // folder whose tile label matches the same string.
+    await expect(
+      page.getByRole("heading", { name: "Proposal", exact: true })
+    ).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("4 · Contracts & documents")).toBeVisible();
     await expect(page.getByLabel("Module quantity")).toHaveCount(0);
 
