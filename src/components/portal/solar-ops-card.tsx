@@ -344,7 +344,7 @@ export function SolarOpsCard(props: SolarOpsProps) {
               {props.build.lenders.length === 0 ? (
                 <p className="text-[11px] text-amber-700">
                   No lenders set up yet.{" "}
-                  <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
+                  <Link href="/portal/settings/solar-lenders" className="underline underline-offset-2">
                     Add your lenders
                   </Link>{" "}
                   to filter equipment by an approved-vendor list.
