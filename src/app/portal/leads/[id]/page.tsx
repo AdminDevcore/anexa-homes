@@ -736,9 +736,13 @@ export default async function LeadDetailPage({
               className="scroll-mt-24"
               slides={[
                 { id: "system", label: "System & financing" },
-                { id: "activity", label: "Activity" },
                 { id: "ops", label: "Operations", icon: "ops" },
                 { id: "install", label: "Installation", icon: "install" },
+                // Activity is always last, on every deal that has one. The
+                // first three are the job; the feed is what people said about
+                // it, and a running commentary does not belong between two
+                // halves of the work.
+                { id: "activity", label: "Activity" },
               ]}
             >
               <div data-deal-slide="system" className="space-y-6">
@@ -760,19 +764,6 @@ export default async function LeadDetailPage({
                     </Section>
                   </div>
                 )}
-              </div>
-
-              <div data-deal-slide="activity">
-                <SolarActivityFeed
-                  leadId={lead.id}
-                  canPost={can(user, "read", "Lead")}
-                  posts={solarFeed.map((f) => ({
-                    id: f.id,
-                    body: f.body,
-                    author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
-                    createdAt: f.createdAt.toISOString(),
-                  }))}
-                />
               </div>
 
             <div data-deal-slide="ops">
@@ -855,6 +846,19 @@ export default async function LeadDetailPage({
                   </div>
                 )}
             </div>
+
+              <div data-deal-slide="activity">
+                <SolarActivityFeed
+                  leadId={lead.id}
+                  canPost={can(user, "read", "Lead")}
+                  posts={solarFeed.map((f) => ({
+                    id: f.id,
+                    body: f.body,
+                    author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
+                    createdAt: f.createdAt.toISOString(),
+                  }))}
+                />
+              </div>
             </DealSlides>
           )}
 
