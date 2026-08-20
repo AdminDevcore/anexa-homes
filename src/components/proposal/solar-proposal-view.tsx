@@ -595,11 +595,32 @@ export function SolarProposalView({
         <details className="text-[11px] text-muted-foreground">
           <summary className="cursor-pointer font-medium">Assumptions used in this proposal</summary>
           <ul className="mt-2 space-y-0.5">
-            <li>
-              Production: {s.assumptions.kwhPerKwYear} kWh per kW per year,{" "}
-              {Math.round((1 - s.assumptions.derateFactor) * 100)}% system losses
-              {s.system.tsrfPct != null ? `, ${pct(s.system.tsrfPct)} solar resource (TSRF)` : ""}
-            </li>
+            {/*
+              The document lists the assumptions its numbers came from, so it
+              has to name the model that actually produced them. Printing "1,450
+              kWh per kW per year" under a figure that was simulated per plane
+              against a real weather record is a false sentence in the one
+              section whose whole job is to be true.
+            */}
+            {s.assumptions.yieldBasis ? (
+              <li>
+                Production: simulated for this address by NREL PVWatts against the
+                {s.assumptions.yieldBasis.station
+                  ? ` ${s.assumptions.yieldBasis.station} `
+                  : " local "}
+                weather record, using each roof plane&apos;s own direction and pitch and{" "}
+                {Math.round((1 - s.assumptions.derateFactor) * 100)}% system losses
+                {s.assumptions.yieldBasis.arrays < s.assumptions.yieldBasis.totalArrays
+                  ? ` (${s.assumptions.yieldBasis.arrays} of ${s.assumptions.yieldBasis.totalArrays} arrays; the rest use a regional average of ${s.assumptions.kwhPerKwYear} kWh per kW per year)`
+                  : ""}
+              </li>
+            ) : (
+              <li>
+                Production: {s.assumptions.kwhPerKwYear} kWh per kW per year,{" "}
+                {Math.round((1 - s.assumptions.derateFactor) * 100)}% system losses
+                {s.system.tsrfPct != null ? `, ${pct(s.system.tsrfPct)} solar resource (TSRF)` : ""}
+              </li>
+            )}
             <li>Panel degradation: {pct(s.assumptions.annualDegradationPct)} per year</li>
             <li>Utility rate increase: {pct(s.assumptions.utilityEscalationPct)} per year</li>
             {s.assumptions.currentRateMillsPerKwh > 0 && (

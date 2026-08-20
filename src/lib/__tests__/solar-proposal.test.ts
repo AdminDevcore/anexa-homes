@@ -454,3 +454,49 @@ describe("the extra work is named on the customer's copy", () => {
     expect(s.financing.adderTotalCents).toBeNull();
   });
 });
+
+describe("the document names the model its production came from", () => {
+  it("lists the market average when that is what produced the figure", () => {
+    const s = build();
+    expect("yieldBasis" in s.assumptions).toBe(false);
+    expect(s.assumptions.kwhPerKwYear).toBe(1450);
+  });
+
+  /**
+   * The assumptions section exists to be true. Once production is simulated per
+   * plane, "1,450 kWh per kW per year" is a false sentence sitting in the one
+   * part of the document whose whole job is to explain the numbers.
+   */
+  it("records the simulation when one produced the figure", () => {
+    const s = build({
+      yieldBasis: { source: "pvwatts", station: "Dallas", arrays: 3, totalArrays: 3 },
+    });
+    expect(s.assumptions.yieldBasis).toEqual({
+      source: "pvwatts",
+      station: "Dallas",
+      arrays: 3,
+      totalArrays: 3,
+    });
+  });
+
+  it("says how many arrays were simulated when only some were", () => {
+    const s = build({
+      yieldBasis: { source: "pvwatts", station: null, arrays: 2, totalArrays: 3 },
+    });
+    expect(s.assumptions.yieldBasis!.arrays).toBe(2);
+    expect(s.assumptions.yieldBasis!.totalArrays).toBe(3);
+  });
+
+  it("keeps the market yield on the document either way — it still explains the rest", () => {
+    const s = build({
+      yieldBasis: { source: "pvwatts", station: "Dallas", arrays: 1, totalArrays: 2 },
+    });
+    // The unsimulated array is still priced on it, so the figure has to be there.
+    expect(s.assumptions.kwhPerKwYear).toBe(1450);
+  });
+
+  it("omits the key rather than holding a null the renderer would have to guard", () => {
+    const s = build({ yieldBasis: null });
+    expect("yieldBasis" in s.assumptions).toBe(false);
+  });
+});

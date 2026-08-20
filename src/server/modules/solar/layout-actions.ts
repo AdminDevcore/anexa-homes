@@ -11,6 +11,8 @@ import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { systemTotals } from "@/lib/solar-arrays";
 import { offsetPct } from "@/lib/solar-money";
 import { recomputeAdderTotal } from "./adders";
+import { planeFor, resolvePlaneYields } from "./pvwatts";
+import { yieldCacheKey } from "@/lib/solar-pvwatts";
 
 // `actions.ts` is a "use server" module, so its helpers cannot be shared —
 // every export there has to be an async server function.
@@ -84,9 +86,9 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
 
   const lead = await prisma.lead.findFirst({
     where: { companyId: user.companyId, id: leadId },
-    // `lat` drives the sun's path, so the orientation penalty is this house's
-    // and not a national average.
-    select: { id: true, vertical: true, lat: true },
+    // The coordinate is the site. `lat` drives the sun's path for the fallback
+    // model; both together are what PVWatts simulates the real weather for.
+    select: { id: true, vertical: true, lat: true, lng: true },
   });
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
@@ -96,11 +98,49 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
 
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId },
-    select: { moduleId: true, annualUsageKwh: true },
+    select: { moduleId: true, annualUsageKwh: true, mountType: true },
   });
 
   const assumptions = await getSolarSettings(user.companyId);
   const module_ = await resolveSizingModule(user.companyId, existing?.moduleId ?? null);
+
+  /**
+   * Ask NREL what each described plane on this roof actually makes.
+   *
+   * This is the SAVE, not the drawing: the designer previews on the old model
+   * while a rep drags panels, and the figures the deal and the proposal are
+   * built from are settled here. Deduplicated and cached by plane, so a roof
+   * with four arrays facing the same way is one question and a redraw is none.
+   *
+   * Everything about it can fail — no key, a timeout, a rate limit — and none
+   * of it is fatal. An unanswered plane keeps the company's market-average
+   * yield, which is what every figure was built on before this existed.
+   */
+  const planes = (blocks as LayoutBlock[])
+    .map((b) =>
+      planeFor({
+        lat: lead.lat,
+        lon: lead.lng,
+        tiltDeg: b.tiltDeg,
+        azimuthDeg: b.azimuthDeg,
+        derateFactor: assumptions.derateFactor,
+        arrayType: existing?.mountType === "ground" ? "ground" : "roof",
+      })
+    )
+    .filter((p): p is NonNullable<typeof p> => p !== null);
+
+  const yields = await resolvePlaneYields(planes);
+  const planeYield = ({ tiltDeg, azimuthDeg }: { tiltDeg: number | null; azimuthDeg: number | null }) => {
+    const plane = planeFor({
+      lat: lead.lat,
+      lon: lead.lng,
+      tiltDeg,
+      azimuthDeg,
+      derateFactor: assumptions.derateFactor,
+      arrayType: existing?.mountType === "ground" ? "ground" : "roof",
+    });
+    return plane ? (yields.get(yieldCacheKey(plane))?.kwhPerKwYear ?? null) : null;
+  };
 
   // Production is weighted array by array now. A south plane and a north plane
   // of the same size used to contribute identical kWh, which is the difference
@@ -109,13 +149,22 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
     lat: lead.lat,
     moduleRatingW: module_?.ratingW ?? null,
     assumptions,
+    planeYield,
   });
   const { systemSizeKwDc, year1ProductionKwh } = totals;
   const computedOffset = existing?.annualUsageKwh
     ? offsetPct(year1ProductionKwh, existing.annualUsageKwh)
     : 0;
 
+  // Which model produced the figure above, recorded so the customer's document
+  // can list the assumptions it ACTUALLY used. A partial answer — some planes
+  // simulated, some not — is recorded as partial rather than rounded up.
+  const station = [...yields.values()].map((y) => y.station).find(Boolean) ?? null;
+
   const data = {
+    yieldSource: totals.measuredArrays > 0 ? "pvwatts" : null,
+    yieldStation: totals.measuredArrays > 0 ? station : null,
+    yieldArrays: totals.measuredArrays,
     layoutBlocks: blocks,
     // Omitted entirely when the caller did not send any, so Prisma leaves the
     // column as it is. `?? []` here would read "no setbacks in this payload"
@@ -152,5 +201,7 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
     systemSizeKwDc,
     year1ProductionKwh,
     offsetPct: computedOffset,
+    /** How many arrays NREL answered for, so the designer can say. */
+    measuredArrays: totals.measuredArrays,
   };
 }

@@ -15,6 +15,7 @@ import { readSolarReadiness } from "./readiness";
 import { buildProposalSnapshot, type SnapshotEquipment } from "@/lib/solar-proposal";
 import { canGenerate } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
+import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
 import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 
@@ -246,6 +247,18 @@ export async function generateSolarProposalAction(leadId: string) {
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
     assumptions,
+    // What the design recorded about which model produced its production
+    // figure. Null keeps the document listing the market average, which is what
+    // it was built on.
+    yieldBasis:
+      design.yieldSource === "pvwatts" && design.yieldArrays > 0
+        ? {
+            source: "pvwatts" as const,
+            station: design.yieldStation,
+            arrays: design.yieldArrays,
+            totalArrays: Math.max(design.yieldArrays, parseLayoutBlocks(design.layoutBlocks).length),
+          }
+        : null,
     now: new Date(),
   });
 

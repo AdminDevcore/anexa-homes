@@ -2999,6 +2999,20 @@ model SolarDesign {
   systemSizeKwAc     Float           @default(0)
   year1ProductionKwh Int             @default(0)
   offsetPct          Float           @default(0)
+  /// WHICH MODEL produced `year1ProductionKwh`. "pvwatts" when NREL simulated
+  /// this site's own planes against its weather record; null when the figure is
+  /// the company's market-average yield scaled by the clear-sky ratio, which is
+  /// what every design before this carried.
+  ///
+  /// Stored because the customer's proposal lists the assumptions its numbers
+  /// came from, and "1,450 kWh per kW per year" is a false sentence on a
+  /// document whose production did not come from that figure.
+  yieldSource        String?
+  /// The NSRDB station that answered, for the record on the document.
+  yieldStation       String?
+  /// How many arrays were simulated. Fewer than all of them means the rest kept
+  /// the market average, and the proposal says so rather than implying more.
+  yieldArrays        Int             @default(0)
 
   // ── Plan-set artifacts (FileAsset ids, plain columns) ───────────────────
   planSetFileId    String?
@@ -3287,6 +3301,44 @@ model SolarDealAdder {
   @@index([companyId, leadId])
   @@index([equipmentId])
   @@map("solar_deal_adders")
+}
+
+/// What one plane of panels makes at one place, according to NREL PVWatts.
+///
+/// DELIBERATELY NOT PER-COMPANY, and the only table here that is not. This is
+/// the weather record for a grid cell and the physics of a tilted plane — it is
+/// not anybody's data, it does not vary by tenant, and a second company quoting
+/// the same street should not pay for the same request again. Nothing derived
+/// from a customer is stored: a key, an angle and a kWh figure.
+///
+/// The stored yield is for a 1 kW system, so one row serves an array of any
+/// size. Shading is NOT in here — it varies array by array while the plane's
+/// yield does not, so it is applied to this figure rather than baked into it.
+model SolarYieldCache {
+  id  String @id @default(uuid())
+  /// `lat|lon|tilt|azimuth|losses|arrayType`, rounded — see yieldCacheKey.
+  key String @unique
+
+  /// The rounded inputs, kept alongside the key so a row is readable without
+  /// parsing it and a stale rounding rule can be found and re-fetched.
+  lat        Float
+  lon        Float
+  tiltDeg    Float
+  azimuthDeg Float
+  lossesPct  Float
+  arrayType  String
+
+  /// kWh per kW-DC per year on this plane. The number everything rests on.
+  kwhPerKwYear Float
+  /// Twelve monthly figures for a 1 kW system, Jan..Dec. The shape of the year.
+  monthly      Json    @default("[]")
+  /// Which NSRDB station answered, for the record.
+  station      String?
+
+  fetchedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("solar_yield_cache")
 }
 
 /// Who a milestone pays.

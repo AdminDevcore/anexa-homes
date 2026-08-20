@@ -5,6 +5,8 @@ import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks, parseLayoutSetbacks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
+import { yieldCacheKey } from "@/lib/solar-pvwatts";
+import { cachedPlaneYields, planeFor } from "@/server/modules/solar/pvwatts";
 import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +49,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
       // The designer frames the roof on this. Null means no rooftop coordinate
       // yet, and it says so rather than drawing an empty canvas.
       lat: true,
+      lng: true,
     },
   });
   if (!lead) notFound();
@@ -57,6 +60,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
     select: {
       layoutBlocks: true,
       layoutSetbacks: true,
+      mountType: true,
       annualUsageKwh: true,
       moduleId: true,
       inverterId: true,
@@ -88,6 +92,39 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
   };
   const inverter = equipment.find((x) => x.id === design?.inverterId);
 
+  /**
+   * What NREL has already said about the planes on this roof.
+   *
+   * Read from the CACHE ONLY — `resolvePlaneYields` fetches what it does not
+   * have, and a page load is the wrong moment to spend a rate-limited request:
+   * opening a designer must not be slower than drawing on it, and a plane
+   * nobody has priced yet is one the save will settle a moment later.
+   *
+   * Keyed by the two angles, because everything else in the request is fixed
+   * for one design — see the designer's `measuredYields`.
+   */
+  const blocks = parseLayoutBlocks(design?.layoutBlocks);
+  const arrayType = design?.mountType === "ground" ? ("ground" as const) : ("roof" as const);
+  const planes = blocks.flatMap((b) => {
+    const plane = planeFor({
+      lat: lead.lat,
+      lon: lead.lng,
+      tiltDeg: b.tiltDeg,
+      azimuthDeg: b.azimuthDeg,
+      derateFactor: settings.derateFactor,
+      arrayType,
+    });
+    return plane ? [{ plane, tiltDeg: b.tiltDeg!, azimuthDeg: b.azimuthDeg! }] : [];
+  });
+  const cachedYields = planes.length
+    ? await cachedPlaneYields(planes.map((p) => p.plane))
+    : new Map<string, { kwhPerKwYear: number }>();
+  const measuredYields: Record<string, number> = {};
+  for (const { plane, tiltDeg, azimuthDeg } of planes) {
+    const hit = cachedYields.get(yieldCacheKey(plane));
+    if (hit) measuredYields[`${tiltDeg}|${azimuthDeg}`] = hit.kwhPerKwYear;
+  }
+
   const address = [lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
     .filter(Boolean)
     .join(" · ");
@@ -107,7 +144,8 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
       inverterRatingW={inverter?.ratingW ?? null}
       batteryLabel={named(design?.batteryId)}
       annualUsageKwh={design?.annualUsageKwh ?? null}
-      initialBlocks={parseLayoutBlocks(design?.layoutBlocks)}
+      initialBlocks={blocks}
+      measuredYields={measuredYields}
       initialSetbacks={parseLayoutSetbacks(design?.layoutSetbacks)}
       assumptions={{
         kwhPerKwYear: settings.kwhPerKwYear,

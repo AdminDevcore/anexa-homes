@@ -17,6 +17,20 @@ import {
   type YieldAssumptions,
 } from "./solar-money";
 
+/**
+ * What one plane makes, when somebody has actually measured it.
+ *
+ * Returns kWh per kW-DC per year for a plane, or null when nothing is known
+ * about it — a lookup into the PVWatts cache, passed in rather than imported so
+ * this module keeps knowing nothing about the network. Null falls the array
+ * back to the company's market-average yield, which is what every figure was
+ * built on before PVWatts existed.
+ */
+export type PlaneYieldLookup = (plane: {
+  tiltDeg: number | null;
+  azimuthDeg: number | null;
+}) => number | null;
+
 export type ArrayBreakdown = {
   id: string;
   panels: number;
@@ -44,6 +58,15 @@ export type ArrayBreakdown = {
   unoriented: boolean;
   /** "SW", or null when there is no azimuth to name. */
   compass: string | null;
+  /**
+   * kWh per kW-year for this plane, when a real simulation answered for it.
+   *
+   * Null means the array is priced on the company's market average scaled by
+   * the clear-sky ratio — the old model. Kept per array rather than per system
+   * because one roof can have a measured plane and an undescribed one on it,
+   * and a proposal that says "modelled" should mean it.
+   */
+  measuredKwhPerKwYear: number | null;
 };
 
 /**
@@ -55,7 +78,12 @@ export type ArrayBreakdown = {
  */
 export function arrayBreakdown(
   blocks: LayoutBlock[],
-  opts: { lat: number | null; moduleRatingW: number | null }
+  opts: {
+    lat: number | null;
+    moduleRatingW: number | null;
+    /** Optional. Absent means every array uses the old market-average model. */
+    planeYield?: PlaneYieldLookup;
+  }
 ): ArrayBreakdown[] {
   return blocks.map((b) => {
     const panels = blockPanelCount(b);
@@ -80,6 +108,7 @@ export function arrayBreakdown(
       factor: orientation * shadeFactor,
       unoriented,
       compass: azimuthDeg == null ? null : compassLabel(azimuthDeg),
+      measuredKwhPerKwYear: opts.planeYield?.({ tiltDeg, azimuthDeg }) ?? null,
     };
   });
 }
@@ -99,6 +128,12 @@ export type SystemTotals = {
   blendedFactor: number | null;
   /** How many arrays still have no orientation recorded. */
   unorientedArrays: number;
+  /**
+   * How many arrays are priced on a real PVWatts simulation rather than on the
+   * company's market average. Zero means every figure here is an estimate of
+   * the old kind, and a proposal built on it should not imply otherwise.
+   */
+  measuredArrays: number;
 };
 
 /**
@@ -107,18 +142,47 @@ export type SystemTotals = {
  */
 export function systemTotals(
   blocks: LayoutBlock[],
-  opts: { lat: number | null; moduleRatingW: number | null; assumptions: YieldAssumptions }
+  opts: {
+    lat: number | null;
+    moduleRatingW: number | null;
+    assumptions: YieldAssumptions;
+    /** Optional. Absent means the whole system uses the market-average model. */
+    planeYield?: PlaneYieldLookup;
+  }
 ): SystemTotals {
   const arrays = arrayBreakdown(blocks, opts);
   const forMoney = arrays.map((a) => ({ kwDc: a.kwDc, orientationFactor: a.factor }));
+
+  /**
+   * Production, array by array, from whichever model can answer for each.
+   *
+   * A MEASURED plane is `size × its own yield × (1 − shade)` and owes nothing to
+   * `kwhPerKwYear` or to the clear-sky ratio — both of those exist to guess at
+   * what PVWatts has now actually simulated. An undescribed plane still has no
+   * simulation to draw on, so it keeps the market average exactly as before.
+   *
+   * The two can therefore sit on one roof, and the totals add up regardless.
+   */
+  const year1ProductionKwh = arrays.reduce((sum, a) => {
+    if (a.measuredKwhPerKwYear == null) {
+      return (
+        sum +
+        year1ProductionFromArrays([{ kwDc: a.kwDc, orientationFactor: a.factor }], opts.assumptions)
+      );
+    }
+    return sum + Math.round(a.kwDc * a.measuredKwhPerKwYear * a.shadeFactor);
+  }, 0);
+
   return {
     arrays,
     panels: arrays.reduce((n, a) => n + a.panels, 0),
     // Rounded to the watt: floating-point kW sums print as 9.860000000000001
     // on a proposal otherwise.
     systemSizeKwDc: Math.round(arrays.reduce((n, a) => n + a.kwDc, 0) * 1000) / 1000,
-    year1ProductionKwh: year1ProductionFromArrays(forMoney, opts.assumptions),
+    year1ProductionKwh,
     blendedFactor: blendedOrientationFactor(forMoney),
     unorientedArrays: arrays.filter((a) => a.unoriented && a.panels > 0).length,
+    /** How many arrays are priced on a real simulation rather than an average. */
+    measuredArrays: arrays.filter((a) => a.measuredKwhPerKwYear != null && a.panels > 0).length,
   };
 }

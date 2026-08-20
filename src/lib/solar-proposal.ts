@@ -199,6 +199,22 @@ export type SnapshotEquipment = {
   qty: number;
 };
 
+/**
+ * Which model produced a proposal's production figure.
+ *
+ * Recorded on the document because the document lists the assumptions its
+ * numbers came from, and "1,450 kWh per kW per year" is a false sentence on a
+ * proposal whose production was simulated per plane instead.
+ */
+export type YieldBasis = {
+  source: "pvwatts";
+  /** The NSRDB station that answered. */
+  station: string | null;
+  /** How many arrays were simulated, out of how many there are. */
+  arrays: number;
+  totalArrays: number;
+};
+
 export type SolarProposalSnapshot = {
   /**
    * Bumped when the shape changes, so old proposals still render.
@@ -355,7 +371,19 @@ export type SolarProposalSnapshot = {
   savings: SavingsModel;
   environmental: ReturnType<typeof environmentalImpact>;
   /** Every assumption, recorded so the document explains its own numbers. */
-  assumptions: SolarAssumptions & { currentRateMillsPerKwh: number };
+  assumptions: SolarAssumptions & {
+    currentRateMillsPerKwh: number;
+    /**
+     * WHERE the production figure came from.
+     *
+     * Absent or null means `kwhPerKwYear` above — the company's market average,
+     * scaled by a clear-sky ratio. Present means NREL simulated these planes
+     * against this site's own weather record and the market average did not
+     * enter into the number, which is exactly why the document must stop
+     * listing it as though it had.
+     */
+    yieldBasis?: YieldBasis | null;
+  };
   /** `incentive` only ever appears on legacy snapshots; nothing renders it. */
   disclaimers: { incentive?: string; estimate: string };
 };
@@ -421,6 +449,8 @@ export function buildProposalSnapshot(args: {
   /** The lender's CUSTOMER application link. Never the dealer portal. */
   lenderApplyUrl?: string | null;
   assumptions: SolarAssumptions;
+  /** Which model produced the design's production figure, if not the average. */
+  yieldBasis?: YieldBasis | null;
   now: Date;
 }): SolarProposalSnapshot {
   const { design, finance, assumptions: a } = args;
@@ -603,7 +633,13 @@ export function buildProposalSnapshot(args: {
     },
     savings,
     environmental: environmentalImpact(lifetimeKwh),
-    assumptions: { ...a, currentRateMillsPerKwh },
+    // Spread, not assigned null: the snapshot is asserted to hold no undefined
+    // and an older document simply has no such key.
+    assumptions: {
+      ...a,
+      currentRateMillsPerKwh,
+      ...(args.yieldBasis ? { yieldBasis: args.yieldBasis } : {}),
+    },
     disclaimers: { estimate: ESTIMATE_DISCLAIMER },
   };
 }

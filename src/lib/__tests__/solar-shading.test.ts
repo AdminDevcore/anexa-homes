@@ -89,3 +89,84 @@ describe("shading", () => {
     expect(totals.arrays[0].factor).toBeCloseTo(0.7, 6);
   });
 });
+
+describe("a measured plane outranks the market average", () => {
+  /** PVWatts answers per plane; anything it has not answered for keeps the
+   *  company's typed yield scaled by the clear-sky ratio, as before. */
+  const measured = (kwh: number) => () => kwh;
+
+  it("prices a measured array on its own yield, not on kwhPerKwYear", () => {
+    const totals = systemTotals([block()], {
+      lat: LAT,
+      moduleRatingW: 400,
+      assumptions: ASSUMPTIONS,
+      planeYield: measured(1600),
+    });
+    // 10 panels × 400 W = 4 kW, at 1,600 kWh/kW.
+    expect(totals.systemSizeKwDc).toBeCloseTo(4, 6);
+    expect(totals.year1ProductionKwh).toBe(6400);
+    expect(totals.measuredArrays).toBe(1);
+  });
+
+  it("owes nothing to the derate or the clear-sky ratio once measured", () => {
+    const a = systemTotals([block()], {
+      lat: LAT, moduleRatingW: 400, assumptions: ASSUMPTIONS, planeYield: measured(1600),
+    });
+    // A different derate and a different market yield change nothing: PVWatts
+    // has already accounted for losses and for the plane.
+    const b = systemTotals([block()], {
+      lat: LAT,
+      moduleRatingW: 400,
+      assumptions: { kwhPerKwYear: 900, derateFactor: 0.5 },
+      planeYield: measured(1600),
+    });
+    expect(b.year1ProductionKwh).toBe(a.year1ProductionKwh);
+  });
+
+  it("still takes the shade off — it was never sent to PVWatts", () => {
+    const totals = systemTotals([block({ shadePct: 50 })], {
+      lat: LAT, moduleRatingW: 400, assumptions: ASSUMPTIONS, planeYield: measured(1600),
+    });
+    expect(totals.year1ProductionKwh).toBe(3200);
+  });
+
+  it("falls back to the market average for a plane nothing has answered for", () => {
+    const withLookup = systemTotals([block()], {
+      lat: LAT, moduleRatingW: 400, assumptions: ASSUMPTIONS, planeYield: () => null,
+    });
+    const without = systemTotals([block()], {
+      lat: LAT, moduleRatingW: 400, assumptions: ASSUMPTIONS,
+    });
+    expect(withLookup.year1ProductionKwh).toBe(without.year1ProductionKwh);
+    expect(withLookup.measuredArrays).toBe(0);
+  });
+
+  /** One roof can carry a described plane and an undescribed one. The totals
+   *  have to add up across both models. */
+  it("adds a measured array and an unmeasured one together", () => {
+    const totals = systemTotals(
+      [block({ id: "known" }), block({ id: "unknown", azimuthDeg: null, tiltDeg: null })],
+      {
+        lat: LAT,
+        moduleRatingW: 400,
+        assumptions: ASSUMPTIONS,
+        // Only the described plane has an answer.
+        planeYield: ({ azimuthDeg }) => (azimuthDeg == null ? null : 1600),
+      }
+    );
+    const marketOnly = systemTotals([block({ azimuthDeg: null, tiltDeg: null })], {
+      lat: LAT, moduleRatingW: 400, assumptions: ASSUMPTIONS,
+    });
+    expect(totals.measuredArrays).toBe(1);
+    expect(totals.unorientedArrays).toBe(1);
+    expect(totals.year1ProductionKwh).toBe(6400 + marketOnly.year1ProductionKwh);
+  });
+
+  it("reports nothing measured when no lookup is given at all", () => {
+    const totals = systemTotals([block()], {
+      lat: LAT, moduleRatingW: 400, assumptions: ASSUMPTIONS,
+    });
+    expect(totals.measuredArrays).toBe(0);
+    expect(totals.arrays[0].measuredKwhPerKwYear).toBeNull();
+  });
+});

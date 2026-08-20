@@ -126,6 +126,7 @@ export function SolarLayoutDesigner({
   inverterRatingW,
   batteryLabel,
   annualUsageKwh,
+  measuredYields,
   initialBlocks,
   initialSetbacks,
   assumptions,
@@ -146,6 +147,20 @@ export function SolarLayoutDesigner({
   batteryLabel: string | null;
   /** What the house uses, so offset is live rather than a saved snapshot. */
   annualUsageKwh: number | null;
+  /**
+   * kWh per kW-year for planes NREL has already answered for on this site,
+   * keyed `tilt|azimuth`.
+   *
+   * Keyed on just the two angles because everything else in a PVWatts request —
+   * the coordinate, the loss assumption, roof or ground — is fixed for one
+   * design, so within this screen the plane IS the key.
+   *
+   * It exists so the live preview and the saved figure agree. Drag a panel onto
+   * a plane that has been priced before and the number on screen is the number
+   * that will be stored; draw a plane nobody has asked about yet and it
+   * previews on the market average until the save settles it.
+   */
+  measuredYields: Record<string, number>;
   initialBlocks: LayoutBlock[];
   initialSetbacks: LayoutSetback[];
   /** The company's yield and derate, so the preview matches what the server saves. */
@@ -246,8 +261,17 @@ export function SolarLayoutDesigner({
   const count = panelCount(blocks);
 
   const totals = React.useMemo(
-    () => systemTotals(blocks, { lat, moduleRatingW, assumptions }),
-    [blocks, lat, moduleRatingW, assumptions]
+    () =>
+      systemTotals(blocks, {
+        lat,
+        moduleRatingW,
+        assumptions,
+        planeYield: ({ tiltDeg, azimuthDeg }) =>
+          tiltDeg == null || azimuthDeg == null
+            ? null
+            : (measuredYields[`${tiltDeg}|${azimuthDeg}`] ?? null),
+      }),
+    [blocks, lat, moduleRatingW, assumptions, measuredYields]
   );
   const bestTilt = React.useMemo(() => (lat == null ? 30 : optimalTiltDeg(lat)), [lat]);
 
@@ -1174,8 +1198,13 @@ export function SolarLayoutDesigner({
                 title={offsetPct == null ? "No annual usage on the Energy step yet" : undefined}
               />
               <Metric
-                label="Est. Production"
+                label={totals.measuredArrays > 0 ? "Production" : "Est. Production"}
                 value={moduleRatingW ? `${totals.year1ProductionKwh.toLocaleString()} kWh` : "—"}
+                title={
+                  totals.measuredArrays > 0
+                    ? `${totals.measuredArrays} of ${totals.arrays.filter((a) => a.panels > 0).length} arrays simulated against this site's own weather record (NREL PVWatts). The rest use the company's market average.`
+                    : "The company's market-average yield. Save the layout to simulate these planes against this site's own weather record."
+                }
               />
               <Metric
                 label="DC/AC"
