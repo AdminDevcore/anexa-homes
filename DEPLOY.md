@@ -37,6 +37,7 @@ git push -u origin HEAD            # pushes the current branch
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | S3 credentials (or R2 equivalents) |
 | `RESEND_API_KEY` + `NOTIFY_EMAIL_FROM` | (optional) email — invites, pay stubs, 1099 |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | (optional) SMS |
+| `NREL_API_KEY` | (optional, solar) real production figures — see below |
 
 ⚠️ **Do NOT set in prod:** `DEV_AUTH_BYPASS` and `NEXT_PUBLIC_DEMO_MODE` — these are
 dev-only and would be a security hole live.
@@ -59,6 +60,20 @@ Re-run `migrate deploy` whenever new migrations land.
   first-run setup. Change all seeded passwords immediately.
 
 ## Notes / gotchas
+- **NREL key (solar production):** `NREL_API_KEY` is what turns a proposal's kWh
+  from an estimate into a simulation. With it, every described roof plane is run
+  against the NSRDB weather record for that address by PVWatts v8, and the
+  customer's proposal says so. Without it the app falls back to NREL's shared
+  `DEMO_KEY`, which they throttle to roughly **30 requests an hour per address** —
+  past that, planes quietly keep the company's market-average yield from Solar
+  settings, and the proposal correctly lists that average instead. Nothing breaks
+  either way; the numbers are just softer. The key is free and instant:
+  <https://developer.nrel.gov/signup>.
+
+  Answers are cached per rounded location-and-plane and shared across companies,
+  so the request volume is far lower than the number of deals — a second quote on
+  the same street with the same roof pitch costs nothing.
+
 - **Google Maps key:** `GOOGLE_MAPS_API_KEY` backs three separate things, and each
   needs its API switched on in the Google Cloud console:
   - *Maps Static API* — the aerial thumbnail on a deal.
