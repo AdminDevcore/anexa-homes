@@ -450,7 +450,7 @@ export function SolarActivityFeed({
 // Five pills under the header (View proposal / Edit design / Upload files /
 // Tasks / Invite homeowner) each duplicated a control that already lives with
 // the thing it acts on, one screen further down: the System Design card, the
-// Contracts & documents card, the Generate & send card, the activity feed's
+// Contracts & documents card, the Review & send card, the activity feed's
 // follow-up. Two entry points to one action is a maintenance tax and a reading
 // tax. "Invite homeowner" was not moved but DELETED, along with its server
 // action — this product has no customer-facing portal, so there is nowhere to

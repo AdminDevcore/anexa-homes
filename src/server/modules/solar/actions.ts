@@ -526,6 +526,10 @@ const equipmentSchema = z.object({
   heightMm: z.number().int().min(300).max(3000).nullable().optional(),
   costCents: z.number().int().min(0).optional(),
   priceCents: z.number().int().min(0).optional(),
+  // Adders only: the per-watt rate, in tenths of a cent per installed watt.
+  // 50 = $0.05/W. Non-null is what makes an adder per-watt. Capped at $10/W
+  // because a rate above that is dollars typed where mills were wanted.
+  priceMillsPerWatt: z.number().int().min(0).max(10_000).nullable().optional(),
   rank: z.number().int().min(0).max(999).optional(),
   // Ties a "Re-roof" / "MPU" adder to the Phase-3 crossover so selecting it
   // raises the flag on the deal instead of quietly becoming a line item.
@@ -564,6 +568,18 @@ export async function upsertSolarEquipmentAction(
 
   if (d.kind === "module" && !(d.ratingW && d.ratingW > 0)) {
     return fail("A module needs a wattage above zero — system size is calculated from it.");
+  }
+
+  // A per-watt rate on a panel means nothing, and would put a rate on a deal
+  // line that the adder maths never reads.
+  if (d.kind !== "adder" && d.priceMillsPerWatt) {
+    return fail("Only an adder can be priced per watt.");
+  }
+  // One price per item. An adder carrying both a flat price and a per-watt rate
+  // has two answers to "what does this cost", and which one applies would
+  // depend on which code path read it.
+  if (d.kind === "adder" && d.priceMillsPerWatt && d.priceCents) {
+    return fail("An adder is either a flat price or a rate per watt, not both.");
   }
 
   // Identity clash, in the same terms a rep would recognise.

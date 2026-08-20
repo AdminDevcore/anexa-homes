@@ -51,6 +51,7 @@ export default async function SolarEquipmentPage() {
           ratingW: i.ratingW,
           costCents: i.costCents,
           priceCents: i.priceCents,
+          priceMillsPerWatt: i.priceMillsPerWatt,
           rank: i.rank,
           crossoverKind: i.crossoverKind,
           isActive: i.isActive,

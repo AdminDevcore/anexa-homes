@@ -69,8 +69,8 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     await expect(page.getByLabel("Term (years)")).toBeVisible();
 
     // And the last step generates.
-    await page.getByRole("button", { name: "5 · Generate & send" }).click();
-    await expect(page.getByRole("button", { name: /Check proposal readiness/ })).toBeVisible();
+    await page.getByRole("button", { name: "5 · Review & send" }).click();
+    await expect(page.getByRole("button", { name: /Check it is ready/ })).toBeVisible();
   });
 
   test("an unsaved entry survives a trip to another step", async ({ page }) => {

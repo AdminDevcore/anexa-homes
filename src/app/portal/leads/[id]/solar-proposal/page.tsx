@@ -11,6 +11,7 @@ import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
+import { listDealAdders } from "@/server/modules/solar/adders";
 
 export const dynamic = "force-dynamic";
 
@@ -122,6 +123,19 @@ export default async function SolarProposalBuilderPage({
   // standard 60-cell module rather than drawing nothing.
   const sizingModule = await resolveSizingModule(user.companyId, design?.moduleId ?? null);
 
+  // The adders this company sells, and the ones already on this deal. Sellable
+  // rows only for the catalogue — a retired adder should stop being offered —
+  // but the LINES are read whole, because a line already on a quote has to keep
+  // showing whatever it was priced at.
+  const [adderCatalogue, adderLines] = await Promise.all([
+    prisma.solarEquipment.findMany({
+      where: { companyId: user.companyId, kind: "adder", isActive: true },
+      orderBy: [{ rank: "asc" }, { model: "asc" }],
+      select: { id: true, manufacturer: true, model: true, priceCents: true, priceMillsPerWatt: true },
+    }),
+    listDealAdders(user.companyId, lead.id),
+  ]);
+
   // A provider a design already names stays in its own list even after being
   // retired — otherwise the select falls back to "not set" and the next save
   // blanks a value nobody meant to touch.
@@ -202,6 +216,13 @@ export default async function SolarProposalBuilderPage({
           isActive: p.isActive,
         }))}
         targetNetPpwCents={settings?.targetNetPpwCents ?? null}
+        adderCatalogue={adderCatalogue.map((a) => ({
+          id: a.id,
+          label: [a.manufacturer, a.model].filter(Boolean).join(" ") || a.model,
+          priceCents: a.priceCents,
+          priceMillsPerWatt: a.priceMillsPerWatt,
+        }))}
+        adderLines={adderLines}
         systemSizeKwDc={design?.systemSizeKwDc ?? 0}
         year1ProductionKwh={design?.year1ProductionKwh ?? 0}
         annualDegradationPct={settings.annualDegradationPct}

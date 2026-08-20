@@ -47,7 +47,7 @@ test.describe(FLAG_ON ? "the proposal builder's steps" : "the proposal builder's
     const leadId = await openDesignerDeal(page);
     await page.goto(`/portal/leads/${leadId}/solar-proposal`);
 
-    for (const label of [/1 · Customer/, /2 · Energy/, /3 · System design/, /4 · Financing/, /5 · Generate/]) {
+    for (const label of [/1 · Customer/, /2 · Energy/, /3 · System design/, /4 · Financing/, /5 · Review/]) {
       await expect(page.getByRole("button", { name: label })).toBeVisible();
     }
 

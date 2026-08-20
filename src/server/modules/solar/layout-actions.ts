@@ -10,6 +10,7 @@ import { resolveSizingModule } from "./sizing";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { systemTotals } from "@/lib/solar-arrays";
 import { offsetPct } from "@/lib/solar-money";
+import { recomputeAdderTotal } from "./adders";
 
 // `actions.ts` is a "use server" module, so its helpers cannot be shared —
 // every export there has to be an async server function.
@@ -132,6 +133,12 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
     create: { companyId: user.companyId, leadId, ...data },
     update: data,
   });
+
+  // A per-watt adder is a RATE, so redrawing the roof reprices it. Leaving the
+  // cached total alone here is the same staleness the typed "Adders $" box had,
+  // just one level deeper: the deal would carry a steep-roof charge worked out
+  // on the array before this one.
+  await recomputeAdderTotal(user.companyId, leadId);
 
   revalidatePath(`/portal/leads/${leadId}`);
   // The builder and the full-screen designer are separate routes now, and a

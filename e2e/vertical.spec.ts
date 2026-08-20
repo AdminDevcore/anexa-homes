@@ -171,8 +171,8 @@ test.describe("workspace switcher", () => {
     await page.getByRole("button", { name: /Save energy/ }).click();
     await expect(page.getByText(/Energy saved/)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: /5 · Generate & send/ }).click();
-    await page.getByRole("button", { name: /Check proposal readiness/ }).click();
+    await page.getByRole("button", { name: /5 · Review & send/ }).click();
+    await page.getByRole("button", { name: /Check it is ready/ }).click();
     await expect(page.getByText(/Blocked/)).toBeVisible({ timeout: 15000 });
     // The blocking issue itself, not step 1's "Annual usage (kWh)" label — that
     // is still in the DOM (steps are hidden, not unmounted) and would match a

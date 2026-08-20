@@ -358,6 +358,7 @@ model Company {
   creditApplications       CreditApplication[]
   solarProposals           SolarProposal[]
   solarMilestones          SolarMilestone[]
+  solarDealAdders          SolarDealAdder[]
   solarLenders             SolarLender[]
   solarLenderProducts      SolarLenderProduct[]
   dealFeedPosts            DealFeedPost[]
@@ -809,6 +810,7 @@ model Lead {
   creditApplications CreditApplication[]
   solarProposals     SolarProposal[]
   solarMilestones    SolarMilestone[]
+  solarDealAdders    SolarDealAdder[]
   feedPosts          DealFeedPost[]
 
   @@index([companyId, stageId])
@@ -2877,6 +2879,15 @@ model SolarEquipment {
   costCents     Int                @default(0)
   /// What the customer pays, cents. For adders this is the adder price.
   priceCents    Int                @default(0)
+  /// Adders only, and only the ones quoted PER WATT: tenths of a cent per
+  /// installed watt. 50 = $0.05/W. Non-null is what makes an adder per-watt —
+  /// steep roof and small-system charges are quoted this way and have to follow
+  /// the array, which a flat `priceCents` copied onto a deal never does.
+  ///
+  /// Mills rather than cents because $0.05/W is five cents, and a "5" sitting
+  /// in a cents column reads as $5.00/W: a hundredfold error on a line nobody
+  /// re-reads.
+  priceMillsPerWatt Int?
   /// Adders only: display order, so the highest-margin ones lead.
   rank          Int                @default(0)
   /// Adders only: ties an adder to the Phase-3 crossover so picking "Re-roof"
@@ -2902,6 +2913,7 @@ model SolarEquipment {
   designsAsModule   SolarDesign[]          @relation("DesignModule")
   designsAsInverter SolarDesign[]          @relation("DesignInverter")
   designsAsBattery  SolarDesign[]          @relation("DesignBattery")
+  dealAdders        SolarDealAdder[]
   /// Which lenders' approved-vendor lists this item appears on.
   lenderApprovals   SolarEquipmentLender[]
 
@@ -3197,6 +3209,62 @@ model SolarProposalEvent {
 
   @@index([proposalId, createdAt])
   @@map("solar_proposal_events")
+}
+
+/// How one adder line works out its money.
+enum SolarAdderBasis {
+  /// A catalogue price. A main panel upgrade is $2,700 whatever the size.
+  flat
+  /// Scales with the array — steep roof, small system. Rate in mills per watt.
+  perWatt
+  /// A one-off the rep prices on the day. Still a line, still labelled.
+  custom
+}
+
+/// One piece of extra work on a solar deal, and what it costs.
+///
+/// NEW DATA. `SolarFinance.adderTotalCents` held a single number a rep typed
+/// into a box called "Adders $", which cannot say what the money is FOR, cannot
+/// be checked against the catalogue, and goes stale the moment the array
+/// changes — a $0.05/W steep-roof charge is right for the 8 kW system it was
+/// typed on and wrong for the 12 kW one the roof turned out to hold.
+///
+/// The total is still cached on SolarFinance, because pricing, commissions and
+/// the customer's proposal all read it and none of them should have to sum a
+/// table. These rows are the truth it is recomputed from.
+model SolarDealAdder {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// The catalogue item this came off. Null for a one-off typed on the deal.
+  /// SetNull rather than Cascade: retiring a catalogue item must not delete a
+  /// line off a quote somebody has already been shown.
+  equipmentId String?
+  equipment   SolarEquipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+
+  /// COPIED at pick time, never read back through the relation. Renaming a
+  /// catalogue item would otherwise retitle a line on a signed proposal.
+  label String
+  basis SolarAdderBasis @default(flat)
+  /// `flat` and `custom`: the whole amount, cents. Null on `perWatt`.
+  flatCents    Int?
+  /// `perWatt`: tenths of a cent per installed watt. 50 = $0.05/W.
+  millsPerWatt Int?
+  qty          Int @default(1)
+  /// Display order, so a breakdown reads the same way twice running.
+  sortOrder    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, leadId])
+  @@index([equipmentId])
+  @@map("solar_deal_adders")
 }
 
 /// Who a milestone pays.

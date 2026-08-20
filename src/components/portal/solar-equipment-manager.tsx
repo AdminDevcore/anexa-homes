@@ -25,6 +25,8 @@ type Item = {
   ratingW: number | null;
   costCents: number;
   priceCents: number;
+  /** Adders only: tenths of a cent per installed watt. 50 = $0.05/W. */
+  priceMillsPerWatt: number | null;
   rank: number;
   crossoverKind: string | null;
   isActive: boolean;
@@ -205,7 +207,14 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
         </span>
       )}
       <span className="tabular-nums text-muted-foreground">cost {money(item.costCents)}</span>
-      <span className="tabular-nums font-medium">{money(item.priceCents)}</span>
+      {/* A per-watt adder shows its RATE, never a dollar figure — the amount
+          depends on the system it lands on, and printing one here would be
+          quoting an array this catalogue row has never seen. */}
+      <span className="tabular-nums font-medium">
+        {item.priceMillsPerWatt
+          ? `$${(item.priceMillsPerWatt / 1000).toFixed(3).replace(/0$/, "")}/W`
+          : money(item.priceCents)}
+      </span>
       {/* One default per kind — promoting this one demotes the incumbent, so
           the builder always has exactly one obvious starting choice. */}
       {canEdit && item.kind !== "adder" && item.isActive && (
@@ -316,6 +325,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     cost: "",
     price: "",
     rank: "0",
+    perWatt: "",
     avlYear: "",
     crossoverKind: "",
   });
@@ -333,6 +343,11 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
       heightMm: f.heightMm ? Number(f.heightMm) : null,
       costCents: f.cost ? Math.round(Number(f.cost) * 100) : 0,
       priceCents: f.price ? Math.round(Number(f.price) * 100) : 0,
+      // Dollars per watt on screen, mills per watt on the wire. $0.05 → 50.
+      priceMillsPerWatt:
+        kind === "adder" && f.perWatt.trim() !== ""
+          ? Math.round(Number(f.perWatt) * 1000)
+          : null,
       rank: Number(f.rank) || 0,
       avlYear: f.avlYear.trim() === "" ? null : Number(f.avlYear),
       crossoverKind: (f.crossoverKind || null) as "reroof" | "mpu" | null,
@@ -340,7 +355,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success("Added");
-    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", rank: "0", avlYear: "", crossoverKind: "" });
+    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", rank: "0", perWatt: "", avlYear: "", crossoverKind: "" });
     setOpen(false);
     router.refresh();
   }
@@ -353,21 +368,31 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     );
   }
 
+  /**
+   * A field id, scoped to this section's kind.
+   *
+   * All four kinds render this form on the same page, so a bare `id="model"`
+   * would appear four times — and a duplicate id is a label that points at
+   * somebody else's box. It also makes every field addressable by its name,
+   * which is what a screen reader announces and what a test asks for.
+   */
+  const fid = (name: string) => `eq-${kind}-${name}`;
+
   return (
     <div className="w-full space-y-2 rounded-lg border border-border p-3">
       <div className="grid gap-2 sm:grid-cols-3">
         <div className="space-y-1">
-          <Label className="text-xs">Manufacturer</Label>
-          <Input value={f.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} />
+          <Label className="text-xs" htmlFor={fid("manufacturer")}>Manufacturer</Label>
+          <Input id={fid("manufacturer")} value={f.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Model *</Label>
-          <Input value={f.model} onChange={(e) => set("model", e.target.value)} />
+          <Label className="text-xs" htmlFor={fid("model")}>Model *</Label>
+          <Input id={fid("model")} value={f.model} onChange={(e) => set("model", e.target.value)} />
         </div>
         {kind !== "adder" && (
           <div className="space-y-1">
-            <Label className="text-xs">{ratingLabel}</Label>
-            <Input type="number" value={f.ratingW} onChange={(e) => set("ratingW", e.target.value)} />
+            <Label className="text-xs" htmlFor={fid("rating")}>{ratingLabel}</Label>
+            <Input id={fid("rating")} type="number" value={f.ratingW} onChange={(e) => set("ratingW", e.target.value)} />
           </div>
         )}
         {/* The laminate's real size. The roof designer lays panels out at true
@@ -378,8 +403,9 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
         {kind === "module" && (
           <>
             <div className="space-y-1">
-              <Label className="text-xs">Width (mm)</Label>
+              <Label className="text-xs" htmlFor={fid("width")}>Width (mm)</Label>
               <Input
+                id={fid("width")}
                 type="number"
                 placeholder="1134"
                 value={f.widthMm}
@@ -387,8 +413,9 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Length (mm)</Label>
+              <Label className="text-xs" htmlFor={fid("length")}>Length (mm)</Label>
               <Input
+                id={fid("length")}
                 type="number"
                 placeholder="1762"
                 value={f.heightMm}
@@ -400,8 +427,9 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
         {/* Which approved-vendor list this belongs to. Optional: plenty of
             items are not year-scoped, and a blank is honest about that. */}
         <div className="space-y-1">
-          <Label className="text-xs">AVL year</Label>
+          <Label className="text-xs" htmlFor={fid("avl")}>AVL year</Label>
           <Input
+            id={fid("avl")}
             type="number"
             inputMode="numeric"
             placeholder="e.g. 2026"
@@ -410,22 +438,38 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Cost $</Label>
-          <Input type="number" value={f.cost} onChange={(e) => set("cost", e.target.value)} />
+          <Label className="text-xs" htmlFor={fid("cost")}>Cost $</Label>
+          <Input id={fid("cost")} type="number" value={f.cost} onChange={(e) => set("cost", e.target.value)} />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Price $</Label>
-          <Input type="number" value={f.price} onChange={(e) => set("price", e.target.value)} />
+          <Label className="text-xs" htmlFor={fid("price")}>Price $</Label>
+          <Input id={fid("price")} type="number" value={f.price} onChange={(e) => set("price", e.target.value)} />
         </div>
         {kind === "adder" && (
           <>
             <div className="space-y-1">
-              <Label className="text-xs">Rank</Label>
-              <Input type="number" value={f.rank} onChange={(e) => set("rank", e.target.value)} />
+              <Label className="text-xs" htmlFor={fid("perwatt")}>Or $ per watt</Label>
+              <Input
+                id={fid("perwatt")}
+                type="number"
+                step="0.001"
+                placeholder="e.g. 0.05"
+                value={f.perWatt}
+                onChange={(e) => set("perWatt", e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                For a charge that scales with the array — steep roof, small system. Fill this
+                <em> instead of</em> Price, not as well as.
+              </p>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Crossover</Label>
+              <Label className="text-xs" htmlFor={fid("rank")}>Rank</Label>
+              <Input id={fid("rank")} type="number" value={f.rank} onChange={(e) => set("rank", e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs" htmlFor={fid("crossover")}>Crossover</Label>
               <select
+                id={fid("crossover")}
                 className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                 value={f.crossoverKind}
                 onChange={(e) => set("crossoverKind", e.target.value)}

@@ -20,6 +20,12 @@ import {
   type ValidationIssue,
 } from "@/lib/solar-validation";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
+import { adderTotals } from "@/lib/solar-adders";
+import {
+  SolarAddersPanel,
+  type AdderOption,
+  type DealAdderLine,
+} from "@/components/portal/solar-adders-panel";
 import { systemTotals } from "@/lib/solar-arrays";
 import {
   loanPaymentCents,
@@ -633,6 +639,91 @@ export function SolarDesignPanel({
   );
 }
 
+/**
+ * Base price per watt, what the adders add to it, and what the customer
+ * actually pays per watt — plus the two figures that follow from it.
+ *
+ * The last one is the point. A rep quotes and is measured on "$3.50 a watt",
+ * and on a job carrying a $14,500 re-roof the customer is paying nearer $4.20:
+ * the sticker rate and the real rate are different numbers, and only one of
+ * them was ever on screen. Showing the ladder makes the gap impossible to
+ * miss and impossible to argue with, because every rung is derived from the
+ * one above it.
+ *
+ * Derived here rather than read back off the deal so it moves as the rep types.
+ * It is the same arithmetic `pricePurchase` does on the server; the difference
+ * is only that this one has not been saved yet.
+ */
+function PriceLadder({
+  systemSizeKwDc,
+  basePpwCents,
+  adderTotalCents,
+  monthlyCents,
+  monthlyApproved,
+}: {
+  systemSizeKwDc: number;
+  basePpwCents: number;
+  adderTotalCents: number;
+  monthlyCents: number | null;
+  /** True when the figure is the lender's own, not our estimate of it. */
+  monthlyApproved: boolean;
+}) {
+  const watts = Math.round(systemSizeKwDc * 1000);
+  const baseCents = Math.round(watts * basePpwCents);
+  const contractCents = baseCents + adderTotalCents;
+  // Rates, not amounts, so they are not rounded to the cent before being added
+  // together — a ladder whose rungs do not sum is worse than no ladder.
+  const adderPpw = watts > 0 ? adderTotalCents / watts : 0;
+  const finalPpw = watts > 0 ? contractCents / watts : 0;
+
+  if (watts === 0) {
+    return (
+      <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
+        Nothing is drawn on the roof yet, so there is no system to price. The panel count is what
+        every figure here is multiplied by.
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <div className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[1fr_auto]">
+        <span className="text-muted-foreground">Base</span>
+        <span className="text-right tabular-nums">
+          ${(basePpwCents / 100).toFixed(2)}/W · {usdWhole(baseCents)}
+        </span>
+
+        <span className="text-muted-foreground">Adders</span>
+        <span className="text-right tabular-nums">
+          ${(adderPpw / 100).toFixed(2)}/W · {usdWhole(adderTotalCents)}
+        </span>
+
+        <span className="border-t border-border pt-1 font-semibold">Final</span>
+        <span
+          data-testid="final-ppw"
+          className="border-t border-border pt-1 text-right font-semibold tabular-nums"
+        >
+          ${(finalPpw / 100).toFixed(2)}/W · {usdWhole(contractCents)}
+        </span>
+
+        {monthlyCents != null && (
+          <>
+            <span className="text-muted-foreground">
+              Monthly {monthlyApproved ? "(approved)" : "(estimate)"}
+            </span>
+            <span className="text-right tabular-nums">{usdWhole(monthlyCents)}/mo</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Cents → "$2,700". Whole dollars: nobody quotes a system to the cent. */
+function usdWhole(cents: number): string {
+  return `$${Math.round(cents / 100).toLocaleString()}`;
+}
+
 export type LenderOption = {
   id: string;
   name: string;
@@ -683,6 +774,8 @@ export function SolarFinancePanel({
   lenderId: initialLenderId,
   products,
   targetNetPpwCents,
+  adderCatalogue,
+  adderLines,
   systemSizeKwDc,
   year1ProductionKwh,
   annualDegradationPct,
@@ -699,6 +792,10 @@ export function SolarFinancePanel({
    *  Held whole so switching lender re-offers terms without a round trip. */
   products: LenderProductOption[];
   targetNetPpwCents: number | null;
+  /** The adders this company sells, for the rep to pick from. */
+  adderCatalogue: AdderOption[];
+  /** The lines already on this deal. The total is derived from them. */
+  adderLines: DealAdderLine[];
   /** Needed to price a lease, which is quoted per kW-month. */
   systemSizeKwDc: number;
   /** A PPA is paid per kWh produced, so its term costs what the roof makes. */
@@ -716,7 +813,6 @@ export function SolarFinancePanel({
   const seed = (f: SolarFinanceView) => ({
     grossPpw: num(f?.grossPpwCents, 100, 2),
     dealerFeePct: num(f?.dealerFeePct),
-    adderTotal: num(f?.adderTotalCents, 100),
     rate: num(f?.rateMillsPerKwh, 1000, 3),
     monthly: num(f?.monthlyPaymentCents, 100),
     escalatorPct: num(f?.escalatorPct),
@@ -732,6 +828,20 @@ export function SolarFinancePanel({
   const isLoan = product === "loan";
 
   const chosen = products.find((p) => p.id === lenderProductId) ?? null;
+
+  /**
+   * What the adders come to, derived from the lines exactly as the server
+   * derives it.
+   *
+   * Mirrors `recomputeAdderTotal`, including the legacy branch: a deal priced
+   * before adders were itemised carries a typed total and no lines, and
+   * recomputing that from an empty list would show a homeowner's quote dropping
+   * by the price of their re-roof. The moment there is one line, the lines win.
+   */
+  const adderTotalCents = React.useMemo(() => {
+    if (adderLines.length === 0) return finance?.adderTotalCents ?? 0;
+    return adderTotals(adderLines, Math.round(systemSizeKwDc * 1000)).totalCents;
+  }, [adderLines, finance?.adderTotalCents, systemSizeKwDc]);
 
   /**
    * Choosing a product writes the derived sticker straight into the box.
@@ -815,7 +925,7 @@ export function SolarFinancePanel({
   const basis: CompareBasis = {
     systemSizeKwDc,
     year1ProductionKwh,
-    adderTotalCents: numOrNullPure(form.adderTotal, 100) ?? 0,
+    adderTotalCents,
     downPaymentCents: numOrNullPure(form.downPayment, 100) ?? 0,
     targetNetPpwCents,
     typedGrossPpwCents: numOrNullPure(form.grossPpw, 100),
@@ -888,7 +998,7 @@ export function SolarFinancePanel({
     const principalNow =
       isLoan && chosen
         ? (numOrNullPure(form.grossPpw, 100) ?? 0) * systemSizeKwDc * 1000 +
-          (numOrNullPure(form.adderTotal, 100) ?? 0) -
+          adderTotalCents -
           (numOrNullPure(form.downPayment, 100) ?? 0)
         : 0;
     const factors =
@@ -933,7 +1043,7 @@ export function SolarFinancePanel({
         : null;
 
     const contractCents =
-      Math.round(systemSizeKwDc * 1000 * grossPpwCents) + (numOrNullPure(form.adderTotal, 100) ?? 0);
+      Math.round(systemSizeKwDc * 1000 * grossPpwCents) + adderTotalCents;
     const principal = contractCents - (numOrNullPure(form.downPayment, 100) ?? 0);
 
     // A PUBLISHED payment factor outranks our amortisation. The factor already
@@ -960,7 +1070,7 @@ export function SolarFinancePanel({
     };
   }, [
     chosen, product, isLoan, systemSizeKwDc, targetNetPpwCents,
-    form.grossPpw, form.adderTotal, form.downPayment, form.loanMonthly,
+    form.grossPpw, adderTotalCents, form.downPayment, form.loanMonthly,
   ]);
 
   /** What the boxes below currently add up to. Purchase only — see solar-money. */
@@ -973,9 +1083,9 @@ export function SolarFinancePanel({
       systemSizeKwDc,
       grossPpwCents: gross,
       dealerFeePct: numOrNullPure(form.dealerFeePct) ?? 0,
-      adderTotalCents: numOrNullPure(form.adderTotal, 100) ?? 0,
+      adderTotalCents,
     }).contractPriceCents;
-  }, [isPurchase, product, systemSizeKwDc, form.grossPpw, form.dealerFeePct, form.adderTotal]);
+  }, [isPurchase, product, systemSizeKwDc, form.grossPpw, form.dealerFeePct, adderTotalCents]);
 
   // A blank box means "not set" (null); a typed "0" is a real zero and is sent
   // as one. `form.x ? … : null` is safe here ONLY because these are STRINGS —
@@ -999,7 +1109,6 @@ export function SolarFinancePanel({
       product,
       grossPpwCents: numOrNull(form.grossPpw, 100) ?? undefined,
       dealerFeePct: rawOrNull(form.dealerFeePct) ?? undefined,
-      adderTotalCents: numOrNull(form.adderTotal, 100) ?? undefined,
       rateMillsPerKwh: numOrNull(form.rate, 1000),
       monthlyPaymentCents: numOrNull(form.monthly, 100),
       escalatorPct: rawOrNull(form.escalatorPct),
@@ -1150,17 +1259,43 @@ export function SolarFinancePanel({
           screen reader announces each figure, the label is clickable, and the
           field can be addressed by name. */}
       {isPurchase ? (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <TextField label="Gross $/W" type="number" step="0.01" value={form.grossPpw} disabled={!canEdit} onChange={(v) => set("grossPpw", v)} />
-          <TextField
-            label="Dealer fee %"
-            type="number"
-            value={product === "cash" ? "" : form.dealerFeePct}
-            disabled={!canEdit || product === "cash"}
-            placeholder={product === "cash" ? "n/a — no lender" : undefined}
-            onChange={(v) => set("dealerFeePct", v)}
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <TextField label="Gross $/W" type="number" step="0.01" value={form.grossPpw} disabled={!canEdit} onChange={(v) => set("grossPpw", v)} />
+            <TextField
+              label="Dealer fee %"
+              type="number"
+              value={product === "cash" ? "" : form.dealerFeePct}
+              disabled={!canEdit || product === "cash"}
+              placeholder={product === "cash" ? "n/a — no lender" : undefined}
+              onChange={(v) => set("dealerFeePct", v)}
+            />
+          </div>
+
+          {/* Adders are LINES now, not a box. The old "Adders $" field could not
+              say what the money was for and went stale every time the array
+              changed — see SolarAddersPanel. */}
+          <SolarAddersPanel
+            leadId={leadId}
+            canEdit={canEdit}
+            catalogue={adderCatalogue}
+            lines={adderLines}
+            systemWatts={Math.round(systemSizeKwDc * 1000)}
+            storedTotalCents={finance?.adderTotalCents ?? 0}
           />
-          <TextField label="Adders $" type="number" value={form.adderTotal} disabled={!canEdit} onChange={(v) => set("adderTotal", v)} />
+
+          {/* Base → adders → final, the three numbers a rep is actually checked
+              on. The final rate is the one that differs from the sticker
+              whenever there is extra work on the job: quoting $3.50/W on a job
+              carrying a $14,500 re-roof understates what the customer pays per
+              watt by seventy cents. */}
+          <PriceLadder
+            systemSizeKwDc={systemSizeKwDc}
+            basePpwCents={numOrNullPure(form.grossPpw, 100) ?? 0}
+            adderTotalCents={adderTotalCents}
+            monthlyCents={quote?.monthlyCents ?? null}
+            monthlyApproved={quote?.approved ?? false}
+          />
         </div>
       ) : null}
 
@@ -1320,10 +1455,19 @@ export function SolarProposalGate({
 
   return (
     <div className="space-y-3">
+      {/* "Generate" said nothing about what it produced or who saw it. What this
+          step actually does is freeze the design, the usage and the money into a
+          numbered version with its own link — which is the sentence a rep needs
+          before pressing it, not after. */}
+      <p className="text-sm text-muted-foreground">
+        This takes everything set on the four steps above — the array, the usage, the lender and
+        the price — and freezes it into a numbered version with its own customer link. Later edits
+        do not change a version that has gone out; they make the next one.
+      </p>
       <div className="flex items-center gap-2">
         <Button size="sm" variant="outline" onClick={check} disabled={busy}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Sun className="size-4" />}
-          Check proposal readiness
+          Check it is ready
         </Button>
         {canGen === true && <span className="text-xs text-emerald-600">Ready to generate</span>}
         {canGen === false && <span className="text-xs text-red-600">Blocked — fix the issues below</span>}
@@ -1336,7 +1480,7 @@ export function SolarProposalGate({
       {canEdit && (
         <Button size="sm" onClick={generate} disabled={busy}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Sun className="size-4" />}
-          Generate proposal
+          Create the customer&apos;s proposal
         </Button>
       )}
 

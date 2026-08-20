@@ -146,7 +146,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByRole("button", { name: "2 · Energy" })).toBeVisible();
     await expect(page.getByRole("button", { name: "3 · System design" })).toBeVisible();
     await expect(page.getByRole("button", { name: "4 · Financing" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "5 · Generate & send" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "5 · Review & send" })).toBeVisible();
     await page.goBack();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 

@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Hammer, Landmark, Sun, User, Zap } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Hammer, Landmark, Maximize2, Sun, User, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LayoutBlock } from "@/lib/solar-layout";
 import type { YieldAssumptions } from "@/lib/solar-money";
@@ -16,6 +17,7 @@ import {
   type SolarDesignView,
   type SolarFinanceView,
 } from "@/components/portal/solar-panels";
+import type { AdderOption, DealAdderLine } from "@/components/portal/solar-adders-panel";
 import { SolarCustomerPanel, type SolarCustomerView } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
 import type { ProviderOption } from "@/server/modules/solar/providers";
@@ -27,7 +29,7 @@ const STEPS: { id: StepId; label: string; icon: React.ComponentType<{ className?
   { id: "energy", label: "2 · Energy", icon: Zap },
   { id: "design", label: "3 · System design", icon: Hammer },
   { id: "financing", label: "4 · Financing", icon: Landmark },
-  { id: "generate", label: "5 · Generate & send", icon: Sun },
+  { id: "generate", label: "5 · Review & send", icon: Sun },
 ];
 
 /**
@@ -50,6 +52,8 @@ export function SolarProposalBuilder({
   lenderId,
   lenderProducts,
   targetNetPpwCents,
+  adderCatalogue,
+  adderLines,
   systemSizeKwDc,
   year1ProductionKwh,
   annualDegradationPct,
@@ -86,6 +90,10 @@ export function SolarProposalBuilder({
   /** Every lender's rate sheet — see SolarFinancePanel. */
   lenderProducts: LenderProductOption[];
   targetNetPpwCents: number | null;
+  /** Every adder the company sells, for the Financing step to offer. */
+  adderCatalogue: AdderOption[];
+  /** The adder lines already on this deal. Their sum is the contract's. */
+  adderLines: DealAdderLine[];
   systemSizeKwDc: number;
   /** A PPA's term costs what the roof makes, so the comparison needs output. */
   year1ProductionKwh: number;
@@ -182,6 +190,18 @@ export function SolarProposalBuilder({
         title="Financing"
         blurb="The lender, the product and its terms travel with the quote the customer signs — pick them here, not on the deal."
       >
+        {/* WHAT is being priced, at the top of the screen that prices it.
+            Financing was a form with no system on it: a rep chose a product,
+            typed a rate per watt and read back a monthly payment with nothing
+            on screen saying how big the array was or what it made. Every figure
+            below is that array multiplied by something. */}
+        <SystemBanner
+          leadId={leadId}
+          systemSizeKwDc={systemSizeKwDc}
+          year1ProductionKwh={year1ProductionKwh}
+          annualUsageKwh={energy?.annualUsageKwh ?? null}
+          onOpenEnergy={() => setStep("energy")}
+        />
         <SolarFinancePanel
           leadId={leadId}
           finance={finance}
@@ -190,14 +210,16 @@ export function SolarProposalBuilder({
           lenderId={lenderId}
           products={lenderProducts}
           targetNetPpwCents={targetNetPpwCents}
+          adderCatalogue={adderCatalogue}
+          adderLines={adderLines}
           systemSizeKwDc={systemSizeKwDc}
           year1ProductionKwh={year1ProductionKwh}
           annualDegradationPct={annualDegradationPct}
         />
-        <NextStep label="Next: Generate & send" onClick={() => setStep("generate")} />
+        <NextStep label="Next: Review & send" onClick={() => setStep("generate")} />
       </StepPanel>
 
-      <StepPanel active={step === "generate"} title="Generate & send">
+      <StepPanel active={step === "generate"} title="Review & send">
         <SolarProposalGate
           leadId={leadId}
           canEdit={canCreateProposal}
@@ -205,6 +227,74 @@ export function SolarProposalBuilder({
           onOpenStep={setStep}
         />
       </StepPanel>
+    </div>
+  );
+}
+
+/**
+ * The system the money is being quoted on: how big, what it makes, what share
+ * of the house that covers.
+ *
+ * Every one of these is a link as well as a figure, because the answer to "that
+ * offset is wrong" is always on another screen — either the roof or the bill —
+ * and making a rep hunt for the tab is how a proposal goes out on numbers
+ * nobody corrected.
+ *
+ * Offset reads "—" rather than 0% when no usage has been recorded. A system
+ * makes the same kWh whatever the house uses; 0% would be a claim about the
+ * house, made from nothing.
+ */
+function SystemBanner({
+  leadId,
+  systemSizeKwDc,
+  year1ProductionKwh,
+  annualUsageKwh,
+  onOpenEnergy,
+}: {
+  leadId: string;
+  systemSizeKwDc: number;
+  year1ProductionKwh: number;
+  annualUsageKwh: number | null;
+  onOpenEnergy: () => void;
+}) {
+  const offset =
+    annualUsageKwh && annualUsageKwh > 0 ? (year1ProductionKwh / annualUsageKwh) * 100 : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3">
+      <Figure label="System" value={`${systemSizeKwDc.toFixed(2)} kW`} />
+      <Figure label="Year one" value={`${year1ProductionKwh.toLocaleString()} kWh`} />
+      <Figure
+        label="Offset"
+        value={offset == null ? "—" : `${offset.toFixed(0)}%`}
+        muted={offset == null}
+      />
+      <div className="ml-auto flex flex-wrap gap-2">
+        <Button asChild size="sm" variant="outline">
+          <Link href={`/portal/leads/${leadId}/solar-proposal/design`}>
+            <Maximize2 className="size-4" /> Edit the design
+          </Link>
+        </Button>
+        <Button size="sm" variant="outline" onClick={onOpenEnergy}>
+          <Zap className="size-4" /> {annualUsageKwh ? "Edit usage" : "Add usage"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function Figure({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "font-display text-lg font-semibold tabular-nums",
+          muted && "text-muted-foreground"
+        )}
+      >
+        {value}
+      </div>
     </div>
   );
 }
