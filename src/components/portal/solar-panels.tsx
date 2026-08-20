@@ -37,6 +37,7 @@ import {
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
 import { FinanceOffers } from "@/components/portal/solar-finance-offers";
+import { SolarSharePanel } from "@/components/portal/solar-share-panel";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor, formatFactor } from "@/lib/solar-loan";
 import {
   saveSolarDesignAction,
@@ -1408,15 +1409,22 @@ export type ProposalVersion = {
   viewedAt: string | null;
   signedAt: string | null;
   createdAt: string;
+  /** Whether the customer's copy carries the 25-year comparison. */
+  showComparison: boolean;
 };
 
 export function SolarProposalGate({
   leadId,
+  customerEmail,
+  customerPhone,
   versions,
   canEdit,
   onOpenStep,
 }: {
   leadId: string;
+  /** Where the proposal can be sent. Null means nowhere. */
+  customerEmail: string | null;
+  customerPhone: string | null;
   versions: ProposalVersion[];
   canEdit: boolean;
   /** Sends the rep to the builder step that fixes a finding. See ValidationList. */
@@ -1426,6 +1434,10 @@ export function SolarProposalGate({
   const [canGen, setCanGen] = React.useState<boolean | null>(null);
   const [busy, setBusy] = React.useState(false);
   const router = useRouter();
+
+  // Versions arrive newest-first, so the first one still standing is the one
+  // this deal is actually quoting.
+  const current = versions.find((v) => !v.supersededAt) ?? null;
 
   async function generate() {
     setBusy(true);
@@ -1482,6 +1494,24 @@ export function SolarProposalGate({
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Sun className="size-4" />}
           Create the customer&apos;s proposal
         </Button>
+      )}
+
+      {/* Share the CURRENT version — the newest one that has not been replaced.
+          A superseded version is not offerable: sending an old quote to a
+          homeowner is the one thing versioning exists to prevent. */}
+      {current && (
+        <SolarSharePanel
+          proposalId={current.id}
+          leadId={leadId}
+          version={current.version}
+          customerEmail={customerEmail}
+          customerPhone={customerPhone}
+          publicToken={current.publicToken}
+          sentAt={current.sentAt}
+          viewedAt={current.viewedAt}
+          showComparison={current.showComparison}
+          canEdit={canEdit}
+        />
       )}
 
       <ProposalVersionList versions={versions} canEdit={canEdit} />
@@ -1556,6 +1586,7 @@ export function ProposalVersionList({
             {canEdit && !v.sentAt && !v.supersededAt && (
               <button
                 className="text-xs underline underline-offset-2"
+                title="For a proposal sent some other way — this records the send without delivering anything."
                 onClick={async () => {
                   const res = await markProposalSentAction(v.id);
                   if (!res.ok) return toast.error(res.error);
@@ -1563,7 +1594,7 @@ export function ProposalVersionList({
                   router.refresh();
                 }}
               >
-                Mark sent
+                Mark sent by hand
               </button>
             )}
           </li>

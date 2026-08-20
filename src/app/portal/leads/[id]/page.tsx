@@ -247,6 +247,7 @@ export default async function LeadDetailPage({
           select: {
             id: true, version: true, status: true, publicToken: true, supersededAt: true,
             sentAt: true, viewedAt: true, signedAt: true, createdAt: true,
+            showComparison: true,
           },
         }),
         // A deal can be shopped to several lenders (declined by one, approved by
@@ -1000,6 +1001,7 @@ export default async function LeadDetailPage({
                       viewedAt: v.viewedAt?.toISOString() ?? null,
                       signedAt: v.signedAt?.toISOString() ?? null,
                       createdAt: v.createdAt.toISOString(),
+          showComparison: v.showComparison,
                     }))}
                   />
                 </Card>

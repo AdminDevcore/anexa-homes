@@ -140,22 +140,38 @@ export async function sendEmailWithAttachments(
   await deliver(to, subject, body, opts?.fromName, attachments, opts?.html);
 }
 
-export async function sendSms(to: string, body: string): Promise<void> {
+/**
+ * Returns true only if the message was actually accepted by Twilio.
+ *
+ * It used to return void, so a caller had no way to tell a delivered text from
+ * one that was console-logged because nothing is configured — and a caller that
+ * stamps a record as "sent" on the strength of that is recording a fiction.
+ * Existing callers that ignore the result behave exactly as before.
+ */
+export async function sendSms(to: string, body: string): Promise<boolean> {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_FROM;
   if (!sid || !token || !from) {
-    console.log(`[sms:dev] to=${to}\n${body}`);
-    return;
+    console.log(`[sms:dev — NOT SENT, no TWILIO_*] to=${to}\n${body}`);
+    return false;
   }
   try {
     const auth = Buffer.from(`${sid}:${token}`).toString("base64");
-    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
       method: "POST",
       headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ To: to, From: from, Body: body }).toString(),
     });
+    // Twilio answers 4xx with a JSON error rather than throwing, so a bad
+    // number or a suspended account looks exactly like success to a bare await.
+    if (!res.ok) {
+      console.error("[sms] send rejected", res.status, await res.text().catch(() => ""));
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error("[sms] send failed", err);
+    return false;
   }
 }

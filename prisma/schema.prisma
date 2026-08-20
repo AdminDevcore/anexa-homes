@@ -3186,6 +3186,17 @@ model SolarProposal {
   /// The frozen document. See SolarProposalSnapshot in src/lib/solar-proposal.ts.
   snapshot Json
 
+  /// Whether the customer's copy carries the 25-year utility-versus-solar
+  /// comparison.
+  ///
+  /// A COLUMN, deliberately outside the snapshot. The snapshot is what this
+  /// customer was quoted and must never move; this is a choice about what to
+  /// show them, and a rep turning the table off should not have to reissue a
+  /// version and renumber the document to do it. Some households read the
+  /// twenty-five-year table as the proof and some read it as a wall of numbers,
+  /// and that is a decision made at the table, after the thing is generated.
+  showComparison Boolean @default(true)
+
   /// Set when a newer version replaces this one.
   supersededAt      DateTime?
   /// The e-sign envelope, once sent for signature.

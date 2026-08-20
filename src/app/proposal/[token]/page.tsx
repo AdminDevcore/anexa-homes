@@ -44,6 +44,7 @@ export default async function PublicSolarProposalPage({
     <div className="min-h-screen bg-background">
       <SolarProposalView
         snapshot={proposal.snapshot}
+        showComparison={proposal.showComparison}
         token={token}
         alreadySigned={!!proposal.signedAt}
         superseded={!!proposal.supersededAt}

@@ -115,6 +115,7 @@ export default async function SolarProposalBuilderPage({
       select: {
         id: true, version: true, status: true, publicToken: true, supersededAt: true,
         sentAt: true, viewedAt: true, signedAt: true, createdAt: true,
+        showComparison: true,
       },
     }),
   ]);
@@ -272,6 +273,7 @@ export default async function SolarProposalBuilderPage({
           viewedAt: v.viewedAt?.toISOString() ?? null,
           signedAt: v.signedAt?.toISOString() ?? null,
           createdAt: v.createdAt.toISOString(),
+          showComparison: v.showComparison,
         }))}
       />
     </div>

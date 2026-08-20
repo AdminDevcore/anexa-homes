@@ -14,6 +14,7 @@ import { getSolarSettings } from "./settings";
 import { readSolarReadiness } from "./readiness";
 import { buildProposalSnapshot, type SnapshotEquipment } from "@/lib/solar-proposal";
 import { canGenerate } from "@/lib/solar-validation";
+import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 
 const fail = (error: string) => ({ ok: false as const, error });
 
@@ -333,6 +334,159 @@ export async function markProposalSentAction(proposalId: string) {
     },
   });
   revalidatePath(`/portal/leads/${p.leadId}`);
+  return { ok: true as const };
+}
+
+/**
+ * Send the proposal to the customer, by email, by text, or both.
+ *
+ * This replaced a checkbox called "Mark sent". A rep pasted the link into their
+ * own mail client, came back and ticked a box, and the deal's `sentAt` recorded
+ * the tick rather than the send — so "sent three days ago, still not viewed"
+ * could equally mean nobody ever actually sent it.
+ *
+ * WHAT GOES OUT IS THE LINK, NOT AN ATTACHMENT, and that is a deliberate
+ * difference from the tools that mail a PDF. The link is the live document: it
+ * records when the homeowner opened it, it cannot be forwarded around in a
+ * stale version months later, and the customer can still print it to PDF from
+ * the page. A PDF in an inbox is a snapshot of a snapshot with none of that.
+ *
+ * The token is minted HERE, on the first real send — an unsent proposal has no
+ * public surface at all. A re-send keeps the existing link so the copy the
+ * customer already has never dies.
+ */
+export async function sendSolarProposalAction(input: {
+  proposalId: string;
+  email: boolean;
+  sms: boolean;
+  /** The rep's own words. Blank falls back to the standard line. */
+  note?: string;
+}) {
+  const user = await requireUser();
+  if (!can(user, "update", "Proposal")) return fail("Not allowed.");
+  if (!input.email && !input.sms) return fail("Pick email, text, or both.");
+
+  const p = await prisma.solarProposal.findFirst({
+    where: { companyId: user.companyId, id: input.proposalId },
+    select: {
+      id: true, leadId: true, version: true, publicToken: true,
+      supersededAt: true, signedAt: true,
+      lead: { select: { firstName: true, email: true, phone: true } },
+      company: { select: { name: true } },
+    },
+  });
+  if (!p) return fail("Proposal not found.");
+  if (p.supersededAt) return fail("This version has been superseded. Send the current one.");
+
+  const to = { email: p.lead.email?.trim() || null, phone: p.lead.phone?.trim() || null };
+  if (input.email && !to.email) return fail("This customer has no email address on the deal.");
+  if (input.sms && !to.phone) return fail("This customer has no phone number on the deal.");
+
+  const publicToken = p.publicToken ?? randomBytes(24).toString("base64url");
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+  const link = `${appUrl}/proposal/${publicToken}`;
+  if (!appUrl) {
+    // Without a base URL the message would carry "/proposal/abc" — a relative
+    // path in an email, which is nothing at all. Better to refuse than to send
+    // a homeowner a dead link and stamp the deal as sent.
+    return fail("NEXT_PUBLIC_APP_URL is not configured, so the link would be unreachable.");
+  }
+
+  const note = (input.note ?? "").trim();
+  const greeting = p.lead.firstName ? `Hi ${p.lead.firstName},` : "Hi,";
+  const body = [
+    greeting,
+    "",
+    note || `Here is your solar proposal from ${p.company.name}.`,
+    "",
+    link,
+    "",
+    "You can read it on any device, and print it if you would like a copy.",
+  ].join("\n");
+
+  // Delivery is attempted BEFORE anything is stamped. A send that failed must
+  // not leave a deal claiming the customer has it.
+  const delivered: string[] = [];
+  const failed: string[] = [];
+  if (input.email && to.email) {
+    const ok = await sendEmail(to.email, `Your solar proposal from ${p.company.name}`, body, {
+      fromName: p.company.name,
+    });
+    (ok ? delivered : failed).push("email");
+  }
+  if (input.sms && to.phone) {
+    // One line for a text: a link buried under four paragraphs on a phone gets
+    // scrolled past.
+    const ok = await sendSms(
+      to.phone,
+      `${note || `Your solar proposal from ${p.company.name}`}: ${link}`
+    );
+    (ok ? delivered : failed).push("text");
+  }
+
+  // NOTHING is stamped unless something actually went out. A deal that claims
+  // the customer has the proposal when the provider refused it is the failure
+  // this whole action replaced.
+  if (delivered.length === 0) {
+    return fail(
+      `Nothing was sent — ${failed.join(" and ")} could not be delivered. Check the messaging provider is configured.`
+    );
+  }
+
+  await prisma.solarProposal.update({
+    where: { id: p.id },
+    data: {
+      status: "sent",
+      sentAt: new Date(),
+      publicToken,
+      events: {
+        create: {
+          type: "sent",
+          actorId: user.userId,
+          actorName: user.fullName,
+          detail: `${delivered.join(" + ")}${p.publicToken ? " · existing link kept" : " · public link activated"}`,
+        },
+      },
+    },
+  });
+  await prisma.activityLog.create({
+    data: {
+      companyId: user.companyId,
+      type: "system",
+      message: `${user.fullName} sent solar proposal v${p.version} by ${delivered.join(" and ")}`,
+      leadId: p.leadId,
+      actorId: user.userId,
+    },
+  });
+
+  revalidatePath(`/portal/leads/${p.leadId}`);
+  revalidatePath(`/portal/leads/${p.leadId}/solar-proposal`);
+  return { ok: true as const, delivered, failed, link };
+}
+
+/**
+ * Show or hide the 25-year comparison on the customer's copy.
+ *
+ * Does NOT reissue the proposal, on purpose. The snapshot is what this customer
+ * was quoted and every figure in it stays exactly where it was; this changes
+ * which section of it is rendered, which is a decision a rep makes at the table
+ * once they know whether this household reads the table as proof or as a wall
+ * of numbers.
+ */
+export async function setProposalComparisonAction(proposalId: string, show: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Proposal")) return fail("Not allowed.");
+  const p = await prisma.solarProposal.findFirst({
+    where: { companyId: user.companyId, id: proposalId },
+    select: { id: true, leadId: true },
+  });
+  if (!p) return fail("Proposal not found.");
+
+  await prisma.solarProposal.update({
+    where: { id: p.id },
+    data: { showComparison: show },
+  });
+  revalidatePath(`/portal/leads/${p.leadId}/solar-proposal`);
   return { ok: true as const };
 }
 

@@ -78,9 +78,22 @@ export function SolarProposalView({
   superseded,
   previewMode = false,
   layoutImageUrl = null,
+  showComparison = true,
 }: {
   snapshot: SolarProposalSnapshot;
   token: string;
+  /**
+   * Whether to render the 25-year utility-versus-solar section.
+   *
+   * A PRESENTATION choice held on the proposal row, not in the snapshot: every
+   * figure the customer was quoted stays exactly where it was, and a rep who
+   * decides at the table that this household reads the table as a wall of
+   * numbers can turn it off without reissuing the document.
+   *
+   * Defaults true, which is how every proposal sent before the toggle existed
+   * was rendered.
+   */
+  showComparison?: boolean;
   alreadySigned: boolean;
   superseded: boolean;
   /**
@@ -404,6 +417,7 @@ export function SolarProposalView({
       </Section>
 
       {/* ── 7 · Savings & projections ────────────────────────────────────── */}
+      {showComparison && (
       <Section title="Staying with the utility vs going solar">
         <div className="grid gap-3 sm:grid-cols-2">
           <Callout
@@ -465,6 +479,7 @@ export function SolarProposalView({
           system in that year.
         </p>
       </Section>
+      )}
 
       {/* ── Environmental ────────────────────────────────────────────────── */}
       <Section title="What this does for the planet">

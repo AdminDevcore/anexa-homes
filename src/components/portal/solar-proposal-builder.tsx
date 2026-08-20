@@ -223,6 +223,8 @@ export function SolarProposalBuilder({
       <StepPanel active={step === "generate"} title="Review & send">
         <SolarProposalGate
           leadId={leadId}
+          customerEmail={customer.email}
+          customerPhone={customer.phone}
           canEdit={canCreateProposal}
           versions={versions}
           onOpenStep={setStep}

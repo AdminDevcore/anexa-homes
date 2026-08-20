@@ -48,6 +48,7 @@ export default async function SolarProposalPreviewPage({
     orderBy: { version: "desc" },
     select: {
       version: true, snapshot: true, signedAt: true, supersededAt: true, createdAt: true,
+      showComparison: true,
     },
   });
   if (!proposal) notFound();
@@ -81,6 +82,34 @@ export default async function SolarProposalPreviewPage({
         </span>
       </div>
 
+      {/*
+        The way back to every number on this page.
+
+        A proposal here is a FROZEN snapshot, not a live document — which is
+        what makes "you were quoted this" answerable months later, and also what
+        means a figure cannot be corrected in place. So the honest affordance is
+        not an edit box on the document: it is the shortest route to the screen
+        that owns each number, and a plain sentence saying that changing one
+        makes the next version rather than rewriting this one.
+      */}
+      <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-1 px-4 text-xs print:hidden sm:px-6">
+        <span className="text-muted-foreground">Change a figure:</span>
+        {(
+          [
+            ["usage", `/portal/leads/${id}/solar-proposal?step=energy`],
+            ["the array", `/portal/leads/${id}/solar-proposal/design`],
+            ["the price", `/portal/leads/${id}/solar-proposal?step=financing`],
+          ] as const
+        ).map(([label, href]) => (
+          <Link key={label} href={href} className="underline underline-offset-2 hover:text-foreground">
+            {label}
+          </Link>
+        ))}
+        <span className="text-muted-foreground">
+          — this version keeps what it was quoted at; the change goes into the next one.
+        </span>
+      </div>
+
       {/* Internal only — the customer's copy simply omits the section. This is
           the rep's cue to fix it BEFORE the proposal goes anywhere. */}
       {layoutMissing && (
@@ -102,6 +131,7 @@ export default async function SolarProposalPreviewPage({
 
       <SolarProposalView
         snapshot={snapshot}
+        showComparison={proposal.showComparison}
         // No token is handed to the preview: acceptance is disabled, so there is
         // nothing for one to authorize, and it stays out of the page source.
         token=""
