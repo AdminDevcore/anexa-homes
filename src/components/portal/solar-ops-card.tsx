@@ -58,6 +58,13 @@ export type SolarOpsProps = {
     inverters: { id: string; label: string }[];
     batteries: { id: string; label: string }[];
   };
+  /**
+   * Render without the card shell and without the "Operations" heading, for
+   * when something outside already provides both — the deal page's slide
+   * switcher, whose tab IS the heading. The stage line and the action-required
+   * badge stay either way: they are the card's content, not its chrome.
+   */
+  bare?: boolean;
 };
 
 /**
@@ -101,12 +108,14 @@ export function SolarOpsCard(props: SolarOpsProps) {
 
   const ownerLabel = stageOwnerLabel(stage?.ownerRole);
 
+  const bare = props.bare ?? false;
+
   return (
-    <div className="space-y-4 rounded-xl border border-border bg-card p-5">
+    <div className={cn("space-y-4", !bare && "rounded-xl border border-border bg-card p-5")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="font-semibold">Operations</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          {!bare && <h3 className="font-semibold">Operations</h3>}
+          <p className={cn("text-xs text-muted-foreground", !bare && "mt-0.5")}>
             {stage ? stage.name : "No stage"}
             {ownerLabel && <> · owned by <span className="font-medium">{ownerLabel}</span></>}
           </p>

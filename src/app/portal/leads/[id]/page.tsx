@@ -3,15 +3,12 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ListTodo,
-  Hammer,
   Camera,
   Users,
   ClipboardCheck,
   DollarSign,
-  Zap,
   Satellite,
   Landmark,
-  MessageSquare,
   Sun,
   FolderOpen,
 } from "lucide-react";
@@ -712,13 +709,27 @@ export default async function LeadDetailPage({
             />
           </Card>
 
-          {/* System, pricing, payment schedule AND the lender's terms in one
-              card. These were two separate concerns on two separate surfaces,
+          {/* The numbers and the conversation, one at a time — the switcher
+              roofing already uses for Claim / Estimate / Scope.
+
+              These were two stacked cards. The money card alone runs a stat
+              row, a pricing breakdown, two payment schedules and the lender's
+              terms, so the feed underneath it started a screen and a half down
+              and nobody scrolled that far to read it. Side by side as slides,
+              both are one click from the top of the deal.
+
+              System, pricing, payment schedule AND the lender's terms stay
+              together in the first slide: they were two separate surfaces once,
               which is why nobody could answer "what did they get approved for"
               without leaving the page. */}
           {isSolarDeal && (
-            <Card title="System & financing" icon={Zap} tone="solar">
-              <div className="space-y-6">
+            <DealSlides
+              slides={[
+                { id: "system", label: "System & financing" },
+                { id: "activity", label: "Activity" },
+              ]}
+            >
+              <div data-deal-slide="system" className="space-y-6">
                 <SolarSystemMoneyPanel
                   leadId={lead.id}
                   canEdit={can(user, "update", "Lead")}
@@ -738,26 +749,46 @@ export default async function LeadDetailPage({
                   </div>
                 )}
               </div>
-            </Card>
+
+              <div data-deal-slide="activity">
+                <SolarActivityFeed
+                  leadId={lead.id}
+                  canPost={can(user, "read", "Lead")}
+                  posts={solarFeed.map((f) => ({
+                    id: f.id,
+                    body: f.body,
+                    author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
+                    createdAt: f.createdAt.toISOString(),
+                  }))}
+                />
+              </div>
+            </DealSlides>
           )}
 
-          {isSolarDeal && (
-            <Card title="Activity" icon={MessageSquare} tone="solar">
-              <SolarActivityFeed
-                leadId={lead.id}
-                canPost={can(user, "read", "Lead")}
-                posts={solarFeed.map((f) => ({
-                  id: f.id,
-                  body: f.body,
-                  author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
-                  createdAt: f.createdAt.toISOString(),
-                }))}
-              />
-            </Card>
-          )}
+          {/* Operations and Installation, one at a time — the same switcher the
+              two above use.
 
+              They answer the two halves of "how is this job going": who we are
+              waiting on, and what the crew has actually done. Stacked, the ops
+              chase sat up here and the install ran a section and a half below
+              it, so nobody read them together even though the second is the
+              answer to the first.
+
+              `id="production"` moves with the Installation content rather than
+              being left behind on an empty section — a bookmarked
+              …/leads/x#production still lands on the install work. */}
           {isSolarDeal && (
+            <DealSlides
+              id="production"
+              className="scroll-mt-24"
+              slides={[
+                { id: "ops", label: "Operations", icon: "ops" },
+                { id: "install", label: "Installation", icon: "install" },
+              ]}
+            >
+            <div data-deal-slide="ops">
             <SolarOpsCard
+              bare
               leadId={lead.id}
               stage={
                 lead.stage
@@ -782,6 +813,60 @@ export default async function LeadDetailPage({
               linkedDeal={linkedDeal}
               canEdit={can(user, "update", "Lead")}
             />
+            </div>
+
+            <div data-deal-slide="install">
+                {!project ? (
+                  canManageProd ? (
+                    <StartProductionButton leadId={lead.id} />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">This deal isn&rsquo;t in production yet.</p>
+                  )
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
+                      {/* No production-status control. `Project.status` was a
+                          second, hand-maintained status that duplicated the
+                          pipeline — which already has In Production, QC
+                          Inspection, Paid and Cancelled as stages. The deal's
+                          stage is the only status now. */}
+                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
+                    </div>
+
+                    <Section icon={Camera} label="Site & Install Photos" tone="solar">
+                      <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
+                    </Section>
+
+                    <Section icon={Users} label="Crew" tone="solar">
+                      {canAssignCrew ? (
+                        <CrewAssigner
+                          projectId={project.id}
+                          crews={crews}
+                          assignments={project.crewAssignments.map((a) => ({
+                            id: a.id,
+                            crewName: a.crew.name,
+                            members: a.crew.members.length,
+                          }))}
+                        />
+                      ) : project.crewAssignments.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No crew assigned.</p>
+                      ) : (
+                        <ul className="space-y-1 text-sm">
+                          {project.crewAssignments.map((a) => (
+                            <li key={a.id}>{a.crew.name} · {a.crew.members.length} members</li>
+                          ))}
+                        </ul>
+                      )}
+                    </Section>
+
+                    <Section icon={ClipboardCheck} label="QC Checklist" tone="solar">
+                      <QcChecklistEditor projectId={project.id} items={qcItems} />
+                    </Section>
+                  </div>
+                )}
+            </div>
+            </DealSlides>
           )}
 
           {/* Notes — roofing only. On solar the channelled Activity feed above
@@ -1007,71 +1092,6 @@ export default async function LeadDetailPage({
                 </Card>
               </section>
             )}
-
-            {/* ── Installation (solar only) ──
-                Roofing's equivalent is the "Field production" slide above; a
-                roofing deal must not render this section twice.
-
-                Named for the crew going out, not "Operations": the ops-chase
-                card further up already owns that word, and two sections with
-                one name on a single scrolling page told the reader nothing
-                about which was which. */}
-            {isSolarDeal && (
-            <section id="production" className="scroll-mt-24 space-y-6">
-              <Card title="Installation" icon={Hammer} tone="solar">
-                {!project ? (
-                  canManageProd ? (
-                    <StartProductionButton leadId={lead.id} />
-                  ) : (
-                    <p className="text-sm text-muted-foreground">This deal isn&rsquo;t in production yet.</p>
-                  )
-                ) : (
-                  <div className="space-y-6">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
-                      {/* No production-status control. `Project.status` was a
-                          second, hand-maintained status that duplicated the
-                          pipeline — which already has In Production, QC
-                          Inspection, Paid and Cancelled as stages. The deal's
-                          stage is the only status now. */}
-                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
-                    </div>
-
-                    <Section icon={Camera} label="Site & Install Photos" tone="solar">
-                      <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
-                    </Section>
-
-                    <Section icon={Users} label="Crew" tone="solar">
-                      {canAssignCrew ? (
-                        <CrewAssigner
-                          projectId={project.id}
-                          crews={crews}
-                          assignments={project.crewAssignments.map((a) => ({
-                            id: a.id,
-                            crewName: a.crew.name,
-                            members: a.crew.members.length,
-                          }))}
-                        />
-                      ) : project.crewAssignments.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No crew assigned.</p>
-                      ) : (
-                        <ul className="space-y-1 text-sm">
-                          {project.crewAssignments.map((a) => (
-                            <li key={a.id}>{a.crew.name} · {a.crew.members.length} members</li>
-                          ))}
-                        </ul>
-                      )}
-                    </Section>
-
-                    <Section icon={ClipboardCheck} label="QC Checklist" tone="solar">
-                      <QcChecklistEditor projectId={project.id} items={qcItems} />
-                    </Section>
-                  </div>
-                )}
-              </Card>
-            </section>
-            )}
-
 
             {/* ── Financials ──
                 Solar only. A roofing deal reads its financials inside the

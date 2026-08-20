@@ -1,7 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { ShieldCheck, Hammer, DollarSign, Calculator, ReceiptText, type LucideIcon } from "lucide-react";
+import {
+  Calculator,
+  DollarSign,
+  Hammer,
+  MessageSquare,
+  ReceiptText,
+  ShieldCheck,
+  Wrench,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type DealSlideDef = { id: string; label: string; icon?: string };
@@ -14,6 +24,12 @@ const SLIDE_ICONS: Record<string, LucideIcon> = {
   scope: Calculator,
   field: Hammer,
   financials: DollarSign,
+  // Solar's pair. Same icons the two cards carried before they became slides,
+  // so the switcher reads as the same two things moved, not as new ones.
+  system: Zap,
+  activity: MessageSquare,
+  ops: Wrench,
+  install: Hammer,
 };
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
@@ -36,10 +52,13 @@ export function DealSlides({
   slides,
   children,
   className,
+  id,
 }: {
   slides: DealSlideDef[];
   children: React.ReactNode;
   className?: string;
+  /** Anchor for a deep link, on the section this already renders. */
+  id?: string;
 }) {
   const [picked, setPicked] = React.useState<string | null>(null);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -63,6 +82,7 @@ export function DealSlides({
 
   return (
     <section
+      id={id}
       className={cn("overflow-hidden rounded-xl border border-border bg-card shadow-sm", className)}
       data-testid="deal-slides"
     >

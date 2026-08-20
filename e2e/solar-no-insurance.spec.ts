@@ -92,12 +92,20 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
       await expect(page.getByRole("button", { name: product, exact: true })).toHaveCount(0);
     }
 
-    // All four are offered where they are picked.
+    // They are picked in the builder — but off the rate sheets, not from a
+    // fixed list of four. The hand-quote row that used to offer Loan/Lease/PPA
+    // as bare chips is gone, so a rep cannot put a deal on terms the company
+    // holds no programme for. Cash is the one that is always there: it needs no
+    // lender and no sheet.
     await page.getByRole("link", { name: /Build Proposal/ }).first().click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
     await page.getByRole("button", { name: "4 · Financing" }).click();
-    for (const product of ["Cash", "Loan", "Lease", "PPA"]) {
-      await expect(page.getByRole("button", { name: new RegExp(`^${product}`) }).first()).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }),
+    ).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Not on a rate sheet?")).toHaveCount(0);
+    for (const product of ["Loan", "Lease", "PPA"]) {
+      await expect(page.getByRole("button", { name: product, exact: true })).toHaveCount(0);
     }
 
     // And the roofing toggle's wording is nowhere to be seen.
@@ -199,7 +207,17 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // 4 · One feed, no channels. Internal / External / Customer split the
     // stream three ways to describe one audience: everything here is staff-only,
     // because there is no customer portal for the other two to reach.
-    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+    //
+    // The feed is the second slide of the System & financing switcher now, not
+    // a card of its own, so it has to be asked for. Everything asserted above
+    // this line lives on the first slide, which is why none of it needed a
+    // click: the money IS what the deal opens on.
+    const slides = page.getByTestId("deal-slides");
+    await expect(slides.getByRole("tab", { name: "System & financing" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await slides.getByRole("tab", { name: "Activity" }).click();
     await expect(page.getByPlaceholder(/Use @Name to notify/)).toBeVisible();
     // Scoped to the feed. Page-wide, "Customer" also matches the Operations
     // card's who-are-we-waiting-on picker, which is a different control that
@@ -248,6 +266,13 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
   test("the feed is one staff-only stream, unbadged", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
+    // The feed shares a switcher with System & financing, so open its slide
+    // first. Everything below is about what the feed CONTAINS; the slide is
+    // just how you get to it.
+    await page
+      .getByTestId("deal-slides")
+      .getByRole("tab", { name: "Activity" })
+      .click();
     // The seeded posts are all present regardless of the channel they were
     // written under — collapsing the UI must not hide history.
     await expect(page.getByText(/Plan set submitted to the city/)).toBeVisible({ timeout: 15000 });
