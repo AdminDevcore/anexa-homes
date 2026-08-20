@@ -709,24 +709,36 @@ export default async function LeadDetailPage({
             />
           </Card>
 
-          {/* The numbers and the conversation, one at a time — the switcher
+          {/* The whole deal in one switcher, a slide at a time — the control
               roofing already uses for Claim / Estimate / Scope.
 
-              These were two stacked cards. The money card alone runs a stat
-              row, a pricing breakdown, two payment schedules and the lender's
-              terms, so the feed underneath it started a screen and a half down
-              and nobody scrolled that far to read it. Side by side as slides,
-              both are one click from the top of the deal.
+              These were four full-height cards stacked down one column. The
+              money card alone runs a stat row, a pricing breakdown, two payment
+              schedules and the lender's terms, so the feed began off-screen and
+              the install work sat a section and a half below the ops chase that
+              asks about it. Four tabs, and any of them is one click from the
+              top of the deal.
+
+              Two switchers before this, which only moved the problem: the
+              second bar was itself below the fold of the first. One bar or
+              none.
 
               System, pricing, payment schedule AND the lender's terms stay
               together in the first slide: they were two separate surfaces once,
               which is why nobody could answer "what did they get approved for"
-              without leaving the page. */}
+              without leaving the page.
+
+              `id="production"` rides on the switcher so a bookmarked
+              …/leads/x#production still lands on the job. */}
           {isSolarDeal && (
             <DealSlides
+              id="production"
+              className="scroll-mt-24"
               slides={[
                 { id: "system", label: "System & financing" },
                 { id: "activity", label: "Activity" },
+                { id: "ops", label: "Operations", icon: "ops" },
+                { id: "install", label: "Installation", icon: "install" },
               ]}
             >
               <div data-deal-slide="system" className="space-y-6">
@@ -762,30 +774,7 @@ export default async function LeadDetailPage({
                   }))}
                 />
               </div>
-            </DealSlides>
-          )}
 
-          {/* Operations and Installation, one at a time — the same switcher the
-              two above use.
-
-              They answer the two halves of "how is this job going": who we are
-              waiting on, and what the crew has actually done. Stacked, the ops
-              chase sat up here and the install ran a section and a half below
-              it, so nobody read them together even though the second is the
-              answer to the first.
-
-              `id="production"` moves with the Installation content rather than
-              being left behind on an empty section — a bookmarked
-              …/leads/x#production still lands on the install work. */}
-          {isSolarDeal && (
-            <DealSlides
-              id="production"
-              className="scroll-mt-24"
-              slides={[
-                { id: "ops", label: "Operations", icon: "ops" },
-                { id: "install", label: "Installation", icon: "install" },
-              ]}
-            >
             <div data-deal-slide="ops">
             <SolarOpsCard
               bare
