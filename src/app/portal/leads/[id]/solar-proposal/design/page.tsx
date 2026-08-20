@@ -73,24 +73,38 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
     resolveSizingModule(user.companyId, design?.moduleId ?? null),
   ]);
 
-  // Named, so a rep drawing 93 panels can see which panel they are. Read-only
-  // here: the approved-vendor list decides what a system is built from, and it
-  // is chosen on the deal's Operations card alongside the lender that gates it.
-  const equipmentIds = [sizingModule?.id, design?.inverterId, design?.batteryId].filter(
+  /**
+   * The whole catalogue, because the top bar picks from it.
+   *
+   * Sellable rows PLUS whatever this design already names, so a retired item on
+   * an existing deal keeps showing instead of the picker silently falling back
+   * to "not set" and the next save stripping a choice nobody meant to touch —
+   * the same rule the lender rate sheets follow.
+   */
+  const namesOn = [design?.moduleId, design?.inverterId, design?.batteryId].filter(
     (v): v is string => !!v
   );
-  const equipment = equipmentIds.length
-    ? await prisma.solarEquipment.findMany({
-        where: { companyId: user.companyId, id: { in: equipmentIds } },
-        select: { id: true, manufacturer: true, model: true, ratingW: true },
-      })
-    : [];
-  const named = (equipmentId: string | null | undefined) => {
-    const e = equipment.find((x) => x.id === equipmentId);
-    if (!e) return null;
-    return [e.manufacturer, e.model].filter(Boolean).join(" ") || null;
-  };
-  const inverter = equipment.find((x) => x.id === design?.inverterId);
+  const equipment = await prisma.solarEquipment.findMany({
+    where: {
+      companyId: user.companyId,
+      kind: { in: ["module", "inverter", "battery"] },
+      OR: [{ isActive: true }, ...(namesOn.length ? [{ id: { in: namesOn } }] : [])],
+    },
+    orderBy: [{ isDefault: "desc" }, { manufacturer: "asc" }, { model: "asc" }],
+    select: {
+      id: true, kind: true, manufacturer: true, model: true, ratingW: true, widthMm: true, heightMm: true,
+    },
+  });
+  const optionsOf = (kind: "module" | "inverter" | "battery") =>
+    equipment
+      .filter((e) => e.kind === kind)
+      .map((e) => ({
+        id: e.id,
+        label: [e.manufacturer, e.model].filter(Boolean).join(" ") || e.model,
+        ratingW: e.ratingW,
+        // Only a module is drawn, so only a module's size matters.
+        ...(kind === "module" ? { sized: e.widthMm != null && e.heightMm != null } : {}),
+      }));
 
   /**
    * What NREL has already said about the planes on this roof.
@@ -139,10 +153,19 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         widthMm: sizingModule?.widthMm ?? MODULE_FALLBACK_MM.widthMm,
         heightMm: sizingModule?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
       }}
-      moduleLabel={named(sizingModule?.id)}
-      inverterLabel={named(design?.inverterId)}
-      inverterRatingW={inverter?.ratingW ?? null}
-      batteryLabel={named(design?.batteryId)}
+      catalogue={{
+        module: optionsOf("module"),
+        inverter: optionsOf("inverter"),
+        battery: optionsOf("battery"),
+      }}
+      chosen={{
+        // The design's own module if it names one, otherwise whatever the
+        // catalogue default resolved to — so the picker shows the panel the
+        // figures were actually computed with.
+        moduleId: design?.moduleId ?? sizingModule?.id ?? null,
+        inverterId: design?.inverterId ?? null,
+        batteryId: design?.batteryId ?? null,
+      }}
       annualUsageKwh={design?.annualUsageKwh ?? null}
       initialBlocks={blocks}
       measuredYields={measuredYields}

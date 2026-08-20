@@ -384,6 +384,97 @@ export function growBlock(b: LayoutBlock, side: GrowSide, m: ModuleMm): LayoutBl
 }
 
 /**
+ * Which cell of a block's lattice a ground point falls in.
+ *
+ * Indices may be NEGATIVE or past the end — that is the point. The lattice is
+ * infinite; the block is the part of it that currently has panels on it. Asking
+ * "which cell is this click in" for a point just off the edge answers row -1 or
+ * col `cols`, which is exactly what is needed to extend the array to meet it.
+ */
+export function cellAt(
+  b: Pick<LayoutBlock, "originE" | "originN" | "rotationDeg" | "orientation">,
+  m: ModuleMm,
+  point: { e: number; n: number }
+): { row: number; col: number } {
+  const { w, h } = panelSizeM(m, b.orientation);
+  const local = groundToBlockLocal(b, point.e, point.n);
+  return {
+    col: Math.floor(local.x / (w + PANEL_GAP_M)),
+    row: Math.floor(local.y / (h + PANEL_GAP_M)),
+  };
+}
+
+/**
+ * How far a cell is from the block, in whole cells. Zero means inside it.
+ *
+ * Drives "is this click close enough to join this array": one means touching an
+ * edge, two means a cell's gap away, and by three the rep is plainly starting
+ * something new somewhere else on the roof.
+ */
+export function cellDistance(b: LayoutBlock, cell: { row: number; col: number }): number {
+  const dCol = Math.max(0, -cell.col, cell.col - (Math.max(1, b.cols) - 1));
+  const dRow = Math.max(0, -cell.row, cell.row - (Math.max(1, b.rows) - 1));
+  return Math.max(dCol, dRow);
+}
+
+/**
+ * Put ONE panel into a block's lattice at the given cell, growing the grid if
+ * the cell is outside it.
+ *
+ * This is what makes adding panels feel like laying tile rather than dropping
+ * confetti. A click near an existing array joins that array on its own lattice
+ * — same bearing, same rows, same rail gaps — instead of creating a loose panel
+ * a few centimetres out of line with everything around it, which is what a
+ * roof full of independent 1x1 blocks looks like from above.
+ *
+ * The cells that were already there are carried across BY POSITION, not by
+ * index. Growing changes what every row-major index means, and the one cell the
+ * rep asked for is the only one the new row or column should gain — a grow
+ * alone would hand them a whole row they did not ask for.
+ */
+export function addPanelAtCell(
+  b: LayoutBlock,
+  cell: { row: number; col: number },
+  m: ModuleMm
+): LayoutBlock {
+  const cols = Math.max(1, b.cols);
+  const rows = Math.max(1, b.rows);
+
+  const leftAdds = Math.max(0, -cell.col);
+  const rightAdds = Math.max(0, cell.col - (cols - 1));
+  const topAdds = Math.max(0, -cell.row);
+  const bottomAdds = Math.max(0, cell.row - (rows - 1));
+
+  // Everything already on the roof, as positions in the OLD grid.
+  const skip = omittedInRange(b);
+  const present: { row: number; col: number }[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!skip.has(r * cols + c)) present.push({ row: r, col: c });
+    }
+  }
+
+  let next = b;
+  for (let i = 0; i < leftAdds; i++) next = growBlock(next, "left", m);
+  for (let i = 0; i < rightAdds; i++) next = growBlock(next, "right", m);
+  for (let i = 0; i < topAdds; i++) next = growBlock(next, "top", m);
+  for (let i = 0; i < bottomAdds; i++) next = growBlock(next, "bottom", m);
+
+  // Growing left or up shifts every old position by that many cells.
+  const nextCols = Math.max(1, next.cols);
+  const nextRows = Math.max(1, next.rows);
+  const keep = new Set(
+    present.map((p) => (p.row + topAdds) * nextCols + (p.col + leftAdds))
+  );
+  keep.add((cell.row + topAdds) * nextCols + (cell.col + leftAdds));
+
+  const omitted: number[] = [];
+  for (let i = 0; i < nextRows * nextCols; i++) if (!keep.has(i)) omitted.push(i);
+
+  return { ...next, omitted };
+}
+
+/**
  * The four places one more row or column could go, as ground-metre quads.
  *
  * Drawn as translucent ghosts so a rep can see where the array would extend

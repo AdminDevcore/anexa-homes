@@ -5,14 +5,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { getSolarSettings } from "./settings";
-import { resolveSizingModule } from "./sizing";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
-import { systemTotals } from "@/lib/solar-arrays";
-import { offsetPct } from "@/lib/solar-money";
-import { recomputeAdderTotal } from "./adders";
-import { planeFor, resolvePlaneYields } from "./pvwatts";
-import { yieldCacheKey } from "@/lib/solar-pvwatts";
+import { recomputeDesignFigures } from "./recompute";
 
 // `actions.ts` is a "use server" module, so its helpers cannot be shared —
 // every export there has to be an async server function.
@@ -96,98 +90,28 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
   const moduleQty = panelCount(blocks as LayoutBlock[]);
   if (moduleQty > 500) return fail("That is more than 500 panels — check the drawing.");
 
-  const existing = await prisma.solarDesign.findUnique({
-    where: { leadId },
-    select: { moduleId: true, annualUsageKwh: true, mountType: true },
-  });
-
-  const assumptions = await getSolarSettings(user.companyId);
-  const module_ = await resolveSizingModule(user.companyId, existing?.moduleId ?? null);
-
-  /**
-   * Ask NREL what each described plane on this roof actually makes.
-   *
-   * This is the SAVE, not the drawing: the designer previews on the old model
-   * while a rep drags panels, and the figures the deal and the proposal are
-   * built from are settled here. Deduplicated and cached by plane, so a roof
-   * with four arrays facing the same way is one question and a redraw is none.
-   *
-   * Everything about it can fail — no key, a timeout, a rate limit — and none
-   * of it is fatal. An unanswered plane keeps the company's market-average
-   * yield, which is what every figure was built on before this existed.
-   */
-  const planes = (blocks as LayoutBlock[])
-    .map((b) =>
-      planeFor({
-        lat: lead.lat,
-        lon: lead.lng,
-        tiltDeg: b.tiltDeg,
-        azimuthDeg: b.azimuthDeg,
-        derateFactor: assumptions.derateFactor,
-        arrayType: existing?.mountType === "ground" ? "ground" : "roof",
-      })
-    )
-    .filter((p): p is NonNullable<typeof p> => p !== null);
-
-  const yields = await resolvePlaneYields(planes);
-  const planeYield = ({ tiltDeg, azimuthDeg }: { tiltDeg: number | null; azimuthDeg: number | null }) => {
-    const plane = planeFor({
-      lat: lead.lat,
-      lon: lead.lng,
-      tiltDeg,
-      azimuthDeg,
-      derateFactor: assumptions.derateFactor,
-      arrayType: existing?.mountType === "ground" ? "ground" : "roof",
-    });
-    return plane ? (yields.get(yieldCacheKey(plane))?.kwhPerKwYear ?? null) : null;
-  };
-
-  // Production is weighted array by array now. A south plane and a north plane
-  // of the same size used to contribute identical kWh, which is the difference
-  // between an estimate and a guess dressed up as one.
-  const totals = systemTotals(blocks as LayoutBlock[], {
-    lat: lead.lat,
-    moduleRatingW: module_?.ratingW ?? null,
-    assumptions,
-    planeYield,
-  });
-  const { systemSizeKwDc, year1ProductionKwh } = totals;
-  const computedOffset = existing?.annualUsageKwh
-    ? offsetPct(year1ProductionKwh, existing.annualUsageKwh)
-    : 0;
-
-  // Which model produced the figure above, recorded so the customer's document
-  // can list the assumptions it ACTUALLY used. A partial answer — some planes
-  // simulated, some not — is recorded as partial rather than rounded up.
-  const station = [...yields.values()].map((y) => y.station).find(Boolean) ?? null;
-
-  const data = {
-    yieldSource: totals.measuredArrays > 0 ? "pvwatts" : null,
-    yieldStation: totals.measuredArrays > 0 ? station : null,
-    yieldArrays: totals.measuredArrays,
-    layoutBlocks: blocks,
-    // Omitted entirely when the caller did not send any, so Prisma leaves the
-    // column as it is. `?? []` here would read "no setbacks in this payload"
-    // as "the rep erased them all".
-    ...(setbacks ? { layoutSetbacks: setbacks } : {}),
-    moduleQty,
-    moduleId: module_?.id ?? null,
-    systemSizeKwDc,
-    year1ProductionKwh,
-    offsetPct: computedOffset,
-  };
-
+  // Write the geometry, then derive everything that follows from it through
+  // the one shared path — the same one that runs when the MODULE changes, so a
+  // redraw and a panel swap cannot leave the design's figures computed two
+  // different ways.
   await prisma.solarDesign.upsert({
     where: { leadId },
-    create: { companyId: user.companyId, leadId, ...data },
-    update: data,
+    create: {
+      companyId: user.companyId,
+      leadId,
+      layoutBlocks: blocks,
+      ...(setbacks ? { layoutSetbacks: setbacks } : {}),
+    },
+    update: {
+      layoutBlocks: blocks,
+      // Omitted entirely when the caller did not send any, so Prisma leaves the
+      // column as it is. `?? []` here would read "no setbacks in this payload"
+      // as "the rep erased them all".
+      ...(setbacks ? { layoutSetbacks: setbacks } : {}),
+    },
   });
 
-  // A per-watt adder is a RATE, so redrawing the roof reprices it. Leaving the
-  // cached total alone here is the same staleness the typed "Adders $" box had,
-  // just one level deeper: the deal would carry a steep-roof charge worked out
-  // on the array before this one.
-  await recomputeAdderTotal(user.companyId, leadId);
+  const figures = await recomputeDesignFigures(user.companyId, leadId);
 
   revalidatePath(`/portal/leads/${leadId}`);
   // The builder and the full-screen designer are separate routes now, and a
@@ -197,11 +121,11 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
   revalidatePath(`/portal/leads/${leadId}/solar-proposal/design`);
   return {
     ok: true as const,
-    moduleQty,
-    systemSizeKwDc,
-    year1ProductionKwh,
-    offsetPct: computedOffset,
+    moduleQty: figures?.moduleQty ?? moduleQty,
+    systemSizeKwDc: figures?.systemSizeKwDc ?? 0,
+    year1ProductionKwh: figures?.year1ProductionKwh ?? 0,
+    offsetPct: figures?.offsetPct ?? 0,
     /** How many arrays NREL answered for, so the designer can say. */
-    measuredArrays: totals.measuredArrays,
+    measuredArrays: figures?.measuredArrays ?? 0,
   };
 }

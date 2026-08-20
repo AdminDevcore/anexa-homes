@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  addPanelAtCell,
+  cellAt,
+  cellDistance,
   growBlock,
   growGhosts,
   holeQuads,
@@ -227,5 +230,102 @@ describe("panelSizeM still turns a module the right way round", () => {
   it("swaps the sides for landscape", () => {
     expect(panelSizeM(M, "portrait")).toEqual({ w: 1, h: 2 });
     expect(panelSizeM(M, "landscape")).toEqual({ w: 2, h: 1 });
+  });
+});
+
+describe("joining an array instead of scattering singles", () => {
+  const M2: ModuleMm = { widthMm: 1000, heightMm: 2000 };
+  const at = (row: number, col: number) => ({ row, col });
+
+  it("finds which cell of the lattice a point falls in", () => {
+    const b = block({ cols: 3, rows: 2 });
+    // Middle of the panel at row 0, col 0.
+    expect(cellAt(b, M2, { e: 0.5, n: -1 })).toEqual(at(0, 0));
+    // One module to the right.
+    expect(cellAt(b, M2, { e: 1.5, n: -1 })).toEqual(at(0, 1));
+    // One row down: +y in the block frame is south, so n goes negative.
+    expect(cellAt(b, M2, { e: 0.5, n: -3 })).toEqual(at(1, 0));
+  });
+
+  /** Negative and past-the-end indices are the point — that is how a click just
+   *  off the edge says "extend to meet me". */
+  it("answers with a negative cell for a point off the left or top", () => {
+    const b = block({ cols: 3, rows: 2 });
+    expect(cellAt(b, M2, { e: -0.5, n: -1 }).col).toBe(-1);
+    expect(cellAt(b, M2, { e: 0.5, n: 1 }).row).toBe(-1);
+  });
+
+  it("measures how far a cell is from the block in whole cells", () => {
+    const b = block({ cols: 3, rows: 2 });
+    expect(cellDistance(b, at(0, 0))).toBe(0); // inside
+    expect(cellDistance(b, at(0, 3))).toBe(1); // touching the right edge
+    expect(cellDistance(b, at(-1, 0))).toBe(1); // touching the top
+    expect(cellDistance(b, at(0, 5))).toBe(3); // plainly somewhere else
+  });
+
+  it("adds ONE panel on the edge, not a whole column", () => {
+    const before = block({ cols: 3, rows: 2 });
+    const after = addPanelAtCell(before, at(0, 3), M2);
+    expect(after.cols).toBe(4);
+    // 6 were there, 1 was asked for. A bare grow would have given 8.
+    expect(blockPanelCount(after)).toBe(7);
+  });
+
+  /**
+   * By POSITION, not by index. Widening the grid renumbers every cell, so the
+   * nth panel before is not the nth panel after — what has to hold is that
+   * every panel still sits exactly where it did on the roof.
+   */
+  it("keeps every existing panel exactly where it was", () => {
+    const before = block({ cols: 3, rows: 2 });
+    const after = addPanelAtCell(before, at(0, 3), M2);
+    const key = (q: { e: number; n: number }[]) => `${q[0].e.toFixed(6)},${q[0].n.toFixed(6)}`;
+    const afterKeys = new Set(panelCorners(after, M2).map(key));
+    for (const q of panelCorners(before, M2)) expect(afterKeys.has(key(q))).toBe(true);
+    expect(afterKeys.size).toBe(7);
+  });
+
+  /**
+   * Growing left or up renumbers every row-major index, so carrying the old
+   * cells across BY INDEX would slide the whole array around the new panel.
+   */
+  it("keeps them in place when the grid grows leftwards", () => {
+    const before = block({ cols: 3, rows: 2 });
+    const after = addPanelAtCell(before, at(0, -1), M2);
+    expect(after.cols).toBe(4);
+    expect(blockPanelCount(after)).toBe(7);
+    const beforeFirst = panelCorners(before, M2)[0][0];
+    // The original row-0 col-0 panel is now at col 1, and has not moved on the
+    // roof — the origin walked back a module instead.
+    const afterCells = panelCorners(after, M2);
+    const stillThere = afterCells.some(
+      (q) => Math.abs(q[0].e - beforeFirst.e) < 1e-6 && Math.abs(q[0].n - beforeFirst.n) < 1e-6
+    );
+    expect(stillThere).toBe(true);
+  });
+
+  it("fills a hole rather than growing when the cell is inside", () => {
+    const before = block({ cols: 3, rows: 2, omitted: [4] });
+    expect(blockPanelCount(before)).toBe(5);
+    const after = addPanelAtCell(before, at(1, 1), M2);
+    expect(after.cols).toBe(3);
+    expect(after.rows).toBe(2);
+    expect(blockPanelCount(after)).toBe(6);
+  });
+
+  it("reaches a cell two out diagonally without filling the space between", () => {
+    const before = block({ cols: 2, rows: 2 });
+    const after = addPanelAtCell(before, at(-1, 2), M2);
+    expect(blockPanelCount(after)).toBe(5); // the 4 that were there, plus one
+    expect(after.rows).toBe(3);
+    expect(after.cols).toBe(3);
+  });
+
+  it("leaves a single panel a single panel when it is asked for its own cell", () => {
+    const before = block({ cols: 1, rows: 1 });
+    const after = addPanelAtCell(before, at(0, 0), M2);
+    expect(blockPanelCount(after)).toBe(1);
+    expect(after.cols).toBe(1);
+    expect(after.rows).toBe(1);
   });
 });

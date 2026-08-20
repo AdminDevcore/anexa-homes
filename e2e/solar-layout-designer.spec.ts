@@ -349,17 +349,16 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(afterMove);
   });
 
-  test("a single panel can be placed, slid and nudged", async ({ page }) => {
+  test("a single panel placed on an empty roof stands on its own", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openDesigner(page);
-
-    const before = await panelsOnRoof(page);
+    await clearRoof(page);
 
     // ONE panel, placed by clicking. The whole reason this tool grew a
     // per-panel mode: a rectangle drag cannot put a module beside a vent.
     const box = await pickTool(page, "Add panel");
     await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
-    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(before + 1);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(1);
     await expect(page.getByText("Panel", { exact: true })).toBeVisible();
 
     // Placing it selects it, so the arrow keys have something to move. The
@@ -368,14 +367,49 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Shift+ArrowDown");
-    expect(await panelsOnRoof(page)).toBe(before + 1);
+    expect(await panelsOnRoof(page)).toBe(1);
 
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText(/panels? saved/)).toBeVisible({ timeout: 15000 });
 
     await page.reload();
     await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
-    expect(await panelsOnRoof(page)).toBe(before + 1);
+    expect(await panelsOnRoof(page)).toBe(1);
+  });
+
+  /**
+   * The complaint this behaviour answers: adding panels one at a time used to
+   * drop a free-standing module wherever the pointer was, so six clicks left
+   * six independent arrays, each a few centimetres out of line with the others.
+   * A click near an existing array now lands on THAT array's lattice.
+   */
+  test("a panel added beside an array joins it rather than starting another", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    const drawBox = await pickTool(page, "Draw array");
+    await dragArray(page, drawBox);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+    const drawn = await panelsOnRoof(page);
+
+    // Aim at the green ghost just past the array's edge — the cell where the
+    // lattice continues. Under Add panel that is ONE panel, not the whole
+    // column a ghost click gives under Move array.
+    await pickTool(page, "Add panel");
+    expect(await clickCanvasColour(page, "ghost", "rightmost")).toBe(true);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(drawn + 1);
+
+    // And it joined: the selection is the array, not a loose module.
+    await expect(page.getByText(/^Array · /)).toBeVisible();
+    await expect(page.getByText("Panel", { exact: true })).toHaveCount(0);
+
+    // Three more clicks, three more panels — one each, still on one array.
+    for (let i = 2; i <= 4; i++) {
+      expect(await clickCanvasColour(page, "ghost", "rightmost")).toBe(true);
+      await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(drawn + i);
+    }
+    await expect(page.getByText(/^Array · /)).toBeVisible();
   });
 
   test("pulling one panel out of an array keeps the count the same", async ({ page }) => {

@@ -23,6 +23,9 @@ import {
   blockLocalToGround,
   groundToBlockLocal,
   blockSpanM,
+  addPanelAtCell,
+  cellAt,
+  cellDistance,
   growBlock,
   growGhosts,
   holeQuads,
@@ -43,6 +46,7 @@ import {
 } from "@/lib/solar-orientation";
 import type { YieldAssumptions } from "@/lib/solar-money";
 import { saveSolarLayoutAction } from "@/server/modules/solar/layout-actions";
+import { setSolarDesignEquipmentAction } from "@/server/modules/solar/equipment-actions";
 import { uploadPanelLayoutAction } from "@/server/modules/solar/proposal-actions";
 
 /**
@@ -80,6 +84,16 @@ import { uploadPanelLayoutAction } from "@/server/modules/solar/proposal-actions
  * count serve one panel and a forty-panel grid, so precision work needed no new
  * model, no migration and no second code path to keep in step.
  */
+
+/** One catalogue item, as offered in the top bar. */
+export type EquipOption = {
+  id: string;
+  label: string;
+  /** Modules: watts per panel. Inverters: rated AC watts. Batteries: usable Wh. */
+  ratingW: number | null;
+  /** Modules only: whether it carries a physical size to draw at true scale. */
+  sized?: boolean;
+};
 
 /** Google clamps each side of a Static Maps image to 640; scale=2 doubles it. */
 const DEFAULT_CANVAS_PX = 1280;
@@ -121,10 +135,8 @@ export function SolarLayoutDesigner({
   lat,
   moduleMm,
   moduleRatingW,
-  moduleLabel,
-  inverterLabel,
-  inverterRatingW,
-  batteryLabel,
+  catalogue,
+  chosen,
   annualUsageKwh,
   measuredYields,
   initialBlocks,
@@ -140,11 +152,10 @@ export function SolarLayoutDesigner({
   lat: number | null;
   moduleMm: ModuleMm;
   moduleRatingW: number | null;
-  moduleLabel: string | null;
-  inverterLabel: string | null;
-  /** Rated AC output, for the DC/AC ratio. Null leaves that chip blank. */
-  inverterRatingW: number | null;
-  batteryLabel: string | null;
+  /** Everything this company sells, for the three pickers in the top bar. */
+  catalogue: { module: EquipOption[]; inverter: EquipOption[]; battery: EquipOption[] };
+  /** What this design already names. Null in a slot means nothing chosen. */
+  chosen: { moduleId: string | null; inverterId: string | null; batteryId: string | null };
   /** What the house uses, so offset is live rather than a saved snapshot. */
   annualUsageKwh: number | null;
   /**
@@ -238,6 +249,40 @@ export function SolarLayoutDesigner({
   const [shadeOpen, setShadeOpen] = React.useState(false);
   const [tiltOpen, setTiltOpen] = React.useState(false);
 
+  /**
+   * What this design is built from.
+   *
+   * DERIVED from the props with an in-flight override on top, rather than
+   * copied into state and re-synced by an effect. Mirroring a prop into state
+   * means two things claiming to know the same fact, and the effect that keeps
+   * them together is a render that causes another render. The override exists
+   * only while the request is out, so the select does not snap back to the old
+   * value under the rep's finger.
+   */
+  const [pendingEquip, setPendingEquip] = React.useState<Partial<typeof chosen> | null>(null);
+  const [equipBusy, setEquipBusy] = React.useState(false);
+  const equip = { ...chosen, ...(pendingEquip ?? {}) };
+
+  /**
+   * Choosing a panel changes what every panel on the roof is worth, so the
+   * server re-derives the size, the production and the offset, and the page is
+   * refreshed to pick them up. The drawing itself is untouched.
+   */
+  async function pickEquipment(patch: Partial<typeof chosen>) {
+    setPendingEquip(patch);
+    setEquipBusy(true);
+    const res = await setSolarDesignEquipmentAction({ leadId, ...patch });
+    setEquipBusy(false);
+    // Either way the override goes: on success the refreshed props carry the
+    // new value, on failure the old one was never really replaced.
+    if (!res.ok) {
+      setPendingEquip(null);
+      return toast.error(res.error);
+    }
+    router.refresh();
+    setPendingEquip(null);
+  }
+
   // Which zoom's imagery has resolved, how, and AT WHAT SIZE. The size is part
   // of the answer because the canvas and the metres-per-pixel are both derived
   // from it — Google clamps a Static Maps request to 640 a side and says
@@ -301,6 +346,8 @@ export function SolarLayoutDesigner({
    * Stated as an assumption because it is one — the honest fix is a flag on the
    * catalogue entry, and this is the seam it would replace.
    */
+  const inverterRatingW =
+    catalogue.inverter.find((i) => i.id === equip.inverterId)?.ratingW ?? null;
   const perModuleInverter =
     !!inverterRatingW && !!moduleRatingW && inverterRatingW < moduleRatingW * 2;
   const inverterKwAc =
@@ -605,6 +652,29 @@ export function SolarLayoutDesigner({
     return null;
   };
 
+  /**
+   * The array a click at this point should join, if any.
+   *
+   * "Nearest" is measured in CELLS of each array's own lattice, not in metres:
+   * a click one cell off the end of a long row belongs to that row however far
+   * away the array's origin happens to be, and a click a metre from a rotated
+   * array may be nowhere near its lattice at all.
+   *
+   * Two cells is the reach. One is touching, two allows for an aimed click
+   * landing in the rail gap, and by three the rep is starting a new array
+   * somewhere else on the roof.
+   */
+  const JOIN_REACH_CELLS = 2;
+  const nearestBlockFor = (point: { e: number; n: number }) => {
+    let best: { block: LayoutBlock; distance: number } | null = null;
+    for (const b of blocksRef.current) {
+      const distance = cellDistance(b, cellAt(b, moduleMm, point));
+      if (distance > JOIN_REACH_CELLS) continue;
+      if (!best || distance < best.distance) best = { block: b, distance };
+    }
+    return best;
+  };
+
   /** A lone panel centred on a ground point, rather than hung off its corner. */
   const lonePanelAt = (
     m: { e: number; n: number },
@@ -657,10 +727,18 @@ export function SolarLayoutDesigner({
     // undo step for the whole of it rather than one per stage.
     gestureBeforeRef.current = blocksRef.current;
 
-    // A click on a green ghost is the fastest thing in the tool, so it is
-    // tested before the tools are — whatever is selected, a click on the
-    // square that says "a panel goes here" puts a panel there.
-    if (tool !== "erase") {
+    /**
+     * A click on a green ghost adds a whole row or column, which is the fastest
+     * thing in the tool — so it is tested before the tools are.
+     *
+     * EXCEPT under Add panel, where it would be the opposite of what was asked
+     * for. The ghosts sit exactly where the next panel goes, so a rep aiming a
+     * single panel at the end of a row hits one, and gets six. Add panel means
+     * one panel; the ghosts stay visible because they still show where the
+     * lattice continues, and the click lands on that same cell either way — the
+     * difference is only how much of the row comes with it.
+     */
+    if (tool !== "erase" && tool !== "panel") {
       const g = hitGhost(m);
       if (g) {
         const b = blocksRef.current.find((x) => x.id === selectedId)!;
@@ -701,6 +779,33 @@ export function SolarLayoutDesigner({
     }
 
     if (tool === "panel") {
+      /**
+       * JOIN THE NEAREST ARRAY IF THERE IS ONE.
+       *
+       * Adding a panel used to drop a free-standing 1x1 wherever the pointer
+       * was. Do that six times and the roof carries six independent arrays,
+       * each a few centimetres out of line with the others and each showing its
+       * own four green ghosts — which is what a scattered layout is, seen from
+       * above.
+       *
+       * A click within a cell or two of an existing array now lands on that
+       * array's own lattice: same bearing, same rows, same rail gaps. Further
+       * out than that and the rep is plainly starting something new, so they
+       * get a fresh panel — aligned to the last array's rotation, as before.
+       */
+      const host = nearestBlockFor(m);
+      if (host) {
+        const cell = cellAt(host.block, moduleMm, m);
+        commit(
+          blocksRef.current.map((x) =>
+            x.id === host.block.id ? addPanelAtCell(x, cell, moduleMm) : x
+          )
+        );
+        setSelectedId(host.block.id);
+        setDirty(true);
+        return;
+      }
+
       // Match whatever is already up there, so a panel added to a rotated array
       // lands square with it instead of pointing north.
       const near = selected ?? blocksRef.current[blocksRef.current.length - 1];
@@ -1011,9 +1116,31 @@ export function SolarLayoutDesigner({
             decides what this system is built from, and it is set on the deal's
             Operations card with the lender that gates it. Showing it is worth
             it — a rep drawing 93 panels needs to see which panel they are. */}
-        <EquipChip label="Module" value={moduleLabel} suffix={moduleRatingW ? `${moduleRatingW} W` : null} />
-        <EquipChip label="Inverter" value={inverterLabel} suffix={inverterRatingW ? `${inverterRatingW} W` : null} />
-        <EquipChip label="Battery" value={batteryLabel} suffix={null} />
+        {/* Chosen HERE, not on a settings page. The panel decides how many fit
+            on the roof and what each one is worth, and both are questions you
+            are looking at while you draw. The catalogue's starred default is
+            the fallback it was always meant to be. */}
+        <EquipPicker
+          label="Module"
+          options={catalogue.module}
+          value={equip.moduleId}
+          disabled={!canEdit || equipBusy}
+          onChange={(id) => void pickEquipment({ moduleId: id })}
+        />
+        <EquipPicker
+          label="Inverter"
+          options={catalogue.inverter}
+          value={equip.inverterId}
+          disabled={!canEdit || equipBusy}
+          onChange={(id) => void pickEquipment({ inverterId: id })}
+        />
+        <EquipPicker
+          label="Battery"
+          options={catalogue.battery}
+          value={equip.batteryId}
+          disabled={!canEdit || equipBusy}
+          onChange={(id) => void pickEquipment({ batteryId: id })}
+        />
         <select
           className="h-8 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white"
           value={zoom}
@@ -1496,26 +1623,64 @@ function Metric({
   );
 }
 
-/** A piece of equipment named in the top bar. Unset says so rather than lying. */
-function EquipChip({
+/**
+ * One equipment slot in the top bar, as a picker.
+ *
+ * It used to be a read-only chip that said "not set" and pointed at another
+ * screen. On a catalogue with fifty modules and none starred as the default,
+ * that left a rep with no way to put a panel on the design at all — every
+ * figure sat at zero behind a warning about Settings.
+ *
+ * A native select, deliberately: this list runs to dozens of items, it is
+ * searched by typing, and the browser's own control does that on a phone in a
+ * driveway better than anything rebuilt here.
+ */
+function EquipPicker({
   label,
+  options,
   value,
-  suffix,
+  disabled,
+  onChange,
 }: {
   label: string;
+  options: EquipOption[];
   value: string | null;
-  suffix: string | null;
+  disabled: boolean;
+  onChange: (id: string | null) => void;
 }) {
+  const id = `equip-${label.toLowerCase()}`;
+  const current = options.find((o) => o.id === value) ?? null;
+
   return (
-    <div
-      className="hidden items-center gap-1.5 rounded-md bg-white/5 px-2.5 py-1.5 text-xs lg:flex"
-      title={`${label} — set on the deal's Operations card`}
-    >
-      <span className="text-white/45">{label}</span>
-      <span className={cn("truncate", value ? "text-white" : "text-white/40")}>
-        {value ?? "not set"}
-      </span>
-      {suffix && <span className="text-white/45">{suffix}</span>}
+    <div className="hidden items-center gap-1.5 rounded-md bg-white/5 px-2 py-1 text-xs lg:flex">
+      <label htmlFor={id} className="text-white/45">
+        {label}
+      </label>
+      <select
+        id={id}
+        className="max-w-[13rem] truncate rounded bg-transparent py-0.5 text-white outline-none disabled:opacity-60"
+        value={value ?? ""}
+        disabled={disabled || options.length === 0}
+        onChange={(e) => onChange(e.target.value || null)}
+      >
+        <option className="text-black" value="">
+          {options.length === 0 ? "none in the catalogue" : "not set"}
+        </option>
+        {options.map((o) => (
+          <option key={o.id} className="text-black" value={o.id}>
+            {o.label}
+            {o.ratingW ? ` · ${o.ratingW} W` : ""}
+          </option>
+        ))}
+      </select>
+      {/* A module with no width and length is drawn at a generic size, so the
+          count that comes off the roof is for a panel nobody sells. Worth
+          saying on the spot rather than in a settings page nobody is on. */}
+      {current && current.sized === false && (
+        <span title="This panel has no width and length on file, so the roof is laid out with a generic module." className="text-amber-300">
+          no size
+        </span>
+      )}
     </div>
   );
 }
