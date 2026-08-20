@@ -233,18 +233,38 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     await expect(page.getByText(/buys electricity, not the array/)).toBeVisible();
   });
 
-  test("terms that are on nobody's sheet can still be typed", async ({ page }) => {
-    // A company closing a deal off a phone call is not blocked by a catalogue
-    // it has not filled in yet.
+  test("there is no hand-quoting escape — the rate sheets are the only way in", async ({ page }) => {
+    // This used to be the opposite test: a "Not on a rate sheet? Quote by hand"
+    // row let a rep type a loan, lease or PPA the company had no terms for.
+    // It was removed deliberately. A quote now has to come off a programme
+    // somebody entered, so what the customer signs is always terms the company
+    // actually holds.
+    await login(page, "owner@anexahomes.com");
+    await toSolar(page);
+
+    const leadId = await openSolarDeal(page);
+    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
+    await expect(page.getByRole("button", { name: "Save financing" })).toBeVisible({ timeout: 15000 });
+
+    await expect(page.getByText("Not on a rate sheet?")).toHaveCount(0);
+    for (const p of ["Loan", "Lease", "PPA"]) {
+      await expect(page.getByRole("button", { name: p, exact: true })).toHaveCount(0);
+    }
+  });
+
+  test("cash is quotable with no rate sheets loaded at all", async ({ page }) => {
+    // Removing the hand-quote row made the empty state load-bearing: it used to
+    // REPLACE the comparison, so a company with no programmes saw a banner and
+    // nothing else — and with no chips left either, the step would have offered
+    // no way to quote anything. Cash needs no lender, so its column stays.
     await login(page, "owner@anexahomes.com");
     await toSolar(page);
 
     const leadId = await openSolarDeal(page);
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
 
-    await page.getByRole("button", { name: "PPA", exact: true }).click();
-    await expect(page.getByLabel("$/kWh", { exact: true })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByLabel("Escalator %/yr", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("Gross $/W")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }),
+    ).toBeVisible({ timeout: 15000 });
   });
 });

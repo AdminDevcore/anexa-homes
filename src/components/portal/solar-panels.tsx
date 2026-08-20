@@ -273,13 +273,6 @@ export type SolarFinanceView = {
   lenderProductId: string | null;
 } | null;
 
-const PRODUCTS: { value: FinanceProduct; label: string; blurb: string }[] = [
-  { value: "cash", label: "Cash", blurb: "Priced per watt. No lender, so no dealer fee." },
-  { value: "loan", label: "Loan", blurb: "Priced per watt. The dealer fee is embedded in the gross price." },
-  { value: "lease", label: "Lease", blurb: "Fixed monthly payment with an annual escalator. No system price." },
-  { value: "ppa", label: "PPA", blurb: "Priced per kWh produced, with an annual escalator. No system price." },
-];
-
 function money(cents: number) {
   return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
@@ -1143,64 +1136,37 @@ export function SolarFinancePanel({
       {/*
         An empty shelf has to say WHY it is empty.
 
-        With no rate sheets loaded this step falls back to the hand-quoting
-        fields below, and the screen looks like a bare form with a lender
-        dropdown reading "— none —" — which is exactly how it reads as broken
-        rather than as unconfigured. The programmes, the side-by-side
-        comparison and the monthly payments all exist; they need rows.
+        This is a hint ABOVE the shelf rather than a replacement for it. Cash
+        needs no lender and no rate sheet, so the cash column is quotable on a
+        company that has not entered a single programme — swapping the whole
+        comparison out for this banner used to take that away too, leaving a
+        step with nothing on it at all.
       */}
-      {offers.length === 0 ? (
+      {offers.length === 0 && (
         <div className="max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <strong>No lender programmes are loaded yet</strong>, so there is nothing to compare.
-          Adding each partner&apos;s terms once turns this step into a shelf of every programme
-          priced against this system, side by side, with the monthly payment on each.{" "}
+          <strong>No lender programmes are loaded yet</strong>, so there is nothing to compare
+          against cash. Adding each partner&apos;s terms once turns this step into a shelf of
+          every programme priced against this system, side by side, with the monthly payment
+          on each.{" "}
           <Link
             href="/portal/settings/solar-lenders"
             className="font-medium underline underline-offset-2"
           >
             Add a lender and its rate sheet
           </Link>
-          . Until then, quote the terms by hand below.
-        </div>
-      ) : (
-        <FinanceOffers
-          lenders={lenders}
-          products={offers}
-          basis={basis}
-          shortlist={shortlist}
-          onToggle={toggleShortlist}
-          quotedId={quotedId}
-          onQuote={quoteOffer}
-          canEdit={canEdit || lenderBusy}
-        />
-      )}
-
-      {/* The escape for terms that are not on anybody's sheet. A company still
-          closing deals off a phone call needs to be able to type them, and
-          removing the product types outright took that away. */}
-      {canEdit && (
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          <span>Not on a rate sheet? Quote by hand:</span>
-          {PRODUCTS.filter((p) => p.value !== "cash").map((p) => (
-            <button
-              key={p.value}
-              type="button"
-              onClick={() => {
-                setProduct(p.value);
-                setLenderProductId("");
-              }}
-              className={cn(
-                "rounded-full border px-2 py-0.5 transition-colors",
-                product === p.value && !lenderProductId
-                  ? "border-foreground bg-muted text-foreground"
-                  : "border-border hover:bg-muted/50"
-              )}
-            >
-              {p.label}
-            </button>
-          ))}
+          .
         </div>
       )}
+      <FinanceOffers
+        lenders={lenders}
+        products={offers}
+        basis={basis}
+        shortlist={shortlist}
+        onToggle={toggleShortlist}
+        quotedId={quotedId}
+        onQuote={quoteOffer}
+        canEdit={canEdit || lenderBusy}
+      />
 
       {quote && (
         <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">

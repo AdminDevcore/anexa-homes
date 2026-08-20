@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   addPanelAtCell,
+  cellCorners,
+  quadsOverlap,
+  tidyBlocks,
+  wouldOverlap,
   cellAt,
   cellDistance,
   growBlock,
@@ -327,5 +331,127 @@ describe("joining an array instead of scattering singles", () => {
     expect(blockPanelCount(after)).toBe(1);
     expect(after.cols).toBe(1);
     expect(after.rows).toBe(1);
+  });
+});
+
+describe("panels never sit on top of panels", () => {
+  const M2: ModuleMm = { widthMm: 1134, heightMm: 1762 };
+
+  it("sees two panels in the same place as overlapping", () => {
+    const a = cellCorners(block({ cols: 1, rows: 1, originE: 0, originN: 0 }), M2, 0);
+    const b = cellCorners(block({ cols: 1, rows: 1, originE: 0.18, originN: -0.05 }), M2, 0);
+    expect(quadsOverlap(a, b)).toBe(true);
+  });
+
+  it("does not call two panels sharing a rail edge an overlap", () => {
+    const row = block({ cols: 2, rows: 1 });
+    const [first, second] = [cellCorners(row, M2, 0), cellCorners(row, M2, 1)];
+    expect(quadsOverlap(first, second)).toBe(false);
+  });
+
+  /** An axis-aligned box test would call these two overlapping. They are not. */
+  it("handles rotated panels without a false positive", () => {
+    const a = cellCorners(block({ cols: 1, rows: 1, rotationDeg: 30 }), M2, 0);
+    const b = cellCorners(
+      block({ cols: 1, rows: 1, rotationDeg: 30, originE: 2.4, originN: -1.6 }),
+      M2,
+      0
+    );
+    expect(quadsOverlap(a, b)).toBe(false);
+  });
+
+  it("reports a candidate landing on an existing array", () => {
+    const row = block({ cols: 8, rows: 1 });
+    const candidate = cellCorners(block({ cols: 1, rows: 1, originE: 2, originN: 0 }), M2, 0);
+    expect(wouldOverlap(candidate, [row], M2)).toBe(true);
+  });
+
+  it("ignores the array being edited, so growing it is never blocked by itself", () => {
+    const row = block({ id: "host", cols: 8, rows: 1 });
+    const candidate = cellCorners(row, M2, 3);
+    expect(wouldOverlap(candidate, [row], M2)).toBe(true);
+    expect(wouldOverlap(candidate, [row], M2, "host")).toBe(false);
+  });
+});
+
+describe("tidying a roof that accumulated strays", () => {
+  const M2: ModuleMm = { widthMm: 1134, heightMm: 1762 };
+
+  /**
+   * The real design that prompted this, read off production: ten panels in nine
+   * blocks, two of them 82% on top of each other and three overlapping the main
+   * row. Every one of those nine was asking separately for a facing and a pitch.
+   */
+  const REAL = (): LayoutBlock[] =>
+    [
+      { cols: 8, rows: 1, originE: -0.09, originN: -2.03 },
+      { cols: 2, rows: 2, originE: 12.64, originN: -7.59 },
+      { cols: 1, rows: 1, originE: -7.53, originN: -1.84 },
+      { cols: 4, rows: 1, originE: -6.38, originN: -1.84 },
+      { cols: 1, rows: 1, originE: -1.15, originN: -2.04 },
+      { cols: 1, rows: 1, originE: -0.97, originN: -2.09 },
+      { cols: 1, rows: 1, originE: 0.71, originN: -0.26 },
+      { cols: 1, rows: 1, originE: 4.44, originN: -3.18 },
+      { cols: 1, rows: 1, originE: -1.72, originN: -1.43 },
+    ].map((b, i) => block({ ...b, id: `b${i}`, omitted: [] }));
+
+  it("leaves no panel sitting on another", () => {
+    const { blocks } = tidyBlocks(REAL(), M2);
+    const quads = blocks.flatMap((b) => panelCorners(b, M2));
+    for (let i = 0; i < quads.length; i++) {
+      for (let j = i + 1; j < quads.length; j++) {
+        expect(quadsOverlap(quads[i], quads[j])).toBe(false);
+      }
+    }
+  });
+
+  it("ends up with fewer arrays than it started with", () => {
+    const before = REAL();
+    const { blocks, merged } = tidyBlocks(before, M2);
+    expect(blocks.length).toBeLessThan(before.length);
+    expect(merged).toBeGreaterThan(0);
+  });
+
+  it("never invents a panel", () => {
+    const before = REAL();
+    const { blocks, dropped } = tidyBlocks(before, M2);
+    const was = before.reduce((n, b) => n + blockPanelCount(b), 0);
+    const now = blocks.reduce((n, b) => n + blockPanelCount(b), 0);
+    expect(now).toBe(was - dropped);
+    expect(now).toBeLessThanOrEqual(was);
+  });
+
+  it("is a no-op on a roof that is already tidy", () => {
+    const clean = [block({ id: "a", cols: 6, rows: 2, originE: 0, originN: 0 })];
+    const { blocks, merged, dropped } = tidyBlocks(clean, M2);
+    expect(merged).toBe(0);
+    expect(dropped).toBe(0);
+    expect(blocks).toHaveLength(1);
+    expect(blockPanelCount(blocks[0])).toBe(12);
+  });
+
+  it("keeps arrays on different planes apart", () => {
+    const north = block({ id: "n", cols: 4, rows: 1, rotationDeg: 0, originE: 0, originN: 0 });
+    const west = block({ id: "w", cols: 4, rows: 1, rotationDeg: 90, originE: 20, originN: 20 });
+    const { blocks, merged } = tidyBlocks([north, west], M2);
+    expect(blocks).toHaveLength(2);
+    expect(merged).toBe(0);
+  });
+
+  it("folds a lone panel sitting on a row's own lattice into that row", () => {
+    const row = block({ id: "row", cols: 4, rows: 1, originE: 0, originN: 0 });
+    // Exactly one cell to the right of the row's end.
+    const stray = block({
+      id: "stray",
+      cols: 1,
+      rows: 1,
+      originE: 4 * (1.134 + PANEL_GAP_M),
+      originN: 0,
+    });
+    const { blocks, merged, dropped } = tidyBlocks([row, stray], M2);
+    expect(blocks).toHaveLength(1);
+    expect(merged).toBe(1);
+    expect(dropped).toBe(0);
+    expect(blockPanelCount(blocks[0])).toBe(5);
   });
 });

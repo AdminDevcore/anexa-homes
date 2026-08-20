@@ -54,19 +54,19 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     // quoting them.
     await expect(page.getByLabel("First name")).toBeVisible({ timeout: 15000 });
 
-    // Financing carries the terms the customer signs: the product, and the
-    // terms that come with it. The seeded deal is a loan, so the escalator is
-    // correctly absent until a lease is picked — which is the point of keeping
-    // these together rather than out on the deal.
+    // Financing carries the terms the customer signs. The seeded deal is a
+    // loan, so the purchase inputs are the ones on screen and the lease/PPA
+    // escalator is correctly absent.
     //
-    // "Lease" exact: the offer cards lead with their own terms, so the bare
-    // word is the quote-by-hand chip and nothing else.
+    // The product is no longer switchable by hand here: quoting is picking a
+    // programme off a lender's rate sheet, and a lease shows its escalator
+    // because the lease OFFER was quoted, not because a chip was clicked. See
+    // "a lease is never badged the winner" in solar-financing-shelf.spec.ts,
+    // which sets up a real lease product and quotes it.
     await page.getByRole("button", { name: "4 · Financing" }).click();
     await expect(page.getByLabel("Gross $/W")).toBeVisible();
     await expect(page.getByLabel("Escalator %/yr")).toHaveCount(0);
-    await page.getByRole("button", { name: "Lease", exact: true }).click();
-    await expect(page.getByLabel("Escalator %/yr")).toBeVisible();
-    await expect(page.getByLabel("Term (years)")).toBeVisible();
+    await expect(page.getByText("Not on a rate sheet?")).toHaveCount(0);
 
     // And the last step generates.
     await page.getByRole("button", { name: "5 · Review & send" }).click();
@@ -85,35 +85,34 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     await usage.fill("17250");
 
     await page.getByRole("button", { name: "4 · Financing" }).click();
-    await expect(page.getByRole("button", { name: "Lease", exact: true })).toBeVisible();
+    // Any stable landmark of the financing step will do; this one is not
+    // conditional on which product is quoted.
+    await expect(page.getByRole("button", { name: "Save financing" })).toBeVisible();
     await page.getByRole("button", { name: "2 · Energy" }).click();
 
     await expect(usage).toHaveValue("17250");
   });
 
-  test("the financing product is set in the builder and only stated on the deal", async ({ page }) => {
+  test("the deal states the financing product and offers no way to change it", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     const id = await openSolarDeal(page);
 
-    // No four-way picker in the Summary any more — the deal states the product.
-    await expect(page.getByRole("button", { name: "PPA", exact: true })).toHaveCount(0);
+    // No four-way picker in the Summary — the deal states the product, the
+    // builder decides it.
+    for (const p of ["Cash", "Loan", "Lease", "PPA"]) {
+      await expect(page.getByRole("button", { name: p, exact: true })).toHaveCount(0);
+    }
 
+    // Nor is there one in the builder any more. The product now follows the
+    // programme quoted off a rate sheet, so a rep cannot put a deal on a lease
+    // the company has no terms for.
     await page.goto(`/portal/leads/${id}/solar-proposal`);
     await page.getByRole("button", { name: "4 · Financing" }).click();
-    await page.getByRole("button", { name: "Lease", exact: true }).click();
-    await page.getByRole("button", { name: "Save financing" }).click();
-    await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
-
-    // …and the deal reports it.
-    await page.goto(`/portal/leads/${id}`);
-    await expect(page.getByText("Lease", { exact: true }).first()).toBeVisible({ timeout: 15000 });
-
-    // Put it back so later specs see the seeded loan deal.
-    await page.goto(`/portal/leads/${id}/solar-proposal`);
-    await page.getByRole("button", { name: "4 · Financing" }).click();
-    await page.getByRole("button", { name: "Loan", exact: true }).click();
-    await page.getByRole("button", { name: "Save financing" }).click();
-    await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("button", { name: "Save financing" })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Not on a rate sheet?")).toHaveCount(0);
+    for (const p of ["Lease", "PPA"]) {
+      await expect(page.getByRole("button", { name: p, exact: true })).toHaveCount(0);
+    }
   });
 
   test("a roofing deal sent to the solar builder lands in its own", async ({ page }) => {

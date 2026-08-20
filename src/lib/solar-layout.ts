@@ -383,6 +383,222 @@ export function growBlock(b: LayoutBlock, side: GrowSide, m: ModuleMm): LayoutBl
   };
 }
 
+// ---------------------------------------------------------------------------
+// Overlap
+// ---------------------------------------------------------------------------
+
+/**
+ * Do two panel footprints intersect?
+ *
+ * Separating-axis test, because panels are rotated rectangles and an
+ * axis-aligned box check would call two panels on a 30-degree ridge
+ * overlapping when they are not. Four axes suffice for two convex quads: each
+ * shape's two edge normals.
+ *
+ * This exists because a design reached production with two modules sitting 18
+ * centimetres apart — 82% of one panel on top of another — and nothing in the
+ * app had an opinion about it. On a roof that is not a layout, it is a
+ * quantity: the count, the system size, the production and the price were all
+ * built on panels that cannot physically both be there.
+ */
+export function quadsOverlap(
+  a: { e: number; n: number }[],
+  b: { e: number; n: number }[]
+): boolean {
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i++) {
+      const p1 = poly[i];
+      const p2 = poly[(i + 1) % poly.length];
+      // The edge's outward normal.
+      const axis = { e: -(p2.n - p1.n), n: p2.e - p1.e };
+      const len = Math.hypot(axis.e, axis.n);
+      if (len < 1e-9) continue;
+      axis.e /= len;
+      axis.n /= len;
+
+      const project = (poly2: { e: number; n: number }[]) => {
+        let min = Infinity;
+        let max = -Infinity;
+        for (const p of poly2) {
+          const d = p.e * axis.e + p.n * axis.n;
+          if (d < min) min = d;
+          if (d > max) max = d;
+        }
+        return { min, max };
+      };
+      const pa = project(a);
+      const pb = project(b);
+      // A hair of tolerance: panels that share a rail edge are touching, not
+      // overlapping, and floating point makes an exact comparison a coin toss.
+      if (pa.max <= pb.min + 1e-6 || pb.max <= pa.min + 1e-6) return false;
+    }
+  }
+  return true;
+}
+
+/** Every present panel on a roof, as quads, with the block it belongs to. */
+function allPanelQuads(blocks: LayoutBlock[], m: ModuleMm) {
+  return blocks.flatMap((b) =>
+    panelCorners(b, m).map((corners) => ({ blockId: b.id, corners }))
+  );
+}
+
+/**
+ * Would this panel land on top of one that is already there?
+ *
+ * `ignoreBlockId` skips the block being edited, so growing an array does not
+ * report the array's own panels as being in its way.
+ */
+export function wouldOverlap(
+  candidate: { e: number; n: number }[],
+  blocks: LayoutBlock[],
+  m: ModuleMm,
+  ignoreBlockId?: string
+): boolean {
+  return allPanelQuads(blocks, m).some(
+    (q) => q.blockId !== ignoreBlockId && quadsOverlap(candidate, q.corners)
+  );
+}
+
+/** The four ground corners of ONE cell of a block's grid. */
+export function cellCorners(
+  b: LayoutBlock,
+  m: ModuleMm,
+  index: number
+): { e: number; n: number }[] {
+  const { w, h } = panelSizeM(m, b.orientation);
+  const { x, y } = cellLocalXY(b, m, index);
+  return (
+    [
+      [x, y],
+      [x + w, y],
+      [x + w, y + h],
+      [x, y + h],
+    ] as const
+  ).map(([lx, ly]) => blockLocalToGround(b, lx, ly));
+}
+
+/** The four ground corners of one lone panel placed at a top-left corner. */
+export function loosePanelCorners(
+  at: { originE: number; originN: number; rotationDeg: number },
+  m: ModuleMm,
+  orientation: Orientation
+): { e: number; n: number }[] {
+  const { w, h } = panelSizeM(m, orientation);
+  return (
+    [
+      [0, 0],
+      [w, 0],
+      [w, h],
+      [0, h],
+    ] as const
+  ).map(([x, y]) => blockLocalToGround(at, x, y));
+}
+
+// ---------------------------------------------------------------------------
+// Tidying up
+// ---------------------------------------------------------------------------
+
+/** Are these two blocks laid out on the same infinite lattice? */
+function sharesLattice(host: LayoutBlock, other: LayoutBlock, m: ModuleMm): boolean {
+  if (host.orientation !== other.orientation) return false;
+  // A rotation difference of more than a degree is a different plane, not a
+  // rounding difference.
+  const spin = Math.abs(((host.rotationDeg - other.rotationDeg) % 360 + 360) % 360);
+  if (spin > 1 && spin < 359) return false;
+
+  const { w, h } = panelSizeM(m, host.orientation);
+  const local = groundToBlockLocal(host, other.originE, other.originN);
+  const col = local.x / (w + PANEL_GAP_M);
+  const row = local.y / (h + PANEL_GAP_M);
+  const off = (v: number) => Math.abs(v - Math.round(v));
+  // A fifth of a cell. Closer than that and it was meant to be the same grid;
+  // further and moving it there would be relocating a rep's panel for them.
+  return off(col) < 0.2 && off(row) < 0.2;
+}
+
+export type TidyResult = {
+  blocks: LayoutBlock[];
+  /** How many separate arrays were folded into another. */
+  merged: number;
+  /** How many panels were sitting on top of one already there. */
+  dropped: number;
+};
+
+/**
+ * Fold arrays that share a lattice into one, and drop panels stacked on others.
+ *
+ * The mess this cleans up is a real one, and it had a cause: adding panels used
+ * to drop a free-standing module wherever the pointer was. Ten panels arrived
+ * as nine separate arrays, three of them overlapping the main row and two of
+ * them 82% on top of each other — and because facing and pitch are set per
+ * array, that is also seven separate arrays each asking to be told which way it
+ * points.
+ *
+ * The biggest array wins, always: it is the one the rep drew deliberately, and
+ * the strays are what accumulated around it.
+ */
+export function tidyBlocks(blocks: LayoutBlock[], m: ModuleMm): TidyResult {
+  // Biggest first, so a lone panel is folded into a row and never the reverse.
+  const order = [...blocks].sort((a, b) => blockPanelCount(b) - blockPanelCount(a));
+  const kept: LayoutBlock[] = [];
+  let merged = 0;
+  let dropped = 0;
+
+  for (const block of order) {
+    if (blockPanelCount(block) === 0) continue;
+
+    const hostIndex = kept.findIndex((h) => sharesLattice(h, block, m));
+
+    // Nothing to join: keep it, minus any panel already covered by a kept one.
+    if (hostIndex === -1) {
+      const skip = new Set<number>(block.omitted);
+      const cells = Math.max(1, block.cols) * Math.max(1, block.rows);
+      for (let index = 0; index < cells; index++) {
+        if (skip.has(index)) continue;
+        if (wouldOverlap(cellCorners(block, m, index), kept, m)) {
+          skip.add(index);
+          dropped++;
+        }
+      }
+      kept.push({ ...block, omitted: [...skip] });
+      continue;
+    }
+
+    // Fold every panel of this block into the host's grid.
+    let host = kept[hostIndex];
+    const skip = new Set(block.omitted);
+    const cells = Math.max(1, block.cols) * Math.max(1, block.rows);
+    for (let index = 0; index < cells; index++) {
+      if (skip.has(index)) continue;
+      // Aim at the cell's CENTRE. Its corner sits exactly on a lattice line,
+      // where a hair of drift picks the neighbouring cell instead.
+      const corners = cellCorners(block, m, index);
+      const centre = {
+        e: (corners[0].e + corners[2].e) / 2,
+        n: (corners[0].n + corners[2].n) / 2,
+      };
+      const before = blockPanelCount(host);
+      host = addPanelAtCell(host, cellAt(host, m, centre), m);
+      // The cell was already taken — this panel was stacked on another.
+      if (blockPanelCount(host) === before) dropped++;
+    }
+    kept[hostIndex] = host;
+    merged++;
+  }
+
+  return {
+    // An array whose every panel was a duplicate leaves an empty husk. So does
+    // erasing a whole array by hand, which is how this design ended up with two
+    // invisible blocks on it. They render nothing and price nothing, but they
+    // are still arrays, and the moment one is selected it offers to be given a
+    // facing and a pitch it will never use.
+    blocks: kept.filter((b) => blockPanelCount(b) > 0),
+    merged,
+    dropped,
+  };
+}
+
 /**
  * Which cell of a block's lattice a ground point falls in.
  *

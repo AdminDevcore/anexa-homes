@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeft, Compass, Eraser, Loader2, MapPin, Minus, MousePointer2, Move, Plus,
-  RotateCcw, Ruler, Square, Sun, Trash2, ZoomIn, ZoomOut,
+  RotateCcw, Ruler, Square, Sun, Trash2, Wand2, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,11 +25,14 @@ import {
   blockSpanM,
   addPanelAtCell,
   cellAt,
+  cellCorners,
   cellDistance,
   growBlock,
   growGhosts,
   holeQuads,
   setbackBands,
+  tidyBlocks,
+  wouldOverlap,
   DEFAULT_SETBACK_M,
   type GrowSide,
   type LayoutBlock,
@@ -795,12 +798,18 @@ export function SolarLayoutDesigner({
        */
       const host = nearestBlockFor(m);
       if (host) {
-        const cell = cellAt(host.block, moduleMm, m);
-        commit(
-          blocksRef.current.map((x) =>
-            x.id === host.block.id ? addPanelAtCell(x, cell, moduleMm) : x
-          )
-        );
+        const grown = addPanelAtCell(host.block, cellAt(host.block, moduleMm, m), moduleMm);
+        // Where the new panel ended up, asked of the GROWN block: adding a
+        // column on the left moves every cell along, so the index it had in the
+        // old grid is not the one it has now.
+        const landed = cellAt(grown, moduleMm, m);
+        const index = landed.row * Math.max(1, grown.cols) + landed.col;
+        // The cell was free on the host's own grid, but another array can cross
+        // the same ground — nothing goes on top of anything.
+        if (wouldOverlap(cellCorners(grown, moduleMm, index), blocksRef.current, moduleMm, host.block.id)) {
+          return toast.error("There is already a panel there.");
+        }
+        commit(blocksRef.current.map((x) => (x.id === host.block.id ? grown : x)));
         setSelectedId(host.block.id);
         setDirty(true);
         return;
@@ -810,6 +819,13 @@ export function SolarLayoutDesigner({
       // lands square with it instead of pointing north.
       const near = selected ?? blocksRef.current[blocksRef.current.length - 1];
       const b = lonePanelAt(m, near?.rotationDeg ?? 0, near?.orientation ?? "portrait");
+      // Nothing goes on top of anything. A design reached production with two
+      // modules 18 cm apart — 82% of one panel on another — and the count, the
+      // system size and the price were all built on panels that cannot both be
+      // up there.
+      if (wouldOverlap(cellCorners(b, moduleMm, 0), blocksRef.current, moduleMm)) {
+        return toast.error("There is already a panel there.");
+      }
       // No history entry here — pointerup records one for the whole gesture, so
       // a single undo takes back the panel AND the slide that positioned it.
       setBlocks([...blocksRef.current, b]);
@@ -1549,6 +1565,47 @@ export function SolarLayoutDesigner({
             >
               <RotateCcw className="size-4" /> Undo
             </Button>
+            {/*
+              For a roof that has already accumulated strays. Adding panels used
+              to drop a free-standing module wherever the pointer was, so a
+              deliberate row plus a few aimed clicks became seven arrays — each
+              asking separately for a facing and a pitch, some of them stacked
+              on the row.
+
+              A button rather than something the save does quietly: this moves a
+              rep's panels, and rearranging somebody's roof without being asked
+              is worse than leaving it untidy. It goes through the same undo as
+              everything else.
+            */}
+            {blocks.length > 1 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 text-white/70 hover:bg-white/10 hover:text-white"
+                title="Fold arrays that sit on the same grid into one, and remove panels stacked on top of others."
+                onClick={() => {
+                  const result = tidyBlocks(blocks, moduleMm);
+                  if (result.merged === 0 && result.dropped === 0) {
+                    return toast.success("Nothing to tidy — no stacked panels, no split arrays.");
+                  }
+                  commit(result.blocks);
+                  setSelectedId(null);
+                  toast.success(
+                    [
+                      result.merged > 0 &&
+                        `${result.merged} ${result.merged === 1 ? "array" : "arrays"} folded in`,
+                      result.dropped > 0 &&
+                        `${result.dropped} stacked ${result.dropped === 1 ? "panel" : "panels"} removed`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  );
+                }}
+              >
+                <Wand2 className="size-4" /> Tidy layout
+              </Button>
+            )}
             {setbacks.length > 0 && (
               <Button
                 type="button"
