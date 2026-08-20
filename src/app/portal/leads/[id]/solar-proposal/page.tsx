@@ -203,6 +203,8 @@ export default async function SolarProposalBuilderPage({
         }))}
         targetNetPpwCents={settings?.targetNetPpwCents ?? null}
         systemSizeKwDc={design?.systemSizeKwDc ?? 0}
+        year1ProductionKwh={design?.year1ProductionKwh ?? 0}
+        annualDegradationPct={settings.annualDegradationPct}
         layoutAvailable={layoutAvailable}
         canApproveLayout={can(user, "update", "Settings")}
         lat={lead.lat}

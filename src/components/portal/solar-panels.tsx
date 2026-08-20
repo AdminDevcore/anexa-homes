@@ -25,9 +25,12 @@ import {
   loanPaymentCents,
   grossPpwFromNet,
   leaseMonthlyCents,
+  pricePurchase,
   type YieldAssumptions,
 } from "@/lib/solar-money";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
+import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
+import { FinanceOffers } from "@/components/portal/solar-finance-offers";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor, formatFactor } from "@/lib/solar-loan";
 import {
   saveSolarDesignAction,
@@ -620,138 +623,6 @@ export type LenderProductOption = {
 const numOrNullPure = (s: string, scale = 1) =>
   s.trim() === "" ? null : Number.isFinite(Number(s)) ? Math.round(Number(s) * scale) : null;
 
-/**
- * Who is financing this deal, and on which of their terms.
- *
- * Both live here because this is where a rep needs them. The lender is a
- * property of the DESIGN — it gates the approved-vendor list, and ops still set
- * it on the deal — but a rate sheet with no lender behind it quotes nothing, so
- * sending someone to another page to unlock this screen is how every design in
- * production ended up with no lender at all.
- *
- * The two controls write the one field through one action and both re-read it
- * on load, so the later edit wins rather than the two screens disagreeing.
- */
-function LenderPicker({
-  lenders,
-  value,
-  onChange,
-  busy,
-  canEdit,
-}: {
-  lenders: LenderOption[];
-  value: string;
-  onChange: (v: string) => void;
-  busy: boolean;
-  canEdit: boolean;
-}) {
-  const id = React.useId();
-  const selected = lenders.find((l) => l.id === value) ?? null;
-
-  if (lenders.length === 0) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-        No lenders set up yet, so there are no terms to quote.{" "}
-        <Link
-          href="/portal/settings/solar-lenders"
-          className="font-medium underline underline-offset-2"
-        >
-          Add your lenders →
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id} className="flex items-center gap-1.5 text-xs">
-        Lender
-        {busy && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
-      </Label>
-      {/* The mark sits beside the select rather than inside it: a native
-          <option> cannot hold an image, and replacing the select with a custom
-          listbox would cost a rep the keyboard behaviour they already have. */}
-      <div className="flex items-center gap-2">
-        {selected && <LenderMark name={selected.name} logoUrl={selected.logoUrl} size="md" />}
-      <select
-        id={id}
-        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
-        value={value}
-        disabled={!canEdit || busy}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">— none —</option>
-        {lenders.map((l) => (
-          <option key={l.id} value={l.id}>
-            {l.name}
-            {l.isActive ? "" : " · retired"}
-          </option>
-        ))}
-      </select>
-      </div>
-      <p className="text-[11px] text-muted-foreground">
-        Saved to the deal as you pick it — it also decides which equipment this system can use.
-      </p>
-    </div>
-  );
-}
-
-/** Which of that lender's terms this deal is quoted on. */
-function LenderProductPicker({
-  lenderName,
-  products,
-  value,
-  onChange,
-  canEdit,
-}: {
-  lenderName: string;
-  products: LenderProductOption[];
-  value: string;
-  onChange: (v: string) => void;
-  canEdit: boolean;
-}) {
-  const id = React.useId();
-
-  if (products.length === 0) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-        {lenderName} has no products of this type on its rate sheet. Add them in{" "}
-        <a className="font-medium underline underline-offset-2" href="/portal/settings/solar-lenders">
-          Settings › Lenders
-        </a>
-        , or keep entering the terms by hand below.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id} className="text-xs">
-        {lenderName} product
-      </Label>
-      <select
-        id={id}
-        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
-        value={value}
-        disabled={!canEdit}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">— none —</option>
-        {products.map((p) => (
-          <option key={p.id} value={p.id}>
-            {lenderProductLabel(p)}
-            {p.isActive ? "" : " · retired"}
-          </option>
-        ))}
-      </select>
-      <p className="text-[11px] text-muted-foreground">
-        Its terms are the terms: APR, term and dealer fee come from the rate sheet, not from this
-        screen.
-      </p>
-    </div>
-  );
-}
-
 export function SolarFinancePanel({
   leadId,
   finance,
@@ -761,6 +632,8 @@ export function SolarFinancePanel({
   products,
   targetNetPpwCents,
   systemSizeKwDc,
+  year1ProductionKwh,
+  annualDegradationPct,
 }: {
   leadId: string;
   finance: SolarFinanceView;
@@ -776,6 +649,10 @@ export function SolarFinancePanel({
   targetNetPpwCents: number | null;
   /** Needed to price a lease, which is quoted per kW-month. */
   systemSizeKwDc: number;
+  /** A PPA is paid per kWh produced, so its term costs what the roof makes. */
+  year1ProductionKwh: number;
+  /** Output decays, so a 25-year total is not year one multiplied by 25. */
+  annualDegradationPct: number;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -802,36 +679,7 @@ export function SolarFinancePanel({
   const isPurchase = product === "cash" || product === "loan";
   const isLoan = product === "loan";
 
-  const forThisDeal = products.filter((p) => p.lenderId === lenderId && p.product === product);
-  const chosen = forThisDeal.find((p) => p.id === lenderProductId) ?? null;
-
-  /**
-   * Changing the lender is saved on the spot, not held for the Save button.
-   *
-   * Everything under it is that lender's: the products offered, the terms a
-   * pick writes into the boxes. Letting the design still say Amos while the
-   * screen offers Climate First's sheet is how a deal gets saved quoting money
-   * nobody approved, so the field that gates the rest is written first.
-   */
-  async function chooseLender(id: string) {
-    const prevLender = lenderId;
-    const prevProduct = lenderProductId;
-    setLenderId(id);
-    // A rate sheet belongs to the lender that published it.
-    setLenderProductId("");
-    setLenderBusy(true);
-    const res = await setSolarDealLenderAction({ leadId, lenderId: id || null });
-    setLenderBusy(false);
-    if (!res.ok) {
-      setLenderId(prevLender);
-      setLenderProductId(prevProduct);
-      return toast.error(res.error);
-    }
-    toast.success(
-      id ? `Financing through ${lenders.find((l) => l.id === id)?.name ?? "this lender"}.` : "Lender cleared."
-    );
-    router.refresh();
-  }
+  const chosen = products.find((p) => p.id === lenderProductId) ?? null;
 
   /**
    * Choosing a product writes the derived sticker straight into the box.
@@ -841,13 +689,136 @@ export function SolarFinancePanel({
    * and only one of them survives Save. Typing over it afterwards still wins —
    * the server keeps a price it is sent and derives only when it is sent none.
    */
-  const applyProduct = (id: string) => {
-    setLenderProductId(id);
-    const p = forThisDeal.find((x) => x.id === id);
-    if (!p || targetNetPpwCents == null || p.dealerFeePct == null) return;
-    const gross = grossPpwFromNet(targetNetPpwCents, p.dealerFeePct);
-    if (gross != null) setForm((f) => ({ ...f, grossPpw: (gross / 100).toFixed(2) }));
+  const applyProductFrom = (p: LenderProductOption) => {
+    setLenderProductId(p.id);
+    const gross =
+      targetNetPpwCents != null && p.dealerFeePct != null
+        ? grossPpwFromNet(targetNetPpwCents, p.dealerFeePct)
+        : null;
+
+    setForm((f) => ({
+      ...f,
+      ...(gross != null ? { grossPpw: (gross / 100).toFixed(2) } : {}),
+      // Every field the SERVER will overwrite from this product, filled in now
+      // so the boxes agree with the row that is about to be saved. Leaving the
+      // previous programme's 28% fee and 3.99% APR on screen under a card that
+      // says 38% and 0% is the screen lying about what Save will write.
+      dealerFeePct: num(p.dealerFeePct),
+      aprPct: p.product === "loan" ? num(p.aprPct) : "",
+      loanTermMonths: p.product === "loan" ? num(p.termMonths) : "",
+      rate: p.product === "ppa" ? num(p.rateMillsPerKwh, 1000, 3) : "",
+      monthly:
+        p.product === "lease" && p.leaseRateCentsPerKwMonth != null
+          ? num(leaseMonthlyCents(p.leaseRateCentsPerKwMonth, systemSizeKwDc), 100)
+          : "",
+      escalatorPct: p.product === "loan" ? "" : num(p.escalatorPct),
+      termYears: p.product === "loan" ? "" : num(p.termYears),
+      // An approval belongs to the programme it was run on. Carrying one over
+      // would quote a homeowner a payment a different lender issued.
+      loanMonthly: "",
+    }));
   };
+
+  /**
+   * Every programme on the shelf, told who published it.
+   *
+   * The comparison prices by lender fee, so a row that cannot name its lender
+   * cannot be priced; a product whose lender has been deleted is dropped rather
+   * than shown under a blank heading.
+   */
+  const offers: OfferProduct[] = React.useMemo(
+    () =>
+      products.flatMap((p) => {
+        const l = lenders.find((x) => x.id === p.lenderId);
+        return l ? [{ ...p, lenderName: l.name, label: lenderProductLabel(p) }] : [];
+      }),
+    [products, lenders]
+  );
+
+  /**
+   * Which programmes are on the table, and which one the deal is quoted on.
+   *
+   * The shortlist is a working set, not a saved one — a rep shows a homeowner
+   * four ways to pay and one of them wins. It opens holding whatever the deal
+   * already quotes so the comparison is never empty on a deal already priced.
+   */
+  const quotedId = lenderProductId || (product === "cash" ? CASH_OFFER_ID : null);
+  const [shortlist, setShortlist] = React.useState<string[]>(() =>
+    finance?.lenderProductId
+      ? [finance.lenderProductId]
+      : (finance?.product ?? "cash") === "cash"
+        ? [CASH_OFFER_ID]
+        : []
+  );
+  const toggleShortlist = (id: string) =>
+    setShortlist((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+
+  /**
+   * The one basis every column is priced on.
+   *
+   * Read live off the form rather than off the saved row: a rep who has just
+   * typed a $14,500 re-roof into Adders expects the comparison to move, and a
+   * table still quoting the pre-adder totals is worse than no table.
+   */
+  const basis: CompareBasis = {
+    systemSizeKwDc,
+    year1ProductionKwh,
+    adderTotalCents: numOrNullPure(form.adderTotal, 100) ?? 0,
+    downPaymentCents: numOrNullPure(form.downPayment, 100) ?? 0,
+    targetNetPpwCents,
+    typedGrossPpwCents: numOrNullPure(form.grossPpw, 100),
+    annualDegradationPct,
+  };
+
+  /**
+   * Moving the deal onto a lender is saved on the spot, not held for the Save
+   * button.
+   *
+   * The lender gates the approved-vendor list as well as the terms, so letting
+   * the design still say Amos while the screen quotes Climate First's sheet is
+   * how a deal gets saved on money nobody approved. Returns false when the
+   * write failed, so the caller can leave the quote where it was.
+   */
+  async function moveToLender(id: string) {
+    if (id === lenderId) return true;
+    const prev = lenderId;
+    setLenderId(id);
+    setLenderBusy(true);
+    const res = await setSolarDealLenderAction({ leadId, lenderId: id || null });
+    setLenderBusy(false);
+    if (!res.ok) {
+      setLenderId(prev);
+      toast.error(res.error);
+      return false;
+    }
+    router.refresh();
+    return true;
+  }
+
+  /**
+   * Commit the deal to one column of the comparison.
+   *
+   * Deliberately separate from shortlisting: checking a card is a question, and
+   * this is the answer. It writes the lender first — everything else on the
+   * screen belongs to that lender — then the product type and the programme,
+   * and seeds the sticker the same way picking a product always has.
+   */
+  async function quoteOffer(row: CompareRow) {
+    if (row.id === CASH_OFFER_ID) {
+      setProduct("cash");
+      setLenderProductId("");
+      toast.success("Quoting cash. Save to keep it.");
+      return;
+    }
+    const p = products.find((x) => x.id === row.id);
+    if (!p) return;
+    if (!(await moveToLender(p.lenderId))) return;
+    setProduct(p.product);
+    applyProductFrom(p);
+    toast.success(`Quoting ${row.lenderName ?? "this lender"} · ${row.label}. Save to keep it.`);
+  }
+
+
 
   /**
    * What this deal costs a month, live, before anything is saved.
@@ -940,6 +911,20 @@ export function SolarFinancePanel({
     form.grossPpw, form.adderTotal, form.downPayment, form.loanMonthly,
   ]);
 
+  /** What the boxes below currently add up to. Purchase only — see solar-money. */
+  const liveContractCents = React.useMemo(() => {
+    if (!isPurchase) return null;
+    const gross = numOrNullPure(form.grossPpw, 100);
+    if (gross == null || !(systemSizeKwDc > 0)) return null;
+    return pricePurchase({
+      product,
+      systemSizeKwDc,
+      grossPpwCents: gross,
+      dealerFeePct: numOrNullPure(form.dealerFeePct) ?? 0,
+      adderTotalCents: numOrNullPure(form.adderTotal, 100) ?? 0,
+    }).contractPriceCents;
+  }, [isPurchase, product, systemSizeKwDc, form.grossPpw, form.dealerFeePct, form.adderTotal]);
+
   // A blank box means "not set" (null); a typed "0" is a real zero and is sent
   // as one. `form.x ? … : null` is safe here ONLY because these are STRINGS —
   // "0" is truthy — which is exactly why the read side above needs its own
@@ -989,44 +974,45 @@ export function SolarFinancePanel({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-2 sm:grid-cols-2">
-        {PRODUCTS.map((p) => (
-          <button
-            key={p.value}
-            disabled={!canEdit}
-            onClick={() => setProduct(p.value)}
-            className={cn(
-              "rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
-              product === p.value ? "border-foreground bg-muted" : "border-border hover:bg-muted/50"
-            )}
-          >
-            <div className="text-sm font-semibold">{p.label}</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">{p.blurb}</div>
-          </button>
-        ))}
-      </div>
+      {/* The rate sheets ARE the interface. Four abstract product types used to
+          sit here instead, which put the actual offers two dropdowns deep and
+          made "which of these is cheaper" a question the screen could not
+          answer. */}
+      <FinanceOffers
+        lenders={lenders}
+        products={offers}
+        basis={basis}
+        shortlist={shortlist}
+        onToggle={toggleShortlist}
+        quotedId={quotedId}
+        onQuote={quoteOffer}
+        canEdit={canEdit || lenderBusy}
+      />
 
-      {/* Who finances it, then on which of their terms. Only for products a
-          lender actually finances — the Cash card says it in as many words —
-          and the sheet stays hidden until there is a lender behind it. */}
-      {product !== "cash" && (
-        <div className="space-y-3 rounded-lg border border-border p-3">
-          <LenderPicker
-            lenders={lenders}
-            value={lenderId}
-            onChange={chooseLender}
-            busy={lenderBusy}
-            canEdit={canEdit}
-          />
-          {lender && (
-            <LenderProductPicker
-              lenderName={lender.name}
-              products={forThisDeal}
-              value={lenderProductId}
-              onChange={applyProduct}
-              canEdit={canEdit}
-            />
-          )}
+      {/* The escape for terms that are not on anybody's sheet. A company still
+          closing deals off a phone call needs to be able to type them, and
+          removing the product types outright took that away. */}
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span>Not on a rate sheet? Quote by hand:</span>
+          {PRODUCTS.filter((p) => p.value !== "cash").map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => {
+                setProduct(p.value);
+                setLenderProductId("");
+              }}
+              className={cn(
+                "rounded-full border px-2 py-0.5 transition-colors",
+                product === p.value && !lenderProductId
+                  ? "border-foreground bg-muted text-foreground"
+                  : "border-border hover:bg-muted/50"
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
       )}
 
@@ -1190,12 +1176,20 @@ export function SolarFinancePanel({
         </div>
       )}
 
-      {isPurchase && finance && (
+      {/* Live, not the saved figure. The comparison above prices every column
+          from the boxes below, so a stale total sitting under them contradicts
+          the table by the width of whatever was just changed. */}
+      {isPurchase && liveContractCents != null && (
         <div className="rounded-lg border border-border bg-muted/30 p-3">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Contract price</span>
-            <span className="font-display text-lg font-semibold">{money(finance.contractPriceCents)}</span>
+            <span className="font-display text-lg font-semibold">{money(liveContractCents)}</span>
           </div>
+          {finance && finance.contractPriceCents !== liveContractCents && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Saved: {money(finance.contractPriceCents)} — Save financing to write this one.
+            </p>
+          )}
         </div>
       )}
 

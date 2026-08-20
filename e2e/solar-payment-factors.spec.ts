@@ -167,26 +167,26 @@ test.describe(FLAG_ON ? "solar payment factors" : "solar payment factors (flag o
     await page.getByRole("button", { name: "Add product" }).click();
     await expect(cardFor(page, name).last().getByText(/factor 0\.005712/)).toBeVisible({ timeout: 15000 });
 
-    // Put the deal on that lender — the rate sheet follows the lender, so an
-    // unattached deal correctly offers nothing.
+    // Quote the deal on it, straight off the shelf — the whole rate sheet is on
+    // the financing step now, so this no longer needs a trip to the deal page.
     await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
     const leadId = page.url().split("/").pop()!;
-    await page.getByLabel("Lender / approved-vendor list").selectOption({ label: name });
-    await page.getByRole("button", { name: "Save build details" }).click();
-    // Wait for the SAVE, not a stopwatch: reloading before the action lands
-    // reads back the old design and looks like a lost write.
-    await expect(page.getByText("Build details saved")).toBeVisible({ timeout: 15000 });
-    await page.reload();
-    await expect(page.locator("#solar-lender option:checked")).toHaveText(name, { timeout: 15000 });
 
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
-    await page.getByRole("button", { name: /Loan.*dealer fee/ }).click();
+    // Scoped to THIS lender's shelf: earlier specs in this file publish
+    // programmes whose terms read identically, and a page-wide match reaches
+    // whichever partner happens to sort first.
+    const card = page
+      .getByRole("region", { name })
+      .getByRole("button", { name: /25 yr · 3\.99% · fee 28%/ });
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await card.click();
+    await page.getByRole("button", { name: `Quote this: ${name} 25 yr · 3.99% · fee 28%` }).click();
 
-    const picker = page.getByLabel(/product$/);
-    await expect(picker).toBeVisible({ timeout: 15000 });
-    await picker.selectOption({ label: "25 yr · 3.99% · fee 28%" });
+    // The deal follows the card: quoting it moves the design onto that lender.
+    await expect(page.getByText(`Quoting ${name}`)).toBeVisible({ timeout: 15000 });
 
     // Both payments, never just the flattering one, and the higher of the two
     // has to actually be higher.
@@ -194,12 +194,15 @@ test.describe(FLAG_ON ? "solar payment factors" : "solar payment factors (flag o
     await expect(page.getByText("Without paydown")).toBeVisible();
     await expect(page.getByText(/Paydown due by month 18/)).toBeVisible();
 
-    // The seeded deal already carries a lender's approved figure, so that one
-    // is the headline and the sheet sits beneath it. Clear the approval and the
-    // headline falls to the FACTOR — not to our amortisation, which is the
-    // whole point of storing factors.
-    await expect(page.getByText(/own figure from the approval/)).toBeVisible();
-    await page.getByLabel("Monthly payment $", { exact: true }).fill("");
+    // An approval belongs to the programme it was run on, so quoting a
+    // different one CLEARS it rather than carrying another lender's figure
+    // across. With the box empty the headline is the FACTOR — not our
+    // amortisation, which is the whole point of storing factors.
+    await expect(page.getByLabel("Monthly payment $", { exact: true })).toHaveValue("");
     await expect(page.getByText(/rate sheet's payment factor/)).toBeVisible({ timeout: 15000 });
+
+    // Type one in and it outranks the sheet again, as the lender's own number.
+    await page.getByLabel("Monthly payment $", { exact: true }).fill("259.40");
+    await expect(page.getByText(/own figure from the approval/)).toBeVisible({ timeout: 15000 });
   });
 });

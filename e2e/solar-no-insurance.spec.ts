@@ -365,13 +365,15 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("$259/mo")).toBeVisible();
 
     // Switching to Cash removes the block entirely — a cash deal is paid in
-    // full, so it has neither a down payment nor a lender's monthly. Matched by
-    // its blurb because the four product cards each lead with a bare label.
+    // full, so it has neither a down payment nor a lender's monthly. Two clicks
+    // because the shelf separates the two questions: shortlisting a card asks
+    // "what would this cost", quoting it answers "this is the deal".
     await page.getByRole("link", { name: /Build Proposal/ }).first().click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
     await page.getByRole("button", { name: "4 · Financing" }).click();
     await expect(page.getByText("Approved loan terms")).toBeVisible();
     await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
+    await page.getByRole("button", { name: "Quote this: Cash" }).click();
     await expect(page.getByText("Approved loan terms")).toBeHidden();
   });
 

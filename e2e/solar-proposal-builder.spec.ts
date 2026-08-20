@@ -58,10 +58,13 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     // terms that come with it. The seeded deal is a loan, so the escalator is
     // correctly absent until a lease is picked — which is the point of keeping
     // these together rather than out on the deal.
+    //
+    // "Lease" exact: the offer cards lead with their own terms, so the bare
+    // word is the quote-by-hand chip and nothing else.
     await page.getByRole("button", { name: "4 · Financing" }).click();
     await expect(page.getByLabel("Gross $/W")).toBeVisible();
     await expect(page.getByLabel("Escalator %/yr")).toHaveCount(0);
-    await page.getByRole("button", { name: /Lease.*Fixed monthly payment/ }).click();
+    await page.getByRole("button", { name: "Lease", exact: true }).click();
     await expect(page.getByLabel("Escalator %/yr")).toBeVisible();
     await expect(page.getByLabel("Term (years)")).toBeVisible();
 
@@ -82,7 +85,7 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     await usage.fill("17250");
 
     await page.getByRole("button", { name: "4 · Financing" }).click();
-    await expect(page.getByRole("button", { name: /Lease.*Fixed monthly payment/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Lease", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "2 · Energy" }).click();
 
     await expect(usage).toHaveValue("17250");
@@ -97,7 +100,7 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
 
     await page.goto(`/portal/leads/${id}/solar-proposal`);
     await page.getByRole("button", { name: "4 · Financing" }).click();
-    await page.getByRole("button", { name: /Lease.*Fixed monthly payment/ }).click();
+    await page.getByRole("button", { name: "Lease", exact: true }).click();
     await page.getByRole("button", { name: "Save financing" }).click();
     await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
 
@@ -108,7 +111,7 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     // Put it back so later specs see the seeded loan deal.
     await page.goto(`/portal/leads/${id}/solar-proposal`);
     await page.getByRole("button", { name: "4 · Financing" }).click();
-    await page.getByRole("button", { name: /Loan.*dealer fee is embedded/ }).click();
+    await page.getByRole("button", { name: "Loan", exact: true }).click();
     await page.getByRole("button", { name: "Save financing" }).click();
     await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
   });

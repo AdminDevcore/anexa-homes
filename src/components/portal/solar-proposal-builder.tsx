@@ -51,6 +51,8 @@ export function SolarProposalBuilder({
   lenderProducts,
   targetNetPpwCents,
   systemSizeKwDc,
+  year1ProductionKwh,
+  annualDegradationPct,
   versions,
   layoutAvailable,
   canApproveLayout,
@@ -86,6 +88,10 @@ export function SolarProposalBuilder({
   lenderProducts: LenderProductOption[];
   targetNetPpwCents: number | null;
   systemSizeKwDc: number;
+  /** A PPA's term costs what the roof makes, so the comparison needs output. */
+  year1ProductionKwh: number;
+  /** And output decays, so a 25-year total is not year one times 25. */
+  annualDegradationPct: number;
   versions: ProposalVersion[];
   /** Resolved server-side: the layout file row AND its bytes both exist. */
   layoutAvailable: boolean;
@@ -188,6 +194,8 @@ export function SolarProposalBuilder({
           products={lenderProducts}
           targetNetPpwCents={targetNetPpwCents}
           systemSizeKwDc={systemSizeKwDc}
+          year1ProductionKwh={year1ProductionKwh}
+          annualDegradationPct={annualDegradationPct}
         />
         <NextStep label="Next: Generate & send" onClick={() => setStep("generate")} />
       </StepPanel>
