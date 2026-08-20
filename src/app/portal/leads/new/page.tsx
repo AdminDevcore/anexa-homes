@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getLeadFormOptions } from "@/server/modules/leads/queries";
+import { listSolarProviders } from "@/server/modules/solar/providers";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { PageHeader } from "@/components/portal/ui";
 import { LeadForm } from "@/components/portal/lead-form";
@@ -16,6 +17,9 @@ export default async function NewLeadPage() {
 
   const vertical = await getActiveVertical(user);
   const options = await getLeadFormOptions(user.companyId, vertical);
+  // Only solar asks for a utility at the door, and only solar pays the query.
+  const utilities =
+    vertical === "solar" ? await listSolarProviders(user.companyId, "utility") : [];
 
   return (
     <div className="space-y-6">
@@ -28,6 +32,8 @@ export default async function NewLeadPage() {
         sources={options.sources}
         stages={options.stages}
         reps={options.reps}
+        setters={options.setters}
+        utilities={utilities}
         canAssign={can(user, "assign", "Lead")}
         fieldDefs={options.fieldDefs}
         vertical={vertical}

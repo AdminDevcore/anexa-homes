@@ -12,6 +12,7 @@ import { annualFromMonthlyKwh, annualUsageFromBill } from "@/lib/solar-energy";
 import { deriveUtilityRateMills } from "@/lib/solar-money";
 import { saveSolarEnergyAction } from "@/server/modules/solar/energy-actions";
 import type { ProviderOption } from "@/server/modules/solar/providers";
+import { SolarEnergyChart } from "@/components/portal/solar-energy-chart";
 
 export type SolarEnergyView = {
   utilityProvider: string | null;
@@ -43,12 +44,15 @@ export function SolarEnergyPanel({
   energy,
   utilities,
   retailers,
+  year1ProductionKwh,
   canEdit,
 }: {
   leadId: string;
   energy: SolarEnergyView;
   utilities: ProviderOption[];
   retailers: ProviderOption[];
+  /** What the array as drawn makes in year one, for the comparison below. */
+  year1ProductionKwh: number;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -105,7 +109,7 @@ export function SolarEnergyPanel({
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Providers
         </h4>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
           <ProviderField
             id="utility-provider"
             label="Utility (delivers the power)"
@@ -160,7 +164,7 @@ export function SolarEnergyPanel({
         </fieldset>
 
         {basis === "usage" ? (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
             <NumberField
               id="annual-usage"
               label="Annual usage (kWh)"
@@ -185,7 +189,7 @@ export function SolarEnergyPanel({
             />
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
             <NumberField
               id="avg-monthly-bill"
               label="Average monthly bill ($)"
@@ -214,7 +218,7 @@ export function SolarEnergyPanel({
 
         <div
           data-testid="energy-summary"
-          className="rounded-lg border border-border bg-muted/30 p-3 text-sm"
+          className="max-w-3xl rounded-lg border border-border bg-muted/30 p-3 text-sm"
         >
           <span className="font-display text-lg font-semibold">
             {annual ? `${annual.toLocaleString()} kWh/yr` : "—"}
@@ -232,7 +236,17 @@ export function SolarEnergyPanel({
           )}
         </div>
 
-        <p className="text-[11px] text-muted-foreground">
+        {/* The two figures the boxes above are for, next to each other. A rep
+            could type 14,000 kWh, draw an array, and not see the pair until
+            the proposal was generated. Live from the same numbers the box
+            holds, so it moves as they type. */}
+        <SolarEnergyChart
+          annualUsageKwh={annual}
+          year1ProductionKwh={year1ProductionKwh}
+          className="max-w-3xl"
+        />
+
+        <p className="max-w-3xl text-[11px] text-muted-foreground">
           Annual usage is what the offset on the proposal is measured against. It does not size the
           system: how much this roof can make depends on which way its planes face, their pitch and
           what shades them, so the size is whatever array you draw on the next step.

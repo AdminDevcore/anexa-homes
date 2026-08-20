@@ -27,6 +27,14 @@ test("staff can create a lead", async ({ page }) => {
   await inputs.nth(0).fill("Test");
   await inputs.nth(1).fill(last);
   await page.locator('input[type="datetime-local"]').fill("2026-06-20T10:00");
+
+  // "Damage Type" is a REQUIRED custom field in the seed, so a create that
+  // leaves it blank is refused with "Damage Type is required." — which this
+  // spec then read as the form being broken. It is the last combobox on the
+  // form, the same way appointment-form.spec.ts addresses it.
+  await page.getByRole("combobox").last().click();
+  await page.getByRole("option", { name: "Hail", exact: true }).click();
+
   await page.getByRole("button", { name: /Create Appointment/ }).click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
   await expect(page.getByRole("heading", { name: new RegExp(last) })).toBeVisible();

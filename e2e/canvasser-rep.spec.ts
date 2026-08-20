@@ -24,6 +24,13 @@ test("a canvasser's appointment auto-assigns to their sales rep", async ({ page 
   await page.locator("input").first().fill(first); // First name
   await page.locator("input").nth(1).fill(last);   // Last name
   await page.locator('input[type="datetime-local"]').fill("2026-07-20T10:00");
+
+  // "Damage Type" is a REQUIRED custom field in the seed, so a create that
+  // leaves it blank is refused. It is the last combobox on the form, the same
+  // way appointment-form.spec.ts addresses it.
+  await page.getByRole("combobox").last().click();
+  await page.getByRole("option", { name: "Hail", exact: true }).click();
+
   await page.getByRole("button", { name: "Create Appointment" }).click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 

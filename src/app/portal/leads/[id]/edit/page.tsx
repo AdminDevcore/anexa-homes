@@ -4,6 +4,8 @@ import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getLeadDetail, getLeadFormOptions } from "@/server/modules/leads/queries";
+import { prisma } from "@/server/db/client";
+import { listSolarProviders } from "@/server/modules/solar/providers";
 import { PageHeader } from "@/components/portal/ui";
 import { LeadForm } from "@/components/portal/lead-form";
 
@@ -18,6 +20,14 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
   if (!lead) notFound();
   // Stages from the deal's own vertical pipeline.
   const options = await getLeadFormOptions(user.companyId, lead.vertical);
+  // The utility lives on the design, so an edit has to read it back from there
+  // rather than off the lead — otherwise saving the form would blank it.
+  const [utilities, design] = await Promise.all([
+    lead.vertical === "solar" ? listSolarProviders(user.companyId, "utility") : [],
+    lead.vertical === "solar"
+      ? prisma.solarDesign.findUnique({ where: { leadId: lead.id }, select: { utilityProvider: true } })
+      : null,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -42,6 +52,8 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
           sourceId: lead.sourceId ?? "",
           stageId: lead.stageId ?? "",
           assignedRepId: lead.assignedRepId ?? "",
+          setterId: lead.setterId ?? "",
+          utilityProvider: design?.utilityProvider ?? "",
           serviceType: lead.serviceType,
           dealType: lead.dealType,
           priority: lead.priority,
@@ -53,6 +65,8 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
         sources={options.sources}
         stages={options.stages}
         reps={options.reps}
+        setters={options.setters}
+        utilities={utilities}
         canAssign={can(user, "assign", "Lead")}
         fieldDefs={options.fieldDefs}
         vertical={lead.vertical}

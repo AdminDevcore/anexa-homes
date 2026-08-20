@@ -686,7 +686,7 @@ function PriceLadder({
   }
 
   return (
-    <div className="rounded-lg border border-border bg-muted/30 p-3">
+    <div className="max-w-md rounded-lg border border-border bg-muted/30 p-3">
       <div className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[1fr_auto]">
         <span className="text-muted-foreground">Base</span>
         <span className="text-right tabular-nums">
@@ -1260,7 +1260,7 @@ export function SolarFinancePanel({
           field can be addressed by name. */}
       {isPurchase ? (
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid max-w-md gap-3 sm:grid-cols-2">
             <TextField label="Gross $/W" type="number" step="0.01" value={form.grossPpw} disabled={!canEdit} onChange={(v) => set("grossPpw", v)} />
             <TextField
               label="Dealer fee %"
@@ -1306,7 +1306,7 @@ export function SolarFinancePanel({
           can contradict the lender's real one, and the number a customer is
           quoted must be the number the lender issued. */}
       {isLoan && (
-        <div className="space-y-2 rounded-lg border border-border p-3">
+        <div className="max-w-3xl space-y-2 rounded-lg border border-border p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {lender && <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="sm" />}

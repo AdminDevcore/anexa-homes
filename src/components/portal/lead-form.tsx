@@ -35,6 +35,8 @@ export function LeadForm({
   sources,
   stages,
   reps,
+  setters,
+  utilities,
   canAssign,
   fieldDefs,
   vertical,
@@ -45,6 +47,10 @@ export function LeadForm({
   sources: Option[];
   stages: Option[];
   reps: Option[];
+  /** Who could have knocked this door. Solar only — see the Setter field. */
+  setters: Option[];
+  /** The utilities this company sells into. Solar only. */
+  utilities: { id: string; name: string }[];
   canAssign: boolean;
   fieldDefs: FieldDef[];
   /** The workspace this deal belongs to — solar hides the insurance-shaped fields. */
@@ -54,6 +60,16 @@ export function LeadForm({
   // dollar estimate has no place on the solar form. Roofing keeps it. The value
   // itself is never dropped: existing leads post theirs straight back (below).
   const showEstimatedValue = vertical !== "solar";
+  /**
+   * Solar-only fields, and solar-only omissions.
+   *
+   * `dealType` is the insurance-vs-cash question, and it does not apply: a
+   * solar deal is cash, loan, lease or PPA, and WHICH is settled on the
+   * proposal's Financing step once there is a system to price. Asking it at
+   * the door made a rep answer a roofing question about a solar job, and the
+   * answer then sat on the deal contradicting the financing product.
+   */
+  const isSolar = vertical === "solar";
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
   const [v, setV] = React.useState({
@@ -68,8 +84,15 @@ export function LeadForm({
     state: initial?.state ?? "",
     zip: initial?.zip ?? "",
     sourceId: initial?.sourceId ?? "",
-    stageId: initial?.stageId ?? "",
+    // Opens on the first stage of the pipeline rather than on "Select stage".
+    // The server already derives this — an appointment date lands the deal in
+    // "Appointment Set", no date keeps it in the first stage — so a blank
+    // picker was asking a rep to make a choice that had already been made for
+    // them, on the one field of the form they cannot get wrong.
+    stageId: initial?.stageId ?? (mode === "create" ? (stages[0]?.id ?? "") : ""),
     assignedRepId: initial?.assignedRepId ?? "",
+    setterId: initial?.setterId ?? "",
+    utilityProvider: initial?.utilityProvider ?? "",
     serviceType: (initial?.serviceType ?? "roofing") as LeadInput["serviceType"],
     dealType: (initial?.dealType ?? "insurance") as LeadInput["dealType"],
     valueDollars: initial?.valueDollars ?? "",
@@ -139,6 +162,8 @@ export function LeadForm({
       zip: v.zip,
       sourceId: v.sourceId,
       stageId: v.stageId,
+      setterId: v.setterId,
+      utilityProvider: isSolar ? v.utilityProvider : "",
       assignedRepId: v.assignedRepId,
       serviceType: v.serviceType,
       dealType: v.dealType,
@@ -230,20 +255,30 @@ export function LeadForm({
             <Picker value={v.sourceId} onChange={(val) => set("sourceId", val)} options={sources} placeholder="Select source" />
           </Field>
           {canAssign && (
-            <Field label="Assigned rep">
+            <Field label={isSolar ? "Sales rep" : "Assigned rep"}>
               <Picker value={v.assignedRepId} onChange={(val) => set("assignedRepId", val)} options={reps} placeholder="Unassigned" />
             </Field>
           )}
-          <Field label="Deal type">
-            <Select value={v.dealType} onValueChange={(val) => set("dealType", val as LeadInput["dealType"])}>
-              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="insurance">Insurance claim</SelectItem>
-                <SelectItem value="cash">Cash / financed</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">Insurance = filed claim (deductible, depreciation, scope). Cash = customer pays out of pocket or finances.</p>
-          </Field>
+          {/* Solar sells door to door: whoever knocked and booked this is paid
+              off it too, and a single "assigned rep" could only name one of the
+              two people on the deal. */}
+          {canAssign && isSolar && (
+            <Field label="Setter">
+              <Picker value={v.setterId} onChange={(val) => set("setterId", val)} options={setters} placeholder="Same as the rep" />
+            </Field>
+          )}
+          {!isSolar && (
+            <Field label="Deal type">
+              <Select value={v.dealType} onValueChange={(val) => set("dealType", val as LeadInput["dealType"])}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="insurance">Insurance claim</SelectItem>
+                  <SelectItem value="cash">Cash / financed</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Insurance = filed claim (deductible, depreciation, scope). Cash = customer pays out of pocket or finances.</p>
+            </Field>
+          )}
           {showEstimatedValue && (
             <Field label="Estimated value (USD)">
               <Input type="number" value={v.valueDollars} onChange={(e) => set("valueDollars", e.target.value)} placeholder="0" />
@@ -260,6 +295,27 @@ export function LeadForm({
               </SelectContent>
             </Select>
           </Field>
+          {isSolar && (
+            <Field label="Utility provider">
+              {/* Free text with the company's list as suggestions: a rep at the
+                  door should not be blocked by a utility nobody has added yet,
+                  and the Energy step still owns the final value. */}
+              <Input
+                list="lead-utility-options"
+                value={v.utilityProvider}
+                placeholder="Who delivers their power"
+                onChange={(e) => set("utilityProvider", e.target.value)}
+              />
+              <datalist id="lead-utility-options">
+                {utilities.map((u) => (
+                  <option key={u.id} value={u.name} />
+                ))}
+              </datalist>
+              <p className="text-xs text-muted-foreground">
+                Carried into the proposal&apos;s Energy step, so nobody has to ask twice.
+              </p>
+            </Field>
+          )}
           <Field label="Appointment date & time">
             <Input type="datetime-local" value={v.appointmentDate} onChange={(e) => set("appointmentDate", e.target.value)} />
             <p className="text-xs text-muted-foreground">

@@ -16,6 +16,14 @@ export const leadContactFields = {
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
   coOwnerName: z.string().max(80).optional().or(z.literal("")),
+  /**
+   * Which language this household is sold and serviced in.
+   *
+   * Here rather than only on the intake form because the proposal's Customer
+   * step writes the same contact record, and one definition of a valid
+   * language is the point of this module.
+   */
+  preferredLanguage: z.string().max(40).optional().or(z.literal("")),
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().max(30).optional().or(z.literal("")),
   address: z.string().max(160).optional().or(z.literal("")),

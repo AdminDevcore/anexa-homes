@@ -496,6 +496,7 @@ model User {
   updatedAt             DateTime   @updatedAt
 
   leadsAssigned   Lead[]               @relation("LeadAssignedRep")
+  leadsSet        Lead[]               @relation("LeadSetter")
   leadsCreated    Lead[]               @relation("LeadCreatedBy")
   customerLeads   Lead[]               @relation("LeadCustomerUser")
   projectsManaged Project[]            @relation("ProjectManager")
@@ -734,6 +735,15 @@ model Lead {
 
   assignedRepId String?
   assignedRep   User?   @relation("LeadAssignedRep", fields: [assignedRepId], references: [id])
+  /// Who SET the appointment, where that is a different person from the rep who
+  /// runs it. Solar sells door-to-door: a setter knocks and books, a closer
+  /// sits the table, and both are paid off the same deal — so a single
+  /// `assignedRepId` could name one of them and lost the other.
+  ///
+  /// Nullable and unused by roofing, where the canvasser who knocks is already
+  /// funnelled into the owning rep (see resolveOwningRepId).
+  setterId      String?
+  setter        User?   @relation("LeadSetter", fields: [setterId], references: [id])
   createdById   String?
   createdBy     User?   @relation("LeadCreatedBy", fields: [createdById], references: [id])
 
@@ -815,6 +825,7 @@ model Lead {
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
+  @@index([setterId])
   @@index([companyId, status])
   @@index([companyId, vertical], map: "leads_companyId_industry_idx")
   @@map("leads")

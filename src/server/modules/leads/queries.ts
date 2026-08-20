@@ -27,6 +27,10 @@ export async function getLeadFormOptions(companyId: string, vertical?: Vertical)
     sources: sources.map((s) => ({ id: s.id, name: s.name })),
     stages: (pipeline?.stages ?? []).map((s) => ({ id: s.id, name: s.name })),
     reps: reps.map((r) => ({ id: r.id, name: `${r.firstName} ${r.lastName}` })),
+    // Every staff member is offerable as a setter. Deliberately not filtered to
+    // canvassers: on a small team the person who knocks is often the same one
+    // who closes, and a picker that cannot name them makes the field useless.
+    setters: reps.map((r) => ({ id: r.id, name: `${r.firstName} ${r.lastName}` })),
     fieldDefs: fieldDefs.map((f) => ({
       id: f.id,
       key: f.key,

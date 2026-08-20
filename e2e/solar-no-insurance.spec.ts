@@ -377,10 +377,15 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("Approved loan terms")).toBeHidden();
   });
 
-  test("the new-appointment form drops Estimated value on solar, keeps it on roofing", async ({ page }) => {
+  test("the new-appointment form is a solar form on solar and a roofing one on roofing", async ({ page }) => {
     // A solar deal is priced off the system design, never off a dollar guess at
     // intake — so the field has no business on the solar form. Roofing quotes
     // one on the spot and keeps it.
+    //
+    // Deal type goes the same way: insurance-vs-cash is a roofing question, and
+    // WHICH way a solar job is paid for (cash, loan, lease, PPA) is settled on
+    // the proposal's Financing step once there is a system to price. Asking it
+    // at the door left an answer on the deal contradicting the product.
     await login(page, "admin@anexahomes.com");
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await page.getByRole("menuitem", { name: "Solar" }).click();
@@ -392,13 +397,29 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // Pipeline link, so that text matches before the form has rendered at all.
     await expect(page.getByRole("button", { name: /Create Appointment/ })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Estimated value (USD)")).toHaveCount(0);
+    await expect(page.getByText("Deal type")).toHaveCount(0);
 
-    // Same form, roofing workspace: the field is back.
+    // What solar gains instead: the two people on a door-to-door deal, and the
+    // utility read off the meter while the rep is standing at it.
+    await expect(page.getByText("Setter", { exact: true })).toBeVisible();
+    await expect(page.getByText("Sales rep", { exact: true })).toBeVisible();
+    await expect(page.getByText("Utility provider", { exact: true })).toBeVisible();
+
+    // The stage opens on the pipeline's first stage rather than on "Select
+    // stage" — the server derives it either way, so a blank picker asked a rep
+    // to make a choice that had already been made for them.
+    await expect(page.getByText("Select stage")).toHaveCount(0);
+
+    // Same form, roofing workspace: the fields are back, and solar's are not.
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await page.getByRole("menuitem", { name: "Roofing" }).click();
     await page.waitForURL(/\/portal\/dashboard/, { timeout: 15000 });
     await page.goto("/portal/leads/new");
     await expect(page.getByText("Estimated value (USD)")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Deal type")).toBeVisible();
+    await expect(page.getByText("Assigned rep", { exact: true })).toBeVisible();
+    await expect(page.getByText("Setter", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Utility provider", { exact: true })).toHaveCount(0);
   });
 
   test("roofing keeps every one of those concepts", async ({ page }) => {

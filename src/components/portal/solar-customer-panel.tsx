@@ -13,6 +13,7 @@ export type SolarCustomerView = {
   firstName: string;
   lastName: string;
   coOwnerName: string | null;
+  preferredLanguage: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
@@ -48,6 +49,7 @@ export function SolarCustomerPanel({
     firstName: customer.firstName ?? "",
     lastName: customer.lastName ?? "",
     coOwnerName: customer.coOwnerName ?? "",
+    preferredLanguage: customer.preferredLanguage ?? "",
     email: customer.email ?? "",
     phone: customer.phone ?? "",
     address: customer.address ?? "",
@@ -82,7 +84,7 @@ export function SolarCustomerPanel({
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Who we are talking to
         </h4>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
           <TextField id="first-name" label="First name" value={f.firstName} onChange={(v) => set("firstName", v)} disabled={!canEdit} />
           <TextField id="last-name" label="Last name" value={f.lastName} onChange={(v) => set("lastName", v)} disabled={!canEdit} />
           <TextField
@@ -93,6 +95,23 @@ export function SolarCustomerPanel({
             disabled={!canEdit}
             hint="The other person on the title or the loan, if there is one."
           />
+          {/* Free text with suggestions rather than a fixed select: the list a
+              company actually serves is theirs, not ours, and a datalist still
+              lets somebody type "Tagalog". Same control as the intake form. */}
+          <TextField
+            id="preferred-language"
+            label="Preferred language"
+            list="solar-language-options"
+            placeholder="English"
+            value={f.preferredLanguage}
+            onChange={(v) => set("preferredLanguage", v)}
+            disabled={!canEdit}
+          />
+          <datalist id="solar-language-options">
+            {["English", "Spanish", "Vietnamese", "Mandarin", "Tagalog", "Arabic", "French", "Portuguese"].map((l) => (
+              <option key={l} value={l} />
+            ))}
+          </datalist>
           <TextField id="phone" label="Phone" value={f.phone} onChange={(v) => set("phone", v)} disabled={!canEdit} />
           <TextField id="email" label="Email" type="email" value={f.email} onChange={(v) => set("email", v)} disabled={!canEdit} />
         </div>
@@ -102,14 +121,16 @@ export function SolarCustomerPanel({
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Where the system goes
         </h4>
-        <TextField id="address" label="Address" value={f.address} onChange={(v) => set("address", v)} disabled={!canEdit} />
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="max-w-3xl">
+          <TextField id="address" label="Address" value={f.address} onChange={(v) => set("address", v)} disabled={!canEdit} />
+        </div>
+        <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
           <TextField id="city" label="City" value={f.city} onChange={(v) => set("city", v)} disabled={!canEdit} />
           <TextField id="state" label="State" value={f.state} onChange={(v) => set("state", v)} disabled={!canEdit} />
           <TextField id="zip" label="ZIP" value={f.zip} onChange={(v) => set("zip", v)} disabled={!canEdit} />
         </div>
         {hasLayout && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+          <p className="max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] text-amber-900">
             This deal already has a panel layout drawn on its roof. Changing the address moves the
             roof, so the array would need redrawing.
           </p>
@@ -127,7 +148,7 @@ export function SolarCustomerPanel({
 
 /** Module scope on purpose — react-hooks/static-components is an error here. */
 function TextField({
-  id, label, value, onChange, disabled, type = "text", hint,
+  id, label, value, onChange, disabled, type = "text", hint, list, placeholder,
 }: {
   id: string;
   label: string;
@@ -136,11 +157,22 @@ function TextField({
   disabled?: boolean;
   type?: string;
   hint?: string;
+  /** A <datalist> id, for a field that suggests without constraining. */
+  list?: string;
+  placeholder?: string;
 }) {
   return (
     <div className="space-y-1">
       <Label htmlFor={id} className="text-xs">{label}</Label>
-      <Input id={id} type={type} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      <Input
+        id={id}
+        type={type}
+        list={list}
+        placeholder={placeholder}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      />
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   );

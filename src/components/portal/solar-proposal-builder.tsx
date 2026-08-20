@@ -165,6 +165,7 @@ export function SolarProposalBuilder({
           energy={energy}
           utilities={utilities}
           retailers={retailers}
+          year1ProductionKwh={year1ProductionKwh}
           canEdit={canEditDeal}
         />
         <NextStep label="Next: System design" onClick={() => setStep("design")} />

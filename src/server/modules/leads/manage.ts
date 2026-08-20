@@ -28,10 +28,20 @@ const leadInput = z.object({
   // The contact half is shared with the solar builder's Customer step — see
   // leadContactFields. One definition of a valid name, not two.
   ...leadContactFields,
-  preferredLanguage: z.string().max(40).optional().or(z.literal("")),
   sourceId: z.string().uuid().optional().or(z.literal("")),
   stageId: z.string().uuid().optional().or(z.literal("")),
   assignedRepId: z.string().uuid().optional().or(z.literal("")),
+  /** Who knocked and booked it, where that is not the rep who runs it. */
+  setterId: z.string().uuid().optional().or(z.literal("")),
+  /**
+   * Solar only: the utility that delivers the power, captured at the door.
+   *
+   * Asked here because the rep is standing in front of the meter, and because
+   * the proposal's Energy step needs it before it can derive a rate. It seeds
+   * the design rather than living on the lead — the design is what owns it —
+   * and a later edit there wins.
+   */
+  utilityProvider: z.string().max(120).optional().or(z.literal("")),
   // Mirrors the full ServiceType enum, retired products included — editing an
   // existing storm_restoration lead posts its current value back and must pass.
   // Which types a user may CHOOSE is enforced in the UI (SELECTABLE_SERVICE_TYPES).
@@ -127,6 +137,7 @@ export async function createLeadAction(input: LeadInput) {
       stageChangedAt: new Date(),
       sourceId: d.sourceId || null,
       assignedRepId,
+      setterId: d.setterId || null,
       createdById: user.userId,
       vertical,
       serviceType: VERTICAL_SERVICE_TYPE[vertical],
@@ -138,6 +149,18 @@ export async function createLeadAction(input: LeadInput) {
       customFields: d.customFields as Prisma.InputJsonValue,
     },
   });
+
+  // The utility the rep read off the meter, put where the proposal looks for
+  // it. Seeded into the design rather than stored on the lead: the design is
+  // what owns the energy figures, and the Energy step's own edit then wins
+  // without two fields disagreeing about which utility this house is on.
+  if (vertical === "solar" && d.utilityProvider) {
+    await prisma.solarDesign.upsert({
+      where: { leadId: lead.id },
+      create: { companyId: user.companyId, leadId: lead.id, utilityProvider: d.utilityProvider },
+      update: { utilityProvider: d.utilityProvider },
+    });
+  }
 
   await prisma.activityLog.create({
     data: { companyId: user.companyId, type: "system", message: `Lead created by ${user.fullName}`, actorId: user.userId, leadId: lead.id },
@@ -166,6 +189,9 @@ export async function updateLeadAction(id: string, input: LeadInput) {
     select: {
       id: true, assignedRepId: true, pipelineId: true, stageId: true,
       address: true, city: true, state: true, zip: true,
+      // Which workspace this deal is in decides whether the form's solar-only
+      // fields mean anything.
+      vertical: true,
     },
   });
   if (!existing) return { ok: false as const, error: "Lead not found or access denied." };
@@ -214,7 +240,7 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       stageId,
       ...(stageChanged ? { stageChangedAt: new Date() } : {}),
       sourceId: d.sourceId || null,
-      ...(canAssign ? { assignedRepId: d.assignedRepId || null } : {}),
+      ...(canAssign ? { assignedRepId: d.assignedRepId || null, setterId: d.setterId || null } : {}),
       serviceType: d.serviceType,
       dealType: d.dealType,
       value: d.valueCents,
@@ -224,6 +250,18 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       customFields: d.customFields as Prisma.InputJsonValue,
     },
   });
+
+  // The utility is the design's, not the lead's, so an edit writes it through
+  // to the design. Only when the form actually sent one: a roofing edit, or a
+  // solar edit that left the box alone, must not blank what the Energy step
+  // has since recorded.
+  if (existing.vertical === "solar" && d.utilityProvider) {
+    await prisma.solarDesign.upsert({
+      where: { leadId: id },
+      create: { companyId: user.companyId, leadId: id, utilityProvider: d.utilityProvider },
+      update: { utilityProvider: d.utilityProvider },
+    });
+  }
 
   if (canAssign && d.assignedRepId && d.assignedRepId !== existing.assignedRepId) {
     await fireEvent({ companyId: user.companyId, event: "lead_assigned", actorId: user.userId, leadId: id });
