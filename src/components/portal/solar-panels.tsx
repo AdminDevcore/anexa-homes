@@ -1142,7 +1142,11 @@ export function SolarFinancePanel({
         comparison out for this banner used to take that away too, leaving a
         step with nothing on it at all.
       */}
-      {offers.length === 0 && (
+      {/* Only the "lenders exist, but none of them has a rate sheet" case.
+          FinanceOffers carries its own note for having no lenders at all, and
+          two amber boxes stacked saying almost the same thing reads as two
+          separate problems. */}
+      {lenders.length > 0 && offers.length === 0 && (
         <div className="max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
           <strong>No lender programmes are loaded yet</strong>, so there is nothing to compare
           against cash. Adding each partner&apos;s terms once turns this step into a shelf of
