@@ -324,8 +324,30 @@ export function SolarProposalView({
           {isPurchase && f.basePriceCents != null && (
             <Row k="System price" v={usd(f.basePriceCents)} />
           )}
+          {/*
+            The extra work, named where we have the names.
+
+            A homeowner reading "Additional work — $14,500" on an $82,660
+            contract, alone at their kitchen table with nobody to ask, has one
+            obvious question and no way to answer it. So each line says what it
+            bought, and the total sits underneath them.
+
+            Proposals generated before v3 carry the total and no lines, and keep
+            rendering exactly as they did — the snapshot is what that customer
+            was shown, and back-filling names onto it would be inventing a
+            breakdown for money nobody itemised at the time.
+          */}
           {isPurchase && f.adderTotalCents != null && (
-            <Row k="Additional work" v={usd(f.adderTotalCents)} />
+            f.adders?.length ? (
+              <>
+                {f.adders.map((a, i) => (
+                  <Row key={`${a.label}-${i}`} k={a.label} v={usd(a.amountCents)} />
+                ))}
+                <Row k="Additional work" v={usd(f.adderTotalCents)} />
+              </>
+            ) : (
+              <Row k="Additional work" v={usd(f.adderTotalCents)} />
+            )
           )}
           {isPurchase && f.contractPriceCents != null && (
             <Row k="Total price" v={usd(f.contractPriceCents)} strong />

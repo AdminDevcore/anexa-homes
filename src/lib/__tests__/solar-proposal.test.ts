@@ -385,3 +385,72 @@ describe("the lender's logo travels with the document", () => {
     expect(build().financing.lenderLogoUrl).toBeNull();
   });
 });
+
+describe("the extra work is named on the customer's copy", () => {
+  const ADDERS = [
+    { label: "Full re-roof (under array)", amountCents: 1_450_000 },
+    { label: "Steep roof (7/12+)", amountCents: 96_000 },
+  ];
+
+  it("carries each line, so a homeowner can see what the money bought", () => {
+    const s = build({ finance: { ...LOAN, adderTotalCents: 1_546_000, adders: ADDERS } });
+    expect(s.financing.adders).toEqual(ADDERS);
+    expect(s.financing.adderTotalCents).toBe(1_546_000);
+  });
+
+  it("the lines add up to the total the contract is built on", () => {
+    const s = build({ finance: { ...LOAN, adderTotalCents: 1_546_000, adders: ADDERS } });
+    const summed = s.financing.adders!.reduce((n, a) => n + a.amountCents, 0);
+    expect(summed).toBe(s.financing.adderTotalCents);
+  });
+
+  /**
+   * The document is frozen. A rename in the catalogue next quarter must not
+   * retitle a line on a proposal a homeowner has already read.
+   */
+  it("copies the labels rather than referring to the catalogue", () => {
+    const source = [{ label: "Main panel upgrade (200A)", amountCents: 385_000 }];
+    const s = build({ finance: { ...LOAN, adderTotalCents: 385_000, adders: source } });
+    source[0].label = "RENAMED IN THE CATALOGUE";
+    expect(s.financing.adders![0].label).toBe("Main panel upgrade (200A)");
+  });
+
+  it("drops a line that costs nothing rather than printing a $0 row", () => {
+    const s = build({
+      finance: {
+        ...LOAN,
+        adderTotalCents: 385_000,
+        adders: [
+          { label: "Main panel upgrade (200A)", amountCents: 385_000 },
+          { label: "Steep roof (7/12+)", amountCents: 0 },
+        ],
+      },
+    });
+    expect(s.financing.adders).toHaveLength(1);
+  });
+
+  /**
+   * Every proposal generated before v3 carries a total and no lines. It has to
+   * keep rendering exactly as it did: back-filling names would be inventing a
+   * breakdown for money nobody itemised at the time.
+   */
+  it("omits the key entirely on a design with no itemised adders", () => {
+    const s = build({ finance: { ...LOAN, adderTotalCents: 385_000 } });
+    expect("adders" in s.financing).toBe(false);
+    expect(s.financing.adderTotalCents).toBe(385_000);
+  });
+
+  it("names nothing on a lease, which has no system price to add to", () => {
+    const s = build({
+      finance: {
+        ...LOAN,
+        product: "lease" as const,
+        monthlyPaymentCents: 23_808,
+        adderTotalCents: 385_000,
+        adders: ADDERS,
+      },
+    });
+    expect("adders" in s.financing).toBe(false);
+    expect(s.financing.adderTotalCents).toBeNull();
+  });
+});

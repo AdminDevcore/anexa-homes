@@ -14,6 +14,8 @@ import { getSolarSettings } from "./settings";
 import { readSolarReadiness } from "./readiness";
 import { buildProposalSnapshot, type SnapshotEquipment } from "@/lib/solar-proposal";
 import { canGenerate } from "@/lib/solar-validation";
+import { adderAmountCents } from "@/lib/solar-adders";
+import { listDealAdders } from "./adders";
 import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -97,6 +99,12 @@ export async function generateSolarProposalAction(leadId: string) {
   if (!canGenerate(readiness.issues)) {
     return { ok: false as const, error: "Fix the blocking issues before generating.", issues: readiness.issues };
   }
+
+  // The extra work on this job, read at generation and frozen with everything
+  // else. The same discipline as the lender's rate sheet below: a document that
+  // looked its lines up later would re-title or re-price work a customer has
+  // already been shown.
+  const adderLines = await listDealAdders(user.companyId, leadId);
 
   const approvedCredit =
     finance.product === "loan"
@@ -206,6 +214,13 @@ export async function generateSolarProposalAction(leadId: string) {
       grossPpwCents: finance.grossPpwCents,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
+      // Named and priced HERE, then frozen into the snapshot. Reading them back
+      // through the catalogue at render time would let a later rename retitle a
+      // line on a document a homeowner has already been shown.
+      adders: adderLines.map((l) => ({
+        label: l.label,
+        amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
+      })),
       rateMillsPerKwh: finance.rateMillsPerKwh,
       monthlyPaymentCents: finance.monthlyPaymentCents,
       escalatorPct: finance.escalatorPct,

@@ -204,8 +204,9 @@ export type SolarProposalSnapshot = {
    * Bumped when the shape changes, so old proposals still render.
    * v2 adds the energy profile, equipment detail, layout image, company
    * identity, representative and the utility-avoided/net-savings split.
+   * v3 names the adders instead of showing one "Additional work" total.
    */
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   generatedAt: string;
   /** Who generated it — recorded on the document, not shown to the customer. */
   generatedById: string | null;
@@ -277,6 +278,20 @@ export type SolarProposalSnapshot = {
     grossPpwCents: number | null;
     basePriceCents: number | null;
     adderTotalCents: number | null;
+    /**
+     * The extra work, named, as it was priced on the day.
+     *
+     * v3 and later. A homeowner reading "Additional work — $14,500" on an
+     * $82,660 contract, alone at their kitchen table with nobody to ask, has
+     * one obvious question and no way to answer it. Naming the line is the
+     * difference between a number that looks arbitrary and one that looks
+     * justified.
+     *
+     * COPIED, like every other figure here: a later rename or reprice in the
+     * catalogue must not rewrite what this customer was shown. Undefined on a
+     * proposal generated before v3, which keeps rendering its single total.
+     */
+    adders?: { label: string; amountCents: number }[];
     finalPpwCents: number | null;
     /** Lease/PPA only. */
     monthlyPaymentCents: number | null;
@@ -386,6 +401,8 @@ export function buildProposalSnapshot(args: {
     grossPpwCents: number;
     dealerFeePct: number;
     adderTotalCents: number;
+    /** The lines behind that total, already priced against this system. */
+    adders?: { label: string; amountCents: number }[];
     rateMillsPerKwh: number | null;
     monthlyPaymentCents: number | null;
     escalatorPct: number | null;
@@ -471,7 +488,7 @@ export function buildProposalSnapshot(args: {
       : null;
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     generatedAt: args.now.toISOString(),
     generatedById: args.generatedById,
     reference: args.reference,
@@ -521,6 +538,26 @@ export function buildProposalSnapshot(args: {
       // Null, not 0, when there are no adders: the renderer omits the row
       // rather than printing an "Adders $0" line the customer has to parse.
       adderTotalCents: purchase && purchase.adderTotalCents > 0 ? purchase.adderTotalCents : null,
+      // Only lines that cost something, and only on a purchase. A lease or a
+      // PPA has no system price for an adder to sit on top of, and a $0 line
+      // is a row the customer has to read to learn nothing.
+      //
+      // SPREAD rather than assigned undefined: the snapshot is asserted to hold
+      // no undefined anywhere, because an undefined that reaches a renderer
+      // prints as "undefined" in front of a homeowner. A key that is not there
+      // is the honest way to say "this document predates named adders".
+      //
+      // Each line is rebuilt as a NEW object, not just filtered into a new
+      // array. `filter` copies the array and keeps the caller's objects, so a
+      // snapshot built that way still points at whatever the caller mutates
+      // next — which is precisely the freezing this whole module exists to do.
+      ...(purchase && finance.adders?.some((a) => a.amountCents > 0)
+        ? {
+            adders: finance.adders
+              .filter((a) => a.amountCents > 0)
+              .map((a) => ({ label: a.label, amountCents: a.amountCents })),
+          }
+        : {}),
       finalPpwCents: purchase ? Math.round(purchase.finalPpwCents) : null,
       // Lease/PPA carry no APR. Gating here as well as at the write means a
       // stale value left on the row by a product switch can never reach a
