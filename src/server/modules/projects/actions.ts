@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import type { ProjectStatus, ServiceType, Priority } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
+import { rawUnscoped } from "@/server/vertical/context";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { isAdmin } from "@/server/rbac/matrix";
@@ -256,28 +257,89 @@ export async function ensureProjectForLeadAction(
   if (!lead) return fail("Deal not found.");
   if (lead.project) return { ok: true, projectId: lead.project.id };
 
-  const count = await prisma.project.count({ where: { companyId: user.companyId } });
   const { recordPrefix } = await brandingForCompany(user.companyId);
-  const project = await prisma.project.create({
-    data: {
-      companyId: user.companyId,
-      leadId: lead.id,
-      projectNumber: `${recordPrefix}${1000 + count + 1}`,
-      status: "not_started",
-      serviceType: lead.serviceType,
-      priority: lead.priority,
-      address: lead.address,
-      city: lead.city,
-      state: lead.state,
-      zip: lead.zip,
-      // The insurance-approved claim price is the real contract; fall back to the
-      // rep's estimate if it hasn't been entered yet.
-      contractValue: lead.claimPrice ?? lead.value,
-      // Seed the QC checklist from the company's customizable template.
-      qcChecklist: (await getQcChecklistTemplate(user.companyId, await getActiveVertical(user))).map((label) => ({ label, done: false })),
-    },
-    select: { id: true },
-  });
+  const qcChecklist = (
+    await getQcChecklistTemplate(user.companyId, await getActiveVertical(user))
+  ).map((label) => ({ label, done: false }));
+
+  /**
+   * The next free project number for this COMPANY.
+   *
+   * Read unscoped, and that is the whole bug this replaces. The number is
+   * unique per company across every workspace, but `Project` is a vertical-
+   * scoped model — so counting it while acting in Solar counted only the SOLAR
+   * projects. With none of those, the number generated was the first one, which
+   * a roofing project has had since the day the company started. Starting
+   * production on a solar deal therefore failed on a unique constraint every
+   * single time, and the button simply span forever.
+   *
+   * Highest-so-far rather than a count, so a deleted project cannot hand its
+   * old number to the next job either.
+   */
+  const nextNumber = async () => {
+    // RAW, and that is deliberate twice over. The vertical extension rewrites
+    // model queries, so `prisma.project.findMany` sees only the workspace being
+    // acted in — and `runUnscoped` cannot be relied on to lift that here,
+    // because `next dev` loads the async-local context module twice and the
+    // copy holding the escape hatch is not the copy the extension reads. A raw
+    // query goes past the extension entirely, in dev and in production alike.
+    const rows = await rawUnscoped(
+      "project number is unique per COMPANY across every workspace, so the highest one has to be read across all of them",
+      // Reviewed exception. The rule exists to stop raw SQL leaking one
+      // vertical's rows into another; the only column read here is a number
+      // that is deliberately shared across all of them.
+      () =>
+        // eslint-disable-next-line no-restricted-syntax
+        prisma.$queryRaw<{ projectNumber: string }[]>`
+          SELECT "projectNumber" FROM "projects" WHERE "companyId" = ${user.companyId}
+        `
+    );
+
+    // Parsed here rather than in SQL. A `regexp_replace(...)::bigint` needs a
+    // backslash class, and a backslash in a template literal is eaten by
+    // JavaScript before Postgres ever sees it — which turned the pattern into
+    // "strip the letter D" and left "AH-1001" being cast to a bigint.
+    const highest = rows.reduce((max, r) => {
+      const digits = r.projectNumber.match(/(\d+)\s*$/);
+      const n = digits ? Number(digits[1]) : 0;
+      return Number.isFinite(n) && n > max ? n : max;
+    }, 1000);
+    return highest + 1;
+  };
+
+  // Two people starting production in the same second would still collide on
+  // the unique index, so the number is re-derived and retried rather than
+  // failing the second one.
+  let project: { id: string } | null = null;
+  for (let attempt = 0; attempt < 5 && !project; attempt++) {
+    try {
+      project = await prisma.project.create({
+        data: {
+          companyId: user.companyId,
+          leadId: lead.id,
+          projectNumber: `${recordPrefix}${(await nextNumber()) + attempt}`,
+          status: "not_started",
+          serviceType: lead.serviceType,
+          priority: lead.priority,
+          address: lead.address,
+          city: lead.city,
+          state: lead.state,
+          zip: lead.zip,
+          // The insurance-approved claim price is the real contract; fall back
+          // to the rep's estimate if it hasn't been entered yet.
+          contractValue: lead.claimPrice ?? lead.value,
+          // Seed the QC checklist from the company's customizable template.
+          qcChecklist,
+        },
+        select: { id: true },
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      // P2002 is the unique index doing its job. Anything else is not ours.
+      if (code !== "P2002") throw err;
+    }
+  }
+  if (!project) return fail("Could not allocate a project number — try again.");
 
   revalidatePath(`/portal/leads/${leadId}`);
   return { ok: true, projectId: project.id };

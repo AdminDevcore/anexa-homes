@@ -11,13 +11,27 @@ export function StartProductionButton({ leadId }: { leadId: string }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
 
+  /**
+   * The `finally` is the point.
+   *
+   * Without it, a server action that THROWS — rather than returning
+   * `{ok:false}` — skips the rest of this function, so `busy` stays true and
+   * the button sits disabled with a spinner on it and no message, forever.
+   * That is exactly what a unique-constraint failure looked like from the
+   * outside: a dead button and nothing to go on.
+   */
   async function start() {
     setBusy(true);
-    const res = await ensureProjectForLeadAction(leadId);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Production started");
-    router.refresh();
+    try {
+      const res = await ensureProjectForLeadAction(leadId);
+      if (!res.ok) return toast.error(res.error);
+      toast.success("Production started");
+      router.refresh();
+    } catch {
+      toast.error("Could not start production. Try again, and tell us if it keeps failing.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

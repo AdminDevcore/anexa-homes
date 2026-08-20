@@ -54,6 +54,13 @@ const ALLOWED: Record<string, string> = {
   // side). Not a scoped read or write.
   "src/server/modules/payroll/__tests__/override-vertical.itest.ts":
     'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
+  // A project number is unique per COMPANY, not per workspace, so the highest
+  // one has to be read across every vertical — a scoped read sees only the
+  // workspace being acted in, which on a solar deal at a roofing company is
+  // none of them, and the number it then picks is one a roofing job already
+  // holds. Reads a single shared column and writes nothing.
+  "src/server/modules/projects/actions.ts":
+    'SELECT "projectNumber" — the number is company-wide by definition',
   // The guard itself and its own fixtures mention the identifiers in strings.
   "src/lib/__tests__/no-raw-sql.test.ts": "this guard",
 };
