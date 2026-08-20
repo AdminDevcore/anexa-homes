@@ -156,6 +156,13 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
     // Asserted on the deal's own lender control rather than the builder's:
     // the two set the same field, and this one is not being rebuilt underneath
     // the spec. Beside the select, because a native <option> holds no image.
+    //
+    // It lives on the System info slide — the deal opens on System & financing,
+    // so the slide has to be asked for before anything on it is visible.
+    await page
+      .getByTestId("deal-slides")
+      .getByRole("tab", { name: "System info" })
+      .click();
     const picker = page.getByLabel("Lender / approved-vendor list");
     await expect(picker).toBeVisible({ timeout: 15000 });
     await picker.selectOption({ label: name });
@@ -168,6 +175,10 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
     await page.getByRole("button", { name: "Save build details" }).click();
     await expect(page.getByText("Build details saved")).toBeVisible({ timeout: 15000 });
     await page.reload();
+    await page
+      .getByTestId("deal-slides")
+      .getByRole("tab", { name: "System info" })
+      .click();
     await expect(page.locator("#solar-lender option:checked")).toHaveText(name, { timeout: 15000 });
     await expect(page.locator('img[src*="/api/solar/lender-logo"]').first()).toBeVisible({
       timeout: 15000,

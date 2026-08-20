@@ -30,6 +30,8 @@ import {
 } from "@/server/modules/settings/queries";
 import { claimStatusLabel, claimStatusOptionsFor } from "@/lib/claim-status";
 import { SolarOpsCard } from "@/components/portal/solar-ops-card";
+import { SolarSystemInfo } from "@/components/portal/solar-system-info";
+import { blockPanelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import {
   SolarSystemMoneyPanel,
@@ -317,6 +319,56 @@ export default async function LeadDetailPage({
       batteries: options("battery"),
     };
   })();
+
+  /**
+   * The design as specifications, for the System info slide.
+   *
+   * Read off the SolarDesign already fetched above — no extra query. The
+   * per-array rows come from `layoutBlocks`, the same JSON the layout designer
+   * writes, so what this reports is literally what was drawn rather than a
+   * second account of it that can disagree.
+   */
+  const solarSpecs = solarDesign
+    ? (() => {
+        const blocks = (solarDesign.layoutBlocks as unknown as LayoutBlock[]) ?? [];
+        const name = (e: { manufacturer: string | null; model: string } | null) =>
+          e ? `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` : null;
+        return {
+          module: name(solarDesign.module),
+          moduleQty: solarDesign.moduleQty,
+          moduleRatingW: solarDesign.module?.ratingW ?? null,
+          inverter: name(solarDesign.inverter),
+          battery: name(solarDesign.battery),
+          batteryQty: solarDesign.batteryQty,
+          sizeKwDc: solarDesign.systemSizeKwDc,
+          sizeKwAc: solarDesign.systemSizeKwAc,
+          year1Kwh: solarDesign.year1ProductionKwh,
+          offsetPct: solarDesign.offsetPct,
+          mountType: solarDesign.mountType,
+          tsrfPct: solarDesign.tsrfPct,
+          yieldSource: solarDesign.yieldSource,
+          yieldStation: solarDesign.yieldStation,
+          annualUsageKwh: solarDesign.annualUsageKwh,
+          rateMills: solarDesign.utilityRateMills,
+          ratePlan: solarDesign.ratePlan,
+          netMeteringProgram: solarDesign.netMeteringProgram,
+          // Empty blocks are dropped: an array with no panels is a leftover of
+          // drawing, not a bank anybody is going to install.
+          arrays: blocks
+            .map((b) => ({
+              id: b.id,
+              panels: blockPanelCount(b),
+              azimuthDeg: b.azimuthDeg ?? null,
+              tiltDeg: b.tiltDeg ?? null,
+              shadePct: b.shadePct ?? null,
+            }))
+            .filter((a) => a.panels > 0),
+          setbackNotes: solarDesign.setbackNotes,
+          structuralNotes: solarDesign.structuralNotes,
+          electricalNotes: solarDesign.electricalNotes,
+        };
+      })()
+    : null;
 
   // Where the proposal stands, as one value. Derived rather than stored — see
   // src/lib/solar-proposal-state.ts for why a column would go stale.
@@ -738,6 +790,7 @@ export default async function LeadDetailPage({
                 { id: "system", label: "System & financing" },
                 { id: "ops", label: "Operations", icon: "ops" },
                 { id: "install", label: "Installation", icon: "install" },
+                { id: "specs", label: "System info", icon: "specs" },
                 // Activity is always last, on every deal that has one. The
                 // first three are the job; the feed is what people said about
                 // it, and a running commentary does not belong between two
@@ -782,7 +835,6 @@ export default async function LeadDetailPage({
                     }
                   : null
               }
-              build={solarBuild}
               stageChangedAt={lead.stageChangedAt ? lead.stageChangedAt.toISOString() : null}
               createdAt={lead.createdAt.toISOString()}
               blockedBy={lead.blockedBy}
@@ -846,6 +898,15 @@ export default async function LeadDetailPage({
                   </div>
                 )}
             </div>
+
+              <div data-deal-slide="specs">
+                <SolarSystemInfo
+                  leadId={lead.id}
+                  specs={solarSpecs}
+                  build={solarBuild}
+                  canEdit={can(user, "update", "Lead")}
+                />
+              </div>
 
               <div data-deal-slide="activity">
                 <SolarActivityFeed

@@ -6,6 +6,7 @@ import {
   DollarSign,
   Hammer,
   MessageSquare,
+  PanelsTopLeft,
   ReceiptText,
   ShieldCheck,
   Wrench,
@@ -30,6 +31,7 @@ const SLIDE_ICONS: Record<string, LucideIcon> = {
   activity: MessageSquare,
   ops: Wrench,
   install: Hammer,
+  specs: PanelsTopLeft,
 };
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
