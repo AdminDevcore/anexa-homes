@@ -149,27 +149,28 @@ export function ContactForm({
       className="space-y-5 rounded-2xl border border-border bg-card p-6 sm:p-8"
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="First name" error={errors.firstName?.message}>
-          <Input {...register("firstName")} placeholder="Jane" />
+        <Field id="contact-first-name" label="First name" error={errors.firstName?.message}>
+          <Input id="contact-first-name" {...register("firstName")} placeholder="Jane" />
         </Field>
-        <Field label="Last name" error={errors.lastName?.message}>
-          <Input {...register("lastName")} placeholder="Doe" />
+        <Field id="contact-last-name" label="Last name" error={errors.lastName?.message}>
+          <Input id="contact-last-name" {...register("lastName")} placeholder="Doe" />
         </Field>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Email" error={errors.email?.message}>
-          <Input type="email" {...register("email")} placeholder="jane@email.com" />
+        <Field id="contact-email" label="Email" error={errors.email?.message}>
+          <Input id="contact-email" type="email" {...register("email")} placeholder="jane@email.com" />
         </Field>
-        <Field label="Phone" error={errors.phone?.message}>
-          <Input {...register("phone")} placeholder="(555) 123-4567" />
+        <Field id="contact-phone" label="Phone" error={errors.phone?.message}>
+          <Input id="contact-phone" {...register("phone")} placeholder="(555) 123-4567" />
         </Field>
       </div>
       {!hideProperty && (
         <>
-          <Field label="Property address" error={errors.address?.message}>
+          <Field id="contact-address" label="Property address" error={errors.address?.message}>
             {/* Public, so it goes through the throttled server actions rather
                 than the session-gated /api/geocode routes. */}
             <AddressAutocomplete
+              id="contact-address"
               value={watch("address") ?? ""}
               onChange={(val) => setValue("address", val, { shouldValidate: true })}
               onSelect={(parts) => {
@@ -183,11 +184,11 @@ export function ContactForm({
             />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="City" error={errors.city?.message}>
-              <Input {...register("city")} placeholder="Dallas" />
+            <Field id="contact-city" label="City" error={errors.city?.message}>
+              <Input id="contact-city" {...register("city")} placeholder="Dallas" />
             </Field>
-            <Field label="ZIP" error={errors.zip?.message}>
-              <Input {...register("zip")} placeholder="75201" />
+            <Field id="contact-zip" label="ZIP" error={errors.zip?.message}>
+              <Input id="contact-zip" {...register("zip")} placeholder="75201" />
             </Field>
           </div>
         </>
@@ -197,12 +198,12 @@ export function ContactForm({
           <div className="space-y-4 rounded-xl border border-[var(--metal)]/30 bg-[var(--metal)]/[0.06] p-4">
             <p className="text-sm font-semibold">Pick a time for your free inspection</p>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Preferred date" error={errors.preferredDate?.message}>
-                <Input type="date" min={minDate} {...register("preferredDate")} />
+              <Field id="contact-preferred-date" label="Preferred date" error={errors.preferredDate?.message}>
+                <Input id="contact-preferred-date" type="date" min={minDate} {...register("preferredDate")} />
               </Field>
               <Field label="Preferred time">
                 <Select value={preferredTime} onValueChange={(v) => setValue("preferredTime", v)}>
-                  <SelectTrigger className="w-full"><SelectValue placeholder="Select a window" /></SelectTrigger>
+                  <SelectTrigger className="w-full" aria-labelledby="preferred-time-label"><SelectValue placeholder="Select a window" /></SelectTrigger>
                   <SelectContent className="dark bg-popover text-popover-foreground">
                     {TIME_OPTIONS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                   </SelectContent>
@@ -213,7 +214,7 @@ export function ContactForm({
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Property type">
               <Select value={propertyType} onValueChange={(v) => setValue("propertyType", v)}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectTrigger className="w-full" aria-labelledby="property-type-label"><SelectValue placeholder="Select" /></SelectTrigger>
                 <SelectContent className="dark bg-popover text-popover-foreground">
                   {PROPERTY_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                 </SelectContent>
@@ -221,7 +222,7 @@ export function ContactForm({
             </Field>
             <Field label="Are you the homeowner?">
               <Select value={homeowner} onValueChange={(v) => setValue("homeowner", v)}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectTrigger className="w-full" aria-labelledby="are-you-the-homeowner-label"><SelectValue placeholder="Select" /></SelectTrigger>
                 <SelectContent className="dark bg-popover text-popover-foreground">
                   <SelectItem value="Yes, I own this property">Yes, I own this property</SelectItem>
                   <SelectItem value="No">No</SelectItem>
@@ -231,7 +232,7 @@ export function ContactForm({
           </div>
           <Field label="When are you looking to start?">
             <Select value={timeframe} onValueChange={(v) => setValue("timeframe", v)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Select a timeframe" /></SelectTrigger>
+              <SelectTrigger className="w-full" aria-labelledby="when-are-you-looking-to-start-label"><SelectValue placeholder="Select a timeframe" /></SelectTrigger>
               <SelectContent className="dark bg-popover text-popover-foreground">
                 {TIMEFRAMES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
               </SelectContent>
@@ -242,7 +243,7 @@ export function ContactForm({
       {!hideService && (
         <Field label="I'm interested in">
           <Select value={service} onValueChange={(v) => setValue("service", v)}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-full" aria-labelledby="i-m-interested-in-label">
               <SelectValue placeholder="Select a service" />
             </SelectTrigger>
             <SelectContent className="dark bg-popover text-popover-foreground">
@@ -255,8 +256,8 @@ export function ContactForm({
           </Select>
         </Field>
       )}
-      <Field label={messageLabel} error={errors.message?.message}>
-        <Textarea {...register("message")} rows={4} placeholder={messagePlaceholder} />
+      <Field id="contact-message" label={messageLabel} error={errors.message?.message}>
+        <Textarea id="contact-message" {...register("message")} rows={4} placeholder={messagePlaceholder} />
       </Field>
 
       <Button
@@ -280,20 +281,48 @@ export function ContactForm({
   );
 }
 
+/**
+ * One labelled field on the public form.
+ *
+ * `htmlFor` is not decoration here. Every label on this form used to point at
+ * nothing, so a screen reader announced an unlabelled edit box on the single
+ * most important form the company has — the one every inbound enquiry goes
+ * through. It is also why the tests had to reach for `input[name=...]` and
+ * placeholder text, which is how they came to be testing a field that had
+ * quietly become an autocomplete with no name at all.
+ *
+ * A shadcn `Select` renders a button rather than an input, so those fields get
+ * their accessible name from `aria-labelledby` on the trigger instead; `labelId`
+ * is exposed for that.
+ */
 function Field({
+  id,
   label,
   error,
   children,
 }: {
+  /** The id of the control this labels. Omit only for a Select — see above. */
+  id?: string;
   label: string;
   error?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-sm">{label}</Label>
+      <Label htmlFor={id} id={id ? undefined : `${slug(label)}-label`} className="text-sm">
+        {label}
+      </Label>
       {children}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <p id={id ? `${id}-error` : undefined} className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
+}
+
+/** "Property type" → "property-type", for the ids the labels point at. */
+function slug(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }

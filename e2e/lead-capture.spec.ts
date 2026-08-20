@@ -15,15 +15,24 @@ const PASSWORD = "Passw0rd!";
 const FLAG_ON =
   process.env.SOLAR_VERTICAL_ENABLED === "1" || process.env.SOLAR_VERTICAL_ENABLED === "true";
 
+/**
+ * Fill the enquiry by LABEL, not by input name.
+ *
+ * The address field is an autocomplete, not a plain registered input, so it has
+ * no `name` — which is how this helper came to be looking for
+ * `input[name="address"]` and timing out on a form that worked perfectly. Every
+ * field on the form is now wired to its label, so asking for them the way a
+ * person would is both the accessible check and the stable selector.
+ */
 async function submitEnquiry(page: Page, service: string | null, lastName: string) {
   await page.goto(service ? `/contact?service=${service}` : "/contact");
-  await page.fill('input[name="firstName"]', "E2E");
-  await page.fill('input[name="lastName"]', lastName);
-  await page.fill('input[name="email"]', `${lastName}@example.com`);
-  await page.fill('input[name="phone"]', "(555) 010-2030");
-  await page.fill('input[name="address"]', "500 Test Ave");
-  await page.fill('input[name="city"]', "Dallas");
-  await page.fill('input[name="zip"]', "75201");
+  await page.getByLabel("First name").fill("E2E");
+  await page.getByLabel("Last name").fill(lastName);
+  await page.getByLabel("Email", { exact: true }).fill(`${lastName}@example.com`);
+  await page.getByLabel("Phone", { exact: true }).fill("(555) 010-2030");
+  await page.getByLabel("Property address").fill("500 Test Ave");
+  await page.getByLabel("City").fill("Dallas");
+  await page.getByLabel("ZIP").fill("75201");
   await page.getByRole("button", { name: /Request Free Inspection|Start Claim Support|Request/ }).first().click();
 }
 
