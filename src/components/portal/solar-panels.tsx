@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Loader2, TriangleAlert, CircleAlert, Sun, ImageUp, Trash2, BadgeCheck, ExternalLink,
+  Loader2, TriangleAlert, CircleAlert, Sun, ImageUp, Trash2, BadgeCheck, ExternalLink, Maximize2,
 } from "lucide-react";
 import type { FinanceProduct, MountType } from "@prisma/client";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ import {
   type ValidationIssue,
 } from "@/lib/solar-validation";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
-import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
+import { systemTotals } from "@/lib/solar-arrays";
 import {
   loanPaymentCents,
   grossPpwFromNet,
@@ -47,13 +47,20 @@ import {
 } from "@/server/modules/solar/proposal-actions";
 
 /**
- * Attach the panel layout drawn in an external design tool.
+ * The layout the proposal shows the customer, and the escape hatch that feeds
+ * it from somewhere else.
  *
- * Interim by design: Anexa has no roof designer yet, and a proposal that cannot
- * show a homeowner where the panels go is a weaker document. Explicitly NOT the
- * aerial property photo — a satellite view with no array on it is a picture of a
- * roof, and presenting it as a design is something the customer discovers at the
- * site survey.
+ * Anexa draws the roof itself now, and saving in the designer attaches the
+ * drawing here automatically — so this panel's normal state is "showing what
+ * was drawn", not "asking a rep which tool they used". The upload is kept, and
+ * kept FOLDED AWAY, for the two cases that still need it: a plan set from an
+ * engineer, and a deal whose design was done elsewhere before the customer ever
+ * reached us. A tool that is itself the design tool should not lead with a box
+ * asking for the name of the design tool.
+ *
+ * Explicitly NOT the aerial property photo — a satellite view with no array on
+ * it is a picture of a roof, and presenting it as a design is something the
+ * customer discovers at the site survey.
  */
 function PanelLayoutPanel({
   leadId,
@@ -163,28 +170,37 @@ function PanelLayoutPanel({
         </p>
       ) : (
         <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
-          No layout attached. The proposal will not show the customer where the panels go — it
-          omits the section rather than showing a placeholder.
+          Nothing drawn yet. The proposal omits the layout section rather than showing the customer
+          a placeholder — open the designer above and lay the array on the roof.
         </p>
       )}
 
       {canEdit && (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2">
+        <details className="rounded-lg border border-border bg-muted/20 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+            Use a drawing from somewhere else instead
+          </summary>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Only for a plan set from an engineer, or a design done before this deal reached us.
+            Drawing it here is what keeps the panel count, the system size and the offset tied to
+            the same geometry — an uploaded picture is a picture, and none of those numbers come
+            off it.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <TextField
-              label="Design tool (optional)"
+              label="Design tool"
               value={meta.provider}
               placeholder="e.g. Aurora"
               onChange={(v) => setMeta((m) => ({ ...m, provider: v }))}
             />
             <TextField
-              label="Design reference (optional)"
+              label="Design reference"
               value={meta.externalRef}
               placeholder="Provider's project id"
               onChange={(v) => setMeta((m) => ({ ...m, externalRef: v }))}
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <input
               ref={inputRef}
               type="file"
@@ -207,7 +223,7 @@ function PanelLayoutPanel({
             )}
             <span className="text-[11px] text-muted-foreground">JPG, PNG or WebP · max 15MB</span>
           </div>
-        </>
+        </details>
       )}
     </section>
   );
@@ -410,7 +426,6 @@ export function SolarDesignPanel({
   layoutAvailable,
   canApproveLayout,
   lat,
-  moduleMm,
   moduleRatingW,
   initialBlocks,
   assumptions,
@@ -422,7 +437,6 @@ export function SolarDesignPanel({
   layoutAvailable: boolean;
   canApproveLayout: boolean;
   lat: number | null;
-  moduleMm: { widthMm: number; heightMm: number };
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
   /** The company's yield and derate, so the live preview matches the save. */
@@ -439,6 +453,16 @@ export function SolarDesignPanel({
   // Counted from the geometry, the same way the server counts it on save —
   // never read back off `design.moduleQty`, which is only ever a cached copy.
   const drawnPanels = panelCount(initialBlocks);
+  // And sized the same way, from the same function the designer and the save
+  // action call, so the summary here cannot disagree with either of them.
+  const live = React.useMemo(
+    () => systemTotals(initialBlocks, { lat, moduleRatingW, assumptions }),
+    [initialBlocks, lat, moduleRatingW, assumptions]
+  );
+  const liveOffsetPct =
+    design?.annualUsageKwh && design.annualUsageKwh > 0
+      ? (live.year1ProductionKwh / design.annualUsageKwh) * 100
+      : null;
   const staleCount = (design?.moduleQty ?? 0) > 0 && drawnPanels === 0;
 
   async function save() {
@@ -487,11 +511,6 @@ export function SolarDesignPanel({
 
             The module count is not typed either: it is how many panels were
             drawn on the roof below, which is the only way to know how many fit. */}
-        <p className="text-sm">
-          <span className="font-display text-lg font-semibold">{drawnPanels}</span>{" "}
-          {drawnPanels === 1 ? "panel" : "panels"}
-          <span className="text-muted-foreground"> · drawn on the roof below</span>
-        </p>
 
         {/* The drawing is the source of truth; `moduleQty` is a copy of it that
             the save action refreshes. They disagree in exactly one situation,
@@ -525,39 +544,72 @@ export function SolarDesignPanel({
           </p>
         ) : null}
 
-        {/* Computed server-side from module count × rating and the company's
-            assumptions — never typed in, so it cannot be faked. */}
+        {/* Computed from module count × rating and the company's assumptions —
+            never typed in, so it cannot be faked.
+
+            Read off the GEOMETRY rather than off the saved columns, for the
+            same reason the panel count is: the columns are a cache the save
+            action refreshes, and a design opened after a drawing was changed
+            elsewhere would otherwise show the figures from the drawing before
+            it. Offset is the one that needs a second input — a system makes the
+            same kWh whatever the house uses — so it stays blank rather than
+            reading 0% when nobody has recorded the usage. */}
         <div className="grid grid-cols-3 gap-3 rounded-lg border border-border bg-muted/30 p-3 text-center">
           <div>
-            <div className="font-display text-lg font-semibold">{design?.systemSizeKwDc?.toFixed(2) ?? "0.00"}</div>
+            <div className="font-display text-lg font-semibold">{live.systemSizeKwDc.toFixed(2)}</div>
             <div className="text-[11px] text-muted-foreground">kW-DC</div>
           </div>
           <div>
             <div className="font-display text-lg font-semibold">
-              {(design?.year1ProductionKwh ?? 0).toLocaleString()}
+              {live.year1ProductionKwh.toLocaleString()}
             </div>
             <div className="text-[11px] text-muted-foreground">yr-1 kWh</div>
           </div>
           <div>
-            <div className="font-display text-lg font-semibold">{(design?.offsetPct ?? 0).toFixed(0)}%</div>
-            <div className="text-[11px] text-muted-foreground">offset</div>
+            <div className="font-display text-lg font-semibold">
+              {liveOffsetPct == null ? "—" : `${liveOffsetPct.toFixed(0)}%`}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {liveOffsetPct == null ? "no usage yet" : "offset"}
+            </div>
           </div>
         </div>
       </section>
 
       <section className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Panel layout
+          The array
         </h4>
-        <SolarLayoutDesigner
-          leadId={leadId}
-          lat={lat}
-          moduleMm={moduleMm}
-          moduleRatingW={moduleRatingW}
-          initialBlocks={initialBlocks}
-          assumptions={assumptions}
-          canEdit={canEdit}
-        />
+
+        {/* The designer is a screen of its own, not a box on this form. A roof
+            is landscape and a form is a column, and the judgement being made
+            here — does this module clear the vent, is that oak over this bank —
+            needs the picture as big as the screen goes. */}
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-muted/30 p-4">
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-lg font-semibold">
+              {drawnPanels} {drawnPanels === 1 ? "panel" : "panels"}{" "}
+              <span className="text-sm font-normal text-muted-foreground">
+                {live.systemSizeKwDc > 0
+                  ? `· ${live.systemSizeKwDc.toFixed(2)} kW-DC · ${live.year1ProductionKwh.toLocaleString()} kWh yr-1`
+                  : "· nothing drawn on the roof yet"}
+              </span>
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {lat == null
+                ? "This deal has no rooftop coordinate, so the roof cannot be shown — fix the address first."
+                : live.unorientedArrays > 0
+                  ? `${live.unorientedArrays} ${live.unorientedArrays === 1 ? "array still needs" : "arrays still need"} a facing and a pitch — until then they earn the generic market yield.`
+                  : "Setbacks, tilt, shading and the live offset are all in the designer."}
+            </p>
+          </div>
+          <Button asChild size="lg" disabled={lat == null}>
+            <Link href={`/portal/leads/${leadId}/solar-proposal/design`}>
+              <Maximize2 className="size-4" />
+              {drawnPanels > 0 ? "Open the designer" : "Draw the array"}
+            </Link>
+          </Button>
+        </div>
       </section>
 
       <PanelLayoutPanel

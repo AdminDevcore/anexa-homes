@@ -37,6 +37,20 @@ export type LayoutBlock = {
   azimuthDeg?: number | null;
   /** The plane's slope off horizontal, degrees. 0 is flat. Undefined = unknown. */
   tiltDeg?: number | null;
+  /**
+   * How much of this array's year the surroundings take away, 0..100.
+   *
+   * A tree, a neighbour's gable, a chimney — the things the aerial shows but
+   * the sun model cannot, because the sun model only knows the plane and never
+   * what is standing in front of it. 0 is a clear roof and is what an array
+   * with nothing recorded means: undefined has to keep pricing a design
+   * exactly as it did before shading existed.
+   *
+   * Deliberately ONE number for the whole array rather than per panel. A rep
+   * on a doorstep judges "that oak takes about half this bank" and is right;
+   * asked for a per-module figure they would be inventing precision.
+   */
+  shadePct?: number | null;
 };
 
 export type ModuleMm = { widthMm: number; heightMm: number };
@@ -284,6 +298,8 @@ export function detachPanel(
     omitted: [],
     azimuthDeg: parent.azimuthDeg ?? null,
     tiltDeg: parent.tiltDeg ?? null,
+    // The panel has not moved out from under the tree by being detached.
+    shadePct: parent.shadePct ?? null,
   };
   return {
     blocks: [
@@ -296,9 +312,148 @@ export function detachPanel(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Growing an array
+// ---------------------------------------------------------------------------
+
+export type GrowSide = "left" | "right" | "top" | "bottom";
+
+/**
+ * Add one row or column to an array, on the side asked for.
+ *
+ * This is the whole of "click the green square and a panel appears there". It
+ * beats dragging a resize grip for the case that actually comes up on a roof —
+ * one more panel along this eave — because a grip has to be dragged far enough
+ * to cross a whole module boundary and not so far that it crosses two.
+ *
+ * THE KNOCKED-OUT CELLS HAVE TO BE REMAPPED, and this is the part that is easy
+ * to get wrong. `omitted` holds row-major indices, `row * cols + col`, so the
+ * moment `cols` changes every stored index means a different cell. Growing a
+ * 3-wide array with a hole at index 4 (row 1, col 1) to 4 wide without
+ * remapping leaves the hole at row 1, col 0 — the array silently rearranges
+ * itself around the panel the rep removed, which is exactly the complaint that
+ * "it doesn't put them all symmetric" describes.
+ *
+ * Growing left or top also moves the ORIGIN, because the origin is the first
+ * panel's top-left corner: a new column on the left starts one module further
+ * back along the block's own x axis, not along north.
+ */
+export function growBlock(b: LayoutBlock, side: GrowSide, m: ModuleMm): LayoutBlock {
+  const { w, h } = panelSizeM(m, b.orientation);
+  const cols = Math.max(1, b.cols);
+  const rows = Math.max(1, b.rows);
+  const cell = (i: number) => ({ row: Math.floor(i / cols), col: i % cols });
+
+  if (side === "right" || side === "left") {
+    const nextCols = cols + 1;
+    const shift = side === "left" ? 1 : 0;
+    const origin =
+      side === "left"
+        ? blockLocalToGround(b, -(w + PANEL_GAP_M), 0)
+        : { e: b.originE, n: b.originN };
+    return {
+      ...b,
+      cols: nextCols,
+      rows,
+      originE: origin.e,
+      originN: origin.n,
+      omitted: b.omitted
+        .filter((i) => i >= 0 && i < cols * rows)
+        .map((i) => {
+          const { row, col } = cell(i);
+          return row * nextCols + col + shift;
+        }),
+    };
+  }
+
+  const nextRows = rows + 1;
+  const origin =
+    side === "top" ? blockLocalToGround(b, 0, -(h + PANEL_GAP_M)) : { e: b.originE, n: b.originN };
+  return {
+    ...b,
+    rows: nextRows,
+    cols,
+    originE: origin.e,
+    originN: origin.n,
+    // Columns are unchanged, so a row-major index only has to move down by a
+    // whole row when the new row is inserted above it.
+    omitted: b.omitted
+      .filter((i) => i >= 0 && i < cols * rows)
+      .map((i) => (side === "top" ? i + cols : i)),
+  };
+}
+
+/**
+ * The four places one more row or column could go, as ground-metre quads.
+ *
+ * Drawn as translucent ghosts so a rep can see where the array would extend
+ * before committing to it — the same affordance the tool this was modelled on
+ * uses, and the reason panel-by-panel work there feels like laying tile rather
+ * than aiming at a handle.
+ */
+export function growGhosts(
+  b: LayoutBlock,
+  m: ModuleMm
+): { side: GrowSide; corners: { e: number; n: number }[] }[] {
+  const { w, h } = panelSizeM(m, b.orientation);
+  const { spanX, spanY } = blockSpanM(b, m);
+  const quad = (x: number, y: number, dx: number, dy: number) =>
+    (
+      [
+        [x, y],
+        [x + dx, y],
+        [x + dx, y + dy],
+        [x, y + dy],
+      ] as const
+    ).map(([lx, ly]) => blockLocalToGround(b, lx, ly));
+
+  return [
+    { side: "left" as const, corners: quad(-(w + PANEL_GAP_M), 0, w, spanY) },
+    { side: "right" as const, corners: quad(spanX + PANEL_GAP_M, 0, w, spanY) },
+    { side: "top" as const, corners: quad(0, -(h + PANEL_GAP_M), spanX, h) },
+    { side: "bottom" as const, corners: quad(0, spanY + PANEL_GAP_M, spanX, h) },
+  ];
+}
+
+/**
+ * The holes: cells knocked out of this array, as quads plus their index.
+ *
+ * Shown as ghosts too, so putting a removed panel back is a click on the gap it
+ * left rather than a redraw of the whole array.
+ */
+export function holeQuads(
+  b: LayoutBlock,
+  m: ModuleMm
+): { index: number; corners: { e: number; n: number }[] }[] {
+  const { w, h } = panelSizeM(m, b.orientation);
+  const skip = omittedInRange(b);
+  const out: { index: number; corners: { e: number; n: number }[] }[] = [];
+  for (const index of [...skip].sort((a, z) => a - z)) {
+    const { x, y } = cellLocalXY(b, m, index);
+    out.push({
+      index,
+      corners: (
+        [
+          [x, y],
+          [x + w, y],
+          [x + w, y + h],
+          [x, y + h],
+        ] as const
+      ).map(([lx, ly]) => blockLocalToGround(b, lx, ly)),
+    });
+  }
+  return out;
+}
+
 /** An angle from the database, or null. Keeps NaN and Infinity out of the maths. */
 function finiteOrNull(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** 0..100, or null. A shade of 140% would hand an array negative production. */
+export function clampShade(v: number | null | undefined): number | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  return Math.max(0, Math.min(100, v));
 }
 
 /** Parse `SolarDesign.layoutBlocks` from the database. Bad data reads as empty. */
@@ -329,5 +484,97 @@ export function parseLayoutBlocks(raw: unknown): LayoutBlock[] {
     ...b,
     azimuthDeg: finiteOrNull((b as LayoutBlock).azimuthDeg),
     tiltDeg: finiteOrNull((b as LayoutBlock).tiltDeg),
+    // Same story as orientation: shading arrived later, so a design saved
+    // before it has none, and none has to mean "clear" rather than NaN.
+    shadePct: clampShade(finiteOrNull((b as LayoutBlock).shadePct)),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Setbacks
+// ---------------------------------------------------------------------------
+
+/**
+ * A fire setback: the strip along a roof edge that has to stay clear.
+ *
+ * Drawn as a POLYLINE along the edge plus a width, not as a filled polygon,
+ * because that is how a roof states the rule — "three feet back from this
+ * eave" — and because an edge is what a rep can actually trace on an aerial.
+ * The band is rendered from the line and the width.
+ *
+ * Points are ground metres east/north of the deal's coordinate, exactly like
+ * a block's origin. Nothing here is in pixels for the same reason.
+ *
+ * These do NOT clip panels. Ours is a drawing aid and a talking point on the
+ * plan set, and a tool that silently deleted a rep's array because a line
+ * moved would be worse than one that shows the conflict and lets them judge
+ * it — which is also how the tool this was modelled on behaves.
+ */
+export type LayoutSetback = {
+  id: string;
+  /** At least two points; a straight eave is two, a hip run is more. */
+  points: { e: number; n: number }[];
+  /** How far back the rule reaches, metres. 0.914 m is the usual 3 ft. */
+  widthM: number;
+};
+
+/** The 3 ft (0.914 m) most jurisdictions ask for along an eave or a ridge. */
+export const DEFAULT_SETBACK_M = 0.914;
+
+/** Parse `SolarDesign.layoutSetbacks`. Bad data reads as none drawn. */
+export function parseLayoutSetbacks(raw: unknown): LayoutSetback[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((v) => {
+    if (!v || typeof v !== "object") return [];
+    const x = v as Record<string, unknown>;
+    if (typeof x.id !== "string" || !Array.isArray(x.points)) return [];
+    const points = x.points.flatMap((pt) => {
+      if (!pt || typeof pt !== "object") return [];
+      const p = pt as Record<string, unknown>;
+      return typeof p.e === "number" && Number.isFinite(p.e) &&
+        typeof p.n === "number" && Number.isFinite(p.n)
+        ? [{ e: p.e, n: p.n }]
+        : [];
+    });
+    if (points.length < 2) return [];
+    const widthM =
+      typeof x.widthM === "number" && Number.isFinite(x.widthM) && x.widthM > 0
+        ? Math.min(10, x.widthM)
+        : DEFAULT_SETBACK_M;
+    return [{ id: x.id, points, widthM }];
+  });
+}
+
+/**
+ * The band a setback occupies, as a ground-metre polygon per segment.
+ *
+ * One quad per segment rather than one offset outline for the whole run: a
+ * mitred outline needs the join maths to be right at every corner, and a wrong
+ * mitre draws the keep-out zone somewhere the roof does not have one. Overlapping
+ * quads at a corner are visually identical and cannot lie.
+ *
+ * The band is drawn on BOTH sides of the line, so a rep tracing an eave does
+ * not have to know which way round the tool wants the roof to be.
+ */
+export function setbackBands(s: LayoutSetback): { e: number; n: number }[][] {
+  const half = s.widthM / 2;
+  const out: { e: number; n: number }[][] = [];
+  for (let i = 0; i + 1 < s.points.length; i++) {
+    const a = s.points[i];
+    const b = s.points[i + 1];
+    const dE = b.e - a.e;
+    const dN = b.n - a.n;
+    const len = Math.hypot(dE, dN);
+    if (len < 1e-6) continue;
+    // Unit normal to the segment.
+    const nE = -dN / len;
+    const nN = dE / len;
+    out.push([
+      { e: a.e + nE * half, n: a.n + nN * half },
+      { e: b.e + nE * half, n: b.n + nN * half },
+      { e: b.e - nE * half, n: b.n - nN * half },
+      { e: a.e - nE * half, n: a.n - nN * half },
+    ]);
+  }
+  return out;
 }

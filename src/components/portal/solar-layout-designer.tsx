@@ -1,11 +1,12 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Loader2, MousePointer2, Square, Eraser, RotateCcw, Trash2, Save, ZoomIn, ZoomOut,
-  Plus, Move, Compass,
+  ArrowLeft, Compass, Eraser, Loader2, MapPin, Minus, MousePointer2, Move, Plus,
+  RotateCcw, Ruler, Square, Sun, Trash2, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,14 @@ import {
   blockLocalToGround,
   groundToBlockLocal,
   blockSpanM,
+  growBlock,
+  growGhosts,
+  holeQuads,
+  setbackBands,
+  DEFAULT_SETBACK_M,
+  type GrowSide,
   type LayoutBlock,
+  type LayoutSetback,
   type ModuleMm,
   type Orientation,
 } from "@/lib/solar-layout";
@@ -38,7 +46,7 @@ import { saveSolarLayoutAction } from "@/server/modules/solar/layout-actions";
 import { uploadPanelLayoutAction } from "@/server/modules/solar/proposal-actions";
 
 /**
- * Draw the array on the customer's own roof.
+ * Draw the array on the customer's own roof. Full screen, because a roof is.
  *
  * The module count — and therefore the system size, the production and the
  * price — is the number of panels drawn here. It used to be typed, which is why
@@ -51,13 +59,21 @@ import { uploadPanelLayoutAction } from "@/server/modules/solar/proposal-actions
  * from the deal's coordinate, never pixels, so reopening at a different zoom
  * puts every panel back where it was.
  *
- * TWO THINGS ARE MODELLED HERE and they are easy to confuse:
+ * EVERY FIGURE ON SCREEN IS LIVE. There is no Calculate button and there should
+ * never be one: size, production and offset are pure functions of the geometry
+ * and the company's assumptions, all of which are already in the browser. A
+ * button would only be there to make a round trip nobody needs, and a rep who
+ * has to press it is a rep quoting the last drawing they pressed it on.
+ *
+ * THREE THINGS ARE MODELLED HERE and they are easy to confuse:
  *   - `rotationDeg` turns the GRID in plan view, so its rows run along the
  *     ridge. It is a drawing concern and does not change output.
  *   - `azimuthDeg`/`tiltDeg` are which way the plane FACES and how steep it is.
- *     They are the only things here that change the kWh.
- * A rep can align an array beautifully and still have it pointing north, which
- * is why the orientation is asked for separately rather than inferred.
+ *   - `shadePct` is what the tree in front of it takes away.
+ * The last two are the only things here that change the kWh. A rep can align an
+ * array beautifully and still have it pointing north, which is why the facing
+ * is asked for rather than inferred: an array drawn along a ridge faces square
+ * off it, but off WHICH side is a coin toss the drawing cannot settle.
  *
  * A SINGLE PANEL IS A 1x1 BLOCK. That is the whole trick behind placing and
  * sliding individual modules: the same shape, the same maths and the same
@@ -68,7 +84,7 @@ import { uploadPanelLayoutAction } from "@/server/modules/solar/proposal-actions
 /** Google clamps each side of a Static Maps image to 640; scale=2 doubles it. */
 const DEFAULT_CANVAS_PX = 1280;
 
-type Tool = "draw" | "panel" | "select" | "movePanel" | "erase";
+type Tool = "draw" | "panel" | "select" | "movePanel" | "erase" | "setback";
 type Zoom = 20 | 21;
 
 type Drag =
@@ -101,26 +117,47 @@ function insideQuad(p: { e: number; n: number }, q: { e: number; n: number }[]):
 
 export function SolarLayoutDesigner({
   leadId,
+  address,
   lat,
   moduleMm,
   moduleRatingW,
+  moduleLabel,
+  inverterLabel,
+  inverterRatingW,
+  batteryLabel,
+  annualUsageKwh,
   initialBlocks,
+  initialSetbacks,
   assumptions,
   canEdit,
+  backHref,
 }: {
   leadId: string;
+  /** Shown in the top bar: the rep needs to know whose roof this is. */
+  address: string;
   /** Null when the deal has no rooftop coordinate — the roof cannot be shown. */
   lat: number | null;
   moduleMm: ModuleMm;
   moduleRatingW: number | null;
+  moduleLabel: string | null;
+  inverterLabel: string | null;
+  /** Rated AC output, for the DC/AC ratio. Null leaves that chip blank. */
+  inverterRatingW: number | null;
+  batteryLabel: string | null;
+  /** What the house uses, so offset is live rather than a saved snapshot. */
+  annualUsageKwh: number | null;
   initialBlocks: LayoutBlock[];
+  initialSetbacks: LayoutSetback[];
   /** The company's yield and derate, so the preview matches what the server saves. */
   assumptions: YieldAssumptions;
   canEdit: boolean;
+  /** Where "Update proposal" and the back arrow return to. */
+  backHref: string;
 }) {
   const router = useRouter();
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
+  const viewportRef = React.useRef<HTMLDivElement>(null);
 
   /**
    * THE GESTURE STATE LIVES IN A REF AS WELL AS IN STATE, and the ref is the
@@ -135,10 +172,6 @@ export function SolarLayoutDesigner({
    * was taken from a stale copy. Anyone quick with a mouse hit it every time,
    * anyone slow enough for a repaint between the two events never did, which
    * is what made it look like the tool worked for some people and not others.
-   *
-   * Writing the ref synchronously means every event in a gesture sees what the
-   * events before it did, whatever React has or has not committed yet. State
-   * is still set, because state is what paints.
    */
   const [blocks, setBlocksState] = React.useState<LayoutBlock[]>(initialBlocks);
   const blocksRef = React.useRef<LayoutBlock[]>(initialBlocks);
@@ -151,6 +184,23 @@ export function SolarLayoutDesigner({
     []
   );
 
+  const [setbacks, setSetbacksState] = React.useState<LayoutSetback[]>(initialSetbacks);
+  const setbacksRef = React.useRef<LayoutSetback[]>(initialSetbacks);
+  const setSetbacks = React.useCallback((next: LayoutSetback[]) => {
+    setbacksRef.current = next;
+    setSetbacksState(next);
+  }, []);
+
+  /** The setback being traced, point by point. Null when not tracing one. */
+  const [pending, setPendingState] = React.useState<{ e: number; n: number }[] | null>(null);
+  const pendingRef = React.useRef<{ e: number; n: number }[] | null>(null);
+  const setPending = React.useCallback((next: { e: number; n: number }[] | null) => {
+    pendingRef.current = next;
+    setPendingState(next);
+  }, []);
+  /** Where the pointer is while tracing, so the next segment previews. */
+  const [ghostPoint, setGhostPoint] = React.useState<{ e: number; n: number } | null>(null);
+
   const [drag, setDragState] = React.useState<Drag>(null);
   const dragRef = React.useRef<Drag>(null);
   const setDrag = React.useCallback((next: Drag) => {
@@ -161,8 +211,6 @@ export function SolarLayoutDesigner({
   /**
    * The layout as it was when the current gesture began, so one drag is one
    * undo step — and undoing a move puts the array back where it started.
-   * Recording the blocks at pointerup, as this used to, records them as they
-   * already are: an undo that restores the drag you were trying to undo.
    */
   const gestureBeforeRef = React.useRef<LayoutBlock[] | null>(null);
 
@@ -171,6 +219,10 @@ export function SolarLayoutDesigner({
   const [tool, setTool] = React.useState<Tool>("draw");
   const [zoom, setZoom] = React.useState<Zoom>(21);
   const [viewScale, setViewScale] = React.useState(1);
+  const [dirty, setDirty] = React.useState(false);
+  const [shadeOpen, setShadeOpen] = React.useState(false);
+  const [tiltOpen, setTiltOpen] = React.useState(false);
+
   // Which zoom's imagery has resolved, how, and AT WHAT SIZE. The size is part
   // of the answer because the canvas and the metres-per-pixel are both derived
   // from it — Google clamps a Static Maps request to 640 a side and says
@@ -186,9 +238,6 @@ export function SolarLayoutDesigner({
   const imageState: "loading" | "ready" | "failed" =
     loaded?.zoom !== zoom ? "loading" : loaded.ok ? "ready" : "failed";
 
-  // Square, and the size the picture actually is. The old constants said
-  // 2560x1440 for an image Google returns as 1280x1280, which stretched every
-  // roof 1.78x wide and put the panel scale out by 2x across and 1.13x down.
   const canvasW = loaded?.ok ? loaded.widthPx : DEFAULT_CANVAS_PX;
   const canvasH = loaded?.ok ? loaded.heightPx : DEFAULT_CANVAS_PX;
 
@@ -202,16 +251,57 @@ export function SolarLayoutDesigner({
   );
   const bestTilt = React.useMemo(() => (lat == null ? 30 : optimalTiltDeg(lat)), [lat]);
 
+  /**
+   * Offset, live. The same division the server does on save — kept here so the
+   * number a rep watches while drawing is the number that gets stored, rather
+   * than a figure that only catches up after a save and a refresh.
+   */
+  const offsetPct =
+    annualUsageKwh && annualUsageKwh > 0
+      ? (totals.year1ProductionKwh / annualUsageKwh) * 100
+      : null;
+
+  /**
+   * Array-to-inverter ratio. Blank without an inverter — 1.2 is not a default.
+   *
+   * A MICROINVERTER IS ONE PER MODULE, and the catalogue does not say which
+   * kind an entry is: both are `kind: "inverter"` with a rated output. Dividing
+   * a 26 kW array by a single 290 W Enphase gives 91, which is not a DC/AC
+   * ratio, it is a unit error printed with two decimal places.
+   *
+   * The discriminator used is the one that actually separates them in the real
+   * world: a module-level inverter is rated in the same order as the panel it
+   * sits under (250–400 W), and the smallest string inverters on the market
+   * start around 1.5 kW. So an inverter rated under twice the module is one per
+   * module, and the system's AC capacity is its rating times the panel count.
+   * Stated as an assumption because it is one — the honest fix is a flag on the
+   * catalogue entry, and this is the seam it would replace.
+   */
+  const perModuleInverter =
+    !!inverterRatingW && !!moduleRatingW && inverterRatingW < moduleRatingW * 2;
+  const inverterKwAc =
+    inverterRatingW == null
+      ? null
+      : perModuleInverter
+        ? (inverterRatingW * count) / 1000
+        : inverterRatingW / 1000;
+  const dcAc =
+    inverterKwAc && inverterKwAc > 0 && totals.systemSizeKwDc > 0
+      ? totals.systemSizeKwDc / inverterKwAc
+      : null;
+
   /** Every mutation goes through here, so undo has one place to record. */
   const commit = React.useCallback((next: LayoutBlock[]) => {
     setHistory((h) => [...h.slice(-49), blocksRef.current]);
     setBlocks(next);
+    setDirty(true);
   }, [setBlocks]);
 
   const undo = React.useCallback(() => {
     setHistory((h) => {
       if (h.length === 0) return h;
       setBlocks(h[h.length - 1]);
+      setDirty(true);
       return h.slice(0, -1);
     });
   }, [setBlocks]);
@@ -229,10 +319,13 @@ export function SolarLayoutDesigner({
    * What a newly drawn array should face.
    *
    * The FIRST array on a deal inherits nothing, so it stays unoriented and the
-   * warning fires at least once — a rep who is never told the roof matters will
+   * prompt fires at least once — a rep who is never told the roof matters will
    * never say which way it faces. After that, arrays inherit from the last one
    * drawn, because the second and third arrays are usually further up the same
    * plane and retyping the pitch three times is how people stop bothering.
+   *
+   * Shade is deliberately NOT inherited: the whole reason to shade one array
+   * and not another is that the tree is only over one of them.
    */
   const inheritedOrientation = (): Pick<LayoutBlock, "azimuthDeg" | "tiltDeg"> => {
     const source = selected ?? blocksRef.current[blocksRef.current.length - 1];
@@ -248,9 +341,6 @@ export function SolarLayoutDesigner({
     // Same-origin: the route proxies Google server-side so the API key never
     // reaches the browser. That is also what keeps the canvas untainted, which
     // is what makes `toBlob` on save possible at all.
-    //
-    // `square=1` because the geometry below assumes the picture is the shape it
-    // asked for. See the route.
     img.src = `/api/property/satellite?leadId=${encodeURIComponent(leadId)}&zoom=${zoom}&pin=0&square=1`;
     img.onload = () => {
       if (!live) return;
@@ -267,12 +357,47 @@ export function SolarLayoutDesigner({
       imgRef.current = null;
       setLoaded({ zoom, ok: false, widthPx: DEFAULT_CANVAS_PX, heightPx: DEFAULT_CANVAS_PX });
     };
-    // A zoom switched mid-fetch must not have the old picture land on top of
-    // the new one.
     return () => {
       live = false;
     };
   }, [leadId, zoom, lat]);
+
+  /**
+   * Open filling the viewport rather than at 1:1.
+   *
+   * A 1280px canvas inside an 900px-tall screen opens showing the middle
+   * quarter of the roof, which is why the old embedded version read as "it
+   * gives me the wrong thing" — the house was there, just outside the box.
+   */
+  const fitted = React.useRef(false);
+  React.useEffect(() => {
+    const el = viewportRef.current;
+    // Deliberately NOT gated on the imagery having loaded. The canvas has a
+    // size either way, and a failed tile is exactly when a rep least wants the
+    // picture to also be three times the height of the screen.
+    if (!el || !loaded) return;
+    const fit = () => {
+      const f = Math.min(el.clientWidth / canvasW, el.clientHeight / canvasH);
+      if (Number.isFinite(f) && f > 0) setViewScale(Math.max(0.2, Math.min(2, f)));
+    };
+    fit();
+    fitted.current = true;
+    // A window resized, a laptop undocked, a browser zoom: the roof has to come
+    // back to fitting rather than sit half off the bottom of the screen. Once a
+    // rep has zoomed in deliberately this stops — refitting under someone who
+    // is inspecting a vent is worse than leaving the picture where they put it.
+    const ro = new ResizeObserver(() => {
+      if (fitted.current) fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [loaded, canvasW, canvasH]);
+
+  /** Any deliberate zoom hands control over: stop refitting behind their back. */
+  const zoomBy = React.useCallback((mul: number) => {
+    fitted.current = false;
+    setViewScale((v) => Math.max(0.15, Math.min(6, v * mul)));
+  }, []);
 
   // ── Drawing ────────────────────────────────────────────────────────────
   const paint = React.useCallback(
@@ -287,15 +412,54 @@ export function SolarLayoutDesigner({
       }
 
       const img = { widthPx: canvasW, heightPx: canvasH };
+      const toPx = (c: { e: number; n: number }) => metresToImagePx(c.e, c.n, mpp, img);
+      const trace = (pts: { x: number; y: number }[]) => {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.closePath();
+      };
+
+      // Setbacks go UNDER the panels: the point of the band is to show which
+      // modules are sitting in it, and a band painted on top hides them.
+      for (const s of setbacks) {
+        for (const band of setbackBands(s)) {
+          trace(band.map(toPx));
+          ctx.fillStyle = "rgba(244, 99, 30, 0.28)";
+          ctx.fill();
+        }
+        const line = s.points.map(toPx);
+        ctx.beginPath();
+        ctx.moveTo(line[0].x, line[0].y);
+        for (let i = 1; i < line.length; i++) ctx.lineTo(line[i].x, line[i].y);
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "#f4631e";
+        ctx.stroke();
+      }
+
+      if (opts.chrome && pending && pending.length > 0) {
+        const pts = [...pending, ...(ghostPoint ? [ghostPoint] : [])].map(toPx);
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.setLineDash([8, 6]);
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "#fb923c";
+        ctx.stroke();
+        ctx.setLineDash([]);
+        for (const p of pending.map(toPx)) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = "#fb923c";
+          ctx.fill();
+        }
+      }
+
       for (const b of blocks) {
         const isSel = opts.chrome && b.id === selectedId;
         const lone = b.cols === 1 && b.rows === 1;
         for (const quad of panelCorners(b, moduleMm)) {
-          const pts = quad.map((c) => metresToImagePx(c.e, c.n, mpp, img));
-          ctx.beginPath();
-          ctx.moveTo(pts[0].x, pts[0].y);
-          for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
-          ctx.closePath();
+          trace(quad.map(toPx));
           ctx.fillStyle = "rgba(17, 32, 56, 0.82)";
           ctx.fill();
           ctx.lineWidth = isSel ? 2.5 : 1.5;
@@ -308,11 +472,33 @@ export function SolarLayoutDesigner({
         }
 
         if (isSel) {
+          // The green ghosts: where one more row or column would go, and every
+          // hole a removed panel left. Clicking one is how an array is built up
+          // module by module without touching a resize grip.
+          for (const g of growGhosts(b, moduleMm)) {
+            trace(g.corners.map(toPx));
+            ctx.fillStyle = "rgba(74, 222, 128, 0.35)";
+            ctx.fill();
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = "rgba(22, 163, 74, 0.9)";
+            ctx.stroke();
+          }
+          for (const h of holeQuads(b, moduleMm)) {
+            trace(h.corners.map(toPx));
+            ctx.fillStyle = "rgba(74, 222, 128, 0.22)";
+            ctx.fill();
+            ctx.setLineDash([4, 4]);
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = "rgba(22, 163, 74, 0.8)";
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
           drawFacing(ctx, b, moduleMm, mpp, img);
-          const h = handlePositions(b, moduleMm, mpp, img);
+          const hp = handlePositions(b, moduleMm, mpp, img);
           for (const [pos, colour] of [
-            [h.rotate, "#f4631e"],
-            [h.resize, "#38bdf8"],
+            [hp.rotate, "#f4631e"],
+            [hp.resize, "#38bdf8"],
           ] as const) {
             ctx.beginPath();
             ctx.arc(pos.x, pos.y, 9, 0, Math.PI * 2);
@@ -338,7 +524,7 @@ export function SolarLayoutDesigner({
         ctx.setLineDash([]);
       }
     },
-    [blocks, selectedId, drag, moduleMm, mpp, canvasW, canvasH]
+    [blocks, setbacks, pending, ghostPoint, selectedId, drag, moduleMm, mpp, canvasW, canvasH]
   );
 
   React.useEffect(() => {
@@ -380,6 +566,21 @@ export function SolarLayoutDesigner({
     return null;
   };
 
+  /** A ghost or a hole under this point, for the selected array only. */
+  const hitGhost = (
+    m: { e: number; n: number }
+  ): { kind: "grow"; side: GrowSide } | { kind: "hole"; index: number } | null => {
+    const b = blocksRef.current.find((x) => x.id === selectedId);
+    if (!b) return null;
+    for (const h of holeQuads(b, moduleMm)) {
+      if (insideQuad(m, h.corners)) return { kind: "hole", index: h.index };
+    }
+    for (const g of growGhosts(b, moduleMm)) {
+      if (insideQuad(m, g.corners)) return { kind: "grow", side: g.side };
+    }
+    return null;
+  };
+
   /** A lone panel centred on a ground point, rather than hung off its corner. */
   const lonePanelAt = (
     m: { e: number; n: number },
@@ -387,8 +588,6 @@ export function SolarLayoutDesigner({
     orientation: Orientation
   ): LayoutBlock => {
     const { w, h } = panelSizeM(moduleMm, orientation);
-    // With a zero origin, blockLocalToGround is the pure rotation, so this is
-    // the centre offset turned into ground axes.
     const off = blockLocalToGround({ originE: 0, originN: 0, rotationDeg }, w / 2, h / 2);
     return {
       id: uid(),
@@ -403,6 +602,16 @@ export function SolarLayoutDesigner({
     };
   };
 
+  /** Finish the setback being traced. Fewer than two points is not a line. */
+  const finishSetback = React.useCallback(() => {
+    const pts = pendingRef.current;
+    setPending(null);
+    setGhostPoint(null);
+    if (!pts || pts.length < 2) return;
+    setSetbacks([...setbacksRef.current, { id: uid(), points: pts, widthM: DEFAULT_SETBACK_M }]);
+    setDirty(true);
+  }, [setPending, setSetbacks]);
+
   function onPointerDown(ev: React.PointerEvent) {
     if (!canEdit || lat == null) return;
     const p = toCanvas(ev);
@@ -415,15 +624,44 @@ export function SolarLayoutDesigner({
       /* capture is an optimisation, not a requirement */
     }
 
+    if (tool === "setback") {
+      setPending([...(pendingRef.current ?? []), m]);
+      return;
+    }
+
     // Everything this gesture is about to change, so pointerup can record one
     // undo step for the whole of it rather than one per stage.
     gestureBeforeRef.current = blocksRef.current;
+
+    // A click on a green ghost is the fastest thing in the tool, so it is
+    // tested before the tools are — whatever is selected, a click on the
+    // square that says "a panel goes here" puts a panel there.
+    if (tool !== "erase") {
+      const g = hitGhost(m);
+      if (g) {
+        const b = blocksRef.current.find((x) => x.id === selectedId)!;
+        commit(
+          blocksRef.current.map((x) =>
+            x.id !== b.id
+              ? x
+              : g.kind === "grow"
+                ? growBlock(x, g.side, moduleMm)
+                : { ...x, omitted: x.omitted.filter((i) => i !== g.index) }
+          )
+        );
+        return;
+      }
+    }
 
     if (tool === "erase") {
       const h = hit(m);
       if (h) {
         // A lone panel is deleted outright: knocking out the only cell of a 1x1
         // leaves an empty block on the canvas that can still be clicked.
+        //
+        // Anything bigger keeps its grid and loses one cell, so the modules
+        // either side stay exactly where the rep put them. Re-flowing them to
+        // close the gap is what "it doesn't put them all symmetric" describes.
         commit(
           h.block.cols === 1 && h.block.rows === 1
             ? blocksRef.current.filter((b) => b.id !== h.block.id)
@@ -431,7 +669,9 @@ export function SolarLayoutDesigner({
                 b.id === h.block.id ? { ...b, omitted: [...b.omitted, h.index] } : b
               )
         );
-        if (selectedId === h.block.id) setSelectedId(null);
+        if (selectedId === h.block.id && h.block.cols === 1 && h.block.rows === 1) {
+          setSelectedId(null);
+        }
       }
       return;
     }
@@ -445,6 +685,7 @@ export function SolarLayoutDesigner({
       // a single undo takes back the panel AND the slide that positioned it.
       setBlocks([...blocksRef.current, b]);
       setSelectedId(b.id);
+      setDirty(true);
       return setDrag({
         kind: "move",
         id: b.id,
@@ -463,8 +704,8 @@ export function SolarLayoutDesigner({
       // hole it came from stays knocked out.
       const res = detachPanel(blocksRef.current, h.block.id, h.index, moduleMm, uid());
       if (!res) return;
-      // As above: the detach and the slide are one gesture, so one undo step.
       setBlocks(res.blocks);
+      setDirty(true);
       const loose = res.blocks.find((b) => b.id === res.detachedId)!;
       setSelectedId(loose.id);
       return setDrag({
@@ -511,6 +752,10 @@ export function SolarLayoutDesigner({
   }
 
   function onPointerMove(ev: React.PointerEvent) {
+    if (tool === "setback" && pendingRef.current) {
+      const m = toMetres(toCanvas(ev));
+      return setGhostPoint(m);
+    }
     // The ref, not the state — see the note where it is declared.
     const d = dragRef.current;
     if (!d || lat == null) return;
@@ -597,9 +842,11 @@ export function SolarLayoutDesigner({
     }
 
     // move/rotate/resize edited the layout live, so the undo step is the
-    // layout as it was when the gesture STARTED. Recording it here, as this
-    // used to, records the finished drag as the thing to go back to.
-    if (before) setHistory((h) => [...h.slice(-49), before]);
+    // layout as it was when the gesture STARTED.
+    if (before) {
+      setHistory((h) => [...h.slice(-49), before]);
+      setDirty(true);
+    }
   }
 
   /**
@@ -625,6 +872,15 @@ export function SolarLayoutDesigner({
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         return undo();
+      }
+      if (pendingRef.current && (e.key === "Enter" || e.key === "Escape")) {
+        e.preventDefault();
+        if (e.key === "Escape") {
+          setPending(null);
+          setGhostPoint(null);
+          return;
+        }
+        return finishSetback();
       }
       if (!selected) return;
 
@@ -660,12 +916,20 @@ export function SolarLayoutDesigner({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, blocks, commit, undo, canEdit, patchSelected]);
+  }, [selected, blocks, commit, undo, canEdit, patchSelected, finishSetback, setPending]);
+
+  /** Leaving with an unsaved array is the one way to lose work here. */
+  React.useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   // ── Save ───────────────────────────────────────────────────────────────
-  async function save() {
+  async function save(then?: () => void) {
     setBusy(true);
-    const res = await saveSolarLayoutAction({ leadId, blocks });
+    const res = await saveSolarLayoutAction({ leadId, blocks, setbacks });
     if (!res.ok) {
       setBusy(false);
       return toast.error(res.error);
@@ -680,8 +944,8 @@ export function SolarLayoutDesigner({
       off.width = canvasW;
       off.height = canvasH;
       const octx = off.getContext("2d");
-      // Re-render WITHOUT selection handles or the drag outline: this image is
-      // what the homeowner sees.
+      // Re-render WITHOUT selection handles, ghosts or the drag outline: this
+      // image is what the homeowner sees.
       if (octx) paint(octx, { chrome: false });
       const blob = await new Promise<Blob | null>((r) => off.toBlob(r, "image/jpeg", 0.9));
       if (blob) {
@@ -696,161 +960,409 @@ export function SolarLayoutDesigner({
     }
 
     setBusy(false);
+    setDirty(false);
     toast.success(`${res.moduleQty} ${res.moduleQty === 1 ? "panel" : "panels"} saved`);
     router.refresh();
+    then?.();
   }
 
   // ── Render ─────────────────────────────────────────────────────────────
-  if (lat == null) {
-    return (
-      <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-        This deal has no rooftop coordinate yet, so the roof cannot be shown. Fix the address on the
-        deal, or attach a layout drawn elsewhere below.
-      </p>
-    );
-  }
-
   const groundSpanM = canvasW * mpp;
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {canEdit &&
-          ([
-            ["draw", "Draw array", Square],
-            ["panel", "Add panel", Plus],
-            ["select", "Move array", MousePointer2],
-            ["movePanel", "Move panel", Move],
-            ["erase", "Remove panels", Eraser],
-          ] as const).map(([id, label, Icon]) => (
-            <Button
-              key={id}
-              type="button"
-              size="sm"
-              variant={tool === id ? "default" : "outline"}
-              aria-pressed={tool === id}
-              onClick={() => setTool(id)}
-            >
-              <Icon className="size-4" /> {label}
-            </Button>
-          ))}
-
-        <div className="ml-auto flex items-center gap-1">
-          <Button type="button" size="sm" variant="outline" onClick={() => setViewScale((v) => Math.max(1, v - 0.5))} aria-label="Zoom out">
-            <ZoomOut className="size-4" />
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setViewScale((v) => Math.min(6, v + 0.5))} aria-label="Zoom in">
-            <ZoomIn className="size-4" />
-          </Button>
-          <select
-            className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
-            value={zoom}
-            aria-label="Imagery detail"
-            onChange={(e) => setZoom(Number(e.target.value) as Zoom)}
-          >
-            <option value={21}>Closest imagery</option>
-            <option value={20}>Wider imagery</option>
-          </select>
+    <div className="fixed inset-0 z-50 flex flex-col bg-neutral-950 text-white">
+      {/* ── Top bar: whose roof, and what it is being built from ─────────── */}
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-900 px-3 py-2">
+        <Link
+          href={backHref}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-white/70 hover:bg-white/10 hover:text-white"
+        >
+          <ArrowLeft className="size-4" /> Proposal
+        </Link>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md bg-white/5 px-2.5 py-1.5">
+          <MapPin className="size-4 shrink-0 text-solar" />
+          <span className="truncate text-sm">{address || "No address on this deal"}</span>
         </div>
-      </div>
+        {/* Equipment is read-only here on purpose: the approved-vendor list
+            decides what this system is built from, and it is set on the deal's
+            Operations card with the lender that gates it. Showing it is worth
+            it — a rep drawing 93 panels needs to see which panel they are. */}
+        <EquipChip label="Module" value={moduleLabel} suffix={moduleRatingW ? `${moduleRatingW} W` : null} />
+        <EquipChip label="Inverter" value={inverterLabel} suffix={inverterRatingW ? `${inverterRatingW} W` : null} />
+        <EquipChip label="Battery" value={batteryLabel} suffix={null} />
+        <select
+          className="h-8 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white"
+          value={zoom}
+          aria-label="Imagery detail"
+          onChange={(e) => setZoom(Number(e.target.value) as Zoom)}
+        >
+          <option className="text-black" value={21}>Closest imagery</option>
+          <option className="text-black" value={20}>Wider imagery</option>
+        </select>
+      </header>
 
-      <div className="overflow-auto rounded-lg border border-border bg-muted/30">
-        <canvas
-          ref={canvasRef}
-          data-testid="layout-canvas"
-          width={canvasW}
-          height={canvasH}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerCancel}
-          style={{ width: `${100 * viewScale}%`, height: "auto", touchAction: "none" }}
-          className={cn(
-            "block max-w-none",
-            canEdit && (tool === "draw" || tool === "panel") && "cursor-crosshair",
-            canEdit && tool === "movePanel" && "cursor-grab",
-            canEdit && tool === "erase" && "cursor-cell"
-          )}
-        />
-      </div>
+      {/* ── The roof ─────────────────────────────────────────────────────── */}
+      {/*
+        Two layers, and they must not be the same element. The picture scrolls
+        and the controls do not: an `absolute` child of a scrolling box scrolls
+        with its content, so a toolbar inside the scroller slides off the screen
+        the moment a rep zooms in and pans — exactly when they need it most.
+      */}
+      <div className="relative flex-1 overflow-hidden bg-neutral-950">
+        <div ref={viewportRef} className="absolute inset-0 overflow-auto">
+        {/*
+          Centred when it fits, scrollable when it does not. `min-w-full` on a
+          `w-fit` wrapper is what gets both: zoomed out the wrapper is the size
+          of the viewport and the picture sits in the middle of it, zoomed in
+          the wrapper is the size of the picture and every edge stays reachable.
+          Centring the scroll container itself makes the left overflow
+          impossible to scroll back to.
+        */}
+        <div className="flex h-fit min-h-full w-fit min-w-full items-center justify-center">
+        {lat == null ? (
+          <div className="flex h-full items-center justify-center p-8">
+            <p className="max-w-md rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+              This deal has no rooftop coordinate yet, so the roof cannot be shown. Fix the address
+              on the deal and come back — the designer needs to know which house it is drawing on.
+            </p>
+          </div>
+        ) : (
+          <canvas
+            ref={canvasRef}
+            data-testid="layout-canvas"
+            width={canvasW}
+            height={canvasH}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
+            onDoubleClick={() => tool === "setback" && finishSetback()}
+            style={{
+              width: canvasW * viewScale,
+              height: canvasH * viewScale,
+              touchAction: "none",
+            }}
+            className={cn(
+              "block max-w-none",
+              canEdit && (tool === "draw" || tool === "panel" || tool === "setback") && "cursor-crosshair",
+              canEdit && tool === "movePanel" && "cursor-grab",
+              canEdit && tool === "erase" && "cursor-cell"
+            )}
+          />
+        )}
+        </div>
+        </div>
 
-      {imageState === "failed" && (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
-          The satellite image did not load — try the wider imagery, or check that the Maps key is
-          configured. Panels you draw are still saved against the real coordinates.
-        </p>
-      )}
-
-      {/* ── The numbers ─────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 p-3">
-        <div>
-          <span data-testid="panel-count" className="font-display text-lg font-semibold">
-            {count} {count === 1 ? "panel" : "panels"}
-          </span>
-          <span className="ml-2 text-xs text-muted-foreground">
-            {moduleRatingW
-              ? `${totals.systemSizeKwDc.toFixed(2)} kW-DC · ${totals.year1ProductionKwh.toLocaleString()} kWh yr-1`
-              : "No default panel in the catalogue, so this cannot be sized"}
-          </span>
-          {/* Only once EVERY array has been described. An undescribed array
-              weighs 1 in the maths — the pre-orientation answer — and printing
-              that as "100% of ideal" turns a missing measurement into a claim
-              of a perfect roof. The amber prompt below says what to do instead. */}
-          {totals.blendedFactor != null && moduleRatingW && totals.unorientedArrays === 0 ? (
-            <span
-              data-testid="orientation-factor"
-              className={cn(
-                "ml-2 rounded-full px-2 py-0.5 text-[11px] font-medium",
-                totals.blendedFactor >= 0.9
-                  ? "bg-emerald-100 text-emerald-800"
-                  : totals.blendedFactor >= 0.75
-                    ? "bg-amber-100 text-amber-800"
-                    : "bg-rose-100 text-rose-800"
+        {/* ── Tools ──────────────────────────────────────────────────────── */}
+        {canEdit && lat != null && (
+          <div className="pointer-events-none absolute inset-0">
+            <div className="pointer-events-auto absolute left-3 top-3 w-44 overflow-hidden rounded-lg border border-black/10 bg-white text-neutral-900 shadow-lg">
+              {(
+                [
+                  ["draw", "Draw array", Square],
+                  ["panel", "Add panel", Plus],
+                  ["select", "Move array", MousePointer2],
+                  ["movePanel", "Move panel", Move],
+                  ["erase", "Remove panels", Eraser],
+                  ["setback", "Draw setbacks", Ruler],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={tool === id}
+                  onClick={() => {
+                    if (id !== "setback" && pendingRef.current) finishSetback();
+                    setTool(id);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium",
+                    tool === id ? "bg-solar text-solar-foreground" : "hover:bg-neutral-100"
+                  )}
+                >
+                  <Icon className="size-4" /> {label}
+                </button>
+              ))}
+              {selected && (
+                <>
+                  <div className="border-t border-neutral-200" />
+                  <button
+                    type="button"
+                    onClick={() => { setTiltOpen((v) => !v); setShadeOpen(false); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                  >
+                    <Compass className="size-4" /> Set tilt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShadeOpen((v) => !v); setTiltOpen(false); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                  >
+                    <Sun className="size-4" /> Set shading
+                  </button>
+                </>
               )}
-              title="Expected output as a share of what these panels would make on this site's best-oriented plane."
-            >
-              {(totals.blendedFactor * 100).toFixed(0)}% of ideal
-            </span>
-          ) : null}
-        </div>
+            </div>
 
-        {canEdit && (
-          <div className="ml-auto flex items-center gap-2">
-            <Button type="button" size="sm" variant="ghost" disabled={history.length === 0} onClick={undo}>
-              <RotateCcw className="size-4" /> Undo
-            </Button>
-            <Button type="button" size="sm" onClick={save} disabled={busy}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              Save layout
-            </Button>
+            {/* Tilt and shade sit beside the toolbar, not in a modal: both are
+                things you judge by watching the production figure move, and a
+                dialog over the roof hides the array you are judging. */}
+            {selected && tiltOpen && (
+              <div className="pointer-events-auto absolute left-52 top-3 w-64 rounded-lg border border-black/10 bg-white p-3 text-neutral-900 shadow-lg">
+                <SliderRow
+                  label="Pitch (tilt)"
+                  hint={selected.tiltDeg == null ? "not set" : `${selected.tiltDeg}°`}
+                  value={selected.tiltDeg ?? 0}
+                  min={0}
+                  max={60}
+                  step={0.5}
+                  onChange={(v) => patchSelected({ tiltDeg: v })}
+                />
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {COMMON_PITCHES.slice(0, 6).map((rise) => (
+                    <button
+                      key={rise}
+                      type="button"
+                      onClick={() => patchSelected({ tiltDeg: pitchToTiltDeg(rise) })}
+                      className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] hover:bg-neutral-100"
+                    >
+                      {rise}/12
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => patchSelected({ tiltDeg: 0 })}
+                    className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] hover:bg-neutral-100"
+                  >
+                    Flat
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {selected && shadeOpen && (
+              <div className="pointer-events-auto absolute left-52 top-3 w-64 rounded-lg border border-black/10 bg-white p-3 text-neutral-900 shadow-lg">
+                <SliderRow
+                  label="Shading"
+                  hint={`${selected.shadePct ?? 0}%`}
+                  value={selected.shadePct ?? 0}
+                  min={0}
+                  max={100}
+                  step={1}
+                  onChange={(v) => patchSelected({ shadePct: v })}
+                  stepper
+                />
+                <div className="mt-1 flex justify-between text-[10px] text-neutral-500">
+                  <span>No shade</span>
+                  <span>50%</span>
+                  <span>Full shade</span>
+                </div>
+                <p className="mt-2 text-[11px] text-neutral-600">
+                  What the trees and neighbouring roofs take off THIS array. The production figure
+                  moves as you drag it.
+                </p>
+              </div>
+            )}
+
+            {/* ── The numbers, live ──────────────────────────────────────── */}
+            <div className="pointer-events-auto absolute right-3 top-3 flex overflow-hidden rounded-lg border border-black/10 bg-white text-neutral-900 shadow-lg">
+              <Metric label="Size" value={moduleRatingW ? `${totals.systemSizeKwDc.toFixed(2)} kW` : "—"} />
+              <Metric
+                label="Offset"
+                value={offsetPct == null ? "—" : `${offsetPct.toFixed(0)}%`}
+                tone={offsetPct == null ? undefined : offsetPct >= 90 ? "good" : "warn"}
+                title={offsetPct == null ? "No annual usage on the Energy step yet" : undefined}
+              />
+              <Metric
+                label="Est. Production"
+                value={moduleRatingW ? `${totals.year1ProductionKwh.toLocaleString()} kWh` : "—"}
+              />
+              <Metric
+                label="DC/AC"
+                value={dcAc == null ? "—" : dcAc.toFixed(2)}
+                title={
+                  dcAc == null
+                    ? "No inverter on this design yet"
+                    : perModuleInverter
+                      ? `Module-level inverters: ${count} × ${inverterRatingW} W AC`
+                      : `String inverter: ${(inverterKwAc ?? 0).toFixed(2)} kW AC`
+                }
+              />
+              <Metric label="Panels" value={String(count)} testId="panel-count" />
+            </div>
+
+            {/* One line, and only when something is actually wrong. */}
+            {(totals.unorientedArrays > 0 || !moduleRatingW) && (
+              <div className="pointer-events-auto absolute right-3 top-20 max-w-sm rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 shadow-lg">
+                {!moduleRatingW ? (
+                  <>
+                    <strong>No default panel in the catalogue.</strong> Size, production and offset
+                    stay at zero until there is one — a panel count without a wattage is not a
+                    system size.{" "}
+                    <Link href="/portal/settings/solar-equipment" className="font-medium underline">
+                      Add a module in Settings
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  <>
+                    <strong>
+                      {totals.unorientedArrays}{" "}
+                      {totals.unorientedArrays === 1 ? "array has" : "arrays have"} no facing or
+                      pitch.
+                    </strong>{" "}
+                    They earn the generic market yield — the same kWh a south roof would.
+                    An array drawn along a ridge faces square off it, but off which side is
+                    something only you can see. Select it and press <em>Off the rows</em>, then
+                    flip it if the arrow points the wrong way.
+                  </>
+                )}
+              </div>
+            )}
+
+            {imageState === "failed" && (
+              <div className="pointer-events-auto absolute bottom-3 left-3 max-w-sm rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 shadow-lg">
+                The satellite image did not load — try the wider imagery, or check the Maps key.
+                Panels you draw are still saved against the real coordinates.
+              </div>
+            )}
+
+            {pending && (
+              <div className="pointer-events-auto absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-900 px-4 py-2 text-xs text-white shadow-lg">
+                Click along the edge · <strong>double-click or Enter</strong> to finish · Esc to
+                cancel
+              </div>
+            )}
+
+            {/* ── Zoom ───────────────────────────────────────────────────── */}
+            <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-black/10 bg-white text-neutral-900 shadow-lg">
+              <button
+                type="button"
+                aria-label="Zoom in"
+                className="px-2 py-1.5 hover:bg-neutral-100"
+                onClick={() => zoomBy(1.25)}
+              >
+                <ZoomIn className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Zoom out"
+                className="border-t border-neutral-200 px-2 py-1.5 hover:bg-neutral-100"
+                onClick={() => zoomBy(1 / 1.25)}
+              >
+                <ZoomOut className="size-4" />
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {totals.unorientedArrays > 0 && canEdit && (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
-          <strong>
-            {totals.unorientedArrays} {totals.unorientedArrays === 1 ? "array has" : "arrays have"} no
-            facing or pitch set.
-          </strong>{" "}
-          Their production is the generic market yield — the same kWh a south-facing roof would get.
-          Select an array and set which way it faces to price the roof this house actually has.
-        </p>
-      )}
-
-      {/* ── The selected array ──────────────────────────────────────────── */}
+      {/* ── The selected array ───────────────────────────────────────────── */}
       {selected && canEdit && (
-        <div className="space-y-3 rounded-lg border border-border p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <section className="shrink-0 border-t border-white/10 bg-neutral-900 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            <span className="font-medium">
               {selected.cols === 1 && selected.rows === 1
-                ? "Selected panel"
-                : `Selected array · ${selected.cols} x ${selected.rows}`}
-            </h5>
+                ? "Panel"
+                : `Array · ${selected.cols} × ${selected.rows}`}
+            </span>
+
+            <label className="flex items-center gap-1.5 text-xs text-white/70">
+              Grid angle
+              <input
+                type="number"
+                step="1"
+                aria-label="Grid angle"
+                value={Math.round(selected.rotationDeg)}
+                onChange={(e) => patchSelected({ rotationDeg: Number(e.target.value) || 0 })}
+                className="h-7 w-16 rounded border border-white/20 bg-white/10 px-1.5 text-sm text-white"
+              />
+            </label>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              onClick={() =>
+                patchSelected({
+                  orientation: selected.orientation === "portrait" ? "landscape" : "portrait",
+                })
+              }
+            >
+              {selected.orientation === "portrait" ? "Portrait" : "Landscape"}
+            </Button>
+
+            <label className="flex items-center gap-1.5 text-xs text-white/70">
+              Facing
+              <input
+                type="number"
+                step="5"
+                min={0}
+                max={359}
+                placeholder="—"
+                aria-label="Facing (azimuth)"
+                value={selected.azimuthDeg ?? ""}
+                onChange={(e) =>
+                  patchSelected({ azimuthDeg: e.target.value === "" ? null : Number(e.target.value) })
+                }
+                className="h-7 w-16 rounded border border-white/20 bg-white/10 px-1.5 text-sm text-white"
+              />
+              <span className="w-7 font-medium text-white">
+                {selected.azimuthDeg == null ? "—" : compassLabel(selected.azimuthDeg)}
+              </span>
+            </label>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              title="Face square off the rows — the down-slope direction for an array aligned to the ridge."
+              onClick={() => patchSelected({ azimuthDeg: norm360(selected.rotationDeg + 90) })}
+            >
+              <Compass className="size-4" /> Off the rows
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              onClick={() => patchSelected({ azimuthDeg: norm360((selected.azimuthDeg ?? 0) + 180) })}
+            >
+              Flip 180°
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              title="Due south at this site's optimal tilt — for a ground mount or a tilt-up frame."
+              onClick={() => patchSelected({ azimuthDeg: 180, tiltDeg: bestTilt })}
+            >
+              Best here (S {bestTilt}°)
+            </Button>
+
+            <span className="text-xs text-white/60">
+              Pitch {selected.tiltDeg == null ? "—" : `${selected.tiltDeg}°`} · Shade{" "}
+              {selected.shadePct ?? 0}%
+              {selected.azimuthDeg != null && selected.tiltDeg != null && (
+                <>
+                  {" "}
+                  · this plane returns{" "}
+                  <strong data-testid="orientation-factor" className="text-white">
+                    {(arrayFactor(totals, selected.id) * 100).toFixed(0)}%
+                  </strong>{" "}
+                  of the site&apos;s best
+                </>
+              )}
+            </span>
+
             <Button
               type="button"
               size="sm"
               variant="ghost"
+              className="ml-auto h-7 text-white/70 hover:bg-white/10 hover:text-white"
               onClick={() => {
                 commit(blocks.filter((b) => b.id !== selected.id));
                 setSelectedId(null);
@@ -860,196 +1372,186 @@ export function SolarLayoutDesigner({
               {selected.cols === 1 && selected.rows === 1 ? "Delete panel" : "Delete array"}
             </Button>
           </div>
+        </section>
+      )}
 
-          {/* Plan-view geometry: where it sits, not what it makes. */}
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="block-rotation" className="text-xs">
-                Grid angle
-              </Label>
-              <input
-                id="block-rotation"
-                type="number"
-                step="1"
-                value={Math.round(selected.rotationDeg)}
-                onChange={(e) => patchSelected({ rotationDeg: Number(e.target.value) || 0 })}
-                className="h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm"
-              />
-            </div>
+      {/* ── Commit ───────────────────────────────────────────────────────── */}
+      <footer className="flex shrink-0 items-center gap-2 border-t border-white/10 bg-neutral-900 px-3 py-2">
+        <span className="text-xs text-white/50">
+          {setbacks.length > 0 && `${setbacks.length} setback${setbacks.length === 1 ? "" : "s"} · `}
+          {groundSpanM > 0 && `picture is ${groundSpanM.toFixed(0)} m across · panels drawn to scale`}
+        </span>
+        {canEdit && (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="ml-auto h-8 text-white/70 hover:bg-white/10 hover:text-white"
+              disabled={history.length === 0}
+              onClick={undo}
+            >
+              <RotateCcw className="size-4" /> Undo
+            </Button>
+            {setbacks.length > 0 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 text-white/70 hover:bg-white/10 hover:text-white"
+                onClick={() => {
+                  setSetbacks([]);
+                  setDirty(true);
+                }}
+              >
+                Clear setbacks
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={() =>
-                patchSelected({
-                  orientation: selected.orientation === "portrait" ? "landscape" : "portrait",
-                })
-              }
+              className="h-8 border-white/20 bg-white/10 text-white hover:bg-white/20"
+              onClick={() => save()}
+              disabled={busy}
             >
-              {selected.orientation === "portrait" ? "Portrait" : "Landscape"}
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null} Save
             </Button>
-            <p className="text-[11px] text-muted-foreground">
-              Arrow keys nudge {NUDGE_FINE_M * 100} cm · hold shift for {NUDGE_COARSE_M} m
-            </p>
-          </div>
-
-          {/* Production geometry: the only two fields here that change the kWh. */}
-          <div className="space-y-2 rounded-md bg-muted/40 p-2.5">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="block-azimuth" className="text-xs">
-                  Facing (azimuth)
-                </Label>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    id="block-azimuth"
-                    type="number"
-                    step="5"
-                    min={0}
-                    max={359}
-                    placeholder="—"
-                    value={selected.azimuthDeg ?? ""}
-                    onChange={(e) =>
-                      patchSelected({
-                        azimuthDeg: e.target.value === "" ? null : Number(e.target.value),
-                      })
-                    }
-                    className="h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm"
-                  />
-                  <span className="w-8 text-xs font-medium text-muted-foreground">
-                    {selected.azimuthDeg == null ? "—" : compassLabel(selected.azimuthDeg)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="block-tilt" className="text-xs">
-                  Pitch (tilt)
-                </Label>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    id="block-tilt"
-                    type="number"
-                    step="0.5"
-                    min={0}
-                    max={90}
-                    placeholder="—"
-                    value={selected.tiltDeg ?? ""}
-                    onChange={(e) =>
-                      patchSelected({
-                        tiltDeg: e.target.value === "" ? null : Number(e.target.value),
-                      })
-                    }
-                    className="h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm"
-                  />
-                  <select
-                    aria-label="Roof pitch"
-                    className="h-8 rounded-md border border-input bg-transparent px-1.5 text-xs"
-                    // Only names a pitch that the tilt EXACTLY is. A 31° tilt
-                    // is nearest 7/12, but 7/12 is 30.3°, and a dropdown
-                    // reading "7/12" beside a box reading 31 invites a rep to
-                    // quote a pitch the roof does not have.
-                    value={String(exactPitch(selected.tiltDeg) ?? "")}
-                    onChange={(e) =>
-                      e.target.value !== "" &&
-                      patchSelected({ tiltDeg: pitchToTiltDeg(Number(e.target.value)) })
-                    }
-                  >
-                    <option value="">pitch…</option>
-                    {COMMON_PITCHES.map((rise) => (
-                      <option key={rise} value={rise}>
-                        {rise}/12 ({pitchToTiltDeg(rise)}°)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                {/* An array is normally aligned to the ridge first, and then it
-                    faces square off one side of it or the other. Two clicks
-                    beat working the compass bearing out by hand on a ladder. */}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    patchSelected({ azimuthDeg: norm360(selected.rotationDeg + 90) })
-                  }
-                  title="Face square off the rows — the down-slope direction for an array aligned to the ridge."
-                >
-                  <Compass className="size-4" /> Off the rows
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    patchSelected({ azimuthDeg: norm360((selected.azimuthDeg ?? 0) + 180) })
-                  }
-                >
-                  Flip 180°
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => patchSelected({ azimuthDeg: 180, tiltDeg: bestTilt })}
-                  title="Due south at this site's optimal tilt — for a ground mount or a tilt-up frame."
-                >
-                  Best here (S {bestTilt}°)
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => patchSelected({ tiltDeg: 0 })}
-                >
-                  Flat
-                </Button>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-muted-foreground">
-              {selected.azimuthDeg == null || selected.tiltDeg == null ? (
-                <>Set both to price this plane. Until then it earns the generic market yield.</>
-              ) : (
-                <>
-                  Facing {compassLabel(selected.azimuthDeg)} ({Math.round(selected.azimuthDeg)}°) at{" "}
-                  {selected.tiltDeg}° — this plane returns{" "}
-                  <strong>
-                    {(
-                      (totals.blendedFactor != null
-                        ? arrayFactor(totals, selected.id)
-                        : 1) * 100
-                    ).toFixed(0)}
-                    %
-                  </strong>{" "}
-                  of what it would on this site&apos;s best plane.
-                </>
-              )}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {canEdit && (
-        <p className="text-[11px] text-muted-foreground">
-          <strong>Draw array</strong> fills a rectangle with as many panels as truly fit.{" "}
-          <strong>Add panel</strong> places one where you click, and <strong>Move panel</strong>{" "}
-          pulls a single panel out of an array so you can slide it clear of a vent. Arrow keys nudge
-          the selection. The picture is {groundSpanM.toFixed(0)} m across and panels are drawn to
-          scale — if one does not fit here, it does not fit up there.
-        </p>
-      )}
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              disabled={busy}
+              onClick={() => save(() => router.push(backHref))}
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null} Update proposal
+            </Button>
+          </>
+        )}
+        {!canEdit && (
+          <span className="ml-auto text-xs text-white/50">Read only — you cannot edit this deal.</span>
+        )}
+      </footer>
     </div>
   );
 }
 
-/** The whole-inch pitch this tilt IS, or null when it falls between two. */
-function exactPitch(tiltDeg: number | null | undefined): number | null {
-  if (tiltDeg == null) return null;
-  return COMMON_PITCHES.find((rise) => Math.abs(pitchToTiltDeg(rise) - tiltDeg) < 0.05) ?? null;
+/** One live figure in the top-right strip. */
+function Metric({
+  label,
+  value,
+  tone,
+  title,
+  testId,
+}: {
+  label: string;
+  value: string;
+  tone?: "good" | "warn";
+  title?: string;
+  testId?: string;
+}) {
+  return (
+    <div className="border-r border-neutral-200 px-3 py-1.5 last:border-r-0" title={title}>
+      <div className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</div>
+      <div
+        data-testid={testId}
+        className={cn(
+          "font-display text-sm font-semibold tabular-nums",
+          tone === "good" && "text-emerald-600",
+          tone === "warn" && "text-amber-600"
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/** A piece of equipment named in the top bar. Unset says so rather than lying. */
+function EquipChip({
+  label,
+  value,
+  suffix,
+}: {
+  label: string;
+  value: string | null;
+  suffix: string | null;
+}) {
+  return (
+    <div
+      className="hidden items-center gap-1.5 rounded-md bg-white/5 px-2.5 py-1.5 text-xs lg:flex"
+      title={`${label} — set on the deal's Operations card`}
+    >
+      <span className="text-white/45">{label}</span>
+      <span className={cn("truncate", value ? "text-white" : "text-white/40")}>
+        {value ?? "not set"}
+      </span>
+      {suffix && <span className="text-white/45">{suffix}</span>}
+    </div>
+  );
+}
+
+/** A labelled slider with an optional +/- stepper, for tilt and shade. */
+function SliderRow({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  stepper,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  stepper?: boolean;
+}) {
+  const clamp = (v: number) => Math.max(min, Math.min(max, v));
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">{label}</Label>
+        <span className="text-xs font-semibold tabular-nums">{hint}</span>
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        {stepper && (
+          <button
+            type="button"
+            aria-label={`Decrease ${label}`}
+            className="rounded border border-neutral-300 p-1 hover:bg-neutral-100"
+            onClick={() => onChange(clamp(value - step))}
+          >
+            <Minus className="size-3.5" />
+          </button>
+        )}
+        <input
+          type="range"
+          aria-label={label}
+          className="flex-1 accent-[#f4631e]"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        />
+        {stepper && (
+          <button
+            type="button"
+            aria-label={`Increase ${label}`}
+            className="rounded border border-neutral-300 p-1 hover:bg-neutral-100"
+            onClick={() => onChange(clamp(value + step))}
+          >
+            <Plus className="size-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** 0..359, so a flip past north and a negative bearing both read normally. */

@@ -9,7 +9,7 @@
  * opposite sides of the wire, if each did the sum itself.
  */
 
-import { blockPanelCount, type LayoutBlock } from "./solar-layout";
+import { blockPanelCount, clampShade, type LayoutBlock } from "./solar-layout";
 import { orientationFactor, compassLabel } from "./solar-orientation";
 import {
   year1ProductionFromArrays,
@@ -23,7 +23,22 @@ export type ArrayBreakdown = {
   kwDc: number;
   azimuthDeg: number | null;
   tiltDeg: number | null;
-  /** 0..1 against this site's best plane. 1 when the orientation is unknown. */
+  /**
+   * What the PLANE does, 0..1 against this site's best one. 1 when the
+   * orientation is unknown. Geometry only — nothing standing in front of it.
+   */
+  orientationFactor: number;
+  /** What the surroundings take away, 0..1. 1 is a clear roof. */
+  shadeFactor: number;
+  /** 0..100 as recorded, or null when nobody has looked. */
+  shadePct: number | null;
+  /**
+   * The two multiplied: the share of ideal this array actually earns, and the
+   * only one of the three that production is allowed to be built on. Kept
+   * beside its parts rather than instead of them so a UI can say WHY an array
+   * is at 54% — a north roof and a clear sky is a different conversation from
+   * a south roof under an oak.
+   */
   factor: number;
   /** True when nobody has said which way this array faces. */
   unoriented: boolean;
@@ -47,13 +62,22 @@ export function arrayBreakdown(
     const azimuthDeg = b.azimuthDeg ?? null;
     const tiltDeg = b.tiltDeg ?? null;
     const unoriented = azimuthDeg == null || tiltDeg == null;
+    const orientation = orientationFactor({ lat: opts.lat, tiltDeg, azimuthDeg });
+    // Null shade is a clear roof, NOT a missing measurement that has to be
+    // defended against: an array with no tree recorded near it is the normal
+    // case, and every design saved before shading existed is one.
+    const shadePct = clampShade(b.shadePct);
+    const shadeFactor = 1 - (shadePct ?? 0) / 100;
     return {
       id: b.id,
       panels,
       kwDc: opts.moduleRatingW ? (panels * opts.moduleRatingW) / 1000 : 0,
       azimuthDeg,
       tiltDeg,
-      factor: orientationFactor({ lat: opts.lat, tiltDeg, azimuthDeg }),
+      orientationFactor: orientation,
+      shadePct,
+      shadeFactor,
+      factor: orientation * shadeFactor,
       unoriented,
       compass: azimuthDeg == null ? null : compassLabel(azimuthDeg),
     };
@@ -67,7 +91,11 @@ export type SystemTotals = {
   panels: number;
   systemSizeKwDc: number;
   year1ProductionKwh: number;
-  /** The whole system as a share of ideal, or null when nothing is drawn. */
+  /**
+   * The whole system as a share of ideal, or null when nothing is drawn.
+   * Orientation AND shade — it is what the production figure was built on, so
+   * printing anything narrower beside that figure would not explain it.
+   */
   blendedFactor: number | null;
   /** How many arrays still have no orientation recorded. */
   unorientedArrays: number;

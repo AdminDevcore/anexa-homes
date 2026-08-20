@@ -9,7 +9,7 @@ import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
-import { parseLayoutBlocks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
+import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
 
 export const dynamic = "force-dynamic";
@@ -143,7 +143,7 @@ export default async function SolarProposalBuilderPage({
     .join(" · ");
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-6">
+    <div className="mx-auto w-full max-w-6xl px-6 py-6">
       <Link
         href={`/portal/leads/${id}`}
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -209,10 +209,6 @@ export default async function SolarProposalBuilderPage({
         canApproveLayout={can(user, "update", "Settings")}
         lat={lead.lat}
         moduleRatingW={sizingModule?.ratingW ?? null}
-        moduleMm={{
-          widthMm: sizingModule?.widthMm ?? MODULE_FALLBACK_MM.widthMm,
-          heightMm: sizingModule?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
-        }}
         initialBlocks={parseLayoutBlocks(design?.layoutBlocks)}
         assumptions={{
           kwhPerKwYear: settings.kwhPerKwYear,

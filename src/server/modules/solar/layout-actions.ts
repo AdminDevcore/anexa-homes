@@ -33,11 +33,37 @@ const blockSchema = z.object({
   // inventing a south-facing roof.
   azimuthDeg: z.number().finite().min(-360).max(360).nullish(),
   tiltDeg: z.number().finite().min(0).max(90).nullish(),
+  // What the surroundings take off this array, 0..100. Nullish for the same
+  // reason as the two above: a design saved before shading existed has none,
+  // and none has to keep pricing exactly as it did.
+  shadePct: z.number().finite().min(0).max(100).nullish(),
+});
+
+/**
+ * A traced fire setback. Bounded like the blocks are, and for the same reason:
+ * a residential roof is a few tens of metres across, so a point 200 m out is a
+ * bad payload rather than an eave.
+ */
+const setbackSchema = z.object({
+  id: z.string().min(1).max(40),
+  points: z
+    .array(
+      z.object({
+        e: z.number().finite().min(-200).max(200),
+        n: z.number().finite().min(-200).max(200),
+      })
+    )
+    .min(2)
+    .max(60),
+  widthM: z.number().finite().min(0.05).max(10),
 });
 
 const layoutSchema = z.object({
   leadId: z.string().min(1),
   blocks: z.array(blockSchema).max(40),
+  // Optional so an older client — or any caller that only means to change the
+  // array — leaves the traced setbacks alone instead of wiping them.
+  setbacks: z.array(setbackSchema).max(40).optional(),
 });
 
 /**
@@ -53,7 +79,7 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
   if (!can(user, "update", "Lead")) return fail("Not allowed.");
   const parsed = layoutSchema.safeParse(input);
   if (!parsed.success) return fail("That layout could not be read.");
-  const { leadId, blocks } = parsed.data;
+  const { leadId, blocks, setbacks } = parsed.data;
 
   const lead = await prisma.lead.findFirst({
     where: { companyId: user.companyId, id: leadId },
@@ -90,6 +116,10 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
 
   const data = {
     layoutBlocks: blocks,
+    // Omitted entirely when the caller did not send any, so Prisma leaves the
+    // column as it is. `?? []` here would read "no setbacks in this payload"
+    // as "the rep erased them all".
+    ...(setbacks ? { layoutSetbacks: setbacks } : {}),
     moduleQty,
     moduleId: module_?.id ?? null,
     systemSizeKwDc,
@@ -104,6 +134,11 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
   });
 
   revalidatePath(`/portal/leads/${leadId}`);
+  // The builder and the full-screen designer are separate routes now, and a
+  // rep goes designer -> Update proposal -> builder expecting the figures on
+  // the other side to be the ones they just saved.
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal/design`);
   return {
     ok: true as const,
     moduleQty,

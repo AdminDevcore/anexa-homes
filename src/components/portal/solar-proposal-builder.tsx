@@ -57,7 +57,6 @@ export function SolarProposalBuilder({
   layoutAvailable,
   canApproveLayout,
   lat,
-  moduleMm,
   moduleRatingW,
   initialBlocks,
   assumptions,
@@ -98,7 +97,6 @@ export function SolarProposalBuilder({
   canApproveLayout: boolean;
   /** Null when the deal has no rooftop coordinate — see SolarLayoutDesigner. */
   lat: number | null;
-  moduleMm: { widthMm: number; heightMm: number };
   moduleRatingW: number | null;
   initialBlocks: LayoutBlock[];
   /** The company's yield and derate. The designer previews production with the
@@ -172,7 +170,6 @@ export function SolarProposalBuilder({
           layoutAvailable={layoutAvailable}
           canApproveLayout={canApproveLayout}
           lat={lat}
-          moduleMm={moduleMm}
           moduleRatingW={moduleRatingW}
           initialBlocks={initialBlocks}
           assumptions={assumptions}

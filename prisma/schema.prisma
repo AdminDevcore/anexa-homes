@@ -2996,6 +2996,11 @@ model SolarDesign {
   /// metres east/north of the lead's coordinate. NOT pixels — a pixel layout
   /// reopened at a different zoom is a layout in the wrong place.
   layoutBlocks            Json      @default("[]")
+  /// The fire setbacks traced on the roof: LayoutSetback[], polylines in the
+  /// same ground metres as the blocks. A drawing aid and a plan-set talking
+  /// point — they do NOT clip panels, because a tool that silently deleted a
+  /// rep's array when a line moved is worse than one that shows the conflict.
+  layoutSetbacks          Json      @default("[]")
   layoutImageFileId       String?
   layoutImageUploadedById String?
   layoutImageUploadedAt   DateTime?
