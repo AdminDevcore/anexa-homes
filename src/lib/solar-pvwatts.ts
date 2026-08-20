@@ -1,5 +1,5 @@
 /**
- * What a plane of panels actually makes, according to NREL.
+ * What a plane of panels actually makes, according to PVWatts.
  *
  * `solar-orientation.ts` answers "how much worse is west than south" from a
  * clear-sky model, and says in its own header that it is not good enough to be
@@ -24,7 +24,7 @@
  *
  * Pure and network-free on purpose, like every other `solar-*` lib: the request
  * shape, the response reading and the cache key are the parts worth testing,
- * and a module that fetches cannot be tested without pretending to be NREL.
+ * and a module that fetches cannot be tested without pretending to be the API.
  */
 
 /** Fixed roof mount runs hotter than an open rack, and PVWatts knows it. */
@@ -96,7 +96,12 @@ export function pvwattsParams(r: YieldRequest, apiKey: string): URLSearchParams 
     // 1 = fixed roof mount, 0 = fixed open rack.
     array_type: r.arrayType === "roof" ? "1" : "0",
     module_type: "0",
-    losses: String(derateToLossesPct(r.lossesPct === 0 ? 0 : r.lossesPct)),
+    // ALREADY a percentage. `planeFor` converts the company's derate factor
+    // once, on the way in; converting again here read 16 as a factor, produced
+    // -1500, and clamped to -5 — a system that GAINS five percent. Every
+    // production figure came back about 22% high, and it looked like a
+    // plausible number for a good roof rather than an obvious error.
+    losses: String(Math.max(-5, Math.min(99, Math.round(r.lossesPct)))),
     timeframe: "monthly",
   });
 }

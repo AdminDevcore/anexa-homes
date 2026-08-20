@@ -377,7 +377,7 @@ export type SolarProposalSnapshot = {
      * WHERE the production figure came from.
      *
      * Absent or null means `kwhPerKwYear` above — the company's market average,
-     * scaled by a clear-sky ratio. Present means NREL simulated these planes
+     * scaled by a clear-sky ratio. Present means PVWatts simulated these planes
      * against this site's own weather record and the market average did not
      * enter into the number, which is exactly why the document must stop
      * listing it as though it had.

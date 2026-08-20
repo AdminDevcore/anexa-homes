@@ -40,6 +40,25 @@ describe("the request PVWatts is sent", () => {
     expect(p.get("azimuth")).toBe("180");
   });
 
+  /**
+   * `lossesPct` is ALREADY a percentage by the time it reaches here — `planeFor`
+   * converts the company's derate factor once, on the way in. Converting again
+   * read 16 as a factor, produced -1500, and clamped to -5: a system that GAINS
+   * five percent. Every production figure came back about 22% high, which on a
+   * page reads as a good roof rather than as an error, and the only reason it
+   * was caught was two live calls disagreeing.
+   */
+  it("sends the loss percentage it was given, without converting it again", () => {
+    expect(pvwattsParams(REQ, "k").get("losses")).toBe("16");
+    expect(pvwattsParams({ ...REQ, lossesPct: 14 }, "k").get("losses")).toBe("14");
+    expect(pvwattsParams({ ...REQ, lossesPct: 0 }, "k").get("losses")).toBe("0");
+  });
+
+  it("clamps a loss figure to the range the API accepts", () => {
+    expect(pvwattsParams({ ...REQ, lossesPct: 250 }, "k").get("losses")).toBe("99");
+    expect(pvwattsParams({ ...REQ, lossesPct: -80 }, "k").get("losses")).toBe("-5");
+  });
+
   it("clamps a tilt that is not a roof", () => {
     expect(pvwattsParams({ ...REQ, tiltDeg: 140 }, "k").get("tilt")).toBe("90");
     expect(pvwattsParams({ ...REQ, tiltDeg: -20 }, "k").get("tilt")).toBe("0");

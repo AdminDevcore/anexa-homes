@@ -162,7 +162,7 @@ export function SolarLayoutDesigner({
   /** What the house uses, so offset is live rather than a saved snapshot. */
   annualUsageKwh: number | null;
   /**
-   * kWh per kW-year for planes NREL has already answered for on this site,
+   * kWh per kW-year for planes PVWatts has already answered for on this site,
    * keyed `tilt|azimuth`.
    *
    * Keyed on just the two angles because everything else in a PVWatts request —
@@ -1345,7 +1345,7 @@ export function SolarLayoutDesigner({
                 value={moduleRatingW ? `${totals.year1ProductionKwh.toLocaleString()} kWh` : "—"}
                 title={
                   totals.measuredArrays > 0
-                    ? `${totals.measuredArrays} of ${totals.arrays.filter((a) => a.panels > 0).length} arrays simulated against this site's own weather record (NREL PVWatts). The rest use the company's market average.`
+                    ? `${totals.measuredArrays} of ${totals.arrays.filter((a) => a.panels > 0).length} arrays simulated against this site's own weather record (PVWatts). The rest use the company's market average.`
                     : "The company's market-average yield. Save the layout to simulate these planes against this site's own weather record."
                 }
               />

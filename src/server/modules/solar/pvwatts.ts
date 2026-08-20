@@ -11,11 +11,11 @@ import {
 } from "@/lib/solar-pvwatts";
 
 /**
- * Asking NREL what a roof makes, once, and remembering the answer.
+ * Asking the lab what a roof makes, once, and remembering the answer.
  *
  * Everything network-shaped lives here; the request, the parsing and the cache
  * key are in `@/lib/solar-pvwatts` where they can be tested without pretending
- * to be NREL.
+ * to be the API.
  *
  * THE CALLER NEVER WAITS ON THIS TO DRAW. The designer keeps its instant local
  * estimate while a rep drags panels around; the real figures are fetched when
@@ -42,19 +42,37 @@ export type PlaneYield = {
 };
 
 /**
- * DEMO_KEY is NREL's own throttled key — about 30 requests an hour from one
+ * The host, which moved.
+ *
+ * NREL became the National Laboratory of the Rockies and `developer.nrel.gov`
+ * was RETIRED on 29 May 2026 — the domain does not resolve at all, so the
+ * request did not fail slowly, it failed at DNS. Worth stating plainly because
+ * a dead domain looks exactly like a firewall from inside a build: this code
+ * shipped pointing at it, and the fallback quietly carried every quote.
+ *
+ * The API itself is unchanged — same path, same parameters, same response, and
+ * still PVWatts v8.
+ */
+const PVWATTS_URL = "https://developer.nlr.gov/api/pvwatts/v8.json";
+
+/**
+ * DEMO_KEY is the lab's own throttled key — about 30 requests an hour from one
  * address. Fine for a developer poking at it, useless for a company quoting
  * roofs, so production is expected to set its own free key and the log says so
  * exactly once per process rather than on every call.
+ *
+ * `NREL_API_KEY` is still read: it is the name this shipped with, the key
+ * itself did not change in the rename, and silently ignoring one somebody has
+ * already set would put them back on the shared key with no way to tell.
  */
 let warnedAboutKey = false;
 function apiKey(): string {
-  const key = process.env.NREL_API_KEY?.trim();
+  const key = (process.env.NLR_API_KEY || process.env.NREL_API_KEY)?.trim();
   if (key) return key;
   if (!warnedAboutKey) {
     warnedAboutKey = true;
     console.warn(
-      "[pvwatts] NREL_API_KEY is not set — falling back to DEMO_KEY, which NREL rate-limits to about 30 requests an hour. Get a free key at developer.nrel.gov/signup."
+      "[pvwatts] NLR_API_KEY is not set — falling back to DEMO_KEY, which is rate-limited to about 30 requests an hour. Get a free key at developer.nlr.gov/signup."
     );
   }
   return "DEMO_KEY";
@@ -176,9 +194,9 @@ export async function cachedPlaneYields(
 async function fetchPlaneYield(
   req: YieldRequest
 ): Promise<{ kwhPerKwYear: number; monthly: number[]; station: string | null } | null> {
-  const url = `https://developer.nrel.gov/api/pvwatts/v8.json?${pvwattsParams(req, apiKey())}`;
+  const url = `${PVWATTS_URL}?${pvwattsParams(req, apiKey())}`;
   try {
-    // A save must not hang on NREL being slow. Ten seconds is generous for a
+    // A save must not hang on the lab being slow. Ten seconds is generous for a
     // single simulation and short enough that a rep does not notice.
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) {

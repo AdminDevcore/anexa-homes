@@ -19,7 +19,7 @@
  * horizon, no shading. Against PVWatts (which does use TMY) it lands within a
  * few points for ordinary residential planes, and is PESSIMISTIC toward east,
  * west and north because a clear-sky year over-weights direct beam. For a
- * bankable figure the honest upgrade is NREL PVWatts v8 keyed on the deal's
+ * bankable figure the honest upgrade is PVWatts v8 keyed on the deal's
  * own coordinates; `orientationFactor` is the seam that swaps out.
  *
  * Angle conventions, which are the thing most likely to be got wrong:

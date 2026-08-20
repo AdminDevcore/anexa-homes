@@ -604,7 +604,8 @@ export function SolarProposalView({
             */}
             {s.assumptions.yieldBasis ? (
               <li>
-                Production: simulated for this address by NREL PVWatts against the
+                Production: simulated for this address by PVWatts (National Laboratory of the
+                Rockies) against the
                 {s.assumptions.yieldBasis.station
                   ? ` ${s.assumptions.yieldBasis.station} `
                   : " local "}

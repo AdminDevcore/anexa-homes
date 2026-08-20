@@ -7,10 +7,11 @@ import { yieldCacheKey, type YieldRequest } from "@/lib/solar-pvwatts";
 /**
  * The PVWatts cache, against a real database and a stubbed NREL.
  *
- * NREL itself is stubbed on purpose and not merely for speed: a test that hits
- * developer.nrel.gov fails when their key is rate-limited, when the machine is
- * offline, and when the API is fine but slow — none of which say anything about
- * this code. What IS ours is the caching, the deduplication, the fallback and
+ * The API is stubbed on purpose and not merely for speed: a test that hits the
+ * live host fails when the shared key is rate-limited, when the machine is
+ * offline, and when the service is fine but slow — none of which say anything
+ * about this code. It would also have gone on passing through the domain being
+ * retired, which is the failure that actually happened. What IS ours is the caching, the deduplication, the fallback and
  * the refusal to store nonsense, and all of that is exercised here for real.
  */
 process.env.SOLAR_VERTICAL_ENABLED = "1";
