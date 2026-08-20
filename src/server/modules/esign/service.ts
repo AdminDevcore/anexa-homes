@@ -155,6 +155,10 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
         title: template.name,
         status: "sent",
         snapshot: snapshot as unknown as Prisma.InputJsonValue,
+        // Copied, not read live: re-pointing this template later must not
+        // relocate a document that is already signed. Same reasoning as the
+        // body/fields snapshot above.
+        folderKey: template.folderKey,
         sentAt: new Date(),
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30),
         createdById: user.userId,

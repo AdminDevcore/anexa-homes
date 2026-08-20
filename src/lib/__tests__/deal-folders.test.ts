@@ -6,6 +6,8 @@ import {
   folderKeyFor,
   folderLabel,
   foldersFor,
+  packageDestinations,
+  packagesByFolder,
   visibleFiles,
 } from "../deal-folders";
 
@@ -210,5 +212,92 @@ describe("visibleFiles", () => {
   it("returns the same list untouched when nothing is signed", () => {
     const files = [pdf, bill];
     expect(visibleFiles(files, [])).toBe(files);
+  });
+});
+
+describe("packageDestinations", () => {
+  it("omits the photo and call folders", () => {
+    // Their bodies are a slot checklist and a one-recording-per-slot uploader.
+    // Filing a signed PDF into either would render it as a missing photo.
+    for (const v of ["roofing", "solar"]) {
+      expect(packageDestinations(v).some((f) => f.special)).toBe(false);
+    }
+    expect(packageDestinations("roofing").map((f) => f.key)).not.toContain("qc_call");
+    expect(packageDestinations("roofing").map((f) => f.key)).not.toContain("survey");
+  });
+
+  it("keeps every folder a document could legitimately go in", () => {
+    const solar = packageDestinations("solar").map((f) => f.key);
+    for (const k of ["contract", "certificate_acceptance", "lien_waiver_final", "pto"]) {
+      expect(solar).toContain(k);
+    }
+  });
+});
+
+// updateTemplateAction validates a chosen destination with exactly this call,
+// so the cross-vertical guard is asserted here rather than by mocking Prisma
+// for a single action — there is no server-action test harness in this repo.
+describe("destination validation (the guard updateTemplateAction applies)", () => {
+  const allows = (vertical: string, key: string) =>
+    packageDestinations(vertical).some((f) => f.key === key);
+
+  it("refuses a solar folder on a roofing template", () => {
+    expect(allows("roofing", "pto")).toBe(false);
+    expect(allows("roofing", "lien_waiver_final")).toBe(false);
+    expect(allows("solar", "pto")).toBe(true);
+  });
+
+  it("refuses a roofing folder on a solar template", () => {
+    expect(allows("solar", "adjuster_scope")).toBe(false);
+    expect(allows("roofing", "adjuster_scope")).toBe(true);
+  });
+
+  it("refuses a made-up key", () => {
+    expect(allows("solar", "'; drop table --")).toBe(false);
+    expect(allows("solar", "")).toBe(false);
+  });
+});
+
+describe("packagesByFolder", () => {
+  const pkg = (folderKey: string | null) => ({ folderKey });
+
+  it("files a package where its template said", () => {
+    const map = packagesByFolder("solar", [pkg("certificate_acceptance")]);
+    expect(map.get("certificate_acceptance")).toHaveLength(1);
+    expect(map.get("contract")).toBeUndefined();
+  });
+
+  // Everything sent before routing existed has a null key. It must keep landing
+  // in Contract, which is why the column needed no backfill.
+  it("falls back to Contract when nothing was configured", () => {
+    for (const v of ["roofing", "solar"]) {
+      expect(packagesByFolder(v, [pkg(null)]).get("contract")).toHaveLength(1);
+    }
+  });
+
+  // A solar folder key on a roofing deal is not "unidentified" — it came from a
+  // template someone set up — so it goes to Contract, not Other.
+  it("falls back to Contract for a key this vertical does not have", () => {
+    const map = packagesByFolder("roofing", [pkg("pto")]);
+    expect(map.get("contract")).toHaveLength(1);
+    expect(map.get(FALLBACK_FOLDER_KEY)).toBeUndefined();
+  });
+
+  it("never files a package into a photo or call folder", () => {
+    const map = packagesByFolder("roofing", [pkg("survey"), pkg("qc_call")]);
+    expect(map.get("survey")).toBeUndefined();
+    expect(map.get("qc_call")).toBeUndefined();
+    expect(map.get("contract")).toHaveLength(2);
+  });
+
+  it("groups several packages across several folders", () => {
+    const map = packagesByFolder("solar", [
+      pkg("contract"),
+      pkg("lien_waiver_progress"),
+      pkg("lien_waiver_progress"),
+      pkg(null),
+    ]);
+    expect(map.get("contract")).toHaveLength(2);
+    expect(map.get("lien_waiver_progress")).toHaveLength(2);
   });
 });

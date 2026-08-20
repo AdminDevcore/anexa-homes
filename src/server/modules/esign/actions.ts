@@ -10,6 +10,7 @@ import { requireUser } from "@/server/auth/session";
 import { requireCan, can } from "@/server/rbac/guards";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { putObject } from "@/server/storage";
+import { packageDestinations } from "@/lib/deal-folders";
 import {
   sendForSignature,
   resendSignatureRequest,
@@ -247,6 +248,54 @@ export async function uploadTemplatePdfAction(formData: FormData) {
 
   revalidatePath(`/portal/documents/templates/${templateId}`);
   return { ok: true as const, pages: pages.length };
+}
+
+const updateTemplateSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1, "Name is required.").max(120),
+  // "" from an unset <select> means "no destination", which is Contract.
+  folderKey: z.string().optional().or(z.literal("")),
+});
+
+/**
+ * Rename a template and choose where its signed document files.
+ *
+ * The name was previously unreachable: templates were created as "Untitled
+ * contract" and nothing ever wrote the column, so every template — and every
+ * package, which takes its title from here — carried the placeholder. Four
+ * documents that are all called "Untitled contract" cannot be told apart, let
+ * alone routed, so renaming ships with the routing that needs it.
+ */
+export async function updateTemplateAction(input: z.infer<typeof updateTemplateSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Document")) return { ok: false as const, error: "Not allowed." };
+  const parsed = updateTemplateSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const template = await prisma.documentTemplate.findFirst({
+    where: { id: parsed.data.id, companyId: user.companyId },
+    select: { id: true, vertical: true },
+  });
+  if (!template) return { ok: false as const, error: "Template not found." };
+
+  // The destination must be a real folder for THIS template's vertical, or an
+  // arbitrary string reaches the column and the document files nowhere. Same
+  // guard moveFileAction applies to a file's category.
+  const folderKey = parsed.data.folderKey || null;
+  if (folderKey && !packageDestinations(template.vertical).some((f) => f.key === folderKey)) {
+    return { ok: false as const, error: "Unknown folder." };
+  }
+
+  await prisma.documentTemplate.update({
+    where: { id: template.id },
+    data: { name: parsed.data.name, folderKey },
+  });
+
+  revalidatePath("/portal/documents");
+  revalidatePath(`/portal/documents/templates/${template.id}`);
+  return { ok: true as const };
 }
 
 /** Create a blank contract template in the active vertical workspace; returns its id. */

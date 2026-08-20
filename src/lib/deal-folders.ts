@@ -59,10 +59,13 @@ export type DealFolder = {
    */
   special?: "photos" | "calls";
   /**
-   * This folder also lists the deal's e-signature packages, above its files.
-   * They are DocumentPackage rows rather than uploads, but a proposal sent for
-   * signature and the countersigned PDF that comes back are the same thing to
-   * whoever is looking for it — so they share one folder instead of sitting in
+   * Where e-signature packages land when their template names no folder, and
+   * the fallback for a key this vertical does not recognise. Exactly one folder
+   * per set carries it — see the assertion in deal-folders.test.ts.
+   *
+   * Packages are DocumentPackage rows rather than uploads, but a document sent
+   * for signature and the countersigned PDF that comes back are the same thing
+   * to whoever is looking for it, so they share a folder instead of sitting in
    * a separate list beside the grid.
    */
   hostsPackages?: boolean;
@@ -142,6 +145,51 @@ export function visibleFiles<T extends { id: string }>(
     packages.map((p) => p.signedFileId).filter((id): id is string => Boolean(id)),
   );
   return signed.size === 0 ? files : files.filter((f) => !signed.has(f.id));
+}
+
+/** Folders a signed document can be filed into. */
+export function packageDestinations(vertical: string | null | undefined): DealFolder[] {
+  // A photo checklist and a call-recording slot render their own purpose-built
+  // UI and hold one kind of thing each. A signed PDF is not that thing, so they
+  // are not offered as destinations.
+  return foldersFor(vertical).filter((f) => !f.special);
+}
+
+/**
+ * Which folder each e-signature package belongs in.
+ *
+ * A template names its destination (`folderKey`) and the package copies it at
+ * send time. Two cases fall back to the packages folder — the one flagged
+ * `hostsPackages`, which is Contract in both verticals:
+ *
+ *  - `null`, meaning nobody configured a destination. Every package created
+ *    before routing existed is in this state, which is why the column needed no
+ *    backfill.
+ *  - a key this vertical does not have — a solar folder on a roofing deal, or a
+ *    folder deleted from the set since.
+ *
+ * Note this differs from how a FILE with an unrecognised category falls back.
+ * A file lands in "Other", because an unknown category genuinely means "we do
+ * not know what this is". A package always came from a template someone set up,
+ * so the honest fallback is where packages have always lived, not the drawer of
+ * unidentified things.
+ */
+export function packagesByFolder<T extends { folderKey: string | null }>(
+  vertical: string | null | undefined,
+  packages: T[],
+): Map<string, T[]> {
+  const folders = foldersFor(vertical);
+  const fallback = folders.find((f) => f.hostsPackages)?.key ?? FALLBACK_FOLDER_KEY;
+  const known = new Set(packageDestinations(vertical).map((f) => f.key));
+
+  const map = new Map<string, T[]>();
+  for (const p of packages) {
+    const key = p.folderKey && known.has(p.folderKey) ? p.folderKey : fallback;
+    const bucket = map.get(key);
+    if (bucket) bucket.push(p);
+    else map.set(key, [p]);
+  }
+  return map;
 }
 
 export function folderLabel(vertical: string | null | undefined, key: string | null): string {

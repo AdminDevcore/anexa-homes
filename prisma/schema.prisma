@@ -1328,6 +1328,11 @@ model DocumentTemplate {
   body         Json                 @default("[]")
   // Storage key of an uploaded source PDF. When set, fields are stamped onto it.
   sourcePdfKey String?
+  // Which deal folder this document files into once signed, as a DealFolder key
+  // (src/lib/deal-folders.ts). NULL means Contract — the folder every package
+  // landed in before routing existed, so existing templates keep their behaviour
+  // without a backfill.
+  folderKey    String?
   active       Boolean              @default(true)
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
@@ -1379,6 +1384,10 @@ model DocumentPackage {
   status       DocumentPackageStatus @default(draft)
   // Snapshot of template body + fields at send time so edits don't mutate sent docs
   snapshot     Json                  @default("{}")
+  // Destination folder, copied from the template when the package is sent.
+  // Copied rather than read live for the same reason `snapshot` exists: editing
+  // a template must not relocate documents already signed.
+  folderKey    String?
   signedFileId String?
   signedFile   FileAsset?            @relation("PackageSignedFile", fields: [signedFileId], references: [id])
   sentAt       DateTime?
@@ -2724,11 +2733,11 @@ model SolarLender {
   /// Hotlinking a bank's image would put a document a homeowner keeps at the
   /// mercy of someone else's URL, and this one has to still render a year from
   /// now. Normalised to PNG on the way in, so no mime column is needed.
-  logoKey            String?
+  logoKey       String?
   /// When the logo last changed — the cache-buster in the serving URL. A column
   /// rather than `updatedAt` because renaming a lender must not invalidate
   /// every cached copy of an image that did not change.
-  logoUpdatedAt      DateTime?
+  logoUpdatedAt DateTime?
 
   approvals SolarEquipmentLender[]
   designs   SolarDesign[]

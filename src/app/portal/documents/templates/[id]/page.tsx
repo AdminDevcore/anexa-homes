@@ -7,6 +7,8 @@ import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
 import { TemplateBuilder } from "@/components/esign/template-builder";
 import { TemplatePdfUploader } from "@/components/esign/template-pdf-uploader";
+import { TemplateSettings } from "@/components/esign/template-settings";
+import { foldersFor, packageDestinations } from "@/lib/deal-folders";
 import { buildFieldCatalog } from "@/server/modules/esign/autofill";
 
 export const metadata = { title: "Template" };
@@ -49,6 +51,20 @@ export default async function TemplateEditorPage({
       <PageHeader
         title={`Edit: ${template.name}`}
         description="Upload your own PDF or use the built-in page, then drag fields and map auto-fill data from the CRM."
+      />
+      <TemplateSettings
+        templateId={template.id}
+        initialName={template.name}
+        initialFolderKey={template.folderKey}
+        // The packages folder is already the default option, so it is not
+        // offered a second time under its own name — two entries that do the
+        // same thing only raise the question of how they differ.
+        destinations={packageDestinations(template.vertical)
+          .filter((f) => !f.hostsPackages)
+          .map((f) => ({ key: f.key, label: f.label }))}
+        fallbackLabel={
+          foldersFor(template.vertical).find((f) => f.hostsPackages)?.label ?? "Contract"
+        }
       />
       <TemplatePdfUploader templateId={template.id} hasPdf={!!template.sourcePdfKey} />
       <TemplateBuilder

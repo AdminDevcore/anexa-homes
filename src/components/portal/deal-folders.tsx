@@ -12,6 +12,7 @@ import {
   FALLBACK_FOLDER_KEY,
   folderKeyFor,
   foldersFor,
+  packagesByFolder,
   visibleFiles,
   type DealFolder,
 } from "@/lib/deal-folders";
@@ -34,6 +35,8 @@ export type FolderPackage = {
   id: string;
   title: string;
   status: string;
+  /** Destination folder, copied from the template at send time. */
+  folderKey: string | null;
   /**
    * The countersigned PDF, once the package completes. The e-sign flow stores
    * it as a FileAsset, so without this the same contract arrives twice: once as
@@ -90,6 +93,14 @@ export function DealFolders({
     return map;
   }, [shown, vertical]);
 
+  // Each package goes to the folder its template named; anything unconfigured
+  // or unrecognised falls back to Contract, which is where every package lived
+  // before routing existed.
+  const pkgByFolder = React.useMemo(
+    () => packagesByFolder(vertical, packages),
+    [vertical, packages],
+  );
+
   const open = openKey ? folders.find((f) => f.key === openKey) ?? null : null;
 
   if (open) {
@@ -98,7 +109,7 @@ export function DealFolders({
         <OpenFolder
           folder={open}
           files={byFolder.get(open.key) ?? []}
-          packages={open.hostsPackages ? packages : []}
+          packages={pkgByFolder.get(open.key) ?? []}
           folders={folders}
           leadId={leadId}
           projectId={projectId}
@@ -115,10 +126,10 @@ export function DealFolders({
     <div className="space-y-4" data-testid="deal-folders">
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {folders.map((f) => {
-          // The Contract tile counts its e-sign packages too, so the badge
-          // matches what you actually find when you open it.
+          // A tile counts the packages routed to it as well as its files, so
+          // the badge matches what you actually find when you open it.
           const count =
-            (byFolder.get(f.key)?.length ?? 0) + (f.hostsPackages ? packages.length : 0);
+            (byFolder.get(f.key)?.length ?? 0) + (pkgByFolder.get(f.key)?.length ?? 0);
           const Icon = f.icon;
           return (
             <button

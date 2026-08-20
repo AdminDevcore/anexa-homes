@@ -1130,6 +1130,7 @@ export default async function LeadDetailPage({
                 title: d.title,
                 status: d.status,
                 signedFileId: d.signedFileId,
+                folderKey: d.folderKey,
               }))}
               canUpload={can(user, "create", "File")}
               canDelete={can(user, "create", "File")}
