@@ -64,13 +64,16 @@ export type CompareBasis = {
   adderTotalCents: number;
   downPaymentCents: number;
   /**
-   * What the company keeps per watt after the lender's cut. Set, and each
-   * column's sticker is derived from its OWN fee — which is exactly what makes
-   * a dearer lender show up as a dearer system rather than as a smaller margin.
+   * The deal's base price per watt, cents — what the company charges BEFORE any
+   * lender takes its cut. Set on the deal in the System price card, seeded from
+   * the company's figure, moved up and down per deal by the rep.
+   *
+   * Each column's sticker is derived from this and its OWN dealer fee, which is
+   * what makes a dearer lender show up as a dearer system rather than as a
+   * smaller margin — and what keeps a cash buyer from being charged a fee no
+   * bank ever levied. Null only while the box is empty.
    */
-  targetNetPpwCents: number | null;
-  /** The sticker the rep typed, used when there is no net target to derive from. */
-  typedGrossPpwCents: number | null;
+  basePpwCents: number | null;
   /** Lease and PPA totals run across the term, so output has to decay. */
   annualDegradationPct: number;
 };
@@ -112,17 +115,14 @@ function loanTermLabel(months: number | null): string {
 /**
  * The sticker this particular offer has to carry.
  *
- * With a net target, each lender's fee produces its own gross — a 28% partner
- * costs the customer more than an 18% one for the same job, and that difference
- * is the single most useful number on the screen. Without one, every column is
- * quoted at what the rep typed, because inventing a per-lender sticker from
- * nothing would make the comparison look precise while meaning nothing.
+ * One base price, grossed up by each lender's own fee: a 28% partner costs the
+ * customer more than an 18% one for the same job, and that difference is the
+ * single most useful number on the screen. Cash carries a fee of zero by
+ * definition, so it is quoted at the base exactly.
  */
 function stickerCents(basis: CompareBasis, dealerFeePct: number): number | null {
-  if (basis.targetNetPpwCents != null) {
-    return grossPpwFromNet(basis.targetNetPpwCents, dealerFeePct);
-  }
-  return basis.typedGrossPpwCents;
+  if (basis.basePpwCents == null) return null;
+  return grossPpwFromNet(basis.basePpwCents, dealerFeePct);
 }
 
 function purchaseRow(
@@ -310,9 +310,8 @@ export type BasisGaps = {
   /** No array yet — nothing to multiply a price per watt by. */
   systemSize: boolean;
   /**
-   * Nothing to derive a sticker from: no company net target AND no typed gross.
-   * Blocks cash and loan; a lease or PPA quotes off its own rate sheet and is
-   * unaffected.
+   * No base price on the deal at all. Blocks cash and loan; a lease or PPA
+   * quotes off its own rate sheet and is unaffected.
    */
   pricePerWatt: boolean;
 };
@@ -320,6 +319,6 @@ export type BasisGaps = {
 export function basisGaps(basis: CompareBasis): BasisGaps {
   return {
     systemSize: !(basis.systemSizeKwDc > 0),
-    pricePerWatt: basis.targetNetPpwCents == null && basis.typedGrossPpwCents == null,
+    pricePerWatt: !(basis.basePpwCents != null && basis.basePpwCents > 0),
   };
 }

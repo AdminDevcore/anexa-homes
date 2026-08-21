@@ -93,14 +93,16 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     await openFinancing(page, leadId);
     await clearAdders(page);
 
-    await page.getByLabel("Gross $/W").fill("3.00");
+    await page.getByLabel("Base $/W").fill("3.00");
 
     // No lines, and the seeded $3,850 is still in the price. Recomputing that
     // from an empty table would drop a homeowner's quote by the cost of their
     // panel upgrade, silently.
     await expect(page.getByTestId("adder-total")).toHaveCount(0);
     await expect(page.getByText(/entered before they were itemised/)).toBeVisible();
-    expect(dollars(await page.getByTestId("final-ppw").innerText())).toBeCloseTo(3.385, 2);
+    // 10 kW at $3.00/W plus the seeded $3,850 of un-itemised adders.
+    expect(dollars(await page.getByTestId("final-ppw").innerText())).toBeCloseTo(3.39, 2);
+    expect(dollars(await page.getByTestId("contract-total").innerText())).toBe(33850);
   });
 
   test("an adder is a named line, and it moves the final price per watt", async ({ page }) => {
@@ -111,7 +113,7 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     await clearAdders(page);
 
     // A round rate so the ladder is readable: 10 kW at $3.00/W is $30,000.
-    await page.getByLabel("Gross $/W").fill("3.00");
+    await page.getByLabel("Base $/W").fill("3.00");
 
     // Pick one off the catalogue rather than typing an amount. The label is
     // what makes the money answerable later.
@@ -129,7 +131,10 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     // quoting a number the customer is not paying.
     const final = dollars(await page.getByTestId("final-ppw").innerText());
     expect(final).toBeGreaterThan(3);
-    expect(final).toBeCloseTo(3 + total / 10000, 2);
+    // Printed to the nearest cent per watt: $33,850 over 10 kW is $3.385/W and
+    // shows as $3.39. The contract total is the figure with no rounding in it.
+    expect(final).toBe(Math.round(((30000 + total) / 10000) * 100) / 100);
+    expect(dollars(await page.getByTestId("contract-total").innerText())).toBe(30000 + total);
 
     // Removing it takes the money with it, rather than falling back to the
     // typed figure the lines replaced.

@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowRight, Hammer, Landmark, Maximize2, Sun, User, Zap } from "lucide-react";
+import {
+  ArrowLeft, ArrowRight, Hammer, Landmark, Maximize2, Sun, User, Zap,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LayoutBlock } from "@/lib/solar-layout";
 import type { YieldAssumptions } from "@/lib/solar-money";
@@ -24,12 +26,52 @@ import type { ProviderOption } from "@/server/modules/solar/providers";
 
 export type StepId = "customer" | "energy" | "design" | "financing" | "generate";
 
-const STEPS: { id: StepId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: "customer", label: "1 · Customer", icon: User },
-  { id: "energy", label: "2 · Energy", icon: Zap },
-  { id: "design", label: "3 · System design", icon: Hammer },
-  { id: "financing", label: "4 · Financing", icon: Landmark },
-  { id: "generate", label: "5 · Review & send", icon: Sun },
+type Step = {
+  id: StepId;
+  /** The rail's word for it. The ordinal is drawn, never typed into the label. */
+  label: string;
+  title: string;
+  blurb?: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+const STEPS: Step[] = [
+  {
+    id: "customer",
+    label: "Customer",
+    title: "Customer",
+    blurb: "Check we are quoting the right person at the right house before anything else.",
+    icon: User,
+  },
+  {
+    id: "energy",
+    label: "Energy",
+    title: "Energy",
+    blurb:
+      "What the house uses and what they pay for it — from their usage, or from their bill and rate.",
+    icon: Zap,
+  },
+  {
+    id: "design",
+    label: "System design",
+    title: "System design",
+    blurb: "The array on the roof, and the size and output that follow from it.",
+    icon: Hammer,
+  },
+  {
+    id: "financing",
+    label: "Financing",
+    title: "Price & financing",
+    blurb:
+      "What we charge for this system, and every way the customer could pay for it. Both travel with the quote they sign.",
+    icon: Landmark,
+  },
+  {
+    id: "generate",
+    label: "Review & send",
+    title: "Review & send",
+    icon: Sun,
+  },
 ];
 
 /**
@@ -51,7 +93,9 @@ export function SolarProposalBuilder({
   lenders,
   lenderId,
   lenderProducts,
-  targetNetPpwCents,
+  defaultBasePpwCents,
+  minPpwCents,
+  maxPpwCents,
   adderCatalogue,
   adderLines,
   systemSizeKwDc,
@@ -89,7 +133,11 @@ export function SolarProposalBuilder({
   lenderId: string | null;
   /** Every lender's rate sheet — see SolarFinancePanel. */
   lenderProducts: LenderProductOption[];
-  targetNetPpwCents: number | null;
+  /** The company's base price per watt, which a deal nobody has priced opens on. */
+  defaultBasePpwCents: number | null;
+  /** The company's price band. Outside it warns; it never blocks a save. */
+  minPpwCents: number;
+  maxPpwCents: number;
   /** Every adder the company sells, for the Financing step to offer. */
   adderCatalogue: AdderOption[];
   /** The adder lines already on this deal. Their sum is the contract's. */
@@ -118,84 +166,16 @@ export function SolarProposalBuilder({
   hasLayout: boolean;
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
+  const index = STEPS.findIndex((s) => s.id === step);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap gap-2">
-        {STEPS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            aria-current={step === s.id ? "step" : undefined}
-            onClick={() => setStep(s.id)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
-              step === s.id
-                ? "bg-solar text-solar-foreground"
-                : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-            )}
-          >
-            <s.icon className="size-3.5" />
-            {s.label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-5">
+      <StepRail active={step} onSelect={setStep} />
 
-      <StepPanel
-        active={step === "customer"}
-        title="Customer"
-        blurb="Check we are quoting the right person at the right house before anything else."
-      >
-        <SolarCustomerPanel
-          leadId={leadId}
-          customer={customer}
-          hasLayout={hasLayout}
-          canEdit={canEditDeal}
-        />
-        <NextStep label="Next: Energy" onClick={() => setStep("energy")} />
-      </StepPanel>
-
-      <StepPanel
-        active={step === "energy"}
-        title="Energy"
-        blurb="What the house uses and what they pay for it — from their usage, or from their bill and rate."
-      >
-        <SolarEnergyPanel
-          leadId={leadId}
-          energy={energy}
-          utilities={utilities}
-          retailers={retailers}
-          year1ProductionKwh={year1ProductionKwh}
-          canEdit={canEditDeal}
-        />
-        <NextStep label="Next: System design" onClick={() => setStep("design")} />
-      </StepPanel>
-
-      <StepPanel active={step === "design"} title="System design">
-        <SolarDesignPanel
-          leadId={leadId}
-          design={design}
-          canEdit={canEditDeal}
-          layoutAvailable={layoutAvailable}
-          canApproveLayout={canApproveLayout}
-          lat={lat}
-          moduleRatingW={moduleRatingW}
-          initialBlocks={initialBlocks}
-          assumptions={assumptions}
-        />
-        <NextStep label="Next: Financing" onClick={() => setStep("financing")} />
-      </StepPanel>
-
-      <StepPanel
-        active={step === "financing"}
-        title="Financing"
-        blurb="The lender, the product and its terms travel with the quote the customer signs — pick them here, not on the deal."
-      >
-        {/* WHAT is being priced, at the top of the screen that prices it.
-            Financing was a form with no system on it: a rep chose a product,
-            typed a rate per watt and read back a monthly payment with nothing
-            on screen saying how big the array was or what it made. Every figure
-            below is that array multiplied by something. */}
+      {/* WHAT is being quoted, on every step that spends it. A rep pricing a
+          system needs the size and the offset on screen; the two steps that
+          collect them have their own, better figures a few inches down. */}
+      {(step === "financing" || step === "generate") && (
         <SystemBanner
           leadId={leadId}
           systemSizeKwDc={systemSizeKwDc}
@@ -203,35 +183,159 @@ export function SolarProposalBuilder({
           annualUsageKwh={energy?.annualUsageKwh ?? null}
           onOpenEnergy={() => setStep("energy")}
         />
-        <SolarFinancePanel
-          leadId={leadId}
-          finance={finance}
-          canEdit={canEditDeal}
-          lenders={lenders}
-          lenderId={lenderId}
-          products={lenderProducts}
-          targetNetPpwCents={targetNetPpwCents}
-          adderCatalogue={adderCatalogue}
-          adderLines={adderLines}
-          systemSizeKwDc={systemSizeKwDc}
-          year1ProductionKwh={year1ProductionKwh}
-          annualDegradationPct={annualDegradationPct}
-          onOpenDesign={() => setStep("design")}
-        />
-        <NextStep label="Next: Review & send" onClick={() => setStep("generate")} />
-      </StepPanel>
+      )}
 
-      <StepPanel active={step === "generate"} title="Review & send">
-        <SolarProposalGate
-          leadId={leadId}
-          customerEmail={customer.email}
-          customerPhone={customer.phone}
-          canEdit={canCreateProposal}
-          versions={versions}
-          onOpenStep={setStep}
-        />
-      </StepPanel>
+      {STEPS.map((s, i) => (
+        <StepPanel
+          key={s.id}
+          active={step === s.id}
+          ordinal={i + 1}
+          step={s}
+          prev={i > 0 ? STEPS[i - 1] : null}
+          next={i < STEPS.length - 1 ? STEPS[i + 1] : null}
+          onGo={setStep}
+        >
+          {s.id === "customer" && (
+            <SolarCustomerPanel
+              leadId={leadId}
+              customer={customer}
+              hasLayout={hasLayout}
+              canEdit={canEditDeal}
+            />
+          )}
+          {s.id === "energy" && (
+            <SolarEnergyPanel
+              leadId={leadId}
+              energy={energy}
+              utilities={utilities}
+              retailers={retailers}
+              year1ProductionKwh={year1ProductionKwh}
+              canEdit={canEditDeal}
+            />
+          )}
+          {s.id === "design" && (
+            <SolarDesignPanel
+              leadId={leadId}
+              design={design}
+              canEdit={canEditDeal}
+              layoutAvailable={layoutAvailable}
+              canApproveLayout={canApproveLayout}
+              lat={lat}
+              moduleRatingW={moduleRatingW}
+              initialBlocks={initialBlocks}
+              assumptions={assumptions}
+            />
+          )}
+          {s.id === "financing" && (
+            <SolarFinancePanel
+              leadId={leadId}
+              finance={finance}
+              canEdit={canEditDeal}
+              lenders={lenders}
+              lenderId={lenderId}
+              products={lenderProducts}
+              defaultBasePpwCents={defaultBasePpwCents}
+              minPpwCents={minPpwCents}
+              maxPpwCents={maxPpwCents}
+              adderCatalogue={adderCatalogue}
+              adderLines={adderLines}
+              systemSizeKwDc={systemSizeKwDc}
+              year1ProductionKwh={year1ProductionKwh}
+              annualDegradationPct={annualDegradationPct}
+              onOpenDesign={() => setStep("design")}
+            />
+          )}
+          {s.id === "generate" && (
+            <SolarProposalGate
+              leadId={leadId}
+              customerEmail={customer.email}
+              customerPhone={customer.phone}
+              canEdit={canCreateProposal}
+              versions={versions}
+              onOpenStep={setStep}
+            />
+          )}
+        </StepPanel>
+      ))}
+
+      <p className="text-center text-[11px] text-muted-foreground">
+        Step {index + 1} of {STEPS.length}
+        {" · "}
+        nothing is sent to the customer until Review &amp; send
+      </p>
     </div>
+  );
+}
+
+/**
+ * The five steps as a rail rather than five pills.
+ *
+ * The pills said "1 · Customer" through "5 · Review & send" and were otherwise
+ * identical, so the ordinals were the only thing carrying the sequence and they
+ * were doing it in body text. Drawing the number in its own disc, with a rule
+ * running between the discs, says "these happen in order and you are here"
+ * without a word — and leaves the label free to be the label.
+ *
+ * Every step stays clickable. This is a builder, not a wizard: a rep who needs
+ * to change the bill mid-quote goes back to Energy and returns, and gating a
+ * step behind the one before it would only invent a wall the data does not have.
+ */
+function StepRail({ active, onSelect }: { active: StepId; onSelect: (id: StepId) => void }) {
+  const activeIndex = STEPS.findIndex((s) => s.id === active);
+
+  return (
+    <nav aria-label="Proposal steps" className="-mx-1 overflow-x-auto px-1 pb-1">
+      <ol className="flex min-w-max items-center gap-1">
+        {STEPS.map((s, i) => {
+          const current = s.id === active;
+          const behind = i < activeIndex;
+          return (
+            <li key={s.id} className="flex items-center">
+              {i > 0 && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "mx-1 h-px w-5 shrink-0 sm:w-8",
+                    behind || current ? "bg-solar/50" : "bg-border"
+                  )}
+                />
+              )}
+              <button
+                type="button"
+                aria-current={current ? "step" : undefined}
+                onClick={() => onSelect(s.id)}
+                className={cn(
+                  "group inline-flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-sm font-medium transition-colors",
+                  "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                  current
+                    ? "bg-solar/10 text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                {/* Decorative. The ordinal is already carried structurally by
+                    the <ol> and by aria-current, and leaving it in the
+                    accessible name makes every step announce as "4 Financing"
+                    — a number read as part of a word. */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums transition-colors",
+                    current
+                      ? "bg-solar text-solar-foreground"
+                      : behind
+                        ? "bg-solar/15 text-solar"
+                        : "bg-muted text-muted-foreground group-hover:bg-background"
+                  )}
+                >
+                  {i + 1}
+                </span>
+                {s.label}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -265,7 +369,7 @@ function SystemBanner({
     annualUsageKwh && annualUsageKwh > 0 ? (year1ProductionKwh / annualUsageKwh) * 100 : null;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3">
+    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border bg-card px-4 py-3">
       <Figure label="System" value={`${systemSizeKwDc.toFixed(2)} kW`} />
       <Figure label="Year one" value={`${year1ProductionKwh.toLocaleString()} kWh`} />
       <Figure
@@ -307,33 +411,61 @@ function Figure({ label, value, muted }: { label: string; value: string; muted?:
  * One step's card. `hidden` (not conditional rendering) so the step keeps its
  * unsaved state while another one is on screen — and stays out of the
  * accessibility tree and tab order while it is off.
+ *
+ * The footer moves BOTH ways now. A one-way "Next" is fine for a form nobody
+ * revisits; this is a quote, and the commonest move on the financing step is
+ * back to the roof and forward again.
  */
 function StepPanel({
   active,
-  title,
-  blurb,
+  ordinal,
+  step,
+  prev,
+  next,
+  onGo,
   children,
 }: {
   active: boolean;
-  title: string;
-  blurb?: string;
+  ordinal: number;
+  step: Step;
+  prev: Step | null;
+  next: Step | null;
+  onGo: (id: StepId) => void;
   children: React.ReactNode;
 }) {
   return (
-    <section hidden={!active} className="rounded-xl border border-border bg-card p-5">
-      <h2 className="font-display text-lg font-semibold">{title}</h2>
-      {blurb && <p className="mt-1 text-sm text-muted-foreground">{blurb}</p>}
-      <div className="mt-4 space-y-5">{children}</div>
-    </section>
-  );
-}
+    <section hidden={!active} className="overflow-hidden rounded-xl border border-border bg-card">
+      <header className="flex items-start gap-3 border-b border-border/70 px-5 py-4">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-solar/10 text-solar">
+          <step.icon className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="font-display text-lg font-semibold">{step.title}</h2>
+          {step.blurb && <p className="mt-0.5 text-sm text-muted-foreground">{step.blurb}</p>}
+        </div>
+        <span className="ml-auto hidden shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground sm:block">
+          Step {ordinal}
+        </span>
+      </header>
 
-function NextStep({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <div className="flex justify-end border-t border-border pt-4">
-      <Button variant="outline" onClick={onClick}>
-        {label} <ArrowRight className="size-4" />
-      </Button>
-    </div>
+      <div className="space-y-5 p-5">{children}</div>
+
+      {(prev || next) && (
+        <footer className="flex items-center justify-between gap-3 border-t border-border/70 bg-muted/20 px-5 py-3">
+          {prev ? (
+            <Button variant="ghost" size="sm" onClick={() => onGo(prev.id)}>
+              <ArrowLeft className="size-4" /> {prev.label}
+            </Button>
+          ) : (
+            <span />
+          )}
+          {next && (
+            <Button variant="outline" size="sm" onClick={() => onGo(next.id)}>
+              {next.label} <ArrowRight className="size-4" />
+            </Button>
+          )}
+        </footer>
+      )}
+    </section>
   );
 }

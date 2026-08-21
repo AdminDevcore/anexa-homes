@@ -158,21 +158,36 @@ export default async function SolarProposalBuilderPage({
     .filter(Boolean)
     .join(" · ");
 
+  const name = `${lead.firstName} ${lead.lastName}`.trim();
+
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-6">
       <Link
         href={`/portal/leads/${id}`}
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" /> Back to deal
       </Link>
-      <div className="mb-6">
-        <h1 className="font-serif text-2xl font-bold">Build Proposal</h1>
-        <p className="text-sm text-muted-foreground">
-          {`${lead.firstName} ${lead.lastName}`.trim()}
-          {address ? ` · ${address}` : ""}
-        </p>
-      </div>
+
+      {/* Who this quote is for, once, at the top — the five steps below all
+          scroll and the name is the one thing that must not. The address is a
+          line of its own rather than trailing the name behind a middot: on a
+          long street name the two ran together into one unreadable string. */}
+      <header className="mt-3 mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b border-border pb-5">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-solar">Solar proposal</p>
+          <h1 className="font-display text-2xl font-bold">{name || "Build Proposal"}</h1>
+          {address && <p className="mt-0.5 text-sm text-muted-foreground">{address}</p>}
+        </div>
+        {design?.systemSizeKwDc ? (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-display text-lg font-semibold tabular-nums text-foreground">
+              {design.systemSizeKwDc.toFixed(2)} kW
+            </span>{" "}
+            designed
+          </p>
+        ) : null}
+      </header>
 
       <SolarProposalBuilder
         leadId={lead.id}
@@ -217,7 +232,14 @@ export default async function SolarProposalBuilderPage({
           paydownMonths: p.paydownMonths,
           isActive: p.isActive,
         }))}
-        targetNetPpwCents={settings?.targetNetPpwCents ?? null}
+        // What a deal nobody has priced yet opens on. The company's net
+        // target when it has set one — that is already "what we keep per watt
+        // before the lender's cut", which is exactly what the base price is —
+        // and otherwise the plain default sticker, which on a company with no
+        // target is the same figure by another name.
+        defaultBasePpwCents={settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null}
+        minPpwCents={settings.minPpwCents}
+        maxPpwCents={settings.maxPpwCents}
         adderCatalogue={adderCatalogue.map((a) => ({
           id: a.id,
           label: [a.manufacturer, a.model].filter(Boolean).join(" ") || a.model,

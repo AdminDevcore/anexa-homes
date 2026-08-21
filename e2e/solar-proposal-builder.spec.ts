@@ -13,6 +13,17 @@ import { test, expect, type Page } from "@playwright/test";
 const FLAG_ON =
   process.env.SOLAR_VERTICAL_ENABLED === "1" || process.env.SOLAR_VERTICAL_ENABLED === "true";
 
+/**
+ * One step in the builder's rail.
+ *
+ * Scoped to the rail rather than matched across the page: the step card's
+ * footer carries "← System design" and "Review & send →" buttons whose names
+ * are the same words, so a bare `getByRole("button", { name: "Financing" })`
+ * is two elements the moment the rep is standing on the step before it.
+ */
+const step = (page: Page, name: string | RegExp) =>
+  page.getByRole("navigation", { name: "Proposal steps" }).getByRole("button", { name });
+
 const PASSWORD = "Passw0rd!";
 
 async function login(page: Page, email: string) {
@@ -48,7 +59,10 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     await build.click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
 
-    await expect(page.getByRole("heading", { name: "Build Proposal" })).toBeVisible();
+    // The page leads with WHO is being quoted, not with the name of the screen.
+    // The eyebrow above it still says which builder this is.
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/\w/);
+    await expect(page.getByText("Solar proposal", { exact: true })).toBeVisible();
 
     // Step 1 is open, and it is the customer — check who we are quoting before
     // quoting them.
@@ -63,13 +77,13 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     // because the lease OFFER was quoted, not because a chip was clicked. See
     // "a lease is never badged the winner" in solar-financing-shelf.spec.ts,
     // which sets up a real lease product and quotes it.
-    await page.getByRole("button", { name: "4 · Financing" }).click();
-    await expect(page.getByLabel("Gross $/W")).toBeVisible();
+    await step(page, "Financing").click();
+    await expect(page.getByLabel("Base $/W")).toBeVisible();
     await expect(page.getByLabel("Escalator %/yr")).toHaveCount(0);
     await expect(page.getByText("Not on a rate sheet?")).toHaveCount(0);
 
     // And the last step generates.
-    await page.getByRole("button", { name: "5 · Review & send" }).click();
+    await step(page, "Review & send").click();
     await expect(page.getByRole("button", { name: /Check it is ready/ })).toBeVisible();
   });
 
@@ -84,11 +98,11 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     await expect(usage).toBeVisible({ timeout: 15000 });
     await usage.fill("17250");
 
-    await page.getByRole("button", { name: "4 · Financing" }).click();
+    await step(page, "Financing").click();
     // Any stable landmark of the financing step will do; this one is not
     // conditional on which product is quoted.
     await expect(page.getByRole("button", { name: "Save financing" })).toBeVisible();
-    await page.getByRole("button", { name: "2 · Energy" }).click();
+    await step(page, "Energy").click();
 
     await expect(usage).toHaveValue("17250");
   });
@@ -107,7 +121,7 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     // programme quoted off a rate sheet, so a rep cannot put a deal on a lease
     // the company has no terms for.
     await page.goto(`/portal/leads/${id}/solar-proposal`);
-    await page.getByRole("button", { name: "4 · Financing" }).click();
+    await step(page, "Financing").click();
     await expect(page.getByRole("button", { name: "Save financing" })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Not on a rate sheet?")).toHaveCount(0);
     for (const p of ["Lease", "PPA"]) {

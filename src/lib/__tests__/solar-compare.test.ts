@@ -22,9 +22,8 @@ const BASIS: CompareBasis = {
   year1ProductionKwh: 12_000,
   adderTotalCents: 0,
   downPaymentCents: 0,
-  // $2.80/W net is what the company keeps, whatever the lender charges.
-  targetNetPpwCents: 280,
-  typedGrossPpwCents: 350,
+  // $2.80/W is what the company charges, whatever the lender then adds.
+  basePpwCents: 280,
   annualDegradationPct: 0.5,
 };
 
@@ -103,15 +102,16 @@ describe("compareOffers — a loan column", () => {
     expect(row.totalPaidWithoutPaydownCents).toBe(22_206 * 300);
   });
 
-  it("falls back to the typed sticker when no net target is set", () => {
-    // A company that prices by hand still gets a comparison; it is just quoted
-    // at the same sticker across every lender.
+  it("prices nothing at all when the deal has no base price", () => {
+    // The rep emptied the price box. Every purchase column goes unpriced rather
+    // than falling back to a figure nobody typed.
     const rows = compareOffers([loan(), loan({ id: "p2", dealerFeePct: 28 })], {
       ...BASIS,
-      targetNetPpwCents: null,
+      basePpwCents: null,
     });
-    expect(rows[0].grossPpwCents).toBe(350);
-    expect(rows[1].grossPpwCents).toBe(350);
+    expect(rows[0].grossPpwCents).toBeNull();
+    expect(rows[1].grossPpwCents).toBeNull();
+    expect(rows[0].contractPriceCents).toBeNull();
   });
 });
 
@@ -255,7 +255,7 @@ describe("basisGaps — why a whole shelf reads dashes", () => {
   });
 
   it("names a missing price per watt when there is nothing to derive a sticker from", () => {
-    const noPrice = { ...BASIS, targetNetPpwCents: null, typedGrossPpwCents: null };
+    const noPrice = { ...BASIS, basePpwCents: null };
     expect(basisGaps(noPrice)).toEqual({ systemSize: false, pricePerWatt: true });
     expect(compareOffers([loan()], noPrice)[0].grossPpwCents).toBeNull();
   });

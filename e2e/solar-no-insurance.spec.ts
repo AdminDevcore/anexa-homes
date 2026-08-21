@@ -13,6 +13,17 @@ import { test, expect, type Page } from "@playwright/test";
 const FLAG_ON =
   process.env.SOLAR_VERTICAL_ENABLED === "1" || process.env.SOLAR_VERTICAL_ENABLED === "true";
 
+/**
+ * One step in the builder's rail.
+ *
+ * Scoped to the rail rather than matched across the page: the step card's
+ * footer carries "← System design" and "Review & send →" buttons whose names
+ * are the same words, so a bare `getByRole("button", { name: "Financing" })`
+ * is two elements the moment the rep is standing on the step before it.
+ */
+const step = (page: Page, name: string | RegExp) =>
+  page.getByRole("navigation", { name: "Proposal steps" }).getByRole("button", { name });
+
 const PASSWORD = "Passw0rd!";
 
 async function login(page: Page, email: string) {
@@ -103,7 +114,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // lender and no sheet.
     await page.getByRole("link", { name: /Build Proposal/ }).first().click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
-    await page.getByRole("button", { name: "4 · Financing" }).click();
+    await step(page, "Financing").click();
     await expect(
       page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }),
     ).toBeVisible({ timeout: 15000 });
@@ -154,11 +165,11 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // The whole close flow is one click away, in order.
     await page.getByRole("link", { name: /Build Proposal/ }).first().click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
-    await expect(page.getByRole("button", { name: "1 · Customer" })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole("button", { name: "2 · Energy" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "3 · System design" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "4 · Financing" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "5 · Review & send" })).toBeVisible();
+    await expect(step(page, "Customer")).toBeVisible({ timeout: 15000 });
+    await expect(step(page, "Energy")).toBeVisible();
+    await expect(step(page, "System design")).toBeVisible();
+    await expect(step(page, "Financing")).toBeVisible();
+    await expect(step(page, "Review & send")).toBeVisible();
     await page.goBack();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
@@ -401,7 +412,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // builder. The deal REPORTS these figures; only the proposal sets them.
     await page.getByRole("link", { name: /Build Proposal/ }).first().click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
-    await page.getByRole("button", { name: "4 · Financing" }).click();
+    await step(page, "Financing").click();
 
     await expect(page.getByText("Approved loan terms")).toBeVisible();
     await page.getByLabel("Down payment $").fill("7500");
@@ -424,7 +435,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // "what would this cost", quoting it answers "this is the deal".
     await page.getByRole("link", { name: /Build Proposal/ }).first().click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
-    await page.getByRole("button", { name: "4 · Financing" }).click();
+    await step(page, "Financing").click();
     await expect(page.getByText("Approved loan terms")).toBeVisible();
     await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
     await page.getByRole("button", { name: "Quote this: Cash" }).click();

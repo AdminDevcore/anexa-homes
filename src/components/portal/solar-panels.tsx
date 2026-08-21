@@ -34,6 +34,7 @@ import {
   pricePurchase,
   type YieldAssumptions,
 } from "@/lib/solar-money";
+import { SystemPriceCard } from "@/components/portal/solar/system-price";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
 import { FinanceOffers } from "@/components/portal/solar-finance-offers";
@@ -633,99 +634,6 @@ export function SolarDesignPanel({
   );
 }
 
-/**
- * Base price per watt, what the adders add to it, and what the customer
- * actually pays per watt — plus the two figures that follow from it.
- *
- * The last one is the point. A rep quotes and is measured on "$3.50 a watt",
- * and on a job carrying a $14,500 re-roof the customer is paying nearer $4.20:
- * the sticker rate and the real rate are different numbers, and only one of
- * them was ever on screen. Showing the ladder makes the gap impossible to
- * miss and impossible to argue with, because every rung is derived from the
- * one above it.
- *
- * Derived here rather than read back off the deal so it moves as the rep types.
- * It is the same arithmetic `pricePurchase` does on the server; the difference
- * is only that this one has not been saved yet.
- */
-function PriceLadder({
-  systemSizeKwDc,
-  basePpwCents,
-  adderTotalCents,
-  monthlyCents,
-  monthlyApproved,
-}: {
-  systemSizeKwDc: number;
-  basePpwCents: number;
-  adderTotalCents: number;
-  monthlyCents: number | null;
-  /** True when the figure is the lender's own, not our estimate of it. */
-  monthlyApproved: boolean;
-}) {
-  const watts = Math.round(systemSizeKwDc * 1000);
-  const baseCents = Math.round(watts * basePpwCents);
-  const contractCents = baseCents + adderTotalCents;
-  // Rates, not amounts, so they are not rounded to the cent before being added
-  // together — a ladder whose rungs do not sum is worse than no ladder.
-  const adderPpw = watts > 0 ? adderTotalCents / watts : 0;
-  const finalPpw = watts > 0 ? contractCents / watts : 0;
-
-  if (watts === 0) {
-    return (
-      <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900">
-        Nothing is drawn on the roof yet, so there is no system to price. The panel count is what
-        every figure here is multiplied by.
-      </p>
-    );
-  }
-
-  // With no adders every rung is the same number, and the contract-price box
-  // right below states it a fourth time. The ladder earns its space only when
-  // base and final actually differ — which is precisely when there ARE adders:
-  // a $14,500 re-roof is what turns $2.20/W into $4.03/W, and that gap is the
-  // whole point of showing it. A loan keeps the box regardless, because the
-  // monthly row is its own reason to render.
-  if (adderTotalCents === 0 && monthlyCents == null) return null;
-
-  return (
-    <div className="max-w-md rounded-lg border border-border bg-muted/30 p-3">
-      <div className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[1fr_auto]">
-        <span className="text-muted-foreground">Base</span>
-        <span className="text-right tabular-nums">
-          ${(basePpwCents / 100).toFixed(2)}/W · {usdWhole(baseCents)}
-        </span>
-
-        <span className="text-muted-foreground">Adders</span>
-        <span className="text-right tabular-nums">
-          ${(adderPpw / 100).toFixed(2)}/W · {usdWhole(adderTotalCents)}
-        </span>
-
-        <span className="border-t border-border pt-1 font-semibold">Final</span>
-        <span
-          data-testid="final-ppw"
-          className="border-t border-border pt-1 text-right font-semibold tabular-nums"
-        >
-          ${(finalPpw / 100).toFixed(2)}/W · {usdWhole(contractCents)}
-        </span>
-
-        {monthlyCents != null && (
-          <>
-            <span className="text-muted-foreground">
-              Monthly {monthlyApproved ? "(approved)" : "(estimate)"}
-            </span>
-            <span className="text-right tabular-nums">{usdWhole(monthlyCents)}/mo</span>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Cents → "$2,700". Whole dollars: nobody quotes a system to the cent. */
-function usdWhole(cents: number): string {
-  return `$${Math.round(cents / 100).toLocaleString()}`;
-}
-
 export type LenderOption = {
   id: string;
   name: string;
@@ -775,7 +683,9 @@ export function SolarFinancePanel({
   lenders,
   lenderId: initialLenderId,
   products,
-  targetNetPpwCents,
+  defaultBasePpwCents,
+  minPpwCents,
+  maxPpwCents,
   adderCatalogue,
   adderLines,
   systemSizeKwDc,
@@ -794,7 +704,11 @@ export function SolarFinancePanel({
   /** Every lender's rate sheet: sellable rows, plus whatever this deal quotes.
    *  Held whole so switching lender re-offers terms without a round trip. */
   products: LenderProductOption[];
-  targetNetPpwCents: number | null;
+  /** The company's base price per watt, which a fresh deal opens on. */
+  defaultBasePpwCents: number | null;
+  /** The company's guard rails. A price outside them warns; it never blocks. */
+  minPpwCents: number;
+  maxPpwCents: number;
   /** The adders this company sells, for the rep to pick from. */
   adderCatalogue: AdderOption[];
   /** The lines already on this deal. The total is derived from them. */
@@ -816,7 +730,6 @@ export function SolarFinancePanel({
   const [lenderProductId, setLenderProductId] = React.useState<string>(finance?.lenderProductId ?? "");
   const lender = lenders.find((l) => l.id === lenderId) ?? null;
   const seed = (f: SolarFinanceView) => ({
-    grossPpw: num(f?.grossPpwCents, 100, 2),
     dealerFeePct: num(f?.dealerFeePct),
     rate: num(f?.rateMillsPerKwh, 1000, 3),
     monthly: num(f?.monthlyPaymentCents, 100),
@@ -836,6 +749,25 @@ export function SolarFinancePanel({
   const chosen = products.find((p) => p.id === lenderProductId) ?? null;
 
   /**
+   * The deal's base price per watt — what Anexa charges before a lender's cut.
+   *
+   * Recovered from the stored row rather than kept in a column of its own:
+   * `grossPpwCents` is the sticker the deal was quoted at and `dealerFeePct` is
+   * the cut that was taken out of it, so the base is `gross × (1 − fee)` — the
+   * exact inverse of `grossPpwFromNet`, which is what put the sticker there.
+   *
+   * That inverse is what keeps an already-quoted deal on its own number: a deal
+   * quoted on a 28% loan recovers the base that regrosses to the same sticker,
+   * and a cash deal (fee zero) recovers its price unchanged. A deal nobody has
+   * priced yet opens on the company figure.
+   */
+  const [basePpwCents, setBasePpwCents] = React.useState<number | null>(() =>
+    finance && finance.grossPpwCents > 0
+      ? Math.round(finance.grossPpwCents * (1 - (finance.dealerFeePct ?? 0) / 100))
+      : defaultBasePpwCents
+  );
+
+  /**
    * What the adders come to, derived from the lines exactly as the server
    * derives it.
    *
@@ -850,27 +782,33 @@ export function SolarFinancePanel({
   }, [adderLines, finance?.adderTotalCents, systemSizeKwDc]);
 
   /**
-   * Choosing a product writes the derived sticker straight into the box.
+   * The fee this deal is quoted under, and the sticker the base grosses up to.
    *
-   * The box has to show what will be saved. Leaving the rep's old $3.50 on
-   * screen while the quote beside it prices $3.99 is two numbers for one field,
-   * and only one of them survives Save. Typing over it afterwards still wins —
-   * the server keeps a price it is sent and derives only when it is sent none.
+   * The fee is read off the RATE SHEET whenever a programme is quoted, because
+   * that is where the save action reads it from too — a typed fee that the
+   * server is going to overwrite is a number on screen that does not survive
+   * Save. Cash carries no fee by definition; a hand-quoted loan with no
+   * programme behind it falls back to the typed box.
+   */
+  const feePct = isCash
+    ? 0
+    : (chosen?.dealerFeePct ?? (form.dealerFeePct.trim() === "" ? null : Number(form.dealerFeePct)) ?? 0);
+  const stickerPpwCents =
+    basePpwCents == null ? null : grossPpwFromNet(basePpwCents, Number.isFinite(feePct) ? feePct : 0);
+
+  /**
+   * Choosing a programme copies its terms into the boxes.
+   *
+   * The boxes have to show what will be saved. Leaving the previous
+   * programme's 28% fee and 3.99% APR on screen under a card that says 38% and
+   * 0% is the screen lying about what Save will write. The PRICE is not touched:
+   * the base belongs to the deal, and each programme grosses it up by its own
+   * fee — switching lender changes what the customer pays, not what we charge.
    */
   const applyProductFrom = (p: LenderProductOption) => {
     setLenderProductId(p.id);
-    const gross =
-      targetNetPpwCents != null && p.dealerFeePct != null
-        ? grossPpwFromNet(targetNetPpwCents, p.dealerFeePct)
-        : null;
-
     setForm((f) => ({
       ...f,
-      ...(gross != null ? { grossPpw: (gross / 100).toFixed(2) } : {}),
-      // Every field the SERVER will overwrite from this product, filled in now
-      // so the boxes agree with the row that is about to be saved. Leaving the
-      // previous programme's 28% fee and 3.99% APR on screen under a card that
-      // says 38% and 0% is the screen lying about what Save will write.
       dealerFeePct: num(p.dealerFeePct),
       aprPct: p.product === "loan" ? num(p.aprPct) : "",
       loanTermMonths: p.product === "loan" ? num(p.termMonths) : "",
@@ -924,17 +862,17 @@ export function SolarFinancePanel({
   /**
    * The one basis every column is priced on.
    *
-   * Read live off the form rather than off the saved row: a rep who has just
-   * typed a $14,500 re-roof into Adders expects the comparison to move, and a
-   * table still quoting the pre-adder totals is worse than no table.
+   * Read live off the price card and the adder lines rather than off the saved
+   * row: a rep who has just moved the price ten cents expects every card and
+   * column to move with it, and a table still quoting the saved figures is
+   * worse than no table.
    */
   const basis: CompareBasis = {
     systemSizeKwDc,
     year1ProductionKwh,
     adderTotalCents,
     downPaymentCents: numOrNullPure(form.downPayment, 100) ?? 0,
-    targetNetPpwCents,
-    typedGrossPpwCents: numOrNullPure(form.grossPpw, 100),
+    basePpwCents,
     annualDegradationPct,
   };
 
@@ -968,8 +906,7 @@ export function SolarFinancePanel({
    *
    * Deliberately separate from shortlisting: checking a card is a question, and
    * this is the answer. It writes the lender first — everything else on the
-   * screen belongs to that lender — then the product type and the programme,
-   * and seeds the sticker the same way picking a product always has.
+   * screen belongs to that lender — then the product type and the programme.
    */
   async function quoteOffer(row: CompareRow) {
     if (row.id === CASH_OFFER_ID) {
@@ -986,14 +923,12 @@ export function SolarFinancePanel({
     toast.success(`Quoting ${row.lenderName ?? "this lender"} · ${row.label}. Save to keep it.`);
   }
 
-
-
   /**
    * What this deal costs a month, live, before anything is saved.
    *
-   * Mirrors the server rather than reading a stored figure: the rep changes the
-   * product, the sticker and the payment move with it, and Save then writes the
-   * same numbers because both sides compute them the same way.
+   * Mirrors the server rather than reading a stored figure: the rep moves the
+   * price, the payment moves with it, and Save then writes the same numbers
+   * because both sides compute them the same way.
    */
   const quote = React.useMemo(() => {
     // The sheet's own factor arithmetic, computed BEFORE the approved-figure
@@ -1002,8 +937,8 @@ export function SolarFinancePanel({
     // with — hiding it the moment an approval lands is how a mismatch goes
     // unnoticed.
     const principalNow =
-      isLoan && chosen
-        ? (numOrNullPure(form.grossPpw, 100) ?? 0) * systemSizeKwDc * 1000 +
+      isLoan && chosen && stickerPpwCents != null
+        ? stickerPpwCents * Math.round(systemSizeKwDc * 1000) +
           adderTotalCents -
           (numOrNullPure(form.downPayment, 100) ?? 0)
         : 0;
@@ -1014,13 +949,29 @@ export function SolarFinancePanel({
 
     const approvedCents = numOrNullPure(form.loanMonthly, 100);
     if (isLoan && approvedCents != null) {
+      // The estimate is kept alongside rather than replaced. An approval that
+      // comes back $66 above what the rate sheet prices is worth seeing; a
+      // screen that swaps one number for the other silently is how the gap
+      // gets found by the customer instead.
+      const sheetCents =
+        factors && factorMonthlyCents(factors)
+          ? factorMonthlyCents(factors)
+          : chosen && stickerPpwCents != null
+            ? loanPaymentCents({
+                principalCents:
+                  Math.round(systemSizeKwDc * 1000 * stickerPpwCents) +
+                  adderTotalCents -
+                  (numOrNullPure(form.downPayment, 100) ?? 0),
+                aprPct: chosen.aprPct,
+                termMonths: chosen.termMonths,
+              })
+            : null;
       return {
         monthlyCents: approvedCents,
         approved: true,
         fromFactor: false,
         factors,
-        grossPpwCents: null,
-        derivedGross: false,
+        sheetCents: sheetCents !== approvedCents ? sheetCents : null,
       };
     }
     if (!chosen) return null;
@@ -1031,25 +982,13 @@ export function SolarFinancePanel({
         approved: false,
         fromFactor: false,
         factors: null,
-        grossPpwCents: null,
-        derivedGross: false,
+        sheetCents: null,
       };
     }
     if (product === "ppa") return null; // priced per kWh produced, not per month
+    if (!isLoan || stickerPpwCents == null) return null;
 
-    if (!isLoan) return null;
-
-    // Read from the box, which applyProduct has already filled with the derived
-    // figure. One number on screen, and it is the one that saves.
-    const grossPpwCents = numOrNullPure(form.grossPpw, 100);
-    if (grossPpwCents == null) return null;
-    const derived =
-      targetNetPpwCents != null && chosen.dealerFeePct != null
-        ? grossPpwFromNet(targetNetPpwCents, chosen.dealerFeePct)
-        : null;
-
-    const contractCents =
-      Math.round(systemSizeKwDc * 1000 * grossPpwCents) + adderTotalCents;
+    const contractCents = Math.round(systemSizeKwDc * 1000 * stickerPpwCents) + adderTotalCents;
     const principal = contractCents - (numOrNullPure(form.downPayment, 100) ?? 0);
 
     // A PUBLISHED payment factor outranks our amortisation. The factor already
@@ -1071,27 +1010,24 @@ export function SolarFinancePanel({
       /** True when the figure came off the sheet rather than out of a formula. */
       fromFactor: factors != null && factorMonthlyCents(factors) != null,
       factors,
-      grossPpwCents,
-      derivedGross: derived != null && derived === grossPpwCents,
+      sheetCents: null,
     };
   }, [
-    chosen, product, isLoan, systemSizeKwDc, targetNetPpwCents,
-    form.grossPpw, adderTotalCents, form.downPayment, form.loanMonthly,
+    chosen, product, isLoan, systemSizeKwDc, stickerPpwCents,
+    adderTotalCents, form.downPayment, form.loanMonthly,
   ]);
 
-  /** What the boxes below currently add up to. Purchase only — see solar-money. */
+  /** What the boxes above currently add up to. Purchase only — see solar-money. */
   const liveContractCents = React.useMemo(() => {
-    if (!isPurchase) return null;
-    const gross = numOrNullPure(form.grossPpw, 100);
-    if (gross == null || !(systemSizeKwDc > 0)) return null;
+    if (!isPurchase || stickerPpwCents == null || !(systemSizeKwDc > 0)) return null;
     return pricePurchase({
       product,
       systemSizeKwDc,
-      grossPpwCents: gross,
-      dealerFeePct: numOrNullPure(form.dealerFeePct) ?? 0,
+      grossPpwCents: stickerPpwCents,
+      dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
       adderTotalCents,
     }).contractPriceCents;
-  }, [isPurchase, product, systemSizeKwDc, form.grossPpw, form.dealerFeePct, adderTotalCents]);
+  }, [isPurchase, product, systemSizeKwDc, stickerPpwCents, feePct, adderTotalCents]);
 
   // A blank box means "not set" (null); a typed "0" is a real zero and is sent
   // as one. `form.x ? … : null` is safe here ONLY because these are STRINGS —
@@ -1109,11 +1045,23 @@ export function SolarFinancePanel({
     );
     if (bad) return toast.error(`"${bad[1]}" is not a number.`);
 
+    // An empty price box is not a price of zero, and it must not be saved as
+    // one: sending no sticker lets the server fall back to the company default,
+    // which would quietly write $3.50/W over a rep who had just cleared the
+    // field on purpose.
+    if (isPurchase && stickerPpwCents == null) {
+      return toast.error("Set a base price for the system before saving.");
+    }
+
     setBusy(true);
     const res = await saveSolarFinanceAction({
       leadId,
       product,
-      grossPpwCents: numOrNull(form.grossPpw, 100) ?? undefined,
+      // The STICKER, not the base: `grossPpwCents` is what the customer is
+      // quoted, and the base is recovered from it and the fee on the way back
+      // in. Sent explicitly so the server keeps this price rather than deriving
+      // the company default over the top of it.
+      grossPpwCents: stickerPpwCents ?? undefined,
       // Zeroed rather than left stale: pricePurchase ignores a cash deal's
       // fee, but the row should not carry one a lender never charged.
       dealerFeePct: isCash ? 0 : rawOrNull(form.dealerFeePct) ?? undefined,
@@ -1136,32 +1084,62 @@ export function SolarFinancePanel({
       setForm(seed(res.finance));
       setProduct(res.finance.product);
       setLenderProductId(res.finance.lenderProductId ?? "");
+      if (res.finance.grossPpwCents > 0) {
+        setBasePpwCents(
+          Math.round(res.finance.grossPpwCents * (1 - (res.finance.dealerFeePct ?? 0) / 100))
+        );
+      }
     }
     toast.success("Financing saved");
     router.refresh();
   }
 
+  const dirty = finance != null && liveContractCents != null && finance.contractPriceCents !== liveContractCents;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {/* WHAT WE CHARGE, first, above everything derived from it. The step used
+          to open on a shelf of lender cards and put the price below the
+          comparison — a rep scrolled past every figure derived from the price
+          before reaching the price itself. */}
+      <SystemPriceCard
+        systemSizeKwDc={systemSizeKwDc}
+        basePpwCents={basePpwCents}
+        defaultPpwCents={defaultBasePpwCents}
+        minPpwCents={minPpwCents}
+        maxPpwCents={maxPpwCents}
+        adderTotalCents={adderTotalCents}
+        quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
+        quotedLabel={
+          chosen ? [lender?.name, chosen.name].filter(Boolean).join(" · ") || lenderProductLabel(chosen) : null
+        }
+        canEdit={canEdit}
+        onChange={setBasePpwCents}
+      />
+
+      {/* Adders are LINES, not a box. The old "Adders $" field could not say
+          what the money was for and went stale every time the array changed —
+          see SolarAddersPanel. Directly under the price because they are the
+          other half of the contract total the card above prints. */}
+      <SolarAddersPanel
+        leadId={leadId}
+        canEdit={canEdit}
+        catalogue={adderCatalogue}
+        lines={adderLines}
+        systemWatts={Math.round(systemSizeKwDc * 1000)}
+        storedTotalCents={finance?.adderTotalCents ?? 0}
+      />
+
       {/* The rate sheets ARE the interface. Four abstract product types used to
           sit here instead, which put the actual offers two dropdowns deep and
           made "which of these is cheaper" a question the screen could not
           answer. */}
-      {/*
-        An empty shelf has to say WHY it is empty.
-
-        This is a hint ABOVE the shelf rather than a replacement for it. Cash
-        needs no lender and no rate sheet, so the cash column is quotable on a
-        company that has not entered a single programme — swapping the whole
-        comparison out for this banner used to take that away too, leaving a
-        step with nothing on it at all.
-      */}
       {/* Only the "lenders exist, but none of them has a rate sheet" case.
           FinanceOffers carries its own note for having no lenders at all, and
           two amber boxes stacked saying almost the same thing reads as two
           separate problems. */}
       {lenders.length > 0 && offers.length === 0 && (
-        <div className="max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <Notice tone="warn">
           <strong>No lender programmes are loaded yet</strong>, so there is nothing to compare
           against cash. Adding each partner&apos;s terms once turns this step into a shelf of
           every programme priced against this system, side by side, with the monthly payment
@@ -1173,8 +1151,9 @@ export function SolarFinancePanel({
             Add a lender and its rate sheet
           </Link>
           .
-        </div>
+        </Notice>
       )}
+
       <FinanceOffers
         lenders={lenders}
         products={offers}
@@ -1187,132 +1166,72 @@ export function SolarFinancePanel({
         onOpenDesign={onOpenDesign}
       />
 
+      {/* What the deal is quoted on right now, in one strip: the programme, the
+          payment, and — when the sheet publishes factors — both versions of it,
+          never just the flattering one. */}
       {quote && (
-        <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            {quote.grossPpwCents != null && (
-              <span className="text-xs text-muted-foreground">
-                gross{" "}
-                <span className="font-medium text-foreground">
-                  ${(quote.grossPpwCents / 100).toFixed(2)}/W
-                </span>
-                {quote.derivedGross && " · derived from the net target"}
-              </span>
-            )}
-            <span className="ml-auto">
-              <span className="text-xs text-muted-foreground">
-                {quote.approved ? "Monthly (approved)" : "Monthly (est.)"}
-              </span>{" "}
-              <span className="text-lg font-semibold tabular-nums">
-                ${(quote.monthlyCents / 100).toFixed(2)}
-              </span>
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {quote.approved
-              ? "The lender's own figure from the approval. This is what the customer sees."
-              : quote.fromFactor
-                ? "From the rate sheet's payment factor — the lender's own published figure. The approved figure replaces it below."
-                : "Estimated from the product's terms. The lender's approved figure replaces it below."}
-          </p>
-
-          {/* Both payments, never just the flattering one: the low figure is
-              conditional on a paydown the customer has to actually make, and a
-              customer who never applies the credit finds out from a bank
-              statement. */}
-          {quote.factors && (
-            <dl className="mt-2 space-y-1 border-t border-border/60 pt-2 text-[11px]">
-              {quote.factors.withPaydownMonthlyCents != null && (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">
-                    With paydown
-                    <span className="ml-1 opacity-70">
-                      (&times;&nbsp;{formatFactor(chosen?.factorWithPaydownMicros)})
-                    </span>
-                  </dt>
-                  <dd className="tabular-nums font-medium">
-                    ${(quote.factors.withPaydownMonthlyCents / 100).toFixed(2)}/mo
-                  </dd>
+        <section className="rounded-xl border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              {lender && <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="sm" />}
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">
+                  {chosen ? lenderProductLabel(chosen) : "Cash"}
                 </div>
+                <div className="text-[11px] text-muted-foreground">
+                  {quote.approved
+                    ? "The lender's own figure from the approval — this is what the customer sees."
+                    : quote.fromFactor
+                      ? "From the rate sheet's payment factor, the lender's own published figure."
+                      : "Estimated from the programme's terms. The approved figure replaces it below."}
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                {quote.approved ? "Monthly · approved" : "Monthly · estimate"}
+              </div>
+              <div className="font-display text-2xl font-semibold tabular-nums">
+                ${(quote.monthlyCents / 100).toFixed(2)}
+              </div>
+              {quote.sheetCents != null && (
+                <div className="text-[11px] text-muted-foreground tabular-nums">
+                  rate sheet priced ${(quote.sheetCents / 100).toFixed(2)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Both payments: the low figure is conditional on a paydown the
+              customer has to actually make, and a customer who never applies
+              the credit finds out from a bank statement. */}
+          {quote.factors && (
+            <dl className="grid gap-x-6 gap-y-1 border-t border-border/70 bg-muted/20 px-4 py-2.5 text-[11px] sm:grid-cols-3">
+              {quote.factors.withPaydownMonthlyCents != null && (
+                <FactorLine
+                  label="With paydown"
+                  sub={`× ${formatFactor(chosen?.factorWithPaydownMicros)}`}
+                  value={`$${(quote.factors.withPaydownMonthlyCents / 100).toFixed(2)}/mo`}
+                />
               )}
               {quote.factors.withoutPaydownMonthlyCents != null && (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">
-                    Without paydown
-                    <span className="ml-1 opacity-70">
-                      (&times;&nbsp;{formatFactor(chosen?.factorWithoutPaydownMicros)})
-                    </span>
-                  </dt>
-                  <dd className="tabular-nums font-medium">
-                    ${(quote.factors.withoutPaydownMonthlyCents / 100).toFixed(2)}/mo
-                  </dd>
-                </div>
+                <FactorLine
+                  label="Without paydown"
+                  sub={`× ${formatFactor(chosen?.factorWithoutPaydownMicros)}`}
+                  value={`$${(quote.factors.withoutPaydownMonthlyCents / 100).toFixed(2)}/mo`}
+                />
               )}
               {quote.factors.paydownCents != null && quote.factors.paydownMonths != null && (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">
-                    Paydown due by month {quote.factors.paydownMonths} ({quote.factors.paydownPct}%)
-                  </dt>
-                  <dd className="tabular-nums font-medium">
-                    {money(quote.factors.paydownCents)}
-                  </dd>
-                </div>
+                <FactorLine
+                  label={`Paydown due by month ${quote.factors.paydownMonths}`}
+                  sub={`${quote.factors.paydownPct}% of the loan`}
+                  value={money(quote.factors.paydownCents)}
+                />
               )}
             </dl>
           )}
-        </div>
+        </section>
       )}
-
-      {/* The two product families take completely different inputs. Showing the
-          wrong ones is how a PPA ends up quoted with a dealer fee. */}
-      {/* TextField throughout, not bare Label+Input: it wires htmlFor/id, so a
-          screen reader announces each figure, the label is clickable, and the
-          field can be addressed by name. */}
-      {isPurchase ? (
-        <div className="space-y-4">
-          <div className={`grid gap-3 ${isCash ? "max-w-[13rem]" : "max-w-md sm:grid-cols-2"}`}>
-            <TextField label="Gross $/W" type="number" step="0.01" value={form.grossPpw} disabled={!canEdit} onChange={(v) => set("grossPpw", v)} />
-            {/* A dealer fee is what a LENDER charges to buy the paper. A cash
-                deal has no lender, so the box could never be filled in — it sat
-                permanently greyed out saying "n/a" beside the one input on this
-                screen that matters. Absent beats disabled. */}
-            {!isCash && (
-              <TextField
-                label="Dealer fee %"
-                type="number"
-                value={form.dealerFeePct}
-                disabled={!canEdit}
-                onChange={(v) => set("dealerFeePct", v)}
-              />
-            )}
-          </div>
-
-          {/* Adders are LINES now, not a box. The old "Adders $" field could not
-              say what the money was for and went stale every time the array
-              changed — see SolarAddersPanel. */}
-          <SolarAddersPanel
-            leadId={leadId}
-            canEdit={canEdit}
-            catalogue={adderCatalogue}
-            lines={adderLines}
-            systemWatts={Math.round(systemSizeKwDc * 1000)}
-            storedTotalCents={finance?.adderTotalCents ?? 0}
-          />
-
-          {/* Base → adders → final, the three numbers a rep is actually checked
-              on. The final rate is the one that differs from the sticker
-              whenever there is extra work on the job: quoting $3.50/W on a job
-              carrying a $14,500 re-roof understates what the customer pays per
-              watt by seventy cents. */}
-          <PriceLadder
-            systemSizeKwDc={systemSizeKwDc}
-            basePpwCents={numOrNullPure(form.grossPpw, 100) ?? 0}
-            adderTotalCents={adderTotalCents}
-            monthlyCents={quote?.monthlyCents ?? null}
-            monthlyApproved={quote?.approved ?? false}
-          />
-        </div>
-      ) : null}
 
       {/* The lender's terms, as issued. Loan only — a cash deal has no lender,
           no down payment (it is paid in full) and no monthly.
@@ -1321,14 +1240,11 @@ export function SolarFinancePanel({
           can contradict the lender's real one, and the number a customer is
           quoted must be the number the lender issued. */}
       {isLoan && (
-        <div className="max-w-3xl space-y-2 rounded-lg border border-border p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              {lender && <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="sm" />}
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Approved loan terms
-              </div>
-            </div>
+        <section className="rounded-xl border border-border bg-card">
+          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-2.5">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Approved loan terms
+            </h4>
             {lender?.portalUrl && (
               <a
                 href={lender.portalUrl}
@@ -1336,33 +1252,56 @@ export function SolarFinancePanel({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
               >
-                Run credit{lender ? ` at ${lender.name}` : ""} <ExternalLink className="size-3" />
+                Run credit at {lender.name} <ExternalLink className="size-3" />
               </a>
             )}
-          </div>
-          {/* TextField, not bare Label+Input: it wires htmlFor/id, so a screen
-              reader announces each figure and the label is clickable. */}
-          <div className="grid gap-3 sm:grid-cols-4">
-            <TextField label="APR %" type="number" step="0.01" value={form.aprPct} disabled={!canEdit} onChange={(v) => set("aprPct", v)} />
-            <TextField label="Term (months)" type="number" value={form.loanTermMonths} disabled={!canEdit} onChange={(v) => set("loanTermMonths", v)} />
-            <TextField label="Down payment $" type="number" value={form.downPayment} disabled={!canEdit} onChange={(v) => set("downPayment", v)} />
-            <TextField label="Monthly payment $" type="number" step="0.01" value={form.loanMonthly} disabled={!canEdit} onChange={(v) => set("loanMonthly", v)} />
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Enter the lender&rsquo;s own figures from the approval — these are never calculated here.
-          </p>
+          </header>
 
-          {lender?.creditInstructions && (
-            <details className="rounded-lg border border-border/70 p-2">
-              <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
-                How to run credit{lender ? ` at ${lender.name}` : ""}
-              </summary>
-              <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
-                {lender.creditInstructions}
-              </p>
-            </details>
-          )}
-        </div>
+          <div className="space-y-3 p-4">
+            {/* TextField, not bare Label+Input: it wires htmlFor/id, so a screen
+                reader announces each figure and the label is clickable.
+
+                The fee sits in the same row as the terms it belongs to, and is
+                the RATE SHEET's rather than this screen's whenever a programme
+                is quoted — the save action reads it off the same row, so an
+                editable box here would show a number that does not survive
+                Save. Shown and locked rather than hidden: it is the figure that
+                explains why this lender's sticker is higher than the next
+                one's. Only a hand-quoted loan, with no programme behind it,
+                gets to type one. */}
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <TextField
+                label="Dealer fee %"
+                type="number"
+                value={form.dealerFeePct}
+                disabled={!canEdit || chosen != null}
+                onChange={(v) => set("dealerFeePct", v)}
+              />
+              <TextField label="APR %" type="number" step="0.01" value={form.aprPct} disabled={!canEdit} onChange={(v) => set("aprPct", v)} />
+              <TextField label="Term (months)" type="number" value={form.loanTermMonths} disabled={!canEdit} onChange={(v) => set("loanTermMonths", v)} />
+              <TextField label="Down payment $" type="number" value={form.downPayment} disabled={!canEdit} onChange={(v) => set("downPayment", v)} />
+              <TextField label="Monthly payment $" type="number" step="0.01" value={form.loanMonthly} disabled={!canEdit} onChange={(v) => set("loanMonthly", v)} />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {chosen
+                ? `The dealer fee is ${lender?.name ?? "this lender"}'s, off the rate sheet. `
+                : ""}
+              Enter the lender&rsquo;s own figures from the approval — these are never calculated
+              here.
+            </p>
+
+            {lender?.creditInstructions && (
+              <details className="rounded-lg border border-border/70 p-2">
+                <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
+                  How to run credit at {lender.name}
+                </summary>
+                <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                  {lender.creditInstructions}
+                </p>
+              </details>
+            )}
+          </div>
+        </section>
       )}
 
       {/* A lease's monthly, its escalator, its term and a PPA's $/kWh used to be
@@ -1370,33 +1309,57 @@ export function SolarFinancePanel({
           set: every one of them is published on the lender's rate sheet, is
           filled in by quoting the programme, and is what the customer signs.
           Leaving them editable meant a proposal could go out on an escalator no
-          lender had ever issued — and on a shelf of loans and cash they were
-          four empty boxes under the comparison for no reason at all. Change the
-          terms on the rate sheet; the quote follows. */}
+          lender had ever issued. Change the terms on the rate sheet; the quote
+          follows. */}
 
-      {/* Live, not the saved figure. The comparison above prices every column
-          from the boxes below, so a stale total sitting under them contradicts
-          the table by the width of whatever was just changed. */}
-      {isPurchase && liveContractCents != null && (
-        <div className="rounded-lg border border-border bg-muted/30 p-3">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Contract price</span>
-            <span className="font-display text-lg font-semibold">{money(liveContractCents)}</span>
-          </div>
-          {finance && finance.contractPriceCents !== liveContractCents && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Saved: {money(finance.contractPriceCents)} — Save financing to write this one.
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+          <Button onClick={save} disabled={busy}>
+            {busy && <Loader2 className="size-4 animate-spin" />} Save financing
+          </Button>
+          {dirty && (
+            <p className="text-[11px] text-muted-foreground">
+              Saved at {money(finance!.contractPriceCents)} — this quote comes to{" "}
+              <span className="font-medium tabular-nums text-foreground">
+                {money(liveContractCents!)}
+              </span>
+              .
             </p>
           )}
         </div>
       )}
-
-      {canEdit && (
-        <Button onClick={save} disabled={busy}>
-          {busy && <Loader2 className="size-4 animate-spin" />} Save financing
-        </Button>
-      )}
     </div>
+  );
+}
+
+/** One published factor and what it makes the payment. */
+function FactorLine({ label, sub, value }: { label: string; sub: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2 sm:block">
+      <dt className="text-muted-foreground">
+        {label} <span className="opacity-70">{sub}</span>
+      </dt>
+      <dd className="font-medium tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * A coloured aside. One component so amber never drifts between two shades and
+ * the dark-mode pairing is written once rather than in every call site.
+ */
+function Notice({ tone, children }: { tone: "warn" | "info"; children: React.ReactNode }) {
+  return (
+    <p
+      className={cn(
+        "max-w-3xl rounded-lg border px-3 py-2.5 text-sm",
+        tone === "warn"
+          ? "border-amber-300/70 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+          : "border-border bg-muted/40 text-muted-foreground"
+      )}
+    >
+      {children}
+    </p>
   );
 }
 

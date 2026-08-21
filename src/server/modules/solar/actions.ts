@@ -11,6 +11,7 @@ import { year1Production, offsetPct } from "@/lib/solar-money";
 import { canGenerate } from "@/lib/solar-validation";
 import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
+import { resolveAdderTotal } from "./adders";
 
 const fail = (error: string) => ({ ok: false as const, error });
 const ok = () => ({ ok: true as const });
@@ -347,7 +348,8 @@ const financeSchema = z.object({
   product: z.enum(["cash", "loan", "lease", "ppa"]),
   grossPpwCents: z.number().int().min(0).optional(),
   dealerFeePct: z.number().min(0).max(100).optional(),
-  adderTotalCents: z.number().int().min(0).optional(),
+  /// NOT accepted from the caller any more. The adder total is the deal's own,
+  /// resolved from its lines — see resolveAdderTotal.
   rateMillsPerKwh: z.number().int().min(0).nullable().optional(),
   monthlyPaymentCents: z.number().int().min(0).nullable().optional(),
   escalatorPct: z.number().min(0).max(10).nullable().optional(),
@@ -410,9 +412,14 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       })
     : null;
 
+  // The adders are the DEAL's, read here rather than taken from the request.
+  // Nothing was sending them, so every save wrote a zero over the cached total
+  // and priced the contract without the extra work in it.
+  const adderTotalCents = await resolveAdderTotal(user.companyId, f.leadId);
+
   // Every product-specific column is gated on the product — see
   // financeRowForProduct for why "most of them" was a customer-facing defect.
-  const data = financeRowForProduct(f, {
+  const data = financeRowForProduct({ ...f, adderTotalCents }, {
     systemSizeKwDc: design?.systemSizeKwDc ?? 0,
     assumptions,
     lenderProduct,

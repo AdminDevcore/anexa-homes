@@ -57,6 +57,32 @@ export async function listDealAdders(
  * an adder is not a decision to price the deal, and an empty finance row would
  * make the readiness report claim a product had been chosen.
  */
+/**
+ * What a deal's adders come to right now, WITHOUT writing anything.
+ *
+ * `saveSolarFinanceAction` needs the figure to price the contract and must not
+ * take it from the request: the panel never sent one, so `f.adderTotalCents ??
+ * 0` in `financeRowForProduct` wrote a zero over the cached total on every
+ * save, and the contract price it stored had the customer's re-roof missing
+ * from it — a quote short by the price of the extra work, generated from a
+ * screen that had been showing the right number the whole time.
+ *
+ * Applies the same rule `recomputeAdderTotal` does: the lines win the moment
+ * there is one, and a legacy typed total survives until somebody itemises it.
+ */
+export async function resolveAdderTotal(
+  companyId: string,
+  leadId: string
+): Promise<number> {
+  const [lines, design, finance] = await Promise.all([
+    listDealAdders(companyId, leadId),
+    prisma.solarDesign.findUnique({ where: { leadId }, select: { systemSizeKwDc: true } }),
+    prisma.solarFinance.findUnique({ where: { leadId }, select: { adderTotalCents: true } }),
+  ]);
+  if (lines.length === 0) return finance?.adderTotalCents ?? 0;
+  return adderTotals(lines, Math.round((design?.systemSizeKwDc ?? 0) * 1000)).totalCents;
+}
+
 export async function recomputeAdderTotal(
   companyId: string,
   leadId: string,

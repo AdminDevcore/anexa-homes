@@ -11,6 +11,17 @@ import { test, expect, type Page } from "@playwright/test";
 const FLAG_ON =
   process.env.SOLAR_VERTICAL_ENABLED === "1" || process.env.SOLAR_VERTICAL_ENABLED === "true";
 
+/**
+ * One step in the builder's rail.
+ *
+ * Scoped to the rail rather than matched across the page: the step card's
+ * footer carries "← System design" and "Review & send →" buttons whose names
+ * are the same words, so a bare `getByRole("button", { name: "Financing" })`
+ * is two elements the moment the rep is standing on the step before it.
+ */
+const step = (page: Page, name: string | RegExp) =>
+  page.getByRole("navigation", { name: "Proposal steps" }).getByRole("button", { name });
+
 const PASSWORD = "Passw0rd!";
 
 async function login(page: Page, email: string) {
@@ -47,8 +58,8 @@ test.describe(FLAG_ON ? "the proposal builder's steps" : "the proposal builder's
     const leadId = await openDesignerDeal(page);
     await page.goto(`/portal/leads/${leadId}/solar-proposal`);
 
-    for (const label of [/1 · Customer/, /2 · Energy/, /3 · System design/, /4 · Financing/, /5 · Review/]) {
-      await expect(page.getByRole("button", { name: label })).toBeVisible();
+    for (const label of [/^Customer$/, /^Energy$/, /^System design$/, /^Financing$/, /^Review & send$/]) {
+      await expect(step(page, label)).toBeVisible();
     }
 
     // Step 1 shows who we are quoting, editable in place.

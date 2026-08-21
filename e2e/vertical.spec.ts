@@ -16,6 +16,17 @@ import { test, expect, type Page } from "@playwright/test";
 const FLAG_ON =
   process.env.SOLAR_VERTICAL_ENABLED === "1" || process.env.SOLAR_VERTICAL_ENABLED === "true";
 
+/**
+ * One step in the builder's rail.
+ *
+ * Scoped to the rail rather than matched across the page: the step card's
+ * footer carries "← System design" and "Review & send →" buttons whose names
+ * are the same words, so a bare `getByRole("button", { name: "Financing" })`
+ * is two elements the moment the rep is standing on the step before it.
+ */
+const step = (page: Page, name: string | RegExp) =>
+  page.getByRole("navigation", { name: "Proposal steps" }).getByRole("button", { name });
+
 const PASSWORD = "Passw0rd!";
 
 async function login(page: Page, email: string) {
@@ -188,14 +199,14 @@ test.describe("workspace switcher", () => {
     //
     // Usage lives on the Energy step, which owns it — the design step is the
     // roof now.
-    await page.getByRole("button", { name: /2 · Energy/ }).click();
+    await step(page, /^Energy$/).click();
     const usage = page.getByLabel("Annual usage (kWh)");
     await expect(usage).toBeVisible({ timeout: 15000 });
     await usage.fill("");
     await page.getByRole("button", { name: /Save energy/ }).click();
     await expect(page.getByText(/Energy saved/)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: /5 · Review & send/ }).click();
+    await step(page, /^Review & send$/).click();
     await page.getByRole("button", { name: /Check it is ready/ }).click();
     await expect(page.getByText(/Blocked/)).toBeVisible({ timeout: 15000 });
     // The blocking issue itself, not step 1's "Annual usage (kWh)" label — that
@@ -204,7 +215,7 @@ test.describe("workspace switcher", () => {
     await expect(page.getByText(/Offset cannot be calculated without it/i)).toBeVisible();
 
     // Restore it so later specs see a complete deal.
-    await page.getByRole("button", { name: /2 · Energy/ }).click();
+    await step(page, /^Energy$/).click();
     await usage.fill("14000");
     await page.getByRole("button", { name: /Save energy/ }).click();
     await expect(page.getByText(/Energy saved/)).toBeVisible({ timeout: 15000 });
