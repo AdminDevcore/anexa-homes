@@ -38,7 +38,7 @@ export async function getPublicSolarProposal(token: string) {
       prisma.solarProposal.findUnique({
         where: { publicToken: token },
         select: {
-          id: true, leadId: true, version: true, status: true, signedAt: true,
+          id: true, leadId: true, companyId: true, version: true, status: true, signedAt: true,
           sentAt: true, supersededAt: true, snapshot: true, showComparison: true,
           lead: { select: { vertical: true } },
         },

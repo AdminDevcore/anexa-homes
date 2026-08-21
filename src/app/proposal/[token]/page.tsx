@@ -5,6 +5,7 @@ import { SolarProposalView } from "@/components/proposal/solar-proposal-view";
 import { prisma } from "@/server/db/client";
 import { objectExists } from "@/server/storage";
 import { runUnscoped } from "@/server/vertical/context";
+import { brandingForRecord } from "@/server/branding/resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -40,17 +41,21 @@ export default async function PublicSolarProposalPage({
     ? await layoutUrlIfAvailable(token, proposal.snapshot.layout.fileId, proposal.leadId)
     : null;
 
+  // Branded by the DEAL, never by whoever is looking: an anonymous visitor has
+  // no session and no workspace cookie, and a solar proposal has to carry the
+  // solar brand's accent regardless.
+  const branding = await brandingForRecord(proposal.companyId, proposal.lead.vertical);
+
   return (
-    <div className="min-h-screen bg-background">
-      <SolarProposalView
-        snapshot={proposal.snapshot}
-        showComparison={proposal.showComparison}
-        token={token}
-        alreadySigned={!!proposal.signedAt}
-        superseded={!!proposal.supersededAt}
-        layoutImageUrl={layoutImageUrl}
-      />
-    </div>
+    <SolarProposalView
+      snapshot={proposal.snapshot}
+      showComparison={proposal.showComparison}
+      token={token}
+      alreadySigned={!!proposal.signedAt}
+      superseded={!!proposal.supersededAt}
+      layoutImageUrl={layoutImageUrl}
+      accentColor={branding.accentColor}
+    />
   );
 }
 

@@ -6,10 +6,14 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { SolarProposalView } from "@/components/proposal/solar-proposal-view";
+import { brandingForRecord } from "@/server/branding/resolve";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Proposal preview" };
+
+/** Height of the portal shell's own sticky header, which sits above this page. */
+const PORTAL_HEADER_PX = 64;
 
 /**
  * The generated proposal, exactly as the customer would see it — read from
@@ -68,9 +72,14 @@ export default async function SolarProposalPreviewPage({
   const layoutImageUrl = layoutAsset ? `/portal/files/${layoutAsset.id}` : null;
   const layoutMissing = !!snapshot.layout && !layoutAsset;
 
+  // The document is branded by the DEAL, not by the workspace the reviewer
+  // happens to be sitting in — so a roofing admin previewing a solar proposal
+  // sees the solar brand's accent, exactly as the customer will.
+  const branding = await brandingForRecord(user.companyId, "solar");
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 pt-6 print:hidden sm:px-6">
+    <div className="min-h-screen bg-[#f6f3ee]">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 pt-6 print:hidden sm:px-6">
         <Link
           href={`/portal/leads/${id}/solar-proposal`}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -92,7 +101,7 @@ export default async function SolarProposalPreviewPage({
         that owns each number, and a plain sentence saying that changing one
         makes the next version rather than rewriting this one.
       */}
-      <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-1 px-4 text-xs print:hidden sm:px-6">
+      <div className="mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-1 px-4 pb-6 text-xs print:hidden sm:px-6">
         <span className="text-muted-foreground">Change a figure:</span>
         {(
           [
@@ -113,7 +122,7 @@ export default async function SolarProposalPreviewPage({
       {/* Internal only — the customer's copy simply omits the section. This is
           the rep's cue to fix it BEFORE the proposal goes anywhere. */}
       {layoutMissing && (
-        <div className="mx-auto mt-4 max-w-3xl px-4 print:hidden sm:px-6">
+        <div className="mx-auto mb-6 max-w-5xl px-4 print:hidden sm:px-6">
           <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" />
             <span>
@@ -139,6 +148,11 @@ export default async function SolarProposalPreviewPage({
         superseded={!!proposal.supersededAt}
         previewMode
         layoutImageUrl={layoutImageUrl}
+        accentColor={branding.accentColor}
+        // The portal shell's header is already pinned at the top of the
+        // viewport. Without this the document's own nav pins to y=0 as well and
+        // the two bars paint over each other.
+        chromeOffset={PORTAL_HEADER_PX}
       />
     </div>
   );
