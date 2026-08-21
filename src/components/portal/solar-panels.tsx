@@ -679,6 +679,14 @@ function PriceLadder({
     );
   }
 
+  // With no adders every rung is the same number, and the contract-price box
+  // right below states it a fourth time. The ladder earns its space only when
+  // base and final actually differ — which is precisely when there ARE adders:
+  // a $14,500 re-roof is what turns $2.20/W into $4.03/W, and that gap is the
+  // whole point of showing it. A loan keeps the box regardless, because the
+  // monthly row is its own reason to render.
+  if (adderTotalCents === 0 && monthlyCents == null) return null;
+
   return (
     <div className="max-w-md rounded-lg border border-border bg-muted/30 p-3">
       <div className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[1fr_auto]">
@@ -823,6 +831,7 @@ export function SolarFinancePanel({
   const set = (k: keyof ReturnType<typeof seed>, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const isPurchase = product === "cash" || product === "loan";
   const isLoan = product === "loan";
+  const isCash = product === "cash";
 
   const chosen = products.find((p) => p.id === lenderProductId) ?? null;
 
@@ -1105,7 +1114,9 @@ export function SolarFinancePanel({
       leadId,
       product,
       grossPpwCents: numOrNull(form.grossPpw, 100) ?? undefined,
-      dealerFeePct: rawOrNull(form.dealerFeePct) ?? undefined,
+      // Zeroed rather than left stale: pricePurchase ignores a cash deal's
+      // fee, but the row should not carry one a lender never charged.
+      dealerFeePct: isCash ? 0 : rawOrNull(form.dealerFeePct) ?? undefined,
       rateMillsPerKwh: numOrNull(form.rate, 1000),
       monthlyPaymentCents: numOrNull(form.monthly, 100),
       escalatorPct: rawOrNull(form.escalatorPct),
@@ -1259,16 +1270,21 @@ export function SolarFinancePanel({
           field can be addressed by name. */}
       {isPurchase ? (
         <div className="space-y-4">
-          <div className="grid max-w-md gap-3 sm:grid-cols-2">
+          <div className={`grid gap-3 ${isCash ? "max-w-[13rem]" : "max-w-md sm:grid-cols-2"}`}>
             <TextField label="Gross $/W" type="number" step="0.01" value={form.grossPpw} disabled={!canEdit} onChange={(v) => set("grossPpw", v)} />
-            <TextField
-              label="Dealer fee %"
-              type="number"
-              value={product === "cash" ? "" : form.dealerFeePct}
-              disabled={!canEdit || product === "cash"}
-              placeholder={product === "cash" ? "n/a — no lender" : undefined}
-              onChange={(v) => set("dealerFeePct", v)}
-            />
+            {/* A dealer fee is what a LENDER charges to buy the paper. A cash
+                deal has no lender, so the box could never be filled in — it sat
+                permanently greyed out saying "n/a" beside the one input on this
+                screen that matters. Absent beats disabled. */}
+            {!isCash && (
+              <TextField
+                label="Dealer fee %"
+                type="number"
+                value={form.dealerFeePct}
+                disabled={!canEdit}
+                onChange={(v) => set("dealerFeePct", v)}
+              />
+            )}
           </div>
 
           {/* Adders are LINES now, not a box. The old "Adders $" field could not
