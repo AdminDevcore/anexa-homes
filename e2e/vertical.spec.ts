@@ -78,8 +78,10 @@ test.describe("workspace switcher", () => {
   test("editing one workspace's settings never touches the other", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
 
-    // Capture roofing's inspection outcomes.
-    await page.goto("/portal/settings/inspection-outcomes");
+    // The production checklist, because both workspaces have one and both store
+    // it in the same vertical-namespaced column. (This used to prove the point
+    // on inspection outcomes — solar no longer has that page at all.)
+    await page.goto("/portal/settings/production-checklist");
     const firstRow = page.getByRole("textbox").first();
     await expect(firstRow).toBeVisible({ timeout: 15000 });
     const roofingBefore = await page.getByRole("textbox").evaluateAll((els) =>
@@ -87,24 +89,60 @@ test.describe("workspace switcher", () => {
     );
     expect(roofingBefore.length).toBeGreaterThan(0);
 
-    // Rename the first outcome while in SOLAR.
+    // Rename the first step while in SOLAR.
     await switchTo(page, "Solar");
-    await page.goto("/portal/settings/inspection-outcomes");
+    await page.goto("/portal/settings/production-checklist");
     const solarFirst = page.getByRole("textbox").first();
     await expect(solarFirst).toBeVisible({ timeout: 15000 });
-    await solarFirst.fill("SOLAR ONLY OUTCOME");
+    await solarFirst.fill("SOLAR ONLY STEP");
     await solarFirst.blur();
     await page.waitForTimeout(1500); // debounced autosave
 
     // Roofing's list must be byte-for-byte what it was.
     await switchTo(page, "Roofing");
-    await page.goto("/portal/settings/inspection-outcomes");
+    await page.goto("/portal/settings/production-checklist");
     await expect(page.getByRole("textbox").first()).toBeVisible({ timeout: 15000 });
     const roofingAfter = await page.getByRole("textbox").evaluateAll((els) =>
       els.map((e) => (e as HTMLInputElement).value)
     );
     expect(roofingAfter).toEqual(roofingBefore);
-    expect(roofingAfter).not.toContain("SOLAR ONLY OUTCOME");
+    expect(roofingAfter).not.toContain("SOLAR ONLY STEP");
+  });
+
+  test("solar's settings hub offers neither commission rules nor a survey outcome", async ({ page }) => {
+    // Two roofing-only settings. Commission rules pay the crew and PM lines;
+    // solar has neither, and a solar rep's cut is the split on his own profile
+    // in Team. Inspection ("Site Survey") outcomes configured a picker solar's
+    // deal page stopped rendering — its visit ends at the appointment status.
+    await login(page, "admin@anexahomes.com");
+
+    // Roofing has both — this is a strip for solar, not a deletion.
+    await page.goto("/portal/settings");
+    await expect(page.getByText("Commission Rules")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Inspection Outcomes")).toBeVisible();
+
+    await switchTo(page, "Solar");
+    await page.goto("/portal/settings");
+    // `exact`: the solar hub also carries a "Solar Settings" card heading.
+    await expect(
+      page.getByRole("heading", { name: "Settings", exact: true })
+    ).toBeVisible({ timeout: 15000 });
+    // Neither card, and neither as a setup-gap warning either — a gap linking
+    // to a page this workspace hides is worse than no gap at all.
+    const body = await page.locator("body").innerText();
+    for (const gone of ["Commission Rules", "Commission rules", "Inspection Outcomes", "Site Survey Outcomes"]) {
+      expect(body, `"${gone}" is still offered in the solar hub`).not.toContain(gone);
+    }
+    // Search finds nothing either: the card is absent, not merely unbanded.
+    await page.getByLabel("Search settings").fill("commission");
+    await expect(page.getByText(/No setting matches/)).toBeVisible({ timeout: 15000 });
+
+    // And the URLs are closed, not just unlinked — both pages write
+    // vertical-scoped rows a solar workspace would never read back.
+    for (const path of ["/portal/settings/commissions", "/portal/settings/inspection-outcomes"]) {
+      await page.goto(path);
+      await expect(page).toHaveURL(/\/portal\/settings$/, { timeout: 15000 });
+    }
   });
 
   test("Operations reports how long the deal spent in each stage", async ({ page }) => {

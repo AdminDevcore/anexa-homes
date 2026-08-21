@@ -9,24 +9,21 @@ import { updateInspectionOutcomesAction } from "@/server/modules/settings/action
 import { PageHeader } from "@/components/portal/ui";
 import { ListSettingsManager } from "@/components/portal/list-settings-manager";
 
-export async function generateMetadata() {
-  const user = await requireUser("/portal/settings/inspection-outcomes");
-  return {
-    title: (await getActiveVertical(user)) === "solar" ? "Site Survey Outcomes" : "Inspection Outcomes",
-  };
-}
+export const metadata = { title: "Inspection Outcomes" };
 
 export default async function InspectionOutcomesSettingsPage() {
   const user = await requireUser("/portal/settings/inspection-outcomes");
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
+  // Roofing's list. This page was once offered to solar too, as "Site Survey
+  // Outcomes" — but solar's visit ends at the appointment status, so the deal
+  // page has no picker to spend the list on. The hub already hides the card;
+  // the redirect closes the URL, because the outcomes are stored per vertical
+  // and a solar session editing them would be filling in a list nothing reads.
   const vertical = await getActiveVertical(user);
-  const items = await getInspectionOutcomes(user.companyId, vertical);
+  if (vertical === "solar") redirect("/portal/settings");
 
-  // Same stored list, same page — different visit. Roofing meets an adjuster on
-  // a roof; solar runs a site survey that gates engineering. The wording follows
-  // the deal page, which already labels this field per vertical.
-  const isSolar = vertical === "solar";
+  const items = await getInspectionOutcomes(user.companyId, vertical);
 
   return (
     <div className="space-y-6">
@@ -34,18 +31,14 @@ export default async function InspectionOutcomesSettingsPage() {
         <ArrowLeft className="size-4" /> Back to settings
       </Link>
       <PageHeader
-        title={isSolar ? "Site Survey Outcomes" : "Inspection Outcomes"}
-        description={
-          isSolar
-            ? "Customize the outcomes recorded after a site survey, and their order."
-            : "Customize the outcomes recorded after a roof inspection / adjuster meeting, and their order."
-        }
+        title="Inspection Outcomes"
+        description="Customize the outcomes recorded after a roof inspection / adjuster meeting, and their order."
       />
       <ListSettingsManager
         items={items}
         save={updateInspectionOutcomesAction}
         addLabel="Add outcome"
-        placeholder={isSolar ? "e.g. Main panel upgrade required" : "e.g. Approved — full replacement"}
+        placeholder="e.g. Approved — full replacement"
       />
     </div>
   );

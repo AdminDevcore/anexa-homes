@@ -272,21 +272,25 @@ function cleanLabels(items: string[]): string[] {
   return out;
 }
 
-/** Replace the company's customizable inspection outcomes (full list). */
+/**
+ * Replace the company's customizable inspection outcomes (full list).
+ *
+ * Roofing only. Solar's visit ends at the appointment status — it has no site
+ * survey outcome to record — so the hub hides the card and the page redirects.
+ * This list is stored per vertical, so without the guard a solar session could
+ * still POST a list into a slice nothing ever reads back.
+ */
 export async function updateInspectionOutcomesAction(input: z.infer<typeof labelListSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const vertical = await getActiveVertical(user);
+  if (vertical === "solar") return fail("Inspection outcomes are a Roofing setting.");
   const parsed = labelListSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid outcomes.");
   const items = cleanLabels(parsed.data.items);
   if (items.length === 0) return fail("Keep at least one outcome.");
 
-  await saveVerticalScopedSetting(
-    user.companyId,
-    await getActiveVertical(user),
-    "inspectionOutcomes",
-    items
-  );
+  await saveVerticalScopedSetting(user.companyId, vertical, "inspectionOutcomes", items);
   revalidatePath("/portal/settings/inspection-outcomes");
   return ok();
 }

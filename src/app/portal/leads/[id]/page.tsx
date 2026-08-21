@@ -256,7 +256,11 @@ export default async function LeadDetailPage({
   // DEAL's vertical, not the active workspace, so the picker always matches
   // the record being viewed.
   const appointmentDispositions = await getAppointmentDispositions(user.companyId, lead.vertical);
-  const inspectionOutcomes = await getInspectionOutcomes(user.companyId, lead.vertical);
+  // Roofing only: a solar deal's visit ends at the appointment, so its panel
+  // renders no inspection step and the list would be fetched to be thrown away.
+  const inspectionOutcomes = isSolarDeal
+    ? []
+    : await getInspectionOutcomes(user.companyId, lead.vertical);
   // The company's own claim-status vocabulary, widened to keep this deal's
   // current status pickable even if the office has since deleted it.
   const claimStatusOptions = claimStatusOptionsFor(

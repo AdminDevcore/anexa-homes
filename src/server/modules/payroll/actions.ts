@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { requireCan, can } from "@/server/rbac/guards";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { sendEmailWithAttachments } from "@/server/modules/notifications/delivery";
@@ -100,6 +101,21 @@ export async function approveAllPendingCommissionsAction() {
 
 // --------------------------- Commission rules -------------------------------
 
+/**
+ * Commission rules are roofing's. Solar pays a rep off the split on his own
+ * profile and has no crew or project-manager line for a rule to pay out to, so
+ * its hub no longer offers the page at all. CommissionRule rows are
+ * vertical-isolated, so a rule written from a solar session lands in a
+ * workspace whose payroll never asks for one — silently, with no error. The
+ * guard is here as well as on the page because a server action is reachable
+ * without it.
+ */
+async function rejectSolar(user: Parameters<typeof getActiveVertical>[0]) {
+  return (await getActiveVertical(user)) === "solar"
+    ? fail("Commission rules are set up in the Roofing workspace.")
+    : null;
+}
+
 const ruleSchema = z.object({
   name: z.string().min(1).max(120),
   role: z.enum(["sales_rep", "manager", "project_manager", "installer"]),
@@ -112,6 +128,8 @@ const ruleSchema = z.object({
 export async function createCommissionRuleAction(input: z.infer<typeof ruleSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const blocked = await rejectSolar(user);
+  if (blocked) return blocked;
   const parsed = ruleSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid rule.");
   await prisma.commissionRule.create({
@@ -132,6 +150,8 @@ export async function createCommissionRuleAction(input: z.infer<typeof ruleSchem
 export async function updateCommissionRuleAction(id: string, input: z.infer<typeof ruleSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const blocked = await rejectSolar(user);
+  if (blocked) return blocked;
   const parsed = ruleSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid rule.");
   const existing = await prisma.commissionRule.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
@@ -154,6 +174,8 @@ export async function updateCommissionRuleAction(id: string, input: z.infer<type
 export async function toggleCommissionRuleAction(id: string, active: boolean) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const blocked = await rejectSolar(user);
+  if (blocked) return blocked;
   const existing = await prisma.commissionRule.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
   if (!existing) return fail("Rule not found.");
   await prisma.commissionRule.update({ where: { id }, data: { active } });
@@ -164,6 +186,8 @@ export async function toggleCommissionRuleAction(id: string, active: boolean) {
 export async function deleteCommissionRuleAction(id: string) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const blocked = await rejectSolar(user);
+  if (blocked) return blocked;
   const existing = await prisma.commissionRule.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
   if (!existing) return fail("Rule not found.");
   await prisma.commissionRule.delete({ where: { id } });

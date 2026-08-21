@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
@@ -13,6 +14,12 @@ export const metadata = { title: "Commission Settings" };
 export default async function CommissionRulesPage() {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
+  // Roofing's page. Solar's hub no longer offers it — a rep's split lives on
+  // his own profile there, and there is no crew or PM line for a rule to pay.
+  // Hiding the card alone would leave the URL live, and CommissionRule rows are
+  // vertical-isolated, so anything saved from a solar session would be written
+  // into a workspace that never reads it.
+  if ((await getActiveVertical(user)) === "solar") redirect("/portal/settings");
 
   const [company, rules] = await Promise.all([
     prisma.company.findUnique({ where: { id: user.companyId }, select: { overheadPct: true, paFeePct: true } }),
