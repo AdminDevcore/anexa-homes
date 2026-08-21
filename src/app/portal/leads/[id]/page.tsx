@@ -29,7 +29,7 @@ import {
   getClaimStatuses,
 } from "@/server/modules/settings/queries";
 import { claimStatusLabel, claimStatusOptionsFor } from "@/lib/claim-status";
-import { SolarOpsCard } from "@/components/portal/solar-ops-card";
+import { DealStageTimeline } from "@/components/portal/deal-stage-timeline";
 import { SolarSystemInfo } from "@/components/portal/solar-system-info";
 import { blockPanelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { lenderLogoUrl } from "@/lib/lender-mark";
@@ -39,7 +39,7 @@ import {
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
 import { pricePurchase } from "@/lib/solar-money";
-import { getLinkedDealSummary } from "@/server/modules/vertical/crossover-queries";
+import { leadStageTimeline } from "@/server/modules/pipeline/stage-history-queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { DealFolders } from "@/components/portal/deal-folders";
@@ -383,8 +383,15 @@ export default async function LeadDetailPage({
         latestProposal: solarProposals[0] ?? null,
       })
     : "not_started";
-  const linkedDeal = isSolarDeal || lead.linkedDealId
-    ? await getLinkedDealSummary(user.companyId, lead.linkedDealId)
+  const stageTimeline = isSolarDeal
+    ? await leadStageTimeline({
+        id: lead.id,
+        createdAt: lead.createdAt,
+        pipelineId: lead.pipelineId,
+        stageId: lead.stageId,
+        stageName: lead.stage?.name ?? null,
+        stageChangedAt: lead.stageChangedAt,
+      })
     : null;
 
   const [solarMilestones, solarFeed] = isSolarDeal
@@ -820,31 +827,7 @@ export default async function LeadDetailPage({
               </div>
 
             <div data-deal-slide="ops">
-            <SolarOpsCard
-              bare
-              leadId={lead.id}
-              stage={
-                lead.stage
-                  ? {
-                      name: lead.stage.name,
-                      stageType: lead.stage.stageType,
-                      ownerRole: lead.stage.ownerRole,
-                      targetDays: lead.stage.targetDays,
-                      followUpDays: lead.stage.followUpDays,
-                      isActionRequired: lead.stage.isActionRequired,
-                    }
-                  : null
-              }
-              stageChangedAt={lead.stageChangedAt ? lead.stageChangedAt.toISOString() : null}
-              createdAt={lead.createdAt.toISOString()}
-              blockedBy={lead.blockedBy}
-              blockerNote={lead.blockerNote}
-              lastTouchAt={lead.lastTouchAt ? lead.lastTouchAt.toISOString() : null}
-              needsReroof={lead.needsReroof}
-              needsMpu={lead.needsMpu}
-              linkedDeal={linkedDeal}
-              canEdit={can(user, "update", "Lead")}
-            />
+              {stageTimeline && <DealStageTimeline timeline={stageTimeline} />}
             </div>
 
             <div data-deal-slide="install">

@@ -15,6 +15,7 @@ import { importOwnerRecords, type OwnerRowMapping, type OwnerImportResult } from
 import { getSkipTraceProvider, type OwnerResult } from "@/server/modules/skiptrace/provider";
 import { resolveStageForAppointment } from "@/server/modules/leads/staging";
 import { resolveOwningRepId } from "@/server/modules/leads/owning-rep";
+import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -439,6 +440,8 @@ export async function convertKnockToLeadAction(
     select: { id: true },
   });
 
+  await recordStageEntry({ leadId: lead.id, stageId: pipeline?.stages[0]?.id ?? null });
+
   await prisma.knock.update({ where: { id: knock.id }, data: { leadId: lead.id } });
   await prisma.knockEvent.create({
     data: { companyId: me.companyId, knockId: knock.id, type: "lead_created", authorId: me.userId, authorName: me.fullName },
@@ -554,6 +557,7 @@ export async function convertKnockToAppointmentAction(
           ...(stageId !== lead.stageId ? { stageChangedAt: new Date() } : {}),
         },
       });
+      if (stageId !== lead.stageId) await recordStageEntry({ leadId: lead.id, stageId });
     }
   }
 

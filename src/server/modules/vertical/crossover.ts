@@ -10,6 +10,7 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { runInVertical } from "@/server/vertical/context";
 import { VERTICAL_LABEL } from "@/lib/vertical";
+import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 
 /**
  * Solar → Roofing crossover.
@@ -120,7 +121,7 @@ export async function createCrossoverDealAction(leadId: string) {
       .filter(Boolean)
       .join(" + ");
 
-    return prisma.lead.create({
+    const lead = await prisma.lead.create({
       data: {
         companyId: user.companyId,
         firstName: source.firstName,
@@ -143,6 +144,8 @@ export async function createCrossoverDealAction(leadId: string) {
       },
       select: { id: true },
     });
+    await recordStageEntry({ leadId: lead.id, stageId: pipeline?.stages[0]?.id ?? null });
+    return lead;
   });
 
   // Close the link from the source side. Still inside the source vertical.

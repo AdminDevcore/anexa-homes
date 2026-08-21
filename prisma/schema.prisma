@@ -668,10 +668,39 @@ model PipelineStage {
   markOverdue           Boolean       @default(false)
   createdAt             DateTime      @default(now())
 
-  leads Lead[]
+  leads       Lead[]
+  stageEvents LeadStageEvent[]
 
   @@unique([pipelineId, key])
   @@map("pipeline_stages")
+}
+
+/// One span of a deal's life in one pipeline stage: when it arrived, when it
+/// left, and — by subtraction — how long that step actually took.
+///
+/// This is a CHILD of Lead (no companyId, no vertical): it is only ever reached
+/// through a lead that vertical isolation has already scoped, exactly like Note
+/// and FileAsset. See server/vertical/models.ts.
+///
+/// The stage NAME is snapshotted alongside the id because a stage can be
+/// renamed or deleted years after a deal passed through it, and a cycle-time
+/// history that silently rewrites itself is worse than none.
+model LeadStageEvent {
+  id        String         @id @default(uuid())
+  leadId    String
+  lead      Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// Null once the stage row is deleted — the name below survives it.
+  stageId   String?
+  stage     PipelineStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  stageName String
+  /// Where this stage sat in the pipeline when the deal passed through it.
+  position  Int            @default(0)
+  enteredAt DateTime       @default(now())
+  /// Null on exactly one row per lead: the stage it is sitting in right now.
+  exitedAt  DateTime?
+
+  @@index([leadId, enteredAt])
+  @@map("lead_stage_events")
 }
 
 model Lead {
@@ -811,6 +840,7 @@ model Lead {
   files              FileAsset[]
   documentPackages   DocumentPackage[]
   activityLogs       ActivityLog[]
+  stageEvents        LeadStageEvent[]
   knocks             Knock[]             @relation("KnockLead")
   scope              ScopeOfWork?
   estimate           Estimate?

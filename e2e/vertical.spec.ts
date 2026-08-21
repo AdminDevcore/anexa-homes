@@ -107,43 +107,29 @@ test.describe("workspace switcher", () => {
     expect(roofingAfter).not.toContain("SOLAR ONLY OUTCOME");
   });
 
-  test("a blocked stage tracks follow-up, not a deadline", async ({ page }) => {
+  test("Operations reports how long the deal spent in each stage", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await switchTo(page, "Solar");
 
-    // The seeded solar deal sits in an externally-blocked stage.
     await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
-    await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible({ timeout: 15000 });
-    // Waiting on a utility is never reported as our team being overdue.
-    await expect(page.getByText(/We don.t control this stage/)).toBeVisible();
-    await expect(page.getByText(/Overdue by/)).toHaveCount(0);
+    await page.getByRole("tab", { name: "Operations" }).click();
 
-    // Logging a follow-up resets the cadence.
-    await page.getByRole("button", { name: /Log follow-up/ }).click();
-    await expect(page.getByText(/Follow-up logged/)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/Last chased/)).toBeVisible({ timeout: 15000 });
-  });
+    // The headline: how long this job has been running, start to now.
+    await expect(page.getByText("Elapsed so far")).toBeVisible({ timeout: 15000 });
 
-  test("a re-roof finding surfaces the crossover instead of burying it", async ({ page }) => {
-    await login(page, "admin@anexahomes.com");
-    await switchTo(page, "Solar");
-    await page.goto("/portal/leads?q=Priya");
-    await page.locator('table a[href^="/portal/leads/"]').first().click();
-    await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+    // The stage it is sitting in, still counting. The seeded deal entered
+    // Permit Submitted 12 days ago and has not moved since.
+    await expect(page.getByText("Permit Submitted").first()).toBeVisible();
+    await expect(page.getByText(/12 days/).first()).toBeVisible();
+    await expect(page.getByText(/\u2192 now/).first()).toBeVisible();
 
-    await expect(page.getByText("Site findings")).toBeVisible({ timeout: 15000 });
-    await page.getByText("Roof needs replacing before install").click();
-    await expect(page.getByRole("button", { name: /Create linked Roofing deal/ })).toBeVisible({
-      timeout: 15000,
-    });
-
-    await page.getByRole("button", { name: /Create linked Roofing deal/ }).click();
-    await expect(page.getByText(/Roofing deal created/)).toBeVisible({ timeout: 15000 });
-    // The link renders, pointing at the deal in the OTHER workspace.
-    await expect(page.getByText(/Linked\s+roofing\s+deal/i)).toBeVisible({ timeout: 15000 });
+    // The chase/SLA controls this tab used to carry are gone: the tab answers
+    // "where did the time go", nothing else.
+    await expect(page.getByRole("button", { name: /Log follow-up/ })).toHaveCount(0);
+    await expect(page.getByText("Site findings")).toHaveCount(0);
   });
 
   test("a proposal cannot be generated from an invalid design", async ({ page }) => {

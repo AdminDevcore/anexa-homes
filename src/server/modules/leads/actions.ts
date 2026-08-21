@@ -8,6 +8,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
+import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 
 /** Ensures the lead exists AND is within the user's row-level scope. */
 async function assertLeadInScope(userCompanyId: string, scope: Prisma.LeadWhereInput, leadId: string) {
@@ -138,7 +139,7 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   // Validate stage belongs to this company.
   const stage = await prisma.pipelineStage.findFirst({
     where: { id: parsed.data.stageId, pipeline: { companyId: user.companyId } },
-    select: { id: true, name: true, defaultBlocker: true, stageType: true },
+    select: { id: true, name: true, position: true, defaultBlocker: true, stageType: true },
   });
   if (!stage) return { ok: false as const, error: "Invalid stage." };
 
@@ -149,6 +150,8 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
       ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
     },
   });
+  await recordStageEntry({ leadId: parsed.data.leadId, stageId: stage.id, stage });
+
   await prisma.activityLog.create({
     data: {
       companyId: user.companyId,
@@ -213,7 +216,7 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
   const stage = await prisma.pipelineStage.findFirst({
     where: { pipelineId: lead.pipelineId, isLost: true, pipeline: { companyId: user.companyId } },
     orderBy: { position: "asc" },
-    select: { id: true, name: true, defaultBlocker: true, stageType: true },
+    select: { id: true, name: true, position: true, defaultBlocker: true, stageType: true },
   });
   if (!stage) {
     return {
@@ -250,6 +253,8 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
       },
     }),
   ]);
+
+  await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage });
 
   await fireEvent({
     companyId: user.companyId,

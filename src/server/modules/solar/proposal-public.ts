@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { runUnscoped, runInVertical, asActiveVertical } from "@/server/vertical/context";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 
 /**
  * Statuses that make a proposal publicly readable.
@@ -110,7 +111,7 @@ export async function acceptSolarProposal(
     });
     const stage = await prisma.pipelineStage.findFirst({
       where: { key: "contract_signed", pipeline: { companyId: co, vertical } },
-      select: { id: true, defaultBlocker: true },
+      select: { id: true, name: true, position: true, defaultBlocker: true },
     });
     if (stage) {
       await prisma.lead.update({
@@ -125,6 +126,7 @@ export async function acceptSolarProposal(
           lastChaseAlertAt: null,
         },
       });
+      await recordStageEntry({ leadId: proposal.leadId, stageId: stage.id, stage });
     }
 
     const { companyId } = await prisma.solarProposal.findUniqueOrThrow({

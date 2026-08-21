@@ -8,6 +8,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
+import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { getClaimStatuses } from "@/server/modules/settings/queries";
 import { claimStatusOpensClaim } from "@/lib/claim-status";
@@ -150,6 +151,8 @@ export async function createLeadAction(input: LeadInput) {
     },
   });
 
+  await recordStageEntry({ leadId: lead.id, stageId });
+
   // The utility the rep read off the meter, put where the proposal looks for
   // it. Seeded into the design rather than stored on the lead: the design is
   // what owns the energy figures, and the Energy step's own edit then wins
@@ -250,6 +253,8 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       customFields: d.customFields as Prisma.InputJsonValue,
     },
   });
+
+  if (stageChanged) await recordStageEntry({ leadId: id, stageId });
 
   // The utility is the design's, not the lead's, so an edit writes it through
   // to the design. Only when the form actually sent one: a roofing edit, or a
@@ -387,6 +392,7 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
   // Setting or clearing the appointment re-derives the front-of-pipeline stage,
   // exactly as the full form does — otherwise booking from the Summary card
   // would leave the deal sitting in "New Lead" with a date on it.
+  let movedTo: string | null = null;
   if ("appointmentAt" in d) {
     const tz = await companyTimeZone(user.companyId);
     data.appointmentAt = d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null;
@@ -398,10 +404,12 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
     if (stageId && stageId !== existing.stageId) {
       data.stage = { connect: { id: stageId } };
       data.stageChangedAt = new Date();
+      movedTo = stageId;
     }
   }
 
   await prisma.lead.update({ where: { id: existing.id }, data });
+  if (movedTo) await recordStageEntry({ leadId: existing.id, stageId: movedTo });
 
   if (canAssign && d.assignedRepId && d.assignedRepId !== existing.assignedRepId) {
     await fireEvent({ companyId: user.companyId, event: "lead_assigned", actorId: user.userId, leadId: existing.id });
