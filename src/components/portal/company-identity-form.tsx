@@ -15,6 +15,8 @@ export function CompanyIdentityForm({
 }: {
   initial: {
     name: string;
+    phone: string;
+    email: string;
     address: string;
     city: string;
     state: string;
@@ -24,6 +26,8 @@ export function CompanyIdentityForm({
 }) {
   const router = useRouter();
   const [name, setName] = React.useState(initial.name);
+  const [phone, setPhone] = React.useState(initial.phone);
+  const [email, setEmail] = React.useState(initial.email);
   const [address, setAddress] = React.useState(initial.address);
   const [city, setCity] = React.useState(initial.city);
   const [state, setState] = React.useState(initial.state);
@@ -35,6 +39,8 @@ export function CompanyIdentityForm({
     setPending(true);
     const res = await updateCompanyIdentityAction({
       name,
+      phone,
+      email,
       address,
       city,
       state,
@@ -52,6 +58,12 @@ export function CompanyIdentityForm({
     <div className="space-y-4 rounded-xl border border-border bg-card p-6">
       <h3 className="font-medium">Company Information</h3>
 
+      <p className="text-sm text-muted-foreground">
+        How the business identifies itself on customer-facing documents — a
+        proposal prints this name, phone, email and address, and will not
+        generate while any of them is blank.
+      </p>
+
       <div className="space-y-1.5">
         <Label>Company Name</Label>
         <Input
@@ -59,6 +71,27 @@ export function CompanyIdentityForm({
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g., Acme Roofing"
         />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>Phone</Label>
+          <Input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="(555) 123-4567"
+            type="tel"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Email</Label>
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="support@example.com"
+            type="email"
+          />
+        </div>
       </div>
 
       <div className="space-y-1.5">

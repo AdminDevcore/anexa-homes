@@ -13,7 +13,10 @@
  *
  * OWNER_EMAIL / OWNER_PASSWORD / OWNER_NAME / COMPANY_NAME are read from env;
  * each falls back to a sensible default (a random password is generated and
- * printed if OWNER_PASSWORD is unset).
+ * printed if OWNER_PASSWORD is unset). COMPANY_PHONE / COMPANY_EMAIL /
+ * COMPANY_ADDRESS / COMPANY_CITY / COMPANY_STATE / COMPANY_ZIP are optional and
+ * have no defaults — they are the identity printed on customer-facing
+ * documents, and the seed says so on the way out when they are left unset.
  */
 import { PrismaClient, type Role } from "@prisma/client";
 import bcrypt from "bcryptjs";
@@ -86,6 +89,18 @@ async function main() {
   const OWNER_PASSWORD = process.env.OWNER_PASSWORD || crypto.randomBytes(9).toString("base64url");
   const OWNER_NAME = process.env.OWNER_NAME || "Mustafa Joulani";
   const COMPANY_NAME = process.env.COMPANY_NAME || "Anexa Homes";
+  // The identity a customer-facing document carries. Optional here — a tenant
+  // can fill them in Settings -> Branding -> Company Information — but they are
+  // NOT seeded blank: `phone: ""` used to be written here, which reads as "set"
+  // to anything doing a null check while printing nothing on the document, and
+  // left the live company blocked from generating a solar proposal with no
+  // screen that could clear it.
+  const COMPANY_PHONE = process.env.COMPANY_PHONE?.trim() || null;
+  const COMPANY_EMAIL = process.env.COMPANY_EMAIL?.trim().toLowerCase() || null;
+  const COMPANY_ADDRESS = process.env.COMPANY_ADDRESS?.trim() || null;
+  const COMPANY_CITY = process.env.COMPANY_CITY?.trim() || null;
+  const COMPANY_STATE = process.env.COMPANY_STATE?.trim() || null;
+  const COMPANY_ZIP = process.env.COMPANY_ZIP?.trim() || null;
   const [ownerFirst, ...ownerRest] = OWNER_NAME.trim().split(/\s+/);
   const ownerLast = ownerRest.join(" ") || "";
   const generatedPw = !process.env.OWNER_PASSWORD;
@@ -105,8 +120,12 @@ async function main() {
     data: {
       name: COMPANY_NAME,
       slug: "anexa-homes",
-      phone: "",
-      email: OWNER_EMAIL,
+      phone: COMPANY_PHONE,
+      email: COMPANY_EMAIL,
+      address: COMPANY_ADDRESS,
+      city: COMPANY_CITY,
+      state: COMPANY_STATE,
+      zip: COMPANY_ZIP,
       timezone: "America/Chicago",
       settings: {
         create: {
@@ -390,6 +409,17 @@ async function main() {
 
   console.log("✅ Clean seed complete.");
   console.log(`   Company: ${COMPANY_NAME} (slug: anexa-homes)`);
+  const missing = [
+    !COMPANY_PHONE && "phone",
+    !COMPANY_EMAIL && "email",
+    !COMPANY_ADDRESS && "address",
+  ].filter(Boolean);
+  if (missing.length) {
+    console.log(`   ⚠️  No company ${missing.join(", ")} set. A solar proposal will not`);
+    console.log("      generate until these are filled in Settings → Branding →");
+    console.log("      Company Information (or seeded via COMPANY_PHONE / COMPANY_EMAIL /");
+    console.log("      COMPANY_ADDRESS / COMPANY_CITY / COMPANY_STATE / COMPANY_ZIP).");
+  }
   console.log(`   Owner login: ${OWNER_EMAIL}`);
   if (generatedPw) {
     console.log(`   Generated password: ${OWNER_PASSWORD}`);

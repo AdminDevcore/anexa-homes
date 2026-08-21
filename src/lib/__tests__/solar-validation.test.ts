@@ -1,5 +1,12 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { validateDesign, type DesignForValidation } from "@/lib/solar-validation";
+import {
+  validateCompanyIdentity,
+  validateDesign,
+  type CompanyForValidation,
+  type DesignForValidation,
+} from "@/lib/solar-validation";
 import { SOLAR_ASSUMPTION_DEFAULTS } from "@/server/modules/solar/settings";
 
 /**
@@ -107,5 +114,56 @@ describe("a rate can come from either direction", () => {
       SOLAR_ASSUMPTION_DEFAULTS
     ).map((i) => i.code);
     expect(codes).toContain("utility.rate_implausible");
+  });
+});
+
+/**
+ * The same rule, applied to the company rather than the design: a blocker the
+ * rep cannot clear is worse than no blocker at all.
+ *
+ * Both halves failed in production at once. `prisma/seed-clean.ts` mints a
+ * tenant with `phone: ""` and no address, so a live Anexa proposal was blocked
+ * on day one — and the finding's "Open company settings" link pointed at
+ * `/portal/settings/company`, a route that has never existed, so following it
+ * 404'd. The Company Information form (Settings -> Branding) had no phone or
+ * email field either, which is why nobody could set them from anywhere.
+ */
+describe("company identity blocks only on what someone can go and fix", () => {
+  const blank: CompanyForValidation = { name: null, phone: null, email: null, address: null };
+
+  it("blocks on every field the customer's proposal prints", () => {
+    expect(validateCompanyIdentity(blank).map((i) => i.code)).toEqual([
+      "company.name_missing",
+      "company.phone_missing",
+      "company.email_missing",
+      "company.address_missing",
+    ]);
+  });
+
+  it("counts a seeded empty string as unset, the way the seed leaves it", () => {
+    const codes = validateCompanyIdentity({ ...blank, phone: "", address: "  " }).map((i) => i.code);
+    expect(codes).toContain("company.phone_missing");
+    expect(codes).toContain("company.address_missing");
+  });
+
+  it("says nothing about a company that is filled in", () => {
+    expect(
+      validateCompanyIdentity({
+        name: "Anexa Homes",
+        phone: "(866) 650-9996",
+        email: "support@anexahomes.com",
+        address: "508 North Bowser Road",
+      })
+    ).toEqual([]);
+  });
+
+  it("sends the rep to a page that exists", () => {
+    for (const issue of validateCompanyIdentity(blank)) {
+      const href = issue.action!.href;
+      expect(
+        existsSync(join(process.cwd(), "src/app", href, "page.tsx")),
+        `${href} has no page.tsx — the finding is a dead link`
+      ).toBe(true);
+    }
   });
 });

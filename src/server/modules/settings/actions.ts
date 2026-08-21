@@ -732,6 +732,11 @@ export async function setEmailSignedCopyToSignersAction(enabled: boolean) {
 
 const companyIdentitySchema = z.object({
   name: z.string().min(1).max(120),
+  // Phone and email are on the CUSTOMER-FACING documents (a solar proposal
+  // prints both, and refuses to generate without them), so they belong here
+  // rather than with the portal's own support contacts in CompanySettings.
+  phone: z.string().max(40).optional().or(z.literal("")),
+  email: z.string().max(160).optional().or(z.literal("")),
   address: z.string().max(200).optional().or(z.literal("")),
   city: z.string().max(80).optional().or(z.literal("")),
   state: z.string().max(40).optional().or(z.literal("")),
@@ -745,14 +750,20 @@ export async function updateCompanyIdentityAction(input: z.infer<typeof companyI
   const parsed = companyIdentitySchema.safeParse(input);
   if (!parsed.success) return fail("Invalid company values.");
   const d = parsed.data;
+  // Trimmed to null, never stored blank: readiness checks and document
+  // templates ask "is this set?", and a stored " " answers yes while printing
+  // nothing. A seeded `phone: ""` is the same trap from the other end.
+  const set = (v: string | undefined) => v?.trim() || null;
   await prisma.company.update({
     where: { id: user.companyId },
     data: {
-      name: d.name,
-      address: d.address || null,
-      city: d.city || null,
-      state: d.state || null,
-      zip: d.zip || null,
+      name: d.name.trim(),
+      phone: set(d.phone),
+      email: set(d.email),
+      address: set(d.address),
+      city: set(d.city),
+      state: set(d.state),
+      zip: set(d.zip),
       timezone: d.timezone,
     },
   });

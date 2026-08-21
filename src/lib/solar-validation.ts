@@ -485,7 +485,11 @@ export function validateCustomer(c: CustomerForValidation, leadId?: string): Val
  */
 export function validateCompanyIdentity(c: CompanyForValidation): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const to = { label: "Open company settings", href: "/portal/settings/company" };
+  // Branding, not a "company settings" page: the Company Information card lives
+  // there and is the only screen that writes these columns. The link used to
+  // point at /portal/settings/company, which has never been a route, so the one
+  // finding a rep could do nothing about was also the one that 404'd.
+  const to = { label: "Open company information", href: "/portal/settings/branding" };
   const push = (code: string, field: string, message: string) =>
     issues.push({ severity: "block", code, group: "company", field, message, action: to });
 

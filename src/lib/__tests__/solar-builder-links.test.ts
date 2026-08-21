@@ -23,7 +23,7 @@ describe("builderStepFromHref", () => {
 
   it("leaves links to other screens alone", () => {
     expect(builderStepFromHref(`/portal/leads/${LEAD}`)).toBeNull();
-    expect(builderStepFromHref("/portal/settings/company")).toBeNull();
+    expect(builderStepFromHref("/portal/settings/branding")).toBeNull();
     expect(builderStepFromHref("/portal/settings/solar")).toBeNull();
     // The roofing counterpart is a different builder on a different route.
     expect(builderStepFromHref(`/portal/leads/${LEAD}/presentation`)).toBeNull();
