@@ -23,31 +23,54 @@ export function LeadSourcesManager({ items }: { items: Source[] }) {
   const [addName, setAddName] = React.useState("");
   const [editId, setEditId] = React.useState<string | null>(null);
   const [editName, setEditName] = React.useState("");
+  const addRef = React.useRef<HTMLInputElement | null>(null);
+  // Mirrors `busy` for the guard below: two Enters in the same tick would both
+  // read the pre-render state value and fire the action twice.
+  const busyRef = React.useRef(false);
 
-  async function run(p: Promise<{ ok: boolean; error?: string }>, success?: string) {
+  /**
+   * Runs one action with the panel in its saving state. `work` is a thunk rather
+   * than a promise so a save already in flight can be dropped before it starts —
+   * and so a *throw* (dropped connection, restarted dev server, expired session)
+   * still clears `busy`. Leaving it set stranded every control on the page,
+   * including the add field, until a full reload.
+   */
+  async function run(work: () => Promise<{ ok: boolean; error?: string }>, success?: string) {
+    if (busyRef.current) return false;
+    busyRef.current = true;
     setBusy(true);
-    const res = await p;
-    setBusy(false);
-    if (!res.ok) { toast.error(res.error); return false; }
-    if (success) toast.success(success);
-    router.refresh();
-    return true;
+    try {
+      const res = await work();
+      if (!res.ok) { toast.error(res.error); return false; }
+      if (success) toast.success(success);
+      router.refresh();
+      return true;
+    } catch (err) {
+      console.error("Lead source action failed", err);
+      toast.error("Couldn’t save that — check your connection and try again.");
+      return false;
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }
 
   async function add() {
     const name = addName.trim();
-    if (!name) return toast.error("Enter a source name.");
-    if (await run(createLeadSourceAction(name), "Source added")) setAddName("");
+    if (!name) { toast.error("Enter a source name."); addRef.current?.focus(); return; }
+    if (await run(() => createLeadSourceAction(name), "Source added")) setAddName("");
+    // Sources get entered in a burst, so hand the caret straight back.
+    addRef.current?.focus();
   }
   async function saveEdit(id: string) {
     const name = editName.trim();
     if (!name) return toast.error("Enter a source name.");
-    if (await run(renameLeadSourceAction(id, name), "Source renamed")) setEditId(null);
+    if (await run(() => renameLeadSourceAction(id, name), "Source renamed")) setEditId(null);
   }
   async function remove(s: Source) {
     if (s._count.leads > 0) return toast.error("Used by existing leads — deactivate it instead.");
     if (!confirm(`Delete "${s.name}"?`)) return;
-    await run(deleteLeadSourceAction(s.id), "Source deleted");
+    await run(() => deleteLeadSourceAction(s.id), "Source deleted");
   }
 
   const activeCount = items.filter((s) => s.active).length;
@@ -89,11 +112,11 @@ export function LeadSourcesManager({ items }: { items: Source[] }) {
                   <span className="shrink-0 text-xs text-muted-foreground">{s._count.leads} lead{s._count.leads === 1 ? "" : "s"}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" disabled={busy || i === 0} onClick={() => run(moveLeadSourceAction(s.id, "up"))}><ArrowUp className="size-4" /></Button>
-                  <Button variant="ghost" size="icon" disabled={busy || i === items.length - 1} onClick={() => run(moveLeadSourceAction(s.id, "down"))}><ArrowDown className="size-4" /></Button>
+                  <Button variant="ghost" size="icon" disabled={busy || i === 0} onClick={() => run(() => moveLeadSourceAction(s.id, "up"))}><ArrowUp className="size-4" /></Button>
+                  <Button variant="ghost" size="icon" disabled={busy || i === items.length - 1} onClick={() => run(() => moveLeadSourceAction(s.id, "down"))}><ArrowDown className="size-4" /></Button>
                   <Button variant="ghost" size="icon" disabled={busy} onClick={() => { setEditId(s.id); setEditName(s.name); }}><Pencil className="size-4" /></Button>
                   <span className="mx-1 inline-flex items-center" title={s.active ? "Active — shown in picker" : "Inactive — hidden from picker"}>
-                    <Switch checked={s.active} disabled={busy} onCheckedChange={(v) => run(setLeadSourceActiveAction(s.id, v), v ? "Source activated" : "Source deactivated")} />
+                    <Switch checked={s.active} disabled={busy} onCheckedChange={(v) => run(() => setLeadSourceActiveAction(s.id, v), v ? "Source activated" : "Source deactivated")} />
                   </span>
                   <Button
                     variant="ghost"
@@ -112,9 +135,14 @@ export function LeadSourcesManager({ items }: { items: Source[] }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        {/*
+          Deliberately not disabled while saving: disabling a focused input blurs
+          it, so a slow save swallowed whatever was typed next and left the field
+          looking dead. The button is what guards against a double submit.
+        */}
         <Input
+          ref={addRef}
           value={addName}
-          disabled={busy}
           placeholder="New source, e.g. Facebook Ads"
           onChange={(e) => setAddName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
