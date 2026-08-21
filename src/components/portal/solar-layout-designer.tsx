@@ -101,6 +101,43 @@ export type EquipOption = {
 /** Google clamps each side of a Static Maps image to 640; scale=2 doubles it. */
 const DEFAULT_CANVAS_PX = 1280;
 
+/**
+ * How close to a traced setback point a click has to land to count as being ON
+ * it, in SCREEN pixels — the dot is the target, and the dot is the same size on
+ * screen however far the picture is zoomed.
+ */
+const SETBACK_SNAP_PX = 12;
+
+/** That radius in ground metres, which is what the trace is stored in. */
+function setbackSnapM(viewScale: number, mpp: number) {
+  return Math.max(8, SETBACK_SNAP_PX / viewScale) * mpp;
+}
+
+/**
+ * Which end of a trace in progress a point lands on.
+ *
+ * This is how a setback ENDS. Finishing used to be a double-click or Enter and
+ * nothing else, so a rep who came back round to the dot they started from — the
+ * gesture every mapping tool closes a shape with — just dropped another point on
+ * top of it, and the dashed line ran on forever.
+ *
+ * The first point closes the loop; the last one ends an open run, which is also
+ * where the second click of a double-click lands.
+ */
+function setbackVertexAt(
+  pts: { e: number; n: number }[] | null,
+  m: { e: number; n: number } | null,
+  snapM: number
+): "close" | "end" | null {
+  if (!pts || !m || pts.length === 0) return null;
+  const near = (p: { e: number; n: number }) => Math.hypot(p.e - m.e, p.n - m.n) <= snapM;
+  // A two-point line closed on itself is a line drawn twice, so a loop needs
+  // three corners before the first dot becomes a target.
+  if (pts.length >= 3 && near(pts[0])) return "close";
+  if (pts.length >= 2 && near(pts[pts.length - 1])) return "end";
+  return null;
+}
+
 type Tool = "draw" | "panel" | "select" | "movePanel" | "erase" | "setback";
 type Zoom = 20 | 21;
 
@@ -305,6 +342,12 @@ export function SolarLayoutDesigner({
   const canvasH = loaded?.ok ? loaded.heightPx : DEFAULT_CANVAS_PX;
 
   const mpp = lat == null ? 0 : metresPerPixel(lat, zoom, 2);
+  /**
+   * The point a click would land on right now, if any — so the cursor, the
+   * rubber band and the click itself all agree about where the trace ends.
+   */
+  const setbackSnap =
+    tool === "setback" ? setbackVertexAt(pending, ghostPoint, setbackSnapM(viewScale, mpp)) : null;
   const selected = blocks.find((b) => b.id === selectedId) ?? null;
   const count = panelCount(blocks);
 
@@ -512,7 +555,16 @@ export function SolarLayoutDesigner({
       }
 
       if (opts.chrome && pending && pending.length > 0) {
-        const pts = [...pending, ...(ghostPoint ? [ghostPoint] : [])].map(toPx);
+        // The rubber band snaps HOME when the pointer is over the dot that
+        // would close the loop, so a rep can see the shape shut before they
+        // commit to it rather than after.
+        const tail =
+          setbackSnap === "close"
+            ? pending[0]
+            : setbackSnap === "end"
+              ? pending[pending.length - 1]
+              : ghostPoint;
+        const pts = [...pending, ...(tail ? [tail] : [])].map(toPx);
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
@@ -521,12 +573,21 @@ export function SolarLayoutDesigner({
         ctx.strokeStyle = "#fb923c";
         ctx.stroke();
         ctx.setLineDash([]);
-        for (const p of pending.map(toPx)) {
+        const target =
+          setbackSnap === "close" ? 0 : setbackSnap === "end" ? pending.length - 1 : -1;
+        pending.map(toPx).forEach((p, i) => {
+          const isTarget = i === target;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, isTarget ? 9 : 5, 0, Math.PI * 2);
           ctx.fillStyle = "#fb923c";
           ctx.fill();
-        }
+          if (!isTarget) return;
+          // A white ring around the dot a click would land on: the only signal
+          // that this click ends the trace instead of extending it.
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "#ffffff";
+          ctx.stroke();
+        });
       }
 
       for (const b of blocks) {
@@ -598,7 +659,19 @@ export function SolarLayoutDesigner({
         ctx.setLineDash([]);
       }
     },
-    [blocks, setbacks, pending, ghostPoint, selectedId, drag, moduleMm, mpp, canvasW, canvasH]
+    [
+      blocks,
+      setbacks,
+      pending,
+      ghostPoint,
+      setbackSnap,
+      selectedId,
+      drag,
+      moduleMm,
+      mpp,
+      canvasW,
+      canvasH,
+    ]
   );
 
   React.useEffect(() => {
@@ -699,15 +772,25 @@ export function SolarLayoutDesigner({
     };
   };
 
-  /** Finish the setback being traced. Fewer than two points is not a line. */
-  const finishSetback = React.useCallback(() => {
-    const pts = pendingRef.current;
-    setPending(null);
-    setGhostPoint(null);
-    if (!pts || pts.length < 2) return;
-    setSetbacks([...setbacksRef.current, { id: uid(), points: pts, widthM: DEFAULT_SETBACK_M }]);
-    setDirty(true);
-  }, [setPending, setSetbacks]);
+  /**
+   * Finish the setback being traced. Fewer than two points is not a line.
+   *
+   * `close` puts the first point back on the end, so the run's last segment is
+   * the one home to where the trace started. setbackBands skips zero-length
+   * segments, so a duplicate costs nothing if the click was already there.
+   */
+  const finishSetback = React.useCallback(
+    (opts?: { close?: boolean }) => {
+      const pts = pendingRef.current;
+      setPending(null);
+      setGhostPoint(null);
+      if (!pts || pts.length < 2) return;
+      const points = opts?.close ? [...pts, pts[0]] : pts;
+      setSetbacks([...setbacksRef.current, { id: uid(), points, widthM: DEFAULT_SETBACK_M }]);
+      setDirty(true);
+    },
+    [setPending, setSetbacks]
+  );
 
   function onPointerDown(ev: React.PointerEvent) {
     if (!canEdit || lat == null) return;
@@ -722,6 +805,11 @@ export function SolarLayoutDesigner({
     }
 
     if (tool === "setback") {
+      // Landing on a point already down ends the trace rather than stacking
+      // another point on it. Hit-tested against the click, not against the
+      // hover, so this works on a touchscreen too — there is no hover there.
+      const on = setbackVertexAt(pendingRef.current, m, setbackSnapM(viewScale, mpp));
+      if (on) return finishSetback({ close: on === "close" });
       setPending([...(pendingRef.current ?? []), m]);
       return;
     }
@@ -1212,6 +1300,9 @@ export function SolarLayoutDesigner({
             className={cn(
               "block max-w-none",
               canEdit && (tool === "draw" || tool === "panel" || tool === "setback") && "cursor-crosshair",
+              // Over the dot that ends the trace it stops being a crosshair,
+              // because this click is not another corner.
+              canEdit && setbackSnap && "!cursor-pointer",
               canEdit && tool === "movePanel" && "cursor-grab",
               canEdit && tool === "erase" && "cursor-cell"
             )}
@@ -1401,8 +1492,8 @@ export function SolarLayoutDesigner({
 
             {pending && (
               <div className="pointer-events-auto absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-900 px-4 py-2 text-xs text-white shadow-lg">
-                Click along the edge · <strong>double-click or Enter</strong> to finish · Esc to
-                cancel
+                Click along the edge · <strong>click the first dot to close</strong> · double-click
+                or Enter to finish · Esc to cancel
               </div>
             )}
 

@@ -551,4 +551,94 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     ).toBeLessThan(clear);
     expect(await panelsOnRoof(page)).toBe(drawn);
   });
+
+  /**
+   * A rep traces a setback by clicking round the eave — and then has to be able
+   * to STOP. Finishing used to be a double-click or Enter and nothing else, so
+   * clicking back onto the dot the trace started from just dropped another point
+   * on top of it and the dashed line ran on forever.
+   *
+   * Clicking the first point closes the loop; clicking the last one ends an open
+   * run, which is also what the second click of a double-click lands on.
+   */
+  test("a traced setback ends where the rep clicks back onto a point already down", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+
+    /**
+     * Wait for the imagery to resolve before aiming at the picture.
+     *
+     * The canvas is full-bleed while the tile is in flight and REFITS the moment
+     * it lands — 1280 px wide down to 622 here. A trace started before that puts
+     * its first point on one canvas and its closing click on another, and the
+     * shape never shuts. Waiting for the box to stop moving is not enough: two
+     * early samples are identical, and the refit comes after them.
+     */
+    const imagery = page.waitForResponse((r) => r.url().includes("/api/property/satellite"), {
+      timeout: 30000,
+    });
+    await openDesigner(page);
+    await imagery;
+    await pickTool(page, "Draw setbacks");
+    const box = await (async () => {
+      let last = "";
+      for (let i = 0; i < 40; i++) {
+        const b = (await page.getByTestId("layout-canvas").boundingBox())!;
+        const key = `${b.x},${b.y},${b.width},${b.height}`;
+        if (key === last) return b;
+        last = key;
+        await page.waitForTimeout(120);
+      }
+      throw new Error("the designer canvas never stopped resizing");
+    })();
+
+    /**
+     * A fraction of the part of the picture that is both ON SCREEN and clear of
+     * the floating panels: the tool palette over the top-left, the totals over
+     * the top-right, the hint pill along the bottom, and — because the picture
+     * is square and the window is not — everything below the fold. A click on
+     * any of those is a click the canvas never sees, which reads as "the tool
+     * ignored me" while the tool is working perfectly.
+     */
+    const left = Math.max(box.x, 200);
+    const right = Math.min(box.x + box.width, page.viewportSize()!.width - 40);
+    const top = Math.max(box.y, 130);
+    const bottom = Math.min(box.y + box.height, page.viewportSize()!.height - 90);
+    const at = (fx: number, fy: number) => ({
+      x: left + (right - left) * fx,
+      y: top + (bottom - top) * fy,
+    });
+    const click = (fx: number, fy: number) => {
+      const p = at(fx, fy);
+      return page.mouse.click(p.x, p.y);
+    };
+    const tracing = page.getByText("Click along the edge");
+    const footer = page.locator("footer").first();
+
+    // Three corners of an eave, then back onto the first dot to close it.
+    await click(0.1, 0.1);
+    await click(0.6, 0.1);
+    await click(0.6, 0.5);
+    await expect(tracing).toBeVisible();
+
+    await click(0.1, 0.1);
+    await expect(tracing).toBeHidden();
+    await expect(footer).toContainText("1 setback");
+
+    // An open run ends on its own last point instead — no loop closed, and one
+    // more setback on the roof.
+    await click(0.25, 0.7);
+    await click(0.75, 0.75);
+    await expect(tracing).toBeVisible();
+    await click(0.75, 0.75);
+    await expect(tracing).toBeHidden();
+    await expect(footer).toContainText("2 setbacks");
+
+    // And the gesture the hint has always advertised still works.
+    await click(0.9, 0.2);
+    const dbl = at(0.9, 0.45);
+    await page.mouse.dblclick(dbl.x, dbl.y);
+    await expect(tracing).toBeHidden();
+    await expect(footer).toContainText("3 setbacks");
+  });
+
 });
