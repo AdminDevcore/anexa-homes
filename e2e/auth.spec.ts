@@ -72,3 +72,47 @@ test("accounting can view payroll, sales rep cannot", async ({ page }) => {
   await expect(page).not.toHaveURL(/\/portal\/payroll/);
   await logout(page);
 });
+
+/**
+ * Google sign-in, as far as it can be driven without real Google credentials.
+ *
+ * The happy path needs an actual OAuth round trip and a Google account, so what
+ * is testable here is the two ends: the button appears only when the provider
+ * is configured, and a refusal comes back as a sentence rather than an
+ * unchanged form. The decision itself is unit-tested in
+ * src/lib/__tests__/google-signin.test.ts, which is where the interesting cases
+ * live (unverified address, disabled account, ambiguous match).
+ */
+test("the Google button appears only when the provider is configured", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.getByLabel("Email")).toBeVisible({ timeout: 15000 });
+
+  const button = page.getByRole("button", { name: /Continue with Google/i });
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    await expect(button).toBeVisible();
+  } else {
+    // A button that can only fail is worse than no button: with no client id
+    // the provider is not registered at all, so it must not be offered.
+    await expect(button).toHaveCount(0);
+  }
+});
+
+test("a refused Google sign-in explains itself on the login page", async ({ page }) => {
+  // Auth.js collapses every refusal into one AccessDenied code, so the signIn
+  // callback redirects with its OWN reason instead. This is that landing.
+  await page.goto("/login?error=no_account");
+  await expect(page.getByText(/No Anexa account uses that email/i)).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(page.getByText(/Ask an admin/i)).toBeVisible();
+
+  // A disabled account is a different answer from a missing one.
+  await page.goto("/login?error=account_inactive");
+  await expect(page.getByText(/that account is not active/i)).toBeVisible({ timeout: 15000 });
+
+  // Auth.js's own codes land on this same param. Echoing one would show the
+  // user a word from a library, so unknown codes render nothing.
+  await page.goto("/login?error=AccessDenied");
+  await expect(page.getByText(/Ask an admin/i)).toHaveCount(0);
+  await expect(page.getByLabel("Email")).toBeVisible();
+});

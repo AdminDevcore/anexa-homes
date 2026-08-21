@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/auth/login-form";
 import { getSessionUser, dashboardPathForRole } from "@/server/auth/session";
+import { isGoogleEnabled } from "@/server/auth/google";
+import { GOOGLE_ERROR_COPY, type GoogleDenialReason } from "@/lib/google-signin";
 
 export const metadata: Metadata = { title: "Sign in" };
 
@@ -27,9 +29,9 @@ const PORTAL_COPY: Record<string, { title: string; subtitle: string }> = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ portal?: string; next?: string }>;
+  searchParams: Promise<{ portal?: string; next?: string; error?: string }>;
 }) {
-  const { portal, next } = await searchParams;
+  const { portal, next, error } = await searchParams;
 
   const existing = await getSessionUser();
   if (existing) {
@@ -44,7 +46,18 @@ export default async function LoginPage({
         <h1 className="font-display text-3xl font-semibold tracking-tight">{copy.title}</h1>
         <p className="mt-2 text-muted-foreground">{copy.subtitle}</p>
       </div>
-      <LoginForm next={next} />
+      <LoginForm
+        next={next}
+        googleEnabled={isGoogleEnabled}
+        // Only OUR refusal codes are rendered. Auth.js puts its own generic
+        // codes ("AccessDenied", "Configuration") on this same param, and
+        // echoing an unknown one would show the user a word from a library.
+        googleError={
+          error && error in GOOGLE_ERROR_COPY
+            ? GOOGLE_ERROR_COPY[error as GoogleDenialReason]
+            : null
+        }
+      />
     </div>
   );
 }
