@@ -7,6 +7,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { permittedVerticalFilter } from "@/server/vertical/visibility";
+import { planStarterRules } from "./defaults";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -130,4 +131,85 @@ export async function markAllNotificationsReadAction() {
   });
   revalidatePath("/portal/notifications");
   return ok();
+}
+
+/**
+ * The rules this workspace would gain from the starter set, without writing any.
+ *
+ * Separate from applying them on purpose: these rules send real email to real
+ * staff the next time a deal moves, so the set is shown and confirmed before it
+ * exists rather than after.
+ */
+export async function previewStarterNotificationRulesAction() {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+
+  const [stages, existing] = await Promise.all([
+    // The active workspace's pipeline — the extension scopes `pipeline`, and
+    // stages are reached through it, so this is the open workspace's list.
+    prisma.pipelineStage.findMany({
+      where: { pipeline: { companyId: user.companyId } },
+      orderBy: { position: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.notificationRule.findMany({
+      where: { companyId: user.companyId },
+      select: { name: true },
+    }),
+  ]);
+
+  const planned = planStarterRules(stages, existing.map((r) => r.name));
+  return {
+    ok: true as const,
+    rules: planned.map((r) => ({
+      name: r.name,
+      event: r.event,
+      channels: r.channels,
+      recipients: [...r.recipients.roles, ...r.recipients.dynamic],
+    })),
+  };
+}
+
+/**
+ * Create the starter rules this workspace is missing. Additive and idempotent:
+ * a rule whose name is already taken is skipped, so pressing it twice tops the
+ * set up instead of duplicating it.
+ */
+export async function applyStarterNotificationRulesAction() {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+
+  const [stages, existing] = await Promise.all([
+    prisma.pipelineStage.findMany({
+      where: { pipeline: { companyId: user.companyId } },
+      orderBy: { position: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.notificationRule.findMany({
+      where: { companyId: user.companyId },
+      select: { name: true },
+    }),
+  ]);
+
+  const planned = planStarterRules(stages, existing.map((r) => r.name));
+  if (planned.length === 0) return fail("This workspace already has every starter rule.");
+
+  for (const r of planned) {
+    await prisma.notificationRule.create({
+      data: {
+        companyId: user.companyId,
+        name: r.name,
+        event: r.event,
+        conditions: r.conditions as Prisma.InputJsonValue,
+        recipients: r.recipients as Prisma.InputJsonValue,
+        channels: r.channels as Prisma.InputJsonValue,
+        titleTemplate: r.titleTemplate,
+        bodyTemplate: r.bodyTemplate,
+        active: true,
+      },
+    });
+  }
+
+  revalidatePath("/portal/settings/notifications");
+  return { ok: true as const, created: planned.length };
 }

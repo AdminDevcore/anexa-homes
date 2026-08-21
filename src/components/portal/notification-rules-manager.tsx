@@ -21,6 +21,7 @@ import {
   toggleNotificationRuleAction, deleteNotificationRuleAction, type RuleInput,
 } from "@/server/modules/notifications/actions";
 import { EVENT_DEFS, DYNAMIC_TARGETS, eventLabel } from "@/server/modules/notifications/types";
+import { StarterRulesButton } from "./starter-rules-button";
 
 type Option = { id: string; name: string };
 type RoleOption = { value: string; label: string };
@@ -51,13 +52,17 @@ export function NotificationRulesManager(props: {
 }) {
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <StarterRulesButton hasRules={props.rules.length > 0} />
         <RuleDialog {...props} />
       </div>
       <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
         {props.rules.length === 0 && (
-          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-            No rules yet. Add one to start sending notifications.
+          <div className="space-y-1 px-5 py-10 text-center text-sm text-muted-foreground">
+            <p>No rules yet, so this workspace sends no notifications at all.</p>
+            <p className="text-xs">
+              Add one, or start from the standard set — rules do not carry across workspaces.
+            </p>
           </div>
         )}
         {props.rules.map((r) => (
