@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ListTodo,
   CalendarClock,
+  CalendarCheck,
   Camera,
   Users,
   ClipboardCheck,
@@ -175,6 +176,7 @@ export default async function LeadDetailPage({
         scheduledStart: project.scheduledStart?.toISOString() ?? null,
         scheduledEnd: project.scheduledEnd?.toISOString() ?? null,
         installDate: project.installDate?.toISOString() ?? null,
+        inspectionAt: project.inspectionAt?.toISOString() ?? null,
         adjusterMeetingAt: project.adjusterMeetingAt?.toISOString() ?? null,
         completedAt: project.completedAt?.toISOString() ?? null,
         notes: project.notes,
@@ -948,19 +950,33 @@ export default async function LeadDetailPage({
             </div>
 
             <div data-deal-slide="install">
-                {/* The install date leads this slide and is rendered whether or
-                    not a job exists yet — picking one CREATES the job. Gating it
-                    on an existing job is what previously hid it on 13 of 16 real
-                    deals, and it is exactly what you agree with a homeowner
-                    before the job formally opens. It moved here from the Summary
-                    sidebar so it sits with the work it schedules. */}
-                <div className="mb-6">
+                {/* The two scheduled dates lead this slide and are rendered
+                    whether or not a job exists yet — picking either CREATES the
+                    job. Gating them on an existing job is what previously hid
+                    the install date on 13 of 16 real deals, and they are exactly
+                    what you agree with a homeowner (and the AHJ) before the job
+                    formally opens. Both show on the calendar alongside the
+                    appointment. Stacked rather than side by side: the
+                    inspection is read as a consequence of the install date
+                    above it. */}
+                <div className="mb-6 space-y-4">
                   <Section icon={CalendarClock} label="Install date" tone="solar">
                     <ProjectSchedule
                       bare
+                      field="install"
                       leadId={lead.id}
                       projectId={project?.id ?? null}
-                      installDate={project?.installDate ? project.installDate.toISOString() : null}
+                      value={project?.installDate ? project.installDate.toISOString() : null}
+                      canManage={canManageProd}
+                    />
+                  </Section>
+                  <Section icon={CalendarCheck} label="Inspection date" tone="solar">
+                    <ProjectSchedule
+                      bare
+                      field="inspection"
+                      leadId={lead.id}
+                      projectId={project?.id ?? null}
+                      value={project?.inspectionAt ? project.inspectionAt.toISOString() : null}
                       canManage={canManageProd}
                     />
                   </Section>
@@ -987,7 +1003,7 @@ export default async function LeadDetailPage({
                           pipeline — which already has In Production, QC
                           Inspection, Paid and Cancelled as stages. The deal's
                           stage is the only status now. */}
-                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
+                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} showInspection={isSolarDeal} />}
                     </div>
 
                     <Section icon={Camera} label="Site & Install Photos" tone="solar">
@@ -1154,7 +1170,7 @@ export default async function LeadDetailPage({
                           pipeline — which already has In Production, QC
                           Inspection, Paid and Cancelled as stages. The deal's
                           stage is the only status now. */}
-                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} />}
+                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} showInspection={isSolarDeal} />}
                     </div>
 
                     <Section icon={Camera} label="Site & Install Photos">

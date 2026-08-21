@@ -306,13 +306,27 @@ export async function setPaFeePctAction(pct: number) {
 // (updateTeamMemberAction → User.commissionSplitPct). The duplicate bulk editor
 // that lived in Commission settings was removed, so there's no setRepSplitAction.
 
+type ScheduleField = "adjuster" | "install" | "inspection";
+
+/**
+ * Which column each calendar date writes to. A lookup rather than a chain of
+ * ternaries: with three dates going through one action, the third is exactly
+ * the one that silently lands in the second one's column, and a Record keyed on
+ * the field union makes a missing case a type error instead.
+ */
+const SCHEDULE_COLUMN: Record<ScheduleField, (v: Date | null) => Prisma.ProjectUpdateInput> = {
+  adjuster: (v) => ({ adjusterMeetingAt: v }),
+  install: (v) => ({ installDate: v }),
+  inspection: (v) => ({ inspectionAt: v }),
+};
+
 const scheduleSchema = z.object({
   projectId: z.string().min(1),
-  field: z.enum(["adjuster", "install"]),
+  field: z.enum(["adjuster", "install", "inspection"]),
   date: z.string().optional().nullable(), // "YYYY-MM-DD" or null to clear
 });
 
-/** Set a project's adjuster-meeting or install date (shown on the calendar). */
+/** Set a project's adjuster-meeting, install or inspection date (shown on the calendar). */
 export async function setProjectScheduleAction(input: z.infer<typeof scheduleSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Project") && !can(user, "update", "Commission")) {
@@ -327,7 +341,7 @@ export async function setProjectScheduleAction(input: z.infer<typeof scheduleSch
   if (value && Number.isNaN(value.getTime())) return { ok: false as const, error: "Enter a valid date." };
   await prisma.project.update({
     where: { id: project.id },
-    data: field === "adjuster" ? { adjusterMeetingAt: value } : { installDate: value },
+    data: SCHEDULE_COLUMN[field](value),
   });
   revalidatePath(`/portal/leads/${project.leadId}`);
   revalidatePath("/portal/calendar");
@@ -336,28 +350,30 @@ export async function setProjectScheduleAction(input: z.infer<typeof scheduleSch
 
 const leadScheduleSchema = z.object({
   leadId: z.string().min(1),
+  field: z.enum(["install", "inspection"]).default("install"),
   date: z.string().optional().nullable(),
 });
 
 /**
- * Set a DEAL's install date, creating the job if it does not have one yet.
+ * Set a DEAL's install or inspection date, creating the job if it does not have
+ * one yet.
  *
- * `installDate` is a column on Project, so the obvious implementation — only
- * offer the field once a project exists — hides it on the 13 of 16 deals that
- * have not started production. But an install date is exactly the sort of thing
- * you agree with a homeowner BEFORE the job formally opens, and the deal page
- * offers it in the Summary next to the other dates, so picking one has to work
- * from a standing start.
+ * Both dates are columns on Project, so the obvious implementation — only offer
+ * the fields once a project exists — hides them on the 13 of 16 deals that have
+ * not started production. But an install date is exactly the sort of thing you
+ * agree with a homeowner BEFORE the job formally opens, and the inspection that
+ * follows it gets booked with the AHJ off the same conversation, so picking
+ * either has to work from a standing start.
  *
  * The job container is already a create-on-demand concept (see
  * `ensureProjectForLeadAction`, behind the "Start production" button); this just
- * reaches the same path from the date field. Clearing a date never creates one.
+ * reaches the same path from the date fields. Clearing a date never creates one.
  */
-export async function setLeadInstallDateAction(input: z.infer<typeof leadScheduleSchema>) {
+export async function setLeadScheduleDateAction(input: z.infer<typeof leadScheduleSchema>) {
   const user = await requireUser();
   const parsed = leadScheduleSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: "Invalid request." };
-  const { leadId, date } = parsed.data;
+  const { leadId, field, date } = parsed.data;
 
   const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   const lead = await prisma.lead.findFirst({
@@ -376,7 +392,7 @@ export async function setLeadInstallDateAction(input: z.infer<typeof leadSchedul
     projectId = created.projectId;
   }
 
-  const res = await setProjectScheduleAction({ projectId, field: "install", date });
+  const res = await setProjectScheduleAction({ projectId, field, date });
   if (!res.ok) return res;
   return { ok: true as const, created: !lead.project };
 }

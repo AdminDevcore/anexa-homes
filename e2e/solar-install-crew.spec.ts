@@ -44,7 +44,7 @@ async function toSolar(page: Page) {
  * is how `solar-no-insurance`'s leak test started failing on "Supplement" from
  * the Edit Job dialog. Own your fixtures when you are going to mutate them.
  */
-async function newSolarDeal(page: Page): Promise<string> {
+async function newSolarDeal(page: Page): Promise<{ id: string; name: string }> {
   await toSolar(page);
   await page.goto("/portal/leads/new");
   const unique = `Crewtest ${Date.now()}`;
@@ -52,7 +52,9 @@ async function newSolarDeal(page: Page): Promise<string> {
   await page.locator("input").nth(1).fill(unique);
   await page.getByRole("button", { name: /Create Appointment/ }).click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
-  return page.url().split("/").pop()!;
+  // The name as the calendar renders it, so a spec can pick this deal's events
+  // out of a month that also holds the seed's.
+  return { id: page.url().split("/").pop()!, name: `Install ${unique}` };
 }
 
 /** Open the Installation slide of the deal's one switcher. */
@@ -139,5 +141,63 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
       await expect(page.getByRole("option", { name: new RegExp(`^${name}`) })).toHaveCount(0);
     }
     await page.keyboard.press("Escape");
+  });
+
+  /**
+   * The AHJ / utility inspection that follows the install.
+   *
+   * Its column already existed and the solar calendar already read it — there
+   * was simply nowhere in the app to set one, so it was permanently null. This
+   * covers the whole path: the field is under the install date on the slide it
+   * belongs to, it writes its OWN column (a shared action setting two dates is
+   * how the second one ends up in the first one's column), and both dates come
+   * out on the calendar next to the appointment.
+   */
+  test("the inspection date sits under the install date, and both reach the calendar", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    const { name } = await newSolarDeal(page);
+    await openInstall(page);
+
+    const install = page.getByLabel("Install date");
+    const inspection = page.getByLabel("Inspection date");
+    await expect(install).toBeVisible({ timeout: 15000 });
+    await expect(inspection).toBeVisible();
+
+    // Under, not beside. Read off geometry rather than DOM order, which would
+    // still pass with the two sitting side by side in a two-column grid.
+    const above = (await install.boundingBox())!;
+    const below = (await inspection.boundingBox())!;
+    expect(below.y).toBeGreaterThan(above.y + above.height - 1);
+
+    // NEXT month, not this one: a day cell shows only its first three events,
+    // and the seed puts its appointments around today. One month out the two
+    // days are the deal's own.
+    const anchor = new Date();
+    anchor.setDate(1);
+    anchor.setMonth(anchor.getMonth() + 1);
+    const on = (day: number) =>
+      `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+    // The first date opens the job, so its toast is the one that says so.
+    await install.fill(on(10));
+    await expect(page.getByText(/Install date set — the job is now open/)).toBeVisible({ timeout: 15000 });
+
+    // Re-read the input: the save refreshes the route, which replaces it.
+    await openInstall(page);
+    await page.getByLabel("Inspection date").fill(on(20));
+    await expect(page.getByText(/Date saved/)).toBeVisible({ timeout: 15000 });
+
+    // The install date is NOT what got overwritten — the two are separate
+    // columns, and the slide still reads the one set a moment ago.
+    await openInstall(page);
+    await expect(page.getByLabel("Install date")).toHaveValue(on(10));
+    await expect(page.getByLabel("Inspection date")).toHaveValue(on(20));
+
+    await page.goto("/portal/calendar");
+    await page.getByLabel("Next month").click();
+    // Titled by type, so this asserts each date landed on its own kind of event
+    // rather than two of the same.
+    await expect(page.getByTitle(`Install · ${name}`)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTitle(`Inspection · ${name}`)).toBeVisible({ timeout: 15000 });
   });
 });

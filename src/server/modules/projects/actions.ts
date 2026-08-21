@@ -118,6 +118,7 @@ const editSchema = z.object({
   scheduledStart: dateStr,
   scheduledEnd: dateStr,
   installDate: dateStr,
+  inspectionAt: dateStr,
   adjusterMeetingAt: dateStr,
   completedAt: dateStr,
   notes: text(5000),
@@ -159,6 +160,9 @@ export async function updateProjectAction(input: z.infer<typeof editSchema>) {
         scheduledStart: toDate(d.scheduledStart),
         scheduledEnd: toDate(d.scheduledEnd),
         installDate: toDate(d.installDate),
+        // Omitted by callers that do not show the field (roofing), so a save
+        // there leaves the column alone instead of clearing it.
+        ...(d.inspectionAt !== undefined ? { inspectionAt: toDate(d.inspectionAt) } : {}),
         adjusterMeetingAt: toDate(d.adjusterMeetingAt),
         completedAt: toDate(d.completedAt),
         notes: d.notes || null,

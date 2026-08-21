@@ -53,6 +53,7 @@ export type EditableJob = {
   scheduledStart: string | null;
   scheduledEnd: string | null;
   installDate: string | null;
+  inspectionAt: string | null;
   adjusterMeetingAt: string | null;
   completedAt: string | null;
   notes: string | null;
@@ -73,7 +74,14 @@ function Fld({ label: l, children }: { label: string; children: React.ReactNode 
 const selectCls =
   "h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm capitalize focus:border-ring focus:outline-none";
 
-export function EditJobDialog({ job }: { job: EditableJob }) {
+/**
+ * `showInspection` is off by default and set only for solar. The inspection is
+ * an AHJ / utility step that only the solar calendar reads — offering it on a
+ * roofing job would let an admin book a date nothing ever shows. When it is
+ * hidden the field is left OUT of the payload entirely rather than sent empty,
+ * so saving a roofing job cannot quietly null a column it never edited.
+ */
+export function EditJobDialog({ job, showInspection = false }: { job: EditableJob; showInspection?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -100,6 +108,7 @@ export function EditJobDialog({ job }: { job: EditableJob }) {
     scheduledStart: dateVal(job.scheduledStart),
     scheduledEnd: dateVal(job.scheduledEnd),
     installDate: dateVal(job.installDate),
+    inspectionAt: dateVal(job.inspectionAt),
     adjusterMeetingAt: dateVal(job.adjusterMeetingAt),
     completedAt: dateVal(job.completedAt),
     notes: job.notes ?? "",
@@ -132,6 +141,7 @@ export function EditJobDialog({ job }: { job: EditableJob }) {
       scheduledStart: f.scheduledStart,
       scheduledEnd: f.scheduledEnd,
       installDate: f.installDate,
+      ...(showInspection ? { inspectionAt: f.inspectionAt } : {}),
       adjusterMeetingAt: f.adjusterMeetingAt,
       completedAt: f.completedAt,
       notes: f.notes,
@@ -289,6 +299,11 @@ export function EditJobDialog({ job }: { job: EditableJob }) {
               <Fld label="Install date">
                 <Input type="date" value={f.installDate} onChange={(e) => set("installDate", e.target.value)} />
               </Fld>
+              {showInspection && (
+                <Fld label="Inspection date">
+                  <Input type="date" value={f.inspectionAt} onChange={(e) => set("inspectionAt", e.target.value)} />
+                </Fld>
+              )}
               <Fld label="Adjuster meeting">
                 <Input type="date" value={f.adjusterMeetingAt} onChange={(e) => set("adjusterMeetingAt", e.target.value)} />
               </Fld>
