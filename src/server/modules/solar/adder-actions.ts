@@ -177,3 +177,92 @@ export async function removeDealAdderAction(input: { leadId: string; id: string 
   revalidateDeal(parsed.data.leadId);
   return { ok: true as const, totalCents };
 }
+
+const syncSchema = z.object({
+  leadId: z.string().min(1),
+  /** Every catalogue adder that should be on the deal when this returns. */
+  equipmentIds: z.array(z.string().min(1)).max(200),
+});
+
+/**
+ * Put the deal's catalogue adders where the picker says they should be.
+ *
+ * A checkbox list is a STATE, not a stream of clicks: a rep opens the picker,
+ * ticks two, unticks one, and presses Add once. Sending that as three separate
+ * writes means three round trips, three recomputes of the contract price, and a
+ * half-applied list if the third one fails. This takes the whole set and makes
+ * the deal match it.
+ *
+ * ONE-OFF LINES ARE NEVER TOUCHED. A line typed on this deal — "tree removal,
+ * $900" — has no catalogue item behind it and so cannot be represented by a
+ * checkbox; deleting it because it is not in the ticked set would silently take
+ * money off a quote from a screen that never showed it.
+ *
+ * Quantities survive: an item that is already on the deal at qty 3 and is still
+ * ticked is left exactly as it is rather than reset to 1.
+ */
+export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSchema>) {
+  const parsed = syncSchema.safeParse(input);
+  if (!parsed.success) return fail("That selection could not be read.");
+  const g = await guard(parsed.data.leadId);
+  if (!g.ok) return fail(g.error);
+  const { leadId } = parsed.data;
+  const wanted = [...new Set(parsed.data.equipmentIds)];
+
+  // Every id has to be one of OUR adders. An id from another company, or a
+  // module id, would put a line on the quote that the catalogue disowns.
+  const items = await prisma.solarEquipment.findMany({
+    where: { id: { in: wanted }, companyId: g.user.companyId, kind: "adder" },
+    select: {
+      id: true,
+      manufacturer: true,
+      model: true,
+      priceCents: true,
+      priceMillsPerWatt: true,
+      rank: true,
+    },
+    orderBy: [{ rank: "asc" }, { model: "asc" }],
+  });
+  if (items.length !== wanted.length) return fail("One of those adders is not in the catalogue.");
+
+  const existing = await prisma.solarDealAdder.findMany({
+    where: { companyId: g.user.companyId, leadId, equipmentId: { not: null } },
+    select: { id: true, equipmentId: true },
+  });
+  const onDeal = new Set(existing.map((l) => l.equipmentId!));
+  const drop = existing.filter((l) => !wanted.includes(l.equipmentId!)).map((l) => l.id);
+  const add = items.filter((i) => !onDeal.has(i.id));
+
+  const last = await prisma.solarDealAdder.findFirst({
+    where: { companyId: g.user.companyId, leadId },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  let sortOrder = last?.sortOrder ?? 0;
+
+  // One transaction, so a deal is never left holding half a rep's selection.
+  await prisma.$transaction([
+    ...(drop.length ? [prisma.solarDealAdder.deleteMany({ where: { id: { in: drop } } })] : []),
+    ...add.map((i) =>
+      prisma.solarDealAdder.create({
+        data: {
+          companyId: g.user.companyId,
+          leadId,
+          equipmentId: i.id,
+          // The label is COPIED, not joined at read time: the quote has to keep
+          // saying what was sold even after somebody renames the catalogue row.
+          label: [i.manufacturer, i.model].filter(Boolean).join(" ") || i.model,
+          basis: i.priceMillsPerWatt ? "perWatt" : "flat",
+          flatCents: i.priceMillsPerWatt ? null : i.priceCents,
+          millsPerWatt: i.priceMillsPerWatt,
+          qty: 1,
+          sortOrder: ++sortOrder,
+        },
+      })
+    ),
+  ]);
+
+  const totalCents = await recomputeAdderTotal(g.user.companyId, leadId, { force: true });
+  revalidateDeal(leadId);
+  return { ok: true as const, totalCents, added: add.length, removed: drop.length };
+}

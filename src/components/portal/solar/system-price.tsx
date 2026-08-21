@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Minus, Plus, RotateCcw } from "lucide-react";
+import { Check, Minus, Pencil, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { grossPpwFromNet, pricePurchase } from "@/lib/solar-money";
@@ -123,6 +123,30 @@ export function SystemPriceCard({
     push(next);
   };
 
+  /**
+   * Whether the price is open for editing.
+   *
+   * Closed is the resting state, INCLUDING after a save: a rep opens the price,
+   * moves it, and the screen goes back to reading like a quote rather than a
+   * form. `canEdit` false never opens at all.
+   */
+  const [editing, setEditing] = React.useState(false);
+  const ppwRef = React.useRef<HTMLInputElement>(null);
+  const totalRef = React.useRef<HTMLInputElement>(null);
+
+  /** Open on the box the rep actually clicked, with the cursor already in it. */
+  const open = (which: "ppw" | "total") => {
+    if (!canEdit) return;
+    setEditing(true);
+    // After the inputs exist. Selecting rather than just focusing, so the first
+    // keystroke replaces the price instead of appending a digit to it.
+    requestAnimationFrame(() => {
+      const el = which === "ppw" ? ppwRef.current : totalRef.current;
+      el?.focus();
+      el?.select();
+    });
+  };
+
   const baseTotalCents = basePpwCents == null || watts === 0 ? null : basePpwCents * watts;
   const grossCents = baseTotalCents == null ? null : baseTotalCents + adderTotalCents;
   const adderPpw = watts > 0 ? adderTotalCents / watts : 0;
@@ -190,88 +214,160 @@ export function SystemPriceCard({
       </header>
 
       <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        {/* The two inputs. Same number, said the two ways it gets said out
-            loud: a rep is measured per watt, a homeowner hears a total. */}
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="space-y-1.5">
-            <label
-              htmlFor="base-ppw"
-              className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-            >
-              Base $/W
-            </label>
-            <div className="flex items-stretch">
-              <button
-                type="button"
-                aria-label="Lower the price by 5 cents a watt"
-                disabled={!canEdit}
-                onClick={() => step(-5)}
-                className="flex w-9 items-center justify-center rounded-l-lg border border-r-0 border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-              >
-                <Minus className="size-3.5" />
-              </button>
-              <div className="relative">
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-display text-lg text-muted-foreground"
-                >
-                  $
-                </span>
-                <input
-                  id="base-ppw"
-                  type="number"
-                  step="0.01"
-                  inputMode="decimal"
-                  disabled={!canEdit}
-                  value={text.ppw}
-                  onChange={(e) => typePpw(e.target.value)}
-                  className="h-12 w-28 border-y border-input bg-transparent pl-7 pr-2 text-left font-display text-2xl font-semibold tabular-nums focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-              </div>
-              <button
-                type="button"
-                aria-label="Raise the price by 5 cents a watt"
-                disabled={!canEdit}
-                onClick={() => step(5)}
-                className="flex w-9 items-center justify-center rounded-r-lg border border-l-0 border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-              >
-                <Plus className="size-3.5" />
-              </button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">per installed watt</p>
-          </div>
+        {/* THE PRICE IS A FIGURE UNTIL SOMEBODY ASKS TO CHANGE IT.
 
-          <div className="space-y-1.5">
-            <label
-              htmlFor="base-total"
-              className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-            >
-              Base total
-            </label>
-            <div className="relative">
-              <span
-                aria-hidden
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-display text-lg text-muted-foreground"
+            Two number boxes with plus and minus buttons on them announce, to
+            whoever is looking at the screen, that the price of this system is
+            a thing anyone present can move. A rep turns this laptop around. So
+            the price reads as a price, and the controls that move it appear
+            when the rep clicks it — the same edit, one click further from a
+            homeowner's eye.
+
+            Same number said the two ways it gets said out loud: a rep is
+            measured per watt, a homeowner hears a total. */}
+        <div
+          className="flex flex-wrap items-start gap-4"
+          onBlur={(e) => {
+            // Collapse only when focus has actually LEFT the price block.
+            // Tabbing from the $/W box to the total is still editing, and a
+            // bare onBlur would slam it shut between the two.
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+            // AFTER the click that caused the blur, not during it. Collapsing
+            // swaps two number boxes and a Done button for two short figures,
+            // which re-flows this row — and a rep who left the price by
+            // clicking a button underneath it would have that button move
+            // between mousedown and mouseup, so the browser fires the click on
+            // their common ancestor instead and the press does nothing. The
+            // price would silently eat the first click on everything below it.
+            setTimeout(() => setEditing(false), 0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && editing) {
+              e.stopPropagation();
+              setEditing(false);
+            }
+          }}
+        >
+          {editing ? (
+            <>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="base-ppw"
+                  className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                >
+                  Base $/W
+                </label>
+                <div className="flex items-stretch">
+                  <button
+                    type="button"
+                    aria-label="Lower the price by 5 cents a watt"
+                    disabled={!canEdit}
+                    onClick={() => step(-5)}
+                    className="flex w-9 items-center justify-center rounded-l-lg border border-r-0 border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <Minus className="size-3.5" />
+                  </button>
+                  <div className="relative">
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-display text-lg text-muted-foreground"
+                    >
+                      $
+                    </span>
+                    <input
+                      id="base-ppw"
+                      ref={ppwRef}
+                      type="number"
+                      step="0.01"
+                      inputMode="decimal"
+                      disabled={!canEdit}
+                      value={text.ppw}
+                      onChange={(e) => typePpw(e.target.value)}
+                      className="h-12 w-28 border-y border-input bg-transparent pl-7 pr-2 text-left font-display text-2xl font-semibold tabular-nums focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Raise the price by 5 cents a watt"
+                    disabled={!canEdit}
+                    onClick={() => step(5)}
+                    className="flex w-9 items-center justify-center rounded-r-lg border border-l-0 border-input text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">per installed watt</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="base-total"
+                  className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+                >
+                  Base total
+                </label>
+                <div className="relative">
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-display text-lg text-muted-foreground"
+                  >
+                    $
+                  </span>
+                  <input
+                    id="base-total"
+                    ref={totalRef}
+                    type="number"
+                    step="1"
+                    inputMode="numeric"
+                    disabled={!canEdit || watts === 0}
+                    value={text.total}
+                    onChange={(e) => typeTotal(e.target.value)}
+                    className="h-12 w-40 rounded-lg border border-input bg-transparent pl-7 pr-3 font-display text-2xl font-semibold tabular-nums focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  {watts === 0
+                    ? "Needs an array to price"
+                    : `${systemSizeKwDc.toFixed(2)} kW · before adders`}
+                </p>
+              </div>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-5"
+                onClick={() => setEditing(false)}
               >
-                $
-              </span>
-              <input
-                id="base-total"
-                type="number"
-                step="1"
-                inputMode="numeric"
-                disabled={!canEdit || watts === 0}
-                value={text.total}
-                onChange={(e) => typeTotal(e.target.value)}
-                className="h-12 w-40 rounded-lg border border-input bg-transparent pl-7 pr-3 font-display text-2xl font-semibold tabular-nums focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                <Check className="size-3.5" /> Done
+              </Button>
+            </>
+          ) : (
+            <>
+              <PriceFigure
+                label="Base $/W"
+                value={basePpwCents == null ? "—" : `$${(basePpwCents / 100).toFixed(2)}`}
+                note="per installed watt"
+                canEdit={canEdit}
+                editLabel={`Edit the base price per watt${
+                  basePpwCents == null ? "" : `, currently $${(basePpwCents / 100).toFixed(2)} a watt`
+                }`}
+                onOpen={() => open("ppw")}
               />
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {watts === 0
-                ? "Needs an array to price"
-                : `${systemSizeKwDc.toFixed(2)} kW · before adders`}
-            </p>
-          </div>
+              <PriceFigure
+                label="Base total"
+                value={
+                  baseTotalCents == null ? "—" : `$${Math.round(baseTotalCents / 100).toLocaleString()}`
+                }
+                note={
+                  watts === 0 ? "Needs an array to price" : `${systemSizeKwDc.toFixed(2)} kW · before adders`
+                }
+                canEdit={canEdit && watts > 0}
+                editLabel="Edit the base price as a total"
+                onOpen={() => open("total")}
+              />
+            </>
+          )}
         </div>
 
         {/* Base → adders → gross. The last rung is what Anexa keeps on this job,
@@ -320,6 +416,55 @@ export function SystemPriceCard({
         )}
       </footer>
     </section>
+  );
+}
+
+/**
+ * A price, shown as a price.
+ *
+ * A button rather than a div with a click handler: this is the only way into
+ * editing the number, so it has to be reachable from a keyboard and announce
+ * itself as something that does something. Read-only users get the same figure
+ * with nothing to press.
+ */
+function PriceFigure({
+  label,
+  value,
+  note,
+  canEdit,
+  editLabel,
+  onOpen,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  canEdit: boolean;
+  /** What a screen reader hears. The visible text is a bare number. */
+  editLabel: string;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      {canEdit ? (
+        <button
+          type="button"
+          aria-label={editLabel}
+          onClick={onOpen}
+          className="group -mx-2 flex h-12 items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <span className="font-display text-2xl font-semibold tabular-nums">{value}</span>
+          <Pencil className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+        </button>
+      ) : (
+        <span className="flex h-12 items-center font-display text-2xl font-semibold tabular-nums">
+          {value}
+        </span>
+      )}
+      <p className="text-[11px] text-muted-foreground">{note}</p>
+    </div>
   );
 }
 

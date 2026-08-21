@@ -59,6 +59,23 @@ function cardFor(page: Page, name: string) {
 }
 
 /**
+ * Put one loan on a lender's rate sheet.
+ *
+ * The shelf shows PROGRAMMES, not partners — a lender with nothing on its sheet
+ * has no card to carry a logo, and "the mark follows the lender to where the
+ * money is quoted" is a claim about a quote, so there has to be something
+ * quotable for it to be about.
+ */
+async function addLoan(page: Page, name: string, apr: string, months: string, fee: string) {
+  await cardFor(page, name).last().getByRole("button", { name: "Loan", exact: true }).click();
+  await page.getByLabel("APR %", { exact: true }).fill(apr);
+  await page.getByLabel("Term (months)", { exact: true }).fill(months);
+  await page.getByLabel("Dealer fee %", { exact: true }).fill(fee);
+  await page.getByRole("button", { name: "Add product" }).click();
+  await expect(page.getByText("Product added")).toBeVisible({ timeout: 15000 });
+}
+
+/**
  * The same card while it is being edited.
  *
  * A separate locator on purpose: in edit mode the lender's name lives in an
@@ -150,6 +167,9 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
     });
     await expect(page.getByText("Logo updated")).toBeVisible({ timeout: 15000 });
 
+    // The shelf is programmes, so give this partner one to be quoted on.
+    await addLoan(page, name, "5.99", "240", "20");
+
     await page.goto("/portal/leads?q=Priya");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
@@ -157,13 +177,17 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
 
     // The proposal's Financing step, which is the ONE place a deal's lender is
     // chosen: the deal page used to carry a second picker for the same field
-    // and now reports what the last proposal froze instead. Each partner is a
-    // landmark named after itself, so this cannot drift onto another lender's
-    // shelf.
+    // and now reports what the last proposal froze instead. Every programme is
+    // a card naming its own lender — the shelf is one wrapped grid rather than
+    // a landmark per partner — so this cannot drift onto another lender's mark.
     await page.goto(`${dealUrl}/solar-proposal?step=financing`);
-    const shelf = page.getByRole("region", { name });
-    await expect(shelf).toBeVisible({ timeout: 15000 });
-    await expect(shelf.locator('img[src*="/api/solar/lender-logo"]').first()).toBeVisible({
+    const card = page
+      .getByRole("button", {
+        name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} · `),
+      })
+      .first();
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await expect(card.locator('img[src*="/api/solar/lender-logo"]').first()).toBeVisible({
       timeout: 15000,
     });
   });

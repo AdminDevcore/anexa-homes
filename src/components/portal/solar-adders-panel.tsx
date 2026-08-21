@@ -4,11 +4,20 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { Check, ListPlus, Loader2, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   adderRateLabel,
   adderTotals,
@@ -20,6 +29,7 @@ import {
 import {
   addDealAdderAction,
   removeDealAdderAction,
+  syncDealCatalogueAddersAction,
   updateDealAdderAction,
 } from "@/server/modules/solar/adder-actions";
 
@@ -68,6 +78,7 @@ export function SolarAddersPanel({
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
+  const [picking, setPicking] = React.useState(false);
   const [custom, setCustom] = React.useState({ label: "", amount: "", basis: "custom" as AdderBasis, rate: "" });
 
   const totals = React.useMemo(() => adderTotals(lines, systemWatts), [lines, systemWatts]);
@@ -86,19 +97,6 @@ export function SolarAddersPanel({
     if (!res.ok) return toast.error(res.error ?? "That did not save.");
     router.refresh();
   }
-
-  const addFromCatalogue = (o: AdderOption) =>
-    run(`add:${o.id}`, () =>
-      addDealAdderAction({
-        leadId,
-        equipmentId: o.id,
-        label: o.label,
-        basis: o.priceMillsPerWatt ? "perWatt" : "flat",
-        flatCents: o.priceMillsPerWatt ? null : o.priceCents,
-        millsPerWatt: o.priceMillsPerWatt,
-        qty: 1,
-      })
-    );
 
   async function addCustom() {
     const isRate = custom.basis === "perWatt";
@@ -120,9 +118,6 @@ export function SolarAddersPanel({
     setCustom({ label: "", amount: "", basis: "custom", rate: "" });
     setAdding(false);
   }
-
-  /** Which catalogue items are not already on the deal. */
-  const unused = catalogue.filter((o) => !lines.some((l) => l.equipmentId === o.id));
 
   return (
     <section className="space-y-3">
@@ -210,36 +205,7 @@ export function SolarAddersPanel({
 
       {canEdit && (
         <div className="space-y-2">
-          {unused.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {unused.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => void addFromCatalogue(o)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs font-medium",
-                    "hover:bg-muted disabled:opacity-50"
-                  )}
-                >
-                  {busy === `add:${o.id}` ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    <Plus className="size-3" />
-                  )}
-                  {o.label}
-                  <span className="text-muted-foreground">
-                    {o.priceMillsPerWatt
-                      ? `$${millsPerWattToDollars(o.priceMillsPerWatt).toFixed(3).replace(/0$/, "")}/W`
-                      : usd(o.priceCents)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {catalogue.length === 0 && (
+          {catalogue.length === 0 ? (
             <p className="text-xs text-muted-foreground">
               No adders in the catalogue yet.{" "}
               <Link href="/portal/settings/solar-equipment" className="font-medium underline">
@@ -247,6 +213,25 @@ export function SolarAddersPanel({
               </Link>{" "}
               so a rep picks rather than types.
             </p>
+          ) : (
+            /* ONE BUTTON, NOT A WALL OF CHIPS. Every catalogue adder used to be
+               a chip laid out in this panel, which works at six of them and
+               stops working at thirty: the price of the system ends up below a
+               paragraph of pills a rep has to read all of to find the one they
+               want. The picker holds the whole catalogue, searchable, and this
+               panel goes back to listing what is actually on the quote. */
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() => setPicking(true)}
+            >
+              <ListPlus className="size-4" /> Choose adders
+              <span className="text-muted-foreground">
+                {catalogue.length} in the catalogue
+              </span>
+            </Button>
           )}
 
           {adding ? (
@@ -313,13 +298,227 @@ export function SolarAddersPanel({
               </div>
             </div>
           ) : (
-            <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setAdding(true)}>
               <Plus className="size-4" /> One-off adder
             </Button>
+          )}
+
+          {picking && (
+            <AdderPicker
+              leadId={leadId}
+              catalogue={catalogue}
+              lines={lines}
+              systemWatts={systemWatts}
+              onClose={() => setPicking(false)}
+              onDone={() => {
+                setPicking(false);
+                router.refresh();
+              }}
+            />
           )}
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The whole catalogue, in a window, with a box beside each one.
+ *
+ * A checkbox list is a STATE, not a stream of clicks: the rep ticks three,
+ * unticks one, and presses Add once — so nothing is written until then, and
+ * what is written is the difference between what the deal held and what the
+ * ticks say. Closing without pressing Add changes nothing.
+ *
+ * Ticked-off means REMOVED. Unticking an adder that is on the deal takes the
+ * line off it, which is the only reading of a checkbox that is not a lie; the
+ * footer says how many are going each way before anything happens.
+ *
+ * One-off lines typed on this deal have no catalogue row behind them, so they
+ * cannot appear here and are never touched by it — see
+ * `syncDealCatalogueAddersAction`.
+ */
+function AdderPicker({
+  leadId,
+  catalogue,
+  lines,
+  systemWatts,
+  onClose,
+  onDone,
+}: {
+  leadId: string;
+  catalogue: AdderOption[];
+  lines: DealAdderLine[];
+  systemWatts: number;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const onDealIds = React.useMemo(
+    () => new Set(lines.map((l) => l.equipmentId).filter((id): id is string => id != null)),
+    [lines]
+  );
+  const [ticked, setTicked] = React.useState<Set<string>>(() => new Set(onDealIds));
+  const [q, setQ] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+
+  const shown = React.useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return needle ? catalogue.filter((o) => o.label.toLowerCase().includes(needle)) : catalogue;
+  }, [catalogue, q]);
+
+  const toggle = (id: string) =>
+    setTicked((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  /** What one item comes to on THIS array — a rate is not an amount. */
+  const amountOf = (o: AdderOption) =>
+    o.priceMillsPerWatt ? Math.round((o.priceMillsPerWatt * systemWatts) / 10) : o.priceCents;
+
+  const tickedTotal = catalogue
+    .filter((o) => ticked.has(o.id))
+    .reduce((sum, o) => sum + amountOf(o), 0);
+
+  const adding = [...ticked].filter((id) => !onDealIds.has(id)).length;
+  const removing = [...onDealIds].filter((id) => !ticked.has(id)).length;
+
+  async function apply() {
+    setSaving(true);
+    const res = await syncDealCatalogueAddersAction({ leadId, equipmentIds: [...ticked] });
+    setSaving(false);
+    if (!res.ok) return toast.error(res.error ?? "That did not save.");
+    toast.success(
+      adding === 0 && removing === 0
+        ? "Nothing changed."
+        : [
+            adding > 0 ? `${adding} adder${adding === 1 ? "" : "s"} added` : null,
+            removing > 0 ? `${removing} removed` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+    );
+    onDone();
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Choose adders</DialogTitle>
+          <DialogDescription>
+            Tick the extra work this job carries. Prices come from the catalogue, and per-watt
+            items are shown at{" "}
+            {systemWatts > 0 ? `${(systemWatts / 1000).toFixed(2)} kW` : "no array yet"}.
+          </DialogDescription>
+        </DialogHeader>
+
+        {catalogue.length > 8 && (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search adders"
+              aria-label="Search adders"
+              className="pl-8"
+            />
+          </div>
+        )}
+
+        {/* Scrolls at a fixed height rather than growing the window: a
+            catalogue of forty is a page-length dialog whose Add button is
+            somewhere below the fold. */}
+        <ul className="-mx-1 max-h-[45vh] space-y-0.5 overflow-y-auto px-1">
+          {shown.map((o) => {
+            const checked = ticked.has(o.id);
+            return (
+              <li key={o.id}>
+                {/* The whole row is the control. A checkbox with a label beside
+                    it gives a rep a 16px target on a laptop trackpad in
+                    somebody's kitchen; the row is the same toggle, forty times
+                    the area. `role=checkbox` on a button keeps Space, the
+                    checked state and the announcement that a native box would
+                    have had. */}
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={checked}
+                  onClick={() => toggle(o.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
+                    "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+                    checked ? "border-foreground/25 bg-muted/60" : "border-transparent hover:bg-muted/40"
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+                      checked ? "border-primary bg-primary text-primary-foreground" : "border-input"
+                    )}
+                  >
+                    {checked && <Check className="size-3" strokeWidth={3} />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{o.label}</span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      {o.priceMillsPerWatt
+                        ? `$${millsPerWattToDollars(o.priceMillsPerWatt).toFixed(3).replace(/0$/, "")}/W · follows the array`
+                        : "flat"}
+                      {onDealIds.has(o.id) && " · already on the quote"}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right font-medium tabular-nums">
+                    {usd(amountOf(o))}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+          {shown.length === 0 && (
+            <li className="px-3 py-6 text-center text-xs text-muted-foreground">
+              Nothing in the catalogue matches &ldquo;{q}&rdquo;.
+            </li>
+          )}
+        </ul>
+
+        <div className="flex items-baseline justify-between gap-3 border-t border-border/70 pt-3 text-sm">
+          <span className="text-xs text-muted-foreground">
+            {ticked.size === 0
+              ? "Nothing ticked"
+              : `${ticked.size} ticked${removing > 0 ? ` · ${removing} coming off` : ""}`}
+          </span>
+          <span className="font-display text-lg font-semibold tabular-nums">{usd(tickedTotal)}</span>
+        </div>
+
+        <DialogFooter>
+          <Link
+            href="/portal/settings/solar-equipment"
+            className="mr-auto self-center text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Manage the catalogue
+          </Link>
+          <DialogClose asChild>
+            <Button type="button" variant="ghost" size="sm">
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button
+            type="button"
+            size="sm"
+            disabled={saving || (adding === 0 && removing === 0)}
+            onClick={() => void apply()}
+          >
+            {saving && <Loader2 className="size-4 animate-spin" />}
+            {removing > 0 && adding === 0 ? "Remove from the quote" : "Add to the quote"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

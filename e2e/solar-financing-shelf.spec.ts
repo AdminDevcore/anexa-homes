@@ -83,19 +83,70 @@ async function setNetTarget(page: Page, dollars: string) {
 }
 
 /**
- * One cell of the comparison, by row and by which column it belongs to.
+ * One figure of the comparison, by which offer it belongs to and which line it
+ * is.
  *
  * Addressed by COLUMN rather than by position: the shortlist opens holding
  * whatever the deal already quotes, so a seeded deal contributes a column these
  * specs never asked for and `nth(0)` silently reads the wrong programme.
+ *
+ * The comparison is a card per offer now rather than a table, so a column is
+ * found by reading each card's own text instead of a shared header row.
  */
 async function compareCell(page: Page, rowKey: string, column: RegExp) {
-  const headers = await page.locator("table thead th").allInnerTexts();
-  const idx = headers.findIndex((h) => column.test(h));
-  expect(idx, `no column matching ${column} in ${JSON.stringify(headers)}`).toBeGreaterThan(0);
-  // The header row leads with a blank corner; the body rows lead with a
-  // rowheader, so the first <td> lines up with the SECOND <th>.
-  return page.getByTestId(`compare-${rowKey}`).locator("td").nth(idx - 1).innerText();
+  const cols = page.getByTestId("compare-col");
+  await expect(cols.first()).toBeVisible({ timeout: 15000 });
+  const texts = await cols.allInnerTexts();
+  const idx = texts.findIndex((t) => column.test(t));
+  expect(idx, `no compare column matching ${column} in ${JSON.stringify(texts)}`).toBeGreaterThanOrEqual(0);
+  return cols.nth(idx).getByTestId(`compare-${rowKey}`).innerText();
+}
+
+/**
+ * One programme on the shelf, scoped to the lender that publishes it.
+ *
+ * The shelf used to be a landmark per partner. It is one wrapped grid now — so
+ * that a rep sees cash and every lender's programmes at once instead of three
+ * sideways scrollers — and the card carries its own lender in its accessible
+ * name, which is what keeps "25 yr · 3.99% · fee 28%" from matching two
+ * partners who happen to publish the same terms.
+ */
+function offerCard(page: Page, lender: string, terms: RegExp) {
+  return page.getByRole("button", {
+    name: new RegExp(`^${lender.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} · .*${terms.source}`),
+  });
+}
+
+/**
+ * The base price, opened for editing.
+ *
+ * It reads as a plain figure until a rep clicks it — a laptop gets turned
+ * around in somebody's kitchen, and a price with a spinner on it announces to
+ * the homeowner that the number is negotiable.
+ */
+async function baseprice(page: Page) {
+  const box = page.getByLabel("Base $/W", { exact: true });
+  if (!(await box.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: /^Edit the base price per watt/ }).click();
+    await expect(box).toBeVisible({ timeout: 15000 });
+  }
+  return box;
+}
+
+/**
+ * Put one catalogue adder on the deal through the picker.
+ *
+ * Every adder used to be a chip laid out in the panel, which a spec could click
+ * directly. They live behind one button now — a catalogue of forty chips is a
+ * paragraph of pills sitting between a rep and the price of the system.
+ */
+async function pickAdder(page: Page, label: RegExp) {
+  await page.getByRole("button", { name: /Choose adders/ }).click();
+  const picker = page.getByRole("dialog");
+  await expect(picker).toBeVisible({ timeout: 15000 });
+  await picker.getByRole("checkbox", { name: label }).click();
+  await picker.getByRole("button", { name: /^Add to the quote/ }).click();
+  await expect(picker).toBeHidden({ timeout: 15000 });
 }
 
 const dollars = (text: string) => Number(text.replace(/[^0-9.]/g, ""));
@@ -127,15 +178,14 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     // Both are on the shelf without opening anything — that is the point.
     // Scoped per lender: specs accumulate partners across runs, and two of
     // them can publish programmes whose terms read exactly the same.
-    const shelf = page.getByRole("region", { name });
-    const cheapFee = shelf.getByRole("button", { name: /25 yr · 4\.99% · fee 18%/ });
-    const dearFee = shelf.getByRole("button", { name: /20 yr · 3\.99% · fee 34%/ });
+    const cheapFee = offerCard(page, name, /25 yr · 4\.99% · fee 18%/);
+    const dearFee = offerCard(page, name, /20 yr · 3\.99% · fee 34%/);
     await expect(cheapFee).toBeVisible({ timeout: 15000 });
     await expect(dearFee).toBeVisible();
 
     await cheapFee.click();
     await dearFee.click();
-    await expect(page.getByTestId("compare-sticker")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("compare-sticker").first()).toBeVisible({ timeout: 15000 });
 
     // Same system, same adders, so the only thing moving the sticker is the
     // lender's cut. A comparison that did not show that would be decoration.
@@ -155,7 +205,7 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     const leadId = await openSolarDeal(page);
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
 
-    await page.getByRole("region", { name }).getByRole("button", { name: /15 yr · 6\.49% · fee 22%/ }).click();
+    await offerCard(page, name, /15 yr · 6\.49% · fee 22%/).click();
     await page.getByRole("button", { name: `Quote this: ${name} 15 yr · 6.49% · fee 22%` }).click();
     await expect(page.getByText(`Quoting ${name}`)).toBeVisible({ timeout: 15000 });
 
@@ -177,9 +227,9 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     // disagreeing with the document the homeowner signed. What is left to prove
     // here is that the choice persisted, which the badge below says.
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
-    await expect(
-      page.getByRole("region", { name }).getByRole("button", { name: /Quoted.*15 yr · 6\.49% · fee 22%/ })
-    ).toBeVisible({ timeout: 15000 });
+    await expect(offerCard(page, name, /15 yr · 6\.49% · fee 22%.*Quoted/)).toBeVisible({
+      timeout: 15000,
+    });
   });
 
   test("cash is a column of the comparison, not a mode hidden behind it", async ({ page }) => {
@@ -195,8 +245,8 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
 
     await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
-    await page.getByRole("region", { name }).getByRole("button", { name: /20 yr · 0% · fee 38%/ }).click();
-    await expect(page.getByTestId("compare-contract-price")).toBeVisible({ timeout: 15000 });
+    await offerCard(page, name, /20 yr · 0% · fee 38%/).click();
+    await expect(page.getByTestId("compare-contract-price").first()).toBeVisible({ timeout: 15000 });
 
     // The single most useful number on the screen: what the fee costs the
     // customer. Cash carries none, so its contract price has to be the lower.
@@ -243,15 +293,15 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
 
     // $3.00/W on Priya's seeded 10 kW, plus $3,850 of extra work: $33,850 is
     // what Anexa keeps whichever way the customer pays for it.
-    await page.getByLabel("Base $/W").fill("3.00");
-    await page.getByRole("button", { name: /Main panel upgrade/ }).click();
+    await (await baseprice(page)).fill("3.00");
+    await pickAdder(page, /Main panel upgrade/);
     await expect
       .poll(async () => dollars(await page.getByTestId("gross-total").innerText()), { timeout: 15000 })
       .toBe(33850);
 
     await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
-    await page.getByRole("region", { name }).getByRole("button", { name: /20 yr · 0% · fee 25%/ }).click();
-    await expect(page.getByTestId("compare-contract-price")).toBeVisible({ timeout: 15000 });
+    await offerCard(page, name, /20 yr · 0% · fee 25%/).click();
+    await expect(page.getByTestId("compare-contract-price").first()).toBeVisible({ timeout: 15000 });
 
     const paidCash = dollars(await compareCell(page, "contract-price", /^No lender/));
     const financed = dollars(await compareCell(page, "contract-price", /0% · fee 25%/));
@@ -281,10 +331,9 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     const leadId = await openSolarDeal(page);
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
 
-    const shelf = page.getByRole("region", { name });
-    await shelf.getByRole("button", { name: /25 yr · 4\.49% · fee 20%/ }).click();
-    await shelf.getByRole("button", { name: /25 yr · esc 2\.9% · \$12\.40\/kW-mo/ }).click();
-    await expect(page.getByTestId("compare-total-paid")).toBeVisible({ timeout: 15000 });
+    await offerCard(page, name, /25 yr · 4\.49% · fee 20%/).click();
+    await offerCard(page, name, /25 yr · esc 2\.9% · \$12\.40\/kW-mo/).click();
+    await expect(page.getByTestId("compare-total-paid").first()).toBeVisible({ timeout: 15000 });
 
     // At the end of one the customer owns an array and at the end of the other
     // they own nothing, so the smaller total is not the better deal and is not
@@ -314,8 +363,7 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     const leadId = await openSolarDeal(page);
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
 
-    const shelf = page.getByRole("region", { name });
-    await shelf.getByRole("button", { name: /25 yr · esc 1\.9% · \$11\.80\/kW-mo/ }).click();
+    await offerCard(page, name, /25 yr · esc 1\.9% · \$11\.80\/kW-mo/).click();
     await page.getByRole("button", { name: new RegExp(`Quote this: ${name}`) }).click();
     await expect(page.getByText(/Quoting .*Save to keep it/)).toBeVisible({ timeout: 15000 });
 

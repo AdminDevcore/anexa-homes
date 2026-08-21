@@ -56,6 +56,38 @@ async function openFinancing(page: Page, leadId: string) {
   });
 }
 
+/**
+ * The base price, opened for editing.
+ *
+ * It reads as a plain figure until a rep clicks it: a laptop gets turned around
+ * in somebody's kitchen, and a price with a spinner on it announces to the
+ * homeowner that the number is negotiable.
+ */
+async function baseprice(page: Page) {
+  const box = page.getByLabel("Base $/W", { exact: true });
+  if (!(await box.isVisible().catch(() => false))) {
+    await page.getByRole("button", { name: /^Edit the base price per watt/ }).click();
+    await expect(box).toBeVisible({ timeout: 15000 });
+  }
+  return box;
+}
+
+/**
+ * Put one catalogue adder on the deal through the picker.
+ *
+ * Every adder used to be a chip laid out in the panel, which a spec could click
+ * directly. They live behind one button now — a catalogue of forty chips is a
+ * paragraph of pills sitting between a rep and the price of the system.
+ */
+async function pickAdder(page: Page, label: RegExp) {
+  await page.getByRole("button", { name: /Choose adders/ }).click();
+  const picker = page.getByRole("dialog");
+  await expect(picker).toBeVisible({ timeout: 15000 });
+  await picker.getByRole("checkbox", { name: label }).click();
+  await picker.getByRole("button", { name: /^Add to the quote/ }).click();
+  await expect(picker).toBeHidden({ timeout: 15000 });
+}
+
 const dollars = (text: string) => Number(text.replace(/[^0-9.]/g, ""));
 
 /**
@@ -93,7 +125,7 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     await openFinancing(page, leadId);
     await clearAdders(page);
 
-    await page.getByLabel("Base $/W").fill("3.00");
+    await (await baseprice(page)).fill("3.00");
 
     // No lines, and the seeded $3,850 is still in the price. Recomputing that
     // from an empty table would drop a homeowner's quote by the cost of their
@@ -113,11 +145,11 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     await clearAdders(page);
 
     // A round rate so the ladder is readable: 10 kW at $3.00/W is $30,000.
-    await page.getByLabel("Base $/W").fill("3.00");
+    await (await baseprice(page)).fill("3.00");
 
     // Pick one off the catalogue rather than typing an amount. The label is
     // what makes the money answerable later.
-    await page.getByRole("button", { name: /Main panel upgrade/ }).click();
+    await pickAdder(page, /Main panel upgrade/);
     await expect(page.getByTestId("adder-total")).toBeVisible({ timeout: 15000 });
 
     // The line names itself, and the itemised total has taken over from the
@@ -168,7 +200,7 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
 
     await openFinancing(page, leadId);
     await clearAdders(page);
-    await page.getByRole("button", { name: new RegExp(name) }).click();
+    await pickAdder(page, new RegExp(name));
 
     // 10 kW at $0.05/W is $500, and the line says so.
     await expect

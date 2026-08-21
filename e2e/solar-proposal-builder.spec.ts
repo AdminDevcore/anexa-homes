@@ -78,7 +78,9 @@ test.describe(FLAG_ON ? "solar proposal builder" : "solar proposal builder (flag
     // "a lease is never badged the winner" in solar-financing-shelf.spec.ts,
     // which sets up a real lease product and quotes it.
     await step(page, "Financing").click();
-    await expect(page.getByLabel("Base $/W")).toBeVisible();
+    // The price reads as a figure until it is clicked — see SystemPriceCard —
+    // so what proves the step arrived is the figure, not the input.
+    await expect(page.getByRole("button", { name: /^Edit the base price per watt/ })).toBeVisible();
     await expect(page.getByLabel("Escalator %/yr")).toHaveCount(0);
     await expect(page.getByText("Not on a rate sheet?")).toHaveCount(0);
 

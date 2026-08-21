@@ -70,11 +70,19 @@ export type OfferLender = {
  * actually QUOTED on is decided in the comparison below, deliberately — a card
  * that both shortlists and commits on one click is a card a rep re-prices a
  * deal with by accident.
+ *
+ * The card names its own lender. The shelf used to be one row per partner,
+ * each scrolling sideways, which stacked cash above Amos above Climate First
+ * and put half of each row off the edge of the screen — three headings and a
+ * lot of white to compare three cards. They lie in one wrapped grid now, so
+ * the card is the only thing left that can say whose programme it is.
  */
 function OfferCard({
   title,
   kind,
   terms,
+  lenderName,
+  logoUrl,
   headline,
   headlineNote,
   unpricedNote,
@@ -86,6 +94,9 @@ function OfferCard({
   title: string;
   kind: FinanceProduct;
   terms: string | null;
+  /** Null on cash — it is the one way to pay that has no lender behind it. */
+  lenderName: string | null;
+  logoUrl: string | null;
   headline: string | null;
   headlineNote: string | null;
   /** Why this card has no figure — the ONE thing that would give it one. */
@@ -101,8 +112,15 @@ function OfferCard({
       onClick={onToggle}
       disabled={disabled}
       aria-pressed={shortlisted}
+      // Named explicitly, lender first. Two partners can publish programmes
+      // whose terms read identically — "25 yr · 3.99% · fee 28%" only names one
+      // offer once you know whose it is, and the per-lender landmark that used
+      // to supply that is gone with the stacked rows.
+      aria-label={[lenderName ?? "No lender", title, terms, quoted ? "Quoted" : null]
+        .filter(Boolean)
+        .join(" · ")}
       className={cn(
-        "relative flex h-[8.5rem] w-[16rem] shrink-0 snap-start flex-col rounded-xl border p-3.5 text-left transition-all",
+        "relative flex min-h-[9.5rem] w-full flex-col rounded-xl border p-3.5 text-left transition-all",
         "focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60",
         quoted
           ? "border-solar bg-solar/[0.06] ring-1 ring-solar"
@@ -111,24 +129,16 @@ function OfferCard({
             : "border-border bg-card hover:-translate-y-px hover:border-foreground/20 hover:shadow-[var(--shadow-raised)]"
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="flex flex-wrap items-center gap-1">
-          <span
-            className={cn(
-              "rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-              KIND_STYLE[kind]
-            )}
-          >
-            {PRODUCT_LABEL[kind]}
+      <div className="flex items-center gap-2">
+        {lenderName ? (
+          <LenderMark name={lenderName} logoUrl={logoUrl} size="sm" />
+        ) : (
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <Wallet className="size-3.5" />
           </span>
-          {/* Inside the card, never floated above it: the shelf scrolls
-              sideways, and an overflow-x container clips vertically too — a
-              badge hung off the top edge simply is not there. */}
-          {quoted && (
-            <span className="rounded bg-solar px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-solar-foreground">
-              Quoted
-            </span>
-          )}
+        )}
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {lenderName ?? "No lender"}
         </span>
         <span
           className={cn(
@@ -142,10 +152,26 @@ function OfferCard({
         </span>
       </div>
 
-      <div className="mt-2 truncate text-sm font-semibold leading-snug">{title}</div>
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        <span
+          className={cn(
+            "rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            KIND_STYLE[kind]
+          )}
+        >
+          {PRODUCT_LABEL[kind]}
+        </span>
+        {quoted && (
+          <span className="rounded bg-solar px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-solar-foreground">
+            Quoted
+          </span>
+        )}
+      </div>
+
+      <div className="mt-1.5 truncate text-sm font-semibold leading-snug">{title}</div>
       {terms && <div className="truncate text-[11px] text-muted-foreground">{terms}</div>}
 
-      <div className="mt-auto">
+      <div className="mt-auto pt-2">
         {headline ? (
           <>
             <div className="font-display text-xl font-semibold tabular-nums">{headline}</div>
@@ -223,17 +249,21 @@ const LINES: CompareLine[] = [
 const MONEY_LINES = new Set(["monthly", "term", "dealer-fee", "sticker", "contract-price", "total-paid"]);
 
 /**
- * The comparison itself.
+ * The comparison itself: one column per shortlisted programme.
  *
- * Scrolls sideways rather than wrapping: four programmes on a laptop is normal,
- * and a table that reflows into stacked blocks stops being a comparison the
- * moment the reader can no longer see two numbers at once. The label column
- * stays put so the fifth column still knows what it is looking at.
+ * It was a table — a frozen label column with the offers running off to the
+ * right — which is the right shape for a spreadsheet and the wrong one for the
+ * moment this screen exists for, which is a rep turning the laptop around and
+ * saying "here are your three choices". A homeowner reads a column, not a row:
+ * whose money it is, what it costs a month, what they sign for, and a button
+ * that picks it. So each offer is a card of its own, they sit side by side, and
+ * the row LABELS repeat inside each column rather than being frozen off to one
+ * side.
  *
- * A line every column leaves blank is dropped — a pure-lease shortlist should
- * not carry four empty purchase rows.
+ * Wraps rather than scrolls. Two columns that cannot both be on screen are not
+ * a comparison, and a sideways scrollbar is how the third one gets missed.
  */
-function CompareTable({
+function CompareColumns({
   rows,
   quotedId,
   onQuote,
@@ -247,19 +277,6 @@ function CompareTable({
   /** Set when the DEAL, not the rate sheet, is why the money rows are empty. */
   blockedNote: string | null;
 }) {
-  /**
-   * A row every column leaves blank is dropped — EXCEPT when the deal itself is
-   * what is missing.
-   *
-   * Dropping them then is what made this look like a bug: with no system size
-   * the payment, contract price and total all vanish at once, and the table
-   * that was supposed to answer "what does each of these cost a month" quietly
-   * became a table of dealer fees. Kept as dashes, with the reason under them,
-   * the comparison still shows what it is going to fill in.
-   */
-  const lines = LINES.filter(
-    (l) => rows.some((r) => l.cell(r) != null) || (blockedNote != null && MONEY_LINES.has(l.key))
-  );
   /**
    * The cheapest column, but ONLY when every column buys the same thing.
    *
@@ -275,14 +292,14 @@ function CompareTable({
     return priced.reduce((a, b) => (a.totalPaidCents! <= b.totalPaidCents! ? a : b)).id;
   }, [rows]);
 
-  /** Said once, under the table, whenever ownership is not the same everywhere. */
+  /** Said once, under the columns, whenever ownership is not the same everywhere. */
   const mixedOwnership =
     rows.some((r) => r.product === "lease" || r.product === "ppa") &&
     rows.some((r) => r.product === "cash" || r.product === "loan");
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
-      <header className="flex items-baseline justify-between gap-2 border-b border-border/70 px-4 py-2.5">
+      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/70 px-4 py-2.5">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Compare · {rows.length} selected
         </h4>
@@ -291,101 +308,22 @@ function CompareTable({
         </p>
       </header>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-max border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="sticky left-0 z-10 w-[13.5rem] min-w-[13.5rem] border-r border-border/60 bg-card px-4 py-3 text-left">
-                &nbsp;
-              </th>
-              {rows.map((r) => (
-                <th key={r.id} className="w-[12rem] min-w-[12rem] px-4 py-3 text-left align-bottom">
-                  <div className="text-[11px] text-muted-foreground">
-                    {r.lenderName ?? "No lender"}
-                  </div>
-                  <div className="text-sm font-semibold leading-snug">{r.label}</div>
-                  {r.id === cheapest && (
-                    <span className="mt-1 inline-block rounded border border-emerald-600/20 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300">
-                      Lowest total
-                    </span>
-                  )}
-                </th>
-              ))}
-              {/* Takes the slack. Without it a single shortlisted programme is
-                  stretched across the whole card, and one $204.32 marooned in
-                  a band of white does not read as a column of a comparison. */}
-              <th aria-hidden className="w-full" />
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line, i) => (
-              <tr
-                key={line.key}
-                data-testid={`compare-${line.key}`}
-                className={cn("border-t border-border/50", i % 2 === 1 && "bg-muted/25")}
-              >
-                {/* The zebra is applied to the row AND repeated on the sticky
-                    header cell. `even:` would key off the CELL's position among
-                    its siblings — it is always the first — so the frozen column
-                    would stay one flat colour while the rows behind it striped,
-                    and the stripes would then slide under it as the table
-                    scrolls. Opaque either way: the cell is what the scrolling
-                    columns pass behind. */}
-                <th
-                  scope="row"
-                  className={cn(
-                    "sticky left-0 z-10 min-w-[13.5rem] border-r border-border/60 px-4 py-2 text-left align-top text-[11px] font-medium text-muted-foreground",
-                    i % 2 === 1 ? "bg-[color-mix(in_oklch,var(--card),var(--muted)_25%)]" : "bg-card"
-                  )}
-                >
-                  {line.label}
-                  {line.hint && <span className="mt-0.5 block max-w-[11rem] opacity-70">{line.hint}</span>}
-                </th>
-                {rows.map((r) => (
-                  <td
-                    key={r.id}
-                    className={cn(
-                      "px-4 py-2 align-top tabular-nums",
-                      line.lead && "font-display text-base font-semibold"
-                    )}
-                  >
-                    {line.cell(r) ?? <span className="text-sm font-normal text-muted-foreground">—</span>}
-                  </td>
-                ))}
-                <td aria-hidden />
-              </tr>
-            ))}
-          </tbody>
-          {canEdit && (
-            <tfoot>
-              <tr className="border-t border-border">
-                <th className="sticky left-0 z-10 min-w-[13.5rem] border-r border-border/60 bg-card px-4 py-3" />
-                {rows.map((r) => (
-                  <td key={r.id} className="px-4 py-3">
-                    {r.id === quotedId ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-solar">
-                        <Check className="size-3.5" /> Quoted
-                      </span>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        // Five buttons reading "Quote this" are five identical
-                        // announcements. The visible text is kept inside the
-                        // name so speech control still works on what is read.
-                        aria-label={`Quote this: ${r.lenderName ? `${r.lenderName} ` : ""}${r.label}`}
-                        onClick={() => onQuote(r)}
-                      >
-                        Quote this
-                      </Button>
-                    )}
-                  </td>
-                ))}
-                <td aria-hidden />
-              </tr>
-            </tfoot>
-          )}
-        </table>
+      {/* auto-FILL, not auto-fit: with one programme shortlisted, auto-fit
+          collapses the empty tracks and stretches that single column across the
+          whole card — one $188.49 marooned in a band of white, which does not
+          read as a column of a comparison. */}
+      <div className="grid gap-3 p-4 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
+        {rows.map((r) => (
+          <CompareColumn
+            key={r.id}
+            row={r}
+            cheapest={r.id === cheapest}
+            quoted={r.id === quotedId}
+            onQuote={() => onQuote(r)}
+            canEdit={canEdit}
+            blocked={blockedNote != null}
+          />
+        ))}
       </div>
 
       {blockedNote && (
@@ -401,6 +339,138 @@ function CompareTable({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * One offer, top to bottom, in the order a homeowner asks about it.
+ *
+ * The headline is whichever figure this product is actually SOLD on — a monthly
+ * payment for anything financed, the contract price for cash, a rate per kWh
+ * for a PPA — and it carries that line's test id, so the figure is on the
+ * screen exactly once whichever shape the offer takes.
+ */
+function CompareColumn({
+  row,
+  cheapest,
+  quoted,
+  onQuote,
+  canEdit,
+  blocked,
+}: {
+  row: CompareRow;
+  cheapest: boolean;
+  quoted: boolean;
+  onQuote: () => void;
+  canEdit: boolean;
+  /** The deal has no system size, so the money lines are held open as dashes. */
+  blocked: boolean;
+}) {
+  const headline =
+    row.monthlyCents != null
+      ? { key: "monthly", value: `${money2(row.monthlyCents)}/mo`, note: "per month" }
+      : row.contractPriceCents != null
+        ? { key: "contract-price", value: money(row.contractPriceCents), note: "contract price" }
+        : row.rateMillsPerKwh != null
+          ? {
+              key: "rate",
+              value: `$${(row.rateMillsPerKwh / 1000).toFixed(3)}/kWh`,
+              note: "escalates each year",
+            }
+          : {
+              key: row.product === "cash" ? "contract-price" : "monthly",
+              value: "—",
+              note: "not priced yet",
+            };
+
+  // Everything the headline did not already say. A line every column leaves
+  // blank is dropped — EXCEPT when the deal itself is what is missing, because
+  // dropping the payment, the contract price and the total all at once turns a
+  // comparison of what things cost into a list of dealer fees.
+  const lines = LINES.filter(
+    (l) => l.key !== headline.key && (l.cell(row) != null || (blocked && MONEY_LINES.has(l.key)))
+  );
+
+  return (
+    <article
+      data-testid="compare-col"
+      data-offer-id={row.id}
+      className={cn(
+        "flex flex-col rounded-xl border p-3.5",
+        quoted ? "border-solar bg-solar/[0.04] ring-1 ring-solar" : "border-border bg-card"
+      )}
+    >
+      <div className="text-[11px] text-muted-foreground">{row.lenderName ?? "No lender"}</div>
+      <div className="text-sm font-semibold leading-snug">{row.label}</div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        <span
+          className={cn(
+            "rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            KIND_STYLE[row.product]
+          )}
+        >
+          {PRODUCT_LABEL[row.product]}
+        </span>
+        {cheapest && (
+          <span className="rounded border border-emerald-600/20 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300">
+            Lowest total
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 border-t border-border/60 pt-3">
+        <div
+          data-testid={`compare-${headline.key}`}
+          className="font-display text-2xl font-semibold tabular-nums"
+        >
+          {headline.value}
+        </div>
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {headline.note}
+        </div>
+      </div>
+
+      <dl className="mt-3 space-y-1 text-sm">
+        {lines.map((line) => (
+          <div key={line.key} className="flex items-baseline justify-between gap-3">
+            <dt className="text-[11px] text-muted-foreground">{line.label}</dt>
+            <dd
+              data-testid={`compare-${line.key}`}
+              className="text-right tabular-nums"
+            >
+              {line.cell(row) ?? <span className="text-muted-foreground">—</span>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      {/* mt-auto: the columns stretch to the tallest of them, and a lease with
+          three lines against a loan with five would otherwise put its button
+          two inches higher — a row of buttons at four different heights is a
+          harder thing to point at than a row of prices. */}
+      {canEdit && (
+        <div className="mt-auto pt-3">
+          {quoted ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-solar">
+              <Check className="size-3.5" /> Quoted
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              // Several buttons reading "Quote this" are several identical
+              // announcements. The visible text is kept inside the name so
+              // speech control still works on what is read.
+              aria-label={`Quote this: ${row.lenderName ? `${row.lenderName} ` : ""}${row.label}`}
+              onClick={onQuote}
+            >
+              Quote this
+            </Button>
+          )}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -442,15 +512,66 @@ export function FinanceOffers({
   /** Takes the rep to the step that fixes an empty comparison. */
   onOpenDesign?: () => void;
 }) {
-  const byLender = React.useMemo(() => {
-    const m = new Map<string, OfferProduct[]>();
+  /**
+   * Every way to pay, in one flat list: cash first, then each lender's
+   * programmes in the order its rate sheet was entered.
+   *
+   * Grouped per lender it was three stacked rows, each scrolling sideways, and
+   * the answer to "show me my options" was three headings and a lot of white.
+   * Flat, they wrap into a grid and a rep sees all of them at once — which is
+   * the only reason to put them on one screen.
+   */
+  const shelf = React.useMemo(() => {
+    const byLender = new Map<string, OfferProduct[]>();
     for (const p of products) {
-      const list = m.get(p.lenderId);
+      const list = byLender.get(p.lenderId);
       if (list) list.push(p);
-      else m.set(p.lenderId, [p]);
+      else byLender.set(p.lenderId, [p]);
     }
-    return m;
-  }, [products]);
+    type ShelfCard = {
+      id: string;
+      title: string;
+      kind: FinanceProduct;
+      terms: string | null;
+      lenderName: string | null;
+      logoUrl: string | null;
+    };
+    const cards: ShelfCard[] = [
+      {
+        id: CASH_OFFER_ID,
+        title: "Cash",
+        kind: "cash",
+        terms: "Paid in full. No lender, so no dealer fee.",
+        lenderName: null,
+        logoUrl: null,
+      },
+    ];
+    for (const l of lenders) {
+      for (const p of byLender.get(l.id) ?? []) {
+        cards.push({
+          id: p.id,
+          title: p.label,
+          kind: p.product,
+          terms:
+            [
+              p.isActive ? null : "retired",
+              lenderProductLabel(p) === p.label ? null : lenderProductLabel(p),
+            ]
+              .filter(Boolean)
+              .join(" · ") || null,
+          lenderName: l.isActive ? l.name : `${l.name} · retired`,
+          logoUrl: l.logoUrl,
+        });
+      }
+    }
+    return cards;
+  }, [products, lenders]);
+
+  /** Lenders the company has set up but has entered no terms for. */
+  const emptySheets = React.useMemo(
+    () => lenders.filter((l) => !products.some((p) => p.lenderId === l.id)),
+    [lenders, products]
+  );
 
   // Priced once, for the cards AND the table, so a card can never disagree with
   // the column it opens.
@@ -477,7 +598,15 @@ export function FinanceOffers({
     ? "Every payment reads — because this deal has no system size yet. Draw the roof on System design and each column prices itself."
     : null;
 
-  const cardFor = (id: string, title: string, kind: FinanceProduct, terms: string | null) => {
+  const cardFor = (c: {
+    id: string;
+    title: string;
+    kind: FinanceProduct;
+    terms: string | null;
+    lenderName: string | null;
+    logoUrl: string | null;
+  }) => {
+    const { id, title, kind, terms } = c;
     const row = priced.get(id);
     const headline =
       row == null
@@ -508,6 +637,8 @@ export function FinanceOffers({
         title={title}
         kind={kind}
         terms={terms}
+        lenderName={c.lenderName}
+        logoUrl={c.logoUrl}
         headline={headline}
         headlineNote={note}
         unpricedNote={unpricedNote(kind, gaps)}
@@ -551,19 +682,15 @@ export function FinanceOffers({
           </p>
         </header>
 
-        <div className="space-y-4 p-4">
-          <section aria-label="Paid outright" className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="flex size-6 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <Wallet className="size-3.5" />
-              </span>
-              <span className="text-xs font-semibold uppercase tracking-wide">Paid outright</span>
-              <span className="text-[11px] text-muted-foreground">no lender</span>
-            </div>
-            <ShelfRow>
-              {cardFor(CASH_OFFER_ID, "Cash", "cash", "Paid in full. No lender, so no dealer fee.")}
-            </ShelfRow>
-          </section>
+        <div className="space-y-3 p-4">
+          {/* ONE GRID, NOT A ROW PER LENDER. Cash leads because it is the
+              comparison every financed programme is argued against; after it
+              the cards simply flow and wrap, so a company with three partners
+              and eight programmes fills the screen rather than hiding six of
+              them off the right-hand edge of three separate scrollers. */}
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
+            {shelf.map((c) => cardFor(c))}
+          </div>
 
           {lenders.length === 0 && (
             <p className="rounded-lg border border-amber-300/70 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
@@ -574,62 +701,34 @@ export function FinanceOffers({
             </p>
           )}
 
-          {lenders.map((l) => {
-            const sheet = byLender.get(l.id) ?? [];
-            return (
-              // A landmark per partner: two lenders can publish programmes whose
-              // terms read identically, so "25 yr · 3.99% · fee 28%" only names one
-              // offer once you know whose shelf it is on.
-              <section key={l.id} aria-label={l.name} className="space-y-2 border-t border-border/60 pt-4">
-                <div className="flex items-center gap-2">
-                  <LenderMark name={l.name} logoUrl={l.logoUrl} size="sm" />
-                  <span className="text-xs font-semibold uppercase tracking-wide">
-                    {l.name}
-                    {l.isActive ? "" : <span className="text-muted-foreground"> · retired</span>}
-                  </span>
-                  {sheet.length > 0 && (
-                    <span className="text-[11px] text-muted-foreground">
-                      {sheet.length} programme{sheet.length === 1 ? "" : "s"}
-                    </span>
-                  )}
-                </div>
-
-                {sheet.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    Nothing on this rate sheet yet.{" "}
-                    <Link
-                      href="/portal/settings/solar-lenders"
-                      className="underline underline-offset-2 hover:text-foreground"
-                    >
-                      Add {l.name}&rsquo;s terms
-                    </Link>{" "}
-                    and they appear here.
-                  </p>
-                ) : (
-                  <ShelfRow>
-                    {sheet.map((p) =>
-                      cardFor(
-                        p.id,
-                        p.label,
-                        p.product,
-                        [
-                          p.isActive ? null : "retired",
-                          lenderProductLabel(p) === p.label ? null : lenderProductLabel(p),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || null
-                      )
-                    )}
-                  </ShelfRow>
-                )}
-              </section>
-            );
-          })}
+          {/* A partner with no terms on file has no card in the grid, so it
+              would otherwise vanish from the screen entirely — and "where is
+              Amos?" is a question about a rate sheet nobody entered, not about
+              this deal. */}
+          {emptySheets.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              Nothing on{" "}
+              {emptySheets.map((l, i) => (
+                <span key={l.id}>
+                  {i > 0 && (i === emptySheets.length - 1 ? " or " : ", ")}
+                  <strong className="font-medium text-foreground">{l.name}</strong>
+                </span>
+              ))}
+              &rsquo;s rate sheet yet.{" "}
+              <Link
+                href="/portal/settings/solar-lenders"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                Add the terms
+              </Link>{" "}
+              and the programmes appear here.
+            </p>
+          )}
         </div>
       </section>
 
       {selected.length > 0 ? (
-        <CompareTable
+        <CompareColumns
           rows={selected}
           quotedId={quotedId}
           onQuote={onQuote}
@@ -644,15 +743,4 @@ export function FinanceOffers({
       )}
     </div>
   );
-}
-
-/**
- * A sideways-scrolling row of cards.
- *
- * `py-1 -my-1` rather than plain overflow: the cards lift a pixel on hover and
- * carry a shadow, and an overflow-x container clips vertically too — without
- * the padding the lift is sheared off at the top edge.
- */
-function ShelfRow({ children }: { children: React.ReactNode }) {
-  return <div className="-my-1 flex snap-x gap-3 overflow-x-auto py-1">{children}</div>;
 }

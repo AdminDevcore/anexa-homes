@@ -175,12 +175,14 @@ test.describe(FLAG_ON ? "solar payment factors" : "solar payment factors (flag o
     const leadId = page.url().split("/").pop()!;
 
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
-    // Scoped to THIS lender's shelf: earlier specs in this file publish
-    // programmes whose terms read identically, and a page-wide match reaches
-    // whichever partner happens to sort first.
-    const card = page
-      .getByRole("region", { name })
-      .getByRole("button", { name: /25 yr · 3\.99% · fee 28%/ });
+    // Scoped to THIS lender: earlier specs in this file publish programmes whose
+    // terms read identically, and a page-wide match reaches whichever partner
+    // happens to sort first. The shelf is one wrapped grid rather than a
+    // landmark per partner now, so the lender is matched inside the card's own
+    // accessible name.
+    const card = page.getByRole("button", {
+      name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} · .*25 yr · 3\\.99% · fee 28%`),
+    });
     await expect(card).toBeVisible({ timeout: 15000 });
     await card.click();
     await page.getByRole("button", { name: `Quote this: ${name} 25 yr · 3.99% · fee 28%` }).click();

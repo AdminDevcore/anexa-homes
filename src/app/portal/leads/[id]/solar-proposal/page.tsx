@@ -161,7 +161,12 @@ export default async function SolarProposalBuilderPage({
   const name = `${lead.firstName} ${lead.lastName}`.trim();
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 py-6">
+    // FULL WIDTH ON PURPOSE. This screen used to sit in a 1152px column
+    // inside the shell's own padding, which on a laptop left two empty bands
+    // down the sides while the comparison and the shelf of programmes — the
+    // two things that are worth more the wider they get — scrolled sideways
+    // inside them. The shell already pads; this adds nothing on top of it.
+    <div className="w-full">
       <Link
         href={`/portal/leads/${id}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
