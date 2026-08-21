@@ -50,10 +50,15 @@ export default async function PublicSolarProposalPage({
     <SolarProposalView
       snapshot={proposal.snapshot}
       showComparison={proposal.showComparison}
+      showPaymentOptions={proposal.showPaymentOptions}
       token={token}
       alreadySigned={!!proposal.signedAt}
       superseded={!!proposal.supersededAt}
       layoutImageUrl={layoutImageUrl}
+      // The token-scoped imagery route. Passed only when the snapshot froze a
+      // coordinate: without one there is nothing to centre on, and the route
+      // would 404 on every zoom level.
+      siteImageBase={proposal.snapshot.site ? `/proposal/${token}/site-image` : null}
       accentColor={branding.accentColor}
     />
   );

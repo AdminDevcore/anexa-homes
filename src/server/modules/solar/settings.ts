@@ -32,6 +32,13 @@ export type SolarSettingsView = SolarAssumptions & {
   /// every pure calculation shares, and this one only ever reaches the sticker
   /// price. Null — the default — means derive nothing and leave gross as typed.
   targetNetPpwCents: number | null;
+  /// What the company claims an owned system adds to a home's value, %.
+  ///
+  /// Also not part of SolarAssumptions: it reaches no calculation at all. It is
+  /// a claim the DOCUMENT makes, and a claim needs an owner — zero, the
+  /// default, means the company makes none and the card is omitted rather than
+  /// printed as "0%".
+  homeValueUpliftPct: number;
 };
 
 export async function getSolarSettings(companyId: string): Promise<SolarSettingsView> {
@@ -41,6 +48,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
       ...SOLAR_ASSUMPTION_DEFAULTS,
       netMeteringProgram: null,
       targetNetPpwCents: null,
+      homeValueUpliftPct: 0,
     };
   }
   return {
@@ -56,5 +64,6 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     maxPpwCents: row.maxPpwCents,
     netMeteringProgram: row.netMeteringProgram,
     targetNetPpwCents: row.targetNetPpwCents,
+    homeValueUpliftPct: row.homeValueUpliftPct,
   };
 }

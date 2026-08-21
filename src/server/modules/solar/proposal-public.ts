@@ -39,7 +39,8 @@ export async function getPublicSolarProposal(token: string) {
         where: { publicToken: token },
         select: {
           id: true, leadId: true, companyId: true, version: true, status: true, signedAt: true,
-          sentAt: true, supersededAt: true, snapshot: true, showComparison: true,
+          sentAt: true, supersededAt: true, snapshot: true,
+          showComparison: true, showPaymentOptions: true,
           lead: { select: { vertical: true } },
         },
       })

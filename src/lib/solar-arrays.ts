@@ -137,6 +137,54 @@ export type SystemTotals = {
 };
 
 /**
+ * Twelve months of what a plane makes, per kW-DC. See PlaneYieldLookup.
+ *
+ * Separate from the annual lookup because they fail separately: PVWatts can
+ * answer with an annual total and no monthly breakdown, and a caller that
+ * assumed one implied the other would draw a year out of nothing.
+ */
+export type PlaneMonthlyLookup = (plane: {
+  tiltDeg: number | null;
+  azimuthDeg: number | null;
+}) => number[] | null;
+
+/**
+ * The shape of the system's year: twelve months of production, Jan..Dec, kWh.
+ *
+ * NULL UNLESS EVERY ARRAY WAS SIMULATED. This is the rule the whole function
+ * exists for. A roof with a measured south plane and an undescribed north one
+ * has an annual figure that adds a simulation to a market average — which is
+ * fine, because an annual figure is one number and the document says how it was
+ * built. A monthly CURVE is different: the market-average model has no seasonal
+ * shape at all, so the only way to draw those months is to invent them, and an
+ * invented January sitting next to a metered one is indistinguishable by eye.
+ *
+ * An array with no panels on it is skipped rather than disqualifying the year —
+ * an empty block is a rectangle somebody drew and did not fill, not a plane
+ * nobody simulated.
+ */
+export function monthlyProduction(
+  arrays: ArrayBreakdown[],
+  planeMonthly: PlaneMonthlyLookup
+): number[] | null {
+  const live = arrays.filter((a) => a.panels > 0 && a.kwDc > 0);
+  if (live.length === 0) return null;
+
+  const total = new Array(12).fill(0) as number[];
+  for (const a of live) {
+    const perKw = planeMonthly({ tiltDeg: a.tiltDeg, azimuthDeg: a.azimuthDeg });
+    if (!perKw || perKw.length !== 12) return null;
+    if (!perKw.every((m) => typeof m === "number" && Number.isFinite(m) && m >= 0)) return null;
+    for (let i = 0; i < 12; i++) total[i] += a.kwDc * perKw[i] * a.shadeFactor;
+  }
+
+  const rounded = total.map((n) => Math.round(n));
+  // Twelve zeros is a cache row that answered with an empty year, not a system
+  // that makes nothing.
+  return rounded.some((n) => n > 0) ? rounded : null;
+}
+
+/**
  * Everything the design step, the proposal and the save action all need to
  * agree on, computed once from the geometry.
  */

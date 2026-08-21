@@ -2,52 +2,85 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Leaf, TreePine, Factory, Car, Check, Loader2, Lock, ExternalLink } from "lucide-react";
+import {
+  Leaf,
+  TreePine,
+  Factory,
+  Car,
+  Home,
+  Check,
+  Loader2,
+  Lock,
+  ExternalLink,
+  ArrowUpRight,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { SolarProposalSnapshot, SavingsYear } from "@/lib/solar-proposal";
-import { SOLAR_TIMELINE, SOLAR_FAQS } from "@/lib/solar-proposal";
+import type {
+  SolarProposalSnapshot,
+  SavingsYear,
+  ProposalPaymentOption,
+} from "@/lib/solar-proposal";
+import { SOLAR_TIMELINE, SOLAR_FAQS, IMPACT_SOURCES } from "@/lib/solar-proposal";
 import { PROPOSAL_NAV_PX } from "@/lib/proposal";
 import { acceptSolarProposalAction } from "@/server/modules/solar/proposal-sign-action";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { ProposalChrome, type ChromeNavItem } from "./proposal-chrome";
+import { PaymentMenu } from "./payment-menu";
+import { SavingsScrubber } from "./savings-scrubber";
+import { YearChart } from "./year-chart";
+import { CompareCards } from "./compare-cards";
+import { HowItWorks } from "./how-it-works";
+import { ArrayMap } from "./array-map";
+import { RepBar, type RepContext } from "./rep-bar";
+import { usd, kwh, usdCompact, pct, pctWhole } from "./format";
 
 /**
- * Money, always from cents. `maximumFractionDigits: 0` on the big numbers so a
- * 25-year projection does not read as false precision to the cent.
+ * Number formatting lives in ./format, shared with every panel inside the
+ * document — see the note there about why two formatters is two answers.
  */
-const usd = (cents: number, digits = 0) =>
-  (cents / 100).toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: digits,
-    minimumFractionDigits: digits,
-  });
-
-const kwh = (n: number) => `${Math.round(n).toLocaleString()} kWh`;
 
 /**
- * Money for a chart axis, where the exact figure is stated in words below the
- * plot and only the SCALE has to survive being 10px wide on a phone.
- */
-const usdCompact = (cents: number) => {
-  const d = Math.round(cents / 100);
-  return d >= 1000 ? `$${Math.round(d / 1000)}k` : `$${d}`;
-};
-
-/**
- * Percentages a homeowner reads. Whole numbers unless the value genuinely has a
- * fraction — "2.9%" must not become "3%", and "87.0%" must not appear at all.
- */
-const pct = (n: number) => `${Number(n.toFixed(2))}%`;
-
-/**
- * The offset, as a HEADLINE.
+ * The payment menu a document offers, including the ones that offer no menu.
  *
- * "71.97% of what your home uses" is false precision on a 25-year projection
- * and reads like a machine talking. The two decimals stay everywhere the number
- * is an assumption being audited; the sentence a homeowner reads gets "72%".
+ * A proposal generated before v4 has no `options` array at all — it has one
+ * financing block and one savings model, which is exactly the same thing as a
+ * menu of one. Synthesising that single option here means the whole document
+ * below has ONE code path: nothing has to ask whether this is an old snapshot,
+ * and no section is written twice.
+ *
+ * The synthesised option's `monthlyCents` and `postSolarMonthlyCents` are
+ * derived from the frozen figures rather than recomputed — they are the same
+ * three lines `priceOption` runs on the server, applied to numbers that were
+ * settled the day the document was generated.
  */
-const pctWhole = (n: number) => `${Math.round(n)}%`;
+function paymentOptions(s: SolarProposalSnapshot): ProposalPaymentOption[] {
+  if (s.options && s.options.length > 0) return s.options;
+
+  const f = s.financing;
+  const year1 = s.savings.years[0];
+  const monthlyCents =
+    f.product === "cash"
+      ? null
+      : f.product === "loan"
+        ? f.loanMonthlyPaymentCents
+        : f.product === "lease"
+          ? f.monthlyPaymentCents
+          : year1
+            ? Math.round(year1.solarPaymentCents / 12)
+            : null;
+
+  return [
+    {
+      key: "quoted",
+      label: PRODUCT_LABEL[f.product] ?? f.product,
+      quoted: true,
+      financing: f,
+      savings: s.savings,
+      monthlyCents,
+      postSolarMonthlyCents: year1 ? Math.round(year1.residualGridCents / 12) : 0,
+    },
+  ];
+}
 
 /**
  * The name on the cover, as a person's name.
@@ -136,6 +169,9 @@ export function SolarProposalView({
   previewMode = false,
   layoutImageUrl = null,
   showComparison = true,
+  showPaymentOptions = true,
+  siteImageBase = null,
+  rep = null,
   accentColor,
   chromeOffset = 0,
 }: {
@@ -153,6 +189,37 @@ export function SolarProposalView({
    * was rendered.
    */
   showComparison?: boolean;
+  /**
+   * Whether the customer's copy offers the payment menu.
+   *
+   * A PRESENTATION choice on the proposal row, like `showComparison`: the
+   * options themselves are frozen into the snapshot either way, so a rep who
+   * decides at the table to show a household what cash looks like turns this on
+   * without reissuing the document and renumbering it. Off shows only the
+   * option the deal was quoted on, which is how every proposal generated before
+   * the menu existed reads.
+   */
+  showPaymentOptions?: boolean;
+  /**
+   * Where to fetch the aerial imagery the array is drawn on, resolved by the
+   * CALLER — the customer's copy uses its token-scoped route, and a preview
+   * inside the portal has no such route and passes null, falling back to the
+   * uploaded drawing.
+   *
+   * A string the component appends `?z=` to rather than a function, because a
+   * server component cannot hand a function to a client one.
+   */
+  siteImageBase?: string | null;
+  /**
+   * The rep's own controls, on the document.
+   *
+   * Passed ONLY by the portal preview, and only for somebody allowed to reissue
+   * a proposal — the customer's copy never receives it, so none of it reaches
+   * the render path of a public page. Every action behind it re-checks the
+   * permission on the server regardless: a component that is not rendered is
+   * not a guard.
+   */
+  rep?: RepContext | null;
   alreadySigned: boolean;
   superseded: boolean;
   /**
@@ -185,19 +252,66 @@ export function SolarProposalView({
    */
   chromeOffset?: number;
 }) {
-  const s = snapshot;
-  const f = s.financing;
+  /**
+   * The document on screen, and which version it is.
+   *
+   * STATE rather than the prop directly, because a rep re-pricing from the bar
+   * gets a freshly generated snapshot back and it has to replace what is under
+   * the customer's eyes without a page reload — a reload at a kitchen table is
+   * a blank screen in the middle of a sentence.
+   *
+   * Reset DURING RENDER when the prop changes rather than in an effect, which
+   * is React's own pattern for derived-from-props state: an effect would paint
+   * the stale document for a frame first, and here that frame is a price.
+   */
+  const [live, setLive] = React.useState({ snapshot, version: rep?.version ?? 0 });
+  const [seenProp, setSeenProp] = React.useState(snapshot);
+  if (seenProp !== snapshot) {
+    setSeenProp(snapshot);
+    setLive({ snapshot, version: rep?.version ?? 0 });
+  }
+  const s = live.snapshot;
   const [signed, setSigned] = React.useState(alreadySigned);
+
+  /**
+   * The ways this household can pay, and which one is on screen.
+   *
+   * The quoted option is first and preselected, so a document opens on the
+   * number the rep quoted — the menu is for the conversation that follows.
+   * Nothing here recomputes: switching reads a different frozen answer out of
+   * the snapshot. See `paymentOptions` for how a pre-menu document is handled.
+   */
+  const options = React.useMemo(() => paymentOptions(s), [s]);
+  const [optionKey, setOptionKey] = React.useState(options[0].key);
+  const option = options.find((o) => o.key === optionKey) ?? options[0];
+  const f = option.financing;
+  const sv = option.savings;
+
   const isPurchase = f.product === "cash" || f.product === "loan";
   const name = firstName(s.customer.name);
 
   const hasEquipment = !!(s.system.module || s.system.inverter || s.system.battery);
-  const hasLayout = !!(s.layout && layoutImageUrl);
+  /**
+   * Which drawing of the array to show, in order of how much it is worth.
+   *
+   * The live aerial when the design was drawn in-house AND the deal geocoded
+   * AND the caller has a route to serve imagery from — that is the one a
+   * homeowner zooms into until they recognise their own driveway. Otherwise the
+   * uploaded export, which says the same thing standing still. Otherwise
+   * nothing at all: never a placeholder, and never the bare satellite photo
+   * with no array on it, which is a picture of a roof being passed off as a
+   * design.
+   */
+  const sitePanels = s.site?.panels ?? [];
+  const hasArrayMap = !!(siteImageBase && s.site && sitePanels.length > 0);
+  const hasUploadedLayout = !!(s.layout && layoutImageUrl);
+  const hasLayout = hasArrayMap || hasUploadedLayout;
 
   const navItems: ChromeNavItem[] = (
     [
       ["overview", "Overview", true],
       ["today", "Today", true],
+      ["how", "How it works", true],
       ["system", "System", true],
       ["layout", "Layout", hasLayout],
       ["cost", "Your cost", true],
@@ -315,8 +429,8 @@ export function SolarProposalView({
             <CoverStat label="Year-one production" value={kwh(s.system.year1ProductionKwh)} />
             <CoverStat label="Energy offset" value={pctWhole(s.system.offsetPct)} />
             <CoverStat
-              label={`${s.savings.years.length}-year net saving`}
-              value={usd(s.savings.netSavingsCents)}
+              label={`${sv.years.length}-year net saving`}
+              value={usd(sv.netSavingsCents)}
               accent
             />
           </div>
@@ -345,17 +459,24 @@ export function SolarProposalView({
             left after paying for the system, not the gross bill reduction. */}
         <div className="overflow-hidden rounded-3xl bg-neutral-950 p-8 text-white sm:p-10">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--proposal-accent)]">
-            Projected {s.savings.years.length}-year net saving
+            Projected {sv.years.length}-year net saving
           </p>
           <p className="mt-3 font-display text-6xl font-bold leading-none tracking-tight sm:text-8xl">
-            {usd(s.savings.netSavingsCents)}
+            {usd(sv.netSavingsCents)}
           </p>
           <p className="mt-5 max-w-md leading-relaxed text-neutral-300">
             After paying for the system, versus staying with your utility for the same period.
-            {s.savings.paybackYear != null
-              ? ` On the assumptions listed, it pays for itself in year ${s.savings.paybackYear}.`
+            {sv.paybackYear != null
+              ? ` On the assumptions listed, it pays for itself in year ${sv.paybackYear}.`
               : ""}
           </p>
+          {options.length > 1 && showPaymentOptions && (
+            <p className="mt-4 text-sm text-neutral-400 print:hidden">
+              On {option.label.toLowerCase().startsWith("pay") ? "" : "the "}
+              <strong className="font-semibold text-white">{option.label}</strong> option. There
+              are {options.length - 1} other{options.length === 2 ? "" : "s"} further down.
+            </p>
+          )}
         </div>
 
         <dl className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -428,6 +549,30 @@ export function SolarProposalView({
         <p className="mt-5 text-sm text-neutral-500">
           Your rate is worked out from your own bill and usage — not a regional average.
         </p>
+
+        {/* The shape of the year, when both halves of it are real. See the
+            snapshot's `monthly` field for why it is usually not. */}
+        {s.monthly && (
+          <div className="mt-12">
+            <h3 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
+              Your year, month by month
+            </h3>
+            <p className="mt-2 max-w-2xl leading-relaxed text-neutral-600">
+              An annual figure hides the two things that actually decide your bill: summer makes
+              more than you use, and winter makes less. The credit you build in June is what pays
+              for December.
+            </p>
+            <YearChart productionKwh={s.monthly.productionKwh} usageKwh={s.monthly.usageKwh} />
+          </div>
+        )}
+      </Section>
+
+      {/* ── 3b · HOW SOLAR WORKS ─────────────────────────────────────────
+          After the money, before the design. Somebody reading this alone at ten
+          at night will not ring anyone to ask what an inverter is, and they
+          will not sign something they do not understand. */}
+      <Section id="how" eyebrow="The basics" title="How solar actually works">
+        <HowItWorks />
       </Section>
 
       {/* ── 4 · RECOMMENDED SYSTEM ───────────────────────────────────────── */}
@@ -480,35 +625,133 @@ export function SolarProposalView({
       </Section>
 
       {/* ── 5 · PANEL LAYOUT ─────────────────────────────────────────────
-          Rendered ONLY when the drawing is genuinely fetchable. Both conditions
-          are required: the snapshot recorded a layout AND the caller resolved a
-          live URL for it. No layout means no section — never a placeholder,
-          never an empty frame, and never the aerial property photo standing in
-          for a design that was not done. */}
-      {hasLayout && s.layout && (
+          The array, on this customer's own roof.
+
+          Two drawings, in order of how much they are worth. The LIVE aerial is
+          the array as drawn projected onto satellite imagery a homeowner can
+          zoom into until they recognise their own driveway — it needs the deal
+          to have geocoded, the array to have been drawn in-house, and the
+          caller to have a route that serves imagery without publishing an API
+          key. The UPLOADED export says the same thing standing still, and is
+          what a design produced in somebody else's tool leaves behind.
+
+          Neither available means NO SECTION. Never a placeholder, never an
+          empty frame, and never the bare aerial photo with no array on it
+          standing in for a design that was not done. */}
+      {hasLayout && (
         <Section id="layout" eyebrow="The array" title="Where the panels go" tone="dark" wide>
-          {/* The uploaded drawing, rendered EXACTLY as designed: `object-contain`
-              inside an auto-height box, so it is never cropped, stretched or
-              repositioned. The panel positions are the design — distorting them
-              would misrepresent where the array actually goes. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={layoutImageUrl!}
-            alt={`${s.layout.preliminary ? "Preliminary panel" : "Panel"} layout for ${s.customer.address}`}
-            className="h-auto max-h-[72vh] w-full rounded-2xl bg-neutral-900 object-contain ring-1 ring-white/10"
-          />
+          {hasArrayMap && s.site ? (
+            <ArrayMap
+              lat={s.site.lat}
+              panels={sitePanels}
+              imageUrl={(z) => `${siteImageBase}?z=${z}`}
+              fallback={
+                hasUploadedLayout ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={layoutImageUrl!}
+                    alt={`Panel layout for ${s.customer.address}`}
+                    className="h-auto max-h-[72vh] w-full rounded-2xl bg-neutral-900 object-contain ring-1 ring-white/10"
+                  />
+                ) : (
+                  <p className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-neutral-400">
+                    The aerial view of your roof could not be loaded. Your consultant can send the
+                    layout drawing separately.
+                  </p>
+                )
+              }
+            />
+          ) : (
+            /* The uploaded drawing, rendered EXACTLY as designed:
+               `object-contain` inside an auto-height box, so it is never
+               cropped, stretched or repositioned. The panel positions are the
+               design — distorting them would misrepresent where the array
+               actually goes. */
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={layoutImageUrl!}
+              alt={`${s.layout?.preliminary ? "Preliminary panel" : "Panel"} layout for ${s.customer.address}`}
+              className="h-auto max-h-[72vh] w-full rounded-2xl bg-neutral-900 object-contain ring-1 ring-white/10"
+            />
+          )}
+
+          {/* The four numbers the drawing is evidence for, directly beneath it.
+              A picture of an array and a system size on different screens are
+              two claims; together they are one. */}
+          <dl className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-white/10 sm:grid-cols-4">
+            <ArrayStat k="System size" v={`${s.system.sizeKwDc.toFixed(2)} kW`} />
+            <ArrayStat k="Year-one production" v={kwh(s.system.year1ProductionKwh)} />
+            <ArrayStat k="Energy offset" v={pctWhole(s.system.offsetPct)} />
+            <ArrayStat
+              k="Panels"
+              v={
+                s.system.moduleQty > 0
+                  ? `${s.system.moduleQty}${s.system.module?.ratingW ? ` × ${s.system.module.ratingW}W` : ""}`
+                  : "—"
+              }
+            />
+          </dl>
+
           <p className="mt-5 max-w-2xl text-sm leading-relaxed text-neutral-400">
-            {s.layout.preliminary
-              ? "Preliminary design. The final layout is confirmed at your site survey and may change once the roof and electrical panel have been measured."
-              : "Final design, confirmed by your project team. Minor adjustments can still arise during installation."}
-            {s.layout.provider ? ` Produced in ${s.layout.provider}.` : ""}
+            {s.layout?.preliminary === false
+              ? "Final design, confirmed by your project team. Minor adjustments can still arise during installation."
+              : "Preliminary design. The final layout is confirmed at your site survey and may change once the roof and electrical panel have been measured."}
+            {s.layout?.provider ? ` Produced in ${s.layout.provider}.` : ""}
           </p>
         </Section>
       )}
 
       {/* ── 6 · PRICING / FINANCING ──────────────────────────────────────── */}
       <Section id="cost" eyebrow="Your investment" title="How you pay for it" tone="dark">
-        <PriceHero f={f} isPurchase={isPurchase} />
+        {/*
+          The four figures that frame the decision, before the payment itself.
+
+          This used to be one enormous repeat of the monthly payment, which then
+          appeared again thirty pixels below it inside the payment card — the
+          same number twice, under the same words, which reads as a bug rather
+          than as emphasis. These four are the ones a household actually weighs
+          against each other, and none of them is repeated anywhere else on the
+          page.
+        */}
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-white/10 sm:grid-cols-4">
+          <CostStat
+            k={isPurchase ? "Total system price" : "What it costs to start"}
+            v={
+              f.contractPriceCents != null
+                ? usd(f.contractPriceCents)
+                : usd(0)
+            }
+          />
+          <CostStat k="Energy offset" v={pctWhole(s.system.offsetPct)} />
+          <CostStat
+            k={`${sv.years.length} years with the utility`}
+            v={usd(sv.years.reduce((n, y) => n + y.utilityCostCents, 0))}
+          />
+          <CostStat
+            k={`${sv.years.length}-year net saving`}
+            v={usd(sv.netSavingsCents)}
+            accent
+          />
+        </dl>
+
+        {/* The menu, and the close.
+            Everything it shows was priced on the server and frozen — switching
+            reads a different answer out of the document, it does not compute
+            one. See ./payment-menu. */}
+        <PaymentMenu
+          options={options}
+          selectedKey={option.key}
+          onSelect={setOptionKey}
+          showMenu={showPaymentOptions}
+        />
+
+        {options.length > 1 && showPaymentOptions && (
+          <p className="mt-4 text-sm leading-relaxed text-neutral-400">
+            Every option above is priced for this system and this address. They differ in what the
+            money costs, not in what gets installed — the panels, the inverter and the production
+            are the same whichever you choose.
+          </p>
+        )}
 
         <dl className="mt-8 break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
           <DarkRow k="Option" v={PRODUCT_LABEL[f.product] ?? f.product} />
@@ -617,30 +860,12 @@ export function SolarProposalView({
           </p>
         )}
 
-        {/* Pre-qualification. A LINK to the lender's own application — nothing
-            is submitted from here, and no information leaves this page. */}
-        {f.applyUrl && (
-          <div className="mt-6 flex flex-wrap items-center gap-5 rounded-2xl border border-white/10 bg-white/[0.04] p-6 print:hidden">
-            {f.lender && <LenderMark name={f.lender} logoUrl={f.lenderLogoUrl} size="lg" />}
-            <div className="min-w-[16rem] flex-1">
-              <p className="font-display text-xl font-semibold text-white">
-                See what you qualify for{f.lender ? ` with ${f.lender}` : ""}
-              </p>
-              <p className="mt-1 text-sm text-neutral-400">
-                Opens {f.lender ?? "the lender"}&rsquo;s own secure application. Nothing is
-                submitted from this page.
-              </p>
-            </div>
-            <a
-              href={f.applyUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-200"
-            >
-              Qualify <ExternalLink className="size-4" />
-            </a>
-          </div>
-        )}
+        {/*
+          Pre-qualification used to sit here as a card of its own, several
+          screens below the payment it applies to. It now sits INSIDE the
+          payment menu, beside the monthly figure — which is where somebody who
+          has just decided they like a number goes looking for what to do next.
+        */}
       </Section>
 
       {/* ── 7 · SAVINGS & PROJECTIONS ────────────────────────────────────── */}
@@ -651,19 +876,23 @@ export function SolarProposalView({
           title="Staying with the utility vs going solar"
           wide
         >
-          <div className="grid gap-3 sm:grid-cols-2">
+          {/* The two futures, side by side. The column most proposals forget
+              to price is the one where the homeowner does nothing. */}
+          <CompareCards snapshot={s} option={option} />
+
+          <div className="mt-10 grid gap-3 sm:grid-cols-2">
             <Callout
               i={0}
               label="Estimated utility cost avoided"
-              value={usd(s.savings.utilityCostAvoidedCents)}
+              value={usd(sv.utilityCostAvoidedCents)}
               note="The part of your electricity bill the system is projected to replace, before paying for it."
             />
             <Callout
               i={1}
-              label={`Net ${s.savings.years.length}-year saving`}
-              value={usd(s.savings.netSavingsCents)}
+              label={`Net ${sv.years.length}-year saving`}
+              value={usd(sv.netSavingsCents)}
               note="What is left after the cost of the system itself."
-              tone={s.savings.netSavingsCents >= 0 ? "good" : "warn"}
+              tone={sv.netSavingsCents >= 0 ? "good" : "warn"}
             />
           </div>
 
@@ -671,15 +900,20 @@ export function SolarProposalView({
             Assumes your utility rate rises {pct(s.assumptions.utilityEscalationPct)} a year and
             your panels lose {pct(s.assumptions.annualDegradationPct)} output annually. Both are
             estimates, not guarantees.
-            {s.savings.paybackYear != null
-              ? ` On these assumptions the system pays for itself in year ${s.savings.paybackYear}.`
+            {sv.paybackYear != null
+              ? ` On these assumptions the system pays for itself in year ${sv.paybackYear}.`
               : ""}
           </p>
 
+          {/* Year by year, with a handle on it. Some households read the table
+              below as the proof and some read it as a wall of numbers; this is
+              the same model, one year at a time. */}
+          <SavingsScrubber years={sv.years} paybackYear={sv.paybackYear} />
+
           <CumulativeCostChart
-            years={s.savings.years}
-            paybackYear={s.savings.paybackYear}
-            netSavingsCents={s.savings.netSavingsCents}
+            years={sv.years}
+            paybackYear={sv.paybackYear}
+            netSavingsCents={sv.netSavingsCents}
           />
 
           <div className="mt-10 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-neutral-200/60">
@@ -705,7 +939,7 @@ export function SolarProposalView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
-                  {s.savings.years
+                  {sv.years
                     .filter((y) => y.year === 1 || y.year % 5 === 0)
                     .map((y) => (
                       <tr key={y.year} className="break-inside-avoid transition-colors hover:bg-neutral-50">
@@ -735,9 +969,9 @@ export function SolarProposalView({
       {/* ── 8 · ENVIRONMENTAL ────────────────────────────────────────────── */}
       <Section id="impact" eyebrow="Beyond the bill" title="What this does for the planet">
         <p className="max-w-2xl text-lg leading-relaxed text-neutral-600">
-          Over the {s.savings.years.length} years modelled, your system is projected to generate{" "}
+          Over the {sv.years.length} years modelled, your system is projected to generate{" "}
           <strong className="font-semibold text-neutral-900">
-            {kwh(s.savings.years.reduce((n, y) => n + y.productionKwh, 0))}
+            {kwh(sv.years.reduce((n, y) => n + y.productionKwh, 0))}
           </strong>{" "}
           of electricity that does not have to be burned into existence.
         </p>
@@ -747,26 +981,66 @@ export function SolarProposalView({
             icon={Leaf}
             value={s.environmental.tonsCo2Avoided.toLocaleString()}
             label="tons CO₂ avoided"
+            source={IMPACT_SOURCES.co2}
           />
           <Impact
             i={1}
             icon={TreePine}
             value={s.environmental.treesEquivalent.toLocaleString()}
             label="trees planted, equivalent"
+            source={IMPACT_SOURCES.trees}
           />
           <Impact
             i={2}
             icon={Factory}
             value={s.environmental.poundsCoalAvoided.toLocaleString()}
             label="lbs coal not burned"
+            source={IMPACT_SOURCES.coal}
           />
           <Impact
             i={3}
             icon={Car}
             value={s.environmental.milesNotDriven.toLocaleString()}
             label="miles not driven"
+            source={IMPACT_SOURCES.miles}
           />
         </div>
+
+        {/*
+          The only one of these that is about money, and the only one that is a
+          CLAIM rather than an arithmetic equivalence.
+
+          Shown only when the company has set a figure it is willing to stand
+          behind — see SolarSettings.homeValueUpliftPct. Zero, the default, means
+          no such claim is made and the card is absent rather than printed as
+          "0%". Restricted to OWNED systems on purpose: a lease or a PPA is
+          somebody else's equipment on your roof, and the studies behind this
+          number are about houses that own theirs.
+        */}
+        {s.assumptions.homeValueUpliftPct != null &&
+          s.assumptions.homeValueUpliftPct > 0 &&
+          isPurchase && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-2xl bg-white p-7 shadow-sm ring-1 ring-neutral-200/60">
+              <Home className="size-8 shrink-0 text-[var(--proposal-accent)]" aria-hidden />
+              <div className="min-w-[14rem] flex-1">
+                <p className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
+                  And it stays with the house
+                </p>
+                <p className="mt-1.5 max-w-xl leading-relaxed text-neutral-600">
+                  Homes with an owned solar system have sold for a premium over comparable homes
+                  without one. Your own market, condition and buyer decide what that is worth here
+                  — it is not a guarantee, and no part of this proposal depends on it.
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="font-display text-5xl font-bold leading-none tracking-tight text-neutral-900">
+                  {pct(s.assumptions.homeValueUpliftPct)}
+                </p>
+                <p className="mt-1.5 text-sm text-neutral-500">estimated value increase</p>
+                <SourceLink source={IMPACT_SOURCES.homeValue} />
+              </div>
+            </div>
+          )}
       </Section>
 
       {/* ── 9 · PROCESS ──────────────────────────────────────────────────── */}
@@ -786,9 +1060,36 @@ export function SolarProposalView({
               <span className="relative z-10 flex size-12 shrink-0 items-center justify-center rounded-full bg-[var(--proposal-accent)] text-lg font-bold text-white shadow-md ring-4 ring-[#f6f3ee] transition-transform duration-300 group-hover:scale-110 group-hover:ring-white">
                 {i + 1}
               </span>
-              <div className="pt-1.5">
-                <p className="text-lg font-semibold text-neutral-900">{step.title}</p>
+              <div className="flex-1 pt-1.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                  <p className="text-lg font-semibold text-neutral-900">{step.title}</p>
+                  {/* A RANGE, always. "2 weeks" on a permit that regularly takes
+                      five is the promise the customer remembers, and the one
+                      the install date gets measured against. */}
+                  <p className="text-sm font-medium tabular-nums text-neutral-500">
+                    {step.duration}
+                  </p>
+                </div>
                 <p className="mt-0.5 leading-relaxed text-neutral-600">{step.blurb}</p>
+                {/* Who actually does it. "We handle everything" is the sentence
+                    every solar company says; naming the city and the utility is
+                    both more convincing and true on the day one of them is
+                    slow. */}
+                <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                  {step.owners.map((owner) => (
+                    <li
+                      key={owner}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-[11px] font-semibold",
+                        owner === "You"
+                          ? "bg-[var(--proposal-accent)]/12 text-[var(--proposal-accent)]"
+                          : "bg-neutral-200/70 text-neutral-600"
+                      )}
+                    >
+                      {owner}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </li>
           ))}
@@ -930,6 +1231,21 @@ export function SolarProposalView({
           </div>
         </div>
       </footer>
+
+      {/* The rep's controls. Never rendered on the customer's copy — see the
+          `rep` prop. */}
+      {rep && (
+        <RepBar
+          rep={{ ...rep, version: live.version || rep.version }}
+          onRepriced={(next, version) => {
+            setLive({ snapshot: next, version });
+            // The menu is rebuilt from the new document, so the selection goes
+            // back to its first option: the key a rep was looking at may not
+            // exist on a version priced from different terms.
+            setOptionKey(paymentOptions(next)[0].key);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -981,6 +1297,40 @@ function Section({
         {children}
       </div>
     </section>
+  );
+}
+
+/**
+ * One of the four figures at the head of the money chapter.
+ *
+ * `accent` for the one that is a saving rather than a cost — the eye has to be
+ * able to tell the difference between four large numbers at a glance, and
+ * colour is the only thing that does it in the width available.
+ */
+function CostStat({ k, v, accent }: { k: string; v: string; accent?: boolean }) {
+  return (
+    <div className="bg-neutral-950 px-5 py-5">
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-neutral-500">{k}</dt>
+      <dd
+        className={
+          accent
+            ? "mt-1.5 font-display text-2xl font-bold tabular-nums tracking-tight text-[var(--proposal-accent)] sm:text-3xl"
+            : "mt-1.5 font-display text-2xl font-bold tabular-nums tracking-tight text-white sm:text-3xl"
+        }
+      >
+        {v}
+      </dd>
+    </div>
+  );
+}
+
+/** One of the four figures under the array drawing, on the dark chapter. */
+function ArrayStat({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="bg-neutral-950 px-5 py-4">
+      <dt className="text-[11px] font-semibold uppercase tracking-[0.15em] text-neutral-500">{k}</dt>
+      <dd className="mt-1 text-lg font-semibold tabular-nums text-white">{v}</dd>
+    </div>
   );
 }
 
@@ -1053,7 +1403,13 @@ function EquipCard({
 }: {
   i: number;
   label: string;
-  e: { manufacturer: string | null; model: string; ratingW: number | null; qty: number } | null;
+  e: {
+    manufacturer: string | null;
+    model: string;
+    ratingW: number | null;
+    qty: number;
+    specSheetUrl?: string | null;
+  } | null;
   unit: string;
 }) {
   if (!e) return null;
@@ -1061,7 +1417,7 @@ function EquipCard({
     <div
       data-stagger
       style={{ ["--i" as string]: i } as React.CSSProperties}
-      className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-neutral-200/60"
+      className="flex flex-col rounded-2xl bg-white p-5 shadow-sm ring-1 ring-neutral-200/60"
     >
       <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">{label}</p>
       <p className="mt-2 font-medium leading-snug text-neutral-900">
@@ -1071,58 +1427,30 @@ function EquipCard({
         {e.ratingW ? `${e.ratingW.toLocaleString()} ${unit}` : "—"}
         {e.qty > 0 ? ` · ${e.qty} total` : ""}
       </p>
+      {/* The manufacturer's own datasheet, when the catalogue records one.
+          Absent rather than dead: a "View details" that goes nowhere is worse
+          than no link on the one page that has to look trustworthy. */}
+      {e.specSheetUrl && (
+        <a
+          href={e.specSheetUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-auto inline-flex items-center gap-1 pt-4 text-sm font-semibold text-neutral-900 underline decoration-neutral-300 underline-offset-4 transition hover:decoration-neutral-900 print:hidden"
+        >
+          View details <ExternalLink className="size-3.5" />
+        </a>
+      )}
     </div>
   );
 }
 
-/**
- * The one price the customer actually asks about, at the top of the money
- * chapter — the monthly on anything financed, the contract on a cash purchase,
- * the rate on a PPA. Everything else stays in the breakdown beneath it.
+/*
+ * `PriceHero` lived here: one enormous repeat of the monthly payment at the top
+ * of the money chapter. It was removed when the payment menu arrived, because
+ * the menu prints the same figure thirty pixels below it — the same number
+ * twice under the same words reads as a defect, not as emphasis. The chapter
+ * now opens on four figures that are each stated exactly once.
  */
-function PriceHero({
-  f,
-  isPurchase,
-}: {
-  f: SolarProposalSnapshot["financing"];
-  isPurchase: boolean;
-}) {
-  let label: string;
-  let value: string;
-  let note: string;
-
-  if (f.loanMonthlyPaymentCents != null) {
-    label = f.loanPaymentApproved ? "Your monthly payment" : "Your estimated monthly payment";
-    value = usd(f.loanMonthlyPaymentCents, 2);
-    note = f.loanPaymentApproved
-      ? "Your lender's own figure, from an approval."
-      : "Amortised from the quoted product. Your lender's approval settles the final figure.";
-  } else if (f.monthlyPaymentCents != null) {
-    label = "Your monthly payment";
-    value = usd(f.monthlyPaymentCents, 2);
-    note = f.termYears != null ? `Over a ${f.termYears}-year term.` : "";
-  } else if (f.rateMillsPerKwh != null) {
-    label = "What you pay per kWh";
-    value = `$${(f.rateMillsPerKwh / 1000).toFixed(3)}`;
-    note = "You pay for the power the system makes, not for the system.";
-  } else if (isPurchase && f.contractPriceCents != null) {
-    label = "Your total price";
-    value = usd(f.contractPriceCents);
-    note = "That is your all-in price for the system shown, installed.";
-  } else {
-    return null;
-  }
-
-  return (
-    <div className="break-inside-avoid rounded-3xl bg-[var(--proposal-accent)] p-8 text-white sm:p-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/80">{label}</p>
-      <p className="mt-3 font-display text-6xl font-bold leading-none tracking-tight sm:text-8xl">
-        {value}
-      </p>
-      {note && <p className="mt-5 max-w-md leading-relaxed text-white/85">{note}</p>}
-    </div>
-  );
-}
 
 function DarkRow({
   k,
@@ -1207,17 +1535,19 @@ function Impact({
   icon: Icon,
   value,
   label,
+  source,
 }: {
   i: number;
   icon: React.ComponentType<{ className?: string }>;
   value: string;
   label: string;
+  source?: { label: string; url: string };
 }) {
   return (
     <div
       data-stagger
       style={{ ["--i" as string]: i } as React.CSSProperties}
-      className="rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-neutral-200/60 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+      className="flex flex-col rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-neutral-200/60 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
     >
       <span className="mx-auto flex size-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
         <Icon className="size-5" />
@@ -1226,7 +1556,36 @@ function Impact({
         {value}
       </div>
       <div className="mt-0.5 text-xs leading-tight text-neutral-500">{label}</div>
+      {source && (
+        <div className="mt-auto pt-3">
+          <SourceLink source={source} />
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * Where a number came from, as a link the homeowner can actually follow.
+ *
+ * "153 trees" is checkable arithmetic on an EPA factor, and a figure nobody can
+ * check reads as marketing however true it is. Citing it costs one line and is
+ * the difference between a claim and a calculation.
+ *
+ * Hidden on paper: a printed page cannot be clicked, and the assumptions block
+ * in the footer carries the same provenance in words.
+ */
+function SourceLink({ source }: { source: { label: string; url: string } }) {
+  return (
+    <a
+      href={source.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={source.label}
+      className="inline-flex items-center gap-0.5 text-[11px] font-medium text-neutral-400 underline decoration-neutral-300 underline-offset-2 transition hover:text-neutral-700 print:hidden"
+    >
+      source <ArrowUpRight className="size-3" />
+    </a>
   );
 }
 

@@ -328,6 +328,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     perWatt: "",
     avlYear: "",
     crossoverKind: "",
+    specSheetUrl: "",
   });
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
 
@@ -351,11 +352,12 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
       rank: Number(f.rank) || 0,
       avlYear: f.avlYear.trim() === "" ? null : Number(f.avlYear),
       crossoverKind: (f.crossoverKind || null) as "reroof" | "mpu" | null,
+      specSheetUrl: f.specSheetUrl.trim() || null,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success("Added");
-    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", rank: "0", perWatt: "", avlYear: "", crossoverKind: "" });
+    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", rank: "0", perWatt: "", avlYear: "", crossoverKind: "", specSheetUrl: "" });
     setOpen(false);
     router.refresh();
   }
@@ -423,6 +425,27 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
               />
             </div>
           </>
+        )}
+        {/* The manufacturer's datasheet, shown to the customer beside the
+            component on their proposal. A LINK to the manufacturer, not a file
+            we store: they revise these without telling anybody, and the version
+            a homeowner should read is whichever is current when they click. */}
+        {kind !== "adder" && (
+          <div className="space-y-1 sm:col-span-2">
+            <Label className="text-xs" htmlFor={fid("spec")}>Spec sheet URL</Label>
+            <Input
+              id={fid("spec")}
+              type="url"
+              inputMode="url"
+              placeholder="https://manufacturer.com/datasheets/model.pdf"
+              value={f.specSheetUrl}
+              onChange={(e) => set("specSheetUrl", e.target.value)}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Optional. Rendered as &ldquo;View details&rdquo; on the customer&rsquo;s proposal;
+              left blank, no link appears.
+            </p>
+          </div>
         )}
         {/* Which approved-vendor list this belongs to. Optional: plenty of
             items are not year-scoped, and a blank is honest about that. */}

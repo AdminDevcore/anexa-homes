@@ -6,6 +6,9 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { SolarProposalView } from "@/components/proposal/solar-proposal-view";
+import type { RepContext } from "@/components/proposal/rep-bar";
+import { lenderProductLabel } from "@/lib/solar-lender-product";
+import { adderAmountCents } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
@@ -51,8 +54,8 @@ export default async function SolarProposalPreviewPage({
     },
     orderBy: { version: "desc" },
     select: {
-      version: true, snapshot: true, signedAt: true, supersededAt: true, createdAt: true,
-      showComparison: true,
+      id: true, version: true, snapshot: true, signedAt: true, supersededAt: true,
+      createdAt: true, showComparison: true, showPaymentOptions: true,
     },
   });
   if (!proposal) notFound();
@@ -76,6 +79,24 @@ export default async function SolarProposalPreviewPage({
   // happens to be sitting in — so a roofing admin previewing a solar proposal
   // sees the solar brand's accent, exactly as the customer will.
   const branding = await brandingForRecord(user.companyId, "solar");
+
+  /**
+   * The rep's controls, assembled here and handed to the document.
+   *
+   * Gated on `update Proposal` AND on the version being the CURRENT one: a
+   * superseded document is a record, and re-pricing from one would generate a
+   * new version off terms two revisions old. A viewer without the permission,
+   * or somebody reading an old version, gets the read-only preview exactly as
+   * before.
+   */
+  const canAdjust =
+    can(user, "update", "Proposal") &&
+    can(user, "update", "Lead") &&
+    !proposal.supersededAt &&
+    !proposal.signedAt &&
+    !v;
+
+  const rep = canAdjust ? await repContext(user.companyId, id, proposal) : null;
 
   return (
     <div className="min-h-screen bg-[#f6f3ee]">
@@ -141,6 +162,8 @@ export default async function SolarProposalPreviewPage({
       <SolarProposalView
         snapshot={snapshot}
         showComparison={proposal.showComparison}
+        showPaymentOptions={proposal.showPaymentOptions}
+        rep={rep}
         // No token is handed to the preview: acceptance is disabled, so there is
         // nothing for one to authorize, and it stays out of the page source.
         token=""
@@ -156,4 +179,108 @@ export default async function SolarProposalPreviewPage({
       />
     </div>
   );
+}
+
+/**
+ * Everything the adjust bar needs, read once on the server.
+ *
+ * Read from the DEAL, not from the snapshot: the bar edits what the next
+ * version will be built from, and the snapshot is a record of the last one. A
+ * price per watt taken off the frozen document would be the figure that was
+ * quoted rather than the figure currently on the row, and the two diverge the
+ * moment anybody touches the builder.
+ */
+async function repContext(
+  companyId: string,
+  leadId: string,
+  proposal: { id: string; version: number; showComparison: boolean; showPaymentOptions: boolean }
+): Promise<RepContext | null> {
+  const [design, finance] = await Promise.all([
+    prisma.solarDesign.findUnique({
+      where: { leadId },
+      select: {
+        lenderId: true, systemSizeKwDc: true,
+        avgMonthlyBillCents: true, annualUsageKwh: true,
+      },
+    }),
+    prisma.solarFinance.findUnique({
+      where: { leadId },
+      select: { product: true, grossPpwCents: true, lenderProductId: true },
+    }),
+  ]);
+  if (!design || !finance) return null;
+
+  const [programmes, adders, onDeal] = await Promise.all([
+    prisma.solarLenderProduct.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        product: finance.product,
+        lender: { isActive: true },
+        // Only the lender the SYSTEM is designed for: another partner's
+        // programme means another approved-vendor list, and the equipment on
+        // this design may not be on it. Changing lender is a builder decision.
+        ...(design.lenderId ? { lenderId: design.lenderId } : {}),
+      },
+      orderBy: [{ rank: "asc" }],
+      select: {
+        id: true, name: true, product: true, aprPct: true, termMonths: true,
+        dealerFeePct: true, leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true,
+        escalatorPct: true, termYears: true,
+        lender: { select: { name: true } },
+      },
+    }),
+    prisma.solarEquipment.findMany({
+      where: { companyId, kind: "adder", isActive: true },
+      orderBy: [{ rank: "asc" }, { model: "asc" }],
+      select: {
+        id: true, manufacturer: true, model: true,
+        priceCents: true, priceMillsPerWatt: true,
+      },
+    }),
+    prisma.solarDealAdder.findMany({
+      where: { companyId, leadId, equipmentId: { not: null } },
+      select: { equipmentId: true },
+    }),
+  ]);
+
+  const watts = Math.round(design.systemSizeKwDc * 1000);
+
+  return {
+    proposalId: proposal.id,
+    version: proposal.version,
+    programmes: programmes.map((p) => ({
+      id: p.id,
+      label: lenderProductLabel(p),
+      lender: p.lender.name,
+    })),
+    adders: adders.map((a) => ({
+      id: a.id,
+      label: [a.manufacturer, a.model].filter(Boolean).join(" "),
+      // Priced against THIS system, so a per-watt adder reads as the money it
+      // would actually add rather than as a rate the rep has to multiply.
+      price: `$${(
+        adderAmountCents(
+          {
+            id: a.id,
+            label: [a.manufacturer, a.model].filter(Boolean).join(" "),
+            basis: a.priceMillsPerWatt ? "perWatt" : "flat",
+            flatCents: a.priceCents,
+            millsPerWatt: a.priceMillsPerWatt,
+            qty: 1,
+          },
+          watts
+        ) / 100
+      ).toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
+    })),
+    selectedAdderIds: onDeal.map((l) => l.equipmentId!),
+    grossPpwCents: finance.grossPpwCents,
+    lenderProductId: finance.lenderProductId,
+    avgMonthlyBillCents: design.avgMonthlyBillCents,
+    annualUsageKwh: design.annualUsageKwh,
+    showComparison: proposal.showComparison,
+    showPaymentOptions: proposal.showPaymentOptions,
+    designHref: `/portal/leads/${leadId}/solar-proposal/design`,
+    isPurchase: finance.product === "cash" || finance.product === "loan",
+  };
 }

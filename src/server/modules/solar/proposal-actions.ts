@@ -5,309 +5,43 @@ import { revalidatePath } from "next/cache";
 import { nanoid } from "nanoid";
 import sharp from "sharp";
 import { prisma } from "@/server/db/client";
-import { lenderLogoUrl } from "@/lib/lender-mark";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
 import { resolveLayoutAsset } from "./layout-asset";
-import { getSolarSettings } from "./settings";
-import { readSolarReadiness } from "./readiness";
-import { buildProposalSnapshot, type SnapshotEquipment } from "@/lib/solar-proposal";
-import { canGenerate } from "@/lib/solar-validation";
-import { adderAmountCents } from "@/lib/solar-adders";
-import { parseLayoutBlocks } from "@/lib/solar-layout";
-import { listDealAdders } from "./adders";
+import { generateProposalVersion } from "./proposal-generate";
+import type { ValidationIssue } from "@/lib/solar-validation";
 import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 
 const fail = (error: string) => ({ ok: false as const, error });
 
-type EquipRow = { manufacturer: string | null; model: string; ratingW: number | null } | null;
-
-function label(e: EquipRow) {
-  if (!e) return null;
-  return `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}${e.ratingW ? ` · ${e.ratingW}W` : ""}`;
-}
-
-function equip(e: EquipRow, qty: number): SnapshotEquipment | null {
-  if (!e) return null;
-  return { manufacturer: e.manufacturer, model: e.model, ratingW: e.ratingW, qty };
-}
-
 /**
  * Generate the next version of a customer-facing proposal.
  *
- * Built entirely from the VALIDATED, server-stored design and finance rows —
- * nothing is taken from client input, so the guard rails cannot be bypassed by
- * posting different numbers. Generation is refused outright while any blocking
- * validation issue stands.
- *
- * Regenerating supersedes the previous version rather than editing it: what a
- * customer was shown, and when, has to survive.
+ * The work itself lives in ./proposal-generate, which is NOT a "use server"
+ * module — see the note there. This is the endpoint: authenticate, check the
+ * permission, hand over.
  */
-export async function generateSolarProposalAction(leadId: string) {
+export async function generateSolarProposalAction(leadId: string): Promise<
+  | { ok: false; error: string; issues?: ValidationIssue[] }
+  | { ok: true; id: string; version: number; publicToken: string | null; warnings: ValidationIssue[] }
+> {
   const user = await requireUser();
   if (!can(user, "create", "Proposal")) return fail("Not allowed.");
-
-  const [lead, design, finance, assumptions, company] = await Promise.all([
-    prisma.lead.findFirst({
-      where: { companyId: user.companyId, id: leadId },
-      select: {
-        id: true, vertical: true, firstName: true, lastName: true,
-        address: true, city: true, state: true, zip: true,
-        assignedRep: { select: { firstName: true, lastName: true, phone: true, email: true } },
-      },
-    }),
-    prisma.solarDesign.findUnique({
-      where: { leadId },
-      include: {
-        module: { select: { manufacturer: true, model: true, ratingW: true } },
-        inverter: { select: { manufacturer: true, model: true, ratingW: true } },
-        battery: { select: { manufacturer: true, model: true, ratingW: true } },
-      },
-    }),
-    prisma.solarFinance.findUnique({ where: { leadId } }),
-    getSolarSettings(user.companyId),
-    prisma.company.findUnique({
-      where: { id: user.companyId },
-      select: {
-        name: true, phone: true, email: true,
-        address: true, city: true, state: true, zip: true,
-        settings: { select: { logoUrl: true } },
-      },
-    }),
-  ]);
-
-  if (!lead) return fail("Deal not found.");
-  if (lead.vertical !== "solar") return fail("This is not a solar deal.");
-  if (!design || !finance) return fail("Complete the system design and financing first.");
-
-  // An accepted proposal is the record of what the customer agreed to.
-  // Regenerating over it would rewrite that record.
-  const accepted = await prisma.solarProposal.findFirst({
-    where: { companyId: user.companyId, leadId, signedAt: { not: null } },
-    select: { version: true },
-  });
-  if (accepted) {
-    return fail(
-      `Proposal v${accepted.version} has already been accepted by the customer and cannot be replaced.`
-    );
-  }
-
-  // The gate. Identical rules to the builder's readiness check — literally the
-  // same function — so a proposal can never be generated around the UI.
-  const readiness = await readSolarReadiness(user.companyId, leadId);
-  if (!readiness.ok) return fail(readiness.error);
-  if (!canGenerate(readiness.issues)) {
-    return { ok: false as const, error: "Fix the blocking issues before generating.", issues: readiness.issues };
-  }
-
-  // The extra work on this job, read at generation and frozen with everything
-  // else. The same discipline as the lender's rate sheet below: a document that
-  // looked its lines up later would re-title or re-price work a customer has
-  // already been shown.
-  const adderLines = await listDealAdders(user.companyId, leadId);
-
-  const approvedCredit =
-    finance.product === "loan"
-      ? await prisma.creditApplication.findFirst({
-          where: { companyId: user.companyId, leadId, status: { in: ["approved", "conditional"] } },
-          orderBy: { decidedAt: "desc" },
-          select: { lender: true },
-        })
-      : null;
-
-  // The partner this deal is on, and the rate-sheet row it was quoted from.
-  // Read at generation and FROZEN into the snapshot: rate sheets change every
-  // quarter, and a document that looked its own terms up later would silently
-  // re-quote a customer who has already been shown a number.
-  const dealLender =
-    finance.product === "loan" && design.lenderId
-      ? await prisma.solarLender.findFirst({
-          where: { companyId: user.companyId, id: design.lenderId },
-          select: { id: true, name: true, applyUrl: true, logoUpdatedAt: true },
-        })
-      : null;
-
-  const quotedProduct =
-    finance.product === "loan" && finance.lenderProductId
-      ? await prisma.solarLenderProduct.findFirst({
-          where: { companyId: user.companyId, id: finance.lenderProductId },
-          select: {
-            factorWithPaydownMicros: true, factorWithoutPaydownMicros: true,
-            paydownPct: true, paydownMonths: true,
-          },
-        })
-      : null;
-
-  const latest = await prisma.solarProposal.findFirst({
-    where: { companyId: user.companyId, leadId },
-    orderBy: { version: "desc" },
-    select: { id: true, version: true },
-  });
-  const version = (latest?.version ?? 0) + 1;
-
-  // The layout drawing — included ONLY if the file row AND the bytes behind it
-  // are both really there. A FileAsset whose object has since gone (a bucket
-  // lifecycle rule, a database restored without its storage) would otherwise be
-  // frozen into the snapshot and render as a broken image in front of a
-  // customer. Verified now, and verified again at render.
-  const layoutAsset = await resolveLayoutAsset(user.companyId, leadId, design.layoutImageFileId);
-  const layout = layoutAsset
-    ? {
-        fileId: layoutAsset.id,
-        provider: design.designProvider,
-        externalRef: design.designExternalRef,
-        // Preliminary unless somebody accountable has marked it final.
-        preliminary: !design.layoutApproved,
-      }
-    : null;
-
-  const companyAddress = company
-    ? [company.address, [company.city, company.state].filter(Boolean).join(", "), company.zip]
-        .filter(Boolean)
-        .join(" · ") || null
-    : null;
-
-  const snapshot = buildProposalSnapshot({
-    reference: `SP-${leadId.slice(0, 8).toUpperCase()}-V${version}`,
-    generatedById: user.userId,
-    customer: {
-      name: `${lead.firstName} ${lead.lastName}`.trim(),
-      address: [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", "),
-    },
-    company: {
-      name: company?.name ?? "",
-      phone: company?.phone ?? null,
-      email: company?.email ?? null,
-      logoUrl: company?.settings?.logoUrl ?? null,
-      address: companyAddress,
-    },
-    representative: lead.assignedRep
-      ? {
-          name: `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`.trim(),
-          phone: lead.assignedRep.phone ?? null,
-          email: lead.assignedRep.email ?? null,
-        }
-      : null,
-    design: {
-      systemSizeKwDc: design.systemSizeKwDc,
-      year1ProductionKwh: design.year1ProductionKwh,
-      offsetPct: design.offsetPct,
-      annualUsageKwh: design.annualUsageKwh ?? 0,
-      moduleLabel: label(design.module),
-      moduleQty: design.moduleQty,
-      inverterLabel: label(design.inverter),
-      batteryLabel: label(design.battery),
-      mountType: design.mountType,
-      utilityProvider: design.utilityProvider,
-      // Company-level now: the programme is set by the utility, not by the
-      // house, so it is one value per company rather than one per deal.
-      netMeteringProgram: assumptions.netMeteringProgram,
-      avgMonthlyBillCents: design.avgMonthlyBillCents,
-      utilityRateMills: design.utilityRateMills,
-      module: equip(design.module, design.moduleQty),
-      inverter: equip(design.inverter, 1),
-      battery: equip(design.battery, design.batteryQty || (design.battery ? 1 : 0)),
-    },
-    layout,
-    finance: {
-      product: finance.product,
-      grossPpwCents: finance.grossPpwCents,
-      dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-      // Named and priced HERE, then frozen into the snapshot. Reading them back
-      // through the catalogue at render time would let a later rename retitle a
-      // line on a document a homeowner has already been shown.
-      adders: adderLines.map((l) => ({
-        label: l.label,
-        amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
-      })),
-      rateMillsPerKwh: finance.rateMillsPerKwh,
-      monthlyPaymentCents: finance.monthlyPaymentCents,
-      escalatorPct: finance.escalatorPct,
-      termYears: finance.termYears,
-      aprPct: finance.aprPct,
-      // These three arrived together with the loan payment row on the customer
-      // proposal, which is the condition the previous note here set: the
-      // snapshot is what the customer was SHOWN, frozen, so a figure goes in
-      // only once the layout renders it. The proposal now shows a monthly for a
-      // loan — the lender's approved figure when one exists, otherwise the
-      // product's terms amortised — and these are what it is computed from.
-      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
-      loanTermMonths: finance.loanTermMonths,
-      downPaymentCents: finance.downPaymentCents,
-    },
-    // The lender chosen on the design wins over whatever a credit application
-    // recorded: the design is the current answer, the application is history.
-    lender: dealLender?.name ?? approvedCredit?.lender ?? null,
-    // Only the partner on the design has a logo to show: the credit
-    // application records its lender as free text from a webhook, which is a
-    // name and nothing more.
-    lenderLogoUrl: dealLender ? lenderLogoUrl(dealLender.id, dealLender.logoUpdatedAt) : null,
-    loanFactors: quotedProduct,
-    lenderApplyUrl: dealLender?.applyUrl ?? null,
-    assumptions,
-    // What the design recorded about which model produced its production
-    // figure. Null keeps the document listing the market average, which is what
-    // it was built on.
-    yieldBasis:
-      design.yieldSource === "pvwatts" && design.yieldArrays > 0
-        ? {
-            source: "pvwatts" as const,
-            station: design.yieldStation,
-            arrays: design.yieldArrays,
-            totalArrays: Math.max(design.yieldArrays, parseLayoutBlocks(design.layoutBlocks).length),
-          }
-        : null,
-    now: new Date(),
-  });
-
-  const proposal = await prisma.solarProposal.create({
-    data: {
-      companyId: user.companyId,
-      leadId,
-      version,
-      status: "generated",
-      // NO public token. Generating is internal; a token is minted only when the
-      // proposal is actually sent. See the note on SolarProposal.publicToken.
-      publicToken: null,
-      snapshot: snapshot as never,
-      createdById: user.userId,
-      events: {
-        create: {
-          type: "generated",
-          actorId: user.userId,
-          actorName: user.fullName,
-          detail: `v${version} · ${finance.product}`,
-        },
-      },
-    },
-    select: { id: true, version: true, publicToken: true },
-  });
-
-  // Supersede rather than delete: the old version stays readable.
-  if (latest) {
-    await prisma.solarProposal.update({
-      where: { id: latest.id },
-      data: {
-        supersededAt: new Date(),
-        events: { create: { type: "superseded", actorId: user.userId, actorName: user.fullName, detail: `replaced by v${proposal.version}` } },
-      },
-    });
-  }
-
-  await prisma.activityLog.create({
-    data: {
-      companyId: user.companyId,
-      type: "system",
-      message: `${user.fullName} generated solar proposal v${version}`,
-      leadId,
-      actorId: user.userId,
-    },
-  });
-
-  revalidatePath(`/portal/leads/${leadId}`);
-  return { ok: true as const, ...proposal, warnings: readiness.issues };
+  const res = await generateProposalVersion(user, leadId);
+  // The snapshot is several hundred kilobytes and the caller here only reloads
+  // the page. Ordinary generation does not need it crossing the wire.
+  if (!res.ok) return res;
+  // The snapshot is several hundred kilobytes and this caller only reloads the
+  // page afterwards. Ordinary generation does not need it crossing the wire —
+  // the live re-price, which re-renders the document in place, does.
+  return {
+    ok: true as const,
+    id: res.id,
+    version: res.version,
+    publicToken: res.publicToken,
+    warnings: res.warnings,
+  };
 }
 
 /**

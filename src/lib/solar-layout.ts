@@ -75,12 +75,11 @@ export const PANEL_GAP_M = 0.02;
 /**
  * Web Mercator ground resolution — the whole tool's accuracy rests here.
  *
- * `scale: 2` is a HiDPI image: twice the pixels for the same ground, so each
- * pixel covers half the distance.
+ * Re-exported rather than defined here since the customer-facing proposal
+ * started drawing the same array on the same imagery: see `@/lib/web-mercator`.
+ * Every existing importer keeps working.
  */
-export function metresPerPixel(lat: number, zoom: number, scale: 1 | 2 = 1): number {
-  return (156543.03392804097 * Math.cos((lat * Math.PI) / 180)) / (2 ** zoom * scale);
-}
+export { metresPerPixel, metresToImagePx } from "./web-mercator";
 
 export function panelSizeM(m: ModuleMm, o: Orientation): { w: number; h: number } {
   const w = m.widthMm / 1000;
@@ -236,24 +235,6 @@ export function panelCorners(b: LayoutBlock, m: ModuleMm): { e: number; n: numbe
     }
   }
   return out;
-}
-
-/**
- * Ground metres → pixel on a static map centred on the deal.
- *
- * Takes both dimensions rather than one "size": the imagery route serves
- * 1280x720, and halving the wrong edge puts the whole array off the roof.
- */
-export function metresToImagePx(
-  e: number,
-  n: number,
-  mpp: number,
-  image: { widthPx: number; heightPx: number }
-): { x: number; y: number } {
-  // Mercator's cos(lat) stretch is already in `mpp`, and a residential roof
-  // spans tens of metres, so treating north as a straight vertical here is
-  // accurate to well under a pixel.
-  return { x: image.widthPx / 2 + e / mpp, y: image.heightPx / 2 - n / mpp };
 }
 
 /**

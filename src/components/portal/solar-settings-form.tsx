@@ -50,6 +50,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
     netMeteringProgram: settings.netMeteringProgram ?? "",
+    homeValueUpliftPct: String(settings.homeValueUpliftPct),
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
     minPpw: (settings.minPpwCents / 100).toFixed(2),
@@ -71,6 +72,9 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       targetNetPpwCents:
         f.targetNetPpw.trim() === "" ? null : Math.round(Number(f.targetNetPpw) * 100),
       netMeteringProgram: f.netMeteringProgram.trim() || null,
+      // Blank is zero, and zero means the claim is not made at all — the
+      // proposal omits the card rather than printing "0%".
+      homeValueUpliftPct: f.homeValueUpliftPct.trim() === "" ? 0 : Number(f.homeValueUpliftPct),
       minOffsetPct: Number(f.minOffsetPct),
       maxOffsetPct: Number(f.maxOffsetPct),
       minPpwCents: Math.round(Number(f.minPpw) * 100),
@@ -110,6 +114,19 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
             Printed on every proposal, and what the FAQ answer about surplus production points at.
             The utility sets this, not the house — so it lives here rather than on each design.
           </p>
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+        <h3 className="font-semibold">What the proposal claims</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <NumField
+            label="Home value increase %"
+            value={f.homeValueUpliftPct}
+            onChange={(v) => set("homeValueUpliftPct", v)}
+            step="0.1"
+            hint="What you are willing to say an owned system adds to a home's value. The published studies cluster around 4% and disagree by market, so this is yours to stand behind. Leave it at 0 and the proposal makes no such claim."
+          />
         </div>
       </section>
 

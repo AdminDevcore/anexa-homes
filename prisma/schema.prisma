@@ -2777,6 +2777,15 @@ model SolarSettings {
   stateIncentiveNote  String?
   incentiveDisclaimer String  @default("Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.")
 
+  // ── Impact assumptions ──────────────────────────────────────────────────
+  /// Estimated increase in home value from an OWNED system, as a % of the
+  /// property's value. Data, like every other number a homeowner reads: the
+  /// published studies disagree (Berkeley Lab ~4.1%, Zillow ~4.1%, and both
+  /// vary by market), so the figure a company is willing to stand behind is
+  /// the company's to set. Zero means the claim is not made at all and the
+  /// card is omitted rather than printed as "0%".
+  homeValueUpliftPct Float @default(0)
+
   // ── Utility programme ───────────────────────────────────────────────────
   /// Net-metering / buyback programme, e.g. "Oncor 1:1 net metering". Set by
   /// the utility and the same for every house on it, so it belongs to the
@@ -3012,6 +3021,14 @@ model SolarEquipment {
   /// or "MPU" on a design raises the flag on the deal rather than quietly
   /// becoming a line item. One of: "reroof" | "mpu" | null.
   crossoverKind     String?
+  /// The manufacturer's own datasheet, as a link.
+  ///
+  /// A LINK rather than a stored PDF: this is the manufacturer's document, it
+  /// is revised without telling us, and the version a homeowner should read is
+  /// whichever one is current when they click — not whichever one we happened
+  /// to download. Rendered on the customer's proposal beside the component, and
+  /// omitted when null rather than shown as a dead "View details".
+  specSheetUrl      String?
   specs             Json               @default("{}")
   isActive          Boolean            @default(true)
   /// The item a new design starts on for this kind. At most one ACTIVE default
@@ -3317,6 +3334,16 @@ model SolarProposal {
   /// twenty-five-year table as the proof and some read it as a wall of numbers,
   /// and that is a decision made at the table, after the thing is generated.
   showComparison Boolean @default(true)
+
+  /// Whether the customer's copy lets them switch between the payment options
+  /// frozen into the snapshot.
+  ///
+  /// A COLUMN for the same reason `showComparison` is: the options themselves
+  /// are part of the frozen document and must not move, but whether to put a
+  /// menu of them in front of THIS household is a call a rep makes at the
+  /// table. Turning it off shows only the option the deal was quoted on, which
+  /// is how every proposal generated before the switcher existed reads.
+  showPaymentOptions Boolean @default(true)
 
   /// Set when a newer version replaces this one.
   supersededAt      DateTime?

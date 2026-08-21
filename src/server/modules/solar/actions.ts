@@ -31,6 +31,11 @@ const settingsSchema = z.object({
   // the rep typed it. Set, and gross is computed from the product's dealer fee.
   targetNetPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
   netMeteringProgram: z.string().max(120).nullable(),
+  // What an owned system is claimed to add to a home's value, %. Zero — the
+  // default — means the claim is not made and the proposal omits the card.
+  // Capped at 20 because the published studies cluster around four, and a
+  // number an order of magnitude above them is a typo reaching a homeowner.
+  homeValueUpliftPct: z.number().min(0).max(20).optional(),
   minOffsetPct: z.number().min(0).max(200),
   maxOffsetPct: z.number().min(0).max(500),
   minPpwCents: z.number().int().min(0).max(2000),
@@ -489,6 +494,19 @@ const equipmentSchema = z.object({
   // The AVL turns over annually. Bounded to a sane window so a typo cannot file
   // a product under the year 202 or 20260.
   avlYear: z.number().int().min(2000).max(2100).nullable().optional(),
+  // The manufacturer's own datasheet, rendered on the customer's proposal.
+  // http(s) only, and validated as a URL: a homeowner clicking "View details"
+  // has to land on a document, and a `javascript:` string in a field that ends
+  // up in an anchor on a public page is not a link, it is a script.
+  specSheetUrl: z
+    .string()
+    .trim()
+    .url()
+    .max(500)
+    .refine((v) => /^https?:\/\//i.test(v), "Use a http:// or https:// link.")
+    .nullable()
+    .optional()
+    .or(z.literal("").transform(() => null)),
 });
 
 /**
