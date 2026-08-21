@@ -4,7 +4,21 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Wrench } from "lucide-react";
+import {
+  ArrowUpRight,
+  BatteryCharging,
+  Compass,
+  Cpu,
+  Home,
+  Landmark,
+  LayoutGrid,
+  Loader2,
+  NotebookPen,
+  PanelsTopLeft,
+  PlugZap,
+  Sun,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,7 +81,125 @@ export type SystemBuild = {
   meterNo: string | null;
 };
 
-/** A label/value row, the deal page's own vocabulary. */
+/* ── The slide's own vocabulary ────────────────────────────────────────────
+   Every block on this slide is one of four shapes: a headline figure, a piece
+   of equipment, a stated assumption, or a note. They are defined once here so
+   the four read as one card rather than as four cards that happened to land
+   on the same tab. */
+
+/** An em dash, so an unset figure reads as unset rather than as zero. */
+const NOT_SET = <span className="font-normal text-muted-foreground">—</span>;
+
+/**
+ * A panel: a titled surface, recessed against the slide it sits on.
+ *
+ * `bg-muted/30` rather than `bg-card` deliberately — this whole slide renders
+ * inside the deal's card, and a card on a card is invisible in light mode and
+ * muddy in dark. A recess reads as "inside" in both.
+ */
+function Panel({
+  title,
+  icon: Icon,
+  action,
+  className,
+  bodyClassName,
+  children,
+}: {
+  title: string;
+  icon?: React.ComponentType<{ className?: string }>;
+  action?: React.ReactNode;
+  className?: string;
+  bodyClassName?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={cn("overflow-hidden rounded-xl border border-border bg-muted/30", className)}>
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border/70 px-4 py-2.5">
+        <h3 className="flex min-w-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {Icon && <Icon className="size-3.5 shrink-0 text-solar" />}
+          <span className="truncate">{title}</span>
+        </h3>
+        {action}
+      </header>
+      <div className={cn("p-4", bodyClassName)}>{children}</div>
+    </section>
+  );
+}
+
+/**
+ * A headline figure.
+ *
+ * The four numbers a rep is asked for on the phone — how big, how many panels,
+ * how much does it make, how much of the bill does that cover. They used to be
+ * four of fifteen identical label/value rows; the answer to "why is this only
+ * offsetting 38%?" was set in the same 13px as the rate plan.
+ */
+function Stat({
+  label,
+  value,
+  unit,
+  hint,
+}: {
+  label: string;
+  value: React.ReactNode;
+  unit?: string;
+  hint?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card px-3.5 py-3">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-0.5 flex items-baseline gap-1">
+        <span className="font-display text-xl font-semibold tabular-nums">{value}</span>
+        {unit && <span className="text-[11px] font-medium text-muted-foreground">{unit}</span>}
+      </div>
+      {hint && <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{hint}</div>}
+    </div>
+  );
+}
+
+/**
+ * One piece of hardware, on its own line with its own mark.
+ *
+ * Right-aligned against the far edge of a two-column grid, a module part number
+ * ended up a hand's width from its label with nothing but whitespace between
+ * them. Equipment is a list of things, so it is laid out as one: mark, what it
+ * is, and how many of it.
+ */
+function Kit({
+  icon: Icon,
+  mark,
+  label,
+  value,
+  meta,
+}: {
+  icon?: React.ComponentType<{ className?: string }>;
+  /** A logo in place of the glyph — the lender brings its own. */
+  mark?: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  meta?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5">
+      {mark ?? (
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-solar/10 text-solar">
+          {Icon && <Icon className="size-4" />}
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="truncate text-sm font-medium">{value}</div>
+      </div>
+      {meta && (
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+          {meta}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** A stated assumption: small, quiet, and always the same shape. */
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-border/60 py-1.5 last:border-0">
@@ -77,20 +209,15 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function Group({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+/** A working note, set as prose. Sentences are not right-aligned figures. */
+function Note({ label, body }: { label: string; body: string }) {
   return (
-    <div>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-        {hint && <span className="ml-1.5 font-normal normal-case tracking-normal">· {hint}</span>}
-      </div>
-      <dl className="mt-1.5">{children}</dl>
+    <div className="border-b border-border/60 py-2 first:pt-0 last:border-0 last:pb-0">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <p className="mt-0.5 text-sm leading-relaxed">{body}</p>
     </div>
   );
 }
-
-/** An em dash, so an unset figure reads as unset rather than as zero. */
-const NOT_SET = <span className="font-normal text-muted-foreground">—</span>;
 
 /**
  * Everything technical about the physical system, in one place.
@@ -156,118 +283,178 @@ export function SolarSystemInfo({
     }
   }
 
+  const proposed = source.kind === "proposal";
+  const builderHref = `/portal/leads/${leadId}/solar-proposal`;
+
+  // How much of the home's own consumption this roof covers, as a bar. Offset
+  // is a RATIO and was printed as a bare percentage next to two six-figure
+  // kWh totals it is derived from, which is three numbers to hold in your head
+  // to picture one thing. Clamped at 100% for the fill — an over-producing
+  // system still fills the bar rather than overflowing its track — while the
+  // stat above keeps saying 118%.
+  const usage = specs?.annualUsageKwh ?? null;
+  const offsetFill = specs ? Math.max(0, Math.min(100, Math.round(specs.offsetPct))) : 0;
+
+  const recorded = !!(build.utilityAccountNo && build.meterNo);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Provenance first. Everything under this line is a report, not a form. */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
-        <p className="text-xs text-muted-foreground">
-          <span className="font-semibold uppercase tracking-wide text-foreground">
-            {source.kind === "proposal" ? "As proposed" : "Working design"}
-          </span>{" "}
-          · {source.label}
-        </p>
-        <Link
-          href={`/portal/leads/${leadId}/solar-proposal`}
-          className="text-xs font-medium underline underline-offset-2"
-        >
-          {source.kind === "proposal" ? "Change in the proposal" : "Open the proposal builder"}
-        </Link>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+              proposed
+                ? "border-solar/40 bg-solar/10 text-solar"
+                : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            )}
+          >
+            {proposed ? "As proposed" : "Working design"}
+          </span>
+          <span className="min-w-0 truncate text-xs text-muted-foreground">{source.label}</span>
+        </div>
+        {specs && (
+          <Button asChild variant="outline" size="sm">
+            <Link href={builderHref}>
+              {proposed ? "Change in the proposal" : "Open the proposal builder"}
+              <ArrowUpRight className="size-3.5" />
+            </Link>
+          </Button>
+        )}
       </div>
 
       {specs ? (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Group title="The system">
-            <Row
-              label="Modules"
-              value={
-                specs.module ? (
-                  <>
-                    {specs.moduleQty} × {specs.module}
-                    {specs.moduleRatingW ? (
-                      <span className="ml-1 font-normal text-muted-foreground">
-                        ({specs.moduleRatingW} W)
-                      </span>
-                    ) : null}
-                  </>
-                ) : (
-                  NOT_SET
-                )
-              }
-            />
-            <Row label="Inverter" value={specs.inverter ?? NOT_SET} />
-            <Row
-              label="Battery"
-              value={
-                specs.battery
-                  ? `${specs.batteryQty > 1 ? `${specs.batteryQty} × ` : ""}${specs.battery}`
-                  : NOT_SET
-              }
-            />
-            <Row label="Mount" value={<span className="capitalize">{specs.mountType}</span>} />
-            <Row
+        <>
+          {/* The four figures the job is described by out loud. */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Stat
               label="System size"
-              value={
-                specs.sizeKwDc
-                  ? `${specs.sizeKwDc.toFixed(2)} kW DC${specs.sizeKwAc ? ` · ${specs.sizeKwAc.toFixed(2)} kW AC` : ""}`
-                  : NOT_SET
-              }
+              value={specs.sizeKwDc ? specs.sizeKwDc.toFixed(2) : "—"}
+              unit={specs.sizeKwDc ? "kW DC" : undefined}
+              hint={specs.sizeKwAc ? `${specs.sizeKwAc.toFixed(2)} kW AC` : undefined}
             />
-            {/* The lender rides with the equipment it gates: its approved-vendor
-                list is what makes one inverter quotable and another not. */}
-            <Row
-              label="Lender"
-              value={
-                specs.lender ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <LenderMark name={specs.lender} logoUrl={specs.lenderLogoUrl} size="sm" />
-                    {specs.lender}
-                  </span>
-                ) : (
-                  NOT_SET
-                )
-              }
+            <Stat
+              label="Panels"
+              value={specs.moduleQty || "—"}
+              hint={specs.moduleRatingW ? `${specs.moduleRatingW} W each` : undefined}
             />
-          </Group>
-
-          <Group title="Production">
-            <Row
+            <Stat
               label="Year-1 production"
-              value={specs.year1Kwh ? `${specs.year1Kwh.toLocaleString()} kWh` : NOT_SET}
+              value={specs.year1Kwh ? specs.year1Kwh.toLocaleString() : "—"}
+              unit={specs.year1Kwh ? "kWh" : undefined}
+              hint={specs.yieldSource ? specs.yieldSource.toUpperCase() : undefined}
             />
-            <Row label="Offset" value={specs.offsetPct ? `${Math.round(specs.offsetPct)}%` : NOT_SET} />
-            <Row
-              label="Annual usage"
-              value={specs.annualUsageKwh ? `${specs.annualUsageKwh.toLocaleString()} kWh` : NOT_SET}
+            <Stat
+              label="Offset"
+              value={specs.offsetPct ? `${Math.round(specs.offsetPct)}%` : "—"}
+              hint={usage ? `of ${usage.toLocaleString()} kWh` : undefined}
             />
-            <Row
-              label="Utility rate"
-              value={specs.rateMills != null ? `$${(specs.rateMills / 1000).toFixed(3)}/kWh` : NOT_SET}
-            />
-            {/* Which model produced the number, so a figure that looks wrong can
-                be traced instead of argued about. */}
-            <Row
-              label="Yield source"
-              value={
-                specs.yieldSource ? (
-                  <>
-                    <span className="uppercase">{specs.yieldSource}</span>
-                    {specs.yieldStation && (
-                      <span className="ml-1 font-normal text-muted-foreground">
-                        · {specs.yieldStation}
+          </div>
+
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <Panel title="Equipment" icon={LayoutGrid} bodyClassName="divide-y divide-border/60 p-0">
+              <Kit
+                icon={LayoutGrid}
+                label="Modules"
+                value={specs.module ?? NOT_SET}
+                meta={specs.module ? `${specs.moduleQty} ×` : undefined}
+              />
+              <Kit icon={Cpu} label="Inverter" value={specs.inverter ?? NOT_SET} />
+              <Kit
+                icon={BatteryCharging}
+                label="Battery"
+                value={specs.battery ?? <span className="font-normal text-muted-foreground">None</span>}
+                meta={specs.battery && specs.batteryQty > 1 ? `${specs.batteryQty} ×` : undefined}
+              />
+              <Kit
+                icon={Home}
+                label="Mount"
+                value={<span className="capitalize">{specs.mountType}</span>}
+              />
+              {/* The lender rides with the equipment it gates: its approved-vendor
+                  list is what makes one inverter quotable and another not. */}
+              <Kit
+                icon={Landmark}
+                mark={
+                  specs.lender ? (
+                    <LenderMark name={specs.lender} logoUrl={specs.lenderLogoUrl} size="md" />
+                  ) : undefined
+                }
+                label="Lender"
+                value={specs.lender ?? NOT_SET}
+              />
+            </Panel>
+
+            <Panel title="Production & assumptions" icon={Sun}>
+              {/* The ratio, drawn. */}
+              {usage ? (
+                <div className="mb-3">
+                  <div className="flex items-baseline justify-between gap-3 text-[11px] text-muted-foreground">
+                    <span>
+                      Solar{" "}
+                      <span className="font-medium tabular-nums text-foreground">
+                        {specs.year1Kwh.toLocaleString()} kWh
                       </span>
-                    )}
-                  </>
-                ) : (
-                  NOT_SET
-                )
-              }
-            />
-            {specs.tsrfPct != null && <Row label="TSRF" value={`${Math.round(specs.tsrfPct)}%`} />}
-            {specs.ratePlan && <Row label="Rate plan" value={specs.ratePlan} />}
-            {specs.netMeteringProgram && (
-              <Row label="Net metering" value={specs.netMeteringProgram} />
-            )}
-          </Group>
+                    </span>
+                    <span>
+                      Home uses{" "}
+                      <span className="font-medium tabular-nums text-foreground">
+                        {usage.toLocaleString()} kWh
+                      </span>
+                    </span>
+                  </div>
+                  <div
+                    className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted"
+                    role="img"
+                    aria-label={`Solar covers ${Math.round(specs.offsetPct)}% of this home's annual use`}
+                  >
+                    <div
+                      className="h-full rounded-full bg-solar transition-[width]"
+                      style={{ width: `${offsetFill}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              <dl>
+                <Row
+                  label="Annual usage"
+                  value={usage ? `${usage.toLocaleString()} kWh` : NOT_SET}
+                />
+                <Row
+                  label="Utility rate"
+                  value={
+                    specs.rateMills != null ? `$${(specs.rateMills / 1000).toFixed(3)}/kWh` : NOT_SET
+                  }
+                />
+                {/* Which model produced the number, so a figure that looks wrong can
+                    be traced instead of argued about. */}
+                <Row
+                  label="Yield source"
+                  value={
+                    specs.yieldSource ? (
+                      <>
+                        <span className="uppercase">{specs.yieldSource}</span>
+                        {specs.yieldStation && (
+                          <span className="ml-1 font-normal text-muted-foreground">
+                            · {specs.yieldStation}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      NOT_SET
+                    )
+                  }
+                />
+                {specs.tsrfPct != null && <Row label="TSRF" value={`${Math.round(specs.tsrfPct)}%`} />}
+                {specs.ratePlan && <Row label="Rate plan" value={specs.ratePlan} />}
+                {specs.netMeteringProgram && (
+                  <Row label="Net metering" value={specs.netMeteringProgram} />
+                )}
+              </dl>
+            </Panel>
+          </div>
 
           {/* Per array, because a design is rarely one plane and the totals
               above hide that. An array facing north is not a rounding error.
@@ -277,108 +464,157 @@ export function SolarSystemInfo({
               when the figures above came from a proposal, so a redrawn roof
               cannot quietly read as part of the frozen document. */}
           {specs.arrays.length > 0 && (
-            <div className="lg:col-span-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Arrays
-                {source.kind === "proposal" && (
-                  <span className="ml-1.5 font-normal normal-case tracking-normal">
-                    · current drawing
-                  </span>
-                )}
-              </div>
-              <div className="mt-1.5 overflow-x-auto">
-                <table className="w-full min-w-[26rem] text-sm">
+            <Panel
+              title="Arrays"
+              icon={PanelsTopLeft}
+              bodyClassName="p-0"
+              action={
+                <span className="text-[11px] text-muted-foreground">
+                  {proposed ? "Current drawing" : `${specs.arrays.length} on this roof`}
+                </span>
+              }
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[24rem] text-sm">
                   <thead>
-                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th className="py-1.5 font-medium">#</th>
-                      <th className="py-1.5 font-medium">Panels</th>
-                      <th className="py-1.5 font-medium">Facing</th>
-                      <th className="py-1.5 font-medium">Pitch</th>
-                      <th className="py-1.5 font-medium">Shade</th>
+                    <tr className="border-b border-border/70 text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <th className="w-10 py-2 pl-4 font-medium">#</th>
+                      <th className="w-36 py-2 pr-3 font-medium">Panels</th>
+                      <th className="w-40 py-2 pr-3 font-medium">Facing</th>
+                      <th className="w-32 py-2 pr-3 font-medium">Pitch</th>
+                      <th className="py-2 pr-4 text-right font-medium">Shade</th>
                     </tr>
                   </thead>
                   <tbody>
                     {specs.arrays.map((a, i) => (
-                      <tr key={a.id} className="border-b border-border/60 last:border-0">
-                        <td className="py-1.5 text-muted-foreground">{i + 1}</td>
-                        <td className="py-1.5 tabular-nums">{a.panels}</td>
-                        <td className="py-1.5">
+                      <tr key={a.id} className="border-b border-border/50 last:border-0">
+                        <td className="py-2 pl-4">
+                          <span className="grid size-5 place-items-center rounded-md bg-solar/10 text-[11px] font-semibold tabular-nums text-solar">
+                            {i + 1}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 tabular-nums">
+                          {a.panels}
+                          {specs.moduleRatingW ? (
+                            <span className="ml-1.5 text-[11px] text-muted-foreground">
+                              · {((a.panels * specs.moduleRatingW) / 1000).toFixed(2)} kW
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-2 pr-3">
                           {a.azimuthDeg != null ? (
-                            <>
-                              {compassLabel(a.azimuthDeg)}{" "}
-                              <span className="text-muted-foreground tabular-nums">
-                                ({Math.round(a.azimuthDeg)}°)
+                            <span className="inline-flex items-center gap-1">
+                              <Compass className="size-3 text-muted-foreground" />
+                              {compassLabel(a.azimuthDeg)}
+                              <span className="text-[11px] tabular-nums text-muted-foreground">
+                                {Math.round(a.azimuthDeg)}°
                               </span>
-                            </>
+                            </span>
                           ) : (
                             NOT_SET
                           )}
                         </td>
-                        <td className="py-1.5">
+                        <td className="py-2 pr-3">
                           {a.tiltDeg != null ? (
                             <>
                               <span className="tabular-nums">{Math.round(a.tiltDeg)}°</span>{" "}
-                              <span className="text-muted-foreground">
-                                ({tiltDegToPitch(a.tiltDeg)})
+                              <span className="text-[11px] text-muted-foreground">
+                                {tiltDegToPitch(a.tiltDeg)}
                               </span>
                             </>
                           ) : (
                             NOT_SET
                           )}
                         </td>
-                        <td className="py-1.5 tabular-nums">
+                        <td className="py-2 pr-4 text-right tabular-nums">
                           {a.shadePct ? `${Math.round(a.shadePct)}%` : "—"}
                         </td>
                       </tr>
                     ))}
                   </tbody>
+                  {/* Only when there is something to total. On a single-plane
+                      roof the row would just repeat the one above it. */}
+                  {specs.arrays.length > 1 && (
+                    <tfoot>
+                      <tr className="border-t border-border/70 text-[11px] font-medium text-muted-foreground">
+                        <td className="py-2 pl-4">Σ</td>
+                        <td className="py-2 pr-3 tabular-nums text-foreground">
+                          {specs.arrays.reduce((n, a) => n + a.panels, 0)} panels drawn
+                        </td>
+                        <td colSpan={3} className="py-2 pr-4" />
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
-            </div>
+            </Panel>
           )}
 
           {(specs.setbackNotes || specs.structuralNotes || specs.electricalNotes) && (
-            <div className="lg:col-span-2">
-              <Group title="Site notes">
-                {specs.setbackNotes && <Row label="Setbacks" value={specs.setbackNotes} />}
-                {specs.structuralNotes && <Row label="Structural" value={specs.structuralNotes} />}
-                {specs.electricalNotes && <Row label="Electrical" value={specs.electricalNotes} />}
-              </Group>
-            </div>
+            <Panel title="Site notes" icon={NotebookPen}>
+              {specs.setbackNotes && <Note label="Setbacks" body={specs.setbackNotes} />}
+              {specs.structuralNotes && <Note label="Structural" body={specs.structuralNotes} />}
+              {specs.electricalNotes && <Note label="Electrical" body={specs.electricalNotes} />}
+            </Panel>
           )}
-        </div>
+        </>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          No system design on this deal yet. Build the proposal and the specifications appear here.
-        </p>
+        <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center">
+          <span className="mx-auto grid size-10 place-items-center rounded-full bg-solar/10 text-solar">
+            <PanelsTopLeft className="size-5" />
+          </span>
+          <p className="mt-3 text-sm font-medium">No system designed yet</p>
+          <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
+            Draw the array in the proposal builder and the equipment, production and per-plane
+            angles all report here.
+          </p>
+          <Button asChild size="sm" className="mt-4 bg-solar text-solar-foreground hover:bg-solar/90">
+            <Link href={builderHref}>Open the proposal builder</Link>
+          </Button>
+        </div>
       )}
 
-      {/* ── Interconnection ─────────────────────────────────────────────── */}
-      <div className="space-y-3 rounded-lg border border-dashed border-border p-3">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Interconnection
-          </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            The utility&rsquo;s own numbers for this house, recorded when the job is built. The
-            equipment and the lender are not set here — they are what the customer was quoted, so
-            they change on the proposal.
-          </p>
-        </div>
-
+      {/* ── Interconnection ───────────────────────────────────────────────
+          The only thing on this slide that writes, so it is the only thing
+          styled as a form. */}
+      <Panel
+        title="Interconnection"
+        icon={PlugZap}
+        action={
+          build.hasDesign ? (
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                recorded
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              {recorded ? "Recorded" : "Not recorded yet"}
+            </span>
+          ) : undefined
+        }
+      >
         {!build.hasDesign ? (
           <p className="text-xs text-muted-foreground">
             No system design on this deal yet. Build the proposal first and these will attach to it.
           </p>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              The utility&rsquo;s own numbers for this house, recorded when the job is built. The
+              equipment and the lender are not set here — they are what the customer was quoted, so
+              they change on the proposal.
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label htmlFor="solar-utility-account" className="text-xs">Utility account #</Label>
                 <Input
                   id="solar-utility-account"
                   value={form.utilityAccountNo}
                   disabled={!canEdit}
+                  placeholder="From the customer's bill"
+                  className="bg-card"
                   onChange={(e) => set("utilityAccountNo", e.target.value)}
                 />
               </div>
@@ -388,20 +624,27 @@ export function SolarSystemInfo({
                   id="solar-meter-no"
                   value={form.meterNo}
                   disabled={!canEdit}
+                  placeholder="Read off the meter at install"
+                  className="bg-card"
                   onChange={(e) => set("meterNo", e.target.value)}
                 />
               </div>
             </div>
 
             {canEdit && (
-              <Button size="sm" variant="outline" disabled={busy} onClick={save}>
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <Wrench className="size-4" />}
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={save}
+                className="mt-3 bg-solar text-solar-foreground hover:bg-solar/90"
+              >
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <PlugZap className="size-4" />}
                 Save interconnection
               </Button>
             )}
           </>
         )}
-      </div>
+      </Panel>
     </div>
   );
 }
