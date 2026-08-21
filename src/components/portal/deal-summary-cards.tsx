@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
  *    yet. The tile keeps its slot and shows a muted placeholder, so a header
  *    does not reflow from three cards to four the moment a lender is picked.
  *
- * Solar uses the second kind for its fixed four (stage, size, lender, rep):
+ * Solar uses the second kind for its fixed four (stage, size, financing, rep):
  * a row whose columns move around as a deal fills in reads as unfinished
  * software, not as a deal with unfinished fields.
  *

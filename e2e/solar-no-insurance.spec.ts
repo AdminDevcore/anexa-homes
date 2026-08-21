@@ -263,7 +263,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     }
   });
 
-  test("the summary row answers stage, size, lender and rep without scrolling", async ({ page }) => {
+  test("the summary row answers stage, size, financing and rep without scrolling", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
 
@@ -273,11 +273,14 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // solar's header is fixed, so a fifth card is as much a regression as a
     // missing one.
     await expect(cards.locator("> div")).toHaveCount(4);
-    for (const label of ["Current stage", "System size", "Lender", "Sales rep"]) {
+    for (const label of ["Current stage", "System size", "Financing", "Sales rep"]) {
       await expect(cards.getByText(label, { exact: true })).toBeVisible();
     }
     // The APPROVED lender, not the newer decline — the seed has both.
     await expect(cards.getByText("GoodLeap")).toBeVisible();
+    // …and the PRODUCT beside it. A partner's name alone does not say whether
+    // the customer is buying the system or renting it.
+    await expect(cards.getByText("Loan · Approved", { exact: true })).toBeVisible();
     await expect(cards.getByText("Sunlight Financial")).toHaveCount(0);
     await expect(cards.getByText("10.00 kW")).toBeVisible();
 
@@ -303,7 +306,7 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(cards.locator("> div")).toHaveCount(4);
     // Three of the four have no answer yet, and say so rather than vanishing.
     await expect(cards.locator("> div[data-empty]")).toHaveCount(3);
-    for (const hint of ["Not designed yet", "Not selected", "Unassigned"]) {
+    for (const hint of ["Not designed yet", "No lender selected", "Unassigned"]) {
       await expect(cards.getByText(hint, { exact: true })).toBeVisible();
     }
   });

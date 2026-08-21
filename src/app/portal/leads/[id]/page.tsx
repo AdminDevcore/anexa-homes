@@ -40,6 +40,7 @@ import {
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import { blockPanelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { lenderLogoUrl } from "@/lib/lender-mark";
+import { financingCard } from "@/lib/solar-deal-header";
 import {
   SolarSystemMoneyPanel,
   SolarActivityFeed,
@@ -599,10 +600,10 @@ export default async function LeadDetailPage({
   // The two verticals also fill it differently, on purpose:
   //  • Roofing builds the row from whatever the deal knows — a card with no
   //    answer is left out.
-  //  • Solar is a FIXED four — stage, system size, lender, sales rep — and
+  //  • Solar is a FIXED four — stage, system size, financing, sales rep — and
   //    every one of them is pushed whether or not it has an answer yet. A
-  //    solar deal spends its whole early life with no size and no lender, and
-  //    a header that grows a column each time one of them lands reads as
+  //    solar deal spends its whole early life with no size and no financing,
+  //    and a header that grows a column each time one of them lands reads as
   //    half-built software. Undecided renders as a muted placeholder in its
   //    own slot; see DealSummaryCards.
 
@@ -690,28 +691,20 @@ export default async function LeadDetailPage({
       hint: sizeKw > 0 ? (moduleQty > 0 ? `${moduleQty} panels` : undefined) : "Not designed yet",
     });
 
-    // Which lender is on this deal. A credit application wins when there is
-    // one — that is a decision a lender actually made — and the lender chosen
-    // on the design is only our intent until one comes back. `creditApp` is
-    // already the best of however many applications exist (ranked above).
-    const designLender = solarDesign?.lenderId
-      ? (solarLenders.find((l) => l.id === solarDesign.lenderId)?.name ?? null)
-      : null;
-    // `lender` is a required column but the webhook can still write a blank
-    // one, and a blank string here would render an empty tile that claims to
-    // be filled in. Trim to null so it falls through to the design's choice.
-    const creditLender = creditApp?.lender.trim() || null;
-    const creditStatus = creditApp?.status.replace(/_/g, " ") ?? null;
-    summaryCards.push({
-      label: "Lender",
-      value: creditLender ?? designLender,
-      hint:
-        creditLender && creditStatus
-          ? creditStatus.charAt(0).toUpperCase() + creditStatus.slice(1)
-          : designLender
-            ? "No application yet"
-            : "Not selected",
-    });
+    // HOW THIS DEAL IS PAID FOR — not merely who is lending. `creditApp` is
+    // already the best of however many applications exist (ranked above); the
+    // four-way logic and the reason this stopped being a "Lender" card live in
+    // financingCard.
+    summaryCards.push(
+      financingCard({
+        product: solarFinance?.product ?? null,
+        creditLender: creditApp?.lender ?? null,
+        creditStatus: creditApp?.status.replace(/_/g, " ") ?? null,
+        designLender: solarDesign?.lenderId
+          ? (solarLenders.find((l) => l.id === solarDesign.lenderId)?.name ?? null)
+          : null,
+      })
+    );
 
     summaryCards.push({
       label: "Sales rep",
