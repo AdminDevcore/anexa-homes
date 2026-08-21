@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Menu, Phone } from "lucide-react";
+import { Menu, Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PORTAL_NAV } from "@/lib/nav";
 import { Logo } from "@/components/marketing/logo";
@@ -23,6 +23,20 @@ export type ShellUser = {
   email: string;
   roleLabel: string;
 };
+
+/**
+ * The spinner on the nav item you just clicked.
+ *
+ * `useLinkStatus` reports the pending state of the enclosing Link, so this has
+ * to render inside one. Feedback lands on the exact row the user pressed —
+ * which is the question they are asking ("did that register?") — rather than as
+ * a bar at the top of the window that answers a different one.
+ */
+function NavPending() {
+  const { pending } = useLinkStatus();
+  if (!pending) return null;
+  return <Loader2 className="size-3.5 shrink-0 animate-spin text-white/70" aria-hidden />;
+}
 
 export function PortalShell({
   user,
@@ -84,6 +98,7 @@ export function PortalShell({
           >
             <item.icon className="size-[18px] shrink-0" />
             <span className="flex-1">{item.label}</span>
+            <NavPending />
             {badge !== null && (
               <Badge
                 className={cn(
