@@ -520,12 +520,22 @@ export default async function LeadDetailPage({
       }
     : null;
 
-  // The at-a-glance row under the customer name. Cards with no value are
-  // dropped rather than rendered empty — see DealSummaryCards.
+  // The at-a-glance row under the customer name.
   //
   // Stage is the one card BOTH verticals carry; after that the two businesses
   // are judged on different things, so the lists diverge rather than being
   // forced into one shape.
+  //
+  // The two verticals also fill it differently, on purpose:
+  //  • Roofing builds the row from whatever the deal knows — a card with no
+  //    answer is left out.
+  //  • Solar is a FIXED four — stage, system size, lender, sales rep — and
+  //    every one of them is pushed whether or not it has an answer yet. A
+  //    solar deal spends its whole early life with no size and no lender, and
+  //    a header that grows a column each time one of them lands reads as
+  //    half-built software. Undecided renders as a muted placeholder in its
+  //    own slot; see DealSummaryCards.
+
   // The deal's own pipeline, trimmed to what the client components need. Shared
   // by the header actions and the progress bar so the two can never disagree
   // about which stage is next or which one means dead.
@@ -563,6 +573,11 @@ export default async function LeadDetailPage({
           .join(" · "),
         accent: lead.stage.color,
       });
+    } else if (isSolarDeal) {
+      // Slot one of solar's fixed four. A stageless deal is rare but real
+      // (imported, or its pipeline stage was deleted) and it must not be the
+      // thing that shifts the other three cards left.
+      summaryCards.push({ label: "Current stage", value: null, hint: "Not in a pipeline" });
     }
   }
   if (!isSolarDeal) {
@@ -594,33 +609,51 @@ export default async function LeadDetailPage({
     }
   }
   if (isSolarDeal) {
-    if (creditApp?.lender) {
-      const status = creditApp.status.replace(/_/g, " ");
-      summaryCards.push({
-        label: "Financier",
-        value: creditApp.lender,
-        hint: status.charAt(0).toUpperCase() + status.slice(1),
-      });
-    }
-    if (solarDesign && solarDesign.systemSizeKwDc > 0) {
-      summaryCards.push({
-        label: "System size",
-        value: `${solarDesign.systemSizeKwDc.toFixed(2)} kW`,
-        hint: solarDesign.moduleQty > 0 ? `${solarDesign.moduleQty} panels` : undefined,
-      });
-    }
-    if (project?.manager) {
-      summaryCards.push({
-        label: "Project manager",
-        value: `${project.manager.firstName} ${project.manager.lastName}`,
-      });
-    }
-    if (lead.assignedRep) {
-      summaryCards.push({
-        label: "Sales rep",
-        value: `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`,
-      });
-    }
+    // Slots two, three and four. Every push is unconditional — see the note
+    // above the row: the shape of this header does not depend on how far along
+    // the deal is.
+    const sizeKw = solarDesign?.systemSizeKwDc ?? 0;
+    const moduleQty = solarDesign?.moduleQty ?? 0;
+    summaryCards.push({
+      label: "System size",
+      value: sizeKw > 0 ? `${sizeKw.toFixed(2)} kW` : null,
+      hint: sizeKw > 0 ? (moduleQty > 0 ? `${moduleQty} panels` : undefined) : "Not designed yet",
+    });
+
+    // Which lender is on this deal. A credit application wins when there is
+    // one — that is a decision a lender actually made — and the lender chosen
+    // on the design is only our intent until one comes back. `creditApp` is
+    // already the best of however many applications exist (ranked above).
+    const designLender = solarDesign?.lenderId
+      ? (solarLenders.find((l) => l.id === solarDesign.lenderId)?.name ?? null)
+      : null;
+    // `lender` is a required column but the webhook can still write a blank
+    // one, and a blank string here would render an empty tile that claims to
+    // be filled in. Trim to null so it falls through to the design's choice.
+    const creditLender = creditApp?.lender.trim() || null;
+    const creditStatus = creditApp?.status.replace(/_/g, " ") ?? null;
+    summaryCards.push({
+      label: "Lender",
+      value: creditLender ?? designLender,
+      hint:
+        creditLender && creditStatus
+          ? creditStatus.charAt(0).toUpperCase() + creditStatus.slice(1)
+          : designLender
+            ? "No application yet"
+            : "Not selected",
+    });
+
+    summaryCards.push({
+      label: "Sales rep",
+      value: lead.assignedRep
+        ? `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`
+        : null,
+      hint: lead.assignedRep ? undefined : "Unassigned",
+    });
+    // The project manager is NOT a fifth card. It only exists once a job does,
+    // so it would appear mid-deal and push the row from four tiles to five —
+    // the same reflow the fixed four is here to stop. It reads next to the job
+    // number in the Job panel instead, which is the thing it manages.
   }
 
   // Scope of Work — job profitability calculator. Available once the deal reaches
@@ -889,7 +922,13 @@ export default async function LeadDetailPage({
                 ) : (
                   <div className="space-y-6">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm text-muted-foreground">Job {project.projectNumber}</span>
+                      {/* The project manager reads here, beside the job it
+                          manages, rather than as a fifth summary card. */}
+                      <span className="text-sm text-muted-foreground">
+                        Job {project.projectNumber}
+                        {project.manager &&
+                          ` · PM ${project.manager.firstName} ${project.manager.lastName}`}
+                      </span>
                       {/* No production-status control. `Project.status` was a
                           second, hand-maintained status that duplicated the
                           pipeline — which already has In Production, QC

@@ -24,7 +24,7 @@ async function login(page: Page, email: string) {
   await page.waitForURL("**/portal/**", { timeout: 15000 });
 }
 
-async function openSolarDeal(page: Page) {
+async function toSolar(page: Page) {
   await page.getByRole("button", { name: "Switch workspace" }).click();
   await page.getByRole("menuitem", { name: "Solar" }).click();
   await page.waitForURL(/\/portal\/dashboard/, { timeout: 15000 });
@@ -32,6 +32,10 @@ async function openSolarDeal(page: Page) {
   // Without this the next goto() races the workspace cookie and loads the
   // roofing list, whose deals then 404 in a solar context.
   await expect(page.getByText(/· Solar workspace/)).toBeVisible({ timeout: 15000 });
+}
+
+async function openSolarDeal(page: Page) {
+  await toSolar(page);
   // By name, not by position: another spec creates a second solar deal, and
   // "the first row" silently becomes the wrong deal.
   await page.goto("/portal/leads?q=Priya");
@@ -243,24 +247,49 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     }
   });
 
-  test("the summary row answers stage, financier, size and rep without scrolling", async ({ page }) => {
+  test("the summary row answers stage, size, lender and rep without scrolling", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
 
     const cards = page.getByTestId("deal-summary-cards");
     await expect(cards).toBeVisible({ timeout: 15000 });
-    await expect(cards.getByText("Current stage")).toBeVisible();
-    await expect(cards.getByText("Financier")).toBeVisible();
+    // Exactly four, in this order. The count is the assertion that matters:
+    // solar's header is fixed, so a fifth card is as much a regression as a
+    // missing one.
+    await expect(cards.locator("> div")).toHaveCount(4);
+    for (const label of ["Current stage", "System size", "Lender", "Sales rep"]) {
+      await expect(cards.getByText(label, { exact: true })).toBeVisible();
+    }
     // The APPROVED lender, not the newer decline — the seed has both.
     await expect(cards.getByText("GoodLeap")).toBeVisible();
     await expect(cards.getByText("Sunlight Financial")).toHaveCount(0);
-    await expect(cards.getByText("System size")).toBeVisible();
     await expect(cards.getByText("10.00 kW")).toBeVisible();
-    await expect(cards.getByText("Sales rep")).toBeVisible();
 
-    // No project on this deal, so there is no project manager to name — the
-    // card is absent rather than rendered empty.
+    // The project manager is NOT a fifth card — it would appear only once a
+    // job exists and push the row from four tiles to five. It reads beside the
+    // job number on the Installation slide instead.
     await expect(cards.getByText("Project manager")).toHaveCount(0);
+  });
+
+  test("an undecided deal keeps all four slots and shows a placeholder in each", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    // This spec's OWN deal, brand new: no design, no lender, no rep. That is
+    // the state the fixed four exists for.
+    await toSolar(page);
+    await page.goto("/portal/leads/new");
+    await page.locator("input").first().fill("Blank");
+    await page.locator("input").nth(1).fill(`Header ${Date.now()}`);
+    await page.getByRole("button", { name: /Create Appointment/ }).click();
+    await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+
+    const cards = page.getByTestId("deal-summary-cards");
+    await expect(cards).toBeVisible({ timeout: 15000 });
+    await expect(cards.locator("> div")).toHaveCount(4);
+    // Three of the four have no answer yet, and say so rather than vanishing.
+    await expect(cards.locator("> div[data-empty]")).toHaveCount(3);
+    for (const hint of ["Not designed yet", "Not selected", "Unassigned"]) {
+      await expect(cards.getByText(hint, { exact: true })).toBeVisible();
+    }
   });
 
   test("the feed is one staff-only stream, unbadged", async ({ page }) => {
