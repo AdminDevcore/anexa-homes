@@ -216,6 +216,7 @@ export function SolarProposalBuilder({
           systemSizeKwDc={systemSizeKwDc}
           year1ProductionKwh={year1ProductionKwh}
           annualDegradationPct={annualDegradationPct}
+          onOpenDesign={() => setStep("design")}
         />
         <NextStep label="Next: Review & send" onClick={() => setStep("generate")} />
       </StepPanel>

@@ -76,7 +76,22 @@ export function SolarSharePanel({
     router.refresh();
   }
 
-  const link = publicToken ? `${window.location.origin}/proposal/${publicToken}` : null;
+  /**
+   * The customer's link, assembled at the moment it is copied.
+   *
+   * A "use client" component still renders once on the server, where there is
+   * no `window` — so reading `window.location.origin` in the body threw
+   * "window is not defined" on every solar deal that already had a sent
+   * proposal, and the builder page had to fall back to a client render to come
+   * back from it. Nothing needs the origin until a rep asks for the link, and
+   * by then there is a browser under it.
+   */
+  async function copyLink() {
+    if (!publicToken) return;
+    await navigator.clipboard.writeText(`${window.location.origin}/proposal/${publicToken}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   return (
     <div className="max-w-3xl space-y-5 rounded-xl border border-border p-4">
@@ -154,21 +169,13 @@ export function SolarSharePanel({
           )}
           {/* The link is offered only once it exists, which is after the first
               real send — an unsent proposal has no public surface. */}
-          {link && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={async () => {
-                await navigator.clipboard.writeText(link);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
-            >
+          {publicToken && (
+            <Button size="sm" variant="outline" onClick={copyLink}>
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
               {copied ? "Copied" : "Copy link"}
             </Button>
           )}
-          {!link && (
+          {!publicToken && (
             <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
               <Link2 className="size-3.5" /> The customer link is created by the first send.
             </span>

@@ -233,6 +233,40 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     await expect(page.getByText(/buys electricity, not the array/)).toBeVisible();
   });
 
+  test("a quoted lease carries the rate sheet's terms, with no boxes to retype them in", async ({ page }) => {
+    // The step used to end in four loose inputs — a lease's monthly, its
+    // escalator, its term and a PPA's $/kWh — that a rep could type anything
+    // into. Every one of them is published by the lender and arrives with the
+    // programme, so the boxes could only ever disagree with the sheet the
+    // customer is actually signed onto.
+    await login(page, "owner@anexahomes.com");
+    await toSolar(page);
+
+    const name = lenderName("Lease terms");
+    await addLender(page, name);
+    await cardFor(page, name).last().getByRole("button", { name: "Lease", exact: true }).click();
+    await page.getByLabel("$/kW per month", { exact: true }).fill("11.80");
+    await page.getByLabel("Escalator %/yr", { exact: true }).fill("1.9");
+    await page.getByLabel("Term (years)", { exact: true }).fill("25");
+    await page.getByRole("button", { name: "Add product" }).click();
+    await expect(page.getByText("Product added")).toBeVisible({ timeout: 15000 });
+
+    const leadId = await openSolarDeal(page);
+    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
+
+    const shelf = page.getByRole("region", { name });
+    await shelf.getByRole("button", { name: /25 yr · esc 1\.9% · \$11\.80\/kW-mo/ }).click();
+    await page.getByRole("button", { name: new RegExp(`Quote this: ${name}`) }).click();
+    await expect(page.getByText(/Quoting .*Save to keep it/)).toBeVisible({ timeout: 15000 });
+
+    // The deal is on a lease now, and there is still nowhere on the step to
+    // retype what the lease costs.
+    await expect(page.getByLabel("Escalator %/yr")).toHaveCount(0);
+    await expect(page.getByLabel("Term (years)")).toHaveCount(0);
+    await expect(page.getByLabel("Monthly $", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("$/kWh", { exact: true })).toHaveCount(0);
+  });
+
   test("there is no hand-quoting escape — the rate sheets are the only way in", async ({ page }) => {
     // This used to be the opposite test: a "Not on a rate sheet? Quote by hand"
     // row let a rep type a loan, lease or PPA the company had no terms for.

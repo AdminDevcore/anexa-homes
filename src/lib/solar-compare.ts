@@ -292,3 +292,34 @@ export function compareOffers(offers: Offer[], basis: CompareBasis): CompareRow[
       : purchaseRow(offer, basis, meta);
   });
 }
+
+/**
+ * What the deal is missing, and therefore why every column reads a dash.
+ *
+ * A purchase column is `size × sticker`, so with no system size there is no
+ * contract price, no monthly payment and no total — and the shelf USED TO say
+ * "the terms on this programme are incomplete" under a card whose terms were
+ * perfectly complete. That sentence sent a rep to the rate sheet to fix a
+ * lender that was not broken, when the answer was on the design step: the roof
+ * had never been drawn.
+ *
+ * Deal-level on purpose: neither gap belongs to any one programme, so the shelf
+ * says it once, at the top, next to the step that closes it.
+ */
+export type BasisGaps = {
+  /** No array yet — nothing to multiply a price per watt by. */
+  systemSize: boolean;
+  /**
+   * Nothing to derive a sticker from: no company net target AND no typed gross.
+   * Blocks cash and loan; a lease or PPA quotes off its own rate sheet and is
+   * unaffected.
+   */
+  pricePerWatt: boolean;
+};
+
+export function basisGaps(basis: CompareBasis): BasisGaps {
+  return {
+    systemSize: !(basis.systemSizeKwDc > 0),
+    pricePerWatt: basis.targetNetPpwCents == null && basis.typedGrossPpwCents == null,
+  };
+}

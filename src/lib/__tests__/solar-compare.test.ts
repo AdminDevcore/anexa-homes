@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { compareOffers, CASH_OFFER_ID, type CompareBasis, type OfferProduct } from "@/lib/solar-compare";
+import {
+  basisGaps,
+  compareOffers,
+  CASH_OFFER_ID,
+  type CompareBasis,
+  type OfferProduct,
+} from "@/lib/solar-compare";
 
 /**
  * What a rep puts in front of a homeowner when four ways to pay are on the
@@ -223,5 +229,38 @@ describe("compareOffers — degenerate input", () => {
       compareOffers([loan({ product: "ppa", termMonths: null, termYears: 25, dealerFeePct: null })], BASIS)[0]
         .termLabel
     ).toBe("25 yr");
+  });
+});
+
+describe("basisGaps — why a whole shelf reads dashes", () => {
+  /**
+   * A real deal reached the financing step with three arrays drawn and every
+   * panel rubbed out of them, so the design saved 0 kW. Every payment, contract
+   * price and total on the comparison vanished at once and each card said "the
+   * terms on this programme are incomplete" — under two loans whose terms were
+   * complete. The blame belongs to the deal, and this is what says so.
+   */
+  it("names the missing system size, not the lender's terms", () => {
+    const noSystem = { ...BASIS, systemSizeKwDc: 0 };
+    expect(basisGaps(noSystem)).toEqual({ systemSize: true, pricePerWatt: false });
+
+    const [row] = compareOffers([loan()], noSystem);
+    // The terms are all there — the sticker even prices — and still nothing a
+    // homeowner asks about can be answered.
+    expect(row.grossPpwCents).toBe(341);
+    expect(row.termLabel).toBe("25 yr");
+    expect(row.monthlyCents).toBeNull();
+    expect(row.contractPriceCents).toBeNull();
+    expect(row.totalPaidCents).toBeNull();
+  });
+
+  it("names a missing price per watt when there is nothing to derive a sticker from", () => {
+    const noPrice = { ...BASIS, targetNetPpwCents: null, typedGrossPpwCents: null };
+    expect(basisGaps(noPrice)).toEqual({ systemSize: false, pricePerWatt: true });
+    expect(compareOffers([loan()], noPrice)[0].grossPpwCents).toBeNull();
+  });
+
+  it("reports no gap on a deal that can price", () => {
+    expect(basisGaps(BASIS)).toEqual({ systemSize: false, pricePerWatt: false });
   });
 });

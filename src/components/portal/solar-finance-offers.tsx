@@ -10,8 +10,10 @@ import { LenderMark } from "@/components/ui/lender-mark";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { PRODUCT_LABEL } from "@/lib/solar-lender-product";
 import {
+  basisGaps,
   CASH_OFFER_ID,
   compareOffers,
+  type BasisGaps,
   type CompareBasis,
   type CompareRow,
   type Offer,
@@ -68,6 +70,7 @@ function OfferCard({
   terms,
   headline,
   headlineNote,
+  unpricedNote,
   shortlisted,
   quoted,
   disabled,
@@ -78,6 +81,8 @@ function OfferCard({
   terms: string | null;
   headline: string | null;
   headlineNote: string | null;
+  /** Why this card has no figure — the ONE thing that would give it one. */
+  unpricedNote: string;
   shortlisted: boolean;
   quoted: boolean;
   disabled: boolean;
@@ -132,9 +137,7 @@ function OfferCard({
             {headlineNote && <div className="text-[10px] text-muted-foreground">{headlineNote}</div>}
           </>
         ) : (
-          <div className="text-[11px] text-muted-foreground">
-            Not priced yet — the terms on this programme are incomplete.
-          </div>
+          <div className="text-[11px] text-muted-foreground">{unpricedNote}</div>
         )}
       </div>
 
@@ -194,6 +197,9 @@ const LINES: CompareLine[] = [
   },
 ];
 
+/** The rows a purchase quote is FOR. Held open while the deal cannot price. */
+const MONEY_LINES = new Set(["monthly", "term", "dealer-fee", "sticker", "contract-price", "total-paid"]);
+
 /**
  * The comparison itself.
  *
@@ -210,13 +216,28 @@ function CompareTable({
   quotedId,
   onQuote,
   canEdit,
+  blockedNote,
 }: {
   rows: CompareRow[];
   quotedId: string | null;
   onQuote: (r: CompareRow) => void;
   canEdit: boolean;
+  /** Set when the DEAL, not the rate sheet, is why the money rows are empty. */
+  blockedNote: string | null;
 }) {
-  const lines = LINES.filter((l) => rows.some((r) => l.cell(r) != null));
+  /**
+   * A row every column leaves blank is dropped — EXCEPT when the deal itself is
+   * what is missing.
+   *
+   * Dropping them then is what made this look like a bug: with no system size
+   * the payment, contract price and total all vanish at once, and the table
+   * that was supposed to answer "what does each of these cost a month" quietly
+   * became a table of dealer fees. Kept as dashes, with the reason under them,
+   * the comparison still shows what it is going to fill in.
+   */
+  const lines = LINES.filter(
+    (l) => rows.some((r) => l.cell(r) != null) || (blockedNote != null && MONEY_LINES.has(l.key))
+  );
   /**
    * The cheapest column, but ONLY when every column buys the same thing.
    *
@@ -323,6 +344,12 @@ function CompareTable({
         </table>
       </div>
 
+      {blockedNote && (
+        <p className="border-t border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+          {blockedNote}
+        </p>
+      )}
+
       {mixedOwnership && (
         <p className="border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
           A lease or PPA buys electricity, not the array — its total is not a price for the same
@@ -331,6 +358,21 @@ function CompareTable({
       )}
     </div>
   );
+}
+
+/**
+ * Why THIS card carries no figure — the deal, the company's pricing, or the
+ * programme itself, in the order a rep can act on them.
+ *
+ * A lease or PPA is quoted off its own rate sheet and needs no price per watt,
+ * so it is never told to go and set one.
+ */
+function unpricedNote(kind: FinanceProduct, gaps: BasisGaps): string {
+  if (gaps.systemSize) return "Needs a system size — the roof has not been drawn yet.";
+  if ((kind === "cash" || kind === "loan") && gaps.pricePerWatt) {
+    return "Needs a price per watt — set the net target, or type a gross $/W below.";
+  }
+  return "Not priced yet — the terms on this programme are incomplete.";
 }
 
 export function FinanceOffers({
@@ -342,6 +384,7 @@ export function FinanceOffers({
   quotedId,
   onQuote,
   canEdit,
+  onOpenDesign,
 }: {
   lenders: OfferLender[];
   products: OfferProduct[];
@@ -352,6 +395,8 @@ export function FinanceOffers({
   quotedId: string | null;
   onQuote: (r: CompareRow) => void;
   canEdit: boolean;
+  /** Takes the rep to the step that fixes an empty comparison. */
+  onOpenDesign?: () => void;
 }) {
   const byLender = React.useMemo(() => {
     const m = new Map<string, OfferProduct[]>();
@@ -374,6 +419,19 @@ export function FinanceOffers({
   const selected = shortlist
     .map((id) => priced.get(id))
     .filter((r): r is CompareRow => r != null);
+
+  /**
+   * Nothing on this shelf can be priced, and it is the DEAL that is missing.
+   *
+   * Said once, above every card, because it is one fix on another screen — not
+   * a fault of any lender's terms. Only the system size gets the banner: a
+   * missing price per watt is fixed in the Gross $/W box a few inches below,
+   * where the card note already points.
+   */
+  const gaps = basisGaps(basis);
+  const blockedNote = gaps.systemSize
+    ? "Every payment reads — because this deal has no system size yet. Draw the roof on System design and each column prices itself."
+    : null;
 
   const cardFor = (id: string, title: string, kind: FinanceProduct, terms: string | null) => {
     const row = priced.get(id);
@@ -408,6 +466,7 @@ export function FinanceOffers({
         terms={terms}
         headline={headline}
         headlineNote={note}
+        unpricedNote={unpricedNote(kind, gaps)}
         shortlisted={shortlist.includes(id)}
         quoted={quotedId === id}
         disabled={!canEdit}
@@ -418,6 +477,25 @@ export function FinanceOffers({
 
   return (
     <div className="space-y-4">
+      {/* The one screen that answers "what does each of these cost a month"
+          cannot answer it without an array to multiply by. Said here, at the
+          top, with the way out attached — not left to be inferred from a table
+          of dashes further down. */}
+      {gaps.systemSize && (
+        <div className="max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <strong>No system size yet</strong>, so nothing below can be priced — a monthly payment
+          is the array multiplied by a rate, and this deal has no array on it. Draw the roof on{" "}
+          <strong>System design</strong> and every card and column fills in.
+          {onOpenDesign && (
+            <div className="mt-2">
+              <Button size="sm" variant="outline" onClick={onOpenDesign}>
+                Open System design
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex snap-x gap-3 overflow-x-auto pb-1">
         {cardFor(CASH_OFFER_ID, "Cash", "cash", "Paid in full. No lender, so no dealer fee.")}
       </div>
@@ -484,7 +562,13 @@ export function FinanceOffers({
       })}
 
       {selected.length > 0 ? (
-        <CompareTable rows={selected} quotedId={quotedId} onQuote={onQuote} canEdit={canEdit} />
+        <CompareTable
+          rows={selected}
+          quotedId={quotedId}
+          onQuote={onQuote}
+          canEdit={canEdit}
+          blockedNote={blockedNote}
+        />
       ) : (
         <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <Landmark className="size-3.5" /> Pick two or more programmes above to compare what each one

@@ -773,6 +773,7 @@ export function SolarFinancePanel({
   systemSizeKwDc,
   year1ProductionKwh,
   annualDegradationPct,
+  onOpenDesign,
 }: {
   leadId: string;
   finance: SolarFinanceView;
@@ -796,6 +797,8 @@ export function SolarFinancePanel({
   year1ProductionKwh: number;
   /** Output decays, so a 25-year total is not year one multiplied by 25. */
   annualDegradationPct: number;
+  /** Sends the rep to the step that gives this one a system to price. */
+  onOpenDesign?: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -1170,6 +1173,7 @@ export function SolarFinancePanel({
         quotedId={quotedId}
         onQuote={quoteOffer}
         canEdit={canEdit || lenderBusy}
+        onOpenDesign={onOpenDesign}
       />
 
       {quote && (
@@ -1345,18 +1349,14 @@ export function SolarFinancePanel({
         </div>
       )}
 
-      {!isPurchase && (
-        <div className="grid gap-3 sm:grid-cols-4">
-          {product === "ppa" && (
-            <TextField label="$/kWh" type="number" step="0.001" value={form.rate} disabled={!canEdit} onChange={(v) => set("rate", v)} />
-          )}
-          {product === "lease" && (
-            <TextField label="Monthly $" type="number" value={form.monthly} disabled={!canEdit} onChange={(v) => set("monthly", v)} />
-          )}
-          <TextField label="Escalator %/yr" type="number" step="0.1" value={form.escalatorPct} disabled={!canEdit} onChange={(v) => set("escalatorPct", v)} />
-          <TextField label="Term (years)" type="number" value={form.termYears} disabled={!canEdit} onChange={(v) => set("termYears", v)} />
-        </div>
-      )}
+      {/* A lease's monthly, its escalator, its term and a PPA's $/kWh used to be
+          four boxes here for a rep to type into. They are not this screen's to
+          set: every one of them is published on the lender's rate sheet, is
+          filled in by quoting the programme, and is what the customer signs.
+          Leaving them editable meant a proposal could go out on an escalator no
+          lender had ever issued — and on a shelf of loans and cash they were
+          four empty boxes under the comparison for no reason at all. Change the
+          terms on the rate sheet; the quote follows. */}
 
       {/* Live, not the saved figure. The comparison above prices every column
           from the boxes below, so a stale total sitting under them contradicts
