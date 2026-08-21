@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { useFormat } from "@/components/portal/branding-provider";
 import { serviceTypeLabel } from "@/lib/service-types";
+import { stageChipStyle } from "@/lib/chip-color";
 
 export type ListLead = {
   id: string;
@@ -134,8 +135,8 @@ export function PipelineView({
                     </TableCell>
                     <TableCell>
                       <span
-                        className="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
-                        style={{ backgroundColor: `${l.stageColor}22`, color: l.stageColor }}
+                        className="inline-block rounded-full border px-2 py-0.5 text-xs font-medium"
+                        style={stageChipStyle(l.stageColor)}
                       >
                         {l.stageName}
                       </span>

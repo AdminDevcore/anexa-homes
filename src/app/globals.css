@@ -14,6 +14,8 @@
   --color-gold: var(--gold);
   --color-gold-foreground: var(--gold-foreground);
   --color-gold-muted: var(--gold-muted);
+  --color-shell: var(--shell);
+  --color-shell-border: var(--shell-border);
   --color-solar: var(--solar);
   --color-solar-foreground: var(--solar-foreground);
   --color-metal: var(--metal);
@@ -58,30 +60,48 @@
 }
 
 :root {
+  /* ── Neutrals ───────────────────────────────────────────────────────────
+     Every one of these carried chroma 0 — dead, untinted grey, straight out
+     of the shadcn starter. Pure grey is the single loudest "unfinished
+     template" signal a UI gives off; every product that reads as expensive
+     tints its greys. These carry a trace of blue (chroma 0.005–0.018 around
+     hue 264), which is invisible as colour and unmistakable as polish.
+     Lightness is unchanged, so every contrast ratio the old palette passed,
+     this one still passes — muted-foreground stays at 4.7:1 on white. */
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: oklch(0.16 0.014 264);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.16 0.014 264);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.16 0.014 264);
+  --primary: oklch(0.21 0.016 264);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.968 0.005 264);
+  --secondary-foreground: oklch(0.21 0.016 264);
+  --muted: oklch(0.968 0.005 264);
+  --muted-foreground: oklch(0.553 0.018 258);
+  --accent: oklch(0.968 0.005 264);
+  --accent-foreground: oklch(0.21 0.016 264);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.918 0.007 264);
+  --input: oklch(0.918 0.007 264);
+  --ring: oklch(0.708 0.015 264);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.75rem;
+  /* 12px on a chip reads bulbous. A 10px base gives 6px chips, 8px inputs,
+     10px cards, 14px panels — a ramp instead of one value for everything. */
+  --radius: 0.625rem;
+  /* ── Elevation ──────────────────────────────────────────────────────────
+     The portal had 328 surfaces drawn as a flat 1px outline and 26 with any
+     shadow at all, which is why cards read as boxes drawn ON the page rather
+     than sitting on it. Two very soft layers — a tight contact shadow plus a
+     wider ambient one, both tinted with the same blue as the neutrals so the
+     shadow never goes muddy grey. */
+  --shadow-card: 0 1px 2px -1px oklch(0.22 0.03 264 / 0.06), 0 1px 3px 0 oklch(0.22 0.03 264 / 0.05);
+  --shadow-raised: 0 2px 4px -2px oklch(0.22 0.03 264 / 0.08), 0 6px 16px -4px oklch(0.22 0.03 264 / 0.08);
   /* Brand accent — vibrant orange (~#F4631E), reserved for primary CTAs */
   --gold: oklch(0.665 0.2 41);
   --gold-foreground: oklch(0.99 0 0);
@@ -92,6 +112,19 @@
      dark-mode handling, instead of hardcoding the hex in a style attribute. */
   --solar: oklch(0.685 0.148 237.3);
   --solar-foreground: oklch(0.99 0 0);
+  /* ── Shell ─────────────────────────────────────────────────────────────
+     The sidebar and top bar. Was #0c0c0e — flat, untinted, near-black. Same
+     depth, now carrying the blue the rest of the neutrals carry, so the shell
+     and the content area read as one design rather than two.
+
+     The orange is NOT the active-nav fill any more. A saturated block of brand
+     colour sitting permanently in the corner spends the loudest colour in the
+     palette on "you are here", which the page title already says — and leaves
+     nothing louder for the button you actually want pressed. Active is now a
+     lifted surface with a thin orange indicator; the brand colour is reserved
+     for real calls to action. */
+  --shell: oklch(0.172 0.011 264);
+  --shell-border: oklch(1 0 0 / 0.08);
   /* Brushed-metal palette — the dominant marketing accent */
   --metal: #c7ccd1;
   --metal-bright: #eef1f4;
@@ -699,4 +732,77 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .anexa-search-ring .pulse { animation: none; }
+}
+
+/* ── Portal surface polish ────────────────────────────────────────────────
+   Elevation, applied where the surface already declares itself a surface.
+
+   The portal writes its cards as literal utility strings — `rounded-xl border
+   border-border bg-card` — in 328 places. Keying off the pair of classes that
+   every one of them shares lifts all of them at once, instead of a 328-file
+   edit that would go stale the next time someone writes a card. Anything that
+   sets its own `shadow-*` utility keeps it: those land in Tailwind's utilities
+   layer, which wins over this components layer.
+
+   Tables get tabular figures. Numbers in a column that don't line up are the
+   quiet reason a data-dense screen looks amateur — every digit must occupy the
+   same width so the decimal points stack. */
+@layer components {
+  .bg-card.border,
+  .bg-card.border-border {
+    box-shadow: var(--shadow-card);
+  }
+
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Headings are set in Fraunces; at display sizes a serif needs its tracking
+   pulled in or the letters drift apart and the line reads loose. */
+.font-display,
+h1, h2, h3 {
+  letter-spacing: -0.018em;
+}
+
+/* ── Portal type ramp ─────────────────────────────────────────────────────
+   A tighter, considered scale for the CRM only.
+
+   Scoped to `.portal-root` rather than overriding the theme globally: Tailwind
+   v4 compiles `text-sm` to `font-size: var(--text-sm)`, so redefining the
+   variables on an ancestor re-ramps every utility beneath it and leaves the
+   marketing site — which wants generous, airy sizes — completely alone.
+
+   The moves: 14px body down to 13px and 12px labels down to 11px, which is
+   where dense professional tools sit; a hair of positive tracking at small
+   sizes where letters need air, and increasing negative tracking as text gets
+   larger, where they need the opposite. Line heights are set in absolute rem
+   so rows land on a consistent rhythm instead of drifting with font size. */
+.portal-root {
+  --text-xs: 0.6875rem;
+  --text-xs--line-height: 1rem;
+  --text-xs--letter-spacing: 0.01em;
+
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-sm--letter-spacing: 0.003em;
+
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.375rem;
+
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.5rem;
+  --text-lg--letter-spacing: -0.011em;
+
+  --text-xl: 1.1875rem;
+  --text-xl--line-height: 1.625rem;
+  --text-xl--letter-spacing: -0.016em;
+
+  --text-2xl: 1.4375rem;
+  --text-2xl--line-height: 1.875rem;
+  --text-2xl--letter-spacing: -0.021em;
+
+  --text-3xl: 1.75rem;
+  --text-3xl--line-height: 2.125rem;
+  --text-3xl--letter-spacing: -0.024em;
 }

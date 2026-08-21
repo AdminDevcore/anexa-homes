@@ -18,6 +18,7 @@ import { GripVertical, Phone, MapPin, CalendarClock, Timer, PlayCircle, Clipboar
 import { cn } from "@/lib/utils";
 import { useFormat } from "@/components/portal/branding-provider";
 import { moveLeadStage } from "@/server/modules/leads/actions";
+import { stageAccent } from "@/lib/chip-color";
 
 export type BoardLead = {
   id: string;
@@ -145,7 +146,7 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
       <div className="mb-2 rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: stage.color }} />
+            <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: stageAccent(stage.color) }} />
             <span className="truncate text-sm font-semibold">{stage.name}</span>
             <span className="shrink-0 rounded-full bg-muted px-1.5 text-xs font-medium text-muted-foreground">
               {leads.length}
@@ -156,8 +157,8 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
           </span>
         </div>
         {/* Stage-colored accent rule under the header */}
-        <div className="mt-2 h-0.5 w-full rounded-full" style={{ backgroundColor: `${stage.color}33` }}>
-          <div className="h-full rounded-full" style={{ backgroundColor: stage.color, width: leads.length ? "100%" : "0%" }} />
+        <div className="mt-2 h-0.5 w-full rounded-full" style={{ backgroundColor: "var(--muted)" }}>
+          <div className="h-full rounded-full" style={{ backgroundColor: stageAccent(stage.color), width: leads.length ? "100%" : "0%" }} />
         </div>
       </div>
 
@@ -171,7 +172,7 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
         )}
       >
         {leads.map((lead) => (
-          <Card key={lead.id} lead={lead} accent={stage.color} canMove={canMove} targetDays={stage.targetDays ?? 0} />
+          <Card key={lead.id} lead={lead} accent={stageAccent(stage.color)} canMove={canMove} targetDays={stage.targetDays ?? 0} />
         ))}
         {leads.length === 0 && (
           <div className="m-1 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/70 px-2 py-10 text-center text-xs text-muted-foreground">

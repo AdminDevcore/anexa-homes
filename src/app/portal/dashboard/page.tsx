@@ -21,6 +21,7 @@ import { roleLabel } from "@/lib/roles";
 import { getActiveVertical, userVerticals } from "@/server/auth/vertical";
 import { VERTICAL_LABEL, allowedVerticals } from "@/lib/vertical";
 import { DashboardEmptyHint } from "@/components/portal/dashboard-empty-hint";
+import { stageChipStyle } from "@/lib/chip-color";
 
 export const metadata = { title: "Dashboard" };
 
@@ -113,8 +114,8 @@ export default async function DashboardPage() {
                   )}
                   {l.stage && (
                     <span
-                      className="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                      style={{ backgroundColor: `${l.stage.color}22`, color: l.stage.color }}
+                      className="rounded-full border px-2.5 py-1 text-[11px] font-medium"
+                      style={stageChipStyle(l.stage.color)}
                     >
                       {l.stage.name}
                     </span>

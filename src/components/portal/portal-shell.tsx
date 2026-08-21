@@ -72,10 +72,14 @@ export function PortalShell({
             href={item.href}
             onClick={onNavigate}
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+              "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              // Active is a lifted surface, not a slab of brand colour, with a
+              // thin orange rule at the leading edge. The eye still lands on it
+              // instantly, and the orange stays available for the button that
+              // actually wants pressing.
               active
-                ? "bg-gold text-white shadow-sm"
-                : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                ? "bg-white/[0.08] text-white before:absolute before:inset-y-1.5 before:-left-1 before:w-[3px] before:rounded-full before:bg-gold"
+                : "text-white/55 hover:bg-white/[0.04] hover:text-white/90"
             )}
           >
             <item.icon className="size-[18px] shrink-0" />
@@ -101,8 +105,8 @@ export function PortalShell({
       {/* Desktop sidebar. The shell is workspace furniture: when someone prints
           a page from inside the portal they want the document on it, not the
           navigation around it. */}
-      <aside className="dark fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-white/10 bg-[#0c0c0e] text-foreground lg:flex print:hidden">
-        <div className="flex h-16 items-center border-b border-white/10 px-5">
+      <aside className="dark fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-shell-border bg-shell text-foreground lg:flex print:hidden">
+        <div className="flex h-16 items-center border-b border-shell-border px-5">
           <Link href="/portal/dashboard" className="group inline-flex items-center">
             <div className="flex items-center gap-2">
               {branding.logoUrl ? (
@@ -141,7 +145,7 @@ export function PortalShell({
           scroll inside their own container instead of pushing the page (and the
           header actions) past the viewport's right edge. */}
       <div className="flex min-w-0 flex-1 flex-col lg:pl-64 print:pl-0">
-        <header className="dark sticky top-0 z-30 flex h-16 relative items-center justify-between gap-3 border-b border-white/10 bg-[#0c0c0e] px-4 text-foreground sm:px-6 print:hidden">
+        <header className="dark sticky top-0 z-30 flex h-16 relative items-center justify-between gap-3 border-b border-shell-border bg-shell px-4 text-foreground sm:px-6 print:hidden">
           <div className="flex items-center gap-3">
             {/* Mobile menu */}
             <Sheet>
@@ -150,9 +154,9 @@ export function PortalShell({
                   <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="dark w-72 bg-[#0c0c0e] p-0 text-foreground">
+              <SheetContent side="left" className="dark w-72 bg-shell p-0 text-foreground">
                 <SheetTitle className="sr-only">Navigation</SheetTitle>
-                <div className="flex h-16 items-center border-b border-white/10 px-5">
+                <div className="flex h-16 items-center border-b border-shell-border px-5">
                   <Logo href="/portal/dashboard" />
                 </div>
                 <div className="py-4">

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Search, Phone, Mail, CalendarX2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { stageChipStyle } from "@/lib/chip-color";
 import {
   Table,
   TableBody,
@@ -188,8 +189,8 @@ export function AppointmentsList({
                     <TableCell>
                       {l.stage ? (
                         <span
-                          className="inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium"
-                          style={{ backgroundColor: `${l.stage.color}22`, color: l.stage.color }}
+                          className="inline-block whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium"
+                          style={stageChipStyle(l.stage.color)}
                         >
                           {l.stage.name}
                         </span>
@@ -248,8 +249,8 @@ export function AppointmentsList({
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                   {l.stage ? (
                     <span
-                      className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                      style={{ backgroundColor: `${l.stage.color}22`, color: l.stage.color }}
+                      className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                      style={stageChipStyle(l.stage.color)}
                     >
                       {l.stage.name}
                     </span>
