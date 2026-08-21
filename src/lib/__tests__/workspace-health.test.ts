@@ -9,6 +9,18 @@ describe("workspace setup checks", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("shares its key with the card it points at", () => {
+    // The hub renders a gap ON its own card — the lead-sources warning sits on
+    // the Lead Sources card, where it can be acted on — and it finds that card
+    // by key. A check whose key drifts from its section's would still count
+    // towards the banner and then have nowhere to show up.
+    for (const check of SETUP_CHECKS) {
+      const section = SETTINGS_SECTIONS.find((s) => s.href === check.href);
+      if (!section) continue; // /portal/documents: covered by the href test above
+      expect(check.key, `${check.key} points at the "${section.title}" card`).toBe(section.key);
+    }
+  });
+
   it("only offers a workspace links it can actually open", () => {
     // A gap that sends you to a page hidden in this workspace is worse than no
     // gap at all — you would be told to fix something you cannot reach.

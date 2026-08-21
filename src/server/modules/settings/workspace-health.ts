@@ -101,6 +101,10 @@ export const SETUP_CHECKS: Check[] = [
     // looks like it is working while installers quietly earn nothing.
     hint: "Installer and project-manager commissions never generate. Rep commissions are unaffected — those come from each rep's own terms.",
     severity: "silent",
+    // Roofing's, like the settings card it links to. Solar has no rule-paid
+    // crew or PM line, so "no commission rules" is that workspace's normal
+    // state — reporting it as a gap would be a warning nobody can ever clear.
+    verticals: ["roofing"],
     count: (companyId) => prisma.commissionRule.count({ where: { companyId } }),
   },
   {

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { Building2, FileSignature, KanbanSquare, Users } from "lucide-react";
+import Link from "next/link";
+import { Building2, Users } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
@@ -8,7 +9,7 @@ import { PageHeader } from "@/components/portal/ui";
 import { SettingsHub } from "@/components/portal/settings-hub";
 import { VERTICAL_ACCENT, VERTICAL_LABEL } from "@/lib/vertical";
 import { workspaceSetupGaps } from "@/server/modules/settings/workspace-health";
-import { WorkspaceSetupPanel } from "@/components/portal/workspace-setup-panel";
+import { settingsInventory } from "@/server/modules/settings/inventory";
 
 export const metadata = { title: "Settings" };
 
@@ -17,36 +18,37 @@ export default async function SettingsPage() {
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
   const vertical = await getActiveVertical(user);
 
-  // Only an admin can act on a gap, so only an admin is shown one.
-  const gaps = can(user, "update", "Settings")
-    ? await workspaceSetupGaps(user.companyId, vertical)
-    : [];
-
-  // Users is a company-wide count on purpose — one legal entity, one roster.
-  //
-  // Pipelines and document templates are NOT: they are vertical-isolated, and a
-  // nested `_count` on Company is a relation count that the isolation extension
-  // never sees, so these tiles used to report both workspaces' rows while every
-  // other number on the page was this workspace's. Counted directly through the
-  // scoped client instead, or the tile says "8" one line under a panel saying
-  // there is nothing to send for signature.
-  const [company, pipelines, documentTemplates] = await Promise.all([
-    prisma.company.findUnique({
-      where: { id: user.companyId },
-      include: { settings: true, _count: { select: { users: true } } },
-    }),
-    prisma.pipeline.count({ where: { companyId: user.companyId } }),
-    prisma.documentTemplate.count({ where: { companyId: user.companyId } }),
+  // Only an admin can act on a gap, so only an admin is shown one. The counts
+  // are for everyone who can read Settings — they say nothing a reader could not
+  // learn by opening the page itself.
+  const [gaps, inventory] = await Promise.all([
+    can(user, "update", "Settings") ? workspaceSetupGaps(user.companyId, vertical) : [],
+    settingsInventory(user.companyId, vertical),
   ]);
+
+  // Users is a company-wide count on purpose — one legal entity, one roster —
+  // and it is the only number left up here. Pipelines and document templates
+  // used to sit beside it and were wrong twice over: a nested `_count` on
+  // Company is a relation count the isolation extension never sees, so they
+  // reported both workspaces at once, and now that every card states its own
+  // total they would only repeat the grid below.
+  const company = await prisma.company.findUnique({
+    where: { id: user.companyId },
+    include: { settings: true, _count: { select: { users: true } } },
+  });
+
+  // The subtitle names things this workspace actually has: commissions are
+  // roofing's (solar pays a rep off the split on his own profile), equipment is
+  // solar's. A subtitle listing a card that is not on the page below it is the
+  // same wrong turn the hub itself used to take.
+  const has = vertical === "solar" ? "equipment" : "commissions";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        description={`Customize ${company?.name ?? "your workspace"} — pipeline, fields, documents, commissions, and branding.`}
+        description={`Customize ${company?.name ?? "your workspace"} — pipeline, fields, documents, ${has}, and branding.`}
       />
-
-      <WorkspaceSetupPanel gaps={gaps} vertical={vertical} />
 
       {/* Identity strip: whose settings these are, and which workspace they
           apply to — the numbers are a glance, not the point of the page. */}
@@ -70,51 +72,22 @@ export default async function SettingsPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-xl border border-border bg-background">
-          <Mini
-            icon={Users}
-            label="Users"
-            value={company?._count.users ?? 0}
-            hint="Everyone in the company, across workspaces"
-          />
-          <Mini
-            icon={KanbanSquare}
-            label="Pipelines"
-            value={pipelines}
-            hint={`Pipelines in the ${VERTICAL_LABEL[vertical]} workspace`}
-          />
-          <Mini
-            icon={FileSignature}
-            label="Doc templates"
-            value={documentTemplates}
-            hint={`Templates in the ${VERTICAL_LABEL[vertical]} workspace`}
-          />
-        </div>
+        <Link
+          href="/portal/team"
+          className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-2.5 transition-colors hover:border-gold/40"
+          title="Everyone in the company — one roster, shared by every workspace"
+        >
+          <Users className="size-4 text-muted-foreground" />
+          <span className="font-display text-lg font-semibold tabular-nums">
+            {company?._count.users ?? 0}
+          </span>
+          <span className="text-sm text-muted-foreground">
+            {company?._count.users === 1 ? "user" : "users"}
+          </span>
+        </Link>
       </div>
 
-      <SettingsHub vertical={vertical} />
-    </div>
-  );
-}
-
-function Mini({
-  icon: Icon,
-  label,
-  value,
-  hint,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: number;
-  hint: string;
-}) {
-  return (
-    <div className="px-4 py-3 sm:px-5" title={hint}>
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-        <Icon className="size-3.5" />
-        <span className="truncate">{label}</span>
-      </div>
-      <div className="mt-1 font-display text-xl font-semibold tabular-nums">{value}</div>
+      <SettingsHub vertical={vertical} inventory={inventory} gaps={gaps} />
     </div>
   );
 }

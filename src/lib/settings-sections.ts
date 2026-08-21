@@ -51,8 +51,37 @@ export const SETTINGS_GROUPS = [
 
 export type SettingsGroupKey = (typeof SETTINGS_GROUPS)[number]["key"];
 
+/**
+ * A stable id per card, independent of its title — the title is per-vertical
+ * wording and changes; this is what the hub's live counts and the setup-gap
+ * checks are keyed by. Where a card and a check cover the same table the two
+ * keys are deliberately identical, so a gap lands on its own card.
+ */
+export type SettingsSectionKey =
+  | "pipeline"
+  | "appointment_outcomes"
+  | "custom_fields"
+  | "lead_sources"
+  | "document_templates"
+  | "commission_rules"
+  | "notification_rules"
+  | "storm_homeowner"
+  | "photo_templates"
+  | "inspection_outcomes"
+  | "production_checklist"
+  | "claim_statuses"
+  | "scope_template"
+  | "reviews"
+  | "roles"
+  | "branding"
+  | "solar_settings"
+  | "solar_lenders"
+  | "solar_providers"
+  | "solar_equipment";
+
 export type SettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
+  key: SettingsSectionKey;
   title: string;
   body: string;
   href?: string;
@@ -69,6 +98,7 @@ export type SettingsSection = {
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     icon: KanbanSquare,
+    key: "pipeline",
     title: "Pipeline Stages",
     body: "Customize the stages appointments move through.",
     href: "/portal/settings/pipeline",
@@ -77,6 +107,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: ListChecks,
+    key: "appointment_outcomes",
     title: "Appointment Outcomes",
     body: "Customize the outcomes reps record after appointments.",
     href: "/portal/settings/appointment-outcomes",
@@ -85,6 +116,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: SlidersHorizontal,
+    key: "custom_fields",
     title: "Custom Fields",
     body: "Add custom fields to appointments and projects.",
     href: "/portal/settings/fields",
@@ -93,6 +125,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Megaphone,
+    key: "lead_sources",
     title: "Lead Sources",
     body: "Customize where leads come from (Door Knock, Referral, Ads…).",
     href: "/portal/settings/lead-sources",
@@ -101,6 +134,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: FileSignature,
+    key: "document_templates",
     title: "Document Templates",
     body: "Build and edit contract templates.",
     href: "/portal/documents",
@@ -109,14 +143,21 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: DollarSign,
+    key: "commission_rules",
     title: "Commission Rules",
     body: "Set percentage, flat, and override rules.",
     href: "/portal/settings/commissions",
     group: "money",
     keywords: ["payout", "split", "override", "pay"],
+    // Roofing's. Solar pays its reps off the split on each rep's own profile
+    // (Team → the rep → commission terms), and it has no in-house crew or
+    // project-manager line for a rule to pay out to — so on solar this card
+    // opened a page there was never anything to put in.
+    verticals: ["roofing"],
   },
   {
     icon: Bell,
+    key: "notification_rules",
     title: "Notification Rules",
     body: "Choose triggers, recipients, and channels.",
     href: "/portal/settings/notifications",
@@ -125,6 +166,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: CloudLightning,
+    key: "storm_homeowner",
     title: "Storm & Homeowner Data",
     body: "Storm search area + re-verify homeowner data across houses.",
     href: "/portal/settings/storm-coverage",
@@ -141,6 +183,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Camera,
+    key: "photo_templates",
     title: "Photo Templates",
     body: "Site & install photo checklists for projects.",
     href: "/portal/settings/photo-templates",
@@ -158,6 +201,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: ListChecks,
+    key: "inspection_outcomes",
     title: "Inspection Outcomes",
     body: "Customize the outcomes recorded after an inspection.",
     href: "/portal/settings/inspection-outcomes",
@@ -171,6 +215,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: ListChecks,
+    key: "production_checklist",
     title: "Production Checklist",
     body: "The QC checklist applied to every new job.",
     href: "/portal/settings/production-checklist",
@@ -179,6 +224,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: ShieldCheck,
+    key: "claim_statuses",
     title: "Claim Statuses",
     body: "Customize the insurance claim statuses on the deal Summary.",
     href: "/portal/settings/claim-statuses",
@@ -189,6 +235,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Calculator,
+    key: "scope_template",
     title: "Scope of Work Catalog",
     body: "Master list of insurance-restoration line items (no pricing).",
     href: "/portal/settings/scope-template",
@@ -198,6 +245,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Star,
+    key: "reviews",
     title: "Website Reviews",
     body: "Approve, feature, hide, or remove customer reviews from the website.",
     href: "/portal/settings/reviews",
@@ -206,6 +254,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: ShieldCheck,
+    key: "roles",
     title: "Roles & Permissions",
     body: "Control what each role can see and do.",
     href: "/portal/settings/roles",
@@ -214,6 +263,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Palette,
+    key: "branding",
     title: "Branding",
     body: "Company logo and brand colors.",
     href: "/portal/settings/branding",
@@ -222,6 +272,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Sun,
+    key: "solar_settings",
     title: "Solar Settings",
     body: "Production and pricing assumptions, validation bounds, and stage owners.",
     href: "/portal/settings/solar",
@@ -231,6 +282,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Landmark,
+    key: "solar_lenders",
     title: "Lenders",
     body: "Financing partners, the equipment each approves, and the terms they finance on.",
     href: "/portal/settings/solar-lenders",
@@ -240,6 +292,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: Zap,
+    key: "solar_providers",
     title: "Energy providers",
     body: "The utilities and retail electric providers your reps pick from when working out a customer's usage.",
     href: "/portal/settings/solar-providers",
@@ -249,6 +302,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     icon: PanelsTopLeft,
+    key: "solar_equipment",
     title: "Solar Equipment",
     body: "Modules, inverters, batteries and rank-ordered adders.",
     href: "/portal/settings/solar-equipment",
@@ -260,6 +314,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 
 export type ResolvedSettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
+  key: SettingsSectionKey;
   title: string;
   body: string;
   href?: string;
@@ -273,6 +328,7 @@ export function visibleSettingsSections(vertical: ActiveVertical): ResolvedSetti
     const label = s.labels?.[vertical];
     return {
       icon: s.icon,
+      key: s.key,
       title: label?.title ?? s.title,
       body: label?.body ?? s.body,
       href: s.href,

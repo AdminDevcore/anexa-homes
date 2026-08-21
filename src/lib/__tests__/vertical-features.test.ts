@@ -60,8 +60,16 @@ describe("settings sections", () => {
     expect(solar).toContain("Solar Equipment");
   });
 
+  it("hides commission rules from solar, which pays reps off their own split", () => {
+    // The rules only ever paid the crew and project-manager lines. Solar has
+    // neither; a solar rep's cut is the split on his own profile, so the card
+    // opened a page with nothing in it to set.
+    expect(titles("roofing")).toContain("Commission Rules");
+    expect(titles("solar")).not.toContain("Commission Rules");
+  });
+
   it("leaves the vertical-agnostic cards in both", () => {
-    for (const t of ["Pipeline Stages", "Commission Rules", "Production Checklist", "Branding"]) {
+    for (const t of ["Pipeline Stages", "Production Checklist", "Branding"]) {
       expect(titles("roofing")).toContain(t);
       expect(titles("solar")).toContain(t);
     }

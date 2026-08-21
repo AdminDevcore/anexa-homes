@@ -2,32 +2,63 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight, Search, SearchX, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, Search, SearchX, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { visibleSettingsGroups, type ResolvedSettingsSection } from "@/lib/settings-sections";
+import {
+  visibleSettingsGroups,
+  type ResolvedSettingsSection,
+  type SettingsSectionKey,
+} from "@/lib/settings-sections";
+import type { SettingsInventory, SectionStatus } from "@/server/modules/settings/inventory";
+import type { SetupGap } from "@/server/modules/settings/workspace-health";
 import type { ActiveVertical } from "@/lib/vertical";
+import { VERTICAL_LABEL } from "@/lib/vertical";
 import { cn } from "@/lib/utils";
 
 /**
- * The Settings hub's card grid.
+ * The Settings hub.
  *
- * Twenty near-identical cards in one flat grid is a wall — nothing tells you
- * where to look, so every visit is a linear scan. The cards are banded by what
- * they configure, and a search box filters across every band at once (matching
- * the hidden `keywords` too, so "payout" finds Commission Rules and "logo"
- * finds Branding).
+ * It used to be a menu: twenty near-identical doors in one flat grid, no way to
+ * tell a configured setting from an empty one without opening it, and a separate
+ * amber panel up top restating the empty ones a second time.
  *
- * The band list comes from the shared catalog rather than being restated here,
- * so a card added for one vertical lands in the right band in both.
+ * Now every card carries its own count, so the same grid answers "what is set up
+ * here?" at a glance; the cards are banded by what they configure; and a search
+ * box filters across every band at once, matching hidden keywords as well as the
+ * visible copy. A workspace's setup gaps are rendered on the cards they belong
+ * to — the warning about lead sources sits on the Lead Sources card, where it
+ * can be acted on — with one line at the top to say how many there are.
  */
-export function SettingsHub({ vertical }: { vertical: ActiveVertical }) {
+export function SettingsHub({
+  vertical,
+  inventory,
+  gaps,
+}: {
+  vertical: ActiveVertical;
+  inventory: SettingsInventory;
+  gaps: SetupGap[];
+}) {
   const groups = React.useMemo(() => visibleSettingsGroups(vertical), [vertical]);
+
+  // Only gaps that land on a card this workspace shows: a check whose card is
+  // hidden here has nowhere to be fixed, so counting it would promise a card
+  // that "Show them" could never produce.
+  const gapByKey = React.useMemo(() => {
+    const cards = new Set(groups.flatMap((g) => g.sections.map((s) => s.key)));
+    return new Map(
+      gaps
+        .map((g) => [g.key as SettingsSectionKey, g] as const)
+        .filter(([key]) => cards.has(key))
+    );
+  }, [gaps, groups]);
+  const gapCount = gapByKey.size;
+
   const [q, setQ] = React.useState("");
   const [band, setBand] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  // "/" focuses search from anywhere on the page, the way every list view the
-  // reps already use behaves. Never steal the key from a field being typed in.
+  // "/" focuses search from anywhere on the page, the way the list views the
+  // reps already use behave. Never steal the key from a field being typed in.
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = e.target as HTMLElement | null;
@@ -44,10 +75,13 @@ export function SettingsHub({ vertical }: { vertical: ActiveVertical }) {
 
   const needle = q.trim().toLowerCase();
   const shown = groups
-    .filter((g) => !band || g.key === band)
     .map((g) => ({
       ...g,
-      sections: g.sections.filter((s) => matches(s, g.label, needle)),
+      sections: g.sections.filter(
+        (s) =>
+          matches(s, g.label, needle) &&
+          (band === null || (band === GAPS ? gapByKey.has(s.key) : g.key === band))
+      ),
     }))
     .filter((g) => g.sections.length > 0);
 
@@ -55,14 +89,48 @@ export function SettingsHub({ vertical }: { vertical: ActiveVertical }) {
   const filtering = needle.length > 0 || band !== null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {gapCount > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            setBand(band === GAPS ? null : GAPS);
+            setQ("");
+          }}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors",
+            band === GAPS
+              ? "border-amber-500/50 bg-amber-500/[0.07]"
+              : "border-amber-500/30 bg-amber-500/[0.04] hover:border-amber-500/50"
+          )}
+        >
+          <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span className="min-w-0 flex-1 text-sm">
+            <span className="font-medium">
+              {gapCount} setting{gapCount === 1 ? " in" : "s in"} {VERTICAL_LABEL[vertical]}{" "}
+              {gapCount === 1 ? "has" : "have"} never been set up
+            </span>
+            <span className="ml-1.5 text-muted-foreground">
+              — configuration does not carry across workspaces, and nothing below raises an error
+              when it is empty.
+            </span>
+          </span>
+          <span className="shrink-0 text-sm font-medium text-amber-700 dark:text-amber-400">
+            {band === GAPS ? "Show all" : "Show them"}
+          </span>
+        </button>
+      )}
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="relative w-full lg:max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={inputRef}
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              if (band === GAPS) setBand(null);
+            }}
             onKeyDown={(e) => e.key === "Escape" && setQ("")}
             placeholder="Search settings…"
             aria-label="Search settings"
@@ -133,7 +201,12 @@ export function SettingsHub({ vertical }: { vertical: ActiveVertical }) {
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {g.sections.map((s) => (
-                  <SectionCard key={s.title} section={s} />
+                  <SectionCard
+                    key={s.key}
+                    section={s}
+                    status={inventory[s.key]}
+                    gap={gapByKey.get(s.key)}
+                  />
                 ))}
               </div>
             </section>
@@ -144,55 +217,115 @@ export function SettingsHub({ vertical }: { vertical: ActiveVertical }) {
   );
 }
 
+/** Pseudo-band: the cards this workspace has never set up. */
+const GAPS = "__gaps";
+
 function matches(s: ResolvedSettingsSection, groupLabel: string, needle: string) {
   if (!needle) return true;
   const hay = `${s.title} ${s.body} ${groupLabel} ${(s.keywords ?? []).join(" ")}`.toLowerCase();
   return needle.split(/\s+/).every((word) => hay.includes(word));
 }
 
-function SectionCard({ section: s }: { section: ResolvedSettingsSection }) {
+function SectionCard({
+  section: s,
+  status,
+  gap,
+}: {
+  section: ResolvedSettingsSection;
+  status?: SectionStatus;
+  gap?: SetupGap;
+}) {
+  const attention = Boolean(gap) || status?.tone === "attention";
+
   const inner = (
     <>
-      <span
-        className={cn(
-          "grid size-10 shrink-0 place-items-center rounded-xl transition-colors",
-          s.href
-            ? "bg-gold/10 text-gold group-hover:bg-gold/20"
-            : "bg-muted text-muted-foreground"
+      <div className="flex items-start gap-3">
+        <span
+          className={cn(
+            "grid size-10 shrink-0 place-items-center rounded-xl transition-colors",
+            !s.href && "bg-muted text-muted-foreground",
+            s.href && attention && "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+            s.href &&
+              !attention &&
+              "bg-muted text-muted-foreground group-hover:bg-gold/12 group-hover:text-gold"
+          )}
+        >
+          <s.icon className="size-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="truncate font-medium leading-tight">{s.title}</h3>
+            {gap?.severity === "blocking" && (
+              <span className="shrink-0 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                Blocking
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-sm leading-snug text-muted-foreground">{s.body}</p>
+        </div>
+        {s.href && (
+          <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-gold" />
         )}
-      >
-        <s.icon className="size-[18px]" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-medium leading-tight">{s.title}</span>
-        <span className="mt-1 block text-sm leading-snug text-muted-foreground">{s.body}</span>
-        {!s.href && (
-          <span className="mt-2 inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Next phase
-          </span>
-        )}
-      </span>
-      {s.href && (
-        <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground/40 transition-all group-hover:translate-x-0.5 group-hover:text-gold" />
+      </div>
+
+      {gap ? (
+        // The warning belongs on the card you fix it from, not in a panel that
+        // names the same eight settings a second time.
+        <div className="mt-3 border-t border-amber-500/25 pt-2.5 sm:mt-auto">
+          <div className="text-xs font-medium text-amber-700 dark:text-amber-400">Not set up yet</div>
+          <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{gap.hint}</p>
+        </div>
+      ) : (
+        status && (
+          <div className="mt-3 flex items-center gap-2 border-t border-border/70 pt-2.5 sm:mt-auto">
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                status.tone === "attention" ? "bg-amber-500" : "bg-muted-foreground/35"
+              )}
+              aria-hidden
+            />
+            <span
+              className={cn(
+                "truncate text-xs",
+                status.tone === "attention"
+                  ? "font-medium text-amber-700 dark:text-amber-400"
+                  : "text-muted-foreground"
+              )}
+            >
+              {status.label}
+            </span>
+            {status.companyWide && (
+              <span
+                className="ml-auto shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/60"
+                title="Shared by every workspace — one company, one public site and one roster."
+              >
+                Company-wide
+              </span>
+            )}
+          </div>
+        )
       )}
     </>
   );
 
-  const base =
-    "flex items-start gap-3.5 rounded-2xl border border-border bg-card p-4 text-left";
+  const base = "flex flex-col rounded-2xl border p-4 text-left";
+  const tone = attention ? "border-amber-500/35 bg-amber-500/[0.03]" : "border-border bg-card";
 
   return s.href ? (
     <Link
       href={s.href}
       className={cn(
         base,
-        "group transition-all duration-200 hover:-translate-y-0.5 hover:border-gold/40 hover:shadow-md hover:shadow-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        tone,
+        "group transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:shadow-black/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        attention ? "hover:border-amber-500/60" : "hover:border-gold/40"
       )}
     >
       {inner}
     </Link>
   ) : (
-    <div className={cn(base, "opacity-70")}>{inner}</div>
+    <div className={cn(base, tone, "opacity-70")}>{inner}</div>
   );
 }
 
