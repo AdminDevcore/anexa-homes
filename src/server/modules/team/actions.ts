@@ -199,6 +199,67 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
   return { ok: true as const };
 }
 
+// ---------------------------------------------------------------------------
+// Pay structure
+// ---------------------------------------------------------------------------
+
+// One card on the team page, one action, but two pay models that share nothing.
+// Roofing splits a profit pool; solar pays either the overage above a rep's
+// redline or a flat rate per watt. Every field is optional and `undefined`
+// leaves the column alone, so a rep granted only one vertical never has the
+// other's terms written by a form that did not show them.
+const paySchema = z.object({
+  userId: z.string().min(1),
+  // -- Roofing: profit-pool split. null clears the field.
+  commissionSplitPct: z.number().min(0).max(100).optional().nullable(),
+  providedLeadType: z.enum(["percentage", "flat"]).optional(),
+  providedLeadSplitPct: z.number().min(0).max(100).optional().nullable(),
+  providedLeadFlatCents: z.number().int().min(0).optional().nullable(),
+  deductiblePct: z.number().min(0).max(100).optional().nullable(),
+  // -- Solar: cents per watt NET of the lender's fee. Bounded by the same rails
+  // the pricing validator uses, so a redline cannot be set above any price a rep
+  // is allowed to quote.
+  solarRedlineCentsPerWatt: z.number().int().min(0).max(2000).optional().nullable(),
+  // -- Solar: mills (tenths of a cent) per watt. $2.00/W of commission is already
+  // absurd; the cap is a typo rail, not a policy.
+  solarPerWattMills: z.number().int().min(0).max(20000).optional().nullable(),
+});
+
+/**
+ * Set a member's pay structure — both verticals, from the Pay structure card.
+ *
+ * Deliberately separate from updateTeamMemberAction: role, status and vertical
+ * access are access-control decisions with their own guards (a Super Admin gate,
+ * a self-lockout check, a forced re-auth), and none of them should be re-run
+ * because somebody corrected a decimal on a commission rate.
+ */
+export async function updateMemberPayAction(input: z.infer<typeof paySchema>) {
+  const me = await requireUser();
+  if (!can(me, "update", "User")) return fail("Not allowed.");
+  const parsed = paySchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid pay structure.");
+  const { userId, ...pay } = parsed.data;
+
+  const target = await prisma.user.findFirst({
+    where: { id: userId, companyId: me.companyId },
+    select: { id: true, role: true },
+  });
+  if (!target) return fail("User not found.");
+  // Only the roles that actually earn on a deal carry pay terms. Writing them
+  // onto an installer would put a redline on somebody the engine never reads.
+  if (!["sales_rep", "manager"].includes(target.role)) {
+    return fail("Only sales reps and sales managers have a pay structure.");
+  }
+
+  await prisma.user.update({
+    where: { id: target.id },
+    data: Object.fromEntries(Object.entries(pay).filter(([, v]) => v !== undefined)),
+  });
+  revalidatePath("/portal/team");
+  revalidatePath(`/portal/team/${target.id}`);
+  return { ok: true as const };
+}
+
 /** Link a member to a specific 1099 contractor vendor (or clear the link). */
 export async function setRepVendorAction(userId: string, vendorId: string | null) {
   const me = await requireUser();

@@ -738,6 +738,15 @@ const lenderSchema = z.object({
   /** Customer-facing application link — the proposal's Qualify button. */
   applyUrl: urlField,
   creditInstructions: z.string().max(4000).nullable().optional(),
+  /**
+   * How reps are paid on this lender's deals: `redline` (they keep the overage
+   * above their own net redline) or `per_watt` (a flat rate per installed watt).
+   *
+   * A column rather than a name check on "Amos" — see SolarRepPayMode. Changing
+   * it only affects deals whose commission has not been generated yet: existing
+   * lines carry a snapshot of the terms they were sold on.
+   */
+  repPayMode: z.enum(["redline", "per_watt"]).optional(),
 });
 
 /**

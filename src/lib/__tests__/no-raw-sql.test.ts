@@ -54,6 +54,11 @@ const ALLOWED: Record<string, string> = {
   // side). Not a scoped read or write.
   "src/server/modules/payroll/__tests__/override-vertical.itest.ts":
     'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
+  // Same again: the solar payout suite resets its own `vertical_test` fixtures
+  // on the UNextended client, because it deliberately builds one rep who works
+  // both sides in order to prove the two pay models never reach each other.
+  "src/server/modules/payroll/__tests__/solar-pay.itest.ts":
+    'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
   // A project number is unique per COMPANY, not per workspace, so the highest
   // one has to be read across every vertical — a scoped read sees only the
   // workspace being acted in, which on a solar deal at a roofing company is

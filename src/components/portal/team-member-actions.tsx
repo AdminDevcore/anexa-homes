@@ -12,19 +12,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { VERTICALS, VERTICAL_LABEL, DEFAULT_VERTICAL, type ActiveVertical } from "@/lib/vertical";
 import { updateTeamMemberAction, deleteTeamMemberAction } from "@/server/modules/team/actions";
 
-// Roles that earn a split commission (profit pool × their %).
-const SPLIT_ROLES = ["sales_rep", "manager"];
+// Pay terms deliberately do NOT live here any more. Role, status and workspace
+// access are access-control decisions with their own guards — a Super Admin
+// gate, a self-lockout check, a forced re-auth — and none of them should re-run
+// because somebody corrected a decimal on a commission rate. Pay is its own
+// card, its own action: see components/portal/member-pay-structure.tsx.
 
 export function TeamMemberActions({
   userId,
   currentRole,
   currentTitle,
   currentStatus,
-  currentSplitPct,
-  currentProvidedSplitPct,
-  currentProvidedType,
-  currentProvidedFlatCents,
-  currentDeductiblePct,
   currentIndustries,
   currentSalesRepId,
   reps,
@@ -39,11 +37,6 @@ export function TeamMemberActions({
   currentRole: string;
   currentTitle: string | null;
   currentStatus: string;
-  currentSplitPct: number | null;
-  currentProvidedSplitPct: number | null;
-  currentProvidedType: string;
-  currentProvidedFlatCents: number | null;
-  currentDeductiblePct: number | null;
   currentIndustries: ActiveVertical[];
   currentSalesRepId: string | null;
   reps: { id: string; name: string }[];
@@ -58,11 +51,6 @@ export function TeamMemberActions({
   const [role, setRole] = React.useState(currentRole);
   const [title, setTitle] = React.useState(currentTitle ?? "");
   const [status, setStatus] = React.useState(currentStatus);
-  const [split, setSplit] = React.useState(currentSplitPct == null ? "" : String(currentSplitPct));
-  const [providedSplit, setProvidedSplit] = React.useState(currentProvidedSplitPct == null ? "" : String(currentProvidedSplitPct));
-  const [providedType, setProvidedType] = React.useState(currentProvidedType || "percentage");
-  const [providedFlat, setProvidedFlat] = React.useState(currentProvidedFlatCents == null ? "" : String(currentProvidedFlatCents / 100));
-  const [deductible, setDeductible] = React.useState(currentDeductiblePct == null ? "" : String(currentDeductiblePct));
   const [verticals, setIndustries] = React.useState<ActiveVertical[]>(
     currentIndustries.length ? currentIndustries : [DEFAULT_VERTICAL]
   );
@@ -78,63 +66,34 @@ export function TeamMemberActions({
   // Show roles this editor may assign, plus the member's current role so saving
   // other fields (title/status) on a privileged member still works.
   const selectableRoles = roles.filter((r) => assignableRoles.includes(r.value) || r.value === currentRole);
-  const showSplit = SPLIT_ROLES.includes(role);
   const showCanvasserRep = role === "canvasser";
   const showRepManager = role === "sales_rep";
   const dirty =
     role !== currentRole ||
     title !== (currentTitle ?? "") ||
     status !== currentStatus ||
-    split !== (currentSplitPct == null ? "" : String(currentSplitPct)) ||
-    providedSplit !== (currentProvidedSplitPct == null ? "" : String(currentProvidedSplitPct)) ||
-    providedType !== (currentProvidedType || "percentage") ||
-    providedFlat !== (currentProvidedFlatCents == null ? "" : String(currentProvidedFlatCents / 100)) ||
-    deductible !== (currentDeductiblePct == null ? "" : String(currentDeductiblePct)) ||
     salesRepId !== (currentSalesRepId ?? "none") ||
     managerId !== (currentManagerId ?? "none") ||
     (isSuperAdmin && industriesKey(verticals) !== industriesKey(currentIndustries.length ? currentIndustries : [DEFAULT_VERTICAL]));
 
   async function save() {
-    let commissionSplitPct: number | null = null;
-    let providedLeadSplitPct: number | null = null;
-    let providedLeadFlatCents: number | null = null;
-    let deductiblePct: number | null = null;
-    const providedLeadType: "percentage" | "flat" = providedType === "flat" ? "flat" : "percentage";
-    if (showSplit) {
-      if (split.trim() !== "") {
-        const n = parseFloat(split);
-        if (!(n >= 0 && n <= 100)) return toast.error("Self-gen split must be 0–100.");
-        commissionSplitPct = n;
-      }
-      if (providedSplit.trim() !== "") {
-        const n = parseFloat(providedSplit);
-        if (!(n >= 0 && n <= 100)) return toast.error("Provided-lead split must be 0–100.");
-        providedLeadSplitPct = n;
-      }
-      if (providedLeadType === "flat" && providedFlat.trim() !== "") {
-        const f = parseFloat(providedFlat);
-        if (!(f >= 0)) return toast.error("Lead fee must be a positive amount.");
-        providedLeadFlatCents = Math.round(f * 100);
-      }
-      if (deductible.trim() !== "") {
-        const n = parseFloat(deductible);
-        if (!(n >= 0 && n <= 100)) return toast.error("Deductible % must be 0–100.");
-        deductiblePct = n;
-      }
-    }
     if (isSuperAdmin && verticals.length === 0) return toast.error("Grant at least one vertical.");
     setBusy(true);
-    const res = await updateTeamMemberAction({
-      userId, role: role as never, title: title || null, status: status as never,
-      commissionSplitPct, providedLeadType, providedLeadSplitPct, providedLeadFlatCents, deductiblePct,
-      salesRepId: showCanvasserRep ? (salesRepId === "none" ? null : salesRepId) : null,
-      managerId: showRepManager ? (managerId === "none" ? null : managerId) : null,
-      ...(isSuperAdmin ? { verticals } : {}),
-    });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Member updated");
-    router.refresh();
+    try {
+      const res = await updateTeamMemberAction({
+        userId, role: role as never, title: title || null, status: status as never,
+        salesRepId: showCanvasserRep ? (salesRepId === "none" ? null : salesRepId) : null,
+        managerId: showRepManager ? (managerId === "none" ? null : managerId) : null,
+        ...(isSuperAdmin ? { verticals } : {}),
+      });
+      if (!res.ok) return toast.error(res.error);
+      toast.success("Member updated");
+      router.refresh();
+    } finally {
+      // In a finally: a thrown action must not leave the form permanently
+      // disabled with nothing on screen explaining why.
+      setBusy(false);
+    }
   }
 
   async function remove() {
@@ -212,46 +171,7 @@ export function TeamMemberActions({
         </div>
       )}
 
-      {showSplit && (
-        <div className="space-y-2 rounded-lg border border-gold/30 bg-gold/5 p-3">
-          <Label className="text-xs">Commission splits (% of profit pool)</Label>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <span className="text-[11px] text-muted-foreground">Self-gen lead (%)</span>
-              <Input type="number" inputMode="decimal" value={split} onChange={(e) => setSplit(e.target.value)} placeholder="e.g. 50" />
-            </div>
-            <div className="space-y-1">
-              <span className="text-[11px] text-muted-foreground">Company-provided lead</span>
-              <div className="flex gap-1">
-                <Select value={providedType} onValueChange={setProvidedType}>
-                  <SelectTrigger className="w-[68px] shrink-0 px-2"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="percentage">%</SelectItem>
-                    <SelectItem value="flat">Flat $</SelectItem>
-                  </SelectContent>
-                </Select>
-                {providedType === "flat" ? (
-                  <Input type="number" inputMode="decimal" value={providedFlat} onChange={(e) => setProvidedFlat(e.target.value)} placeholder="$ 250" />
-                ) : (
-                  <Input type="number" inputMode="decimal" value={providedSplit} onChange={(e) => setProvidedSplit(e.target.value)} placeholder="e.g. 35" />
-                )}
-              </div>
-            </div>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Self-gen applies when the {role === "manager" ? "manager" : "rep"} sources the lead. For a company-provided lead, either a lower split %{" "}
-            <strong>or</strong> a flat lead fee deducted from their self-gen commission.
-          </p>
-          <div className="space-y-1 border-t border-gold/20 pt-2">
-            <span className="text-[11px] text-muted-foreground">Deductible the {role === "manager" ? "manager" : "rep"} gets (% of the customer-paid deductible)</span>
-            <div className="flex items-center gap-2">
-              <Input type="number" inputMode="decimal" value={deductible} onChange={(e) => setDeductible(e.target.value)} placeholder="e.g. 10" className="w-28" />
-              <span className="text-sm text-muted-foreground">%</span>
-            </div>
-            <p className="text-[11px] text-muted-foreground">Paid as a separate line on each deal&rsquo;s deductible. Leave blank if they don&rsquo;t get it.</p>
-          </div>
-        </div>
-      )}
+      {/* Pay terms live in the Pay structure card, not here. */}
 
       {/* Vertical access — only the Super Admin decides who sees which workspace. */}
       {isSuperAdmin && (

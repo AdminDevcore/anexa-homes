@@ -29,7 +29,7 @@ export default async function SolarLendersPage() {
     where: { companyId: user.companyId },
     orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
     select: {
-      id: true, name: true, isActive: true, rank: true, notes: true,
+      id: true, name: true, isActive: true, rank: true, notes: true, repPayMode: true,
       portalUrl: true, applyUrl: true, creditInstructions: true,
       logoUpdatedAt: true,
       _count: { select: { approvals: true, designs: true } },
@@ -76,6 +76,7 @@ export default async function SolarLendersPage() {
           portalUrl: l.portalUrl,
           applyUrl: l.applyUrl,
           creditInstructions: l.creditInstructions,
+          repPayMode: l.repPayMode,
           logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
           approvedCount: l._count.approvals,
           dealCount: l._count.designs,

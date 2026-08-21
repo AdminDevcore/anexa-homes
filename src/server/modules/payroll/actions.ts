@@ -13,7 +13,7 @@ import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { formatCents } from "@/lib/format";
 import { computeCommissionsForProject } from "./engine";
-import { getCommissionEligibleStageIds, COMMISSION_GATE_LABEL } from "./eligibility";
+import { getCommissionEligibleStageIds, commissionGateLabel } from "./eligibility";
 import { getPayStubData, getRunStubList, buildPayStubPdf } from "./paystub";
 import { postRunToBookkeeping } from "./post-bookkeeping";
 
@@ -34,7 +34,10 @@ export async function generateCommissionsAction() {
   // are eligible — commissions/payroll can't be generated before then.
   const eligibleStageIds = await getCommissionEligibleStageIds(user.companyId);
   if (eligibleStageIds.size === 0) {
-    return { ok: true as const, created: 0, message: `No deals have reached ${COMMISSION_GATE_LABEL} yet.` };
+    // The gate differs by workspace — Roofing waits on the depreciation request,
+    // Solar on the signed contract — so name the one the user is actually behind.
+    const gate = commissionGateLabel(await getActiveVertical(user));
+    return { ok: true as const, created: 0, message: `No deals have reached ${gate} yet.` };
   }
 
   const projects = await prisma.project.findMany({

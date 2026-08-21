@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Mail, Phone, Briefcase, Calendar, Clock, Shield, Users2, ChevronRight, Percent, ShieldCheck, Lock, Landmark, FileText, MapPin, Paperclip } from "lucide-react";
+import { ArrowLeft, Mail, Phone, Briefcase, Calendar, Clock, Shield, Users2, ChevronRight, ShieldCheck, Lock, Landmark, FileText, MapPin, Paperclip } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getUserDetail, getAssignableReps, getAssignableManagers, ROLE_ORDER } from "@/server/modules/team/queries";
@@ -13,10 +13,12 @@ import { initials } from "@/lib/format";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TeamMemberActions } from "@/components/portal/team-member-actions";
 import { CommissionOverrides } from "@/components/portal/commission-overrides";
+import { MemberPayStructure } from "@/components/portal/member-pay-structure";
 import { RepVendorLink } from "@/components/portal/rep-vendor-link";
 import { prisma } from "@/server/db/client";
 import { allowedVerticals, isActiveVertical, DEFAULT_VERTICAL } from "@/lib/vertical";
 import { companyVerticals, userVerticals } from "@/server/auth/vertical";
+import { getSolarSettings } from "@/server/modules/solar/settings";
 
 export const metadata = { title: "Team member" };
 
@@ -76,6 +78,27 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
   // to a flat list with no picker.
   const liveVerticals = companyVerticals();
 
+  // Pay structure. Same audience as the override sheet — privileged viewers and
+  // the person themselves — and the same reason for reading it unfiltered by the
+  // active workspace: an admin standing in Solar still needs this rep's roofing
+  // terms. Only the roles the commission engine actually reads carry terms.
+  const memberVerticals = allowedVerticals(detail.verticals);
+  const showPay = showFull && ["sales_rep", "manager"].includes(detail.role);
+  const showSolarPay = showPay && memberVerticals.includes("solar");
+  // The company's own pricing defaults, so the worked example is a deal this
+  // company would actually write, and the names of the lenders currently on
+  // fixed pay, so "$0.40/W" is not an unexplained number.
+  const [solarSettings, perWattLenders] = showSolarPay
+    ? await Promise.all([
+        getSolarSettings(user.companyId),
+        prisma.solarLender.findMany({
+          where: { companyId: user.companyId, isActive: true, repPayMode: "per_watt" },
+          select: { name: true },
+          orderBy: { name: "asc" },
+        }),
+      ])
+    : [null, []];
+
   // Sales reps are 1099 contractors — show their linked vendor + let admins reassign it.
   const showRepVendor = canEdit && detail.role === "sales_rep";
   const [companyVendors, linkedVendor] = showRepVendor
@@ -128,25 +151,33 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               <Detail icon={Phone} label="Phone" value={detail.phone ?? "—"} />
               <Detail icon={Calendar} label="Joined" value={fmt.date(detail.createdAt)} />
               <Detail icon={Clock} label="Last active" value={detail.lastLoginAt ? fmt.date(detail.lastLoginAt) : "Never"} />
-              {["sales_rep", "manager"].includes(detail.role) && (
-                <Detail
-                  icon={Percent}
-                  label="Commission split"
-                  value={
-                    detail.commissionSplitPct == null && detail.providedLeadSplitPct == null && detail.providedLeadFlatCents == null
-                      ? "Not set"
-                      : `Self-gen ${detail.commissionSplitPct ?? "—"}% · Provided ${
-                          detail.providedLeadType === "flat"
-                            ? detail.providedLeadFlatCents != null
-                              ? `$${(detail.providedLeadFlatCents / 100).toLocaleString()} lead fee`
-                              : "flat (unset)"
-                            : `${detail.providedLeadSplitPct ?? "—"}%`
-                        }`
-                  }
-                />
-              )}
             </div>
           </div>
+
+          {/* Pay structure — both verticals, side by side. */}
+          {showPay && (
+            <MemberPayStructure
+              userId={detail.id}
+              roleLabel={detail.roleLabel}
+              isRep={detail.role === "sales_rep"}
+              verticals={memberVerticals}
+              canEdit={canEdit}
+              current={{
+                commissionSplitPct: detail.commissionSplitPct,
+                providedLeadType: detail.providedLeadType,
+                providedLeadSplitPct: detail.providedLeadSplitPct,
+                providedLeadFlatCents: detail.providedLeadFlatCents,
+                deductiblePct: detail.deductiblePct,
+                solarRedlineCentsPerWatt: detail.solarRedlineCentsPerWatt,
+                solarPerWattMills: detail.solarPerWattMills,
+              }}
+              solarExample={{
+                grossPpwCents: solarSettings?.defaultGrossPpwCents ?? 350,
+                dealerFeePct: solarSettings?.defaultDealerFeePct ?? 18,
+              }}
+              perWattLenders={perWattLenders.map((l) => l.name)}
+            />
+          )}
 
           {/* Onboarding & payroll PII — restricted to owner/admin/accounting/self */}
           {canViewOnboarding && (
@@ -279,11 +310,6 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               currentRole={detail.role}
               currentTitle={detail.title}
               currentStatus={detail.status}
-              currentSplitPct={detail.commissionSplitPct}
-              currentProvidedSplitPct={detail.providedLeadSplitPct}
-              currentProvidedType={detail.providedLeadType}
-              currentProvidedFlatCents={detail.providedLeadFlatCents}
-              currentDeductiblePct={detail.deductiblePct}
               // Retired values on legacy rows are filtered out here, so the editor
               // only ever shows (and can only ever save) live verticals.
               currentIndustries={allowedVerticals(detail.verticals)}

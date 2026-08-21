@@ -10,7 +10,7 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { computeDealCommission, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
-import { isStageCommissionEligible, COMMISSION_GATE_LABEL } from "@/server/modules/payroll/eligibility";
+import { isStageCommissionEligible, commissionGateLabel } from "@/server/modules/payroll/eligibility";
 import { getDealJobCost } from "./job-cost";
 import { ensureProjectForLeadAction } from "@/server/modules/projects/actions";
 
@@ -130,15 +130,17 @@ export async function generateDealCommissionAction(projectId: string) {
       deductibleCents: true,
       repGetsSupplement: true,
       companyProvidedLead: true,
+      vertical: true,
       company: { select: { overheadPct: true, paFeePct: true } },
       lead: { select: { stageId: true, assignedRep: { select: { id: true, commissionSplitPct: true, providedLeadType: true, providedLeadSplitPct: true, providedLeadFlatCents: true, deductiblePct: true } } } },
     },
   });
   if (!project) return { ok: false as const, error: "Project not found." };
 
-  // Gate: commissions can't be generated until the deal reaches Depreciation Requested.
+  // Gate: commissions can't be generated until the deal reaches its vertical's
+  // gate stage — Depreciation Requested on roofing, Contract Signed on solar.
   if (!(await isStageCommissionEligible(user.companyId, project.lead?.stageId ?? null))) {
-    return { ok: false as const, error: `Commissions can only be generated once the job reaches ${COMMISSION_GATE_LABEL}.` };
+    return { ok: false as const, error: `Commissions can only be generated once the job reaches ${commissionGateLabel(project.vertical)}.` };
   }
 
   const rep = project.lead?.assignedRep;

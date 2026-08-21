@@ -3,6 +3,7 @@ import type { Db } from "@/server/db/types";
 import { computeDealSplit, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
 import { VERTICAL_LABEL } from "@/lib/vertical";
 import { getDealJobCost } from "@/server/modules/costs/job-cost";
+import { computeSolarCommissionsForProject } from "./solar-engine";
 
 function splitLabelFor(pct: number, flatCents: number, provided: boolean): string {
   if (flatCents > 0) {
@@ -25,6 +26,11 @@ function splitLabelFor(pct: number, flatCents: number, provided: boolean): strin
  *  - Crew/installer and project-manager pay stay rule-based (flat or %), via
  *    active CommissionRules. Idempotent (won't duplicate).
  *
+ * SOLAR DOES NOT PAY THIS WAY and is delegated to solar-engine.ts before any of
+ * the above runs. It has no profit pool, no job costs to net off and no price on
+ * its Project row — everything below would compute a pool of zero and pay the
+ * rep, the managers and every override exactly nothing.
+ *
  * Returns the number of commission records created.
  */
 export async function computeCommissionsForProject(
@@ -36,11 +42,21 @@ export async function computeCommissionsForProject(
     where: { id: projectId, companyId },
     include: {
       company: { select: { overheadPct: true, paFeePct: true } },
-      lead: { select: { assignedRep: { select: { id: true, firstName: true, lastName: true, commissionSplitPct: true, providedLeadType: true, providedLeadSplitPct: true, providedLeadFlatCents: true, deductiblePct: true } } } },
+      lead: { select: { id: true, assignedRep: { select: { id: true, firstName: true, lastName: true, commissionSplitPct: true, providedLeadType: true, providedLeadSplitPct: true, providedLeadFlatCents: true, deductiblePct: true } } } },
       crewAssignments: { include: { crew: { include: { members: true } } } },
     },
   });
   if (!project) return 0;
+
+  if (project.vertical === "solar") {
+    const solarRep = project.lead?.assignedRep ?? null;
+    return computeSolarCommissionsForProject(db, companyId, {
+      id: project.id,
+      leadId: project.lead?.id ?? null,
+      assignedRepId: solarRep?.id ?? null,
+      repName: solarRep ? `${solarRep.firstName} ${solarRep.lastName}`.trim() : "",
+    });
+  }
 
   // Total collectible (rules/overrides may reference it). The deductible is split
   // with the rep separately — it is NOT part of the pool.

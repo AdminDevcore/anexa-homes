@@ -446,55 +446,74 @@ model CompanySettings {
 }
 
 model User {
-  id                    String     @id @default(uuid())
-  companyId             String
-  company               Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  email                 String
-  passwordHash          String?
-  firstName             String
-  lastName              String
-  phone                 String?
-  role                  Role       @default(sales_rep)
-  status                UserStatus @default(active)
-  avatarUrl             String?
-  title                 String?
+  id                       String     @id @default(uuid())
+  companyId                String
+  company                  Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email                    String
+  passwordHash             String?
+  firstName                String
+  lastName                 String
+  phone                    String?
+  role                     Role       @default(sales_rep)
+  status                   UserStatus @default(active)
+  avatarUrl                String?
+  title                    String?
   // Sequential employee number per company (join order). Formatted on display as
   // <recordPrefix><5-digit>, e.g. AH-00001. Lower = earlier hire = higher rank.
-  employeeNo            Int?
+  employeeNo               Int?
   // Rep's share (%) of the profit pool on a SELF-GENERATED lead (standard split).
-  commissionSplitPct    Float?
+  commissionSplitPct       Float?
   // Company-provided-lead comp is EITHER a percentage of the pool OR a flat lead
   // fee deducted from the rep's self-gen commission. providedLeadType picks which.
-  providedLeadType      String     @default("percentage") // "percentage" | "flat"
+  providedLeadType         String     @default("percentage") // "percentage" | "flat"
   // Rep's share (%) when the COMPANY provided the lead (percentage mode).
-  providedLeadSplitPct  Float?
+  providedLeadSplitPct     Float?
   // Flat lead/marketing fee (cents) subtracted from the rep's self-gen commission (flat mode).
-  providedLeadFlatCents Int?
+  providedLeadFlatCents    Int?
   // Rep's share (%) of the customer-paid deductible on their deals (separate from
   // the profit-pool split). null/0 = this rep doesn't get the deductible.
-  deductiblePct         Float?
+  deductiblePct            Float?
+  // -- Solar pay -----------------------------------------------------------
+  // Solar does not pay out of a profit pool, so none of the columns above apply
+  // to it. A solar deal pays one of two ways -- see SolarRepPayMode and
+  // src/lib/solar-pay.ts -- and these are this rep's terms for each.
+  //
+  // The rep's redline: what the company must keep per installed watt, NET of
+  // the lender's dealer fee, in cents (200 = $2.00/W). Everything the deal nets
+  // above this is the rep's, in full.
+  //
+  // Net rather than gross on purpose: moving a deal onto expensive money has to
+  // come out of the rep, not the company. Null = this rep has no redline, and
+  // redline deals pay them nothing -- the team page says so out loud rather than
+  // quietly generating a $0 line nobody looks at until payroll.
+  solarRedlineCentsPerWatt Int?
+  // Fixed rate per installed watt on a lender set to per_watt pay, and on every
+  // lease/PPA (which have no system price to redline against). In MILLS --
+  // tenths of a cent, 400 = $0.40/W -- because $0.405/W is a real rate and cents
+  // cannot express it. Matches SolarDealAdder.millsPerWatt.
+  solarPerWattMills        Int?
   // Verticals this user may open and switch between. New users start in Roofing
   // only; the super admin grants Solar explicitly. Retired values on existing
   // rows are filtered out by allowedVerticals() and can never surface.
-  verticals             Vertical[] @default([roofing]) @map("industries")
+  verticals                Vertical[] @default([roofing]) @map("industries")
   // For canvassers: the sales rep they're assigned to. Their knocks, leads, and
   // appointments auto-assign to (and are visible by) this rep.
-  salesRepId            String?
-  salesRep              User?      @relation("RepCanvassers", fields: [salesRepId], references: [id], onDelete: SetNull)
-  canvassers            User[]     @relation("RepCanvassers")
+  salesRepId               String?
+  salesRep                 User?      @relation("RepCanvassers", fields: [salesRepId], references: [id], onDelete: SetNull)
+  canvassers               User[]     @relation("RepCanvassers")
   // For sales reps: the sales manager they report to. The manager sees this rep's
   // deals, canvassing, tasks, and commissions — and nothing outside their team.
-  managerId             String?
-  manager               User?      @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
-  reports               User[]     @relation("ManagerReports")
-  permissions           Json       @default("{}") // per-user permission overrides
-  sessionVersion        Int        @default(1)
-  lastLoginAt           DateTime?
+  managerId                String?
+  manager                  User?      @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  reports                  User[]     @relation("ManagerReports")
+  permissions              Json       @default("{}") // per-user permission overrides
+  sessionVersion           Int        @default(1)
+  lastLoginAt              DateTime?
   // Soft delete: set (with status=disabled) to remove from the roster while
   // keeping the row so historical deals keep showing the rep's name.
-  deletedAt             DateTime?
-  createdAt             DateTime   @default(now())
-  updatedAt             DateTime   @updatedAt
+  deletedAt                DateTime?
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
 
   leadsAssigned   Lead[]               @relation("LeadAssignedRep")
   leadsSet        Lead[]               @relation("LeadSetter")
@@ -1582,37 +1601,48 @@ model CommissionRule {
 }
 
 model Commission {
-  id             String              @id @default(uuid())
-  companyId      String
-  company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id                       String              @id @default(uuid())
+  companyId                String
+  company                  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   /// Shared-but-segmented: reads are never filtered by vertical so the books
   /// stay consolidated, but every row is tagged so the P&L, commissions and
   /// reports break out by department. Null = genuinely company-level.
-  vertical       Vertical?
-  projectId      String
-  project        Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User                @relation("CommissionUser", fields: [userId], references: [id])
-  ruleId         String?
-  rule           CommissionRule?     @relation(fields: [ruleId], references: [id])
+  vertical                 Vertical?
+  projectId                String
+  project                  Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId                   String
+  user                     User                @relation("CommissionUser", fields: [userId], references: [id])
+  ruleId                   String?
+  rule                     CommissionRule?     @relation(fields: [ruleId], references: [id])
   // Set when this line is an override (X earns off Y's deal); distinguishes it
   // from the recipient's own split line so both can coexist + recompute cleanly.
-  overrideId     String?
-  override       CommissionOverride? @relation(fields: [overrideId], references: [id], onDelete: SetNull)
-  label          String?
-  baseAmount     Int                 @default(0) // cents the commission was computed from
-  amount         Int                 @default(0) // computed commission, cents
+  overrideId               String?
+  override                 CommissionOverride? @relation(fields: [overrideId], references: [id], onDelete: SetNull)
+  label                    String?
+  baseAmount               Int                 @default(0) // cents the commission was computed from
+  amount                   Int                 @default(0) // computed commission, cents
   // Snapshot of the split terms at generation time. Locked once created so editing
   // a rep's split never changes existing deals; re-generating only refreshes the
   // amount from current costs using THESE terms. amount = max(0, pool*splitPct% − splitFlatCents).
-  splitPct       Float?
-  splitFlatCents Int                 @default(0)
-  status         CommissionStatus    @default(pending)
-  notes          String?
-  approvedAt     DateTime?
-  paidAt         DateTime?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  splitPct                 Float?
+  splitFlatCents           Int                 @default(0)
+  // Snapshot of the SOLAR terms, for the same reason and with the same rule:
+  // raising a rep's redline must never re-price a deal they already sold. Null
+  // on every roofing line. Watts and price are deliberately NOT snapshotted -- a
+  // design that grows between contract and install should move the number,
+  // exactly as job costs move a roofing pool.
+  // "redline" | "per_watt" -- which basis produced this line.
+  solarBasis               String?
+  // The rep's redline at generation, cents per watt.
+  solarRedlineCentsPerWatt Int?
+  // The rep's fixed rate at generation, mills per watt.
+  solarMillsPerWatt        Int?
+  status                   CommissionStatus    @default(pending)
+  notes                    String?
+  approvedAt               DateTime?
+  paidAt                   DateTime?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
 
   payrollItems PayrollItem[]
 
@@ -2767,6 +2797,19 @@ model SolarSettings {
   @@map("solar_settings")
 }
 
+/// How reps are paid on one lender's deals.
+///
+/// DATA, not a name check. Amos Capital Funding is simply the first partner
+/// switched to per_watt; the second one needs no deploy. Hardcoding
+/// `name === "Amos"` would flip every rep back onto redline pay the day somebody
+/// renames the lender to "Amos Capital" -- silently, and mid-quarter.
+enum SolarRepPayMode {
+  /// The rep sells against their own redline and keeps every cent above it.
+  redline
+  /// The rep earns their fixed $/W rate whatever the deal prices at.
+  per_watt
+}
+
 /// A finance partner whose approved-vendor list constrains what can be sold.
 ///
 /// Managed data, not free text: the whole point is that a rep picks "Credit
@@ -2784,13 +2827,15 @@ model SolarLender {
   /// Isolated per vertical: this row belongs to exactly one workspace.
   vertical  Vertical @default(solar)
 
-  name     String
+  name       String
   /// Retired rather than deleted, for the same reason equipment is: designs
   /// point at it, and last year's deals have to keep explaining themselves.
-  isActive Boolean @default(true)
+  isActive   Boolean         @default(true)
+  /// How reps are paid on this lender's deals -- see SolarRepPayMode.
+  repPayMode SolarRepPayMode @default(redline)
   /// Display order, so the lenders you use most lead.
-  rank     Int     @default(0)
-  notes    String?
+  rank       Int             @default(0)
+  notes      String?
 
   /// Where YOUR team runs credit for this partner — the dealer portal login.
   /// Rep-facing only: it never reaches a customer-facing document.

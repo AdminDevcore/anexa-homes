@@ -12,6 +12,7 @@ import { LenderMark } from "@/components/ui/lender-mark";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatFactor } from "@/lib/solar-loan";
 import {
   upsertSolarLenderProductAction,
@@ -46,6 +47,11 @@ export type LenderRow = {
   /** Customer-facing application link — the proposal's Qualify button. */
   applyUrl: string | null;
   creditInstructions: string | null;
+  /**
+   * How reps are paid on this lender's deals: they keep the overage above their
+   * own redline, or they earn a flat rate per installed watt.
+   */
+  repPayMode: "redline" | "per_watt";
   /** The partner's own mark, when one has been uploaded or fetched. */
   logoUrl: string | null;
   /** How many catalogue items this lender approves. */
@@ -753,6 +759,7 @@ function LenderCard({
     portalUrl: lender.portalUrl ?? "",
     applyUrl: lender.applyUrl ?? "",
     creditInstructions: lender.creditInstructions ?? "",
+    repPayMode: lender.repPayMode,
   });
   const resetDraft = () =>
     setDraft({
@@ -761,6 +768,7 @@ function LenderCard({
       portalUrl: lender.portalUrl ?? "",
       applyUrl: lender.applyUrl ?? "",
       creditInstructions: lender.creditInstructions ?? "",
+      repPayMode: lender.repPayMode,
     });
 
   type ActionResult = { ok: boolean; error?: string; message?: string };
@@ -787,6 +795,7 @@ function LenderCard({
           portalUrl: draft.portalUrl.trim() || null,
           applyUrl: draft.applyUrl.trim() || null,
           creditInstructions: draft.creditInstructions.trim() || null,
+          repPayMode: draft.repPayMode,
         }),
       "Saved"
     );
@@ -825,6 +834,28 @@ function LenderCard({
             value={draft.applyUrl}
             onChange={(v) => setDraft((d) => ({ ...d, applyUrl: v }))}
           />
+          {/* Pay mode is a property of the PARTNER, not of the rep — a fixed-pay
+              lender pays a flat rate to everyone, and the alternative is that
+              somebody hardcodes a name check on "Amos" that a rename breaks. */}
+          <div className="space-y-1 rounded-lg border border-gold/30 bg-gold/5 p-2.5">
+            <Label className="text-xs">How reps are paid on this lender</Label>
+            <Select
+              value={draft.repPayMode}
+              onValueChange={(v) => setDraft((d) => ({ ...d, repPayMode: v as LenderRow["repPayMode"] }))}
+            >
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="redline">Redline — rep keeps everything above their own net $/W</SelectItem>
+                <SelectItem value="per_watt">Fixed $/W — rep earns their flat rate per installed watt</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Each rep&rsquo;s own redline and fixed rate live on their{" "}
+              <Link href="/portal/team" className="underline underline-offset-2">team profile</Link>.
+              Changing this only affects deals whose commission hasn&rsquo;t been generated yet.
+            </p>
+          </div>
+
           <div className="space-y-1">
             <Label className="text-xs" htmlFor={`ld-${lender.id}-credit`}>
               How to run credit with this partner
@@ -915,6 +946,16 @@ function LenderCard({
             <div className="flex justify-between gap-2">
               <dt className="text-muted-foreground">Deals designed for it</dt>
               <dd className="tabular-nums font-medium">{lender.dealCount}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-muted-foreground">Rep pay</dt>
+              <dd className="font-medium">
+                {lender.repPayMode === "per_watt" ? (
+                  <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] text-gold-muted">Fixed $/W</span>
+                ) : (
+                  <span className="text-muted-foreground">Redline</span>
+                )}
+              </dd>
             </div>
           </dl>
 

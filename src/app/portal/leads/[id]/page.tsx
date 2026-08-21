@@ -17,7 +17,7 @@ import {
 import { requireUser, getSessionUser } from "@/server/auth/session";
 import { getLeadDetail, getLeadFormOptions } from "@/server/modules/leads/queries";
 import { getDealFinancials, getProjectPayout } from "@/server/modules/costs/queries";
-import { isStageCommissionEligible, COMMISSION_GATE_LABEL } from "@/server/modules/payroll/eligibility";
+import { isStageCommissionEligible, commissionGateLabel } from "@/server/modules/payroll/eligibility";
 import { DealFinancialsCard } from "@/components/portal/deal-financials";
 import { ProjectPayoutCard } from "@/components/portal/project-payout";
 import { can } from "@/server/rbac/guards";
@@ -1219,7 +1219,7 @@ export default async function LeadDetailPage({
                       projectId={project.id}
                       canManage={can(user, "update", "Commission")}
                       commissionEligible={commissionEligible}
-                      gateLabel={COMMISSION_GATE_LABEL}
+                      gateLabel={commissionGateLabel(lead.vertical)}
                     />
                   )}
                   {project && payout && (
