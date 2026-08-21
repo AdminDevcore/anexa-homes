@@ -164,8 +164,13 @@ export async function computeCommissionsForProject(
   }
 
   // ---- Rule-based commissions: crew (installer) + project manager -----------
+  // Matched on the DEAL's vertical, for the same reason the overrides below are:
+  // payroll can run from a cron with no workspace context, and the isolation
+  // extension only scopes a query when there IS one. Without this clause an
+  // unscoped run pays every solar rule out of a roofing job's contract — a
+  // "Solar PM — 1%" line landing on a re-roof.
   const rules = await db.commissionRule.findMany({
-    where: { companyId, active: true, role: { in: ["installer", "project_manager"] } },
+    where: { companyId, vertical: project.vertical, active: true, role: { in: ["installer", "project_manager"] } },
   });
   const installerUserIds = new Set<string>();
   for (const a of project.crewAssignments) for (const m of a.crew.members) if (m.userId) installerUserIds.add(m.userId);

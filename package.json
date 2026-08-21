@@ -14,6 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-demo": "tsx prisma/seed-local-demo.ts",
+    "db:clone-live": "bash scripts/clone-live-to-local.sh",
     "db:reset": "prisma migrate reset --force",
     "db:studio": "prisma studio",
     "e2e": "playwright test",

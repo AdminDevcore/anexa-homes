@@ -59,6 +59,11 @@ const ALLOWED: Record<string, string> = {
   // both sides in order to prove the two pay models never reach each other.
   "src/server/modules/payroll/__tests__/solar-pay.itest.ts":
     'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
+  // And again for the rule suite, which proves a CommissionRule written for one
+  // vertical never pays on the other's deals. Same unextended client, same
+  // reason: the fixtures are deliberately cross-vertical.
+  "src/server/modules/payroll/__tests__/rule-vertical.itest.ts":
+    'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
   // A project number is unique per COMPANY, not per workspace, so the highest
   // one has to be read across every vertical — a scoped read sees only the
   // workspace being acted in, which on a solar deal at a roofing company is

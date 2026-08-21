@@ -52,3 +52,8 @@ next-env.d.ts
 # including in an unrelated dev server that happens to be running. Building
 # into a scratch dist dir must never be able to do that again.
 /.next-*
+
+# Database dumps pulled from live. These are a complete copy of production —
+# every customer record and every uploaded document — so they must never be
+# committed, however convenient it looks.
+/.backups

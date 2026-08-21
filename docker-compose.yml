@@ -1,6 +1,10 @@
 services:
   db:
-    image: postgres:16-alpine
+    # Matches production (Supabase runs PostgreSQL 17.6). A dump taken from a v17
+    # server does not restore into a v16 one — it carries SET statements v16 has
+    # never heard of — so `npm run db:clone-live` is only possible while these
+    # two versions agree. Do not downgrade this image.
+    image: postgres:17-alpine
     container_name: anexa_db
     restart: unless-stopped
     environment:
@@ -10,7 +14,11 @@ services:
     ports:
       - "5544:5432"
     volumes:
-      - anexa_pgdata:/var/lib/postgresql/data
+      # A v17 server cannot open a data directory initialised by v16, so the
+      # upgrade needs its own volume. The old `anexa_pgdata` is deliberately left
+      # in place — it still holds the pre-clone seed database if it is ever
+      # wanted back (`docker volume ls`).
+      - anexa_pgdata17:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U anexa -d anexa"]
       interval: 5s
@@ -19,3 +27,4 @@ services:
 
 volumes:
   anexa_pgdata:
+  anexa_pgdata17:

@@ -4,6 +4,7 @@ import { LoginForm } from "@/components/auth/login-form";
 import { getSessionUser, dashboardPathForRole } from "@/server/auth/session";
 import { isGoogleEnabled } from "@/server/auth/google";
 import { GOOGLE_ERROR_COPY, type GoogleDenialReason } from "@/lib/google-signin";
+import { getDemoAccounts } from "@/server/auth/demo-accounts";
 
 export const metadata: Metadata = { title: "Sign in" };
 
@@ -40,6 +41,9 @@ export default async function LoginPage({
 
   const copy = PORTAL_COPY[portal ?? "team"] ?? PORTAL_COPY.team;
 
+  // Empty in production — see the guards in getDemoAccounts.
+  const demoAccounts = await getDemoAccounts();
+
   return (
     <div>
       <div className="mb-8">
@@ -49,6 +53,7 @@ export default async function LoginPage({
       <LoginForm
         next={next}
         googleEnabled={isGoogleEnabled}
+        demoAccounts={demoAccounts}
         // Only OUR refusal codes are rendered. Auth.js puts its own generic
         // codes ("AccessDenied", "Configuration") on this same param, and
         // echoing an unknown one would show the user a word from a library.

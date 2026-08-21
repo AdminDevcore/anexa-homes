@@ -10,20 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Demo accounts (with the shared password) are only shown when explicitly enabled.
-// Keep NEXT_PUBLIC_DEMO_MODE unset in production so this block is stripped.
-const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
-
-const DEMO_ACCOUNTS = [
-  { label: "Owner (Super Admin)", email: "owner@anexahomes.com" },
-  { label: "Admin", email: "admin@anexahomes.com" },
-  { label: "Sales Manager", email: "manager@anexahomes.com" },
-  { label: "Sales Rep", email: "rep@anexahomes.com" },
-  { label: "Canvasser", email: "canvasser@anexahomes.com" },
-  { label: "Marketing", email: "marketing@anexahomes.com" },
-  { label: "Installer / Crew", email: "installer@anexahomes.com" },
-  { label: "Accounting", email: "accounting@anexahomes.com" },
-];
+// The demo quick-login panel. The accounts come from the server (see
+// server/auth/demo-accounts.ts) so the list reflects whoever is actually in the
+// database and no real email address is baked into this bundle. An empty list —
+// which is what production always sends — renders nothing.
+const DEMO_PASSWORD = "Passw0rd!";
 
 /** Google's mark, inline so the button needs no network request to render. */
 function GoogleGlyph() {
@@ -41,11 +32,14 @@ export function LoginForm({
   next,
   googleEnabled = false,
   googleError = null,
+  demoAccounts = [],
 }: {
   next?: string;
   googleEnabled?: boolean;
   /** A sentence explaining a refused Google sign-in, already resolved. */
   googleError?: string | null;
+  /** Quick-login accounts. Always empty in production. */
+  demoAccounts?: { email: string; label: string }[];
 }) {
   const [state, formAction, pending] = useActionState<LoginState, FormData>(
     loginAction,
@@ -62,7 +56,7 @@ export function LoginForm({
 
   function fillDemo(demoEmail: string) {
     setEmail(demoEmail);
-    setPassword("Passw0rd!");
+    setPassword(DEMO_PASSWORD);
   }
 
   return (
@@ -161,13 +155,13 @@ export function LoginForm({
         </Button>
       </form>
 
-      {DEMO_MODE && (
+      {demoAccounts.length > 0 && (
         <div className="rounded-xl border border-border bg-muted/40 p-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Demo accounts · password <span className="text-foreground">Passw0rd!</span>
+            Demo accounts · password <span className="text-foreground">{DEMO_PASSWORD}</span>
           </p>
           <div className="mt-3 grid grid-cols-2 gap-1.5">
-            {DEMO_ACCOUNTS.map((a) => (
+            {demoAccounts.map((a) => (
               <button
                 key={a.email}
                 type="button"
