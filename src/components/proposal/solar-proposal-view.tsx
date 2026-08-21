@@ -523,7 +523,7 @@ export function SolarProposalView({
         <ol className="space-y-3">
           {SOLAR_TIMELINE.map((step, i) => (
             <li key={step.key} className="flex gap-3">
-              <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-amber-100 text-xs font-semibold text-amber-800">
+              <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border chip-warning text-xs font-semibold">
                 {i + 1}
               </span>
               <div>

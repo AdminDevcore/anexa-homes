@@ -161,7 +161,7 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
         {item.model}
       </span>
       {item.avlYear != null && (
-        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-800">
+        <span className="rounded-full border chip-info px-2 py-0.5 text-[11px] font-medium">
           AVL {item.avlYear}
         </span>
       )}
@@ -171,13 +171,13 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
         </span>
       )}
       {named.map((l) => (
-        <span key={l.id} className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-800">
+        <span key={l.id} className="rounded-full border chip-violet px-2 py-0.5 text-[11px] font-medium">
           {l.name}
         </span>
       ))}
       {lenders.length > 0 && named.length === 0 && (
         <span
-          className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800"
+          className="rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium"
           title="Not on any lender's approved list, so it is hidden whenever a lender is selected on a deal"
         >
           no lender
@@ -189,12 +189,12 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
         </span>
       ) : null}
       {item.crossoverKind === "reroof" && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+        <span className="inline-flex items-center gap-1 rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">
           <Home className="size-3" /> crossover
         </span>
       )}
       {item.crossoverKind === "mpu" && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+        <span className="inline-flex items-center gap-1 rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">
           <Zap className="size-3" /> crossover
         </span>
       )}
@@ -202,7 +202,7 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
         <span className="text-[11px] text-muted-foreground">rank {item.rank}</span>
       )}
       {item.isDefault && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+        <span className="inline-flex items-center gap-1 rounded-full border chip-good px-2 py-0.5 text-[11px] font-medium">
           <Star className="size-3" /> default
         </span>
       )}

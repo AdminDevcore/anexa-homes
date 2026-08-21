@@ -352,7 +352,7 @@ function GenericFolder({
               <div className="group relative aspect-square overflow-hidden rounded-lg border border-border">
                 <a href={`/portal/files/${f.id}`} target="_blank" rel="noreferrer">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/portal/files/${f.id}`} alt={f.name} className="size-full object-cover" />
+                  <img src={`/portal/files/${f.id}`} alt={f.name} className="size-full object-cover" loading="lazy" decoding="async" />
                 </a>
                 {canDelete && (
                   <button

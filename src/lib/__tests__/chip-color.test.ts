@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hexToOklch, parseHex, stageChipStyle, stageAccent } from "../chip-color";
+import { hexToOklch, parseHex, stageChipStyle, stageAccent, statusChipStyle } from "../chip-color";
 
 /** OKLCH string -> sRGB, so contrast can be asserted rather than eyeballed. */
 function oklchStringToRgb(s: string): [number, number, number] {
@@ -108,5 +108,44 @@ describe("stageAccent", () => {
   it("returns a saturated, fixed-depth colour for dots and rails", () => {
     expect(stageAccent("#22C55E")).toMatch(/^oklch\(0\.62 0\.16 /);
     expect(stageAccent(null)).toMatch(/^oklch\(/);
+  });
+});
+
+describe("statusChipStyle", () => {
+  const KINDS = ["good", "warning", "danger", "info", "neutral"] as const;
+
+  it("clears WCAG AA for every meaning", () => {
+    for (const k of KINDS) {
+      const s = statusChipStyle(k);
+      expect(contrast(s.color, s.backgroundColor), k).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("holds lightness and chroma fixed, so only the hue differs", () => {
+    // This is the actual design guarantee, and it is a PERCEPTUAL one: OKLCH
+    // lightness is perceptually uniform, WCAG relative luminance is not, so
+    // equal L does not mean an equal WCAG number across hues. Assert what is
+    // really promised — identical L and C — rather than an identity that the
+    // contrast formula was never going to give.
+    const lc = (s: string) => s.match(/oklch\(([\d.]+) ([\d.]+) /)!.slice(1, 3).join(",");
+    const chromatic = KINDS.filter((k) => k !== "neutral");
+    expect(new Set(chromatic.map((k) => lc(statusChipStyle(k).color))).size).toBe(1);
+    expect(new Set(chromatic.map((k) => lc(statusChipStyle(k).backgroundColor))).size).toBe(1);
+  });
+
+  it("keeps every status within a hair of the same contrast", () => {
+    // What it replaces: seven amber recipes alone spanning 4.54:1 to 8.77:1 —
+    // a range of 4.23, so chips shouted at seven different volumes. These land
+    // inside 0.6 of each other.
+    const ratios = KINDS.map((k) => {
+      const s = statusChipStyle(k);
+      return contrast(s.color, s.backgroundColor);
+    });
+    expect(Math.max(...ratios) - Math.min(...ratios)).toBeLessThan(0.6);
+  });
+
+  it("weighs the same as a stage chip, so the two can sit in one row", () => {
+    const lc = (s: string) => s.match(/oklch\(([\d.]+) ([\d.]+) /)!.slice(1, 3).join(",");
+    expect(lc(statusChipStyle("good").color)).toBe(lc(stageChipStyle("#22C55E").color));
   });
 });

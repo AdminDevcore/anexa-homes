@@ -118,7 +118,7 @@ export function TestimonialsCarousel({
                     aria-label="View review photo"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="Review photo" loading="lazy" className="size-16 object-cover" />
+                    <img src={url} alt="Review photo" loading="lazy" className="size-16 object-cover" decoding="async" />
                   </button>
                 ))}
                 {t.photoUrls.length > 3 ? (
@@ -190,6 +190,7 @@ export function TestimonialsCarousel({
             src={lightbox.urls[lightbox.i]}
             alt="Review photo"
             onClick={(e) => e.stopPropagation()}
+            decoding="async"
             className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
           />
           {lightbox.urls.length > 1 ? (

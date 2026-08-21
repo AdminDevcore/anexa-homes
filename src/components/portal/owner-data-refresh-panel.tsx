@@ -45,9 +45,9 @@ export function OwnerDataRefreshPanel({
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-semibold">Homeowner data</h2>
         {enabled ? (
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Provider connected</span>
+          <span className="rounded-full border chip-good px-2 py-0.5 text-[11px] font-medium">Provider connected</span>
         ) : (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">No provider key</span>
+          <span className="rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">No provider key</span>
         )}
       </div>
       <div className="grid grid-cols-3 gap-3 text-sm">

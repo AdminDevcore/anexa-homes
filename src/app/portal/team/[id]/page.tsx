@@ -155,9 +155,9 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                 <ShieldCheck className="size-4 text-gold" />
                 <h2 className="font-display text-lg font-semibold">Onboarding &amp; Payroll</h2>
                 {onboarding?.completedAt ? (
-                  <span className="ml-auto rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600">Completed</span>
+                  <span className="ml-auto rounded-full border bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium">Completed</span>
                 ) : (
-                  <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">Pending</span>
+                  <span className="ml-auto rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">Pending</span>
                 )}
               </div>
               {onboarding ? (

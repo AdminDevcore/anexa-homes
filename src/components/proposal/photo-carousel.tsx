@@ -71,7 +71,7 @@ export function PhotoCarousel({ photos, label }: { photos: CarouselPhoto[]; labe
           >
             <button type="button" onClick={() => setLightbox(i)} className="block w-full text-left" aria-label="Open photo full screen">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt={p.caption || label || "Inspection photo"} className="aspect-[4/3] w-full object-cover transition-transform duration-700 group-hover:scale-105" />
+              <img src={p.url} alt={p.caption || label || "Inspection photo"} className="aspect-[4/3] w-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy" decoding="async" />
               {p.caption && (
                 <figcaption className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-4 pb-3 pt-10 text-sm font-medium text-white">
                   {p.caption}
@@ -148,7 +148,7 @@ export function PhotoCarousel({ photos, label }: { photos: CarouselPhoto[]; labe
           )}
           <figure className="max-h-full max-w-5xl" onClick={(e) => e.stopPropagation()}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photos[lightbox].url} alt={photos[lightbox].caption || ""} className="max-h-[82vh] w-auto rounded-lg object-contain" />
+            <img src={photos[lightbox].url} alt={photos[lightbox].caption || ""} className="max-h-[82vh] w-auto rounded-lg object-contain" loading="lazy" decoding="async" />
             {photos[lightbox].caption && <figcaption className="mt-3 text-center text-sm text-white/80">{photos[lightbox].caption}</figcaption>}
           </figure>
         </div>

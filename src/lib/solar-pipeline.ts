@@ -65,11 +65,11 @@ export const BLOCKER_LABEL: Record<BlockerParty, string> = {
 
 /** Colour per blocker so the aging report reads at a glance. */
 export const BLOCKER_TONE: Record<BlockerParty, string> = {
-  us: "bg-red-100 text-red-700", // the only one that is our fault
-  ahj: "bg-violet-100 text-violet-700",
-  utility: "bg-sky-100 text-sky-700",
-  customer: "bg-amber-100 text-amber-700",
-  lender: "bg-emerald-100 text-emerald-700",
+  us: "chip-danger", // the only one that is our fault
+  ahj: "chip-violet",
+  utility: "chip-info",
+  customer: "chip-warning",
+  lender: "chip-good",
 };
 
 export type SolarStageDef = {

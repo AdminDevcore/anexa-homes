@@ -83,7 +83,7 @@ function MessageAttachments({ attachments, mine }: { attachments: Attachment[]; 
           {images.map((a) => (
             <a key={a.id} href={a.url} target="_blank" rel="noreferrer" title={a.name}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={a.url} alt={a.name} className="size-32 rounded-lg border border-border object-cover" />
+              <img src={a.url} alt={a.name} className="size-32 rounded-lg border border-border object-cover" loading="lazy" decoding="async" />
             </a>
           ))}
         </div>
@@ -347,7 +347,7 @@ export function ChatClient() {
                     <div key={a.id} className="relative">
                       {a.kind === "photo" ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={a.url} alt={a.name} className="size-16 rounded-lg border border-border object-cover" />
+                        <img src={a.url} alt={a.name} className="size-16 rounded-lg border border-border object-cover" loading="lazy" decoding="async" />
                       ) : (
                         <div className="flex size-16 flex-col items-center justify-center gap-1 rounded-lg border border-border bg-muted p-1 text-center">
                           <FileText className="size-5 text-muted-foreground" />

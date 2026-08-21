@@ -89,8 +89,8 @@ export function PipelineStagesManager({ pipelineId, stages }: { pipelineId: stri
             <div className="flex items-center gap-3">
               <span className="size-3 rounded-full" style={{ backgroundColor: s.color }} />
               <span className="font-medium">{s.name}</span>
-              {s.isWon && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">Won</span>}
-              {s.isLost && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">Lost</span>}
+              {s.isWon && <span className="rounded-full border chip-good px-2 py-0.5 text-[10px] font-medium">Won</span>}
+              {s.isLost && <span className="rounded-full border chip-danger px-2 py-0.5 text-[10px] font-medium">Lost</span>}
               {s.escalationDays > 0 && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground" title="Extra days after the limit before the deal escalates">
                   +{s.escalationDays}d escalate
@@ -126,7 +126,7 @@ function StageOwnership({ stage }: { stage: Stage }) {
   return (
     <div className="mr-1 hidden items-center gap-1.5 sm:flex">
       {stage.isActionRequired && (
-        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+        <span className="rounded-full border chip-danger px-2 py-0.5 text-[11px] font-medium">
           action required
         </span>
       )}
@@ -172,7 +172,7 @@ function InlineDayLimit({ stage }: { stage: Stage }) {
   if (stage.stageType === "externally_blocked") {
     return (
       <span
-        className="mr-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700"
+        className="mr-1 rounded-full border chip-info px-2 py-0.5 text-[11px] font-medium"
         title="Waiting on a third party. Tracked by follow-up cadence, not a deadline."
       >
         chase {stage.followUpDays || "—"}d

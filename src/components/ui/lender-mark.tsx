@@ -50,7 +50,7 @@ export function LenderMark({
         {/* eslint-disable-next-line @next/next/no-img-element -- served from a
             route, not the image pipeline, and rendered on the public proposal
             where next/image's optimiser is not in play. */}
-        <img src={logoUrl} alt="" className="size-full object-contain" />
+        <img src={logoUrl} alt="" className="size-full object-contain" loading="lazy" decoding="async" />
       </span>
     );
   }

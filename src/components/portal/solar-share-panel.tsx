@@ -101,7 +101,7 @@ export function SolarSharePanel({
             Share v{version}
           </h4>
           {sentAt && (
-            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+            <span className="rounded-full border chip-info px-2 py-0.5 text-[11px] font-medium">
               sent {new Date(sentAt).toLocaleDateString()}
               {viewedAt ? " · opened" : " · not opened yet"}
             </span>

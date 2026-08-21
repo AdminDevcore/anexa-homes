@@ -37,9 +37,9 @@ export function stageTiming(
 }
 
 export const STAGE_STATUS_META: Record<Exclude<StageStatus, "none">, { dot: string; label: string; classes: string }> = {
-  on_track: { dot: "🟢", label: "On Track", classes: "bg-emerald-100 text-emerald-700" },
-  due_soon: { dot: "🟡", label: "Due Soon", classes: "bg-amber-100 text-amber-700" },
-  overdue: { dot: "🔴", label: "Overdue", classes: "bg-red-100 text-red-700" },
+  on_track: { dot: "🟢", label: "On Track", classes: "chip-good" },
+  due_soon: { dot: "🟡", label: "Due Soon", classes: "chip-warning" },
+  overdue: { dot: "🔴", label: "Overdue", classes: "chip-danger" },
 };
 
 /** Short status text incl. "Overdue by N days". */
@@ -117,11 +117,11 @@ export const CHASE_STATUS_META: Record<
   Exclude<ChaseStatus, "none">,
   { dot: string; label: string; classes: string }
 > = {
-  recently_touched: { dot: "🟢", label: "Followed up", classes: "bg-emerald-100 text-emerald-700" },
-  chase_due: { dot: "🟡", label: "Follow up due", classes: "bg-amber-100 text-amber-700" },
+  recently_touched: { dot: "🟢", label: "Followed up", classes: "chip-good" },
+  chase_due: { dot: "🟡", label: "Follow up due", classes: "chip-warning" },
   // Amber, not red: the deal is not late, OUR chasing is. Red stays reserved
   // for internally-owned work that has actually blown its deadline.
-  chase_overdue: { dot: "🟠", label: "Follow up overdue", classes: "bg-orange-100 text-orange-700" },
+  chase_overdue: { dot: "🟠", label: "Follow up overdue", classes: "chip-danger" },
 };
 
 /** e.g. "Follow up due · 8d since last touch". Never says the deal is overdue. */

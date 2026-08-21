@@ -73,13 +73,13 @@ export function DealStageTimeline({ timeline }: { timeline: Timeline }) {
                       {fmtDate(r.enteredAt)} → {r.exitedAt ? fmtDate(r.exitedAt) : "now"}
                     </span>
                     {r.completion && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+                      <span className="inline-flex items-center gap-1 rounded-full border chip-good px-2 py-0.5 font-medium">
                         <CheckCircle2 className="size-3" />
                         {formatDuration(timeline.totalDays)} from start
                       </span>
                     )}
                     {slowest && r.id === slowest.id && rows.length > 1 && !r.completion && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+                      <span className="inline-flex items-center gap-1 rounded-full border chip-warning px-2 py-0.5 font-medium">
                         <Timer className="size-3" /> Longest step
                       </span>
                     )}

@@ -150,7 +150,7 @@ export function PhotoGroupBody({
                   <div key={p.id} className="group relative aspect-square overflow-hidden rounded-lg border border-border">
                     <a href={`/portal/files/${p.id}`} target="_blank" rel="noreferrer">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={`/portal/files/${p.id}`} alt={p.name} className="size-full object-cover" />
+                      <img src={`/portal/files/${p.id}`} alt={p.name} className="size-full object-cover" loading="lazy" decoding="async" />
                     </a>
                     {canDelete && (
                       <button

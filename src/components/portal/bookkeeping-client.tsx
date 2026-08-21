@@ -247,7 +247,7 @@ export function BookkeepingClient({
                       {/* Click the description to open the transaction detail. */}
                       <div className="flex items-center gap-1.5">
                         <button onClick={() => setDetail(t)} className="text-left font-medium hover:text-gold-muted hover:underline">{t.description}</button>
-                        {t.autoSuggested && !t.approved && <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">suggested</span>}
+                        {t.autoSuggested && !t.approved && <span className="rounded-full border chip-warning px-1.5 py-0.5 text-[10px] font-medium">suggested</span>}
                       </div>
                       {t.account && <div className="text-xs text-muted-foreground">{t.account}</div>}
                     </td>
@@ -534,7 +534,7 @@ function ManagePanel({ data, canEdit, onChanged }: { data: BookkeepingData; canE
           </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             {data.connected ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full border chip-good px-2.5 py-1 text-xs font-medium">
                 <CheckCircle2 className="size-3.5" /> Connected · {data.provider}
               </span>
             ) : (

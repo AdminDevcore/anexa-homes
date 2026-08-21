@@ -97,7 +97,7 @@ function StageRow({ stage, canEdit }: { stage: Stage; canEdit: boolean }) {
       <span className="min-w-[13rem] flex-1 text-sm font-medium">{stage.name}</span>
 
       {stage.isActionRequired && (
-        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+        <span className="rounded-full border chip-danger px-2 py-0.5 text-[11px] font-medium">
           action required
         </span>
       )}

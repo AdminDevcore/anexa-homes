@@ -272,7 +272,7 @@ function Card({
               </span>
             )}
             {lead.inspectionOutcome && (
-              <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-600">
+              <span className="inline-flex max-w-full items-center gap-1 rounded-full border bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium">
                 <ClipboardCheck className="size-3 shrink-0" /> <span className="truncate">{lead.inspectionOutcome}</span>
               </span>
             )}

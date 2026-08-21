@@ -87,3 +87,42 @@ export function stageAccent(hex: string | null | undefined): string {
   const neutral = parsed.c < GREY_CHROMA;
   return `oklch(0.62 ${neutral ? 0.02 : 0.16} ${parsed.h.toFixed(1)})`;
 }
+
+/**
+ * Semantic status chips — one recipe per meaning, one weight for all of them.
+ *
+ * The portal grew seven different recipes for amber alone: bg-50/text-900,
+ * bg-100/text-700, bg-100/text-800, bg-50/text-800, bg-50/text-700 and two
+ * more. Every one of them is legible on its own — Tailwind's ramps are well
+ * built, and all twelve pairings in use clear WCAG AA. The problem is that they
+ * clear it at wildly different volumes: 4.54:1 up to 8.77:1. Chips shouting at
+ * seven different levels for no reason is what makes a screen look assembled
+ * rather than designed.
+ *
+ * These share the exact lightness and chroma the stage chips use, so a status
+ * chip and a stage chip sitting in the same row finally weigh the same.
+ */
+export type StatusKind = "good" | "warning" | "danger" | "info" | "neutral";
+
+/** Hue per meaning. Only the hue differs; L and C are fixed above. */
+const STATUS_HUE: Record<StatusKind, number> = {
+  good: 155,     // green
+  warning: 75,   // amber
+  danger: 27,    // red
+  info: 240,     // blue
+  neutral: 264,  // the same blue the app's greys carry
+};
+
+export function statusChipStyle(kind: StatusKind): ChipStyle {
+  const hue = STATUS_HUE[kind];
+  const k = kind === "neutral" ? 0.28 : 1;
+  return {
+    backgroundColor: `oklch(${CHIP.bgL} ${(CHIP.bgC * k).toFixed(4)} ${hue})`,
+    color: `oklch(${CHIP.fgL} ${(CHIP.fgC * k).toFixed(4)} ${hue})`,
+    borderColor: `oklch(${CHIP.borderL} ${(CHIP.borderC * k).toFixed(4)} ${hue})`,
+  };
+}
+
+/** The full chip, shape and colour, for a `style` + `className` pair. */
+export const STATUS_CHIP_CLASS =
+  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-medium";

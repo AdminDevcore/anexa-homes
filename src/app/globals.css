@@ -806,3 +806,42 @@ h1, h2, h3 {
   --text-3xl--line-height: 2.125rem;
   --text-3xl--letter-spacing: -0.024em;
 }
+
+/* ── Status chips ─────────────────────────────────────────────────────────
+   One recipe per meaning, one weight for all of them.
+
+   The portal grew seven different recipes for amber alone — bg-50/text-900,
+   bg-100/text-700, bg-100/text-800, bg-50/text-800, bg-50/text-700 and more.
+   Every one is legible; all twelve pairings in use clear WCAG AA. They just
+   clear it at wildly different volumes, 4.54:1 through 8.77:1, so chips
+   shouted at seven levels for no reason. These land within 0.44 of each other.
+
+   Lightness and chroma are the same numbers lib/chip-color.ts pins for stage
+   chips, so a status chip and a stage chip in the same table row finally weigh
+   the same. Classes rather than a style prop, so the tone maps that store class
+   strings migrate by swapping the string. */
+.chip-good,
+.chip-warning,
+.chip-danger,
+.chip-info,
+.chip-violet,
+.chip-neutral {
+  background-color: oklch(0.962 0.032 var(--chip-h));
+  color: oklch(0.44 0.105 var(--chip-h));
+  border-color: oklch(0.9 0.045 var(--chip-h));
+}
+.chip-good { --chip-h: 155; }
+.chip-warning { --chip-h: 75; }
+.chip-danger { --chip-h: 27; }
+.chip-info { --chip-h: 240; }
+/* Identity, not severity: the AHJ is a party we wait on, and needs a hue of
+   its own that none of the status meanings has claimed. */
+.chip-violet { --chip-h: 300; }
+/* Neutral carries the hue but almost none of the chroma: a status with no
+   colour meaning should not be handed one. */
+.chip-neutral {
+  --chip-h: 264;
+  background-color: oklch(0.962 0.009 264);
+  color: oklch(0.44 0.029 264);
+  border-color: oklch(0.9 0.013 264);
+}

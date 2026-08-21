@@ -182,7 +182,7 @@ export function ReviewForm() {
             {photos.map((p, i) => (
               <div key={i} className="relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.dataUrl} alt={p.name} className="size-16 rounded-lg object-cover ring-1 ring-border" />
+                <img src={p.dataUrl} alt={p.name} className="size-16 rounded-lg object-cover ring-1 ring-border" loading="lazy" decoding="async" />
                 <button
                   type="button"
                   onClick={() => setPhotos((prev) => prev.filter((_, k) => k !== i))}

@@ -361,7 +361,7 @@ export function PresentationBuilder({
               {data.proposal.photoGroups.flatMap((g) => g.photos).map((p) => (
                 <div key={p.id} className="flex items-center gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt="" className="size-12 shrink-0 rounded object-cover" />
+                  <img src={p.url} alt="" className="size-12 shrink-0 rounded object-cover" loading="lazy" decoding="async" />
                   <Input
                     defaultValue={content.photoCaptions?.[p.id] ?? ""}
                     placeholder={`Caption for ${p.category}`}

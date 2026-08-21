@@ -302,7 +302,7 @@ function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEd
     <div>
       {outcome && !picking ? (
         <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2.5 py-1 text-xs font-medium text-blue-600">
+          <span className="inline-flex items-center gap-1 rounded-full border bg-blue-500/15 px-2.5 py-1 text-xs font-medium">
             <ClipboardCheck className="size-3" /> {outcome}
           </span>
           {canEdit && (

@@ -166,7 +166,7 @@ export function ReviewsManager({
                     <div className="flex shrink-0 flex-wrap gap-2 sm:w-16">
                       {r.photoUrls.map((url, i) => (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img key={i} src={url} alt="Review photo" className="size-16 rounded-lg object-cover ring-1 ring-border" />
+                        <img key={i} src={url} alt="Review photo" className="size-16 rounded-lg object-cover ring-1 ring-border" loading="lazy" decoding="async" />
                       ))}
                     </div>
                   ) : (
