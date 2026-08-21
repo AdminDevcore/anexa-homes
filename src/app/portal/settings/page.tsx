@@ -7,6 +7,8 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
 import { visibleSettingsSections } from "@/lib/settings-sections";
+import { workspaceSetupGaps } from "@/server/modules/settings/workspace-health";
+import { WorkspaceSetupPanel } from "@/components/portal/workspace-setup-panel";
 
 export const metadata = { title: "Settings" };
 
@@ -15,10 +17,27 @@ export default async function SettingsPage() {
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
   const vertical = await getActiveVertical(user);
 
-  const company = await prisma.company.findUnique({
-    where: { id: user.companyId },
-    include: { settings: true, _count: { select: { users: true, pipelines: true, documentTemplates: true } } },
-  });
+  // Only an admin can act on a gap, so only an admin is shown one.
+  const gaps = can(user, "update", "Settings")
+    ? await workspaceSetupGaps(user.companyId, vertical)
+    : [];
+
+  // Users is a company-wide count on purpose — one legal entity, one roster.
+  //
+  // Pipelines and document templates are NOT: they are vertical-isolated, and a
+  // nested `_count` on Company is a relation count that the isolation extension
+  // never sees, so these tiles used to report both workspaces' rows while every
+  // other number on the page was this workspace's. Counted directly through the
+  // scoped client instead, or the tile says "8" one line under a panel saying
+  // there is nothing to send for signature.
+  const [company, pipelines, documentTemplates] = await Promise.all([
+    prisma.company.findUnique({
+      where: { id: user.companyId },
+      include: { settings: true, _count: { select: { users: true } } },
+    }),
+    prisma.pipeline.count({ where: { companyId: user.companyId } }),
+    prisma.documentTemplate.count({ where: { companyId: user.companyId } }),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -27,6 +46,8 @@ export default async function SettingsPage() {
         description={`Customize ${company?.name ?? "your workspace"} — pipeline, fields, documents, commissions, and branding.`}
       />
 
+      <WorkspaceSetupPanel gaps={gaps} vertical={vertical} />
+
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="flex items-center gap-2">
           <SettingsIcon className="size-4 text-gold" />
@@ -34,8 +55,8 @@ export default async function SettingsPage() {
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <Mini label="Users" value={company?._count.users ?? 0} />
-          <Mini label="Pipelines" value={company?._count.pipelines ?? 0} />
-          <Mini label="Doc Templates" value={company?._count.documentTemplates ?? 0} />
+          <Mini label="Pipelines" value={pipelines} />
+          <Mini label="Doc Templates" value={documentTemplates} />
         </div>
       </div>
 

@@ -1,0 +1,135 @@
+import { prisma } from "@/server/db/client";
+import type { ActiveVertical } from "@/lib/vertical";
+
+/**
+ * "What has this workspace never been configured with?"
+ *
+ * Per-vertical config is vertical-isolated, so standing up a second workspace
+ * does NOT inherit the first one's setup: Roofing's 15 notification rules, its
+ * lead sources and its photo checklists are invisible from Solar, and a table
+ * with no rows for the active vertical is indistinguishable from a feature
+ * nobody uses. Every one of these fails the same quiet way — a `findMany`
+ * returns nothing, a loop body never runs, and no error is raised.
+ *
+ * That is the bug class behind the blank Photo Templates page: not the missing
+ * create button, but the fact that "empty here, full over there" never
+ * announced itself. This makes it announce itself.
+ *
+ * Every count runs through the scoped client with no `vertical` filter of its
+ * own, so it answers for whichever workspace the viewer has open — the same
+ * isolation that caused the problem is what measures it.
+ */
+
+/**
+ * blocking — the workspace cannot do its job until this is set up.
+ * silent   — the feature exists but does nothing, with no error to notice.
+ */
+export type GapSeverity = "blocking" | "silent";
+
+export type SetupGap = {
+  key: string;
+  label: string;
+  href: string;
+  /** What actually goes wrong today, in the user's terms — not "no rows found". */
+  hint: string;
+  severity: GapSeverity;
+};
+
+type Check = Omit<SetupGap, "key"> & {
+  key: string;
+  /** Absent = every workspace. */
+  verticals?: ActiveVertical[];
+  count: (companyId: string) => Promise<number>;
+};
+
+export const SETUP_CHECKS: Check[] = [
+  {
+    key: "pipeline",
+    label: "Pipeline stages",
+    href: "/portal/settings/pipeline",
+    hint: "Deals in this workspace have no stages to move through.",
+    severity: "blocking",
+    count: (companyId) => prisma.pipeline.count({ where: { companyId } }),
+  },
+  {
+    key: "solar_equipment",
+    label: "Solar equipment",
+    href: "/portal/settings/solar-equipment",
+    hint: "The layout designer has no modules or inverters to place, so a system cannot be sized.",
+    severity: "blocking",
+    verticals: ["solar"],
+    count: (companyId) => prisma.solarEquipment.count({ where: { companyId } }),
+  },
+  {
+    key: "photo_templates",
+    label: "Photo checklists",
+    href: "/portal/settings/photo-templates",
+    hint: "Crews get a bare uploader instead of a checklist, and no photo is ever marked required.",
+    severity: "silent",
+    count: (companyId) => prisma.photoTemplate.count({ where: { companyId } }),
+  },
+  {
+    key: "notification_rules",
+    label: "Notification rules",
+    href: "/portal/settings/notifications",
+    hint: "No alert of any kind fires in this workspace — nobody is told when anything changes.",
+    severity: "silent",
+    count: (companyId) => prisma.notificationRule.count({ where: { companyId } }),
+  },
+  {
+    key: "document_templates",
+    label: "Document templates",
+    href: "/portal/documents",
+    hint: "There is nothing to send for signature on a deal in this workspace.",
+    severity: "silent",
+    count: (companyId) => prisma.documentTemplate.count({ where: { companyId } }),
+  },
+  {
+    key: "lead_sources",
+    label: "Lead sources",
+    href: "/portal/settings/lead-sources",
+    hint: "The lead source dropdown is empty, so where deals come from goes unrecorded.",
+    severity: "silent",
+    count: (companyId) => prisma.leadSource.count({ where: { companyId } }),
+  },
+  {
+    key: "commission_rules",
+    label: "Commission rules",
+    href: "/portal/settings/commissions",
+    // Worth stating precisely: the rules drive ONLY the crew/PM lines in
+    // payroll/engine.ts. A rep's own split comes from their profile, so payroll
+    // looks like it is working while installers quietly earn nothing.
+    hint: "Installer and project-manager commissions never generate. Rep commissions are unaffected — those come from each rep's own terms.",
+    severity: "silent",
+    count: (companyId) => prisma.commissionRule.count({ where: { companyId } }),
+  },
+  {
+    key: "scope_template",
+    label: "Scope of work catalog",
+    href: "/portal/settings/scope-template",
+    hint: "Estimates have no line items to build from.",
+    severity: "silent",
+    verticals: ["roofing"],
+    count: (companyId) => prisma.scopeTemplateItem.count({ where: { companyId } }),
+  },
+];
+
+/** The checks that apply to a workspace. */
+export function checksFor(vertical: ActiveVertical): Check[] {
+  return SETUP_CHECKS.filter((c) => !c.verticals || c.verticals.includes(vertical));
+}
+
+/**
+ * Everything this workspace has none of. Empty array = nothing to report, which
+ * is the state the panel should be in almost all the time.
+ */
+export async function workspaceSetupGaps(
+  companyId: string,
+  vertical: ActiveVertical
+): Promise<SetupGap[]> {
+  const checks = checksFor(vertical);
+  const counts = await Promise.all(checks.map((c) => c.count(companyId)));
+  return checks
+    .filter((_, i) => counts[i] === 0)
+    .map(({ key, label, href, hint, severity }) => ({ key, label, href, hint, severity }));
+}
