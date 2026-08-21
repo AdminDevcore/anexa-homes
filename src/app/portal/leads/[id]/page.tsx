@@ -31,7 +31,12 @@ import {
 } from "@/server/modules/settings/queries";
 import { claimStatusLabel, claimStatusOptionsFor } from "@/lib/claim-status";
 import { DealStageTimeline } from "@/components/portal/deal-stage-timeline";
-import { SolarSystemInfo } from "@/components/portal/solar-system-info";
+import {
+  SolarSystemInfo,
+  type SystemSpecs,
+  type SpecSource,
+} from "@/components/portal/solar-system-info";
+import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import { blockPanelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import {
@@ -259,7 +264,7 @@ export default async function LeadDetailPage({
 
   // Solar operations: the blocker/follow-up model and the re-roof crossover.
   // Roofing deals never render this — their stages are all internally owned.
-  const [solarDesign, solarFinance, solarProposals, creditApps, solarEquipment, solarLenders] =
+  const [solarDesign, solarFinance, solarProposals, creditApps, latestProposal, solarLenders] =
     isSolarDeal
     ? await Promise.all([
         prisma.solarDesign.findUnique({
@@ -286,18 +291,15 @@ export default async function LeadDetailPage({
           where: { companyId: user.companyId, leadId: lead.id },
           orderBy: { createdAt: "desc" },
         }),
-        // Sellable inverters and batteries, PLUS whatever this deal already
-        // chose even if it has since been retired. Filtering to isActive alone
-        // would drop a retired item out of its own dropdown, the select would
-        // fall back to "— none —", and the next save would blank equipment on a
-        // deal nobody meant to edit.
-        prisma.solarEquipment.findMany({
-          where: { companyId: user.companyId, kind: { in: ["inverter", "battery"] } },
-          orderBy: [{ kind: "asc" }, { rank: "asc" }, { model: "asc" }],
-          select: {
-            id: true, kind: true, manufacturer: true, model: true, ratingW: true, isActive: true,
-            lenderApprovals: { select: { lenderId: true } },
-          },
+        // The newest proposal WITH its frozen snapshot — what this customer was
+        // last quoted. Fetched on its own rather than by widening the list
+        // above: a snapshot carries a 25-year savings table, and pulling one per
+        // version to read only the newest would be most of a page's payload
+        // spent on documents nothing on this screen renders.
+        prisma.solarProposal.findFirst({
+          where: { companyId: user.companyId, leadId: lead.id },
+          orderBy: { version: "desc" },
+          select: { version: true, status: true, sentAt: true, createdAt: true, snapshot: true },
         }),
         prisma.solarLender.findMany({
           where: { companyId: user.companyId },
@@ -305,101 +307,152 @@ export default async function LeadDetailPage({
           select: { id: true, name: true, isActive: true, logoUpdatedAt: true },
         }),
       ])
-    : [null, null, [], [], [], []];
+    : [null, null, [], [], null, []];
 
   /**
-   * The Operations card's equipment half.
+   * The interconnection half of the System info slide.
    *
-   * When a lender is chosen the list narrows to that lender's approved-vendor
-   * list, with one exception: whatever this deal has ALREADY chosen stays
-   * visible and is labelled, because dropping a selected item out of its own
-   * dropdown is how a save quietly writes null over a deal's equipment.
+   * Two fields, and deliberately only two. The equipment and the lender used to
+   * be dropdowns here as well, narrowed to the chosen lender's approved-vendor
+   * list — a second owner for fields the proposal had already frozen. They are
+   * reported from the last proposal now and changed in the builder; see
+   * `saveSolarBuildDetailsAction`.
    */
-  const solarBuild = (() => {
-    const chosen = new Set([solarDesign?.inverterId, solarDesign?.batteryId].filter(Boolean));
-    const lenderId = solarDesign?.lenderId ?? null;
-    const approvedFor = (e: { id: string; lenderApprovals: { lenderId: string }[] }) =>
-      !lenderId || e.lenderApprovals.some((a) => a.lenderId === lenderId);
+  const solarBuild = {
+    hasDesign: !!solarDesign,
+    utilityAccountNo: solarDesign?.utilityAccountNo ?? null,
+    meterNo: solarDesign?.meterNo ?? null,
+  };
 
-    const options = (kind: string) =>
-      solarEquipment
-        .filter((e) => e.kind === kind)
-        .filter((e) => approvedFor(e) || chosen.has(e.id))
-        .map((e) => ({
-          id: e.id,
-          label:
-            `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` +
-            `${e.ratingW ? ` · ${e.ratingW}W` : ""}${e.isActive ? "" : " · retired"}` +
-            `${approvedFor(e) ? "" : " · not on this lender's list"}`,
-        }));
+  /**
+   * The system as specifications, for the System info slide.
+   *
+   * READ OFF THE LAST PROPOSAL when there is one. The slide used to report the
+   * live SolarDesign, which is the wrong document to answer "what is on this
+   * job": the design keeps moving — a rep reopens the builder, redraws the roof,
+   * abandons it half-finished — while the thing the customer holds, and signed,
+   * is the frozen snapshot of a particular version. Reporting the design made
+   * this card disagree with the homeowner's own copy, and made it possible to
+   * read `0 × Silfab` on a deal that had been sold a 24-panel array.
+   *
+   * Falls back to the design only while no proposal exists at all, which is the
+   * one moment the design IS the best account of the job.
+   *
+   * Two things stay on the design either way. The per-plane table comes from
+   * `layoutBlocks`, because a snapshot freezes a PICTURE of the roof and not the
+   * angles behind it; the site notes are ops' own working notes and were never
+   * part of the quote. Both are labelled in the UI rather than passed off as
+   * part of the frozen document.
+   */
+  const latestSnapshot = (latestProposal?.snapshot ?? null) as SolarProposalSnapshot | null;
 
+  const solarSpecsSource: SpecSource = latestProposal
+    ? {
+        kind: "proposal",
+        label: `Version ${latestProposal.version} · ${latestProposal.status} · ${fmt.date(
+          latestProposal.sentAt ?? latestProposal.createdAt
+        )}`,
+      }
+    : {
+        kind: "design",
+        label: solarDesign ? "no proposal generated yet" : "nothing designed yet",
+      };
+
+  const solarSpecs: SystemSpecs | null = (() => {
+    if (!isSolarDeal || (!solarDesign && !latestSnapshot)) return null;
+
+    // Empty blocks are dropped: an array with no panels is a leftover of
+    // drawing, not a bank anybody is going to install.
+    const blocks = (solarDesign?.layoutBlocks as unknown as LayoutBlock[]) ?? [];
+    const arrays = blocks
+      .map((b) => ({
+        id: b.id,
+        panels: blockPanelCount(b),
+        azimuthDeg: b.azimuthDeg ?? null,
+        tiltDeg: b.tiltDeg ?? null,
+        shadePct: b.shadePct ?? null,
+      }))
+      .filter((a) => a.panels > 0);
+    const notes = {
+      setbackNotes: solarDesign?.setbackNotes ?? null,
+      structuralNotes: solarDesign?.structuralNotes ?? null,
+      electricalNotes: solarDesign?.electricalNotes ?? null,
+    };
+    const name = (e: { manufacturer: string | null; model: string } | null | undefined) =>
+      e ? `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` : null;
+
+    if (latestSnapshot) {
+      const { system, financing } = latestSnapshot;
+      // `energy` and the yield basis arrived with schemaVersion 2 and 3. Read
+      // as possibly-absent rather than trusted, because the whole promise of a
+      // snapshot is that a document generated under an older shape still
+      // renders instead of throwing on a key nobody wrote that year.
+      const energy = latestSnapshot.energy as SolarProposalSnapshot["energy"] | undefined;
+      const assumptions = latestSnapshot.assumptions as
+        | SolarProposalSnapshot["assumptions"]
+        | undefined;
+      return {
+        // v1 snapshots have only the labels; v2 and later carry the catalogue
+        // rows. Both render, because the whole point of a frozen document is
+        // that it keeps working after the shape around it moved on.
+        module: name(system.module) ?? system.moduleLabel,
+        moduleQty: system.module?.qty ?? system.moduleQty,
+        moduleRatingW: system.module?.ratingW ?? null,
+        inverter: name(system.inverter) ?? system.inverterLabel,
+        battery: name(system.battery) ?? system.batteryLabel,
+        batteryQty: system.battery?.qty ?? (system.batteryLabel ? 1 : 0),
+        lender: financing.lender,
+        lenderLogoUrl: financing.lenderLogoUrl ?? null,
+        sizeKwDc: system.sizeKwDc,
+        // Never frozen on a proposal — a customer is quoted DC — so the row
+        // shows DC alone rather than borrowing today's AC figure.
+        sizeKwAc: 0,
+        year1Kwh: system.year1ProductionKwh,
+        offsetPct: system.offsetPct,
+        mountType: system.mountType ?? "roof",
+        tsrfPct: system.tsrfPct,
+        yieldSource: assumptions?.yieldBasis?.source ?? null,
+        yieldStation: assumptions?.yieldBasis?.station ?? null,
+        annualUsageKwh: energy?.annualUsageKwh ?? null,
+        rateMills: assumptions?.currentRateMillsPerKwh ?? null,
+        ratePlan: energy?.ratePlan ?? null,
+        netMeteringProgram: system.netMeteringProgram,
+        arrays,
+        ...notes,
+      };
+    }
+
+    const design = solarDesign!;
+    const designLender = design.lenderId
+      ? (solarLenders.find((l) => l.id === design.lenderId) ?? null)
+      : null;
     return {
-      hasDesign: !!solarDesign,
-      utilityAccountNo: solarDesign?.utilityAccountNo ?? null,
-      meterNo: solarDesign?.meterNo ?? null,
-      lenderId,
-      inverterId: solarDesign?.inverterId ?? null,
-      batteryId: solarDesign?.batteryId ?? null,
-      lenders: solarLenders.map((l) => ({
-        id: l.id,
-        name: l.name,
-        isActive: l.isActive,
-        logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
-      })),
-      inverters: options("inverter"),
-      batteries: options("battery"),
+      module: name(design.module),
+      moduleQty: design.moduleQty,
+      moduleRatingW: design.module?.ratingW ?? null,
+      inverter: name(design.inverter),
+      battery: name(design.battery),
+      batteryQty: design.batteryQty,
+      lender: designLender?.name ?? null,
+      lenderLogoUrl: designLender
+        ? lenderLogoUrl(designLender.id, designLender.logoUpdatedAt)
+        : null,
+      sizeKwDc: design.systemSizeKwDc,
+      sizeKwAc: design.systemSizeKwAc,
+      year1Kwh: design.year1ProductionKwh,
+      offsetPct: design.offsetPct,
+      mountType: design.mountType,
+      tsrfPct: design.tsrfPct,
+      yieldSource: design.yieldSource,
+      yieldStation: design.yieldStation,
+      annualUsageKwh: design.annualUsageKwh,
+      rateMills: design.utilityRateMills,
+      ratePlan: design.ratePlan,
+      netMeteringProgram: design.netMeteringProgram,
+      arrays,
+      ...notes,
     };
   })();
-
-  /**
-   * The design as specifications, for the System info slide.
-   *
-   * Read off the SolarDesign already fetched above — no extra query. The
-   * per-array rows come from `layoutBlocks`, the same JSON the layout designer
-   * writes, so what this reports is literally what was drawn rather than a
-   * second account of it that can disagree.
-   */
-  const solarSpecs = solarDesign
-    ? (() => {
-        const blocks = (solarDesign.layoutBlocks as unknown as LayoutBlock[]) ?? [];
-        const name = (e: { manufacturer: string | null; model: string } | null) =>
-          e ? `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` : null;
-        return {
-          module: name(solarDesign.module),
-          moduleQty: solarDesign.moduleQty,
-          moduleRatingW: solarDesign.module?.ratingW ?? null,
-          inverter: name(solarDesign.inverter),
-          battery: name(solarDesign.battery),
-          batteryQty: solarDesign.batteryQty,
-          sizeKwDc: solarDesign.systemSizeKwDc,
-          sizeKwAc: solarDesign.systemSizeKwAc,
-          year1Kwh: solarDesign.year1ProductionKwh,
-          offsetPct: solarDesign.offsetPct,
-          mountType: solarDesign.mountType,
-          tsrfPct: solarDesign.tsrfPct,
-          yieldSource: solarDesign.yieldSource,
-          yieldStation: solarDesign.yieldStation,
-          annualUsageKwh: solarDesign.annualUsageKwh,
-          rateMills: solarDesign.utilityRateMills,
-          ratePlan: solarDesign.ratePlan,
-          netMeteringProgram: solarDesign.netMeteringProgram,
-          // Empty blocks are dropped: an array with no panels is a leftover of
-          // drawing, not a bank anybody is going to install.
-          arrays: blocks
-            .map((b) => ({
-              id: b.id,
-              panels: blockPanelCount(b),
-              azimuthDeg: b.azimuthDeg ?? null,
-              tiltDeg: b.tiltDeg ?? null,
-              shadePct: b.shadePct ?? null,
-            }))
-            .filter((a) => a.panels > 0),
-          setbackNotes: solarDesign.setbackNotes,
-          structuralNotes: solarDesign.structuralNotes,
-          electricalNotes: solarDesign.electricalNotes,
-        };
-      })()
-    : null;
 
   // Where the proposal stands, as one value. Derived rather than stored — see
   // src/lib/solar-proposal-state.ts for why a column would go stale.
@@ -969,6 +1022,7 @@ export default async function LeadDetailPage({
                 <SolarSystemInfo
                   leadId={lead.id}
                   specs={solarSpecs}
+                  source={solarSpecsSource}
                   build={solarBuild}
                   canEdit={can(user, "update", "Lead")}
                 />

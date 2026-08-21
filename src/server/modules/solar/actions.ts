@@ -83,37 +83,6 @@ const designSchema = z.object({
 });
 
 /**
- * Resolve a selected catalogue item, refusing anything that is not this
- * company's, not of the right kind, or retired.
- *
- * `allowExistingId` keeps an ALREADY-SAVED choice readable after the catalogue
- * item is retired: an existing deal keeps rendering, but the deactivated item
- * cannot be newly selected. Without the kind check, a battery id posted into
- * `inverterId` would be written straight through.
- *
- * Module scope rather than a closure inside one action: the design step no
- * longer picks equipment, so its callers are now the Operations card, where the
- * decision actually gets made.
- */
-export async function resolveEquipment(
-  companyId: string,
-  id: string | null | undefined,
-  kind: "module" | "inverter" | "battery",
-  allowExistingId: string | null
-): Promise<{ ok: true; row: { id: string; ratingW: number | null } | null } | { ok: false; error: string }> {
-  if (!id) return { ok: true, row: null };
-  const row = await prisma.solarEquipment.findFirst({
-    where: { companyId, id, kind },
-    select: { id: true, ratingW: true, isActive: true, model: true },
-  });
-  if (!row) return { ok: false, error: `That ${kind} is not in your catalogue.` };
-  if (!row.isActive && id !== allowExistingId) {
-    return { ok: false, error: `“${row.model}” has been retired and cannot be added to a new design.` };
-  }
-  return { ok: true, row: { id: row.id, ratingW: row.ratingW } };
-}
-
-/**
  * Save the design and recompute the derived numbers SERVER-SIDE.
  *
  * System size, production and offset are never taken from the client: they are
@@ -185,23 +154,19 @@ const buildDetailsSchema = z.object({
   leadId: z.string().min(1),
   utilityAccountNo: z.string().max(60).nullable(),
   meterNo: z.string().max(60).nullable(),
-  lenderId: z.string().nullable(),
-  inverterId: z.string().nullable(),
-  batteryId: z.string().nullable(),
 });
 
 /**
- * What the job is actually built from, recorded when it is being built.
+ * The utility's own numbers for this house, recorded when the job is built.
  *
- * Deliberately separate from the design action, and deliberately unable to
- * change `systemSizeKwDc`, production or offset: only the module sizes the
- * system, and only the design step sets that. So an ops edit weeks after the
- * sale cannot move a number the customer has already signed against.
- *
- * The lender lives here too, with the approved-vendor list it gates, so ops can
- * correct it from the deal without opening the builder. The Financing step
- * writes the same field through `setSolarDealLenderAction` — see the note there
- * for why one field is worth two controls.
+ * Deliberately unable to change anything the customer was quoted. It once also
+ * wrote the lender, the inverter and the battery, on the reasoning that ops
+ * should be able to correct them from the deal without opening the builder —
+ * which made one field with two owners. A rep quotes a Tesla inverter on a
+ * document a homeowner signs, ops swaps it here a fortnight later, and the deal
+ * and the customer's copy now disagree with nobody told. Equipment moves on the
+ * proposal's design step and the lender on its financing step; both reissue a
+ * version, which is what changing what somebody was sold is supposed to cost.
  */
 export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDetailsSchema>) {
   const user = await requireUser();
@@ -212,34 +177,13 @@ export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDet
 
   const design = await prisma.solarDesign.findFirst({
     where: { leadId: d.leadId, companyId: user.companyId },
-    select: { inverterId: true, batteryId: true },
+    select: { id: true },
   });
   if (!design) return fail("Save the system design before recording build details.");
 
-  // A lender id from another company must never attach to this design.
-  if (d.lenderId) {
-    const l = await prisma.solarLender.findFirst({
-      where: { companyId: user.companyId, id: d.lenderId },
-      select: { id: true },
-    });
-    if (!l) return fail("That lender is not in your list.");
-  }
-
-  const [inv, bat] = await Promise.all([
-    resolveEquipment(user.companyId, d.inverterId, "inverter", design.inverterId),
-    resolveEquipment(user.companyId, d.batteryId, "battery", design.batteryId),
-  ]);
-  for (const r of [inv, bat]) if (!r.ok) return fail(r.error);
-
   await prisma.solarDesign.update({
     where: { leadId: d.leadId },
-    data: {
-      utilityAccountNo: d.utilityAccountNo,
-      meterNo: d.meterNo,
-      lenderId: d.lenderId,
-      inverterId: inv.ok ? (inv.row?.id ?? null) : null,
-      batteryId: bat.ok ? (bat.row?.id ?? null) : null,
-    },
+    data: { utilityAccountNo: d.utilityAccountNo, meterNo: d.meterNo },
   });
 
   revalidatePath(`/portal/leads/${d.leadId}`);
@@ -252,22 +196,21 @@ const dealLenderSchema = z.object({
 });
 
 /**
- * Who is financing this deal, set from the Financing step.
+ * Who is financing this deal, set from the Financing step — the ONLY control
+ * that sets it.
  *
  * The lender lives on the DESIGN because it gates the approved-vendor list, and
- * ops still set it on the deal alongside the equipment it filters. But it is
- * also the first thing the Financing step needs — with no lender there is no
- * rate sheet to quote — and sending a rep out of the builder to a card on
- * another page to set it is why every design in production had none.
- *
- * Both controls write this one field through this one action, and both re-read
- * it on load, so the later edit wins rather than two screens disagreeing.
+ * it is the first thing the Financing step needs: with no lender there is no
+ * rate sheet to quote. The deal page used to offer a second picker for the same
+ * field; it now reports what the last proposal froze and links back here, so
+ * the lender a customer was quoted against and the lender on the deal cannot
+ * drift apart between two screens.
  *
  * Changing the lender CLEARS the quoted product: a rate sheet belongs to the
  * lender that published it, and leaving the old id behind would quote Climate
- * First's money on an Amos deal. Equipment is deliberately left alone — the
- * deal page labels an item that has fallen off the new lender's list rather
- * than silently blanking what someone already ordered.
+ * First's money on an Amos deal. Equipment is deliberately left alone — an item
+ * that has fallen off the new lender's list is a decision for whoever reissues
+ * the proposal, not something to blank out from under an order.
  */
 export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderSchema>) {
   const user = await requireUser();

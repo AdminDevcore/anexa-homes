@@ -21,6 +21,18 @@ export type SystemArray = {
   shadePct: number | null;
 };
 
+/**
+ * Where the figures below came from.
+ *
+ * A proposal is a frozen document; the design underneath it keeps moving. This
+ * slide says which of the two it is reporting rather than showing numbers of
+ * unstated provenance — `label` is built on the server so this stays free of
+ * date formatting.
+ */
+export type SpecSource =
+  | { kind: "proposal"; label: string }
+  | { kind: "design"; label: string };
+
 export type SystemSpecs = {
   module: string | null;
   moduleQty: number;
@@ -28,6 +40,9 @@ export type SystemSpecs = {
   inverter: string | null;
   battery: string | null;
   batteryQty: number;
+  /** The financing partner as the proposal froze it. Null on a cash quote. */
+  lender: string | null;
+  lenderLogoUrl: string | null;
   sizeKwDc: number;
   sizeKwAc: number;
   year1Kwh: number;
@@ -50,12 +65,6 @@ export type SystemBuild = {
   hasDesign: boolean;
   utilityAccountNo: string | null;
   meterNo: string | null;
-  lenderId: string | null;
-  inverterId: string | null;
-  batteryId: string | null;
-  lenders: { id: string; name: string; isActive: boolean; logoUrl: string | null }[];
-  inverters: { id: string; label: string }[];
-  batteries: { id: string; label: string }[];
 };
 
 /** A label/value row, the deal page's own vocabulary. */
@@ -68,11 +77,12 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
+function Group({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
+        {hint && <span className="ml-1.5 font-normal normal-case tracking-normal">· {hint}</span>}
       </div>
       <dl className="mt-1.5">{children}</dl>
     </div>
@@ -97,18 +107,26 @@ const NOT_SET = <span className="font-normal text-muted-foreground">—</span>;
  * — it is what got installed — and burying it under a follow-up log is how it
  * went unfilled.
  *
- * Read on top, write underneath. The specs come from the proposal and are
- * deliberately not editable here: the panel count is what moves a customer's
- * price, and it moves it on the proposal or not at all.
+ * READ-ONLY, and read off the LAST PROPOSAL wherever the proposal has an
+ * opinion. Modules, inverter, battery and lender used to be dropdowns here as
+ * well as choices in the builder, which is one field with two owners: a rep
+ * quotes a customer a Tesla inverter on a signed document and ops swaps it on
+ * this card a fortnight later, and now the deal and the customer's copy
+ * disagree with nobody informed. The proposal is the agreement, so the
+ * proposal decides; this slide reports it and links back to the builder.
+ * Only the interconnection numbers below — utility account and meter — are
+ * genuinely ours to fill in after the fact.
  */
 export function SolarSystemInfo({
   leadId,
   specs,
+  source,
   build,
   canEdit,
 }: {
   leadId: string;
   specs: SystemSpecs | null;
+  source: SpecSource;
   build: SystemBuild;
   canEdit: boolean;
 }) {
@@ -117,34 +135,48 @@ export function SolarSystemInfo({
   const [form, setForm] = React.useState({
     utilityAccountNo: build.utilityAccountNo ?? "",
     meterNo: build.meterNo ?? "",
-    lenderId: build.lenderId ?? "",
-    inverterId: build.inverterId ?? "",
-    batteryId: build.batteryId ?? "",
   });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const chosenLender = build.lenders.find((l) => l.id === form.lenderId) ?? null;
 
   async function save() {
     setBusy(true);
-    const res = await saveSolarBuildDetailsAction({
-      leadId,
-      utilityAccountNo: form.utilityAccountNo.trim() || null,
-      meterNo: form.meterNo.trim() || null,
-      lenderId: form.lenderId || null,
-      inverterId: form.inverterId || null,
-      batteryId: form.batteryId || null,
-    });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error ?? "Something went wrong.");
-    toast.success("Build details saved");
-    router.refresh();
+    try {
+      const res = await saveSolarBuildDetailsAction({
+        leadId,
+        utilityAccountNo: form.utilityAccountNo.trim() || null,
+        meterNo: form.meterNo.trim() || null,
+      });
+      if (!res.ok) return toast.error(res.error ?? "Something went wrong.");
+      toast.success("Interconnection saved");
+      router.refresh();
+    } finally {
+      // In a `finally`, so a thrown action leaves the form usable instead of
+      // latching the button on and stranding the fields.
+      setBusy(false);
+    }
   }
 
   return (
     <div className="space-y-6">
+      {/* Provenance first. Everything under this line is a report, not a form. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+        <p className="text-xs text-muted-foreground">
+          <span className="font-semibold uppercase tracking-wide text-foreground">
+            {source.kind === "proposal" ? "As proposed" : "Working design"}
+          </span>{" "}
+          · {source.label}
+        </p>
+        <Link
+          href={`/portal/leads/${leadId}/solar-proposal`}
+          className="text-xs font-medium underline underline-offset-2"
+        >
+          {source.kind === "proposal" ? "Change in the proposal" : "Open the proposal builder"}
+        </Link>
+      </div>
+
       {specs ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Group title="The array">
+          <Group title="The system">
             <Row
               label="Modules"
               value={
@@ -178,6 +210,21 @@ export function SolarSystemInfo({
                 specs.sizeKwDc
                   ? `${specs.sizeKwDc.toFixed(2)} kW DC${specs.sizeKwAc ? ` · ${specs.sizeKwAc.toFixed(2)} kW AC` : ""}`
                   : NOT_SET
+              }
+            />
+            {/* The lender rides with the equipment it gates: its approved-vendor
+                list is what makes one inverter quotable and another not. */}
+            <Row
+              label="Lender"
+              value={
+                specs.lender ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <LenderMark name={specs.lender} logoUrl={specs.lenderLogoUrl} size="sm" />
+                    {specs.lender}
+                  </span>
+                ) : (
+                  NOT_SET
+                )
               }
             />
           </Group>
@@ -223,11 +270,21 @@ export function SolarSystemInfo({
           </Group>
 
           {/* Per array, because a design is rarely one plane and the totals
-              above hide that. An array facing north is not a rounding error. */}
+              above hide that. An array facing north is not a rounding error.
+
+              Drawn from the LIVE layout, always: a proposal freezes a picture
+              of the roof, not the per-plane angles behind it. Labelled as such
+              when the figures above came from a proposal, so a redrawn roof
+              cannot quietly read as part of the frozen document. */}
           {specs.arrays.length > 0 && (
             <div className="lg:col-span-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Arrays
+                {source.kind === "proposal" && (
+                  <span className="ml-1.5 font-normal normal-case tracking-normal">
+                    · current drawing
+                  </span>
+                )}
               </div>
               <div className="mt-1.5 overflow-x-auto">
                 <table className="w-full min-w-[26rem] text-sm">
@@ -296,15 +353,16 @@ export function SolarSystemInfo({
         </p>
       )}
 
-      {/* ── Interconnection & equipment ─────────────────────────────────── */}
+      {/* ── Interconnection ─────────────────────────────────────────────── */}
       <div className="space-y-3 rounded-lg border border-dashed border-border p-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Interconnection &amp; equipment
+            Interconnection
           </div>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Recorded when the job is built. None of this changes the customer&rsquo;s quote — only
-            the panel count does that, and it lives on the proposal.
+            The utility&rsquo;s own numbers for this house, recorded when the job is built. The
+            equipment and the lender are not set here — they are what the customer was quoted, so
+            they change on the proposal.
           </p>
         </div>
 
@@ -335,84 +393,10 @@ export function SolarSystemInfo({
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="solar-lender" className="text-xs">Lender / approved-vendor list</Label>
-              {/* The mark sits beside the select because a native <option>
-                  cannot carry an image, and a custom listbox here would cost
-                  ops the keyboard behaviour they already have. */}
-              <div className="flex items-center gap-2">
-                {chosenLender && (
-                  <LenderMark name={chosenLender.name} logoUrl={chosenLender.logoUrl} size="md" />
-                )}
-                <select
-                  id="solar-lender"
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                  value={form.lenderId}
-                  disabled={!canEdit || build.lenders.length === 0}
-                  onChange={(e) => set("lenderId", e.target.value)}
-                >
-                  <option value="">— any lender (no filtering) —</option>
-                  {build.lenders.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}{l.isActive ? "" : " · retired"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {build.lenders.length === 0 ? (
-                <p className="text-[11px] text-amber-700">
-                  No lenders set up yet.{" "}
-                  <Link href="/portal/settings/solar-lenders" className="underline underline-offset-2">
-                    Add your lenders
-                  </Link>{" "}
-                  to filter equipment by an approved-vendor list.
-                </p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  {form.lenderId
-                    ? "Only equipment on this lender's approved list is offered below. Save to apply a change."
-                    : "Pick a lender to narrow the equipment below to its approved list."}
-                </p>
-              )}
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              {([
-                ["Inverter", "inverterId", build.inverters],
-                ["Battery", "batteryId", build.batteries],
-              ] as const).map(([label, key, options]) => (
-                <div key={key} className="space-y-1">
-                  <Label htmlFor={`solar-${key}`} className="text-xs">{label}</Label>
-                  <select
-                    id={`solar-${key}`}
-                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                    value={form[key]}
-                    disabled={!canEdit || options.length === 0}
-                    onChange={(e) => set(key, e.target.value)}
-                  >
-                    <option value="">— none —</option>
-                    {options.map((o) => (
-                      <option key={o.id} value={o.id}>{o.label}</option>
-                    ))}
-                  </select>
-                  {/* An empty dropdown is indistinguishable from a broken one. */}
-                  {options.length === 0 && (
-                    <p className="text-[11px] text-amber-700">
-                      No {label.toLowerCase()}s available.{" "}
-                      <Link href="/portal/settings/solar-equipment" className="underline underline-offset-2">
-                        Open the catalogue
-                      </Link>
-                      .
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-
             {canEdit && (
               <Button size="sm" variant="outline" disabled={busy} onClick={save}>
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Wrench className="size-4" />}
-                Save build details
+                Save interconnection
               </Button>
             )}
           </>
