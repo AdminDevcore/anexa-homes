@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { Settings as SettingsIcon } from "lucide-react";
+import { Building2, FileSignature, KanbanSquare, Users } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
-import { visibleSettingsSections } from "@/lib/settings-sections";
+import { SettingsHub } from "@/components/portal/settings-hub";
+import { VERTICAL_ACCENT, VERTICAL_LABEL } from "@/lib/vertical";
 import { workspaceSetupGaps } from "@/server/modules/settings/workspace-health";
 import { WorkspaceSetupPanel } from "@/components/portal/workspace-setup-panel";
 
@@ -48,60 +48,73 @@ export default async function SettingsPage() {
 
       <WorkspaceSetupPanel gaps={gaps} vertical={vertical} />
 
-      <div className="rounded-xl border border-border bg-card p-5">
-        <div className="flex items-center gap-2">
-          <SettingsIcon className="size-4 text-gold" />
-          <h2 className="font-semibold">{company?.name}</h2>
+      {/* Identity strip: whose settings these are, and which workspace they
+          apply to — the numbers are a glance, not the point of the page. */}
+      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-gold/10 text-gold">
+            <Building2 className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate font-display text-base font-semibold tracking-tight">
+              {company?.name}
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span
+                className="size-1.5 rounded-full"
+                style={{ backgroundColor: VERTICAL_ACCENT[vertical] }}
+                aria-hidden
+              />
+              {VERTICAL_LABEL[vertical]} workspace
+            </div>
+          </div>
         </div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <Mini label="Users" value={company?._count.users ?? 0} />
-          <Mini label="Pipelines" value={pipelines} />
-          <Mini label="Doc Templates" value={documentTemplates} />
+
+        <div className="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-xl border border-border bg-background">
+          <Mini
+            icon={Users}
+            label="Users"
+            value={company?._count.users ?? 0}
+            hint="Everyone in the company, across workspaces"
+          />
+          <Mini
+            icon={KanbanSquare}
+            label="Pipelines"
+            value={pipelines}
+            hint={`Pipelines in the ${VERTICAL_LABEL[vertical]} workspace`}
+          />
+          <Mini
+            icon={FileSignature}
+            label="Doc templates"
+            value={documentTemplates}
+            hint={`Templates in the ${VERTICAL_LABEL[vertical]} workspace`}
+          />
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {visibleSettingsSections(vertical).map((s) => {
-          const inner = (
-            <>
-              <span className="grid size-10 place-items-center rounded-lg bg-gold/12 text-gold-muted">
-                <s.icon className="size-5" />
-              </span>
-              <h3 className="mt-4 font-medium">{s.title}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">{s.body}</p>
-              <span
-                className={`mt-3 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${
-                  s.href ? "bg-gold/15 text-gold-muted" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                {s.href ? "Open" : "Next phase"}
-              </span>
-            </>
-          );
-          return s.href ? (
-            <Link
-              key={s.title}
-              href={s.href}
-              className="rounded-xl border border-border bg-card p-5 transition-colors hover:border-gold/40"
-            >
-              {inner}
-            </Link>
-          ) : (
-            <div key={s.title} className="rounded-xl border border-border bg-card p-5">
-              {inner}
-            </div>
-          );
-        })}
-      </div>
+      <SettingsHub vertical={vertical} />
     </div>
   );
 }
 
-function Mini({ label, value }: { label: string; value: number }) {
+function Mini({
+  icon: Icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: number;
+  hint: string;
+}) {
   return (
-    <div className="rounded-lg border border-border bg-background p-4">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 font-display text-xl font-semibold">{value}</div>
+    <div className="px-4 py-3 sm:px-5" title={hint}>
+      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+        <Icon className="size-3.5" />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="mt-1 font-display text-xl font-semibold tabular-nums">{value}</div>
     </div>
   );
 }

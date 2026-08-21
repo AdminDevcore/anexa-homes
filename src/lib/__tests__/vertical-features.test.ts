@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stormEnabled, insuranceEnabled } from "../vertical-features";
-import { visibleSettingsSections } from "../settings-sections";
+import { visibleSettingsSections, visibleSettingsGroups, SETTINGS_GROUPS } from "../settings-sections";
 import { DEFAULT_FILTERS, parseFilters, withoutStormLayers, STORM_PARAMS } from "../field-map-filters";
 
 describe("vertical features", () => {
@@ -64,6 +64,27 @@ describe("settings sections", () => {
     for (const t of ["Pipeline Stages", "Commission Rules", "Production Checklist", "Branding"]) {
       expect(titles("roofing")).toContain(t);
       expect(titles("solar")).toContain(t);
+    }
+  });
+
+  it("bands every visible card, losing none", () => {
+    for (const v of ["roofing", "solar"] as const) {
+      const banded = visibleSettingsGroups(v).flatMap((g) => g.sections.map((s) => s.title));
+      // A card whose group key matched no band would silently vanish from the hub.
+      expect(banded.sort()).toEqual(titles(v).sort());
+    }
+  });
+
+  it("drops the bands this workspace has no card for", () => {
+    const keys = (v: "roofing" | "solar") => visibleSettingsGroups(v).map((g) => g.key);
+    expect(keys("solar")).toContain("solar");
+    expect(keys("solar")).not.toContain("insurance");
+    expect(keys("roofing")).toContain("insurance");
+    expect(keys("roofing")).not.toContain("solar");
+    // Bands stay in catalog order, so the hub reads the same on every visit.
+    for (const v of ["roofing", "solar"] as const) {
+      const order = SETTINGS_GROUPS.map((g) => g.key).filter((k) => keys(v).includes(k));
+      expect(keys(v)).toEqual(order);
     }
   });
 });
