@@ -3,9 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Clock, User, ArrowRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, User, ArrowRight, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import type { Vertical } from "@prisma/client";
@@ -93,6 +94,12 @@ export function WorkCalendar({
     [TYPES, off]
   );
 
+  // Page search, in the same spirit as the pipeline's: it narrows what the
+  // month shows rather than navigating anywhere. Only the fetched window is
+  // searchable, so the hint under the toolbar always names the month.
+  const [q, setQ] = React.useState("");
+  const needle = q.trim().toLowerCase();
+
   const gridStart = startOfWeek(startOfMonth(anchor));
   const gridEnd = addDays(gridStart, 42);
   const todayKey = dayKey(new Date());
@@ -109,7 +116,19 @@ export function WorkCalendar({
     placeholderData: (p) => p,
   });
 
-  const events = (data?.events ?? []).filter((e) => on[e.type]);
+  const events = (data?.events ?? []).filter((e) => {
+    if (!on[e.type]) return false;
+    if (!needle) return true;
+    // The subtitle carries the address (appointments) or project number
+    // (installs/inspections), so both are searchable without being restated.
+    // Type and workspace labels are in the haystack too — searching "install"
+    // or "solar" narrows a month as naturally as typing a customer name.
+    return [e.title, e.subtitle, e.rep, TYPE_META[e.type].label, VERTICAL_LABEL[e.vertical]]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  });
   const byDay = React.useMemo(() => {
     const m = new Map<string, Ev[]>();
     for (const e of events) {
@@ -163,7 +182,18 @@ export function WorkCalendar({
           <h2 className="ml-2 font-display text-lg font-semibold">{monthLabel}</h2>
         </div>
         {/* Type filters — toggle each; e.g. turn off Adjuster + Install to see appointments only. */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+          <div className="relative w-full sm:w-60">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setQ("")}
+              placeholder="Search by name, address, rep…"
+              className="h-9 pl-8"
+              aria-label="Search calendar events"
+            />
+          </div>
           {/* Workspace mode. Rendered only when there is a genuine choice: a
               single-workspace user gets no control, because a switcher with one
               option is just a label that looks clickable. */}
@@ -200,6 +230,16 @@ export function WorkCalendar({
           ))}
         </div>
       </div>
+
+      {/* A month-scoped search needs to say so: nothing found here may simply
+          mean the job sits in another month. */}
+      {needle && (
+        <p className="text-xs text-muted-foreground">
+          {events.length === 0
+            ? `No events match “${q.trim()}” in ${monthLabel} — try another month.`
+            : `${events.length} ${events.length === 1 ? "event" : "events"} matching “${q.trim()}” in ${monthLabel}.`}
+        </p>
+      )}
 
       {/* Month grid */}
       <div className="overflow-hidden rounded-xl border border-border bg-card">
