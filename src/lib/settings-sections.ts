@@ -68,7 +68,21 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       },
     },
   },
-  { icon: Camera, title: "Photo Templates", body: "Site & install photo checklists for projects.", href: "/portal/settings/photo-templates" },
+  {
+    icon: Camera,
+    title: "Photo Templates",
+    body: "Site & install photo checklists for projects.",
+    href: "/portal/settings/photo-templates",
+    // Same setting, different vocabulary — and a different list of shots. The
+    // checklists themselves are vertical-isolated rows, so each workspace edits
+    // its own.
+    labels: {
+      solar: {
+        title: "Photo Templates",
+        body: "Site survey & installation photo checklists for solar jobs.",
+      },
+    },
+  },
   {
     icon: ListChecks,
     title: "Inspection Outcomes",

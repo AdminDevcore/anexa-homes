@@ -2,6 +2,7 @@ import { PrismaClient, type Role, type KnockDisposition as KnockDispo } from "@p
 import bcrypt from "bcryptjs";
 import { DEFAULT_SCOPE_CATALOG } from "../src/lib/scope-catalog";
 import { SOLAR_STAGES } from "../src/lib/solar-pipeline";
+import { defaultItems, defaultName } from "../src/server/modules/photos/defaults";
 
 const prisma = new PrismaClient();
 
@@ -688,6 +689,23 @@ async function main() {
       { templateId: installTemplate.id, label: "Yard sign placed", required: false, position: 8 },
     ],
   });
+
+  // Solar's own pair. PhotoTemplate is vertical-isolated, so the roofing rows
+  // above are invisible from the Solar workspace — a solar job photographs a
+  // main panel, a meter and an attic, not hail hits, and needs its own list.
+  for (const kind of ["site", "install"] as const) {
+    const solarTemplate = await prisma.photoTemplate.create({
+      data: { companyId: company.id, name: defaultName("solar", kind), kind, position: 0, vertical: "solar" },
+    });
+    await prisma.photoTemplateItem.createMany({
+      data: defaultItems("solar", kind).map((d, i) => ({
+        templateId: solarTemplate.id,
+        label: d.label,
+        required: d.required,
+        position: i,
+      })),
+    });
+  }
 
   // Document templates (the 8) with a couple signature/date fields
   for (const t of DOC_TEMPLATES) {

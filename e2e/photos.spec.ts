@@ -117,3 +117,80 @@ test("photos: sales rep cannot access photo-template settings", async ({ page })
   await page.goto("/portal/settings/photo-templates");
   await expect(page).toHaveURL(/\/portal\/dashboard/, { timeout: 10000 });
 });
+
+/**
+ * Solar's photo checklists.
+ *
+ * PhotoTemplate is vertical-isolated, so the pair seeded for roofing is
+ * invisible from the Solar workspace. Before this was fixed the Settings page
+ * mapped over an empty list and rendered as a bare heading with no way to
+ * create anything, and solar's Survey/Installation folders were plain file
+ * dumps rather than checklists. Both halves are asserted here.
+ */
+const FLAG_ON =
+  process.env.SOLAR_VERTICAL_ENABLED === "1" || process.env.SOLAR_VERTICAL_ENABLED === "true";
+
+async function switchToSolar(page: Page) {
+  await page.getByRole("button", { name: "Switch workspace" }).click();
+  await page.getByRole("menuitem", { name: "Solar" }).click();
+  await page.waitForURL(/\/portal\/dashboard/, { timeout: 15000 });
+  await expect(page.getByText(/· Solar workspace/)).toBeVisible({ timeout: 15000 });
+}
+
+test("photos: the solar workspace has its own editable checklists", async ({ page }) => {
+  test.skip(!FLAG_ON, "multi-vertical is behind SOLAR_VERTICAL_ENABLED");
+  await login(page, "admin@anexahomes.com");
+  await switchToSolar(page);
+
+  await page.goto("/portal/settings/photo-templates");
+
+  // Both checklists are on screen under solar's own vocabulary, whether or not
+  // a row exists yet — the bug was that neither was.
+  await expect(page.getByRole("heading", { name: "Site Survey Photos" })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("heading", { name: "Installation Photos" })).toBeVisible();
+  // Roofing's names must not leak across the workspace boundary.
+  await expect(page.getByText("Site / Inspection Photos")).toHaveCount(0);
+
+  // A slot can be added, creating the solar template row on the way in if this
+  // workspace has never had one.
+  const label = `QA Solar Slot ${Date.now() % 100000}`;
+  await page.getByPlaceholder(/New photo label/).first().fill(label);
+  await page.getByRole("button", { name: /Add photo/ }).first().click();
+  await expect
+    .poll(
+      () =>
+        page
+          .getByRole("textbox")
+          .evaluateAll((els, l) => els.some((e) => (e as HTMLInputElement).value === l), label),
+      { timeout: 15000 }
+    )
+    .toBe(true);
+});
+
+test("photos: a solar deal's photo folders are checklist folders, not file dumps", async ({ page }) => {
+  test.skip(!FLAG_ON, "multi-vertical is behind SOLAR_VERTICAL_ENABLED");
+  await login(page, "admin@anexahomes.com");
+  await switchToSolar(page);
+
+  await page.goto("/portal/leads");
+  await page.getByRole("cell", { name: /Priya Raman/ }).click();
+  await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+
+  await page.getByRole("button", { name: /Survey Photos/ }).first().click();
+
+  // Solar's folder keys are `survey_photos` / `install_photos`, not roofing's
+  // `survey` / `install`. They used to be missing `special: "photos"`, so both
+  // opened the generic file list — no capture UI and no report. The Compile PDF
+  // link is the tell: only the photo body renders one, and it must carry
+  // solar's own group key so the report finds the files that were filed there.
+  const compile = page.getByRole("link", { name: /Compile PDF/ }).first();
+  await expect(compile).toBeVisible({ timeout: 15000 });
+  await expect(compile).toHaveAttribute("href", /group=survey_photos$/);
+  await expect(page.getByRole("button", { name: /Add photos/ })).toBeVisible();
+
+  // And the report route accepts that key rather than 400-ing on it.
+  const href = await compile.getAttribute("href");
+  const res = await page.request.get(href!);
+  expect(res.status()).toBe(200);
+  expect(res.headers()["content-type"]).toContain("application/pdf");
+});

@@ -12,8 +12,18 @@ import type { PhotoChecklist } from "@/server/modules/photos/queries";
 
 export type GroupPhoto = { id: string; name: string; group: PhotoGroup };
 
-/** Survey maps to the "site" photo template; Install Photos to the "install" one. */
-export const GROUP_KIND: Record<PhotoGroup, "site" | "install"> = { survey: "site", install: "install" };
+/**
+ * Survey maps to the "site" photo template; Install Photos to the "install"
+ * one. Solar's folder keys differ but mean the same two things, and the
+ * template kinds are shared across verticals — what differs is which
+ * (vertical-isolated) PhotoTemplate row the checklist query returns.
+ */
+export const GROUP_KIND: Record<PhotoGroup, "site" | "install"> = {
+  survey: "site",
+  install: "install",
+  survey_photos: "site",
+  install_photos: "install",
+};
 
 /**
  * The capture UI for one photo group — slot-by-slot checklist when the deal is

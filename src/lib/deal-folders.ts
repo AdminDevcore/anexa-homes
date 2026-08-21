@@ -88,17 +88,25 @@ export const ROOFING_FOLDERS: DealFolder[] = [
   { key: FALLBACK_FOLDER_KEY, label: "Other", hint: "Anything that does not fit above", icon: Folder },
 ];
 
+/**
+ * Solar's folder keys differ from roofing's (`survey_photos` vs `survey`) because
+ * they were chosen independently and FileAsset.category stores them verbatim.
+ * The two photo folders carry `special: "photos"` for the same reason roofing's
+ * do: a site survey and an installation are photographed against a checklist,
+ * not dumped into a file list. Without it solar got a bare uploader and the
+ * checklist in Settings had no way to reach a job.
+ */
 export const SOLAR_FOLDERS: DealFolder[] = [
   { key: "proposal", label: "Proposal", hint: "The proposal as presented — the copy of what was sold", icon: FileText },
   { key: "contract", label: "Contract", hint: "Proposals sent for signature, the signed agreement, change orders", icon: FileSignature, hostsPackages: true },
   { key: "utility_bill", label: "Utility Bill", hint: "12 months of usage — the basis for the design", icon: Zap },
   { key: "personal_files", label: "Personal Files", hint: "ID, proof of income, anything the lender asked for", icon: UserRound },
   { key: "materials", label: "Materials", hint: "Spec sheets and datasheets for what is going on the roof", icon: Package },
-  { key: "survey_photos", label: "Survey Photos", hint: "Roof, attic, main panel, meter", icon: Camera },
+  { key: "survey_photos", label: "Survey Photos", hint: "Roof, attic, main panel, meter", icon: Camera, special: "photos" },
   { key: "engineering", label: "Engineering Plan Sets", hint: "Stamped plan set, single-line, load calc", icon: DraftingCompass },
   { key: "permits", label: "Permits", hint: "Applications, corrections, approvals", icon: Stamp },
   { key: "interconnection", label: "Interconnection", hint: "Utility application and approval", icon: Plug },
-  { key: "install_photos", label: "Installation Photos", hint: "Progress and completion", icon: Hammer },
+  { key: "install_photos", label: "Installation Photos", hint: "Progress and completion", icon: Hammer, special: "photos" },
   { key: "certificate_acceptance", label: "Certificate of Acceptance", hint: "Signed off that the system was installed as sold", icon: BadgeCheck },
   { key: "attestation_payment", label: "Attestation of Customer Payment", hint: "Signed attestation that the amount due was paid", icon: HandCoins },
   { key: "lien_waiver_progress", label: "Conditional Progress Lien Waiver", hint: "Waiver released against a progress payment", icon: FileCheck },
