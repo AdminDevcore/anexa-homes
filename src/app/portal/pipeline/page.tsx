@@ -107,7 +107,7 @@ export default async function PipelinePage() {
   }
 
   return (
-    <ListFilter placeholder="Search deals by name, address…">
+    <ListFilter placeholder="Search deals by name, address…" hideInput>
       <PipelineView
         title={`${VERTICAL_LABEL[vertical]} Pipeline`}
         count={leads.length}

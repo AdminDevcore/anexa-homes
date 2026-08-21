@@ -2,7 +2,34 @@
 
 import * as React from "react";
 import { Search } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+
+type Ctx = { q: string; setQ: (v: string) => void; placeholder: string };
+
+const ListFilterContext = React.createContext<Ctx | null>(null);
+
+/**
+ * The search box itself. Rendered above the list by default; pass `hideInput`
+ * to `ListFilter` and drop this anywhere inside it instead (e.g. next to a
+ * page's view toggle) to place the box yourself.
+ */
+export function ListFilterInput({ className }: { className?: string }) {
+  const ctx = React.useContext(ListFilterContext);
+  if (!ctx) return null;
+  return (
+    <div className={cn("relative", className)}>
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={ctx.q}
+        onChange={(e) => ctx.setQ(e.target.value)}
+        placeholder={ctx.placeholder}
+        className="h-9 pl-8"
+        aria-label="Search this page"
+      />
+    </div>
+  );
+}
 
 /**
  * Per-page search that filters the list it wraps. Any descendant marked with
@@ -19,10 +46,13 @@ import { Input } from "@/components/ui/input";
 export function ListFilter({
   placeholder = "Search this page…",
   className,
+  hideInput = false,
   children,
 }: {
   placeholder?: string;
   className?: string;
+  /** Suppress the default box; render `<ListFilterInput />` in your own layout. */
+  hideInput?: boolean;
   children: React.ReactNode;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
@@ -56,13 +86,14 @@ export function ListFilter({
     return () => obs.disconnect();
   }, [apply]);
 
+  const ctx = React.useMemo(() => ({ q, setQ, placeholder }), [q, placeholder]);
+
   return (
-    <div className={className}>
-      <div className="relative mb-4 max-w-sm">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} className="h-9 pl-8" aria-label="Search this page" />
+    <ListFilterContext.Provider value={ctx}>
+      <div className={className}>
+        {!hideInput && <ListFilterInput className="mb-4 max-w-sm" />}
+        <div ref={ref}>{children}</div>
       </div>
-      <div ref={ref}>{children}</div>
-    </div>
+    </ListFilterContext.Provider>
   );
 }

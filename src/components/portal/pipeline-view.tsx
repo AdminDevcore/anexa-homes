@@ -16,6 +16,7 @@ import {
 import { useFormat } from "@/components/portal/branding-provider";
 import { serviceTypeLabel } from "@/lib/service-types";
 import { stageChipStyle } from "@/lib/chip-color";
+import { ListFilterInput } from "@/components/portal/list-filter";
 
 export type ListLead = {
   id: string;
@@ -73,25 +74,28 @@ export function PipelineView({
             {view === "kanban" ? " · drag cards to move stages" : ""}
           </p>
         </div>
-        <div className="inline-flex overflow-hidden rounded-lg border border-border">
-          <button
-            onClick={() => choose("kanban")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors",
-              view === "kanban" ? "bg-foreground text-background" : "hover:bg-muted"
-            )}
-          >
-            <KanbanSquare className="size-4" /> Kanban
-          </button>
-          <button
-            onClick={() => choose("list")}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors",
-              view === "list" ? "bg-foreground text-background" : "hover:bg-muted"
-            )}
-          >
-            <List className="size-4" /> List
-          </button>
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+          <ListFilterInput className="w-full sm:w-72" />
+          <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-border">
+            <button
+              onClick={() => choose("kanban")}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors",
+                view === "kanban" ? "bg-foreground text-background" : "hover:bg-muted"
+              )}
+            >
+              <KanbanSquare className="size-4" /> Kanban
+            </button>
+            <button
+              onClick={() => choose("list")}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors",
+                view === "list" ? "bg-foreground text-background" : "hover:bg-muted"
+              )}
+            >
+              <List className="size-4" /> List
+            </button>
+          </div>
         </div>
       </div>
 
