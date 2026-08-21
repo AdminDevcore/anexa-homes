@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarClock, Check, Loader2, Pencil, ShieldCheck, Wallet, X } from "lucide-react";
+import { Check, Loader2, Pencil, ShieldCheck, Wallet, X } from "lucide-react";
 import { Card, Detail, type DealTone } from "@/components/portal/deal-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +65,6 @@ export function DealSummaryPanel({
   display,
   dealTypeSlot,
   claimStatusSlot,
-  installDateSlot,
   actionsSlot,
 }: {
   leadId: string;
@@ -91,7 +90,6 @@ export function DealSummaryPanel({
   dealTypeSlot: React.ReactNode;
   /** Null on cash and solar deals, which have no carrier claim to track. */
   claimStatusSlot: React.ReactNode;
-  installDateSlot: React.ReactNode;
   actionsSlot: React.ReactNode;
 }) {
   const router = useRouter();
@@ -295,16 +293,10 @@ export function DealSummaryPanel({
           <Detail label="Priority" value={values.priority} />
         )}
 
-        {/* The install date lives HERE, with the other key dates. Already an
-            inline control, so it is identical in both modes. */}
-        <div>
-          <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-            <CalendarClock className="size-3.5" />
-            Install Date
-          </div>
-          <div className="mt-1">{installDateSlot}</div>
-        </div>
-
+        {/* No install date here any more — it moved onto the Installation
+            slide, with the crew and the photos it schedules. It was the only
+            control in this panel that changed the JOB rather than describing
+            the deal. */}
         <Detail label="Created" value={display.created} />
       </div>
 

@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ListTodo,
+  CalendarClock,
   Camera,
   Users,
   ClipboardCheck,
@@ -68,7 +69,11 @@ import { getEstimateForLead, getEstimateStarterData } from "@/server/modules/est
 import { isScopeReady, stageAtOrAfterScope, canSeeScopeCosts } from "@/server/modules/scope/policies";
 import { ScopeOfWorkPanel } from "@/components/portal/scope-of-work-panel";
 import { EstimatePanel } from "@/components/portal/estimate-panel";
+// CrewAssigner is roofing's, still. Solar names people on the install instead
+// (InstallCrew); roofing keeps the crew picker it has today rather than being
+// changed by a solar request.
 import { QcChecklistEditor, CrewAssigner } from "@/components/portal/project-workflows";
+import { InstallCrew } from "@/components/portal/install-crew";
 import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
 import { utcToZonedWallClock } from "@/lib/tz";
@@ -128,6 +133,10 @@ export default async function LeadDetailPage({
         where: { id: lead.project.id },
         include: {
           crewAssignments: { include: { crew: { include: { members: true } } } },
+          assignees: {
+            orderBy: { createdAt: "asc" },
+            include: { user: { select: { firstName: true, lastName: true } } },
+          },
           // The relation already existed; it was simply never fetched, so the
           // project manager's name could not be shown anywhere on the deal.
           manager: { select: { firstName: true, lastName: true } },
@@ -174,12 +183,16 @@ export default async function LeadDetailPage({
   //  • Canvassers: never (follow-ups don't go to canvassers).
   const ALWAYS_TAGGABLE = new Set(["super_admin", "admin", "manager", "accounting", "marketing"]);
   const dealRepId = lead.assignedRep?.id ?? null;
-  const assignedInstallerUserIds = new Set(
-    (project?.crewAssignments ?? [])
+  const assignedInstallerUserIds = new Set([
+    ...(project?.crewAssignments ?? [])
       .flatMap((a) => a.crew.members)
       .map((m) => m.userId)
-      .filter((uid): uid is string => Boolean(uid))
-  );
+      .filter((uid): uid is string => Boolean(uid)),
+    // People named on the install directly. Without this an installer could
+    // never be tagged on a follow-up, because the crew route that fed this set
+    // has no rows anywhere — no crew has ever been created.
+    ...(project?.assignees ?? []).map((a) => a.userId),
+  ]);
   const taskAssignees = canAssign
     ? (
         await prisma.user.findMany({
@@ -195,6 +208,24 @@ export default async function LeadDetailPage({
       })
     : [];
   const photoChecklists = project ? await getProjectPhotoChecklists(user.companyId, project.id) : [];
+  // Anyone active on the team can be put on an install. Deliberately not
+  // filtered to `installer`: the office books a PM onto a tricky job and a
+  // manager onto a first install, and a picker that hides them is a picker
+  // people work around.
+  const installTeam =
+    project && canAssignCrew
+      ? (
+          await prisma.user.findMany({
+            where: { companyId: user.companyId, role: { in: STAFF_ROLES }, status: "active" },
+            orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+            select: { id: true, firstName: true, lastName: true, role: true },
+          })
+        ).map((u) => ({
+          id: u.id,
+          name: `${u.firstName} ${u.lastName}`.trim(),
+          role: u.role.replace(/_/g, " "),
+        }))
+      : [];
   const crews =
     project && canAssignCrew
       ? await prisma.crew.findMany({ where: { companyId: user.companyId, active: true }, select: { id: true, name: true } })
@@ -831,6 +862,24 @@ export default async function LeadDetailPage({
             </div>
 
             <div data-deal-slide="install">
+                {/* The install date leads this slide and is rendered whether or
+                    not a job exists yet — picking one CREATES the job. Gating it
+                    on an existing job is what previously hid it on 13 of 16 real
+                    deals, and it is exactly what you agree with a homeowner
+                    before the job formally opens. It moved here from the Summary
+                    sidebar so it sits with the work it schedules. */}
+                <div className="mb-6">
+                  <Section icon={CalendarClock} label="Install date" tone="solar">
+                    <ProjectSchedule
+                      bare
+                      leadId={lead.id}
+                      projectId={project?.id ?? null}
+                      installDate={project?.installDate ? project.installDate.toISOString() : null}
+                      canManage={canManageProd}
+                    />
+                  </Section>
+                </div>
+
                 {!project ? (
                   canManageProd ? (
                     <StartProductionButton leadId={lead.id} />
@@ -853,26 +902,21 @@ export default async function LeadDetailPage({
                       <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
                     </Section>
 
+                    {/* People, not crews. `Crew`/`CrewMember` exist but nothing
+                        in the app creates one, so the old picker hid itself on
+                        every job and no install was ever staffed. */}
                     <Section icon={Users} label="Crew" tone="solar">
-                      {canAssignCrew ? (
-                        <CrewAssigner
-                          projectId={project.id}
-                          crews={crews}
-                          assignments={project.crewAssignments.map((a) => ({
-                            id: a.id,
-                            crewName: a.crew.name,
-                            members: a.crew.members.length,
-                          }))}
-                        />
-                      ) : project.crewAssignments.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No crew assigned.</p>
-                      ) : (
-                        <ul className="space-y-1 text-sm">
-                          {project.crewAssignments.map((a) => (
-                            <li key={a.id}>{a.crew.name} · {a.crew.members.length} members</li>
-                          ))}
-                        </ul>
-                      )}
+                      <InstallCrew
+                        projectId={project.id}
+                        team={installTeam}
+                        assignees={project.assignees.map((a) => ({
+                          id: a.id,
+                          userId: a.userId,
+                          name: `${a.user.firstName} ${a.user.lastName}`.trim(),
+                          role: a.role,
+                        }))}
+                        canEdit={canAssignCrew}
+                      />
                     </Section>
 
                     <Section icon={ClipboardCheck} label="QC Checklist" tone="solar">
@@ -1295,20 +1339,6 @@ export default async function LeadDetailPage({
               ) : (
                 <DealTypeToggle leadId={lead.id} value={isInsurance ? "insurance" : "cash"} canEdit={can(user, "update", "Lead")} />
               )
-            }
-            installDateSlot={
-              /* The install date lives HERE, with the other key dates. ALWAYS
-                 rendered: gating it on an existing job hid it on 13 of 16 real
-                 deals, and an install date is exactly what you agree with a
-                 homeowner before the job formally opens. Picking one creates
-                 the job. */
-              <ProjectSchedule
-                bare
-                leadId={lead.id}
-                projectId={project?.id ?? null}
-                installDate={project?.installDate ? project.installDate.toISOString() : null}
-                canManage={canManageProd}
-              />
             }
             actionsSlot={
             /* The visit: appointment → inspection. The claim is not here — it

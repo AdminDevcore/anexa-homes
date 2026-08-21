@@ -234,6 +234,74 @@ export async function unassignCrewAction(projectCrewId: string) {
   return ok();
 }
 
+// --------------------- Install assignees (people, not crews) -----------------
+
+/**
+ * Who is going out on this install.
+ *
+ * People rather than crews: `Crew` exists in the schema but nothing has ever
+ * created one, so the crew dropdown hid itself on every job and installs were
+ * staffed nowhere. The office knows the names on the day; this records them.
+ *
+ * Authorisation deliberately matches crew assignment — whoever could put a crew
+ * on a job can put a person on it. Nothing here is a new privilege.
+ */
+export async function assignInstallerAction(projectId: string, userId: string, role?: string) {
+  const user = await requireUser();
+  if (!can(user, "assign", "Crew") && !can(user, "update", "Project")) return fail("Not allowed.");
+  if (!(await projectInScope(user, projectId))) return fail("Project not found.");
+
+  // Same company only: a userId from anywhere else must not become an
+  // assignment, and the FK alone would happily accept one.
+  const member = await prisma.user.findFirst({
+    where: { id: userId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!member) return fail("That person is not on your team.");
+
+  const existing = await prisma.projectAssignee.findUnique({
+    where: { projectId_userId: { projectId, userId } },
+    select: { id: true },
+  });
+  if (existing) return fail("Already on this install.");
+
+  await prisma.projectAssignee.create({
+    data: { companyId: user.companyId, projectId, userId, role: role?.trim() || null },
+  });
+  revalidatePath(`/portal/projects/${projectId}`);
+  return ok();
+}
+
+/** Change what someone is doing on the install, without removing them. */
+export async function setInstallerRoleAction(assigneeId: string, role: string) {
+  const user = await requireUser();
+  if (!can(user, "assign", "Crew") && !can(user, "update", "Project")) return fail("Not allowed.");
+  const row = await prisma.projectAssignee.findFirst({
+    where: { id: assigneeId, companyId: user.companyId },
+    select: { id: true, projectId: true },
+  });
+  if (!row) return fail("Assignment not found.");
+  await prisma.projectAssignee.update({
+    where: { id: assigneeId },
+    data: { role: role.trim().slice(0, 60) || null },
+  });
+  revalidatePath(`/portal/projects/${row.projectId}`);
+  return ok();
+}
+
+export async function unassignInstallerAction(assigneeId: string) {
+  const user = await requireUser();
+  if (!can(user, "assign", "Crew") && !can(user, "update", "Project")) return fail("Not allowed.");
+  const row = await prisma.projectAssignee.findFirst({
+    where: { id: assigneeId, companyId: user.companyId },
+    select: { id: true, projectId: true },
+  });
+  if (!row) return fail("Assignment not found.");
+  await prisma.projectAssignee.delete({ where: { id: assigneeId } });
+  revalidatePath(`/portal/projects/${row.projectId}`);
+  return ok();
+}
+
 // ------------------- Start production (deal -> production container) ---------
 
 /**
