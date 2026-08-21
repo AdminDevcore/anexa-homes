@@ -29,11 +29,10 @@ import type { ActiveVertical } from "./vertical";
  *                 An insurance-restoration line-item catalog has no meaning in
  *                 solar; a module/inverter list has none in roofing. Hidden.
  *
- *   `labels`    — the same underlying setting, different vocabulary. Solar does
- *                 run a pre-install visit; it is a site survey, not a roof
- *                 inspection. Hiding that card would leave the solar deal page's
- *                 "Site survey outcome" dropdown uneditable, so it is renamed
- *                 rather than removed.
+ *   `labels`    — the same underlying setting, different vocabulary. Both
+ *                 workspaces photograph a job; solar shoots a site survey and
+ *                 an install, roofing a roof. Same screen, renamed, because
+ *                 hiding it would leave a live control uneditable.
  */
 export type SettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
@@ -88,12 +87,11 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     title: "Inspection Outcomes",
     body: "Customize the outcomes recorded after an inspection.",
     href: "/portal/settings/inspection-outcomes",
-    labels: {
-      solar: {
-        title: "Site Survey Outcomes",
-        body: "Customize the outcomes recorded after a site survey.",
-      },
-    },
+    // Roofing's. Solar was offered the same list as "Site Survey Outcomes"
+    // while its deal page had a dropdown to spend it on; that step is gone —
+    // solar's visit ends at the appointment status — so on solar this would now
+    // configure a control nobody can reach.
+    verticals: ["roofing"],
   },
   { icon: ListChecks, title: "Production Checklist", body: "The QC checklist applied to every new job.", href: "/portal/settings/production-checklist" },
   {

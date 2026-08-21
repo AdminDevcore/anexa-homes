@@ -34,6 +34,13 @@ export type OutcomeNote = { id: string; body: string; author: string; createdAt:
  * rep records in the same breath. It is downstream of the inspection, so it is
  * step 3. Building the proposal is the terminal action and the only emphasized
  * button here — it used to be buried in a document card below the fold.
+ *
+ * SOLAR RUNS ONE STEP, not two. Roofing's second stop is a roof inspection a
+ * rep does on the day and writes up on the spot; solar's was a "site survey
+ * outcome" — a different visit, by a different person, weeks later, which is
+ * why the field sat empty on every solar deal while the button for it took up
+ * half the card. So solar shows the appointment status and nothing else, flat:
+ * a numbered rail with a single stop reads as a list missing its second half.
  */
 export function DealActionsPanel({
   leadId,
@@ -77,10 +84,12 @@ export function DealActionsPanel({
 
   return (
     <div className="mt-4 border-t border-border pt-4">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">The visit</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {isSolar ? "Appointment status" : "The visit"}
+      </p>
 
-      <ol className="mt-3">
-        <Step n={1} done={!!disposition} title={isSolar ? "Qualification" : "Appointment"}>
+      {isSolar ? (
+        <div className="mt-2">
           <AppointmentRun
             leadId={leadId}
             disposition={disposition}
@@ -88,27 +97,39 @@ export function DealActionsPanel({
             notes={appointmentNotes}
             groups={groups}
             canEdit={canEditLead}
-            isSolar={isSolar}
+            isSolar
           />
-        </Step>
+        </div>
+      ) : (
+        <ol className="mt-3">
+          <Step n={1} done={!!disposition} title="Appointment">
+            <AppointmentRun
+              leadId={leadId}
+              disposition={disposition}
+              legacyNote={appointmentNote}
+              notes={appointmentNotes}
+              groups={groups}
+              canEdit={canEditLead}
+            />
+          </Step>
 
-        {/* The claim is NOT a step here. It used to be step 3, with an "Open
-            claim" button — but the Summary above already carries a Claim Status
-            picker, and two controls for one claim meant the button had to guess
-            a status ("Filed") the deal might be well past. Setting the status
-            opens the claim now, so the visit ends at the inspection. */}
-        <Step n={2} done={!!inspectionOutcome} title={isSolar ? "Site survey" : "Inspection"} last>
-          <InspectionOutcome
-            leadId={leadId}
-            outcome={inspectionOutcome}
-            legacyNote={inspectionNote}
-            notes={inspectionNotes}
-            outcomes={inspectionOutcomes}
-            canEdit={canEditLead}
-            label={isSolar ? "Site survey outcome" : "Inspection outcome"}
-          />
-        </Step>
-      </ol>
+          {/* The claim is NOT a step here. It used to be step 3, with an "Open
+              claim" button — but the Summary above already carries a Claim Status
+              picker, and two controls for one claim meant the button had to guess
+              a status ("Filed") the deal might be well past. Setting the status
+              opens the claim now, so the visit ends at the inspection. */}
+          <Step n={2} done={!!inspectionOutcome} title="Inspection" last>
+            <InspectionOutcome
+              leadId={leadId}
+              outcome={inspectionOutcome}
+              legacyNote={inspectionNote}
+              notes={inspectionNotes}
+              outcomes={inspectionOutcomes}
+              canEdit={canEditLead}
+            />
+          </Step>
+        </ol>
+      )}
 
       {canCreateProposal && (
         <div className="mt-1 border-t border-border pt-3">
@@ -282,7 +303,9 @@ function OutcomeNotes({
   );
 }
 
-function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEdit, label = "Inspection outcome" }: { leadId: string; outcome: string | null; legacyNote: string | null; notes: OutcomeNote[]; outcomes: string[]; canEdit: boolean; label?: string }) {
+/** Roofing only: solar's visit ends at the appointment status. */
+function InspectionOutcome({ leadId, outcome, legacyNote, notes, outcomes, canEdit }: { leadId: string; outcome: string | null; legacyNote: string | null; notes: OutcomeNote[]; outcomes: string[]; canEdit: boolean }) {
+  const label = "Inspection outcome";
   const router = useRouter();
   const [picking, setPicking] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -344,7 +367,7 @@ function AppointmentRun({
   notes: OutcomeNote[];
   groups: { group: string | null; items: string[] }[];
   canEdit: boolean;
-  /** Solar qualifies a homeowner; roofing runs a storm appointment. */
+  /** Solar records a status; roofing runs a storm appointment. */
   isSolar?: boolean;
 }) {
   const router = useRouter();
@@ -399,7 +422,7 @@ function AppointmentRun({
         </div>
       ) : (
         <Button size="sm" variant="outline" disabled={!canEdit} onClick={() => setPicking(true)} className="mt-1 w-full">
-          {isSolar ? "Record qualification" : "Run appointment"}
+          {isSolar ? "Set appointment status" : "Run appointment"}
         </Button>
       )}
       <OutcomeNotes leadId={leadId} context="appointment_outcome" legacyNote={legacyNote} notes={notes} canEdit={canEdit} placeholder="Add an appointment note…" />

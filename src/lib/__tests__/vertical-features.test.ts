@@ -35,20 +35,22 @@ describe("settings sections", () => {
 
   it("renames rather than hides the cards solar still needs", () => {
     const solar = titles("solar");
-    // Solar runs a site survey, not a roof inspection — but it is the same list,
-    // and hiding the card would leave the solar deal page's dropdown uneditable.
-    expect(solar).toContain("Site Survey Outcomes");
-    expect(solar).not.toContain("Inspection Outcomes");
     // Owner re-verify + county records survive; the storm search area does not.
     expect(solar).toContain("Homeowner Data");
     expect(solar).not.toContain("Storm & Homeowner Data");
   });
 
+  it("hides inspection outcomes from solar, whose visit ends at the appointment", () => {
+    // It was offered as "Site Survey Outcomes" while the solar deal page had a
+    // dropdown to spend it on. That step is gone, so the list configures
+    // nothing a solar user can reach.
+    const solar = titles("solar");
+    expect(solar).not.toContain("Site Survey Outcomes");
+    expect(solar).not.toContain("Inspection Outcomes");
+  });
+
   it("renamed cards still point at the same page", () => {
     const solar = visibleSettingsSections("solar");
-    expect(solar.find((s) => s.title === "Site Survey Outcomes")?.href).toBe(
-      "/portal/settings/inspection-outcomes"
-    );
     expect(solar.find((s) => s.title === "Homeowner Data")?.href).toBe("/portal/settings/storm-coverage");
   });
 
