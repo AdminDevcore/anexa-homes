@@ -1174,34 +1174,19 @@ export default async function LeadDetailPage({
               </section>
             )}
 
-            {/* ── Financials ──
-                Solar only. A roofing deal reads its financials inside the
-                Claim Info / Field Production / Deal Financials switcher above;
-                rendering them here too put the same two cards on the page
-                twice. Solar has no switcher, so this stays its only home. */}
-            {showFinancials && isSolarDeal && (
-            <section id="financials" className="scroll-mt-24 space-y-6">
-          {/* Commission payout breakdown — every recipient on this job + total owed */}
-          {project && payout && (
-            <Card title="Commission Payout" icon={DollarSign} tone={isSolarDeal ? "solar" : "brand"}>
-              <ProjectPayoutCard payout={payout} canManage={can(user, "approve", "Commission")} />
-            </Card>
-          )}
+            {/* No Commission Payout / Deal Financials on a solar deal.
+                Both are roofing's money model wearing a solar tint: a profit
+                pool built from contract value minus job cost, adjusted by
+                Supplement, Deductible and "company-provided lead?", unlocking
+                at the "Depreciation Requested" stage. A solar deal has no
+                supplement, no deductible and no depreciation — it is paid by a
+                financier against milestones, which is what the System &
+                financing slide already shows as Commission milestones and
+                Financier payments.
 
-          {/* Deal financials — costs + margin split (commission roles only) */}
-          {project && dealFinancials && (
-            <Card title="Deal Financials" icon={DollarSign} tone={isSolarDeal ? "solar" : "brand"}>
-              <DealFinancialsCard
-                financials={dealFinancials}
-                projectId={project.id}
-                canManage={can(user, "update", "Commission")}
-                commissionEligible={commissionEligible}
-                gateLabel={COMMISSION_GATE_LABEL}
-              />
-            </Card>
-          )}
-            </section>
-            )}
+                Roofing keeps both, in its own Deal Financials slide. This
+                section only ever rendered on solar (`showFinancials &&
+                isSolarDeal`), so removing it cannot touch roofing. */}
 
             {/* ── Documents & files ── */}
             <section id="documents" className="scroll-mt-24 space-y-6">
