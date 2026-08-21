@@ -520,6 +520,80 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
   });
 
   /**
+   * The other half of that story: an array does not have to be asked about at
+   * all when the building itself can answer.
+   *
+   * GOOGLE IS STUBBED AT OUR OWN ROUTE, not at theirs. The suite runs with a
+   * deliberately invalid Maps key, so a real Solar API call fails and the
+   * designer falls back — which is worth having (the test above pins exactly
+   * that path) but says nothing about what happens when the roof IS known. What
+   * this exercises is everything downstream of the answer: the fill, the mark
+   * on the number, and the round trip through the database.
+   */
+  test("an array drawn on a roof Google knows takes its facing from the building", async ({
+    page,
+  }) => {
+    await login(page, "admin@anexahomes.com");
+
+    // A south-facing plane at a 23° pitch, laid out as a two-metre lattice of
+    // Google's own panels over the whole picture — the cutoff is three metres,
+    // so wherever the array is drawn it lands on this plane.
+    const panels: { e: number; n: number; segmentIndex: number }[] = [];
+    for (let e = -40; e <= 40; e += 2) {
+      for (let n = -40; n <= 40; n += 2) panels.push({ e, n, segmentIndex: 0 });
+    }
+    await page.route("**/api/property/roof-planes*", (route) =>
+      route.fulfill({
+        json: {
+          planes: {
+            segments: [
+              {
+                index: 0,
+                pitchDeg: 23,
+                azimuthDeg: 180,
+                areaM2: 90,
+                centerE: 0,
+                centerN: 0,
+              },
+            ],
+            panels,
+            imageryQuality: "HIGH",
+            imageryDate: "March 2025",
+          },
+        },
+      })
+    );
+
+    await openDesigner(page);
+    await clearRoof(page);
+    const box = await pickTool(page, "Draw array");
+    await dragArray(page, box);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+
+    // Nobody typed this. The array was drawn on a plane the building says faces
+    // south at 23°, so that is what it faces — and the screen says where the
+    // number came from rather than presenting a measurement as a default.
+    await expect(page.getByLabel("Facing (azimuth)")).toHaveValue("180", { timeout: 10000 });
+    await expect(page.getByTestId("facing-source")).toBeVisible();
+    await expect(page.getByText(/no facing or pitch/)).toHaveCount(0);
+
+    // And it is the rep's the moment they overrule it.
+    await page.getByLabel("Facing (azimuth)").fill("270");
+    await expect(page.getByTestId("facing-source")).toHaveCount(0);
+    await page.getByLabel("Facing (azimuth)").fill("180");
+
+    // Through the database and back: the production a customer is quoted is
+    // computed server-side from these angles, so they have to survive the trip.
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText(/panels? saved/)).toBeVisible({ timeout: 15000 });
+    await page.reload();
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
+    await pickTool(page, "Move array");
+    expect(await clickCanvasColour(page, "panel")).toBe(true);
+    await expect(page.getByLabel("Facing (azimuth)")).toHaveValue("180", { timeout: 10000 });
+  });
+
+  /**
    * Shading is the other half of the production model, and the half a rep can
    * see out of the window. A tree over one bank has to take kWh off that bank
    * and no other.

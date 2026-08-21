@@ -3,8 +3,16 @@ import { getSolarSettings } from "./settings";
 import { resolveSizingModule } from "./sizing";
 import { recomputeAdderTotal } from "./adders";
 import { planeFor, resolvePlaneYields } from "./pvwatts";
+import { groundPlanesFor, resolveRoofPlanes } from "./roof-planes";
+import { applyPlanes } from "@/lib/solar-roof-planes";
 import { yieldCacheKey } from "@/lib/solar-pvwatts";
-import { panelCount, parseLayoutBlocks, type LayoutBlock } from "@/lib/solar-layout";
+import {
+  blockPanelCount,
+  panelCount,
+  parseLayoutBlocks,
+  MODULE_FALLBACK_MM,
+  type LayoutBlock,
+} from "@/lib/solar-layout";
 import { systemTotals } from "@/lib/solar-arrays";
 import { offsetPct } from "@/lib/solar-money";
 
@@ -41,10 +49,41 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
   ]);
   if (!lead || !design) return null;
 
-  const blocks: LayoutBlock[] = parseLayoutBlocks(design.layoutBlocks);
+  const stored: LayoutBlock[] = parseLayoutBlocks(design.layoutBlocks);
   const assumptions = await getSolarSettings(companyId);
   const module_ = await resolveSizingModule(companyId, design.moduleId);
   const arrayType = design.mountType === "ground" ? ("ground" as const) : ("roof" as const);
+
+  /**
+   * Give every array nobody has described the angles of the plane it sits on.
+   *
+   * BEFORE the yields are asked for, because the whole point is that PVWatts
+   * then has a real plane to simulate instead of the array falling through to
+   * the company's market average. An array a rep described is untouched, and a
+   * roof Google cannot see leaves everything exactly as it was.
+   *
+   * Ground mounts are skipped: they sit in a yard, not on a plane, and the
+   * nearest roof segment has nothing to do with how they were racked.
+   */
+  const wantsFacing = stored.some(
+    (b) => blockPanelCount(b) > 0 && (b.azimuthDeg == null || b.tiltDeg == null)
+  );
+  // Nothing to fill is not a question worth asking. A design where every array
+  // is already described would otherwise spend a Google request on every save
+  // to be told what it is not going to use.
+  const roof =
+    arrayType === "ground" || !wantsFacing
+      ? null
+      : await resolveRoofPlanes(lead.lat, lead.lng);
+  const read = applyPlanes(
+    stored,
+    groundPlanesFor(roof, lead.lat, lead.lng),
+    {
+      widthMm: module_?.widthMm ?? MODULE_FALLBACK_MM.widthMm,
+      heightMm: module_?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
+    }
+  );
+  const blocks = read.blocks;
 
   const plane = (tiltDeg: number | null, azimuthDeg: number | null) =>
     planeFor({
@@ -81,6 +120,10 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
   await prisma.solarDesign.update({
     where: { leadId },
     data: {
+      // Written back ONLY when the roof supplied something, so this stays a
+      // figures recompute for every other design. The geometry is untouched
+      // either way — the same rectangles, now with a facing on them.
+      ...(read.filled > 0 ? { layoutBlocks: blocks } : {}),
       moduleQty: panelCount(blocks),
       // Only when one resolved. Writing null here would unpick a module a rep
       // chose the moment the catalogue has no default to fall back to.
@@ -106,5 +149,7 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
     year1ProductionKwh: totals.year1ProductionKwh,
     offsetPct: computedOffset,
     measuredArrays: totals.measuredArrays,
+    /** How many arrays took their angles off the building, so the screen can say. */
+    filledFromRoof: read.filled,
   };
 }

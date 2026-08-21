@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeft, Compass, Eraser, Loader2, MapPin, Minus, MousePointer2, Move, Plus,
-  RotateCcw, Ruler, Square, Sun, Trash2, Wand2, ZoomIn, ZoomOut,
+  Layers, RotateCcw, Ruler, Square, Sun, Trash2, Wand2, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import {
   metresPerPixel,
   metresToImagePx,
+  blockPanelCount,
   panelCorners,
   panelCount,
   panelSizeM,
@@ -41,6 +42,12 @@ import {
   type Orientation,
 } from "@/lib/solar-layout";
 import { systemTotals } from "@/lib/solar-arrays";
+import {
+  applyPlanes,
+  assignPlanes,
+  segmentHulls,
+  type RoofPlanes,
+} from "@/lib/solar-roof-planes";
 import {
   compassLabel,
   optimalTiltDeg,
@@ -181,6 +188,8 @@ export function SolarLayoutDesigner({
   measuredYields,
   initialBlocks,
   initialSetbacks,
+  roofPlanes,
+  groundMount,
   assumptions,
   canEdit,
   backHref,
@@ -214,6 +223,15 @@ export function SolarLayoutDesigner({
   measuredYields: Record<string, number>;
   initialBlocks: LayoutBlock[];
   initialSetbacks: LayoutSetback[];
+  /**
+   * The building's own roof planes, when the cache already held them.
+   *
+   * Null is not "this roof has none" — it is "nobody has asked yet", and the
+   * designer asks in the background rather than making the page wait on Google.
+   */
+  roofPlanes: RoofPlanes | null;
+  /** A ground mount is racked in a yard, so the roof has nothing to say about it. */
+  groundMount: boolean;
   /** The company's yield and derate, so the preview matches what the server saves. */
   assumptions: YieldAssumptions;
   canEdit: boolean;
@@ -288,6 +306,35 @@ export function SolarLayoutDesigner({
   const [dirty, setDirty] = React.useState(false);
   const [shadeOpen, setShadeOpen] = React.useState(false);
   const [tiltOpen, setTiltOpen] = React.useState(false);
+  const [showPlanes, setShowPlanes] = React.useState(false);
+
+  /**
+   * What the building itself says about its roof.
+   *
+   * `null` while nobody has asked, and while the asking is in flight. The whole
+   * screen works without it — this only ever ADDS a facing to an array that had
+   * none, so every state below, including the one where Google has never heard
+   * of the address, leaves the designer exactly as it was before roof planes
+   * existed.
+   */
+  const [planes, setPlanesState] = React.useState<RoofPlanes | null>(roofPlanes);
+  const planesRef = React.useRef<RoofPlanes | null>(roofPlanes);
+  const setPlanes = React.useCallback((next: RoofPlanes | null) => {
+    // A ref as well as state, for the same reason the layout keeps one: the
+    // pointer handlers that create an array run before any re-render, and an
+    // array created from a stale copy is an array with no facing.
+    planesRef.current = next;
+    setPlanesState(next);
+  }, []);
+  const [roofState, setRoofState] = React.useState<"idle" | "looking" | "read" | "none">(() =>
+    // Decided at the first render rather than pushed in by the effect below:
+    // whether the roof is about to be looked up is knowable from the props, and
+    // setting it from inside the effect is a second render to say so.
+    roofPlanes ? "read" : groundMount || lat == null ? "idle" : "looking"
+  );
+  /** How many arrays gained a facing off the roof in THIS session, so the
+   *  screen can ask for the save that would keep it. */
+  const [justFilled, setJustFilled] = React.useState(0);
 
   /**
    * What this design is built from.
@@ -433,22 +480,104 @@ export function SolarLayoutDesigner({
   );
 
   /**
-   * What a newly drawn array should face.
+   * What a newly drawn array faces.
    *
-   * The FIRST array on a deal inherits nothing, so it stays unoriented and the
-   * prompt fires at least once — a rep who is never told the roof matters will
-   * never say which way it faces. After that, arrays inherit from the last one
-   * drawn, because the second and third arrays are usually further up the same
-   * plane and retyping the pitch three times is how people stop bothering.
+   * THE BUILDING ANSWERS FIRST. Where the roof planes are known, a new array
+   * takes the plane it was drawn on — which matters most in exactly the case
+   * inheritance gets wrong: the second array goes on the west face, and copying
+   * the first one's south would be a confident, invisible error.
+   *
+   * Inheritance is the fallback, for a roof Google cannot see. The FIRST array
+   * on such a deal inherits nothing, so it stays unoriented and the prompt fires
+   * at least once — a rep who is never told the roof matters will never say
+   * which way it faces. After that, arrays inherit from the last one drawn,
+   * because the second and third are usually further up the same plane and
+   * retyping the pitch three times is how people stop bothering. An inherited
+   * angle is NOT marked as read from the roof: it is a guess about this array
+   * made from a different one.
    *
    * Shade is deliberately NOT inherited: the whole reason to shade one array
    * and not another is that the tree is only over one of them.
    */
-  const inheritedOrientation = (): Pick<LayoutBlock, "azimuthDeg" | "tiltDeg"> => {
+  const orientationFor = (
+    b: LayoutBlock
+  ): Pick<LayoutBlock, "azimuthDeg" | "tiltDeg" | "facingSource"> => {
+    const roof = planesRef.current
+      ? assignPlanes([b], planesRef.current, moduleMm).get(b.id)
+      : undefined;
+    if (roof) {
+      return { azimuthDeg: roof.azimuthDeg, tiltDeg: roof.tiltDeg, facingSource: "roof" };
+    }
     const source = selected ?? blocksRef.current[blocksRef.current.length - 1];
-    if (!source) return { azimuthDeg: null, tiltDeg: null };
-    return { azimuthDeg: source.azimuthDeg ?? null, tiltDeg: source.tiltDeg ?? null };
+    if (!source) return { azimuthDeg: null, tiltDeg: null, facingSource: null };
+    return {
+      azimuthDeg: source.azimuthDeg ?? null,
+      tiltDeg: source.tiltDeg ?? null,
+      facingSource: null,
+    };
   };
+
+  // ── The roof itself ────────────────────────────────────────────────────
+  /**
+   * Ask the building which way its planes face, unless somebody already has.
+   *
+   * AFTER MOUNT, never during the render that draws the roof. The page hands
+   * over whatever the cache held, so a house anybody has quoted before is
+   * already answered here; this is the first-ever look, which costs a call to
+   * Google and must not be a second of blank screen.
+   */
+  React.useEffect(() => {
+    // A ground mount sits in a yard. The nearest roof plane has nothing to do
+    // with how it was racked, and reading one onto it would be an invention.
+    if (roofPlanes || groundMount || lat == null) return;
+    let live = true;
+    fetch(`/api/property/roof-planes?leadId=${encodeURIComponent(leadId)}`)
+      .then((r) => (r.ok ? r.json() : { planes: null }))
+      .then((body: { planes: RoofPlanes | null }) => {
+        if (!live) return;
+        setPlanes(body.planes ?? null);
+        setRoofState(body.planes ? "read" : "none");
+      })
+      // Never fatal, like everything else that leaves this machine: the roof
+      // simply stays unread and every array keeps the facing it already had.
+      .catch(() => live && setRoofState("none"));
+    return () => {
+      live = false;
+    };
+  }, [leadId, lat, roofPlanes, groundMount, setPlanes]);
+
+  /**
+   * Fill in the arrays nobody has described, the moment the roof is known.
+   *
+   * NOT through `commit`. This is not an edit a rep made, so it earns no undo
+   * step and must not raise the unsaved-work guard on a designer somebody only
+   * opened to look at — it is the starting state, arriving a moment late. The
+   * same function runs server-side inside `recomputeDesignFigures`, so what a
+   * save stores is what was on screen rather than a second opinion about it.
+   */
+  React.useEffect(() => {
+    if (!planes) return;
+    const result = applyPlanes(blocksRef.current, planes, moduleMm);
+    if (result.filled === 0) return;
+    setBlocks(result.blocks);
+    setJustFilled(result.filled);
+  }, [planes, moduleMm, setBlocks]);
+
+  /**
+   * Which plane each array is on, live — so dragging one across a ridge says so
+   * while it is being dragged rather than after a save.
+   */
+  const roofAssignments = React.useMemo(
+    () => (planes ? assignPlanes(blocks, planes, moduleMm) : null),
+    [blocks, planes, moduleMm]
+  );
+  const selectedStraddles = (roofAssignments?.get(selectedId ?? "")?.planesSpanned ?? 1) > 1;
+
+  /** The planes drawn as outlines, only while the rep is checking our work. */
+  const hulls = React.useMemo(
+    () => (planes && showPlanes ? segmentHulls(planes) : []),
+    [planes, showPlanes]
+  );
 
   // ── Imagery ────────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -536,6 +665,42 @@ export function SolarLayoutDesigner({
         for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
         ctx.closePath();
       };
+
+      /**
+       * The roof's own planes, when the rep has asked to see them.
+       *
+       * Underneath everything, and only on request. This is a check on the
+       * tool's work — "does it think this face points the way I can see it
+       * points" — and a check that is always on stops being read.
+       */
+      // `chrome: false` is the picture the customer is shown. Working overlays
+      // stay out of it, exactly like the grips and the green ghosts.
+      for (const hull of opts.chrome ? hulls : []) {
+        if (hull.ring.length < 3) continue;
+        const ring = hull.ring.map(toPx);
+        trace(ring);
+        ctx.fillStyle = "rgba(56, 189, 248, 0.12)";
+        ctx.fill();
+        ctx.setLineDash([7, 5]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.9)";
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const cx = ring.reduce((t, p) => t + p.x, 0) / ring.length;
+        const cy = ring.reduce((t, p) => t + p.y, 0) / ring.length;
+        const label = `${compassLabel(hull.azimuthDeg)} · ${Math.round(hull.pitchDeg)}°`;
+        ctx.font = "600 15px ui-sans-serif, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        // Stroked before filled, so the label survives a light roof and a dark
+        // one — the two things this overlay is drawn on top of.
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(15, 23, 42, 0.85)";
+        ctx.strokeText(label, cx, cy);
+        ctx.fillStyle = "#e0f2fe";
+        ctx.fillText(label, cx, cy);
+      }
 
       // Setbacks go UNDER the panels: the point of the band is to show which
       // modules are sitting in it, and a band painted on top hides them.
@@ -662,6 +827,7 @@ export function SolarLayoutDesigner({
     [
       blocks,
       setbacks,
+      hulls,
       pending,
       ghostPoint,
       setbackSnap,
@@ -759,7 +925,7 @@ export function SolarLayoutDesigner({
   ): LayoutBlock => {
     const { w, h } = panelSizeM(moduleMm, orientation);
     const off = blockLocalToGround({ originE: 0, originN: 0, rotationDeg }, w / 2, h / 2);
-    return {
+    const b: LayoutBlock = {
       id: uid(),
       originE: m.e - off.e,
       originN: m.n - off.n,
@@ -768,8 +934,8 @@ export function SolarLayoutDesigner({
       rows: 1,
       orientation,
       omitted: [],
-      ...inheritedOrientation(),
     };
+    return { ...b, ...orientationFor(b) };
   };
 
   /**
@@ -849,22 +1015,27 @@ export function SolarLayoutDesigner({
     if (tool === "erase") {
       const h = hit(m);
       if (h) {
-        // A lone panel is deleted outright: knocking out the only cell of a 1x1
-        // leaves an empty block on the canvas that can still be clicked.
+        // Erasing the LAST panel deletes the block, whatever its grid says.
         //
-        // Anything bigger keeps its grid and loses one cell, so the modules
-        // either side stay exactly where the rep put them. Re-flowing them to
-        // close the gap is what "it doesn't put them all symmetric" describes.
+        // It used to be only a 1x1 that went, so an 8x1 rubbed out cell by cell
+        // left an 8-cell grid holding nothing: invisible, still clickable, still
+        // showing its ghosts, and counting zero modules. A deal reached the
+        // financing step with three of those on it and no system size at all,
+        // which is a roof that looks drawn and prices like an empty one.
+        //
+        // Anything with panels left keeps its grid and loses one cell, so the
+        // modules either side stay exactly where the rep put them. Re-flowing
+        // them to close the gap is what "it doesn't put them all symmetric"
+        // describes.
+        const last = blockPanelCount(h.block) <= 1;
         commit(
-          h.block.cols === 1 && h.block.rows === 1
+          last
             ? blocksRef.current.filter((b) => b.id !== h.block.id)
             : blocksRef.current.map((b) =>
                 b.id === h.block.id ? { ...b, omitted: [...b.omitted, h.index] } : b
               )
         );
-        if (selectedId === h.block.id && h.block.cols === 1 && h.block.rows === 1) {
-          setSelectedId(null);
-        }
+        if (selectedId === h.block.id && last) setSelectedId(null);
       }
       return;
     }
@@ -1057,7 +1228,7 @@ export function SolarLayoutDesigner({
         );
       }
       const topLeft = toMetres({ x: Math.min(d.fromX, to.x), y: Math.min(d.fromY, to.y) });
-      const b: LayoutBlock = {
+      const drawn: LayoutBlock = {
         id: uid(),
         originE: topLeft.e,
         originN: topLeft.n,
@@ -1066,8 +1237,8 @@ export function SolarLayoutDesigner({
         rows: fit.rows,
         orientation: fit.orientation,
         omitted: [],
-        ...inheritedOrientation(),
       };
+      const b: LayoutBlock = { ...drawn, ...orientationFor(drawn) };
       commit([...blocksRef.current, b]);
       setSelectedId(b.id);
       setTool("select");
@@ -1341,6 +1512,23 @@ export function SolarLayoutDesigner({
                   <Icon className="size-4" /> {label}
                 </button>
               ))}
+              {planes && (
+                <>
+                  <div className="border-t border-neutral-200" />
+                  <button
+                    type="button"
+                    aria-pressed={showPlanes}
+                    title="Outline the roof planes Google has modelled, with the way each one faces."
+                    onClick={() => setShowPlanes((v) => !v)}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium",
+                      showPlanes ? "bg-sky-600 text-white" : "hover:bg-neutral-100"
+                    )}
+                  >
+                    <Layers className="size-4" /> Roof planes
+                  </button>
+                </>
+              )}
               {selected && (
                 <>
                   <div className="border-t border-neutral-200" />
@@ -1374,14 +1562,16 @@ export function SolarLayoutDesigner({
                   min={0}
                   max={60}
                   step={0.5}
-                  onChange={(v) => patchSelected({ tiltDeg: v })}
+                  onChange={(v) => patchSelected({ tiltDeg: v, facingSource: null })}
                 />
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {COMMON_PITCHES.slice(0, 6).map((rise) => (
                     <button
                       key={rise}
                       type="button"
-                      onClick={() => patchSelected({ tiltDeg: pitchToTiltDeg(rise) })}
+                      onClick={() =>
+                        patchSelected({ tiltDeg: pitchToTiltDeg(rise), facingSource: null })
+                      }
                       className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] hover:bg-neutral-100"
                     >
                       {rise}/12
@@ -1389,7 +1579,7 @@ export function SolarLayoutDesigner({
                   ))}
                   <button
                     type="button"
-                    onClick={() => patchSelected({ tiltDeg: 0 })}
+                    onClick={() => patchSelected({ tiltDeg: 0, facingSource: null })}
                     className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] hover:bg-neutral-100"
                   >
                     Flat
@@ -1474,12 +1664,49 @@ export function SolarLayoutDesigner({
                       {totals.unorientedArrays === 1 ? "array has" : "arrays have"} no facing or
                       pitch.
                     </strong>{" "}
-                    They earn the generic market yield — the same kWh a south roof would.
-                    An array drawn along a ridge faces square off it, but off which side is
-                    something only you can see. Select it and press <em>Off the rows</em>, then
-                    flip it if the arrow points the wrong way.
+                    They earn the generic market yield — the same kWh a south roof would.{" "}
+                    {/*
+                      Say why the building did not answer, which is a different
+                      sentence in each case — and while it is still being asked,
+                      say nothing at all rather than blame a roof nobody has
+                      looked at yet.
+                    */}
+                    {roofState === "looking" ? (
+                      "Reading the roof now — this usually settles in a second."
+                    ) : (
+                      <>
+                        {roofState === "none"
+                          ? "This address has no roof model to read them off, so these are yours to say: "
+                          : "The building has nothing to say about these — a ground mount, or panels past the modelled roof: "}
+                        select the array and press <em>Off the rows</em>, then flip it if the arrow
+                        points the wrong way.
+                      </>
+                    )}
                   </>
                 )}
+              </div>
+            )}
+
+            {/*
+              The other half of the story, and it needs saying out loud: angles
+              that were read for the rep are still only on screen until the
+              design is saved. Not amber — nothing is wrong here.
+            */}
+            {moduleRatingW && justFilled > 0 && (
+              <div
+                data-testid="roof-read-note"
+                className="pointer-events-auto absolute right-3 top-20 max-w-sm rounded-lg border border-sky-300 bg-sky-50 p-2.5 text-xs text-sky-900 shadow-lg"
+                style={totals.unorientedArrays > 0 ? { top: "10.5rem" } : undefined}
+              >
+                <strong>
+                  {justFilled === 1
+                    ? "One array took its facing"
+                    : `${justFilled} arrays took their facing`}{" "}
+                  off the roof.
+                </strong>{" "}
+                {planes?.imageryDate ? `Google's model of this building, ${planes.imageryDate}. ` : ""}
+                Turn on <em>Roof planes</em> to see what it read, and <em>Save</em> to keep these
+                figures on the deal.
               </div>
             )}
 
@@ -1567,7 +1794,12 @@ export function SolarLayoutDesigner({
                 aria-label="Facing (azimuth)"
                 value={selected.azimuthDeg ?? ""}
                 onChange={(e) =>
-                  patchSelected({ azimuthDeg: e.target.value === "" ? null : Number(e.target.value) })
+                  patchSelected({
+                    azimuthDeg: e.target.value === "" ? null : Number(e.target.value),
+                    // Typed over, so it is theirs now. Leaving the mark on would
+                    // credit the roof with a number a person overruled it with.
+                    facingSource: null,
+                  })
                 }
                 className="h-7 w-16 rounded border border-white/20 bg-white/10 px-1.5 text-sm text-white"
               />
@@ -1576,13 +1808,40 @@ export function SolarLayoutDesigner({
               </span>
             </label>
 
+            {/* Where the number came from. A measurement and a guess must not
+                look the same on a screen a price is read off. */}
+            {selected.facingSource === "roof" && (
+              <span
+                data-testid="facing-source"
+                title={`Read off this building's roof plane${planes?.imageryDate ? `, from Google's model of ${planes.imageryDate}` : ""}. Type over it to make it yours.`}
+                className="inline-flex items-center gap-1 rounded-full bg-sky-500/20 px-2 py-0.5 text-[11px] font-medium text-sky-200"
+              >
+                <Layers className="size-3" /> from the roof
+              </span>
+            )}
+
+            {selectedStraddles && (
+              <span
+                data-testid="straddle-warning"
+                title="Two planes with different facings are being priced as one. Split the array at the ridge and each half gets its own."
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-200"
+              >
+                crosses 2 roof planes
+              </span>
+            )}
+
             <Button
               type="button"
               size="sm"
               variant="outline"
               className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
               title="Face square off the rows — the down-slope direction for an array aligned to the ridge."
-              onClick={() => patchSelected({ azimuthDeg: norm360(selected.rotationDeg + 90) })}
+              onClick={() =>
+                patchSelected({
+                  azimuthDeg: norm360(selected.rotationDeg + 90),
+                  facingSource: null,
+                })
+              }
             >
               <Compass className="size-4" /> Off the rows
             </Button>
@@ -1591,7 +1850,12 @@ export function SolarLayoutDesigner({
               size="sm"
               variant="outline"
               className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
-              onClick={() => patchSelected({ azimuthDeg: norm360((selected.azimuthDeg ?? 0) + 180) })}
+              onClick={() =>
+                patchSelected({
+                  azimuthDeg: norm360((selected.azimuthDeg ?? 0) + 180),
+                  facingSource: null,
+                })
+              }
             >
               Flip 180°
             </Button>
@@ -1601,7 +1865,9 @@ export function SolarLayoutDesigner({
               variant="outline"
               className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
               title="Due south at this site's optimal tilt — for a ground mount or a tilt-up frame."
-              onClick={() => patchSelected({ azimuthDeg: 180, tiltDeg: bestTilt })}
+              onClick={() =>
+                patchSelected({ azimuthDeg: 180, tiltDeg: bestTilt, facingSource: null })
+              }
             >
               Best here (S {bestTilt}°)
             </Button>

@@ -34,6 +34,10 @@ const blockSchema = z.object({
   // reason as the two above: a design saved before shading existed has none,
   // and none has to keep pricing exactly as it did.
   shadePct: z.number().finite().min(0).max(100).nullish(),
+  // Where the two angles above came from. Only one value is meaningful and the
+  // rest of the enum is deliberately absent: a client that sends anything else
+  // is claiming a measurement nobody made.
+  facingSource: z.literal("roof").nullish(),
 });
 
 /**
@@ -127,5 +131,7 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
     offsetPct: figures?.offsetPct ?? 0,
     /** How many arrays NREL answered for, so the designer can say. */
     measuredArrays: figures?.measuredArrays ?? 0,
+    /** How many took their facing off the building on the way through. */
+    filledFromRoof: figures?.filledFromRoof ?? 0,
   };
 }

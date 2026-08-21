@@ -3448,6 +3448,47 @@ model SolarYieldCache {
   @@map("solar_yield_cache")
 }
 
+/// One building's roof, as Google's Solar API models it.
+///
+/// NOT PER-COMPANY, for the same reason as SolarYieldCache above: this is the
+/// shape of a building, derived from the same public aerial imagery the deal
+/// card already shows, and two companies quoting the same street should not pay
+/// for the same request twice. Nothing about a customer is stored — a
+/// coordinate, some angles, and where Google would put panels.
+///
+/// Stored in LAT/LNG rather than the ground metres the designer draws in: those
+/// are measured from one deal's coordinate, and a roof outlives any deal on it.
+model SolarRoofCache {
+  id  String @id @default(uuid())
+  /// `lat|lng` rounded to six decimals — a house, not a neighbourhood.
+  key String @unique
+
+  lat Float
+  lng Float
+
+  /// Roof planes, each with a pitch, an azimuth and a centre. See RoofSegmentGeo.
+  segments Json @default("[]")
+  /// Google's own panel placements, `{lat, lng, segmentIndex}` — the labelled
+  /// point cloud an array's facing is voted from.
+  panels   Json @default("[]")
+
+  /// False when Google has no model for this address. Cached DELIBERATELY: a
+  /// rural roof it cannot see is not a transient failure, and re-asking on
+  /// every page load would spend a request to be told the same thing.
+  found Boolean @default(false)
+
+  /// How good the imagery behind the model is, and when it was taken. Shown to
+  /// the rep, because a facing read off a 2019 picture of a roof that has been
+  /// re-shingled since is still worth a second look.
+  imageryQuality String?
+  imageryDate    String?
+
+  fetchedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("solar_roof_cache")
+}
+
 /// Who a milestone pays.
 enum MilestonePayee {
   /// M1 / M2 / M3 — the rep's commission tranches.

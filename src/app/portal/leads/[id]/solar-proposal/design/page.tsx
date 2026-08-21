@@ -7,6 +7,7 @@ import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks, parseLayoutSetbacks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { yieldCacheKey } from "@/lib/solar-pvwatts";
 import { cachedPlaneYields, planeFor } from "@/server/modules/solar/pvwatts";
+import { cachedRoofPlanes, groundPlanesFor } from "@/server/modules/solar/roof-planes";
 import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
 
 export const dynamic = "force-dynamic";
@@ -139,6 +140,18 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
     if (hit) measuredYields[`${tiltDeg}|${azimuthDeg}`] = hit.kwhPerKwYear;
   }
 
+  /**
+   * The building's own roof planes, from the CACHE ONLY — same rule as the
+   * yields above, and the same reason: opening the designer must not be slower
+   * than drawing on it. A roof nobody has looked up yet comes back null and the
+   * designer asks the route for it in the background.
+   */
+  const roofPlanes = groundPlanesFor(
+    await cachedRoofPlanes(lead.lat, lead.lng),
+    lead.lat,
+    lead.lng
+  );
+
   const address = [lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
     .filter(Boolean)
     .join(" · ");
@@ -169,6 +182,8 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
       annualUsageKwh={design?.annualUsageKwh ?? null}
       initialBlocks={blocks}
       measuredYields={measuredYields}
+      roofPlanes={roofPlanes}
+      groundMount={design?.mountType === "ground"}
       initialSetbacks={parseLayoutSetbacks(design?.layoutSetbacks)}
       assumptions={{
         kwhPerKwYear: settings.kwhPerKwYear,

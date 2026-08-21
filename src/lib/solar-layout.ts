@@ -38,6 +38,17 @@ export type LayoutBlock = {
   /** The plane's slope off horizontal, degrees. 0 is flat. Undefined = unknown. */
   tiltDeg?: number | null;
   /**
+   * Where the facing and pitch above came from: `"roof"` when they were read
+   * off the building's own roof planes, absent when a person said.
+   *
+   * Kept so the screen can be honest about which it is. A rep who typed a
+   * facing has to be able to see that the tool did not quietly replace it, and
+   * a rep who typed nothing has to be able to see that the number in front of
+   * them is a measurement rather than a default. Editing either angle by hand
+   * clears this — from that moment the value is theirs.
+   */
+  facingSource?: "roof" | null;
+  /**
    * How much of this array's year the surroundings take away, 0..100.
    *
    * A tree, a neighbour's gable, a chimney — the things the aerial shows but
@@ -794,6 +805,8 @@ export function parseLayoutBlocks(raw: unknown): LayoutBlock[] {
     // Same story as orientation: shading arrived later, so a design saved
     // before it has none, and none has to mean "clear" rather than NaN.
     shadePct: clampShade(finiteOrNull((b as LayoutBlock).shadePct)),
+    // Anything other than the one value we write is a person's own figure.
+    facingSource: (b as LayoutBlock).facingSource === "roof" ? ("roof" as const) : null,
   }));
 }
 
