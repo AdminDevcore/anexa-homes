@@ -55,12 +55,30 @@ test("payroll: generate -> approve commissions -> run -> pay -> export", async (
   expect(body).toContain("TOTAL");
 });
 
+/**
+ * Open the deal's financial breakdown.
+ *
+ * The claim worksheet, the costed scope, the field checklists and the money all
+ * share one card on the deal, a slide at a time. Every slide stays MOUNTED and
+ * only `display` is toggled, which is why a missed click here fails two
+ * different ways: `getByText` finds the element and reports it "hidden", while
+ * `getByRole` never resolves at all — a display:none subtree is not in the
+ * accessibility tree. Neither reads as "you forgot to open the tab".
+ */
+async function openFinancials(page: Page) {
+  await page
+    .getByTestId("deal-slides")
+    .getByRole("tab", { name: "Deal Financials" })
+    .click();
+}
+
 test("commissions: per-deal generation is gated until Depreciation Requested", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   // Robert Johnson is seeded in "In Production" (has a job, but pre-depreciation).
   await page.goto("/portal/leads?q=Robert");
   await page.locator('table a[href^="/portal/leads/"]').first().click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+  await openFinancials(page);
   await expect(page.getByText(/Commissions unlock at/)).toBeVisible({ timeout: 10000 });
   await expect(page.getByRole("button", { name: /Generate commission|Update commission/ })).toBeDisabled();
 });
@@ -72,13 +90,16 @@ test("deal financials: supplement raises the effective contract value", async ({
   await page.locator('table a[href^="/portal/leads/"]').first().click();
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
+  await openFinancials(page);
   await page.getByRole("button", { name: /^Supplement/ }).click();
   await page.getByPlaceholder("Amount ($)").fill("15000");
   await page.getByRole("button", { name: /^Save$/ }).click();
 
-  // The supplement is added on top of the base contract → adjusted contract value.
+  // The supplement is added on top of the base contract → the pool's revenue.
+  // That row was "= Adjusted contract value" until the breakdown grew company
+  // overhead and the PA fee and had to say WHICH total it was naming.
   await expect(page.getByText("+ Supplement")).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText("= Adjusted contract value")).toBeVisible();
+  await expect(page.getByText("= Pool revenue")).toBeVisible();
   await expect(page.getByText("$39,500").first()).toBeVisible(); // 24,500 + 15,000
 });
 

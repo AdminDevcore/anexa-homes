@@ -23,7 +23,7 @@ test("owner sees all report cards on the hub", async ({ page }) => {
     "Financial",
     "Payroll",
     "Job Profitability",
-    "Delinquency / Follow-up",
+    "Overdue Jobs",
     "Contractor Pay",
   ]) {
     await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
@@ -48,13 +48,16 @@ test("a Company-Report section opens and exports CSV", async ({ page }) => {
   await page.context().clearCookies();
 });
 
-test("delinquency report opens, toggles due-soon, and exports", async ({ page }) => {
+test("overdue-jobs report opens, toggles due-soon, and exports", async ({ page }) => {
   await login(page, "owner@anexahomes.com");
   await page.goto("/portal/reports");
-  await page.getByRole("link", { name: /Delinquency \/ Follow-up/ }).click();
+  // Card and page both read "Overdue Jobs" now — "Delinquency / Follow-up" said
+  // what the query does, not what the reader is looking for. The route keeps
+  // its /delinquency slug.
+  await page.getByRole("link", { name: /Overdue Jobs/ }).click();
   await page.waitForURL("**/portal/reports/delinquency**");
 
-  await expect(page.getByRole("heading", { name: "Delinquency / Follow-up" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overdue Jobs" })).toBeVisible();
   await expect(page.getByText("Deals tracked")).toBeVisible();
 
   // Include-due-soon toggle updates the URL.
@@ -95,12 +98,16 @@ test("contractor pay report opens and exports", async ({ page }) => {
   await page.context().clearCookies();
 });
 
-test("a sales rep without Report access is redirected from the hub", async ({ page }) => {
+test("a user without Report access is redirected from the hub", async ({ page }) => {
   // Only super_admin + accounting hold the Report resource in the RBAC matrix.
-  await login(page, "rep@anexahomes.com");
-  await page.goto("/portal/reports");
-  await page.waitForURL("**/portal/dashboard**");
-  await expect(page.getByRole("heading", { name: "Reports", exact: true })).toHaveCount(0);
-
-  await page.context().clearCookies();
+  // `admin` is the one worth naming: it holds Settings, Payroll and Invoice and
+  // still must not reach Reports, so a well-meant "admins can do everything"
+  // edit to the matrix fails here rather than in front of the company's numbers.
+  for (const email of ["rep@anexahomes.com", "admin@anexahomes.com"]) {
+    await login(page, email);
+    await page.goto("/portal/reports");
+    await page.waitForURL("**/portal/dashboard**");
+    await expect(page.getByRole("heading", { name: "Reports", exact: true })).toHaveCount(0);
+    await page.context().clearCookies();
+  }
 });

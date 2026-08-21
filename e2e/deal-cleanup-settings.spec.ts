@@ -24,8 +24,11 @@ test("deal page: no Claim tab, claim info folded into Overview, no Estimated Val
   await expect(page.getByText("Total Squares")).toHaveCount(0);
   await expect(page.getByText("Line Item Information")).toHaveCount(0);
   await expect(page.getByText("Supplement Opportunities")).toHaveCount(0);
-  // Amounts kept
-  await expect(page.getByText("RCV ($)")).toBeVisible();
+  // Amounts kept. The card is read-first now — an Edit button swaps in the
+  // form — so these are the READ labels; "RCV ($)" only exists on the input.
+  await expect(page.getByRole("heading", { name: "Amounts" })).toBeVisible();
+  await expect(page.getByText("RCV", { exact: true })).toBeVisible();
+  await expect(page.getByText("ACV", { exact: true })).toBeVisible();
   // Estimated Value removed from Summary
   await expect(page.getByText("Estimated Value")).toHaveCount(0);
 

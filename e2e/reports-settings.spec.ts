@@ -10,18 +10,11 @@ async function login(page: Page, email: string) {
   await page.waitForURL("**/portal/**", { timeout: 15000 });
 }
 
-test("reports render with charts and export CSV", async ({ page }) => {
-  await login(page, "admin@anexahomes.com");
-  await page.goto("/portal/reports");
-  await expect(page.getByText("Sales by Rep (Revenue)")).toBeVisible();
-  await expect(page.getByText("Appointments by Source")).toBeVisible();
-  await expect(page.getByText("Closing Rate")).toBeVisible();
-
-  const res = await page.request.get("/portal/reports/export");
-  expect(res.status()).toBe(200);
-  expect(res.headers()["content-type"]).toContain("text/csv");
-  expect(await res.text()).toContain("Sales by Rep");
-});
+// Reports used to be one page of charts here, exported from a single
+// /portal/reports/export. It is a card hub now — every report is its own page
+// with its own export — and `admin` no longer holds the Report resource at all.
+// All three of those changes are covered by e2e/reports-hub.spec.ts, which owns
+// reports outright; what is left in this file is settings.
 
 test("admin can customize pipeline stages", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
