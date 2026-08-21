@@ -205,9 +205,14 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
 
     // 2 · Money panel, including the PPW decomposition and both schedules.
     await expect(page.getByText("Pricing breakdown")).toBeVisible();
-    for (const label of ["Base PPW", "Adder PPW", "Dealer fees", "Final PPW"]) {
-      await expect(page.getByText(label, { exact: true })).toBeVisible();
+    // The ladder in the order the business says it: base, plus adders, is the
+    // GROSS the company keeps; the dealer fee grosses that up to the FINAL
+    // price the customer signs.
+    const ladder = page.getByTestId("pricing-breakdown");
+    for (const label of ["Base price", "Adders", "Gross price", "Final price"]) {
+      await expect(ladder.getByText(label, { exact: true })).toBeVisible();
     }
+    await expect(ladder.getByText(/^Dealer fee/)).toBeVisible();
     await expect(page.getByText("Commission milestones")).toBeVisible();
     await expect(page.getByText("Financier payments")).toBeVisible();
     await expect(page.getByText("M1", { exact: true })).toBeVisible();

@@ -152,14 +152,14 @@ export function MemberPayStructure({
     const priced = pricePurchase({
       product: "loan",
       systemSizeKwDc: EXAMPLE_KW,
-      grossPpwCents: solarExample.grossPpwCents,
+      stickerPpwCents: solarExample.grossPpwCents,
       dealerFeePct: solarExample.dealerFeePct,
       adderTotalCents: 0,
     });
-    const deal = { systemWatts: priced.systemWatts, netPriceCents: priced.netPriceCents };
+    const deal = { systemWatts: priced.systemWatts, basePriceCents: priced.basePriceCents };
     return {
       watts: priced.systemWatts,
-      netPpwCents: Math.round(priced.netPpwCents),
+      basePpwCents: Math.round(priced.basePpwCents),
       redlinePay:
         redlineCents == null
           ? null
@@ -357,7 +357,7 @@ export function MemberPayStructure({
               <dl className="mt-2 space-y-1.5 text-xs">
                 <div className="flex items-baseline justify-between gap-2">
                   <dt className="text-muted-foreground">
-                    Redline{redlineCents != null && ` · nets ${centsPerWattLabel(example.netPpwCents)} vs ${centsPerWattLabel(redlineCents)}`}
+                    Redline{redlineCents != null && ` · nets ${centsPerWattLabel(example.basePpwCents)} vs ${centsPerWattLabel(redlineCents)}`}
                   </dt>
                   <dd className="shrink-0 font-semibold tabular-nums">
                     {example.redlinePay ? money(example.redlinePay.amountCents) : <span className="font-normal text-muted-foreground">not set</span>}

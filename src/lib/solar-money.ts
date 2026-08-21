@@ -162,9 +162,15 @@ export function productionInYear(year1Kwh: number, year: number, a: SolarAssumpt
 export type PurchaseInput = {
   product: "cash" | "loan";
   systemSizeKwDc: number;
-  grossPpwCents: number;
-  /** % of gross taken by the lender. MUST be 0 for cash. */
+  /**
+   * The rate per watt the CUSTOMER is quoted for the system — already grossed
+   * up by the dealer fee. This is `SolarFinance.grossPpwCents`, and it is not
+   * the base: a rep types $2.87/W and an 18% programme stickers it at $3.50/W.
+   */
+  stickerPpwCents: number;
+  /** % the lender keeps of everything it advances. MUST be 0 for cash. */
   dealerFeePct: number;
+  /** The extra work at its CATALOGUE price, before any dealer fee. */
   adderTotalCents: number;
   /** Our hard cost, for the margin basis. */
   equipmentCostCents?: number;
@@ -172,63 +178,141 @@ export type PurchaseInput = {
 
 export type PurchaseBreakdown = {
   systemWatts: number;
-  /** Sticker price before adders, cents. The "base system price". */
-  grossPriceCents: number;
-  /** The lender's cut, embedded in gross. Zero for cash. */
-  dealerFeeCents: number;
-  /** Gross minus dealer fee — what the deal is really worth to us per watt. */
-  netPpwCents: number;
-  netPriceCents: number;
+
+  // ── The ladder, in the words the business uses ────────────────────────────
+
+  /** BASE — the system alone, before the lender's cut. What the rep prices. */
+  basePriceCents: number;
+  /** Base per installed watt. The rate a redline is measured against. */
+  basePpwCents: number;
+
+  /** ADDERS — the extra work at its catalogue price, before the cut. */
   adderTotalCents: number;
-  /** What the customer signs for. */
+
+  /** GROSS — base + adders, still before the cut. What the company keeps. */
+  grossPriceCents: number;
+  /** Gross per installed watt. */
+  grossPpwCents: number;
+
+  /** The lender's cut: final − gross. Zero on cash. */
+  dealerFeeCents: number;
+
+  /** FINAL — gross with the dealer fee in it. What the customer signs. */
   contractPriceCents: number;
-  /**
-   * Contract price per installed watt, cents. This is the figure a rep is
-   * actually checked against, and it differs from `grossPpwCents` whenever
-   * there are adders — quoting the sticker PPW on a job carrying a $14.5k
-   * re-roof understates what the customer is paying per watt.
-   */
+  /** Final per installed watt. What the homeowner is really paying a watt. */
   finalPpwCents: number;
-  /** Contract minus our cost. Only meaningful when cost is known. */
+
+  // ── The same money, split the way the customer's breakdown reads it ───────
+
+  /** The system at sticker, fee included, adders excluded. "System price". */
+  baseStickerCents: number;
+  /** The adders at sticker, fee included. "Additional work". */
+  adderStickerCents: number;
+
+  /** Gross minus our cost. Only meaningful when cost is known. */
   marginCents: number;
 };
 
 /**
  * Price a cash or loan deal.
  *
- * The dealer fee is embedded in the gross price on a LOAN — the lender advances
- * the full sticker and keeps a percentage, so the rep's "$3.50/W" is not what
- * the company nets. Cash has no lender and therefore no fee; passing one is
- * rejected rather than silently applied, because a cash deal quoted with a
- * dealer fee is simply overpriced.
+ * THE MODEL, in the words the business uses, because every expensive mistake
+ * here has been a vocabulary mistake:
+ *
+ *     BASE      what the rep prices the system at, before any lender's cut
+ *   + ADDERS    the extra work, at its catalogue price, likewise before the cut
+ *   = GROSS     what the company keeps
+ *   + FEE       the lender's cut
+ *   = FINAL     what the customer signs
+ *
+ * THE FEE IS A PERCENTAGE OF FINAL, NOT A MARKUP ON GROSS. A 30% programme on
+ * a $100,000 system leaves the company $70,000 — so final is `gross / (1 − f)`
+ * and never `gross × (1 + f)`. Getting that backwards under-prices an 18%
+ * programme by about three cents a watt on every deal.
+ *
+ * THE FEE APPLIES TO THE ADDERS TOO. The lender advances the whole contract and
+ * keeps its percentage of ALL of it — the $14,500 re-roof included. Pricing the
+ * fee on the system alone and bolting the adder on afterwards at face value
+ * gives the lender's cut on that adder away out of margin, silently, on every
+ * job carrying extra work. So the adder grosses up by the same fee the system
+ * does, and the company is left holding exactly what the catalogue said.
+ *
+ * Cash has no lender and therefore no fee; passing one is rejected rather than
+ * silently applied, because a cash deal quoted with a dealer fee is simply
+ * overpriced.
  */
 export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
   const systemWatts = Math.round(input.systemSizeKwDc * 1000);
-  const grossPriceCents = Math.round(systemWatts * input.grossPpwCents);
+  const adderTotalCents = Math.round(input.adderTotalCents);
 
-  const feePct = input.product === "cash" ? 0 : input.dealerFeePct;
-  const dealerFeeCents = Math.round(grossPriceCents * (feePct / 100));
+  // A fee at or above 100% has no honest gross-up — it divides by zero or goes
+  // negative. Standing the fee down beats putting an Infinity in front of a
+  // homeowner; validation rejects one long before it reaches here.
+  const rawPct = input.product === "cash" ? 0 : input.dealerFeePct;
+  const f = Number.isFinite(rawPct) && rawPct > 0 && rawPct < 100 ? rawPct / 100 : 0;
 
-  const netPriceCents = grossPriceCents - dealerFeeCents;
-  const netPpwCents = systemWatts > 0 ? netPriceCents / systemWatts : 0;
-  const contractPriceCents = grossPriceCents + input.adderTotalCents;
+  // The system at sticker. `stickerPpwCents` already carries the fee.
+  const baseStickerCents = Math.round(systemWatts * input.stickerPpwCents);
+  const basePriceCents = baseStickerCents - Math.round(baseStickerCents * f);
+
+  // The adders, grossed up by the SAME fee, so that what survives the lender's
+  // cut is the catalogue price and not 82% of it.
+  const adderStickerCents = f > 0 ? Math.round(adderTotalCents / (1 - f)) : adderTotalCents;
+
+  const contractPriceCents = baseStickerCents + adderStickerCents;
+  const grossPriceCents = basePriceCents + adderTotalCents;
+
+  // Subtracted rather than recomputed as `contract × f`: gross + fee has to
+  // equal final EXACTLY, because a customer reads those three lines and adds
+  // them up. A cent of rounding drift there is a phone call.
+  const dealerFeeCents = contractPriceCents - grossPriceCents;
 
   const marginCents =
-    input.equipmentCostCents === undefined
-      ? 0
-      : netPriceCents + input.adderTotalCents - input.equipmentCostCents;
+    input.equipmentCostCents === undefined ? 0 : grossPriceCents - input.equipmentCostCents;
 
   return {
     systemWatts,
+    basePriceCents,
+    basePpwCents: systemWatts > 0 ? basePriceCents / systemWatts : 0,
+    adderTotalCents,
     grossPriceCents,
+    grossPpwCents: systemWatts > 0 ? grossPriceCents / systemWatts : 0,
     dealerFeeCents,
-    netPpwCents,
-    netPriceCents,
-    adderTotalCents: input.adderTotalCents,
     contractPriceCents,
     finalPpwCents: systemWatts > 0 ? contractPriceCents / systemWatts : 0,
+    baseStickerCents,
+    adderStickerCents,
     marginCents,
   };
+}
+
+/**
+ * Split a total across weighted lines so the parts sum to it EXACTLY.
+ *
+ * Needed because the adders reach the customer twice: once as a grossed-up
+ * total on the contract, and once as the named lines that make that total
+ * answerable. Grossing each line up on its own and printing the total
+ * separately leaves a breakdown that does not add up — three lines and a total
+ * a few cents apart, in front of a homeowner with a calculator.
+ *
+ * Largest remainder: everyone gets their floor, and the leftover cents go to
+ * whoever was rounded down hardest. The result is in the order it was given.
+ */
+export function apportionCents(totalCents: number, weights: number[]): number[] {
+  if (weights.length === 0) return [];
+  const sum = weights.reduce((n, w) => n + Math.max(0, w), 0);
+  if (sum <= 0 || totalCents === 0) return weights.map(() => 0);
+
+  const exact = weights.map((w) => (Math.max(0, w) * totalCents) / sum);
+  const out = exact.map((n) => Math.floor(n));
+  let left = totalCents - out.reduce((n, v) => n + v, 0);
+
+  const order = exact
+    .map((n, i) => ({ i, frac: n - Math.floor(n) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+
+  for (let k = 0; left > 0 && k < order.length; k++, left--) out[order[k].i] += 1;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,8 +462,9 @@ export type SolarCommissionBasis =
 /**
  * What a rep earns on a solar deal.
  *
- * Cash/loan pay on PPW or margin — both computed from the NET price, never the
- * gross, so a rep is not paid on the lender's cut.
+ * Cash/loan pay on PPW or margin — both computed from the GROSS price (base
+ * plus adders, before the lender's cut), never the final, so a rep is not paid
+ * on the dealer fee.
  *
  * Lease/PPA have no system price, so PPW and margin are meaningless: a
  * percentage basis applies to the year-one customer cost, and flat is flat.
@@ -401,9 +486,9 @@ export function solarCommissionCents(
       case "margin":
         return Math.round(p.marginCents * (basis.percent / 100));
       case "percentage":
-        // Net, not gross: paying a percentage of the dealer fee pays the rep
+        // Gross, not final: paying a percentage of the dealer fee pays the rep
         // on money the company never receives.
-        return Math.round(p.netPriceCents * (basis.percent / 100));
+        return Math.round(p.grossPriceCents * (basis.percent / 100));
     }
   }
 

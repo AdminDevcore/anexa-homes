@@ -32,7 +32,8 @@ export type SolarPayBasis = "redline" | "per_watt";
  */
 export type SolarPayTerms = {
   basis: SolarPayBasis;
-  /** Cents per watt, NET of the lender's fee. Set only on `redline`. */
+  /** Cents per watt of BASE price — net of the lender's fee, before adders.
+   *  Set only on `redline`. */
   redlineCentsPerWatt: number | null;
   /** Mills (tenths of a cent) per watt. Set only on `per_watt`. */
   millsPerWatt: number | null;
@@ -84,10 +85,11 @@ export function resolveSolarPayTerms(input: {
 
 export type SolarPayResult = {
   amountCents: number;
-  /** What the amount was computed from: the net price on `redline`, watts on `per_watt`. */
+  /** What the amount was computed from: the base price on `redline`, watts on `per_watt`. */
   basisCents: number;
-  /** The deal's net price per watt, cents. Zero on a system with no watts. */
-  netPpwCents: number;
+  /** The deal's BASE price per watt, cents — before adders, after the lender's
+   *  cut. Zero on a system with no watts. */
+  basePpwCents: number;
   /** How far above the redline the deal landed, cents per watt. Zero on `per_watt`. */
   overageCentsPerWatt: number;
 };
@@ -95,36 +97,38 @@ export type SolarPayResult = {
 /**
  * What the terms pay on this deal.
  *
- * `netPriceCents` is the NET system price — gross minus the lender's cut, and
- * before adders. Net rather than gross because moving a deal onto expensive
- * money has to come out of the rep, not the company: the same $3.20/W sticker
- * is worth $6,240 to the rep through an 18% partner and $1,760 through a 32%
- * one. Before adders because a steep-roof charge is priced from the catalogue
- * to cover its own cost — it is not rep overage.
+ * `basePriceCents` is the BASE system price — what the company keeps for the
+ * system once the lender's cut comes out, and before adders. The base rather
+ * than the final price because moving a deal onto expensive money has to come
+ * out of the rep, not the company: the same $3.20/W sticker is worth $6,240 to
+ * the rep through an 18% partner and $1,760 through a 32% one. Before adders
+ * because a steep-roof charge is priced from the catalogue to cover its own
+ * cost — it is not rep overage, and it carries its own share of the dealer fee
+ * so that the catalogue price survives the lender intact.
  */
 export function solarRepPayCents(
   terms: SolarPayTerms,
-  deal: { systemWatts: number; netPriceCents: number }
+  deal: { systemWatts: number; basePriceCents: number }
 ): SolarPayResult {
   const watts = Math.max(0, Math.round(deal.systemWatts));
-  const netPpwCents = watts > 0 ? deal.netPriceCents / watts : 0;
+  const basePpwCents = watts > 0 ? deal.basePriceCents / watts : 0;
 
   if (terms.basis === "per_watt") {
     // Mills are tenths of a cent, so the rate divides by 10 — not 1000. A $0.40/W
     // rate is 400 mills, and 10,000 W of it is $4,000.
     const amountCents = Math.round((watts * (terms.millsPerWatt ?? 0)) / 10);
-    return { amountCents: Math.max(0, amountCents), basisCents: watts, netPpwCents, overageCentsPerWatt: 0 };
+    return { amountCents: Math.max(0, amountCents), basisCents: watts, basePpwCents, overageCentsPerWatt: 0 };
   }
 
   const redline = terms.redlineCentsPerWatt ?? 0;
   // Integer throughout: subtracting the redline's whole-system value beats
   // multiplying a per-watt overage that has already been rounded.
-  const amountCents = Math.max(0, deal.netPriceCents - redline * watts);
+  const amountCents = Math.max(0, deal.basePriceCents - redline * watts);
   return {
     amountCents,
-    basisCents: Math.max(0, deal.netPriceCents),
-    netPpwCents,
-    overageCentsPerWatt: watts > 0 ? Math.max(0, netPpwCents - redline) : 0,
+    basisCents: Math.max(0, deal.basePriceCents),
+    basePpwCents,
+    overageCentsPerWatt: watts > 0 ? Math.max(0, basePpwCents - redline) : 0,
   };
 }
 
@@ -161,7 +165,7 @@ export function solarPayLabel(terms: SolarPayTerms, watts: number, result: Solar
 /** The one-line explanation under the worked example on the team page. */
 export function solarPayExplanation(terms: SolarPayTerms, result: SolarPayResult): string {
   if (terms.basis === "per_watt") return `Flat rate, whatever the deal prices at.`;
-  return `Nets ${centsPerWattLabel(Math.round(result.netPpwCents))} against a ${centsPerWattLabel(
+  return `Nets ${centsPerWattLabel(Math.round(result.basePpwCents))} against a ${centsPerWattLabel(
     terms.redlineCentsPerWatt ?? 0
   )} redline — ${usd(result.amountCents)} to the rep.`;
 }

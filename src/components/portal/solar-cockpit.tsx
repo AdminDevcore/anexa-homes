@@ -48,6 +48,10 @@ export type SystemMoney = {
   systemWatts: number;
   basePpwCents: number;
   adderPpwCents: number;
+  adderTotalCents: number;
+  grossPpwCents: number;
+  grossPriceCents: number;
+  dealerFeePct: number;
   dealerFeeCents: number;
   dealerFeePpwCents: number;
   finalPpwCents: number;
@@ -92,24 +96,45 @@ export function SolarSystemMoneyPanel({
         {money.product && <SpecRow k="Financing" v={money.product.toUpperCase()} />}
       </dl>
 
-      {/* Price per watt, decomposed. Every figure derives from what is already
-          stored on the design and finance rows — nothing new is entered here. */}
+      {/*
+        The price ladder, rung by rung. Every figure derives from what is
+        already stored on the design and finance rows — nothing new is entered
+        here.
+
+        BASE + ADDERS = GROSS is what the company keeps; the dealer fee grosses
+        that up to the FINAL price the customer signs. The fee is a percentage
+        OF THE FINAL, which is why gross → final divides rather than multiplies:
+        a 30% programme on a $100,000 system leaves $70,000.
+      */}
       <div>
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Pricing breakdown
         </div>
-        <dl className="divide-y divide-border text-sm">
-          <SpecRow k="Base PPW" v={`${usdc(money.basePpwCents)}/W`} />
-          <SpecRow k="Adder PPW" v={`${usdc(money.adderPpwCents)}/W`} />
+        <dl data-testid="pricing-breakdown" className="divide-y divide-border text-sm">
+          <SpecRow k="Base price" v={`${usdc(money.basePpwCents)}/W`} />
           <SpecRow
-            k="Dealer fees"
-            v={money.dealerFeeCents > 0 ? `${usd(money.dealerFeeCents)} · ${usdc(money.dealerFeePpwCents)}/W` : "None"}
+            k="Adders"
+            v={`${usdc(money.adderPpwCents)}/W${money.adderTotalCents > 0 ? ` · ${usd(money.adderTotalCents)}` : ""}`}
+          />
+          <SpecRow
+            k="Gross price"
+            v={`${usdc(money.grossPpwCents)}/W · ${usd(money.grossPriceCents)}`}
+          />
+          <SpecRow
+            k={money.dealerFeePct > 0 ? `Dealer fee · ${money.dealerFeePct}%` : "Dealer fee"}
+            v={money.dealerFeeCents > 0 ? `${usdc(money.dealerFeePpwCents)}/W · ${usd(money.dealerFeeCents)}` : "None"}
           />
           <div className="flex items-center justify-between gap-4 py-2 font-semibold">
-            <dt>Final PPW</dt>
-            <dd className="tabular-nums">{usdc(money.finalPpwCents)}/W</dd>
+            <dt>Final price</dt>
+            <dd className="tabular-nums">
+              {usdc(money.finalPpwCents)}/W · {usd(money.contractPriceCents)}
+            </dd>
           </div>
         </dl>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut. The dealer
+          fee is a share of the final price, so the adders carry it too.
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

@@ -509,7 +509,7 @@ export default async function LeadDetailPage({
       ? pricePurchase({
           product: fin.product,
           systemSizeKwDc: solarDesign.systemSizeKwDc,
-          grossPpwCents: fin.grossPpwCents,
+          stickerPpwCents: fin.grossPpwCents,
           dealerFeePct: fin.dealerFeePct,
           adderTotalCents: fin.adderTotalCents,
         })
@@ -526,12 +526,23 @@ export default async function LeadDetailPage({
       batteryLabel: solarDesign.battery?.model ?? null,
       product: fin?.product ?? null,
       systemWatts: watts,
-      basePpwCents: fin?.grossPpwCents ?? 0,
+      // The ladder, rung by rung, all of it derived: base and adders are what
+      // the company keeps, gross is the two together, and the fee grosses that
+      // up to what the customer signs. `fin.grossPpwCents` is the STICKER and
+      // does not belong on the base rung — reading it there was showing a rep a
+      // base of $3.50 under a "final" of $2.87, which is a ladder pointing down.
+      basePpwCents: Math.round(breakdown?.basePpwCents ?? 0),
       adderPpwCents: watts > 0 ? Math.round((fin?.adderTotalCents ?? 0) / watts) : 0,
+      adderTotalCents: fin?.adderTotalCents ?? 0,
+      grossPpwCents: Math.round(breakdown?.grossPpwCents ?? 0),
+      grossPriceCents: breakdown?.grossPriceCents ?? 0,
+      dealerFeePct: fin && fin.product === "loan" ? fin.dealerFeePct : 0,
       dealerFeeCents: breakdown?.dealerFeeCents ?? 0,
       dealerFeePpwCents: watts > 0 ? Math.round((breakdown?.dealerFeeCents ?? 0) / watts) : 0,
-      finalPpwCents: Math.round(breakdown?.netPpwCents ?? 0),
-      contractPriceCents: fin?.contractPriceCents ?? 0,
+      finalPpwCents: Math.round(breakdown?.finalPpwCents ?? 0),
+      // Derived rather than the stored column, so a deal priced before adders
+      // moved inside the dealer fee reads at what it would sign for today.
+      contractPriceCents: breakdown?.contractPriceCents ?? fin?.contractPriceCents ?? 0,
     };
   })();
 

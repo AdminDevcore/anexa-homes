@@ -136,7 +136,7 @@ export function financeRowForProduct(
     const breakdown = pricePurchase({
       product: f.product as "cash" | "loan",
       systemSizeKwDc: ctx.systemSizeKwDc,
-      grossPpwCents,
+      stickerPpwCents: grossPpwCents,
       dealerFeePct,
       adderTotalCents: f.adderTotalCents ?? 0,
     });

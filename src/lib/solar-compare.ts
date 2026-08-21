@@ -140,7 +140,7 @@ function purchaseRow(
       ? pricePurchase({
           product: cash ? "cash" : "loan",
           systemSizeKwDc: basis.systemSizeKwDc,
-          grossPpwCents,
+          stickerPpwCents: grossPpwCents,
           dealerFeePct,
           adderTotalCents: basis.adderTotalCents,
         })

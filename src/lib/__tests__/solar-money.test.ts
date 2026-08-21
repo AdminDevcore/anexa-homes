@@ -4,6 +4,7 @@ import {
   pricePurchase,
   priceThirdParty,
   solarCommissionCents,
+  apportionCents,
   year1Production,
   offsetPct,
   type SolarAssumptions,
@@ -33,21 +34,22 @@ const A: SolarAssumptions = {
 // The four products are genuinely different
 // ---------------------------------------------------------------------------
 describe("cash vs loan: the dealer fee is the whole difference", () => {
-  const base = { systemSizeKwDc: 10, grossPpwCents: 350, adderTotalCents: 0 };
+  const base = { systemSizeKwDc: 10, stickerPpwCents: 350, adderTotalCents: 0 };
 
-  it("a cash deal has no dealer fee, so net PPW is the gross PPW", () => {
+  it("a cash deal has no dealer fee, so the base is the sticker", () => {
     const p = pricePurchase({ ...base, product: "cash", dealerFeePct: 0 });
-    expect(p.grossPriceCents).toBe(3_500_000); // 10kW × $3.50/W
+    expect(p.contractPriceCents).toBe(3_500_000); // 10kW × $3.50/W
     expect(p.dealerFeeCents).toBe(0);
-    expect(p.netPpwCents).toBe(350);
+    expect(p.basePpwCents).toBe(350);
+    expect(p.grossPriceCents).toBe(3_500_000);
   });
 
-  it("a loan embeds the lender's cut in gross, so net PPW is lower", () => {
+  it("a loan embeds the lender's cut in the sticker, so the base is lower", () => {
     const p = pricePurchase({ ...base, product: "loan", dealerFeePct: 18 });
-    expect(p.grossPriceCents).toBe(3_500_000);
+    expect(p.contractPriceCents).toBe(3_500_000);
     expect(p.dealerFeeCents).toBe(630_000); // 18%
-    expect(p.netPriceCents).toBe(2_870_000);
-    expect(p.netPpwCents).toBeCloseTo(287, 0); // $2.87/W is what we really net
+    expect(p.basePriceCents).toBe(2_870_000);
+    expect(p.basePpwCents).toBeCloseTo(287, 0); // $2.87/W is what we really keep
   });
 
   it("ignores a dealer fee passed on a cash deal rather than applying it", () => {
@@ -56,10 +58,155 @@ describe("cash vs loan: the dealer fee is the whole difference", () => {
     const p = pricePurchase({ ...base, product: "cash", dealerFeePct: 18 });
     expect(p.dealerFeeCents).toBe(0);
   });
+});
 
-  it("adders land on the contract price, on top of gross", () => {
-    const p = pricePurchase({ ...base, product: "loan", dealerFeePct: 18, adderTotalCents: 450_000 });
-    expect(p.contractPriceCents).toBe(3_950_000);
+// ---------------------------------------------------------------------------
+// The price ladder: base → adders → GROSS → dealer fee → FINAL
+//
+// The vocabulary these tests police, because getting it backwards is a silent
+// four-figure error on every job carrying extra work:
+//
+//   BASE   what the rep prices the system at, before any lender takes a cut
+//   ADDERS the catalogue price of the extra work, likewise before the cut
+//   GROSS  base + adders. Still before the fee. What the company keeps.
+//   FINAL  gross with the dealer fee in it. What the customer signs.
+//
+// The fee is a percentage OF FINAL, not a markup on gross: 30% on a $100k
+// system means the company keeps $70k, so final = gross / (1 − fee).
+// ---------------------------------------------------------------------------
+describe("the dealer fee is a percentage of the FINAL price", () => {
+  it("a 30% fee on a $100k system leaves $70k, so gross grosses UP to final", () => {
+    // $7.00/W base on 10 kW is $70,000 kept; at a 30% fee the customer signs
+    // $100,000. This is the example the model is specified by.
+    const p = pricePurchase({
+      product: "loan",
+      systemSizeKwDc: 10,
+      stickerPpwCents: 1_000, // $10.00/W sticker = $7.00/W base at 30%
+      dealerFeePct: 30,
+      adderTotalCents: 0,
+    });
+    expect(p.contractPriceCents).toBe(10_000_000); // final
+    expect(p.grossPriceCents).toBe(7_000_000); // gross
+    expect(p.dealerFeeCents).toBe(3_000_000); // 30% OF FINAL
+  });
+
+  it("gross + dealer fee is exactly the final price, with no rounding gap", () => {
+    // Deliberately awkward: 10,140 W at a rate that does not divide, on a fee
+    // that does not either. Money that fails to add up on a customer's own
+    // breakdown is worse than money that is a cent out somewhere internal.
+    const p = pricePurchase({
+      product: "loan",
+      systemSizeKwDc: 10.14,
+      stickerPpwCents: 337,
+      dealerFeePct: 22.5,
+      adderTotalCents: 386_100,
+    });
+    expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
+    expect(p.basePriceCents + p.adderTotalCents).toBe(p.grossPriceCents);
+  });
+});
+
+describe("adders sit INSIDE the dealer fee", () => {
+  // The defect this describes: the lender advances the whole contract and keeps
+  // its percentage of ALL of it, the $14,500 re-roof included. Pricing the fee
+  // on the base system alone and bolting the adder on afterwards at face value
+  // hands the lender's cut on that adder out of company margin, silently, on
+  // every job carrying extra work.
+  const withAdder = {
+    product: "loan" as const,
+    systemSizeKwDc: 10,
+    stickerPpwCents: 350, // $2.87/W base at 18%
+    dealerFeePct: 18,
+    adderTotalCents: 1_450_000, // a $14,500 re-roof
+  };
+
+  it("grosses the adder up by the same fee the system carries", () => {
+    const p = pricePurchase(withAdder);
+    // $14,500 has to sticker at $17,682.93 for the company to keep $14,500
+    // after an 18% cut — not $14,500.
+    expect(p.adderStickerCents).toBe(Math.round(1_450_000 / 0.82));
+    expect(p.adderStickerCents).toBeGreaterThan(p.adderTotalCents);
+    expect(p.contractPriceCents).toBe(p.baseStickerCents + p.adderStickerCents);
+  });
+
+  it("keeps the company whole: the fee comes out and the adder is still worth its catalogue price", () => {
+    const p = pricePurchase(withAdder);
+    // The whole point. What is left after the lender takes 18% of everything
+    // it advanced is the base plus the adder at exactly what we priced it.
+    expect(p.contractPriceCents - p.dealerFeeCents).toBe(p.grossPriceCents);
+    expect(p.grossPriceCents).toBe(p.basePriceCents + 1_450_000);
+  });
+
+  it("charges the fee on the WHOLE contract, not just the system", () => {
+    const p = pricePurchase(withAdder);
+    const feeOnSystemOnly = Math.round(p.baseStickerCents * 0.18);
+    expect(p.dealerFeeCents).toBeGreaterThan(feeOnSystemOnly);
+    expect(p.dealerFeeCents).toBeCloseTo(p.contractPriceCents * 0.18, 0);
+  });
+
+  it("leaves a cash adder alone, because cash has no lender to pay", () => {
+    const p = pricePurchase({ ...withAdder, product: "cash", dealerFeePct: 0 });
+    expect(p.adderStickerCents).toBe(1_450_000);
+    expect(p.contractPriceCents).toBe(3_500_000 + 1_450_000);
+    expect(p.dealerFeeCents).toBe(0);
+  });
+
+  it("does not divide by zero on a nonsensical fee", () => {
+    // A 100% fee would send the adder to infinity. An Infinity on a homeowner's
+    // proposal is worse than an unfeed adder, so the gross-up stands down.
+    const p = pricePurchase({ ...withAdder, dealerFeePct: 100 });
+    expect(Number.isFinite(p.contractPriceCents)).toBe(true);
+    expect(p.adderStickerCents).toBe(1_450_000);
+  });
+});
+
+describe("the rep's redline reads the BASE, never the gross or the final", () => {
+  it("excludes adders, so extra work is not paid as overage", () => {
+    // An adder is priced from the catalogue to cover its own cost. Paying a
+    // redline rep on it would hand them the re-roof's whole price.
+    const laden = pricePurchase({
+      product: "loan", systemSizeKwDc: 10, stickerPpwCents: 350,
+      dealerFeePct: 18, adderTotalCents: 1_450_000,
+    });
+    const plain = pricePurchase({
+      product: "loan", systemSizeKwDc: 10, stickerPpwCents: 350,
+      dealerFeePct: 18, adderTotalCents: 0,
+    });
+    expect(laden.basePriceCents).toBe(plain.basePriceCents);
+    expect(laden.basePpwCents).toBe(plain.basePpwCents);
+  });
+
+  it("moves with the lender's fee, so dear money comes out of the rep", () => {
+    const cheap = pricePurchase({
+      product: "loan", systemSizeKwDc: 10, stickerPpwCents: 350,
+      dealerFeePct: 18, adderTotalCents: 0,
+    });
+    const dear = pricePurchase({
+      product: "loan", systemSizeKwDc: 10, stickerPpwCents: 350,
+      dealerFeePct: 32, adderTotalCents: 0,
+    });
+    expect(dear.basePriceCents).toBeLessThan(cheap.basePriceCents);
+  });
+});
+
+describe("apportionCents splits a grossed total back across its lines", () => {
+  it("hands out every cent, so the lines always sum to the total", () => {
+    // A customer reads the itemised lines and adds them up. A total that is
+    // three cents off the lines above it is a phone call.
+    const parts = apportionCents(1_768_293, [270_000, 385_000, 790_000]);
+    expect(parts.reduce((a, b) => a + b, 0)).toBe(1_768_293);
+    expect(parts.every((n) => n > 0)).toBe(true);
+  });
+
+  it("keeps the lines in proportion", () => {
+    const parts = apportionCents(1_000, [100, 100, 200]);
+    expect(parts).toEqual([250, 250, 500]);
+  });
+
+  it("survives a total of zero and weights of zero", () => {
+    expect(apportionCents(0, [100, 200])).toEqual([0, 0]);
+    expect(apportionCents(500, [0, 0])).toEqual([0, 0]);
+    expect(apportionCents(500, [])).toEqual([]);
   });
 });
 
@@ -90,7 +237,7 @@ describe("lease and PPA do not use the purchase model at all", () => {
 // ---------------------------------------------------------------------------
 describe("commission bases differ per product", () => {
   const loan = pricePurchase({
-    product: "loan", systemSizeKwDc: 10, grossPpwCents: 350, dealerFeePct: 18,
+    product: "loan", systemSizeKwDc: 10, stickerPpwCents: 350, dealerFeePct: 18,
     adderTotalCents: 0, equipmentCostCents: 2_000_000,
   });
 
@@ -100,15 +247,15 @@ describe("commission bases differ per product", () => {
   });
 
   it("margin pays on what the company keeps, net of the dealer fee", () => {
-    // net 2,870,000 − cost 2,000,000 = 870,000 margin
+    // gross 2,870,000 − cost 2,000,000 = 870,000 margin
     expect(loan.marginCents).toBe(870_000);
     const c = solarCommissionCents("loan", { type: "margin", percent: 40 }, { purchase: loan });
     expect(c).toBe(348_000);
   });
 
-  it("a percentage basis uses NET, never gross — the rep is not paid on the lender's cut", () => {
+  it("a percentage basis uses GROSS, never final — the rep is not paid on the lender's cut", () => {
     const c = solarCommissionCents("loan", { type: "percentage", percent: 10 }, { purchase: loan });
-    expect(c).toBe(287_000); // 10% of net, not 350,000
+    expect(c).toBe(287_000); // 10% of the $28,700 kept, not of the $35,000 signed
   });
 
   it("a TPO rep is never left uncompensated: flat and per-watt both pay", () => {

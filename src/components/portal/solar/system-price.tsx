@@ -4,7 +4,7 @@ import * as React from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { grossPpwFromNet } from "@/lib/solar-money";
+import { grossPpwFromNet, pricePurchase } from "@/lib/solar-money";
 
 /**
  * What this company charges for THIS system, and the one control that moves it.
@@ -31,6 +31,10 @@ import { grossPpwFromNet } from "@/lib/solar-money";
  * Typed two ways because a rep is measured in dollars per watt and a homeowner
  * hears a total. They are the same number; whichever box is typed in, the other
  * follows.
+ *
+ * The ladder on the right is therefore ALL PRE-FEE: base, plus adders, equals
+ * GROSS — what Anexa keeps. The customer's final price lives in the footer,
+ * where the quoted programme's fee is named next to it.
  */
 export function SystemPriceCard({
   systemSizeKwDc,
@@ -120,17 +124,33 @@ export function SystemPriceCard({
   };
 
   const baseTotalCents = basePpwCents == null || watts === 0 ? null : basePpwCents * watts;
-  const contractCents = baseTotalCents == null ? null : baseTotalCents + adderTotalCents;
+  const grossCents = baseTotalCents == null ? null : baseTotalCents + adderTotalCents;
   const adderPpw = watts > 0 ? adderTotalCents / watts : 0;
-  const finalPpw = contractCents != null && watts > 0 ? contractCents / watts : null;
+  const grossPpw = grossCents != null && watts > 0 ? grossCents / watts : null;
 
-  /** What the homeowner actually signs on the programme this deal quotes. */
+  /**
+   * What the homeowner actually signs on the programme this deal quotes.
+   *
+   * Priced through `pricePurchase` rather than by hand, because the adders have
+   * to gross up by the fee too — the lender takes its percentage of the re-roof
+   * as well as of the array. Adding them on at face value here was quoting a
+   * customer price the company could not actually net its own catalogue price
+   * out of.
+   */
   const customerPpw =
     basePpwCents != null && quotedFeePct != null && quotedFeePct > 0
       ? grossPpwFromNet(basePpwCents, quotedFeePct)
       : null;
   const customerContract =
-    customerPpw != null && watts > 0 ? customerPpw * watts + adderTotalCents : null;
+    customerPpw != null && watts > 0
+      ? pricePurchase({
+          product: "loan",
+          systemSizeKwDc,
+          stickerPpwCents: customerPpw,
+          dealerFeePct: quotedFeePct ?? 0,
+          adderTotalCents,
+        }).contractPriceCents
+      : null;
 
   const offDefault = defaultPpwCents != null && basePpwCents != null && basePpwCents !== defaultPpwCents;
   const outOfBand =
@@ -254,19 +274,19 @@ export function SystemPriceCard({
           </div>
         </div>
 
-        {/* Base → adders → contract. The last rung is the one that differs from
-            the sticker on every job carrying extra work, and it is the rate the
-            customer is actually paying. */}
+        {/* Base → adders → gross. The last rung is what Anexa keeps on this job,
+            and the one that differs from the base rate on every job carrying
+            extra work. The dealer fee goes on top of it, in the footer. */}
         <dl className="self-center rounded-lg bg-muted/50 p-3 text-sm">
           <Rung label="Base" ppw={basePpwCents} total={baseTotalCents} />
           <Rung label="Adders" ppw={watts > 0 ? adderPpw : null} total={adderTotalCents} muted />
           <Rung
-            label="Contract"
-            ppw={finalPpw}
-            total={contractCents}
+            label="Gross"
+            ppw={grossPpw}
+            total={grossCents}
             strong
-            ppwTestId="final-ppw"
-            totalTestId="contract-total"
+            ppwTestId="gross-ppw"
+            totalTestId="gross-total"
           />
         </dl>
       </div>
@@ -282,16 +302,20 @@ export function SystemPriceCard({
         {customerPpw != null && customerContract != null ? (
           <p className="text-[11px] text-muted-foreground">
             <span className="font-medium text-foreground">{quotedLabel}</span>{" "}
-            takes a {quotedFeePct}% dealer fee, so the customer&rsquo;s price is{" "}
-            <span className="font-medium tabular-nums text-foreground">
+            takes a {quotedFeePct}% dealer fee on the whole job, adders included, so the
+            customer&rsquo;s final price is{" "}
+            <span
+              data-testid="customer-final"
+              className="font-medium tabular-nums text-foreground"
+            >
               ${(customerPpw / 100).toFixed(2)}/W · ${Math.round(customerContract / 100).toLocaleString()}
             </span>
-            . Cash pays the base.
+            . Cash pays the gross.
           </p>
         ) : (
           <p className="text-[11px] text-muted-foreground">
-            This is what Anexa charges before a lender&rsquo;s cut. Cash pays it as it stands;
-            every financed programme below adds its own dealer fee on top.
+            This is what Anexa keeps before a lender&rsquo;s cut. Cash pays it as it stands;
+            every financed programme below grosses it up by its own dealer fee.
           </p>
         )}
       </footer>

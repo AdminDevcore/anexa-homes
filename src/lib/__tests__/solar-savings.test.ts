@@ -67,7 +67,7 @@ describe("savings distinguish the bill avoided from what the customer is actuall
     // The misleading version of this number shows the bill reduction and calls
     // it "25-year savings", ignoring the cheque the customer wrote.
     const purchase = pricePurchase({
-      product: "cash", systemSizeKwDc: 8, grossPpwCents: 350,
+      product: "cash", systemSizeKwDc: 8, stickerPpwCents: 350,
       dealerFeePct: 0, adderTotalCents: 0,
     });
     const m = savingsModel({ ...base, product: "cash", purchase });
@@ -83,7 +83,7 @@ describe("savings distinguish the bill avoided from what the customer is actuall
 
   it("CASH: the whole price lands in year one and nothing after", () => {
     const purchase = pricePurchase({
-      product: "cash", systemSizeKwDc: 8, grossPpwCents: 350,
+      product: "cash", systemSizeKwDc: 8, stickerPpwCents: 350,
       dealerFeePct: 0, adderTotalCents: 0,
     });
     const m = savingsModel({ ...base, product: "cash", purchase });
@@ -95,18 +95,20 @@ describe("savings distinguish the bill avoided from what the customer is actuall
   });
 
   it("LOAN prices the same as cash for the customer's contract", () => {
-    // The dealer fee is EMBEDDED in gross, not added on top.
+    // The dealer fee is EMBEDDED in the sticker, not added on top of it: the
+    // customer signs $2.80/W either way, and on the loan the lender takes 18%
+    // of that out of what the company keeps.
     const loan = pricePurchase({
-      product: "loan", systemSizeKwDc: 8, grossPpwCents: 350,
+      product: "loan", systemSizeKwDc: 8, stickerPpwCents: 350,
       dealerFeePct: 18, adderTotalCents: 0,
     });
-    expect(loan.grossPriceCents).toBe(8_000 * 350);
     expect(loan.contractPriceCents).toBe(8_000 * 350);
     expect(loan.dealerFeeCents).toBe(Math.round(8_000 * 350 * 0.18));
-    expect(loan.netPriceCents).toBe(loan.grossPriceCents - loan.dealerFeeCents);
+    expect(loan.grossPriceCents).toBe(loan.contractPriceCents - loan.dealerFeeCents);
+    expect(loan.basePriceCents).toBe(loan.grossPriceCents);
     // Cash carries no fee at all.
     const cash = pricePurchase({
-      product: "cash", systemSizeKwDc: 8, grossPpwCents: 350,
+      product: "cash", systemSizeKwDc: 8, stickerPpwCents: 350,
       dealerFeePct: 18, adderTotalCents: 0,
     });
     expect(cash.dealerFeeCents).toBe(0);
@@ -114,7 +116,7 @@ describe("savings distinguish the bill avoided from what the customer is actuall
 
   it("final price per watt reflects adders, not just the sticker", () => {
     const p = pricePurchase({
-      product: "cash", systemSizeKwDc: 8, grossPpwCents: 350,
+      product: "cash", systemSizeKwDc: 8, stickerPpwCents: 350,
       dealerFeePct: 0, adderTotalCents: 1_450_000, // a $14,500 re-roof
     });
     expect(p.contractPriceCents).toBe(8_000 * 350 + 1_450_000);
@@ -207,7 +209,7 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
     // snapshot, because the renderer shows an APR whenever one is present.
     const s = build({
       finance: {
-        product: "lease", grossPpwCents: 0, dealerFeePct: 0, adderTotalCents: 0,
+        product: "lease", stickerPpwCents: 0, dealerFeePct: 0, adderTotalCents: 0,
         rateMillsPerKwh: null, monthlyPaymentCents: 17_500, escalatorPct: 2.9,
         termYears: 25, aprPct: 6.99,
       },

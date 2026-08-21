@@ -394,14 +394,27 @@ describe("the extra work is named on the customer's copy", () => {
 
   it("carries each line, so a homeowner can see what the money bought", () => {
     const s = build({ finance: { ...LOAN, adderTotalCents: 1_546_000, adders: ADDERS } });
-    expect(s.financing.adders).toEqual(ADDERS);
-    expect(s.financing.adderTotalCents).toBe(1_546_000);
+    expect(s.financing.adders!.map((a) => a.label)).toEqual(ADDERS.map((a) => a.label));
+    // At STICKER, not at catalogue: the lender takes 18% of the re-roof as well
+    // as of the array, so what the customer signs for the extra work is the
+    // catalogue price grossed up by the same fee. $15,460 becomes $18,853.66.
+    expect(s.financing.adderTotalCents).toBe(Math.round(1_546_000 / 0.82));
+    expect(s.financing.adders![0].amountCents).toBeGreaterThan(1_450_000);
   });
 
   it("the lines add up to the total the contract is built on", () => {
     const s = build({ finance: { ...LOAN, adderTotalCents: 1_546_000, adders: ADDERS } });
     const summed = s.financing.adders!.reduce((n, a) => n + a.amountCents, 0);
     expect(summed).toBe(s.financing.adderTotalCents);
+  });
+
+  it("the whole breakdown adds up: system + extra work = total price", () => {
+    // The arithmetic a homeowner does at the kitchen table. Every row on the
+    // document is at sticker, so the three of them agree to the cent.
+    const s = build({ finance: { ...LOAN, adderTotalCents: 1_546_000, adders: ADDERS } });
+    expect(s.financing.basePriceCents! + s.financing.adderTotalCents!).toBe(
+      s.financing.contractPriceCents
+    );
   });
 
   /**
@@ -437,7 +450,7 @@ describe("the extra work is named on the customer's copy", () => {
   it("omits the key entirely on a design with no itemised adders", () => {
     const s = build({ finance: { ...LOAN, adderTotalCents: 385_000 } });
     expect("adders" in s.financing).toBe(false);
-    expect(s.financing.adderTotalCents).toBe(385_000);
+    expect(s.financing.adderTotalCents).toBe(Math.round(385_000 / 0.82));
   });
 
   it("names nothing on a lease, which has no system price to add to", () => {

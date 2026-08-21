@@ -38,14 +38,14 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
   if (!(design.systemSizeKwDc > 0)) return null; // no array drawn: nothing to pay on
 
   // Cash and loan are priced per watt; lease and PPA sell electricity and have
-  // no system price at all, so their net is zero and only a per-watt basis can
+  // no system price at all, so their base is zero and only a per-watt basis can
   // reach them. `pricePurchase` already refuses to apply a dealer fee to cash.
   const purchase =
     finance.product === "cash" || finance.product === "loan"
       ? pricePurchase({
           product: finance.product,
           systemSizeKwDc: design.systemSizeKwDc,
-          grossPpwCents: finance.grossPpwCents,
+          stickerPpwCents: finance.grossPpwCents,
           dealerFeePct: finance.dealerFeePct,
           adderTotalCents: finance.adderTotalCents,
         })
@@ -55,9 +55,16 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
     product: finance.product,
     lenderPayMode: design.lender?.repPayMode ?? null,
     systemWatts: purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000),
-    netPriceCents: purchase?.netPriceCents ?? 0,
-    /** What the customer signs. The basis every override is a percentage of. */
-    contractPriceCents: finance.contractPriceCents,
+    basePriceCents: purchase?.basePriceCents ?? 0,
+    /**
+     * What the customer signs. The basis every override is a percentage of.
+     *
+     * DERIVED, not the stored column: `SolarFinance.contractPriceCents` is only
+     * as fresh as the last save, and a deal priced before adders were pulled
+     * inside the dealer fee carries a figure several thousand dollars light. An
+     * override is a percentage of what the customer actually signs.
+     */
+    contractPriceCents: purchase?.contractPriceCents ?? finance.contractPriceCents,
   };
 }
 

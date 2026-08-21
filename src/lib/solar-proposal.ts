@@ -2,6 +2,7 @@ import type { FinanceProduct } from "@prisma/client";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor, type PaymentFactors } from "./solar-loan";
 import { resolveUtilityRateMills } from "./solar-energy";
 import {
+  apportionCents,
   pricePurchase,
   priceThirdParty,
   productionInYear,
@@ -460,7 +461,7 @@ export function buildProposalSnapshot(args: {
     ? pricePurchase({
         product: finance.product as "cash" | "loan",
         systemSizeKwDc: design.systemSizeKwDc,
-        grossPpwCents: finance.grossPpwCents,
+        stickerPpwCents: finance.grossPpwCents,
         dealerFeePct: finance.dealerFeePct,
         adderTotalCents: finance.adderTotalCents,
       })
@@ -564,10 +565,19 @@ export function buildProposalSnapshot(args: {
       product: finance.product,
       contractPriceCents: purchase?.contractPriceCents ?? null,
       grossPpwCents: purchase ? finance.grossPpwCents : null,
-      basePriceCents: purchase?.grossPriceCents ?? null,
-      // Null, not 0, when there are no adders: the renderer omits the row
-      // rather than printing an "Adders $0" line the customer has to parse.
-      adderTotalCents: purchase && purchase.adderTotalCents > 0 ? purchase.adderTotalCents : null,
+      // The system AT STICKER — the dealer fee included — because these three
+      // rows are read as arithmetic by a homeowner: system price, plus extra
+      // work, equals total. Quoting the pre-fee figure here would leave the
+      // customer's own breakdown several thousand dollars short of the total
+      // printed under it.
+      basePriceCents: purchase?.baseStickerCents ?? null,
+      // Likewise at sticker: the lender takes its percentage of the re-roof as
+      // well as of the array, so the re-roof appears on the contract carrying
+      // its share of the fee. Null, not 0, when there are no adders — the
+      // renderer omits the row rather than printing an "Adders $0" line the
+      // customer has to parse.
+      adderTotalCents:
+        purchase && purchase.adderStickerCents > 0 ? purchase.adderStickerCents : null,
       // Only lines that cost something, and only on a purchase. A lease or a
       // PPA has no system price for an adder to sit on top of, and a $0 line
       // is a row the customer has to read to learn nothing.
@@ -581,12 +591,23 @@ export function buildProposalSnapshot(args: {
       // array. `filter` copies the array and keeps the caller's objects, so a
       // snapshot built that way still points at whatever the caller mutates
       // next — which is precisely the freezing this whole module exists to do.
+      //
+      // APPORTIONED, not grossed up one line at a time: each line has to carry
+      // its share of the dealer fee, and the lines have to add up to the total
+      // printed beneath them to the cent. Rounding each line's own gross-up
+      // leaves a breakdown a few cents out from its own total, which is a
+      // question a homeowner with a calculator is entitled to ask.
       ...(purchase && finance.adders?.some((a) => a.amountCents > 0)
-        ? {
-            adders: finance.adders
-              .filter((a) => a.amountCents > 0)
-              .map((a) => ({ label: a.label, amountCents: a.amountCents })),
-          }
+        ? (() => {
+            const lines = finance.adders.filter((a) => a.amountCents > 0);
+            const grossed = apportionCents(
+              purchase.adderStickerCents,
+              lines.map((a) => a.amountCents)
+            );
+            return {
+              adders: lines.map((a, i) => ({ label: a.label, amountCents: grossed[i] })),
+            };
+          })()
         : {}),
       finalPpwCents: purchase ? Math.round(purchase.finalPpwCents) : null,
       // Lease/PPA carry no APR. Gating here as well as at the write means a

@@ -168,13 +168,14 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     await page.getByRole("button", { name: "Save financing" }).click();
     await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
 
-    // It is one field with two controls: the deal's Operations card is the
-    // same lender, and a reload still shows which card is quoted.
-    await page.goto(`/portal/leads/${leadId}`);
-    await expect(page.locator("#solar-lender option:checked")).toHaveText(
-      new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-      { timeout: 15000 }
-    );
+    // A reload still shows which card is quoted.
+    //
+    // The deal's System info slide used to carry a second control for the same
+    // field and this checked the two agreed. That picker is gone on purpose —
+    // 297a4c6 made the slide REPORT the frozen proposal rather than offer to
+    // edit it, because one field with two owners is how a deal ends up
+    // disagreeing with the document the homeowner signed. What is left to prove
+    // here is that the choice persisted, which the badge below says.
     await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
     await expect(
       page.getByRole("region", { name }).getByRole("button", { name: /Quoted.*15 yr · 6\.49% · fee 22%/ })
@@ -202,6 +203,65 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     const paidCash = dollars(await compareCell(page, "contract-price", /^No lender/));
     const financed = dollars(await compareCell(page, "contract-price", /0% · fee 38%/));
     expect(paidCash).toBeLessThan(financed);
+  });
+
+  /**
+   * The defect this exists for: the dealer fee used to be charged on the system
+   * alone, and the adders were bolted onto the contract afterwards at face
+   * value. A lender keeps its percentage of everything it advances — the panel
+   * upgrade included — so that arrangement gave the fee on every adder away out
+   * of company margin, silently, on every job carrying extra work.
+   *
+   * Read off the comparison rather than a single card, because the two columns
+   * price the SAME base and the SAME adders and differ only by the fee. That
+   * makes the assertion a ratio, which no amount of rounding can fake.
+   */
+  test("the dealer fee is charged on the adders too, not just the system", async ({ page }) => {
+    await login(page, "owner@anexahomes.com");
+    await toSolar(page);
+
+    await setNetTarget(page, "3.00");
+    const name = lenderName("Adderfee");
+    await addLender(page, name);
+    await addLoan(page, name, "0", "240", "25");
+
+    const leadId = await openSolarDeal(page);
+    await page.goto(`/portal/leads/${leadId}/solar-proposal?step=financing`);
+    await expect(page.getByRole("heading", { name: "Adders", exact: true })).toBeVisible({
+      timeout: 15000,
+    });
+
+    // These specs share one seeded deal and each of them saves, so the adders
+    // have to be taken back to a known state before one is added.
+    const adderTotal = page.getByTestId("adder-total");
+    for (let i = 0; i < 20; i++) {
+      if (!(await adderTotal.isVisible().catch(() => false))) break;
+      await page.getByRole("button", { name: /^Remove / }).first().click();
+      await page.waitForTimeout(700);
+    }
+    await expect(adderTotal).toHaveCount(0);
+
+    // $3.00/W on Priya's seeded 10 kW, plus $3,850 of extra work: $33,850 is
+    // what Anexa keeps whichever way the customer pays for it.
+    await page.getByLabel("Base $/W").fill("3.00");
+    await page.getByRole("button", { name: /Main panel upgrade/ }).click();
+    await expect
+      .poll(async () => dollars(await page.getByTestId("gross-total").innerText()), { timeout: 15000 })
+      .toBe(33850);
+
+    await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
+    await page.getByRole("region", { name }).getByRole("button", { name: /20 yr · 0% · fee 25%/ }).click();
+    await expect(page.getByTestId("compare-contract-price")).toBeVisible({ timeout: 15000 });
+
+    const paidCash = dollars(await compareCell(page, "contract-price", /^No lender/));
+    const financed = dollars(await compareCell(page, "contract-price", /0% · fee 25%/));
+
+    // Cash carries no fee, so it pays the gross exactly.
+    expect(paidCash).toBe(33850);
+    // And the financed column grosses the WHOLE job up by 25% — $45,133, not
+    // the $43,850 you get by feeing the array and leaving the upgrade alone.
+    // The tolerance is the sticker rate rounding to a whole cent per watt.
+    expect(Math.abs(financed - 33850 / 0.75)).toBeLessThan(100);
   });
 
   test("a lease is never badged the winner against a purchase", async ({ page }) => {

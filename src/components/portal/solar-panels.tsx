@@ -931,16 +931,31 @@ export function SolarFinancePanel({
    * because both sides compute them the same way.
    */
   const quote = React.useMemo(() => {
+    // What the customer would sign at the figures currently on screen.
+    //
+    // Priced through `pricePurchase`, not multiplied out by hand: the adders
+    // carry the dealer fee too, so `sticker × watts + adders` is short by the
+    // lender's cut on the extra work — and a payment quoted off a short
+    // principal is a payment the customer is not going to be held to.
+    const contractNow =
+      chosen && stickerPpwCents != null && systemSizeKwDc > 0
+        ? pricePurchase({
+            product: isLoan ? "loan" : "cash",
+            systemSizeKwDc,
+            stickerPpwCents,
+            dealerFeePct: isLoan && Number.isFinite(feePct) ? feePct : 0,
+            adderTotalCents,
+          }).contractPriceCents
+        : null;
+
     // The sheet's own factor arithmetic, computed BEFORE the approved-figure
     // short-circuit. An approval outranks it as the quoted payment, but a rep
     // still needs to see what the sheet said next to what the lender came back
     // with — hiding it the moment an approval lands is how a mismatch goes
     // unnoticed.
     const principalNow =
-      isLoan && chosen && stickerPpwCents != null
-        ? stickerPpwCents * Math.round(systemSizeKwDc * 1000) +
-          adderTotalCents -
-          (numOrNullPure(form.downPayment, 100) ?? 0)
+      isLoan && contractNow != null
+        ? contractNow - (numOrNullPure(form.downPayment, 100) ?? 0)
         : 0;
     const factors =
       isLoan && chosen && hasPaymentFactor(chosen)
@@ -956,12 +971,9 @@ export function SolarFinancePanel({
       const sheetCents =
         factors && factorMonthlyCents(factors)
           ? factorMonthlyCents(factors)
-          : chosen && stickerPpwCents != null
+          : chosen && contractNow != null
             ? loanPaymentCents({
-                principalCents:
-                  Math.round(systemSizeKwDc * 1000 * stickerPpwCents) +
-                  adderTotalCents -
-                  (numOrNullPure(form.downPayment, 100) ?? 0),
+                principalCents: contractNow - (numOrNullPure(form.downPayment, 100) ?? 0),
                 aprPct: chosen.aprPct,
                 termMonths: chosen.termMonths,
               })
@@ -986,10 +998,9 @@ export function SolarFinancePanel({
       };
     }
     if (product === "ppa") return null; // priced per kWh produced, not per month
-    if (!isLoan || stickerPpwCents == null) return null;
+    if (!isLoan || contractNow == null) return null;
 
-    const contractCents = Math.round(systemSizeKwDc * 1000 * stickerPpwCents) + adderTotalCents;
-    const principal = contractCents - (numOrNullPure(form.downPayment, 100) ?? 0);
+    const principal = contractNow - (numOrNullPure(form.downPayment, 100) ?? 0);
 
     // A PUBLISHED payment factor outranks our amortisation. The factor already
     // carries the fee and whatever promotional structure the program has, so it
@@ -1013,7 +1024,7 @@ export function SolarFinancePanel({
       sheetCents: null,
     };
   }, [
-    chosen, product, isLoan, systemSizeKwDc, stickerPpwCents,
+    chosen, product, isLoan, systemSizeKwDc, stickerPpwCents, feePct,
     adderTotalCents, form.downPayment, form.loanMonthly,
   ]);
 
@@ -1023,7 +1034,7 @@ export function SolarFinancePanel({
     return pricePurchase({
       product,
       systemSizeKwDc,
-      grossPpwCents: stickerPpwCents,
+      stickerPpwCents,
       dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
       adderTotalCents,
     }).contractPriceCents;

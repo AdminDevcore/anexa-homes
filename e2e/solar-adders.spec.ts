@@ -101,11 +101,11 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     await expect(page.getByTestId("adder-total")).toHaveCount(0);
     await expect(page.getByText(/entered before they were itemised/)).toBeVisible();
     // 10 kW at $3.00/W plus the seeded $3,850 of un-itemised adders.
-    expect(dollars(await page.getByTestId("final-ppw").innerText())).toBeCloseTo(3.39, 2);
-    expect(dollars(await page.getByTestId("contract-total").innerText())).toBe(33850);
+    expect(dollars(await page.getByTestId("gross-ppw").innerText())).toBeCloseTo(3.39, 2);
+    expect(dollars(await page.getByTestId("gross-total").innerText())).toBe(33850);
   });
 
-  test("an adder is a named line, and it moves the final price per watt", async ({ page }) => {
+  test("an adder is a named line, and it moves the gross price per watt", async ({ page }) => {
     await login(page, "owner@anexahomes.com");
     await toSolar(page);
     const leadId = await openDeal(page);
@@ -126,22 +126,22 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     const total = dollars(await page.getByTestId("adder-total").innerText());
     expect(total).toBe(3850);
 
-    // And the final rate is no longer the sticker rate. This is the whole
-    // point: a rep quoting "$3.00 a watt" on a job carrying a panel upgrade is
-    // quoting a number the customer is not paying.
-    const final = dollars(await page.getByTestId("final-ppw").innerText());
+    // And the gross rate is no longer the base rate. This is the whole point:
+    // a rep quoting "$3.00 a watt" on a job carrying a panel upgrade is quoting
+    // a number that is not what the job is worth.
+    const final = dollars(await page.getByTestId("gross-ppw").innerText());
     expect(final).toBeGreaterThan(3);
     // Printed to the nearest cent per watt: $33,850 over 10 kW is $3.385/W and
-    // shows as $3.39. The contract total is the figure with no rounding in it.
+    // shows as $3.39. The gross total is the figure with no rounding in it.
     expect(final).toBe(Math.round(((30000 + total) / 10000) * 100) / 100);
-    expect(dollars(await page.getByTestId("contract-total").innerText())).toBe(30000 + total);
+    expect(dollars(await page.getByTestId("gross-total").innerText())).toBe(30000 + total);
 
     // Removing it takes the money with it, rather than falling back to the
     // typed figure the lines replaced.
     await page.getByRole("button", { name: /^Remove / }).first().click();
     await expect(page.getByTestId("adder-total")).toHaveCount(0, { timeout: 15000 });
     await expect
-      .poll(async () => dollars(await page.getByTestId("final-ppw").innerText()), { timeout: 15000 })
+      .poll(async () => dollars(await page.getByTestId("gross-ppw").innerText()), { timeout: 15000 })
       .toBeCloseTo(3, 2);
   });
 

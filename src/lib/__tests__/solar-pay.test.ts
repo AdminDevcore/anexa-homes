@@ -73,14 +73,14 @@ describe("redline pay", () => {
 
   it("pays the overage on the NET price, so the dealer fee comes out of the rep", () => {
     // 10 kW at $3.20/W through Credit Human's 18%: net $2.624/W, $0.624 over.
-    const cheap = pricePurchase({ product: "loan", systemSizeKwDc: 10, grossPpwCents: 320, dealerFeePct: 18, adderTotalCents: 0 });
-    const a = solarRepPayCents(terms, { systemWatts: cheap.systemWatts, netPriceCents: cheap.netPriceCents });
+    const cheap = pricePurchase({ product: "loan", systemSizeKwDc: 10, stickerPpwCents: 320, dealerFeePct: 18, adderTotalCents: 0 });
+    const a = solarRepPayCents(terms, { systemWatts: cheap.systemWatts, basePriceCents: cheap.basePriceCents });
     expect(a.amountCents).toBe(624_000);
     expect(a.overageCentsPerWatt).toBeCloseTo(62.4, 4);
 
     // The same sticker through GoodLeap's 32%: net $2.176/W, $0.176 over.
-    const dear = pricePurchase({ product: "loan", systemSizeKwDc: 10, grossPpwCents: 320, dealerFeePct: 32, adderTotalCents: 0 });
-    const b = solarRepPayCents(terms, { systemWatts: dear.systemWatts, netPriceCents: dear.netPriceCents });
+    const dear = pricePurchase({ product: "loan", systemSizeKwDc: 10, stickerPpwCents: 320, dealerFeePct: 32, adderTotalCents: 0 });
+    const b = solarRepPayCents(terms, { systemWatts: dear.systemWatts, basePriceCents: dear.basePriceCents });
     expect(b.amountCents).toBe(176_000);
 
     // Cheap money is worth $4,480 more to the rep on the identical sticker.
@@ -88,22 +88,22 @@ describe("redline pay", () => {
   });
 
   it("cash has no fee, so the whole gross sits above the redline", () => {
-    const p = pricePurchase({ product: "cash", systemSizeKwDc: 10, grossPpwCents: 290, dealerFeePct: 0, adderTotalCents: 0 });
-    const pay = solarRepPayCents(terms, { systemWatts: p.systemWatts, netPriceCents: p.netPriceCents });
+    const p = pricePurchase({ product: "cash", systemSizeKwDc: 10, stickerPpwCents: 290, dealerFeePct: 0, adderTotalCents: 0 });
+    const pay = solarRepPayCents(terms, { systemWatts: p.systemWatts, basePriceCents: p.basePriceCents });
     expect(pay.amountCents).toBe(900_000); // $0.90/W over × 10,000 W
   });
 
   // A rep who sells under the redline owes the company nothing — they just earn
   // nothing. A negative commission would net off against their other deals.
   it("never goes negative below the redline", () => {
-    const p = pricePurchase({ product: "loan", systemSizeKwDc: 10, grossPpwCents: 250, dealerFeePct: 32, adderTotalCents: 0 });
-    const pay = solarRepPayCents(terms, { systemWatts: p.systemWatts, netPriceCents: p.netPriceCents });
-    expect(pay.netPpwCents).toBeLessThan(200);
+    const p = pricePurchase({ product: "loan", systemSizeKwDc: 10, stickerPpwCents: 250, dealerFeePct: 32, adderTotalCents: 0 });
+    const pay = solarRepPayCents(terms, { systemWatts: p.systemWatts, basePriceCents: p.basePriceCents });
+    expect(pay.basePpwCents).toBeLessThan(200);
     expect(pay.amountCents).toBe(0);
   });
 
   it("pays nothing exactly at the redline", () => {
-    const pay = solarRepPayCents(terms, { systemWatts: 10_000, netPriceCents: 2_000_000 });
+    const pay = solarRepPayCents(terms, { systemWatts: 10_000, basePriceCents: 2_000_000 });
     expect(pay.amountCents).toBe(0);
     expect(pay.overageCentsPerWatt).toBe(0);
   });
@@ -111,19 +111,19 @@ describe("redline pay", () => {
   // Adders are priced from the catalogue to cover their own cost; they are not
   // rep overage. netPriceCents from pricePurchase already excludes them.
   it("ignores adders", () => {
-    const plain = pricePurchase({ product: "loan", systemSizeKwDc: 10, grossPpwCents: 320, dealerFeePct: 18, adderTotalCents: 0 });
-    const laden = pricePurchase({ product: "loan", systemSizeKwDc: 10, grossPpwCents: 320, dealerFeePct: 18, adderTotalCents: 1_450_000 });
+    const plain = pricePurchase({ product: "loan", systemSizeKwDc: 10, stickerPpwCents: 320, dealerFeePct: 18, adderTotalCents: 0 });
+    const laden = pricePurchase({ product: "loan", systemSizeKwDc: 10, stickerPpwCents: 320, dealerFeePct: 18, adderTotalCents: 1_450_000 });
     expect(laden.contractPriceCents).toBeGreaterThan(plain.contractPriceCents);
     expect(
-      solarRepPayCents(terms, { systemWatts: laden.systemWatts, netPriceCents: laden.netPriceCents }).amountCents
+      solarRepPayCents(terms, { systemWatts: laden.systemWatts, basePriceCents: laden.basePriceCents }).amountCents
     ).toBe(
-      solarRepPayCents(terms, { systemWatts: plain.systemWatts, netPriceCents: plain.netPriceCents }).amountCents
+      solarRepPayCents(terms, { systemWatts: plain.systemWatts, basePriceCents: plain.basePriceCents }).amountCents
     );
   });
 
   it("pays nothing on a system with no watts", () => {
-    expect(solarRepPayCents(terms, { systemWatts: 0, netPriceCents: 0 }).amountCents).toBe(0);
-    expect(solarRepPayCents(terms, { systemWatts: 0, netPriceCents: 0 }).netPpwCents).toBe(0);
+    expect(solarRepPayCents(terms, { systemWatts: 0, basePriceCents: 0 }).amountCents).toBe(0);
+    expect(solarRepPayCents(terms, { systemWatts: 0, basePriceCents: 0 }).basePpwCents).toBe(0);
   });
 });
 
@@ -134,18 +134,18 @@ describe("per-watt pay", () => {
   const terms: SolarPayTerms = { basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: 400 };
 
   it("pays the rate on installed watts, and the sticker is irrelevant", () => {
-    expect(solarRepPayCents(terms, { systemWatts: 10_000, netPriceCents: 2_600_000 }).amountCents).toBe(400_000);
-    expect(solarRepPayCents(terms, { systemWatts: 10_000, netPriceCents: 9_900_000 }).amountCents).toBe(400_000);
+    expect(solarRepPayCents(terms, { systemWatts: 10_000, basePriceCents: 2_600_000 }).amountCents).toBe(400_000);
+    expect(solarRepPayCents(terms, { systemWatts: 10_000, basePriceCents: 9_900_000 }).amountCents).toBe(400_000);
   });
 
   it("carries a rate cents cannot express", () => {
     // $0.405/W on 10,140 W = $4,106.70.
     const t: SolarPayTerms = { basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: 405 };
-    expect(solarRepPayCents(t, { systemWatts: 10_140, netPriceCents: 0 }).amountCents).toBe(410_670);
+    expect(solarRepPayCents(t, { systemWatts: 10_140, basePriceCents: 0 }).amountCents).toBe(410_670);
   });
 
   it("reports the watts it was paid on as its basis", () => {
-    const pay = solarRepPayCents(terms, { systemWatts: 10_000, netPriceCents: 2_600_000 });
+    const pay = solarRepPayCents(terms, { systemWatts: 10_000, basePriceCents: 2_600_000 });
     expect(pay.basisCents).toBe(10_000);
   });
 });
