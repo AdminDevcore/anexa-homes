@@ -20,12 +20,13 @@ const A: SolarAssumptions = {
   maxPpwCents: 800,
 };
 
-const lender = (id: string, name: string, rank = 0) => ({
+const lender = (id: string, name: string, rank = 0, maxFinalPpwCents: number | null = null) => ({
   id,
   name,
   rank,
   applyUrl: `https://${id}.example/apply`,
   logoUrl: `/logo/${id}`,
+  maxFinalPpwCents,
 });
 
 const loanProgramme = (
@@ -223,5 +224,58 @@ describe("an alternative carries the programme's terms and nothing borrowed", ()
     expect(alt.finance.termYears).toBe(25);
     // $18.50 per kW-month × 10 kW.
     expect(alt.finance.monthlyPaymentCents).toBe(18_500);
+  });
+});
+
+describe("a capped lender is capped on the customer's own menu too", () => {
+  /**
+   * The menu is PRICED at generation and frozen into the snapshot — a customer's
+   * copy reads a price, it never derives one. So a cap missing from this path
+   * would not be a screen showing the wrong number for a moment; it would be a
+   * document quoting a household a figure the lender does not fund, sent, and
+   * outliving anybody's chance to correct it.
+   */
+  const amos = loanProgramme({
+    id: "p-amos",
+    lenderId: "L-amos",
+    lenderName: "Amos Capital Fund",
+    dealerFeePct: 65,
+    termMonths: 360,
+    lender: lender("L-amos", "Amos Capital Fund", 0, 550),
+  });
+
+  it("prices the alternative at the cap, not at the grossed-up base", () => {
+    const [, option] = proposalAlternatives({
+      ...base,
+      design: { systemSizeKwDc: 8.8 },
+      targetNetPpwCents: 568,
+      programmes: [amos],
+    });
+    expect(option.lender).toBe("Amos Capital Fund");
+    expect(option.finance.grossPpwCents).toBe(550);
+  });
+
+  it("leaves the same programme alone when its lender sets no cap", () => {
+    const [, option] = proposalAlternatives({
+      ...base,
+      design: { systemSizeKwDc: 8.8 },
+      targetNetPpwCents: 568,
+      programmes: [{ ...amos, lender: lender("L-amos", "Amos Capital Fund", 0, null) }],
+    });
+    // 568 / (1 − 0.65) = 1623¢ — the uncapped sticker.
+    expect(option.finance.grossPpwCents).toBe(1623);
+  });
+
+  it("does not let a capped lender drag down the cash option", () => {
+    // Cash is priced at what the company must keep, with no lender in the
+    // picture — so no partner's ceiling applies to it.
+    const [cash] = proposalAlternatives({
+      ...base,
+      design: { systemSizeKwDc: 8.8 },
+      targetNetPpwCents: 568,
+      programmes: [amos],
+    });
+    expect(cash.key).toBe("cash");
+    expect(cash.finance.grossPpwCents).toBe(568);
   });
 });

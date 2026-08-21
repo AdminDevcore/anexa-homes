@@ -1,5 +1,6 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
+  capStickerToFinalPpw,
   pricePurchase,
   grossPpwFromNet,
   leaseMonthlyCents,
@@ -58,6 +59,12 @@ export type LenderProductTerms = {
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
+  /**
+   * The publishing lender's ceiling on the final price per watt, cents. Read
+   * off the LENDER, not the programme, and passed down with the terms because
+   * it constrains the same number the dealer fee produces.
+   */
+  maxFinalPpwCents?: number | null;
 };
 
 export type FinanceRow = {
@@ -129,7 +136,27 @@ export function financeRowForProduct(
     isPurchase && ctx.targetNetPpwCents != null && f.grossPpwCents == null
       ? grossPpwFromNet(ctx.targetNetPpwCents, dealerFeePct)
       : null;
-  const grossPpwCents = derivedGrossPpw ?? f.grossPpwCents ?? assumptions.defaultGrossPpwCents;
+  const uncappedPpwCents = derivedGrossPpw ?? f.grossPpwCents ?? assumptions.defaultGrossPpwCents;
+
+  // The lender's ceiling, applied last and to the price the rep TYPED as well
+  // as to the derived one.
+  //
+  // Deliberately not exempting a hand-entered price the way the target-net
+  // derivation above does. That exemption exists because a rep who types a
+  // price is overriding a default, and a default should yield to a person. A
+  // maximum is not a default — it is what the partner will fund — and a rep
+  // typing $16.23/W into a programme that pays $5.50 has not overridden
+  // anything, they have written a contract the lender will send back.
+  const cap = isPurchase
+    ? capStickerToFinalPpw({
+        stickerPpwCents: uncappedPpwCents,
+        maxFinalPpwCents: lp?.maxFinalPpwCents ?? null,
+        systemSizeKwDc: ctx.systemSizeKwDc,
+        dealerFeePct,
+        adderTotalCents: f.adderTotalCents ?? 0,
+      })
+    : null;
+  const grossPpwCents = cap?.stickerPpwCents ?? uncappedPpwCents;
 
   let contractPriceCents = 0;
   if (isPurchase) {

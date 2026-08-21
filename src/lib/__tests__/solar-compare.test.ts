@@ -44,6 +44,7 @@ const loan = (over: Partial<OfferProduct> = {}): OfferProduct => ({
   factorWithoutPaydownMicros: null,
   paydownPct: null,
   paydownMonths: null,
+  maxFinalPpwCents: null,
   isActive: true,
   ...over,
 });
@@ -262,5 +263,69 @@ describe("basisGaps — why a whole shelf reads dashes", () => {
 
   it("reports no gap on a deal that can price", () => {
     expect(basisGaps(BASIS)).toEqual({ systemSize: false, pricePerWatt: false });
+  });
+});
+
+describe("a lender's maximum price per watt reaches the comparison", () => {
+  /**
+   * The deal from the screenshot that prompted the feature: 8.80 kW, the
+   * company's base at $5.68/W, Amos at a 65% dealer fee. Priced the ordinary
+   * way that column quoted $142,824 on paper that funds $48,400.
+   */
+  const AMOS_BASIS: CompareBasis = {
+    ...BASIS,
+    systemSizeKwDc: 8.8,
+    basePpwCents: 568,
+  };
+  const amos = (over: Partial<OfferProduct> = {}) =>
+    loan({ dealerFeePct: 65, maxFinalPpwCents: 550, termMonths: 360, ...over });
+
+  it("prices the column at the cap instead of the grossed-up base", () => {
+    const [capped] = compareOffers([amos()], AMOS_BASIS);
+    const [uncapped] = compareOffers([amos({ maxFinalPpwCents: null })], AMOS_BASIS);
+
+    expect(uncapped.contractPriceCents).toBe(14_282_400); // $142,824
+    expect(capped.contractPriceCents).toBe(4_840_000); //  $48,400
+    expect(capped.grossPpwCents).toBe(550);
+    expect(capped.capped).toBe(true);
+    expect(uncapped.capped).toBe(false);
+  });
+
+  it("carries the capped price into the monthly, not just the headline", () => {
+    // The whole column has to be priced from one number. A card showing the
+    // capped contract above a payment computed from the uncapped one is two
+    // different deals on one card, and the payment is the figure a homeowner
+    // remembers.
+    const [capped] = compareOffers([amos()], AMOS_BASIS);
+    const [uncapped] = compareOffers([amos({ maxFinalPpwCents: null })], AMOS_BASIS);
+    expect(capped.monthlyCents).toBeLessThan(uncapped.monthlyCents!);
+    expect(capped.totalPaidCents).toBeLessThan(uncapped.totalPaidCents!);
+  });
+
+  it("reports what the company keeps, because under a cap that is what moves", () => {
+    const [row] = compareOffers([amos()], AMOS_BASIS);
+    // $5.50/W with 65% going to the lender leaves 35% of it.
+    expect(Math.round(row.netPpwCents!)).toBe(193);
+    expect(row.maxFinalPpwCents).toBe(550);
+  });
+
+  it("does not cap the cash column, which has no lender to cap it", () => {
+    // Cash carries no dealer fee, so there is no partner whose maximum applies.
+    // Clamping it would cap our own quote against a bank nobody is borrowing
+    // from — and would quietly cut the cash price of every capped lender's deal.
+    const [cashRow] = compareOffers([{ kind: "cash" }], AMOS_BASIS);
+    expect(cashRow.capped).toBe(false);
+    expect(cashRow.contractPriceCents).toBe(4_998_400); // $49,984 — the base, untouched
+    expect(cashRow.maxFinalPpwCents).toBeNull();
+  });
+
+  it("leaves an uncapped lender on the same basis completely alone", () => {
+    // Two columns, one basis, one capped: the comparison is only honest if the
+    // cap moves the column that carries it and nothing else.
+    const other = loan({ id: "p2", lenderId: "l2", lenderName: "Climate First", dealerFeePct: 18 });
+    const [amosRow, otherRow] = compareOffers([amos(), other], AMOS_BASIS);
+    expect(amosRow.capped).toBe(true);
+    expect(otherRow.capped).toBe(false);
+    expect(otherRow.grossPpwCents).toBe(693); // 568 / (1 − 0.18)
   });
 });

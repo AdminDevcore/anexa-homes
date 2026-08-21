@@ -52,6 +52,12 @@ export type LenderRow = {
    * own redline, or they earn a flat rate per installed watt.
    */
   repPayMode: "redline" | "per_watt";
+  /**
+   * The most this partner's paper ever puts in front of a homeowner per watt,
+   * cents, dealer fee and adders included. Null — nearly every lender — leaves
+   * pricing exactly as it was.
+   */
+  maxFinalPpwCents: number | null;
   /** The partner's own mark, when one has been uploaded or fetched. */
   logoUrl: string | null;
   /** How many catalogue items this lender approves. */
@@ -588,6 +594,25 @@ function NumField({
   );
 }
 
+/**
+ * A price per watt, between the box a person types in and the cents stored.
+ *
+ * Blank is a real answer here and means "no ceiling", so it is kept distinct
+ * from a bad one: `null` clears the cap, `"invalid"` is a typo to be reported.
+ * Collapsing the two would let a mistyped cap silently clear a lender's ceiling
+ * and put every deal on that partner back at the ungoverned price.
+ */
+function ppwToCents(s: string): number | null | "invalid" {
+  const t = s.trim().replace(/^\$/, "");
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return "invalid";
+  const cents = Math.round(n * 100);
+  return cents >= 50 && cents <= 2000 ? cents : "invalid";
+}
+
+const ppwToDollars = (cents: number | null) => (cents == null ? "" : (cents / 100).toFixed(2));
+
 function TextField({
   label,
   value,
@@ -760,6 +785,7 @@ function LenderCard({
     applyUrl: lender.applyUrl ?? "",
     creditInstructions: lender.creditInstructions ?? "",
     repPayMode: lender.repPayMode,
+    maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
   });
   const resetDraft = () =>
     setDraft({
@@ -769,6 +795,7 @@ function LenderCard({
       applyUrl: lender.applyUrl ?? "",
       creditInstructions: lender.creditInstructions ?? "",
       repPayMode: lender.repPayMode,
+      maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
     });
 
   type ActionResult = { ok: boolean; error?: string; message?: string };
@@ -787,6 +814,16 @@ function LenderCard({
 
   async function save() {
     if (!draft.name.trim()) return toast.error("A lender needs a name.");
+
+    // Caught here rather than left to the server so the message names the box.
+    // A cap is the one field on this card that silently rewrites what every
+    // deal on this partner quotes, and "Invalid lender." would send somebody
+    // looking at the URL fields.
+    const maxFinalPpwCents = ppwToCents(draft.maxFinalPpw);
+    if (maxFinalPpwCents === "invalid") {
+      return toast.error("Max final $/W has to be a price between $0.50 and $20.00, or blank for no cap.");
+    }
+
     const res = await act(
       () =>
         upsertSolarLenderAction(lender.id, {
@@ -796,6 +833,7 @@ function LenderCard({
           applyUrl: draft.applyUrl.trim() || null,
           creditInstructions: draft.creditInstructions.trim() || null,
           repPayMode: draft.repPayMode,
+          maxFinalPpwCents,
         }),
       "Saved"
     );
@@ -853,6 +891,25 @@ function LenderCard({
               Each rep&rsquo;s own redline and fixed rate live on their{" "}
               <Link href="/portal/team" className="underline underline-offset-2">team profile</Link>.
               Changing this only affects deals whose commission hasn&rsquo;t been generated yet.
+            </p>
+          </div>
+
+          {/* A CEILING on what the customer signs, not a price list. Some
+              partners fund a flat rate whatever the job — Amos is $5.50/W —
+              and priced the ordinary way their dealer fee stickers that at
+              three times the figure they actually advance. */}
+          <div className="space-y-1 rounded-lg border border-border/70 bg-muted/30 p-2.5">
+            <TextField
+              label="Max final $/W — the most this partner ever charges a homeowner"
+              value={draft.maxFinalPpw}
+              placeholder="blank — no cap"
+              onChange={(v) => setDraft((d) => ({ ...d, maxFinalPpw: v }))}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Dealer fee and adders included. Leave blank and this lender prices the normal way:
+              your base $/W grossed up by its fee. Set it and the contract is held at or under
+              this figure — so extra work comes out of what you keep, not out of the
+              customer&rsquo;s price.
             </p>
           </div>
 
@@ -957,6 +1014,19 @@ function LenderCard({
                 )}
               </dd>
             </div>
+            {/* Only shown once set. A "Max final $/W — none" line on every one
+                of a dozen uncapped lenders is a column of dashes teaching
+                nobody anything. */}
+            {lender.maxFinalPpwCents != null && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Max final $/W</dt>
+                <dd className="font-medium tabular-nums">
+                  <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] text-gold-muted">
+                    ${ppwToDollars(lender.maxFinalPpwCents)}/W
+                  </span>
+                </dd>
+              </div>
+            )}
           </dl>
 
           {/* A lender approving nothing produces empty equipment lists on every

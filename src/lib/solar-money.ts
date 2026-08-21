@@ -375,6 +375,101 @@ export function grossPpwFromNet(netPpwCents: number, dealerFeePct: number): numb
 }
 
 /**
+ * What a capped lender does to a deal.
+ *
+ * `stickerPpwCents` is what to hand `pricePurchase`; the rest is what the rep
+ * needs told, because a price that silently moved is a price nobody trusts.
+ */
+export type FinalPpwCap = {
+  /** The system sticker to price with. Unchanged when the cap did not bite. */
+  stickerPpwCents: number;
+  /** True when the cap actually lowered the price. */
+  capped: boolean;
+  /**
+   * True when the adders alone, grossed up, already exceed the cap — there is
+   * no system price low enough to get under it, so the sticker floors at zero
+   * and the contract comes out ABOVE the cap. The one case this function
+   * cannot honour, surfaced rather than swallowed.
+   */
+  adderOverrun: boolean;
+};
+
+/**
+ * Hold a lender's contract to its maximum price per watt.
+ *
+ * THE CAP IS ON THE CONTRACT, NOT THE STICKER. "Five fifty a watt, fee
+ * included" is a statement about the number at the bottom of the agreement —
+ * the system and the re-roof and the lender's cut, all of it, divided by the
+ * installed watts. Capping the sticker instead would let a $14,500 adder push
+ * the real figure to $7.15/W while every screen went on claiming $5.50.
+ *
+ * So the contract is pinned first and the system sticker is solved backwards
+ * out of it. The adders still gross up by the fee — the lender advances them
+ * too and keeps its percentage of them, and that does not stop being true
+ * because a ceiling exists — which leaves the SYSTEM as the only line with any
+ * give in it. That is the whole behaviour in one sentence: under a cap, extra
+ * work comes out of the company's side, and the homeowner's number never moves.
+ *
+ * A CEILING, NOT A FIXED PRICE. A deal already priced under the cap is left
+ * exactly where it is. A cap is protection against quoting a partner more than
+ * they fund, not a floor that drags cheap deals up to it.
+ */
+export function capStickerToFinalPpw(input: {
+  /** What this deal would sticker at with no cap — base ÷ (1 − fee). */
+  stickerPpwCents: number;
+  /** The lender's ceiling, cents per watt. Null or ≤ 0 means uncapped. */
+  maxFinalPpwCents: number | null | undefined;
+  systemSizeKwDc: number;
+  dealerFeePct: number;
+  adderTotalCents: number;
+}): FinalPpwCap {
+  const uncapped: FinalPpwCap = {
+    stickerPpwCents: input.stickerPpwCents,
+    capped: false,
+    adderOverrun: false,
+  };
+
+  const max = input.maxFinalPpwCents;
+  if (max == null || !(max > 0)) return uncapped;
+
+  const systemWatts = Math.round(input.systemSizeKwDc * 1000);
+  if (systemWatts <= 0) return uncapped;
+
+  // The same fee guard `pricePurchase` applies, so the two agree about what
+  // the adders gross up to. A fee it would stand down must not be honoured here.
+  const rawPct = input.dealerFeePct;
+  const f = Number.isFinite(rawPct) && rawPct > 0 && rawPct < 100 ? rawPct / 100 : 0;
+
+  const adderTotalCents = Math.round(input.adderTotalCents);
+  const adderStickerCents = f > 0 ? Math.round(adderTotalCents / (1 - f)) : adderTotalCents;
+
+  const uncappedContract = Math.round(systemWatts * input.stickerPpwCents) + adderStickerCents;
+  const cappedContract = max * systemWatts;
+  if (uncappedContract <= cappedContract) return uncapped;
+
+  // What is left for the array once the grossed-up extras have taken their
+  // share of the ceiling. Negative means the extras alone have blown through
+  // it, and no system price — not even a free one — brings this contract under
+  // the cap. Flooring at zero keeps a negative price per watt off the screen.
+  const baseStickerCents = cappedContract - adderStickerCents;
+  if (baseStickerCents <= 0) {
+    return { stickerPpwCents: 0, capped: true, adderOverrun: true };
+  }
+
+  // FLOOR, not round. The sticker is a whole number of cents per watt — that is
+  // the granularity the whole model stores prices at — so the solved figure
+  // almost never lands exactly on the ceiling. Rounding up half the time quotes
+  // a partner a few cents a watt more than they fund, which on a 20 kW job is
+  // a real number and is the one outcome a maximum exists to prevent. Rounding
+  // down leaves the contract fractionally under the cap instead.
+  return {
+    stickerPpwCents: Math.floor(baseStickerCents / systemWatts),
+    capped: true,
+    adderOverrun: false,
+  };
+}
+
+/**
  * A lease product prices per kW-DC per month; `priceThirdParty` takes a fixed
  * monthly. This is the one line between them, kept here so the conversion is
  * not re-derived at each call site.

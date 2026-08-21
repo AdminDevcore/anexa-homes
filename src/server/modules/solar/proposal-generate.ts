@@ -246,7 +246,16 @@ export async function generateProposalVersion(
       factorWithPaydownMicros: true, factorWithoutPaydownMicros: true,
       paydownPct: true, paydownMonths: true,
       rank: true,
-      lender: { select: { id: true, name: true, rank: true, applyUrl: true, logoUpdatedAt: true } },
+      lender: {
+        select: {
+          id: true, name: true, rank: true, applyUrl: true, logoUpdatedAt: true,
+          // The partner's ceiling on the final price per watt. Selected here
+          // because the menu is PRICED at generation and frozen; a cap missing
+          // from this select quotes a household a number the lender does not
+          // fund, in a document nobody can correct afterwards.
+          maxFinalPpwCents: true,
+        },
+      },
     },
   });
 
@@ -283,6 +292,7 @@ export async function generateProposalVersion(
           rank: p.lender.rank,
           applyUrl: p.lender.applyUrl,
           logoUrl: lenderLogoUrl(p.lender.id, p.lender.logoUpdatedAt),
+          maxFinalPpwCents: p.lender.maxFinalPpwCents,
         },
       })
     ),

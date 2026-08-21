@@ -643,6 +643,12 @@ export type LenderOption = {
   creditInstructions: string | null;
   /** The partner's mark. Null falls back to a monogram, never to nothing. */
   logoUrl: string | null;
+  /**
+   * The most this partner's paper ever puts in front of a homeowner per watt,
+   * fee and adders included, cents. Null — nearly every lender — means the
+   * ordinary base-times-fee pricing, unchanged.
+   */
+  maxFinalPpwCents: number | null;
 };
 
 export type LenderProductOption = {
@@ -836,7 +842,19 @@ export function SolarFinancePanel({
     () =>
       products.flatMap((p) => {
         const l = lenders.find((x) => x.id === p.lenderId);
-        return l ? [{ ...p, lenderName: l.name, label: lenderProductLabel(p) }] : [];
+        // The ceiling lives on the partner and is merged in here, because the
+        // comparison prices a PROGRAMME and should not have to hold a second
+        // collection to find out what its publisher will fund.
+        return l
+          ? [
+              {
+                ...p,
+                lenderName: l.name,
+                label: lenderProductLabel(p),
+                maxFinalPpwCents: l.maxFinalPpwCents,
+              },
+            ]
+          : [];
       }),
     [products, lenders]
   );
@@ -1121,6 +1139,13 @@ export function SolarFinancePanel({
         maxPpwCents={maxPpwCents}
         adderTotalCents={adderTotalCents}
         quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
+        // The ceiling belongs to the partner, so it is read off the LENDER the
+        // chosen programme was published by — never off the programme row.
+        quotedMaxFinalPpwCents={
+          chosen && !isCash
+            ? (lenders.find((l) => l.id === chosen.lenderId)?.maxFinalPpwCents ?? null)
+            : null
+        }
         quotedLabel={
           chosen ? [lender?.name, chosen.name].filter(Boolean).join(" · ") || lenderProductLabel(chosen) : null
         }

@@ -5,6 +5,9 @@ import {
   priceThirdParty,
   solarCommissionCents,
   apportionCents,
+  capStickerToFinalPpw,
+  grossPpwFromNet,
+  type FinalPpwCap,
   year1Production,
   offsetPct,
   type SolarAssumptions,
@@ -473,5 +476,115 @@ describe("production maths", () => {
   it("offset is production over usage", () => {
     expect(offsetPct(12_180, 14_000)).toBeCloseTo(87, 0);
     expect(offsetPct(12_180, 0)).toBe(0); // no divide-by-zero blowup
+  });
+});
+
+describe("a lender's maximum price per watt caps the CONTRACT, not the sticker", () => {
+  // Amos Capital Fund, from a real deal: 8.80 kW, the company's base at
+  // $5.68/W, a 65% dealer fee, and paper that is always $5.50/W to the
+  // homeowner. Priced the ordinary way that base stickers at $16.23/W and
+  // quotes a contract of $142,824 on a programme that funds $48,400.
+  const AMOS = { systemSizeKwDc: 8.8, dealerFeePct: 65, maxFinalPpwCents: 550 };
+  const uncappedSticker = grossPpwFromNet(568, 65)!;
+
+  const contractOf = (cap: FinalPpwCap, adderTotalCents: number) =>
+    pricePurchase({
+      product: "loan",
+      systemSizeKwDc: AMOS.systemSizeKwDc,
+      stickerPpwCents: cap.stickerPpwCents,
+      dealerFeePct: AMOS.dealerFeePct,
+      adderTotalCents,
+    });
+
+  it("holds the contract to the cap on a deal with no adders", () => {
+    expect(uncappedSticker).toBe(1623);
+
+    const cap = capStickerToFinalPpw({
+      stickerPpwCents: uncappedSticker, ...AMOS, adderTotalCents: 0,
+    });
+    expect(cap.capped).toBe(true);
+    expect(cap.stickerPpwCents).toBe(550);
+
+    const priced = contractOf(cap, 0);
+    expect(priced.contractPriceCents).toBe(4_840_000); // $48,400, not $142,824
+    expect(priced.finalPpwCents).toBe(550);
+  });
+
+  it("leaves the homeowner's price alone when work is added, and takes it out of the company", () => {
+    // THE POINT OF THE WHOLE FEATURE. A $5,000 adder on an uncapped lender
+    // raises what the customer signs. Under a cap the ceiling is already
+    // reached, so the extra work comes out of the only line with any give in
+    // it — the system — and the customer's number does not move.
+    const bare = capStickerToFinalPpw({
+      stickerPpwCents: uncappedSticker, ...AMOS, adderTotalCents: 0,
+    });
+    const laden = capStickerToFinalPpw({
+      stickerPpwCents: uncappedSticker, ...AMOS, adderTotalCents: 500_000,
+    });
+
+    const bareP = contractOf(bare, 0);
+    const ladenP = contractOf(laden, 500_000);
+
+    // Never above the cap, and within a watt's worth of cents of it.
+    expect(ladenP.finalPpwCents).toBeLessThanOrEqual(550);
+    expect(ladenP.finalPpwCents).toBeGreaterThan(549);
+
+    // The company, not the homeowner, paid for the adder.
+    expect(ladenP.grossPriceCents).toBeLessThan(bareP.grossPriceCents);
+    expect(ladenP.basePriceCents).toBeLessThan(bareP.basePriceCents);
+  });
+
+  it("is a ceiling, so a deal already under it is left exactly where it is", () => {
+    // A cap that dragged cheap deals UP to it would be a price list, not a
+    // maximum — and would silently raise every quote on that lender.
+    const cheap = capStickerToFinalPpw({
+      stickerPpwCents: 400, ...AMOS, adderTotalCents: 0,
+    });
+    expect(cheap.capped).toBe(false);
+    expect(cheap.stickerPpwCents).toBe(400);
+  });
+
+  it("never quotes above the cap when the sticker does not divide evenly", () => {
+    // The sticker is whole cents per watt, so the solved figure lands between
+    // two of them. Rounding up would quote the partner more than they fund.
+    for (const adder of [1, 99, 100_000, 333_333, 777_777]) {
+      const cap = capStickerToFinalPpw({
+        stickerPpwCents: uncappedSticker, ...AMOS, adderTotalCents: adder,
+      });
+      expect(contractOf(cap, adder).finalPpwCents).toBeLessThanOrEqual(550);
+    }
+  });
+
+  it("flags the case where the adders alone blow through the cap", () => {
+    // $40,000 of extra work grosses up to $114,285 against a $48,400 ceiling.
+    // No system price — not even a free one — gets under it. Better said out
+    // loud than swallowed into a negative price per watt.
+    const cap = capStickerToFinalPpw({
+      stickerPpwCents: uncappedSticker, ...AMOS, adderTotalCents: 4_000_000,
+    });
+    expect(cap.adderOverrun).toBe(true);
+    expect(cap.stickerPpwCents).toBe(0);
+  });
+
+  it("does nothing at all to a lender with no maximum set", () => {
+    // Which is every lender until somebody sets one, so this is the guarantee
+    // that shipping the column moved no existing price.
+    for (const max of [null, undefined, 0]) {
+      const cap = capStickerToFinalPpw({
+        stickerPpwCents: uncappedSticker,
+        maxFinalPpwCents: max,
+        systemSizeKwDc: 8.8,
+        dealerFeePct: 65,
+        adderTotalCents: 500_000,
+      });
+      expect(cap).toEqual({ stickerPpwCents: 1623, capped: false, adderOverrun: false });
+    }
+  });
+
+  it("cannot price a deal that has no array yet", () => {
+    const cap = capStickerToFinalPpw({
+      stickerPpwCents: uncappedSticker, ...AMOS, systemSizeKwDc: 0, adderTotalCents: 0,
+    });
+    expect(cap.capped).toBe(false);
   });
 });

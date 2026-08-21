@@ -45,6 +45,13 @@ export type CatalogueProgramme = {
     applyUrl: string | null;
     /** Our own serving URL for the partner's mark, never the bank's CDN. */
     logoUrl: string | null;
+    /**
+     * The partner's ceiling on the final price per watt, cents. On the LENDER
+     * because it is the partner's rule and not one programme's — a menu that
+     * offered a household a capped programme at the uncapped price would be
+     * frozen into the snapshot and outlive anybody's chance to correct it.
+     */
+    maxFinalPpwCents: number | null;
   };
 };
 
@@ -156,6 +163,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
           rateMillsPerKwh: p.rateMillsPerKwh,
           escalatorPct: p.escalatorPct,
           termYears: p.termYears,
+          maxFinalPpwCents: p.lender.maxFinalPpwCents,
         },
         targetNetPpwCents: input.targetNetPpwCents,
       }

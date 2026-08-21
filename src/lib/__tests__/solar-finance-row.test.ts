@@ -284,3 +284,72 @@ describe("financeRowForProduct with a lender product", () => {
     expect(row.loanMonthlyPaymentCents).toBe(20_113);
   });
 });
+
+describe("a lender's maximum price per watt is enforced on the way to the row", () => {
+  /** Amos: 65% dealer fee, and paper that is always $5.50/W to the homeowner. */
+  const AMOS = {
+    id: "prod-amos",
+    product: "loan" as const,
+    aprPct: 4.99,
+    termMonths: 360,
+    dealerFeePct: 65,
+    leaseRateCentsPerKwMonth: null,
+    rateMillsPerKwh: null,
+    escalatorPct: null,
+    termYears: null,
+    maxFinalPpwCents: 550,
+  };
+  const CTX_8_8 = { systemSizeKwDc: 8.8, assumptions: A };
+
+  it("caps a price derived from the company's net target", () => {
+    const row = financeRowForProduct(
+      { product: "loan", adderTotalCents: 0 },
+      { ...CTX_8_8, lenderProduct: AMOS, targetNetPpwCents: 568 }
+    );
+    expect(row.grossPpwCents).toBe(550);
+    expect(row.contractPriceCents).toBe(4_840_000);
+  });
+
+  it("caps a price the rep TYPED, unlike the net-target derivation", () => {
+    // The derivation above steps aside for a typed price, because a rep
+    // overriding a default should win. A maximum is not a default — it is what
+    // the partner will fund — so typing $16.23/W into Amos does not buy a
+    // $142,824 contract, it buys a call from the lender.
+    const row = financeRowForProduct(
+      { product: "loan", grossPpwCents: 1623, adderTotalCents: 0 },
+      { ...CTX_8_8, lenderProduct: AMOS }
+    );
+    expect(row.grossPpwCents).toBe(550);
+    expect(row.contractPriceCents).toBe(4_840_000);
+  });
+
+  it("keeps the contract at the cap when adders are added", () => {
+    const row = financeRowForProduct(
+      { product: "loan", grossPpwCents: 1623, adderTotalCents: 500_000 },
+      { ...CTX_8_8, lenderProduct: AMOS }
+    );
+    expect(row.contractPriceCents).toBeLessThanOrEqual(4_840_000);
+    // The company absorbed the adder: the system's own sticker came down.
+    expect(row.grossPpwCents).toBeLessThan(550);
+  });
+
+  it("leaves a lender with no maximum exactly as it was", () => {
+    const row = financeRowForProduct(
+      { product: "loan", grossPpwCents: 1623, adderTotalCents: 0 },
+      { ...CTX_8_8, lenderProduct: { ...AMOS, maxFinalPpwCents: null } }
+    );
+    expect(row.grossPpwCents).toBe(1623);
+    expect(row.contractPriceCents).toBe(14_282_400);
+  });
+
+  it("does not cap a cash row, which carries no lender at all", () => {
+    // `lp` is null for cash by construction, so the partner's ceiling never
+    // reaches it — the same rule that stops cash carrying a dealer fee.
+    const row = financeRowForProduct(
+      { product: "cash", grossPpwCents: 568, adderTotalCents: 0 },
+      { ...CTX_8_8, lenderProduct: AMOS }
+    );
+    expect(row.grossPpwCents).toBe(568);
+    expect(row.dealerFeePct).toBe(0);
+  });
+});

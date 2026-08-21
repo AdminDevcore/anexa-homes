@@ -4,7 +4,7 @@ import * as React from "react";
 import { Check, Minus, Pencil, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { grossPpwFromNet, pricePurchase } from "@/lib/solar-money";
+import { capStickerToFinalPpw, grossPpwFromNet, pricePurchase } from "@/lib/solar-money";
 
 /**
  * What this company charges for THIS system, and the one control that moves it.
@@ -44,6 +44,7 @@ export function SystemPriceCard({
   maxPpwCents,
   adderTotalCents,
   quotedFeePct,
+  quotedMaxFinalPpwCents,
   quotedLabel,
   canEdit,
   onChange,
@@ -58,6 +59,13 @@ export function SystemPriceCard({
   adderTotalCents: number;
   /** The dealer fee on the programme this deal is quoted on. Null on cash. */
   quotedFeePct: number | null;
+  /**
+   * That programme's publisher's ceiling on the final price per watt, cents.
+   * Read here so this footer cannot claim a customer price the financing step
+   * below is going to cap — one screen quoting $142,824 while the next quotes
+   * $48,400 for the same deal is worse than either figure alone.
+   */
+  quotedMaxFinalPpwCents: number | null;
   quotedLabel: string | null;
   canEdit: boolean;
   onChange: (cents: number | null) => void;
@@ -161,10 +169,21 @@ export function SystemPriceCard({
    * customer price the company could not actually net its own catalogue price
    * out of.
    */
-  const customerPpw =
+  const uncappedCustomerPpw =
     basePpwCents != null && quotedFeePct != null && quotedFeePct > 0
       ? grossPpwFromNet(basePpwCents, quotedFeePct)
       : null;
+  const customerCap =
+    uncappedCustomerPpw == null
+      ? null
+      : capStickerToFinalPpw({
+          stickerPpwCents: uncappedCustomerPpw,
+          maxFinalPpwCents: quotedMaxFinalPpwCents,
+          systemSizeKwDc,
+          dealerFeePct: quotedFeePct ?? 0,
+          adderTotalCents,
+        });
+  const customerPpw = customerCap?.stickerPpwCents ?? uncappedCustomerPpw;
   const customerContract =
     customerPpw != null && watts > 0
       ? pricePurchase({
@@ -398,8 +417,17 @@ export function SystemPriceCard({
         {customerPpw != null && customerContract != null ? (
           <p className="text-[11px] text-muted-foreground">
             <span className="font-medium text-foreground">{quotedLabel}</span>{" "}
-            takes a {quotedFeePct}% dealer fee on the whole job, adders included, so the
-            customer&rsquo;s final price is{" "}
+            {customerCap?.capped && quotedMaxFinalPpwCents != null ? (
+              <>
+                never charges more than ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, fee and
+                adders included, so the customer&rsquo;s final price is held at{" "}
+              </>
+            ) : (
+              <>
+                takes a {quotedFeePct}% dealer fee on the whole job, adders included, so the
+                customer&rsquo;s final price is{" "}
+              </>
+            )}
             <span
               data-testid="customer-final"
               className="font-medium tabular-nums text-foreground"

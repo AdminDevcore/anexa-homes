@@ -10,6 +10,7 @@ import { resolveAdderTotal } from "./adders";
 import { recomputeDesignFigures } from "./recompute";
 import { generateProposalVersion } from "./proposal-generate";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
+import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { annualUsageFromBill } from "@/lib/solar-energy";
 import { offsetPct } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
@@ -266,11 +267,7 @@ export async function repriceProposalAction(
             companyId: user.companyId,
             ...(design.lenderId ? { lenderId: design.lenderId } : {}),
           },
-          select: {
-            id: true, product: true, aprPct: true, termMonths: true, dealerFeePct: true,
-            leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true, escalatorPct: true,
-            termYears: true,
-          },
+          select: LENDER_TERMS_SELECT,
         })
       : null;
     if (lenderProductId && !lenderProduct) return fail("That financing programme is not available.");
@@ -300,7 +297,7 @@ export async function repriceProposalAction(
       {
         systemSizeKwDc: design.systemSizeKwDc,
         assumptions,
-        lenderProduct,
+        lenderProduct: toLenderProductTerms(lenderProduct),
         targetNetPpwCents: assumptions.targetNetPpwCents,
       }
     );

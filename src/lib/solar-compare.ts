@@ -1,5 +1,6 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
+  capStickerToFinalPpw,
   grossPpwFromNet,
   leaseMonthlyCents,
   loanPaymentCents,
@@ -48,6 +49,12 @@ export type OfferProduct = {
   factorWithoutPaydownMicros: number | null;
   paydownPct: number | null;
   paydownMonths: number | null;
+  /**
+   * The publishing LENDER's ceiling on what a homeowner signs per watt, fee and
+   * adders included. Carried on the programme rather than looked up beside it
+   * so that pricing a column needs one object and not two.
+   */
+  maxFinalPpwCents: number | null;
   isActive: boolean;
 };
 
@@ -97,6 +104,22 @@ export type CompareRow = {
   grossPpwCents: number | null;
   dealerFeePct: number | null;
   contractPriceCents: number | null;
+  /**
+   * What the company keeps per installed watt on this column — the gross, after
+   * the lender's cut and after the adders are paid for, divided by the watts.
+   *
+   * Shown because under a price cap it is the figure that MOVES. Everywhere
+   * else the customer's price absorbs a dear lender and this number sits still;
+   * on a capped column it is the other way round, and a rep quoting one needs
+   * to see what the deal is worth without opening the payroll module.
+   */
+  netPpwCents: number | null;
+  /** The lender's ceiling, when it has one, so the card can name the figure. */
+  maxFinalPpwCents: number | null;
+  /** True when that ceiling actually lowered this column's price. */
+  capped: boolean;
+  /** True when the adders alone exceed it — see `capStickerToFinalPpw`. */
+  adderOverrun: boolean;
   /** Everything the customer hands over across the whole term. */
   totalPaidCents: number | null;
   /** Loan with a paydown: the same total if they never make it. */
@@ -131,9 +154,31 @@ function purchaseRow(
   meta: Pick<CompareRow, "id" | "lenderId" | "lenderName" | "label" | "product">
 ): CompareRow {
   const cash = isCash(offer);
-  // Cash has no lender, so it has no fee to price around, by definition.
+  // Cash has no lender, so it has no fee to price around — and for the same
+  // reason no maximum either. A ceiling belongs to a partner's paper; a
+  // homeowner writing a cheque is buying from the company at the company's
+  // price, and clamping that would be capping our own quote against a lender
+  // nobody is borrowing from.
   const dealerFeePct = cash ? 0 : (offer as OfferProduct).dealerFeePct ?? 0;
-  const grossPpwCents = stickerCents(basis, dealerFeePct);
+  const maxFinalPpwCents = cash ? null : (offer as OfferProduct).maxFinalPpwCents ?? null;
+  const uncappedPpwCents = stickerCents(basis, dealerFeePct);
+
+  // The ceiling is applied to the sticker BEFORE pricing rather than to the
+  // contract afterwards, so that every figure below — the monthly, the total
+  // paid, the redline — is computed from the price the customer is actually
+  // being quoted. Capping the headline and leaving the payment to the old one
+  // would put two different deals on the same card.
+  const cap =
+    uncappedPpwCents == null
+      ? null
+      : capStickerToFinalPpw({
+          stickerPpwCents: uncappedPpwCents,
+          maxFinalPpwCents,
+          systemSizeKwDc: basis.systemSizeKwDc,
+          dealerFeePct,
+          adderTotalCents: basis.adderTotalCents,
+        });
+  const grossPpwCents = cap?.stickerPpwCents ?? uncappedPpwCents;
 
   const priced =
     grossPpwCents != null && basis.systemSizeKwDc > 0
@@ -155,6 +200,11 @@ function purchaseRow(
     grossPpwCents,
     dealerFeePct,
     contractPriceCents: priced?.contractPriceCents ?? null,
+    netPpwCents:
+      priced && priced.systemWatts > 0 ? priced.grossPriceCents / priced.systemWatts : null,
+    maxFinalPpwCents,
+    capped: cap?.capped ?? false,
+    adderOverrun: cap?.adderOverrun ?? false,
     totalPaidCents: null,
     totalPaidWithoutPaydownCents: null,
     termLabel: cash ? "—" : loanTermLabel((offer as OfferProduct).termMonths),
@@ -256,10 +306,16 @@ function thirdPartyRow(
     monthlyWithoutPaydownCents: null,
     paydownCents: null,
     fromFactor: false,
-    // Electricity, not a system: no sticker, no fee, no contract price.
+    // Electricity, not a system: no sticker, no fee, no contract price — and
+    // therefore nothing for a maximum price per watt to cap. A lease sells
+    // kilowatt-hours; there is no per-watt price on it to hold a ceiling over.
     grossPpwCents: null,
     dealerFeePct: null,
     contractPriceCents: null,
+    netPpwCents: null,
+    maxFinalPpwCents: null,
+    capped: false,
+    adderOverrun: false,
     totalPaidCents: lifetime?.lifetimeCostCents ?? null,
     totalPaidWithoutPaydownCents: null,
     termLabel: termYears > 0 ? `${termYears} yr` : "—",

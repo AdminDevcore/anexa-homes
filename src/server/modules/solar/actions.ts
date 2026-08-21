@@ -11,6 +11,7 @@ import { year1Production, offsetPct } from "@/lib/solar-money";
 import { canGenerate } from "@/lib/solar-validation";
 import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
+import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { resolveAdderTotal } from "./adders";
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -409,11 +410,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
           companyId: user.companyId,
           ...(design?.lenderId ? { lenderId: design.lenderId } : {}),
         },
-        select: {
-          id: true, product: true, aprPct: true, termMonths: true, dealerFeePct: true,
-          leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true, escalatorPct: true,
-          termYears: true,
-        },
+        select: LENDER_TERMS_SELECT,
       })
     : null;
 
@@ -427,7 +424,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   const data = financeRowForProduct({ ...f, adderTotalCents }, {
     systemSizeKwDc: design?.systemSizeKwDc ?? 0,
     assumptions,
-    lenderProduct,
+    lenderProduct: toLenderProductTerms(lenderProduct),
     targetNetPpwCents: assumptions.targetNetPpwCents,
   });
 
@@ -765,6 +762,17 @@ const lenderSchema = z.object({
    * lines carry a snapshot of the terms they were sold on.
    */
   repPayMode: z.enum(["redline", "per_watt"]).optional(),
+  /**
+   * The most this partner's paper ever puts in front of a homeowner per watt,
+   * cents, dealer fee and adders included. Null clears the ceiling.
+   *
+   * Bounded by the same $0.50–$20.00/W band the deal-side price box uses, and
+   * for the same reason: every value outside it is a typo, and a typo here is
+   * not a rejected form but a whole lender's pricing quietly rewritten. A cap
+   * of 55 (someone meaning $5.50 and typing cents) would quote every deal on
+   * that partner at 55 cents a watt.
+   */
+  maxFinalPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
 });
 
 /**

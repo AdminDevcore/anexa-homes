@@ -2846,6 +2846,25 @@ model SolarLender {
   rank       Int             @default(0)
   notes      String?
 
+  /// The most this partner's paper ever puts in front of a homeowner, per
+  /// installed watt, in cents -- DEALER FEE AND ADDERS INCLUDED. 550 = $5.50/W.
+  ///
+  /// Every other lender prices one way: the company's base $/W is grossed up by
+  /// the fee, and whatever comes out is what the customer signs. A partner like
+  /// Amos runs the other way round -- their paper is a flat $5.50/W to the
+  /// homeowner and the fee is simply how much of it they keep -- and priced the
+  /// normal way a 65% fee stickers a $5.68/W base at $16.23/W, which is not a
+  /// number that partner has ever funded.
+  ///
+  /// So this is a CEILING on the contract, not on the sticker: adders gross up
+  /// by the fee exactly as they always did, and the system price absorbs
+  /// whatever is left under the cap. Which is why adding work here lowers what
+  /// the company keeps instead of raising what the customer pays.
+  ///
+  /// Null -- the default and every lender until somebody sets one -- means no
+  /// cap, and nothing about that lender's pricing changes.
+  maxFinalPpwCents Int?
+
   /// Where YOUR team runs credit for this partner — the dealer portal login.
   /// Rep-facing only: it never reaches a customer-facing document.
   portalUrl          String?

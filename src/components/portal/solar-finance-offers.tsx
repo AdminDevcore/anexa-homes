@@ -85,6 +85,8 @@ function OfferCard({
   logoUrl,
   headline,
   headlineNote,
+  capNote,
+  capBroken,
   unpricedNote,
   shortlisted,
   quoted,
@@ -99,6 +101,10 @@ function OfferCard({
   logoUrl: string | null;
   headline: string | null;
   headlineNote: string | null;
+  /** Set only where the lender's maximum price per watt moved this figure. */
+  capNote: string | null;
+  /** The cap could not be honoured — the adders alone are over it. */
+  capBroken: boolean;
   /** Why this card has no figure — the ONE thing that would give it one. */
   unpricedNote: string;
   shortlisted: boolean;
@@ -180,6 +186,18 @@ function OfferCard({
                 {headlineNote}
               </div>
             )}
+            {capNote && (
+              <div
+                className={cn(
+                  "mt-1 inline-block max-w-full truncate rounded px-1.5 py-0.5 text-[10px] font-medium",
+                  capBroken
+                    ? "bg-red-50 text-red-800 dark:bg-red-500/10 dark:text-red-300"
+                    : "bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+                )}
+              >
+                {capNote}
+              </div>
+            )}
           </>
         ) : (
           <div className="text-[11px] leading-snug text-muted-foreground">{unpricedNote}</div>
@@ -225,6 +243,17 @@ const LINES: CompareLine[] = [
     cell: (r) => (r.dealerFeePct == null ? null : `${r.dealerFeePct}%`),
   },
   { key: "sticker", label: "Sticker", cell: (r) => (r.grossPpwCents == null ? null : `$${(r.grossPpwCents / 100).toFixed(2)}/W`) },
+  {
+    // Shown only where a ceiling is in play. Everywhere else the customer's
+    // price absorbs a dearer lender and this figure sits still at the base
+    // price, so a row repeating it in every column teaches nothing; under a
+    // cap it is the number that MOVES, and the one a rep is trading away.
+    key: "you-keep",
+    label: "You keep",
+    hint: "Your gross per watt after this lender's cut and the adders.",
+    cell: (r) =>
+      r.capped && r.netPpwCents != null ? `$${(r.netPpwCents / 100).toFixed(2)}/W` : null,
+  },
   {
     key: "contract-price",
     label: "Contract price",
@@ -444,6 +473,35 @@ function CompareColumn({
         ))}
       </dl>
 
+      {/* Said on the column, not once under the table. A capped column and an
+          uncapped one sit side by side here and are priced by different rules;
+          a footnote below both would not say WHICH of them moved. */}
+      {row.capped && row.maxFinalPpwCents != null && (
+        <p
+          data-testid="compare-capped"
+          className={cn(
+            "mt-2.5 rounded-lg border px-2 py-1.5 text-[11px]",
+            row.adderOverrun
+              ? "border-red-300/70 bg-red-50 text-red-900 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+              : "border-amber-300/70 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+          )}
+        >
+          {row.adderOverrun ? (
+            <>
+              The adders alone are over {row.lenderName ?? "this lender"}&rsquo;s $
+              {(row.maxFinalPpwCents / 100).toFixed(2)}/W cap, so this contract cannot get under
+              it. Cut the extra work or quote another lender.
+            </>
+          ) : (
+            <>
+              Held at {row.lenderName ?? "this lender"}&rsquo;s $
+              {(row.maxFinalPpwCents / 100).toFixed(2)}/W cap
+              {row.netPpwCents != null && <> — you keep ${(row.netPpwCents / 100).toFixed(2)}/W</>}.
+            </>
+          )}
+        </p>
+      )}
+
       {/* mt-auto: the columns stretch to the tallest of them, and a lease with
           three lines against a loan with five would otherwise put its button
           two inches higher — a row of buttons at four different heights is a
@@ -641,6 +699,17 @@ export function FinanceOffers({
         logoUrl={c.logoUrl}
         headline={headline}
         headlineNote={note}
+        // On the shelf too, not only in the comparison below: the shelf is what
+        // a rep reads first, and a monthly a third of its neighbours' with no
+        // explanation attached reads as a mistake in the rate sheet.
+        capNote={
+          row?.capped && row.maxFinalPpwCents != null
+            ? row.adderOverrun
+              ? `Adders exceed the $${(row.maxFinalPpwCents / 100).toFixed(2)}/W cap`
+              : `Capped at $${(row.maxFinalPpwCents / 100).toFixed(2)}/W`
+            : null
+        }
+        capBroken={row?.adderOverrun ?? false}
         unpricedNote={unpricedNote(kind, gaps)}
         shortlisted={shortlist.includes(id)}
         quoted={quotedId === id}
