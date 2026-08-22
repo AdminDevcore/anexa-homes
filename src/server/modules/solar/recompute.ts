@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "./settings";
 import { resolveSizingModule } from "./sizing";
-import { recomputeAdderTotal } from "./adders";
+import { applyAutoAdders, recomputeAdderTotal } from "./adders";
 import { planeFor, resolvePlaneYields } from "./pvwatts";
 import { groundPlanesFor, resolveRoofPlanes } from "./roof-planes";
 import { applyPlanes } from "@/lib/solar-roof-planes";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/solar-layout";
 import { systemTotals } from "@/lib/solar-arrays";
 import { offsetPct } from "@/lib/solar-money";
+import { effectiveUsageKwh } from "@/lib/solar-energy";
 
 /**
  * Everything the design's stored figures are derived from, in one place.
@@ -43,6 +44,7 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
         layoutBlocks: true,
         moduleId: true,
         annualUsageKwh: true,
+        usageAdjustmentKwh: true,
         mountType: true,
       },
     }),
@@ -113,9 +115,12 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
   });
 
   const station = [...yields.values()].map((y) => y.station).find(Boolean) ?? null;
-  const computedOffset = design.annualUsageKwh
-    ? offsetPct(totals.year1ProductionKwh, design.annualUsageKwh)
-    : 0;
+  // Against the usage the system actually has to cover — the bill figure PLUS
+  // whatever the adders on this deal will add to it. Quoting offset against the
+  // bill alone promises coverage the array was never sized for on any deal that
+  // sells an EV charger.
+  const usageKwh = effectiveUsageKwh(design.annualUsageKwh, design.usageAdjustmentKwh);
+  const computedOffset = usageKwh ? offsetPct(totals.year1ProductionKwh, usageKwh) : 0;
 
   await prisma.solarDesign.update({
     where: { leadId },
@@ -137,11 +142,17 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
     },
   });
 
+  // The size just moved, so the adders that are TRIGGERED by size have to be
+  // re-decided before they are re-priced: a small-system charge comes off the
+  // moment the roof turns out to hold six kilowatts, and a steep-roof rate that
+  // is still in play is worth more on the bigger array.
+  const auto = await applyAutoAdders(companyId, leadId);
+
   // A per-watt adder is a rate, so anything that changes the system size
   // reprices it — a bigger panel on the same roof is a bigger steep-roof
   // charge, and leaving the cached total alone is the staleness the typed
   // "Adders $" box had, one level deeper.
-  await recomputeAdderTotal(companyId, leadId);
+  await recomputeAdderTotal(companyId, leadId, { force: auto.added.length + auto.removed.length > 0 });
 
   return {
     moduleQty: panelCount(blocks),
@@ -151,5 +162,13 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
     measuredArrays: totals.measuredArrays,
     /** How many arrays took their angles off the building, so the screen can say. */
     filledFromRoof: read.filled,
+    /**
+     * The adders the size rule put on or took off, by name.
+     *
+     * Returned rather than left silent because money appeared on the deal that
+     * the rep did not type. A line nobody can account for is the exact
+     * complaint the itemised adders were built to answer.
+     */
+    autoAdders: auto,
   };
 }

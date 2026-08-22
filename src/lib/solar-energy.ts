@@ -45,6 +45,27 @@ export function annualUsageFromBill(
 }
 
 /**
+ * The consumption a system actually has to cover.
+ *
+ * The bill figure is what the house uses TODAY. It is not what the house will
+ * use once this contract has bolted an EV charger to the garage wall, and
+ * offset worked out against the smaller number is a promise the array cannot
+ * keep — the customer is shown 105% and gets a bill anyway.
+ *
+ * Kept as a named function rather than a `+` at four call sites so that offset,
+ * sizing and the customer's own usage chart cannot drift into disagreeing about
+ * which of the two numbers they mean.
+ */
+export function effectiveUsageKwh(
+  annualUsageKwh: number | null | undefined,
+  usageAdjustmentKwh: number | null | undefined
+): number {
+  const base = annualUsageKwh && annualUsageKwh > 0 ? annualUsageKwh : 0;
+  const extra = usageAdjustmentKwh && usageAdjustmentKwh > 0 ? usageAdjustmentKwh : 0;
+  return base + extra;
+}
+
+/**
  * The monthly bill implied by a usage at a known rate — the third side of the
  * same triangle, for showing a rep what their figures add up to.
  */

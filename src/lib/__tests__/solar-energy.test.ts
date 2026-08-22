@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   annualFromMonthlyKwh,
   annualUsageFromBill,
+  effectiveUsageKwh,
   monthlyBillFromUsage,
   resolveUtilityRateMills,
 } from "@/lib/solar-energy";
@@ -74,5 +75,34 @@ describe("one rate, one place", () => {
     expect(
       resolveUtilityRateMills({ utilityRateMills: 0, avgMonthlyBillCents: 0, annualUsageKwh: 0 })
     ).toBeNull();
+  });
+});
+
+/**
+ * The consumption the array is actually sized against.
+ *
+ * The bill figure is what the house uses today; the EV charger on this contract
+ * is what it will use tomorrow. Offset divides by the sum, and getting that
+ * wrong shows a homeowner a coverage nobody sized for.
+ */
+describe("effectiveUsageKwh", () => {
+  it("adds the adjustment to the bill figure", () => {
+    expect(effectiveUsageKwh(12_000, 3_000)).toBe(15_000);
+  });
+
+  it("is the bill figure alone when nothing was added", () => {
+    expect(effectiveUsageKwh(12_000, 0)).toBe(12_000);
+    expect(effectiveUsageKwh(12_000, null)).toBe(12_000);
+    expect(effectiveUsageKwh(12_000, undefined)).toBe(12_000);
+  });
+
+  it("is zero — not NaN — when usage was never captured", () => {
+    expect(effectiveUsageKwh(null, null)).toBe(0);
+    expect(effectiveUsageKwh(undefined, 3_000)).toBe(3_000);
+  });
+
+  it("ignores a negative on either side rather than subtracting", () => {
+    expect(effectiveUsageKwh(-5, 3_000)).toBe(3_000);
+    expect(effectiveUsageKwh(12_000, -3_000)).toBe(12_000);
   });
 });

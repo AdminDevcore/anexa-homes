@@ -20,6 +20,7 @@ import {
   type SolarFinanceView,
 } from "@/components/portal/solar-panels";
 import type { AdderOption, DealAdderLine } from "@/components/portal/solar-adders-panel";
+import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { SolarCustomerPanel, type SolarCustomerView } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
 import type { ProviderOption } from "@/server/modules/solar/providers";
@@ -181,6 +182,7 @@ export function SolarProposalBuilder({
           systemSizeKwDc={systemSizeKwDc}
           year1ProductionKwh={year1ProductionKwh}
           annualUsageKwh={energy?.annualUsageKwh ?? null}
+          usageAdjustmentKwh={design?.usageAdjustmentKwh ?? 0}
           onOpenEnergy={() => setStep("energy")}
         />
       )}
@@ -357,16 +359,22 @@ function SystemBanner({
   systemSizeKwDc,
   year1ProductionKwh,
   annualUsageKwh,
+  usageAdjustmentKwh,
   onOpenEnergy,
 }: {
   leadId: string;
   systemSizeKwDc: number;
   year1ProductionKwh: number;
   annualUsageKwh: number | null;
+  /** What the deal's adders add to that — an EV charger, a pool pump. */
+  usageAdjustmentKwh: number;
   onOpenEnergy: () => void;
 }) {
-  const offset =
-    annualUsageKwh && annualUsageKwh > 0 ? (year1ProductionKwh / annualUsageKwh) * 100 : null;
+  // Against the usage the system actually has to cover, adders included. This
+  // banner and the customer's document have to agree: a rep reading 72% here
+  // while the proposal says 59% has no way to tell which one is lying.
+  const coverKwh = effectiveUsageKwh(annualUsageKwh, usageAdjustmentKwh);
+  const offset = coverKwh > 0 ? (year1ProductionKwh / coverKwh) * 100 : null;
 
   return (
     <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border bg-card px-4 py-3">

@@ -7,6 +7,8 @@ import { can } from "@/server/rbac/guards";
 import { PageHeader } from "@/components/portal/ui";
 import { prisma } from "@/server/db/client";
 import { SolarEquipmentManager } from "@/components/portal/solar-equipment-manager";
+import { SolarAdderCatalogue } from "@/components/portal/solar-adder-catalogue";
+import { catalogueBasis } from "@/server/modules/solar/adders";
 
 export const dynamic = "force-dynamic";
 
@@ -43,22 +45,52 @@ export default async function SolarEquipmentPage() {
       <SolarEquipmentManager
         canEdit={can(user, "update", "Settings")}
         lenders={lenders}
-        items={items.map((i) => ({
-          id: i.id,
-          kind: i.kind,
-          manufacturer: i.manufacturer,
-          model: i.model,
-          ratingW: i.ratingW,
-          costCents: i.costCents,
-          priceCents: i.priceCents,
-          priceMillsPerWatt: i.priceMillsPerWatt,
-          rank: i.rank,
-          crossoverKind: i.crossoverKind,
-          isActive: i.isActive,
-          isDefault: i.isDefault,
-          avlYear: i.avlYear,
-          lenderIds: i.lenderApprovals.map((a) => a.lenderId),
-        }))}
+        items={items
+          .filter((i) => i.kind !== "adder")
+          .map((i) => ({
+            id: i.id,
+            kind: i.kind,
+            manufacturer: i.manufacturer,
+            model: i.model,
+            ratingW: i.ratingW,
+            costCents: i.costCents,
+            priceCents: i.priceCents,
+            isActive: i.isActive,
+            isDefault: i.isDefault,
+            avlYear: i.avlYear,
+            lenderIds: i.lenderApprovals.map((a) => a.lenderId),
+          }))}
+      />
+      {/* Adders are their own list: a priced rule rather than a product, and
+          ordered by hand because that order is the order a rep is offered
+          them. Sorted by rank here — sellable first — so the arrows on the
+          rows move things where the picker will show them. */}
+      <SolarAdderCatalogue
+        canEdit={can(user, "update", "Settings")}
+        items={items
+          .filter((i) => i.kind === "adder")
+          .sort((a, b) =>
+            a.isActive === b.isActive
+              ? a.rank - b.rank || a.model.localeCompare(b.model)
+              : Number(b.isActive) - Number(a.isActive)
+          )
+          .map((i) => ({
+            id: i.id,
+            label: [i.manufacturer, i.model].filter(Boolean).join(" ") || i.model,
+            description: i.description,
+            basis: catalogueBasis(i),
+            priceCents: i.priceCents,
+            priceMillsPerWatt: i.priceMillsPerWatt,
+            costCents: i.costCents,
+            isVeryCommon: i.isVeryCommon,
+            showOnProposal: i.showOnProposal,
+            autoApplyMinKw: i.autoApplyMinKw,
+            autoApplyMaxKw: i.autoApplyMaxKw,
+            consumptionAdjustable: i.consumptionAdjustable,
+            crossoverKind: i.crossoverKind,
+            rank: i.rank,
+            isActive: i.isActive,
+          }))}
       />
     </div>
   );

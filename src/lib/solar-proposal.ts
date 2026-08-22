@@ -384,7 +384,24 @@ export type SnapshotFinancing = {
    * catalogue must not rewrite what this customer was shown. Undefined on a
    * proposal generated before v3, which keeps rendering its single total.
    */
-  adders?: { label: string; amountCents: number }[];
+  adders?: {
+    label: string;
+    amountCents: number;
+    /**
+     * What the work actually is, in the company's words. v4 and later, and
+     * only on the lines the company chose to explain — see `showcase`.
+     */
+    description?: string;
+    /**
+     * Name this one to the customer under "Additional services", with its
+     * description, rather than only as a figure in the price breakdown.
+     *
+     * FROZEN like everything else here. Un-ticking the flag in the catalogue
+     * tomorrow must not silently remove a service from a document a homeowner
+     * has already read and agreed to.
+     */
+    showcase?: boolean;
+  }[];
   finalPpwCents: number | null;
   /** Lease/PPA only. */
   monthlyPaymentCents: number | null;
@@ -658,7 +675,12 @@ export type ProposalFinanceInput = {
   dealerFeePct: number;
   adderTotalCents: number;
   /** The lines behind that total, already priced against this system. */
-  adders?: { label: string; amountCents: number }[];
+  adders?: {
+    label: string;
+    amountCents: number;
+    description?: string | null;
+    showOnProposal?: boolean;
+  }[];
   rateMillsPerKwh: number | null;
   monthlyPaymentCents: number | null;
   escalatorPct: number | null;
@@ -812,7 +834,15 @@ function priceOption(args: {
             lines.map((x) => x.amountCents)
           );
           return {
-            adders: lines.map((x, i) => ({ label: x.label, amountCents: grossed[i] })),
+            adders: lines.map((x, i) => ({
+              label: x.label,
+              amountCents: grossed[i],
+              // Spread, not assigned undefined: the snapshot is asserted to
+              // hold no undefined anywhere, because an undefined reaching a
+              // renderer prints as "undefined" in front of a homeowner.
+              ...(x.description ? { description: x.description } : {}),
+              ...(x.showOnProposal ? { showcase: true } : {}),
+            })),
           };
         })()
       : {}),

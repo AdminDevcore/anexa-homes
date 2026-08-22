@@ -19,6 +19,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  ADDER_BASES,
+  ADDER_BASIS_ORDER,
+  adderAmountCents,
+  adderCountLabel,
   adderRateLabel,
   adderTotals,
   dollarsToMillsPerWatt,
@@ -37,13 +41,26 @@ import {
 export type AdderOption = {
   id: string;
   label: string;
-  /** Flat price, cents. Zero when the item is priced per watt. */
+  description: string | null;
+  /** How the price is worked out — see `ADDER_BASES`. */
+  basis: AdderBasis;
+  /** The money column: whole amount, per unit, or per foot. Zero on per-watt. */
   priceCents: number;
-  /** Tenths of a cent per installed watt, or null when the item is flat. */
+  /** Tenths of a cent per installed watt, or null when the item is not per-watt. */
   priceMillsPerWatt: number | null;
+  /** Pinned to the "Very common" tab in the picker. */
+  isVeryCommon: boolean;
+  /** This adder changes what the house uses, so the line takes a kWh figure. */
+  consumptionAdjustable: boolean;
 };
 
-export type DealAdderLine = AdderLine & { equipmentId: string | null };
+export type DealAdderLine = AdderLine & {
+  equipmentId: string | null;
+  description: string | null;
+  showOnProposal: boolean;
+  consumptionKwhPerYear: number | null;
+  autoApplied: boolean;
+};
 
 /**
  * The extra work on a deal, itemised.
@@ -79,9 +96,28 @@ export function SolarAddersPanel({
   const [busy, setBusy] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [picking, setPicking] = React.useState(false);
-  const [custom, setCustom] = React.useState({ label: "", amount: "", basis: "custom" as AdderBasis, rate: "" });
+  const [custom, setCustom] = React.useState({
+    label: "",
+    amount: "",
+    basis: "custom" as AdderBasis,
+    rate: "",
+    qty: "1",
+  });
 
   const totals = React.useMemo(() => adderTotals(lines, systemWatts), [lines, systemWatts]);
+
+  /**
+   * The catalogue adders that CHANGE what the house uses.
+   *
+   * Read off the catalogue rather than off the line, because whether an adder
+   * takes a kWh figure is a property of what it is — an EV charger — not of
+   * whether somebody has filled the box in yet. A line with no figure still has
+   * to show the box, or it can never get one.
+   */
+  const consumptionIds = React.useMemo(
+    () => new Set(catalogue.filter((o) => o.consumptionAdjustable).map((o) => o.id)),
+    [catalogue]
+  );
 
   /**
    * A deal priced before adders were itemised: a typed total, and nothing to
@@ -112,10 +148,13 @@ export function SolarAddersPanel({
         basis: custom.basis,
         flatCents: isRate ? null : Math.round(amount * 100),
         millsPerWatt: isRate ? dollarsToMillsPerWatt(rate) : null,
-        qty: 1,
+        // Only a basis priced PER something carries a count; the server pins
+        // the rest to one regardless, so this is the form agreeing with it.
+        qty: ADDER_BASES[custom.basis].counted ? Math.max(1, Number(custom.qty) || 1) : 1,
+        showOnProposal: false,
       })
     );
-    setCustom({ label: "", amount: "", basis: "custom", rate: "" });
+    setCustom({ label: "", amount: "", basis: "custom", rate: "", qty: "1" });
     setAdding(false);
   }
 
@@ -143,31 +182,74 @@ export function SolarAddersPanel({
 
       {lines.length > 0 && (
         <ul className="divide-y divide-border rounded-lg border border-border">
-          {totals.lines.map((l) => (
+          {totals.lines.map((l) => {
+            const countLabel = adderCountLabel(l.basis);
+            return (
             <li key={l.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 truncate font-medium">{l.label}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{l.label}</span>
+                {l.description && (
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {l.description}
+                  </span>
+                )}
+              </span>
               <span className="text-xs text-muted-foreground">{adderRateLabel(l)}</span>
               {l.basis === "perWatt" && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
                   follows the array
                 </span>
               )}
-              {canEdit ? (
-                <Input
-                  type="number"
-                  min={1}
-                  max={99}
-                  aria-label={`Quantity for ${l.label}`}
-                  className="h-7 w-14 text-sm"
-                  value={l.qty}
-                  onChange={(e) => {
-                    const qty = Math.max(1, Math.min(99, Number(e.target.value) || 1));
-                    void run(`qty:${l.id}`, () => updateDealAdderAction({ leadId, id: l.id, qty }));
-                  }}
-                />
-              ) : (
-                <span className="text-xs text-muted-foreground">x{l.qty}</span>
+              {/* Money the rep did not type has to say where it came from. An
+                  unexplained line is the exact complaint itemised adders exist
+                  to answer, and a size rule adding one silently reintroduces it. */}
+              {l.autoApplied && (
+                <span
+                  className="rounded-full border chip-violet px-2 py-0.5 text-[11px] font-medium"
+                  title="Added automatically because of the system size. Remove it and it stays off this deal."
+                >
+                  auto
+                </span>
               )}
+              {l.consumptionKwhPerYear != null && l.consumptionKwhPerYear > 0 && (
+                <span
+                  className="rounded-full border chip-info px-2 py-0.5 text-[11px] font-medium"
+                  title="Added to the household's yearly usage before offset is worked out"
+                >
+                  +{l.consumptionKwhPerYear.toLocaleString()} kWh/yr
+                </span>
+              )}
+              {/* The count box only appears on a basis that HAS a count, and it
+                  is labelled with what is being counted — "Qty" over a trenching
+                  run is how 120 feet gets typed as 120 trenches. */}
+              {countLabel ? (
+                canEdit ? (
+                  <span className="flex items-center gap-1">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10000}
+                      aria-label={`${countLabel} for ${l.label}`}
+                      className="h-7 w-20 text-sm"
+                      defaultValue={l.qty}
+                      onBlur={(e) => {
+                        const qty = Math.max(1, Math.min(10_000, Number(e.target.value) || 1));
+                        if (qty === l.qty) return;
+                        void run(`qty:${l.id}`, () =>
+                          updateDealAdderAction({ leadId, id: l.id, qty })
+                        );
+                      }}
+                    />
+                    <span className="text-[11px] text-muted-foreground">
+                      {countLabel.toLowerCase()}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    {l.qty} {countLabel.toLowerCase()}
+                  </span>
+                )
+              ) : null}
               <span className="w-24 text-right font-medium tabular-nums">{usd(l.amountCents)}</span>
               {canEdit && (
                 <Button
@@ -185,8 +267,37 @@ export function SolarAddersPanel({
                   )}
                 </Button>
               )}
+              {/* The kWh this adder adds to the year, on the line that sells it.
+                  A charger quoted without it leaves the offset on the proposal
+                  describing a house that never bought one. */}
+              {canEdit && consumptionIds.has(l.equipmentId ?? "") && (
+                <div className="flex w-full items-center gap-2 pl-1 text-[11px] text-muted-foreground">
+                  <Label htmlFor={`kwh-${l.id}`} className="text-[11px] font-normal">
+                    Extra usage
+                  </Label>
+                  <Input
+                    id={`kwh-${l.id}`}
+                    type="number"
+                    min={0}
+                    max={100000}
+                    className="h-7 w-24 text-sm"
+                    placeholder="e.g. 3000"
+                    defaultValue={l.consumptionKwhPerYear ?? ""}
+                    onBlur={(e) => {
+                      const raw = e.target.value.trim();
+                      const next = raw === "" ? null : Math.max(0, Math.min(100_000, Number(raw) || 0));
+                      if ((l.consumptionKwhPerYear ?? null) === next) return;
+                      void run(`kwh:${l.id}`, () =>
+                        updateDealAdderAction({ leadId, id: l.id, consumptionKwhPerYear: next })
+                      );
+                    }}
+                  />
+                  <span>kWh a year, added to the home&rsquo;s usage before offset</span>
+                </div>
+              )}
             </li>
-          ))}
+            );
+          })}
           <li className="flex items-center gap-2 bg-muted/40 px-3 py-2 text-sm">
             <span className="flex-1 font-semibold">Total adders</span>
             <span className="text-xs text-muted-foreground">
@@ -236,7 +347,7 @@ export function SolarAddersPanel({
 
           {adding ? (
             <div className="space-y-2 rounded-lg border border-border p-3">
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
                 <div className="space-y-1">
                   <Label className="text-xs" htmlFor="adder-label">
                     What is it
@@ -260,13 +371,20 @@ export function SolarAddersPanel({
                       setCustom((c) => ({ ...c, basis: e.target.value as AdderBasis }))
                     }
                   >
-                    <option value="custom">as an amount</option>
-                    <option value="perWatt">per watt</option>
+                    {ADDER_BASIS_ORDER.map((b) => (
+                      <option key={b} value={b}>
+                        {ADDER_BASES[b].label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs" htmlFor="adder-amount">
-                    {custom.basis === "perWatt" ? "$ per watt" : "Amount $"}
+                    {custom.basis === "perWatt"
+                      ? "$ per watt"
+                      : ADDER_BASES[custom.basis].unit
+                        ? `$ per ${ADDER_BASES[custom.basis].unit}`
+                        : "Amount $"}
                   </Label>
                   {custom.basis === "perWatt" ? (
                     <Input
@@ -287,6 +405,24 @@ export function SolarAddersPanel({
                     />
                   )}
                 </div>
+                {/* Only shown on a basis that HAS a count, labelled with what is
+                    being counted, so a 120-foot trench cannot be entered as 120
+                    trenches. */}
+                {adderCountLabel(custom.basis) && (
+                  <div className="space-y-1">
+                    <Label className="text-xs" htmlFor="adder-qty">
+                      {adderCountLabel(custom.basis)}
+                    </Label>
+                    <Input
+                      id="adder-qty"
+                      type="number"
+                      min={1}
+                      className="w-24"
+                      value={custom.qty}
+                      onChange={(e) => setCustom((c) => ({ ...c, qty: e.target.value }))}
+                    />
+                  </div>
+                )}
               </div>
               <div className="flex gap-2">
                 <Button type="button" size="sm" disabled={busy !== null} onClick={() => void addCustom()}>
@@ -360,11 +496,31 @@ function AdderPicker({
   const [ticked, setTicked] = React.useState<Set<string>>(() => new Set(onDealIds));
   const [q, setQ] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const commonCount = catalogue.filter((o) => o.isVeryCommon).length;
+  /**
+   * Which tab the picker opens on.
+   *
+   * "Very common" when the company has marked any, because six adders sell most
+   * jobs and thirty is a list a rep reads all of to find one of them. Falls
+   * straight to All when nothing is marked, rather than opening on an empty tab
+   * that looks like an empty catalogue.
+   */
+  const [tab, setTab] = React.useState<"common" | "all">(commonCount > 0 ? "common" : "all");
 
   const shown = React.useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return needle ? catalogue.filter((o) => o.label.toLowerCase().includes(needle)) : catalogue;
-  }, [catalogue, q]);
+    const pool =
+      // A search is a search of the whole catalogue. Typing "trench" and being
+      // told there is nothing, because trenching is not on the common tab, is
+      // the worst answer this screen can give.
+      needle || tab === "all" ? catalogue : catalogue.filter((o) => o.isVeryCommon);
+    if (!needle) return pool;
+    return pool.filter(
+      (o) =>
+        o.label.toLowerCase().includes(needle) ||
+        (o.description ?? "").toLowerCase().includes(needle)
+    );
+  }, [catalogue, q, tab]);
 
   const toggle = (id: string) =>
     setTicked((cur) => {
@@ -374,9 +530,26 @@ function AdderPicker({
       return next;
     });
 
-  /** What one item comes to on THIS array — a rate is not an amount. */
+  /**
+   * What one item comes to on THIS array, at a count of one.
+   *
+   * Priced through the same function the deal lines are, so a per-foot adder
+   * cannot come to one figure in the picker and another the moment it lands on
+   * the quote. Feet and units are entered afterwards, on the line, so the
+   * figure here is deliberately the price of one of them.
+   */
   const amountOf = (o: AdderOption) =>
-    o.priceMillsPerWatt ? Math.round((o.priceMillsPerWatt * systemWatts) / 10) : o.priceCents;
+    adderAmountCents(
+      {
+        id: o.id,
+        label: o.label,
+        basis: o.basis,
+        flatCents: o.basis === "perWatt" ? null : o.priceCents,
+        millsPerWatt: o.basis === "perWatt" ? o.priceMillsPerWatt : null,
+        qty: 1,
+      },
+      systemWatts
+    );
 
   const tickedTotal = catalogue
     .filter((o) => ticked.has(o.id))
@@ -414,6 +587,25 @@ function AdderPicker({
             {systemWatts > 0 ? `${(systemWatts / 1000).toFixed(2)} kW` : "no array yet"}.
           </DialogDescription>
         </DialogHeader>
+
+        {commonCount > 0 && (
+          <div className="flex gap-1 rounded-lg bg-muted/60 p-1 text-xs">
+            {(["common", "all"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                aria-pressed={tab === t}
+                className={cn(
+                  "flex-1 rounded-md px-3 py-1.5 font-medium transition-colors",
+                  tab === t ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {t === "common" ? `Very common (${commonCount})` : `All (${catalogue.length})`}
+              </button>
+            ))}
+          </div>
+        )}
 
         {catalogue.length > 8 && (
           <div className="relative">
@@ -465,10 +657,18 @@ function AdderPicker({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{o.label}</span>
+                    {o.description && (
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {o.description}
+                      </span>
+                    )}
                     <span className="block text-[11px] text-muted-foreground">
-                      {o.priceMillsPerWatt
-                        ? `$${millsPerWattToDollars(o.priceMillsPerWatt).toFixed(3).replace(/0$/, "")}/W · follows the array`
-                        : "flat"}
+                      {o.basis === "perWatt"
+                        ? `$${millsPerWattToDollars(o.priceMillsPerWatt ?? 0).toFixed(3).replace(/0$/, "")}/W · follows the array`
+                        : ADDER_BASES[o.basis].label.toLowerCase()}
+                      {ADDER_BASES[o.basis].counted &&
+                        ` · enter ${adderCountLabel(o.basis)?.toLowerCase()} on the line`}
+                      {o.consumptionAdjustable && " · changes usage"}
                       {onDealIds.has(o.id) && " · already on the quote"}
                     </span>
                   </span>
@@ -481,7 +681,9 @@ function AdderPicker({
           })}
           {shown.length === 0 && (
             <li className="px-3 py-6 text-center text-xs text-muted-foreground">
-              Nothing in the catalogue matches &ldquo;{q}&rdquo;.
+              {q
+                ? `Nothing in the catalogue matches “${q}”.`
+                : "Nothing marked as very common yet."}
             </li>
           )}
         </ul>

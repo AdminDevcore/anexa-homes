@@ -9,6 +9,7 @@ import { getSolarSettings } from "./settings";
 import { resolveSizingModule } from "./sizing";
 import { year1Production, offsetPct } from "@/lib/solar-money";
 import { canGenerate } from "@/lib/solar-validation";
+import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
@@ -112,7 +113,7 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
 
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
-    select: { moduleId: true, moduleQty: true, annualUsageKwh: true },
+    select: { moduleId: true, moduleQty: true, annualUsageKwh: true, usageAdjustmentKwh: true },
   });
 
   // The panel is not a rep's decision any more — the approved-vendor list makes
@@ -132,8 +133,13 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   // Usage belongs to the Energy step now, so this reads it rather than taking
   // it from the client. Offset still has to be recomputed here, because it
   // depends on the production that the module count just changed.
-  const annualUsageKwh = existingUsage?.annualUsageKwh ?? null;
-  const computedOffset = annualUsageKwh ? offsetPct(year1ProductionKwh, annualUsageKwh) : 0;
+  // Plus whatever this deal's adders add to the household's year — see
+  // `effectiveUsageKwh`. Every place that divides by usage divides by this one.
+  const usageKwh = effectiveUsageKwh(
+    existingUsage?.annualUsageKwh,
+    existingUsage?.usageAdjustmentKwh
+  );
+  const computedOffset = usageKwh ? offsetPct(year1ProductionKwh, usageKwh) : 0;
 
   const { leadId, moduleQty: _q, ...rest } = d;
   const data = {
@@ -480,6 +486,24 @@ const equipmentSchema = z.object({
   // 50 = $0.05/W. Non-null is what makes an adder per-watt. Capped at $10/W
   // because a rate above that is dollars typed where mills were wanted.
   priceMillsPerWatt: z.number().int().min(0).max(10_000).nullable().optional(),
+  // Adders only: HOW the price is worked out. Six ways, because "$2,700",
+  // "$2,700 each", "$10 a foot" and "$2,700 off" are four different prices
+  // that a single amount column cannot tell apart.
+  adderBasis: z
+    .enum(["flat", "perUnit", "perFoot", "perWatt", "custom", "discount"])
+    .nullable()
+    .optional(),
+  // The sentence a rep and a homeowner both read. What the work actually IS,
+  // not a second copy of its name.
+  description: z.string().trim().max(500).nullable().optional(),
+  isVeryCommon: z.boolean().optional(),
+  showOnProposal: z.boolean().optional(),
+  // The system-size band, kW DC, in which this lands on a deal by itself.
+  // Capped at 1 MW: anything past that is not a residential design, it is a
+  // decimal point in the wrong place disabling the rule.
+  autoApplyMinKw: z.number().min(0).max(1000).nullable().optional(),
+  autoApplyMaxKw: z.number().min(0).max(1000).nullable().optional(),
+  consumptionAdjustable: z.boolean().optional(),
   rank: z.number().int().min(0).max(999).optional(),
   // Ties a "Re-roof" / "MPU" adder to the Phase-3 crossover so selecting it
   // raises the flag on the deal instead of quietly becoming a line item.
@@ -544,6 +568,34 @@ export async function upsertSolarEquipmentAction(
   if (d.kind === "adder" && d.priceMillsPerWatt && d.priceCents) {
     return fail("An adder is either a flat price or a rate per watt, not both.");
   }
+  // Everything below is about adders and would be meaningless on a panel, so it
+  // is refused rather than stored where nothing will ever read it again.
+  if (d.kind !== "adder") {
+    if (d.adderBasis) return fail("Only an adder has a pricing type.");
+    if (d.autoApplyMinKw != null || d.autoApplyMaxKw != null) {
+      return fail("Only an adder can be applied automatically by system size.");
+    }
+    if (d.consumptionAdjustable) return fail("Only an adder can change consumption.");
+  }
+  // A band that ends before it starts fires on nothing, which is a rule that
+  // looks configured and does nothing — the worst of the three outcomes.
+  if (d.autoApplyMinKw != null && d.autoApplyMaxKw != null && d.autoApplyMinKw >= d.autoApplyMaxKw) {
+    return fail("The smallest system size has to be below the largest.");
+  }
+  // A per-watt adder's money lives in `priceMillsPerWatt`; every other basis
+  // reads `priceCents`. Saving one with the wrong column filled is an adder
+  // that prices at zero on every deal it lands on, silently.
+  if (d.kind === "adder" && d.adderBasis) {
+    if (d.adderBasis === "perWatt" && !d.priceMillsPerWatt) {
+      return fail("A per-watt adder needs a rate per watt.");
+    }
+    if (d.adderBasis !== "perWatt" && d.priceMillsPerWatt) {
+      return fail("Only a per-watt adder carries a rate per watt.");
+    }
+    if (d.adderBasis !== "perWatt" && d.adderBasis !== "custom" && !d.priceCents) {
+      return fail("Give the adder a price.");
+    }
+  }
 
   // Identity clash, in the same terms a rep would recognise.
   const clash = await prisma.solarEquipment.findFirst({
@@ -586,6 +638,40 @@ export async function upsertSolarEquipmentAction(
     }
   });
 
+  revalidatePath("/portal/settings/solar-equipment");
+  return ok();
+}
+
+/**
+ * Put the adders in the order the company wants them sold.
+ *
+ * The whole list, as ids, rather than "move this one up": rank is a number
+ * per row and nudging one of them means rewriting its neighbour too, which two
+ * people reordering at once do differently and both think they won. Sending the
+ * order makes the last save the whole truth.
+ *
+ * Ranks are rewritten from zero rather than preserved, so a list that has been
+ * edited for a year does not end up with four items all ranked 0 and an order
+ * that depends on the alphabetical tie-break underneath it.
+ */
+export async function reorderSolarAddersAction(orderedIds: string[]) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = z.array(z.string().min(1)).max(500).safeParse(orderedIds);
+  if (!parsed.success) return fail("That order could not be read.");
+  const ids = [...new Set(parsed.data)];
+
+  // Ours, and adders. An id from another company would silently renumber a row
+  // this user is not allowed to see.
+  const mine = await prisma.solarEquipment.findMany({
+    where: { id: { in: ids }, companyId: user.companyId, kind: "adder" },
+    select: { id: true },
+  });
+  if (mine.length !== ids.length) return fail("One of those adders is not in the catalogue.");
+
+  await prisma.$transaction(
+    ids.map((id, i) => prisma.solarEquipment.update({ where: { id }, data: { rank: i } }))
+  );
   revalidatePath("/portal/settings/solar-equipment");
   return ok();
 }

@@ -20,6 +20,7 @@ import {
   type ValidationIssue,
 } from "@/lib/solar-validation";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
+import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { adderTotals } from "@/lib/solar-adders";
 import {
   SolarAddersPanel,
@@ -241,6 +242,8 @@ function PanelLayoutPanel({
 export type SolarDesignView = {
   utilityProvider: string | null;
   annualUsageKwh: number | null;
+  /** What this deal's adders add to that — an EV charger, a pool pump. */
+  usageAdjustmentKwh: number;
   avgMonthlyBillCents: number | null;
   mountType: MountType;
   moduleQty: number;
@@ -460,10 +463,11 @@ export function SolarDesignPanel({
     () => systemTotals(initialBlocks, { lat, moduleRatingW, assumptions }),
     [initialBlocks, lat, moduleRatingW, assumptions]
   );
-  const liveOffsetPct =
-    design?.annualUsageKwh && design.annualUsageKwh > 0
-      ? (live.year1ProductionKwh / design.annualUsageKwh) * 100
-      : null;
+  // Against the usage the system actually has to cover — the bill figure PLUS
+  // whatever the adders on this deal add to it. The same rule the server
+  // applies, so the live figure here and the stored one cannot disagree.
+  const coverKwh = effectiveUsageKwh(design?.annualUsageKwh, design?.usageAdjustmentKwh);
+  const liveOffsetPct = coverKwh > 0 ? (live.year1ProductionKwh / coverKwh) * 100 : null;
   const staleCount = (design?.moduleQty ?? 0) > 0 && drawnPanels === 0;
 
   async function save() {
@@ -571,7 +575,11 @@ export function SolarDesignPanel({
               {liveOffsetPct == null ? "—" : `${liveOffsetPct.toFixed(0)}%`}
             </div>
             <div className="text-[11px] text-muted-foreground">
-              {liveOffsetPct == null ? "no usage yet" : "offset"}
+              {liveOffsetPct == null
+                ? "no usage yet"
+                : (design?.usageAdjustmentKwh ?? 0) > 0
+                  ? `offset · incl. +${design!.usageAdjustmentKwh.toLocaleString()} kWh`
+                  : "offset"}
             </div>
           </div>
         </div>

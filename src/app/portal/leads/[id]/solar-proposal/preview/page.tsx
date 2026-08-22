@@ -8,7 +8,7 @@ import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { SolarProposalView } from "@/components/proposal/solar-proposal-view";
 import type { RepContext } from "@/components/proposal/rep-bar";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
-import { adderAmountCents } from "@/lib/solar-adders";
+import { adderAmountCents, catalogueBasis } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
@@ -235,7 +235,7 @@ async function repContext(
       orderBy: [{ rank: "asc" }, { model: "asc" }],
       select: {
         id: true, manufacturer: true, model: true,
-        priceCents: true, priceMillsPerWatt: true,
+        adderBasis: true, priceCents: true, priceMillsPerWatt: true,
       },
     }),
     prisma.solarDealAdder.findMany({
@@ -264,7 +264,10 @@ async function repContext(
           {
             id: a.id,
             label: [a.manufacturer, a.model].filter(Boolean).join(" "),
-            basis: a.priceMillsPerWatt ? "perWatt" : "flat",
+            // The stored basis, not a guess from which column is filled: a
+            // per-foot rate priced as a flat amount reads as the whole job,
+            // and a discount reads as a charge.
+            basis: catalogueBasis(a),
             flatCents: a.priceCents,
             millsPerWatt: a.priceMillsPerWatt,
             qty: 1,

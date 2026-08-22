@@ -288,6 +288,15 @@ export function SolarProposalView({
   const sv = option.savings;
 
   const isPurchase = f.product === "cash" || f.product === "loan";
+  /**
+   * The extra work the company chose to EXPLAIN, not just charge for.
+   *
+   * Read off the selected option, because the menu re-prices the adders for
+   * each way of paying and the section has to move with it. Documents generated
+   * before the flag existed carry no `showcase`, so they render exactly as they
+   * always did — no section at all.
+   */
+  const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
 
   const hasEquipment = !!(s.system.module || s.system.inverter || s.system.battery);
@@ -796,6 +805,7 @@ export function SolarProposalView({
             ) : (
               <DarkRow k="Additional work" v={usd(f.adderTotalCents)} />
             ))}
+
           {isPurchase && f.contractPriceCents != null && (
             <DarkRow k="Total price" v={usd(f.contractPriceCents)} strong />
           )}
@@ -850,6 +860,50 @@ export function SolarProposalView({
             />
           )}
         </dl>
+
+        {/*
+          ADDITIONAL SERVICES — the extra work, in sentences rather than as a
+          figure in a column.
+
+          The breakdown above already names every line, which answers "what am
+          I paying for". It does not answer "what IS that", and a homeowner
+          reading "Full Service Upgrade — $3,500" at their kitchen table with
+          nobody to ask has no way to find out. Only the lines the company chose
+          to explain appear here, so an internal cost line does not become a
+          paragraph the customer has to read to learn nothing.
+
+          Frozen onto the document like every other figure: un-ticking the flag
+          in the catalogue tomorrow does not remove a service from a proposal
+          somebody has already agreed to.
+        */}
+        {isPurchase && showcased.length > 0 && (
+          <div className="mt-8 break-inside-avoid">
+            <h3 className="text-sm font-semibold tracking-wide text-neutral-300 uppercase">
+              Additional services
+            </h3>
+            <ul className="mt-3 divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+              {showcased.map((a, i) => (
+                <li
+                  key={`${a.label}-${i}`}
+                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-4"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium text-white">{a.label}</span>
+                    {a.description && (
+                      <span className="mt-1 block text-sm leading-relaxed text-neutral-400">
+                        {a.description}
+                      </span>
+                    )}
+                  </span>
+                  <span className="tabular-nums font-medium text-white">{usd(a.amountCents)}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-sm leading-relaxed text-neutral-400">
+              Included in the total price above — these are not extras billed later.
+            </p>
+          </div>
+        )}
 
         {f.loanPaydownCents != null && (
           <p className="mt-6 break-inside-avoid rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-relaxed text-amber-200">

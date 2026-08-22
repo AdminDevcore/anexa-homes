@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { annualFromMonthlyKwh, annualUsageFromBill } from "@/lib/solar-energy";
+import { annualFromMonthlyKwh, annualUsageFromBill, effectiveUsageKwh } from "@/lib/solar-energy";
 import { offsetPct } from "@/lib/solar-money";
 import { addressChanged } from "@/server/modules/geo/resolve";
 import { leadContactFields } from "@/server/modules/leads/contact-fields";
@@ -67,11 +67,15 @@ export async function saveSolarEnergyAction(input: z.infer<typeof energySchema>)
   // sets. Without this, editing usage leaves a stale offset on the deal.
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
-    select: { year1ProductionKwh: true },
+    select: { year1ProductionKwh: true, usageAdjustmentKwh: true },
   });
+  // Against the bill figure PLUS what this deal's adders will add to it. The
+  // EV charger on the quote is part of what the array has to cover, and an
+  // offset that ignores it is a coverage promise nobody sized for.
+  const usageKwh = effectiveUsageKwh(annualUsageKwh, existing?.usageAdjustmentKwh);
   const computedOffset =
-    annualUsageKwh && existing?.year1ProductionKwh
-      ? offsetPct(existing.year1ProductionKwh, annualUsageKwh)
+    usageKwh && existing?.year1ProductionKwh
+      ? offsetPct(existing.year1ProductionKwh, usageKwh)
       : 0;
 
   const data = {

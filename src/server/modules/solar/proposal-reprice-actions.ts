@@ -6,12 +6,12 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getSolarSettings } from "./settings";
-import { resolveAdderTotal } from "./adders";
+import { lineFromCatalogue, resolveAdderTotal } from "./adders";
 import { recomputeDesignFigures } from "./recompute";
 import { generateProposalVersion } from "./proposal-generate";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
-import { annualUsageFromBill } from "@/lib/solar-energy";
+import { annualUsageFromBill, effectiveUsageKwh } from "@/lib/solar-energy";
 import { offsetPct } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ValidationIssue } from "@/lib/solar-validation";
@@ -127,7 +127,7 @@ export async function repriceProposalAction(
     const design = await prisma.solarDesign.findUnique({
       where: { leadId },
       select: {
-        avgMonthlyBillCents: true, annualUsageKwh: true,
+        avgMonthlyBillCents: true, annualUsageKwh: true, usageAdjustmentKwh: true,
         utilityRateMills: true, usageBasis: true, year1ProductionKwh: true,
       },
     });
@@ -154,10 +154,14 @@ export async function repriceProposalAction(
       data: {
         avgMonthlyBillCents: bill,
         annualUsageKwh: usage,
-        offsetPct:
-          usage && design.year1ProductionKwh
-            ? offsetPct(design.year1ProductionKwh, usage)
-            : 0,
+        // Plus whatever this deal's adders add to the household's year — an EV
+        // charger on the quote is load the array has to cover.
+        offsetPct: (() => {
+          const total = effectiveUsageKwh(usage, design.usageAdjustmentKwh);
+          return total && design.year1ProductionKwh
+            ? offsetPct(design.year1ProductionKwh, total)
+            : 0;
+        })(),
       },
     });
   }
@@ -170,8 +174,9 @@ export async function repriceProposalAction(
     const items = await prisma.solarEquipment.findMany({
       where: { id: { in: wanted }, companyId: user.companyId, kind: "adder" },
       select: {
-        id: true, manufacturer: true, model: true,
-        priceCents: true, priceMillsPerWatt: true, rank: true,
+        id: true, manufacturer: true, model: true, description: true,
+        adderBasis: true, priceCents: true, priceMillsPerWatt: true,
+        showOnProposal: true, rank: true,
       },
       orderBy: [{ rank: "asc" }, { model: "asc" }],
     });
@@ -203,11 +208,10 @@ export async function repriceProposalAction(
           data: {
             companyId: user.companyId,
             leadId,
-            equipmentId: i.id,
-            label: [i.manufacturer, i.model].filter(Boolean).join(" "),
-            basis: i.priceMillsPerWatt ? "perWatt" : "flat",
-            flatCents: i.priceCents,
-            millsPerWatt: i.priceMillsPerWatt,
+            // The one place that turns a catalogue row into a deal line, so a
+            // re-price and a rep's own picker cannot disagree about what the
+            // basis, the description or the money column should be.
+            ...lineFromCatalogue(i),
             qty: 1,
             sortOrder: ++sortOrder,
           },

@@ -3013,25 +3013,25 @@ model SolarEquipmentLender {
 /// Equipment and adders a rep can pick from. Prices live here so a proposal is
 /// built from the catalog rather than typed in free-hand.
 model SolarEquipment {
-  id                String             @id @default(uuid())
-  companyId         String
-  company           Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id                    String             @id @default(uuid())
+  companyId             String
+  company               Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   /// Isolated per vertical: this row belongs to exactly one workspace.
-  vertical          Vertical           @default(solar)
-  kind              SolarEquipmentKind
-  manufacturer      String?
-  model             String
+  vertical              Vertical           @default(solar)
+  kind                  SolarEquipmentKind
+  manufacturer          String?
+  model                 String
   /// Modules: watts per panel. Inverters: rated output W. Batteries: usable Wh.
-  ratingW           Int?
+  ratingW               Int?
   /// Modules only: physical size in mm, so a panel can be drawn on a roof at
   /// true scale. Null falls back to a standard 60-cell residential module —
   /// see MODULE_FALLBACK_MM in src/lib/solar-layout.ts.
-  widthMm           Int?
-  heightMm          Int?
+  widthMm               Int?
+  heightMm              Int?
   /// Unit cost to us, cents.
-  costCents         Int                @default(0)
+  costCents             Int                @default(0)
   /// What the customer pays, cents. For adders this is the adder price.
-  priceCents        Int                @default(0)
+  priceCents            Int                @default(0)
   /// Adders only, and only the ones quoted PER WATT: tenths of a cent per
   /// installed watt. 50 = $0.05/W. Non-null is what makes an adder per-watt —
   /// steep roof and small-system charges are quoted this way and have to follow
@@ -3040,13 +3040,49 @@ model SolarEquipment {
   /// Mills rather than cents because $0.05/W is five cents, and a "5" sitting
   /// in a cents column reads as $5.00/W: a hundredfold error on a line nobody
   /// re-reads.
-  priceMillsPerWatt Int?
+  priceMillsPerWatt     Int?
+  /// Adders only: HOW the price is worked out. Null on equipment, and on
+  /// adder rows that predate the column — those are read as `perWatt` when a
+  /// per-watt rate is set and `flat` otherwise, which is exactly the rule the
+  /// code used before this existed.
+  ///
+  /// Explicit rather than inferred because "$2,700" and "$2,700 each" and
+  /// "$2,700 off" are three different prices that a single amount column
+  /// cannot tell apart.
+  adderBasis            SolarAdderBasis?
+  /// Adders only: the sentence a rep and a homeowner both read. What the work
+  /// actually is, in the company's own words — "Tear off and replace the
+  /// section of roof under the array" rather than "Re-roof Adder".
+  description           String?
+  /// Adders only: pin it to the top of the picker as one the company sells on
+  /// most jobs, so the six that matter are not thirty scrolls from the rest.
+  isVeryCommon          Boolean            @default(false)
+  /// Adders only: name it to the customer under "Additional services" on their
+  /// proposal, with its description, rather than only as a line in the price
+  /// breakdown. Off by default — plenty of adders are internal cost lines a
+  /// homeowner has no reason to read a paragraph about.
+  showOnProposal        Boolean            @default(false)
+  /// Adders only: the system-size band, kW DC, in which this lands on a deal by
+  /// itself. Both null means never automatic. A small-system charge that
+  /// applies under 5 kW is `autoApplyMinKw = null, autoApplyMaxKw = 5`.
+  ///
+  /// The band is INCLUSIVE of the minimum and EXCLUSIVE of the maximum, so
+  /// bands written back to back — under 5, then 5 to 8 — cannot both fire on a
+  /// system that is exactly 5 kW.
+  autoApplyMinKw        Float?
+  autoApplyMaxKw        Float?
+  /// Adders only: this adder CHANGES what the house will use — an EV charger,
+  /// a pool pump, a heat pump. Ticking it lets a rep put kWh/yr on the deal
+  /// line, and that figure is added to the customer's consumption before offset
+  /// is worked out. Without it a rep sells somebody a charger and then quotes
+  /// them an offset computed as if they had never bought one.
+  consumptionAdjustable Boolean            @default(false)
   /// Adders only: display order, so the highest-margin ones lead.
-  rank              Int                @default(0)
+  rank                  Int                @default(0)
   /// Adders only: ties an adder to the Phase-3 crossover so picking "Re-roof"
   /// or "MPU" on a design raises the flag on the deal rather than quietly
   /// becoming a line item. One of: "reroof" | "mpu" | null.
-  crossoverKind     String?
+  crossoverKind         String?
   /// The manufacturer's own datasheet, as a link.
   ///
   /// A LINK rather than a stored PDF: this is the manufacturer's document, it
@@ -3054,22 +3090,22 @@ model SolarEquipment {
   /// whichever one is current when they click — not whichever one we happened
   /// to download. Rendered on the customer's proposal beside the component, and
   /// omitted when null rather than shown as a dead "View details".
-  specSheetUrl      String?
-  specs             Json               @default("{}")
-  isActive          Boolean            @default(true)
+  specSheetUrl          String?
+  specs                 Json               @default("{}")
+  isActive              Boolean            @default(true)
   /// The item a new design starts on for this kind. At most one ACTIVE default
   /// per (company, kind) — enforced by a partial unique index in the migration,
   /// not just in the action, because two defaults means the builder silently
   /// picks whichever the sort happens to return first.
-  isDefault         Boolean            @default(false)
+  isDefault             Boolean            @default(false)
   /// Approved-vendor-list year, e.g. 2026. The AVL turns over annually and the
   /// catalogue has to say which year an item belongs to, so a 2025 product is
   /// still recognisable for what it was after the 2026 list lands. Null means
   /// the item is not year-scoped. Purely a label: what actually stops a rep
   /// picking last year's product is RETIRING it (isActive = false).
-  avlYear           Int?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  avlYear               Int?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   designsAsModule   SolarDesign[]          @relation("DesignModule")
   designsAsInverter SolarDesign[]          @relation("DesignInverter")
@@ -3122,6 +3158,22 @@ model SolarDesign {
   /// does not track usage is the thing validation rejects.
   monthlyUsageKwh     Json    @default("[]")
   annualUsageKwh      Int?
+  /// What the ADDERS on this deal add to that, kWh/yr. DERIVED — summed from
+  /// the deal's adder lines and rewritten whenever they change, never typed.
+  ///
+  /// Kept apart from `annualUsageKwh` rather than folded into it because the
+  /// two answer different questions: one is what the utility bill says the
+  /// house uses today, the other is what the EV charger this contract is
+  /// selling them will add. Offset is worked out against the sum; the Energy
+  /// step still shows, and still edits, the bill figure alone.
+  usageAdjustmentKwh  Int     @default(0)
+  /// Catalogue adders the rep has taken OFF this deal by hand, as an array of
+  /// equipment ids. The auto-apply rule reads it and leaves them alone.
+  ///
+  /// Without it, removing an adder the system size puts on the deal is a dead
+  /// button: the next recompute simply puts it back, and the rep's only clue
+  /// is that their click did nothing.
+  autoAdderOptOut     Json    @default("[]")
   avgMonthlyBillCents Int?
 
   // ── Site ────────────────────────────────────────────────────────────────
@@ -3411,13 +3463,26 @@ model SolarProposalEvent {
 }
 
 /// How one adder line works out its money.
+///
+/// SIX WAYS, because the extra work on a solar job really is priced six
+/// different ways and collapsing them loses the unit. Trenching is quoted per
+/// foot, a steep roof per watt, a main panel upgrade as one number, and a
+/// promotional credit comes OFF. A line that cannot say which of those it is
+/// is a line whose price nobody can check.
 enum SolarAdderBasis {
-  /// A catalogue price. A main panel upgrade is $2,700 whatever the size.
+  /// One amount, whatever the size. A main panel upgrade is $2,700. ("Fixed")
   flat
+  /// Amount times a count the rep enters — attic runs, extra optimisers.
+  perUnit
+  /// Rate times a length in feet. Trenching, conduit. Rate held in `flatCents`.
+  perFoot
   /// Scales with the array — steep roof, small system. Rate in mills per watt.
   perWatt
   /// A one-off the rep prices on the day. Still a line, still labelled.
   custom
+  /// Comes OFF the price. Stored POSITIVE and negated when it is priced, so
+  /// the figure somebody typed is the figure the column holds.
+  discount
 }
 
 /// One piece of extra work on a solar deal, and what it costs.
@@ -3448,15 +3513,32 @@ model SolarDealAdder {
 
   /// COPIED at pick time, never read back through the relation. Renaming a
   /// catalogue item would otherwise retitle a line on a signed proposal.
-  label        String
-  basis        SolarAdderBasis @default(flat)
-  /// `flat` and `custom`: the whole amount, cents. Null on `perWatt`.
-  flatCents    Int?
+  label                 String
+  /// COPIED like the label, and for the same reason: a homeowner reading
+  /// "Trenching — 120 ft" has to keep reading it after somebody rewrites the
+  /// catalogue blurb.
+  description           String?
+  basis                 SolarAdderBasis @default(flat)
+  /// `flat`, `custom` and `discount`: the whole amount, cents. `perUnit`: the
+  /// amount for ONE. `perFoot`: the amount for one FOOT. Null on `perWatt`.
+  flatCents             Int?
   /// `perWatt`: tenths of a cent per installed watt. 50 = $0.05/W.
-  millsPerWatt Int?
-  qty          Int             @default(1)
+  millsPerWatt          Int?
+  /// The multiplier: units on `perUnit`, feet on `perFoot`, otherwise 1.
+  qty                   Int             @default(1)
+  /// Named to the customer under "Additional services", with its description.
+  showOnProposal        Boolean         @default(false)
+  /// What this adder does to the household's annual consumption, kWh. An EV
+  /// charger is roughly +3,000. Added to the design's usage before offset is
+  /// worked out, so a rep who sells a charger does not then quote an offset
+  /// computed as if the charger were not there. Null on everything else.
+  consumptionKwhPerYear Int?
+  /// The system-size rule put this here, not a rep. Only these are taken back
+  /// off when the array grows out of the band — a line somebody chose by hand
+  /// is never removed by a recompute.
+  autoApplied           Boolean         @default(false)
   /// Display order, so a breakdown reads the same way twice running.
-  sortOrder    Int             @default(0)
+  sortOrder             Int             @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

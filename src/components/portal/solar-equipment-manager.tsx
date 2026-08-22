@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Home, Zap, Star, Archive, RotateCcw, Landmark, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, Star, Archive, RotateCcw, Landmark, Check } from "lucide-react";
 import type { SolarEquipmentKind } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,10 +25,6 @@ type Item = {
   ratingW: number | null;
   costCents: number;
   priceCents: number;
-  /** Adders only: tenths of a cent per installed watt. 50 = $0.05/W. */
-  priceMillsPerWatt: number | null;
-  rank: number;
-  crossoverKind: string | null;
   isActive: boolean;
   isDefault: boolean;
   avlYear: number | null;
@@ -37,11 +33,17 @@ type Item = {
 
 export type Lender = { id: string; name: string; isActive: boolean; rank: number; notes: string | null };
 
+/**
+ * The hardware. ADDERS ARE NOT HERE any more — they moved to
+ * `SolarAdderCatalogue`, because an adder stopped being a price and became a
+ * priced rule (how it is worked out, the words a homeowner reads, the system
+ * size that applies it, what it does to consumption), and none of that fits a
+ * grid built for a manufacturer, a model and a wattage.
+ */
 const KINDS: { value: SolarEquipmentKind; label: string; ratingLabel: string }[] = [
   { value: "module", label: "Modules", ratingLabel: "W per panel" },
   { value: "inverter", label: "Inverters", ratingLabel: "Rated W" },
   { value: "battery", label: "Batteries", ratingLabel: "Usable Wh" },
-  { value: "adder", label: "Adders", ratingLabel: "—" },
 ];
 
 const money = (c: number) =>
@@ -65,13 +67,6 @@ export function SolarEquipmentManager({ items, lenders, canEdit }: { items: Item
             <h3 className="font-semibold">{k.label}</h3>
             {canEdit && <AddForm kind={k.value} ratingLabel={k.ratingLabel} />}
           </div>
-          {k.value === "adder" && (
-            <p className="text-xs text-muted-foreground">
-              Tagging an adder as <strong>Re-roof</strong> or <strong>MPU</strong> ties it to the
-              crossover: picking it on a design raises the flag on the deal and offers the linked
-              Roofing job, instead of quietly becoming a line item nobody follows up.
-            </p>
-          )}
           {(() => {
             const mine = items.filter((i) => i.kind === k.value);
             const live = mine.filter((i) => i.isActive);
@@ -188,36 +183,16 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
           {item.ratingW}W
         </span>
       ) : null}
-      {item.crossoverKind === "reroof" && (
-        <span className="inline-flex items-center gap-1 rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">
-          <Home className="size-3" /> crossover
-        </span>
-      )}
-      {item.crossoverKind === "mpu" && (
-        <span className="inline-flex items-center gap-1 rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">
-          <Zap className="size-3" /> crossover
-        </span>
-      )}
-      {item.kind === "adder" && (
-        <span className="text-[11px] text-muted-foreground">rank {item.rank}</span>
-      )}
       {item.isDefault && (
         <span className="inline-flex items-center gap-1 rounded-full border chip-good px-2 py-0.5 text-[11px] font-medium">
           <Star className="size-3" /> default
         </span>
       )}
       <span className="tabular-nums text-muted-foreground">cost {money(item.costCents)}</span>
-      {/* A per-watt adder shows its RATE, never a dollar figure — the amount
-          depends on the system it lands on, and printing one here would be
-          quoting an array this catalogue row has never seen. */}
-      <span className="tabular-nums font-medium">
-        {item.priceMillsPerWatt
-          ? `$${(item.priceMillsPerWatt / 1000).toFixed(3).replace(/0$/, "")}/W`
-          : money(item.priceCents)}
-      </span>
+      <span className="tabular-nums font-medium">{money(item.priceCents)}</span>
       {/* One default per kind — promoting this one demotes the incumbent, so
           the builder always has exactly one obvious starting choice. */}
-      {canEdit && item.kind !== "adder" && item.isActive && (
+      {canEdit && item.isActive && (
         <Button
           variant="ghost"
           size="sm"
@@ -324,10 +299,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
     heightMm: "",
     cost: "",
     price: "",
-    rank: "0",
-    perWatt: "",
     avlYear: "",
-    crossoverKind: "",
     specSheetUrl: "",
   });
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -344,20 +316,13 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
       heightMm: f.heightMm ? Number(f.heightMm) : null,
       costCents: f.cost ? Math.round(Number(f.cost) * 100) : 0,
       priceCents: f.price ? Math.round(Number(f.price) * 100) : 0,
-      // Dollars per watt on screen, mills per watt on the wire. $0.05 → 50.
-      priceMillsPerWatt:
-        kind === "adder" && f.perWatt.trim() !== ""
-          ? Math.round(Number(f.perWatt) * 1000)
-          : null,
-      rank: Number(f.rank) || 0,
       avlYear: f.avlYear.trim() === "" ? null : Number(f.avlYear),
-      crossoverKind: (f.crossoverKind || null) as "reroof" | "mpu" | null,
       specSheetUrl: f.specSheetUrl.trim() || null,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
     toast.success("Added");
-    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", rank: "0", perWatt: "", avlYear: "", crossoverKind: "", specSheetUrl: "" });
+    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", avlYear: "", specSheetUrl: "" });
     setOpen(false);
     router.refresh();
   }
@@ -391,12 +356,10 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
           <Label className="text-xs" htmlFor={fid("model")}>Model *</Label>
           <Input id={fid("model")} value={f.model} onChange={(e) => set("model", e.target.value)} />
         </div>
-        {kind !== "adder" && (
-          <div className="space-y-1">
-            <Label className="text-xs" htmlFor={fid("rating")}>{ratingLabel}</Label>
-            <Input id={fid("rating")} type="number" value={f.ratingW} onChange={(e) => set("ratingW", e.target.value)} />
-          </div>
-        )}
+        <div className="space-y-1">
+          <Label className="text-xs" htmlFor={fid("rating")}>{ratingLabel}</Label>
+          <Input id={fid("rating")} type="number" value={f.ratingW} onChange={(e) => set("ratingW", e.target.value)} />
+        </div>
         {/* The laminate's real size. The roof designer lays panels out at true
             scale against satellite imagery, so this is what decides how many
             fit between a ridge and a setback — leave it blank and every roof is
@@ -430,8 +393,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
             component on their proposal. A LINK to the manufacturer, not a file
             we store: they revise these without telling anybody, and the version
             a homeowner should read is whichever is current when they click. */}
-        {kind !== "adder" && (
-          <div className="space-y-1 sm:col-span-2">
+        <div className="space-y-1 sm:col-span-2">
             <Label className="text-xs" htmlFor={fid("spec")}>Spec sheet URL</Label>
             <Input
               id={fid("spec")}
@@ -445,8 +407,7 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
               Optional. Rendered as &ldquo;View details&rdquo; on the customer&rsquo;s proposal;
               left blank, no link appears.
             </p>
-          </div>
-        )}
+        </div>
         {/* Which approved-vendor list this belongs to. Optional: plenty of
             items are not year-scoped, and a blank is honest about that. */}
         <div className="space-y-1">
@@ -468,42 +429,6 @@ function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel:
           <Label className="text-xs" htmlFor={fid("price")}>Price $</Label>
           <Input id={fid("price")} type="number" value={f.price} onChange={(e) => set("price", e.target.value)} />
         </div>
-        {kind === "adder" && (
-          <>
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor={fid("perwatt")}>Or $ per watt</Label>
-              <Input
-                id={fid("perwatt")}
-                type="number"
-                step="0.001"
-                placeholder="e.g. 0.05"
-                value={f.perWatt}
-                onChange={(e) => set("perWatt", e.target.value)}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                For a charge that scales with the array — steep roof, small system. Fill this
-                <em> instead of</em> Price, not as well as.
-              </p>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor={fid("rank")}>Rank</Label>
-              <Input id={fid("rank")} type="number" value={f.rank} onChange={(e) => set("rank", e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor={fid("crossover")}>Crossover</Label>
-              <select
-                id={fid("crossover")}
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                value={f.crossoverKind}
-                onChange={(e) => set("crossoverKind", e.target.value)}
-              >
-                <option value="">— none —</option>
-                <option value="reroof">Re-roof</option>
-                <option value="mpu">MPU / derate</option>
-              </select>
-            </div>
-          </>
-        )}
       </div>
       <div className="flex gap-2">
         <Button size="sm" onClick={save} disabled={busy}>

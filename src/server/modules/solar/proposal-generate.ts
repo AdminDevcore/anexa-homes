@@ -301,6 +301,8 @@ export async function generateProposalVersion(
     adders: adderLines.map((l) => ({
       label: l.label,
       amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
+      description: l.description,
+      showOnProposal: l.showOnProposal,
     })),
     adderTotalCents: finance.adderTotalCents,
     assumptions,
@@ -418,6 +420,8 @@ export async function generateProposalVersion(
       adders: adderLines.map((l) => ({
         label: l.label,
         amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
+        description: l.description,
+        showOnProposal: l.showOnProposal,
       })),
       rateMillsPerKwh: finance.rateMillsPerKwh,
       monthlyPaymentCents: finance.monthlyPaymentCents,

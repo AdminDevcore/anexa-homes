@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { recomputeAdderTotal } from "./adders";
+import { ADDER_BASES } from "@/lib/solar-adders";
+import { lineFromCatalogue, parseOptOut, recomputeAdderTotal } from "./adders";
 
 /**
  * Putting extra work on a solar deal, one line at a time.
@@ -22,17 +23,38 @@ const fail = (error: string) => ({ ok: false as const, error });
 /** A residential adder over a million dollars is a typo, not a re-roof. */
 const CENTS_MAX = 100_000_000;
 
+/**
+ * The count cap, per basis.
+ *
+ * Ninety-nine is the right ceiling for a thing somebody buys several of and a
+ * nonsense one for a trench: a 400-foot run to a detached shop is an ordinary
+ * job, and rejecting it would send the rep to price it as a one-off with the
+ * unit rate lost. Feet get their own, larger, ceiling.
+ */
+const QTY_MAX: Record<string, number> = { perFoot: 10_000, perUnit: 999 };
+const qtyMaxFor = (basis: string) => QTY_MAX[basis] ?? 99;
+
+/** kWh a single adder may add to a year. A house uses ~11,000; a fleet is not an adder. */
+const CONSUMPTION_MAX = 100_000;
+
+const BASIS_ENUM = z.enum(
+  Object.keys(ADDER_BASES) as [keyof typeof ADDER_BASES, ...(keyof typeof ADDER_BASES)[]]
+);
+
 const addSchema = z.object({
   leadId: z.string().min(1),
   /** Null for a one-off priced on the deal rather than picked off the sheet. */
   equipmentId: z.string().min(1).nullish(),
   label: z.string().trim().min(1).max(120),
-  basis: z.enum(["flat", "perWatt", "custom"]),
+  description: z.string().trim().max(500).nullish(),
+  basis: BASIS_ENUM,
   flatCents: z.number().int().min(0).max(CENTS_MAX).nullish(),
   // 10,000 mills is $10/W. A rate above that is a units mistake — almost
   // certainly dollars typed where mills were wanted.
   millsPerWatt: z.number().int().min(0).max(10_000).nullish(),
-  qty: z.number().int().min(1).max(99).default(1),
+  qty: z.number().int().min(1).max(10_000).default(1),
+  showOnProposal: z.boolean().default(false),
+  consumptionKwhPerYear: z.number().int().min(0).max(CONSUMPTION_MAX).nullish(),
 });
 
 type SolarUser = Awaited<ReturnType<typeof requireUser>>;
@@ -71,7 +93,7 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
   if (!parsed.success) return fail("That adder could not be read.");
   const g = await guard(parsed.data.leadId);
   if (!g.ok) return fail(g.error);
-  const { leadId, equipmentId, label, basis, qty } = parsed.data;
+  const { leadId, equipmentId, label, basis } = parsed.data;
 
   // A basis decides which column means anything, so the other one is stored as
   // null rather than left holding a stale figure from the form it came off.
@@ -79,6 +101,12 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
   const millsPerWatt = basis === "perWatt" ? (parsed.data.millsPerWatt ?? 0) : null;
   if (basis === "perWatt" && !millsPerWatt) return fail("Give the rate per watt.");
   if (basis !== "perWatt" && !flatCents) return fail("Give the amount.");
+
+  // Only a basis that is priced PER something carries a count. Storing 120 on a
+  // fixed line would multiply a $2,700 panel upgrade by a hundred and twenty.
+  const qty = ADDER_BASES[basis].counted
+    ? Math.min(Math.max(1, parsed.data.qty), qtyMaxFor(basis))
+    : 1;
 
   // A catalogue item has to be one of OUR adders. Passing another company's id,
   // or a module id, would put a line on the quote that the catalogue disowns.
@@ -102,10 +130,13 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
       leadId,
       equipmentId: equipmentId ?? null,
       label,
+      description: parsed.data.description?.trim() || null,
       basis,
       flatCents,
       millsPerWatt,
       qty,
+      showOnProposal: parsed.data.showOnProposal,
+      consumptionKwhPerYear: parsed.data.consumptionKwhPerYear ?? null,
       sortOrder: (last?.sortOrder ?? 0) + 1,
     },
   });
@@ -118,10 +149,16 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
 const updateSchema = z.object({
   leadId: z.string().min(1),
   id: z.string().min(1),
-  qty: z.number().int().min(1).max(99).optional(),
+  qty: z.number().int().min(1).max(10_000).optional(),
   flatCents: z.number().int().min(0).max(CENTS_MAX).nullish(),
   millsPerWatt: z.number().int().min(0).max(10_000).nullish(),
   label: z.string().trim().min(1).max(120).optional(),
+  /**
+   * What this adder does to the household's year, kWh. Only meaningful on a
+   * line whose catalogue item was marked as changing consumption; sent as null
+   * to clear it.
+   */
+  consumptionKwhPerYear: z.number().int().min(0).max(CONSUMPTION_MAX).nullish(),
 });
 
 export async function updateDealAdderAction(input: z.infer<typeof updateSchema>) {
@@ -137,6 +174,14 @@ export async function updateDealAdderAction(input: z.infer<typeof updateSchema>)
   });
   if (!existing) return fail("That adder is not on this deal.");
 
+  // Only a basis priced PER something takes a count, and each has its own
+  // ceiling — a 400-foot trench is a job, 400 main panel upgrades is a typo.
+  const countable = ADDER_BASES[existing.basis as keyof typeof ADDER_BASES]?.counted ?? false;
+  const nextQty =
+    qty != null && countable
+      ? Math.min(Math.max(1, qty), qtyMaxFor(existing.basis))
+      : undefined;
+
   // Only the column this line's basis actually uses is writable. Letting a
   // per-watt line accept a flat amount stores two prices for one adder, and
   // which one applies then depends on which code path reads it.
@@ -151,7 +196,14 @@ export async function updateDealAdderAction(input: z.infer<typeof updateSchema>)
 
   await prisma.solarDealAdder.update({
     where: { id },
-    data: { ...money, ...(qty != null ? { qty } : {}), ...(label ? { label } : {}) },
+    data: {
+      ...money,
+      ...(nextQty != null ? { qty: nextQty } : {}),
+      ...(label ? { label } : {}),
+      ...(parsed.data.consumptionKwhPerYear !== undefined
+        ? { consumptionKwhPerYear: parsed.data.consumptionKwhPerYear ?? null }
+        : {}),
+    },
   });
 
   const totalCents = await recomputeAdderTotal(g.user.companyId, leadId, { force: true });
@@ -167,11 +219,29 @@ export async function removeDealAdderAction(input: { leadId: string; id: string 
   const g = await guard(parsed.data.leadId);
   if (!g.ok) return fail(g.error);
 
+  const line = await prisma.solarDealAdder.findFirst({
+    where: { id: parsed.data.id, leadId: parsed.data.leadId, companyId: g.user.companyId },
+    select: { id: true, equipmentId: true, autoApplied: true },
+  });
+  if (!line) return fail("That adder is not on this deal.");
+
   // Scoped by lead AND company, so an id from another deal deletes nothing.
   const { count } = await prisma.solarDealAdder.deleteMany({
     where: { id: parsed.data.id, leadId: parsed.data.leadId, companyId: g.user.companyId },
   });
   if (count === 0) return fail("That adder is not on this deal.");
+
+  /**
+   * Taking off an adder the SIZE RULE put here has to be remembered.
+   *
+   * Otherwise the next recompute — a rep nudging one panel, a module swap — puts
+   * it straight back, and the only feedback the rep gets is that their click
+   * appeared to do nothing. The opt-out is per deal and per catalogue item, so
+   * the rule keeps working everywhere else.
+   */
+  if (line.autoApplied && line.equipmentId) {
+    await rememberOptOut(parsed.data.leadId, [line.equipmentId], "add");
+  }
 
   const totalCents = await recomputeAdderTotal(g.user.companyId, parsed.data.leadId, { force: true });
   revalidateDeal(parsed.data.leadId);
@@ -217,8 +287,11 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
       id: true,
       manufacturer: true,
       model: true,
+      description: true,
+      adderBasis: true,
       priceCents: true,
       priceMillsPerWatt: true,
+      showOnProposal: true,
       rank: true,
     },
     orderBy: [{ rank: "asc" }, { model: "asc" }],
@@ -227,7 +300,7 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
 
   const existing = await prisma.solarDealAdder.findMany({
     where: { companyId: g.user.companyId, leadId, equipmentId: { not: null } },
-    select: { id: true, equipmentId: true },
+    select: { id: true, equipmentId: true, autoApplied: true },
   });
   const onDeal = new Set(existing.map((l) => l.equipmentId!));
   const drop = existing.filter((l) => !wanted.includes(l.equipmentId!)).map((l) => l.id);
@@ -248,13 +321,7 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
         data: {
           companyId: g.user.companyId,
           leadId,
-          equipmentId: i.id,
-          // The label is COPIED, not joined at read time: the quote has to keep
-          // saying what was sold even after somebody renames the catalogue row.
-          label: [i.manufacturer, i.model].filter(Boolean).join(" ") || i.model,
-          basis: i.priceMillsPerWatt ? "perWatt" : "flat",
-          flatCents: i.priceMillsPerWatt ? null : i.priceCents,
-          millsPerWatt: i.priceMillsPerWatt,
+          ...lineFromCatalogue(i),
           qty: 1,
           sortOrder: ++sortOrder,
         },
@@ -262,7 +329,49 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
     ),
   ]);
 
+  /**
+   * The picker is also how a rep changes their mind about a size-triggered
+   * adder, so it maintains the opt-out list on both sides: unticking one
+   * records that this deal does not want it, and ticking it again forgets that.
+   * Without the second half, re-adding an adder by hand would be undone by the
+   * next recompute — the same dead button, from the other direction.
+   */
+  const autoOff = existing
+    .filter((l) => l.autoApplied && !wanted.includes(l.equipmentId!))
+    .map((l) => l.equipmentId!);
+  if (autoOff.length) await rememberOptOut(leadId, autoOff, "add");
+  if (wanted.length) await rememberOptOut(leadId, wanted, "remove");
+
   const totalCents = await recomputeAdderTotal(g.user.companyId, leadId, { force: true });
   revalidateDeal(leadId);
   return { ok: true as const, totalCents, added: add.length, removed: drop.length };
+}
+
+/**
+ * Record — or forget — that this deal does not want a size-triggered adder.
+ *
+ * Kept on the design as a JSON array of catalogue ids rather than as a table:
+ * it is a list of at most a handful of ids, read only by the auto-apply rule,
+ * and a join table for it would be three files of machinery for a preference.
+ *
+ * Not exported: `"use server"` requires every export here to be an async server
+ * action, and this is a helper the browser has no business calling.
+ */
+async function rememberOptOut(leadId: string, ids: string[], mode: "add" | "remove") {
+  const design = await prisma.solarDesign.findUnique({
+    where: { leadId },
+    select: { autoAdderOptOut: true },
+  });
+  if (!design) return;
+  const current = new Set(parseOptOut(design.autoAdderOptOut));
+  const before = current.size;
+  for (const id of ids) {
+    if (mode === "add") current.add(id);
+    else current.delete(id);
+  }
+  if (current.size === before) return;
+  await prisma.solarDesign.update({
+    where: { leadId },
+    data: { autoAdderOptOut: [...current] },
+  });
 }
