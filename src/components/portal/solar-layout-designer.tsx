@@ -48,9 +48,11 @@ import {
   segmentHulls,
   type RoofPlanes,
 } from "@/lib/solar-roof-planes";
+import { autoFillRoof, pruneToCount, pruneToTarget } from "@/lib/solar-autofill";
 import {
   compassLabel,
   optimalTiltDeg,
+  orientationFactor,
   pitchToTiltDeg,
   COMMON_PITCHES,
 } from "@/lib/solar-orientation";
@@ -469,6 +471,96 @@ export function SolarLayoutDesigner({
       return h.slice(0, -1);
     });
   }, [setBlocks]);
+
+  // ── Filling the roof ──────────────────────────────────────────────────────
+  /**
+   * What ONE panel on a given array makes in a year.
+   *
+   * The ranking the fill and both prunes are ordered by, and deliberately the
+   * same arithmetic `systemTotals` prices the system with — a measured plane on
+   * its own simulated yield, an undescribed one on the market average scaled by
+   * the clear-sky ratio. Ranking on anything else would take panels off in an
+   * order that disagreed with the production figure right beside it.
+   *
+   * A freshly filled plane is usually NOT in `measuredYields` yet, because
+   * nobody has saved this roof before, so the first fill ranks on the clear-sky
+   * model and the save settles it on PVWatts. That is the designer's existing
+   * bargain — an instant estimate while you draw, the real figure on save — and
+   * the ORDER the two models put the planes in is the same either way.
+   */
+  const panelKwh = React.useCallback(
+    (b: LayoutBlock): number => {
+      if (!moduleRatingW) return 0;
+      const kw = moduleRatingW / 1000;
+      const shade = 1 - (b.shadePct ?? 0) / 100;
+      const measured =
+        b.tiltDeg == null || b.azimuthDeg == null
+          ? null
+          : (measuredYields[`${b.tiltDeg}|${b.azimuthDeg}`] ?? null);
+      if (measured != null) return kw * measured * shade;
+      const factor = orientationFactor({
+        lat,
+        tiltDeg: b.tiltDeg ?? null,
+        azimuthDeg: b.azimuthDeg ?? null,
+      });
+      return kw * assumptions.kwhPerKwYear * assumptions.derateFactor * factor * shade;
+    },
+    [assumptions, lat, measuredYields, moduleRatingW]
+  );
+
+  /**
+   * How many panels the last fill left on the roof, or null if none has run.
+   *
+   * Drives the plus and minus, and only that. It is a SIZE, not a copy of the
+   * drawing: every nudge re-fills the roof from Google's model at the new
+   * count, so there is no stale snapshot to fall out of step with what is on
+   * screen. The controls say "Auto-fill" for exactly that reason — they resize
+   * the fill, they do not nudge whatever a rep has drawn since.
+   */
+  const [fillCount, setFillCount] = React.useState<number | null>(null);
+
+  /**
+   * Cover the roof, then take back the panels the house does not need.
+   *
+   * Replaces the drawing rather than adding to it. That is the honest move for
+   * a control that claims to lay out the whole roof, and it is undoable — the
+   * commit records history like any other edit, so a rep who wanted to keep
+   * what they had presses undo and has it back.
+   */
+  const fillRoof = React.useCallback(
+    (targetPanels?: number) => {
+      const planes = planesRef.current;
+      if (!planes) return;
+
+      const filled = autoFillRoof(planes, { module: moduleMm });
+      if (filled.length === 0) {
+        toast.error("Nothing to fill — Google modelled no usable plane on this roof.");
+        return;
+      }
+
+      const result =
+        targetPanels != null
+          ? pruneToCount(filled, panelKwh, targetPanels)
+          : annualUsageKwh && annualUsageKwh > 0
+            ? pruneToTarget(filled, panelKwh, annualUsageKwh)
+            : { blocks: filled, removed: 0, productionKwh: 0 };
+
+      const kept = result.blocks.filter((b) => blockPanelCount(b) > 0);
+      const panels = kept.reduce((n, b) => n + blockPanelCount(b), 0);
+      commit(kept);
+      setSelectedId(kept[0]?.id ?? null);
+      setFillCount(panels);
+
+      if (targetPanels == null) {
+        toast.success(
+          result.removed > 0
+            ? `Filled ${kept.length} ${kept.length === 1 ? "plane" : "planes"} and trimmed ${result.removed} to fit the home's usage — ${panels} panels.`
+            : `Filled ${kept.length} ${kept.length === 1 ? "plane" : "planes"} — ${panels} panels.`
+        );
+      }
+    },
+    [annualUsageKwh, commit, moduleMm, panelKwh]
+  );
 
   /** Patch the selected array. Every property control goes through one path. */
   const patchSelected = React.useCallback(
@@ -1517,6 +1609,18 @@ export function SolarLayoutDesigner({
                   <div className="border-t border-neutral-200" />
                   <button
                     type="button"
+                    title={
+                      annualUsageKwh && annualUsageKwh > 0
+                        ? "Cover every roof plane with panels, then take back the worst-facing ones until the system just covers the home's usage. Replaces the drawing — undo puts it back."
+                        : "Cover every roof plane with panels. Replaces the drawing — undo puts it back."
+                    }
+                    onClick={() => fillRoof()}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                  >
+                    <Wand2 className="size-4" /> Fill roof
+                  </button>
+                  <button
+                    type="button"
                     aria-pressed={showPlanes}
                     title="Outline the roof planes Google has modelled, with the way each one faces."
                     onClick={() => setShowPlanes((v) => !v)}
@@ -1549,6 +1653,45 @@ export function SolarLayoutDesigner({
                 </>
               )}
             </div>
+
+            {/* The size of the fill, in the unit the conversation happens in.
+                A homeowner asks "what does one more panel do to the payment",
+                never "what does another 640 kWh do", so the control counts
+                panels and the figures beside it move as they are added. */}
+            {planes && fillCount != null && (
+              <div className="pointer-events-auto absolute left-3 top-[19.5rem] w-44 rounded-lg border border-black/10 bg-white p-2 text-neutral-900 shadow-lg">
+                <div className="px-1 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                  Auto-fill size
+                </div>
+                <div className="flex items-center justify-between gap-1">
+                  <button
+                    type="button"
+                    aria-label="One panel fewer"
+                    disabled={fillCount <= 1}
+                    onClick={() => fillRoof(fillCount - 1)}
+                    className="rounded border border-neutral-300 p-1.5 hover:bg-neutral-100 disabled:opacity-40"
+                  >
+                    <Minus className="size-3.5" />
+                  </button>
+                  <span className="text-sm font-semibold tabular-nums">
+                    {fillCount} {fillCount === 1 ? "panel" : "panels"}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="One panel more"
+                    onClick={() => fillRoof(fillCount + 1)}
+                    className="rounded border border-neutral-300 p-1.5 hover:bg-neutral-100"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </div>
+                {/* Says what it does, because it re-fills rather than editing
+                    what is on screen — see `fillCount`. */}
+                <p className="px-1 pt-1.5 text-[11px] leading-snug text-neutral-500">
+                  Re-fills the roof at this size, worst-facing panels off first.
+                </p>
+              </div>
+            )}
 
             {/* Tilt and shade sit beside the toolbar, not in a modal: both are
                 things you judge by watching the production figure move, and a
