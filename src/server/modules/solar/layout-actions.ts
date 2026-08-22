@@ -37,7 +37,9 @@ const blockSchema = z.object({
   // Where the two angles above came from. Only one value is meaningful and the
   // rest of the enum is deliberately absent: a client that sends anything else
   // is claiming a measurement nobody made.
-  facingSource: z.literal("roof").nullish(),
+  // Both of the values the server writes. A browser is free to send either
+  // back unchanged; anything else is a person's own figure and parses to null.
+  facingSource: z.enum(["roof", "footprint"]).nullish(),
 });
 
 /**
@@ -133,5 +135,7 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
     measuredArrays: figures?.measuredArrays ?? 0,
     /** How many took their facing off the building on the way through. */
     filledFromRoof: figures?.filledFromRoof ?? 0,
+    /** And how many only got one ESTIMATED from the building's outline. */
+    filledFromOutline: figures?.filledFromOutline ?? 0,
   };
 }

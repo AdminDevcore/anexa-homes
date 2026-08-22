@@ -431,7 +431,7 @@ export function segmentHulls(planes: RoofPlanes): SegmentHull[] {
  * return nothing rather than a degenerate ring the canvas would draw as a
  * hairline nobody can interpret.
  */
-function convexHull(points: { e: number; n: number }[]): { e: number; n: number }[] {
+export function convexHull(points: { e: number; n: number }[]): { e: number; n: number }[] {
   if (points.length < 3) return [];
   const pts = [...points].sort((a, b) => a.e - b.e || a.n - b.n);
   const cross = (

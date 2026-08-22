@@ -46,8 +46,17 @@ export type LayoutBlock = {
    * a rep who typed nothing has to be able to see that the number in front of
    * them is a measurement rather than a default. Editing either angle by hand
    * clears this — from that moment the value is theirs.
+   *
+   * THREE STATES, not two, and the difference is the strength of the claim:
+   *   "roof"      — Google's photogrammetric model of THIS building, per plane.
+   *                 A measurement.
+   *   "footprint" — inferred from the building's outline by `solar-footprint`,
+   *                 when no roof model exists. One ridge for the whole house,
+   *                 so it can be wrong on an L-plan and cannot tell the faces
+   *                 of a hip apart. An estimate, and the proposal says so.
+   *   null        — a person's own figure, or nothing at all.
    */
-  facingSource?: "roof" | null;
+  facingSource?: "roof" | "footprint" | null;
   /**
    * How much of this array's year the surroundings take away, 0..100.
    *
@@ -786,8 +795,13 @@ export function parseLayoutBlocks(raw: unknown): LayoutBlock[] {
     // Same story as orientation: shading arrived later, so a design saved
     // before it has none, and none has to mean "clear" rather than NaN.
     shadePct: clampShade(finiteOrNull((b as LayoutBlock).shadePct)),
-    // Anything other than the one value we write is a person's own figure.
-    facingSource: (b as LayoutBlock).facingSource === "roof" ? ("roof" as const) : null,
+    // Anything other than the values we write is a person's own figure.
+    facingSource:
+      (b as LayoutBlock).facingSource === "roof"
+        ? ("roof" as const)
+        : (b as LayoutBlock).facingSource === "footprint"
+          ? ("footprint" as const)
+          : null,
   }));
 }
 

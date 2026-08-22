@@ -5,6 +5,8 @@ import { applyAutoAdders, recomputeAdderTotal } from "./adders";
 import { planeFor, resolvePlaneYields } from "./pvwatts";
 import { groundPlanesFor, resolveRoofPlanes } from "./roof-planes";
 import { applyPlanes } from "@/lib/solar-roof-planes";
+import { applyFootprintFacing } from "@/lib/solar-footprint";
+import { resolveFootprintFacing } from "./footprint";
 import { yieldCacheKey } from "@/lib/solar-pvwatts";
 import {
   blockPanelCount,
@@ -85,7 +87,29 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
       heightMm: module_?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
     }
   );
-  const blocks = read.blocks;
+
+  /**
+   * Whatever the roof could not answer, ask the building's outline.
+   *
+   * AFTER `applyPlanes` and never instead of it. Google's model is per plane
+   * and knows a hip from a gable; this is one ridge for the whole house. So it
+   * only ever reaches arrays that would otherwise have gone to PVWatts with no
+   * facing at all — which is to say, gone to the flat market average and quietly
+   * lost a fifth of the production on a south roof.
+   *
+   * Ground mounts are skipped for the same reason they skip the roof: a rack in
+   * a yard is aimed, not built onto a slope.
+   *
+   * The pitch is NOT filled from this, so an array with no tilt is still
+   * unpriced afterwards. That is deliberate — see `applyFootprintFacing`.
+   */
+  const stillUnfaced =
+    arrayType !== "ground" &&
+    read.blocks.some((b) => blockPanelCount(b) > 0 && b.azimuthDeg == null);
+  const ridge = stillUnfaced ? await resolveFootprintFacing(lead.lat, lead.lng) : null;
+  const outline = applyFootprintFacing(read.blocks, ridge);
+
+  const blocks = outline.blocks;
 
   const plane = (tiltDeg: number | null, azimuthDeg: number | null) =>
     planeFor({
@@ -125,10 +149,14 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
   await prisma.solarDesign.update({
     where: { leadId },
     data: {
-      // Written back ONLY when the roof supplied something, so this stays a
-      // figures recompute for every other design. The geometry is untouched
-      // either way — the same rectangles, now with a facing on them.
-      ...(read.filled > 0 ? { layoutBlocks: blocks } : {}),
+      // Written back ONLY when something supplied a facing — the roof OR the
+      // building outline — so this stays a figures recompute for every other
+      // design. The geometry is untouched either way: the same rectangles, now
+      // with a facing on them. Testing `read.filled` alone would compute the
+      // outline's answer, price the design on it, and then throw the facing
+      // away, so the next save would ask again and the block would stay blank
+      // for ever.
+      ...(read.filled + outline.filled > 0 ? { layoutBlocks: blocks } : {}),
       moduleQty: panelCount(blocks),
       // Only when one resolved. Writing null here would unpick a module a rep
       // chose the moment the catalogue has no default to fall back to.
@@ -162,6 +190,16 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
     measuredArrays: totals.measuredArrays,
     /** How many arrays took their angles off the building, so the screen can say. */
     filledFromRoof: read.filled,
+    /**
+     * How many took a facing from the building's OUTLINE instead.
+     *
+     * Counted separately, never added to the one above. They are different
+     * claims — one is measured off the roof, the other inferred from the shape
+     * of the house — and a screen that reported "5 arrays read from the roof"
+     * for a number that was partly guessed would be making the stronger claim
+     * on the weaker evidence.
+     */
+    filledFromOutline: outline.filled,
     /**
      * The adders the size rule put on or took off, by name.
      *
