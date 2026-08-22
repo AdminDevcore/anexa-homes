@@ -496,14 +496,11 @@ const equipmentSchema = z.object({
   // The sentence a rep and a homeowner both read. What the work actually IS,
   // not a second copy of its name.
   description: z.string().trim().max(500).nullable().optional(),
-  isVeryCommon: z.boolean().optional(),
-  showOnProposal: z.boolean().optional(),
   // The system-size band, kW DC, in which this lands on a deal by itself.
   // Capped at 1 MW: anything past that is not a residential design, it is a
   // decimal point in the wrong place disabling the rule.
   autoApplyMinKw: z.number().min(0).max(1000).nullable().optional(),
   autoApplyMaxKw: z.number().min(0).max(1000).nullable().optional(),
-  consumptionAdjustable: z.boolean().optional(),
   rank: z.number().int().min(0).max(999).optional(),
   // Ties a "Re-roof" / "MPU" adder to the Phase-3 crossover so selecting it
   // raises the flag on the deal instead of quietly becoming a line item.
@@ -575,7 +572,6 @@ export async function upsertSolarEquipmentAction(
     if (d.autoApplyMinKw != null || d.autoApplyMaxKw != null) {
       return fail("Only an adder can be applied automatically by system size.");
     }
-    if (d.consumptionAdjustable) return fail("Only an adder can change consumption.");
   }
   // A band that ends before it starts fires on nothing, which is a rule that
   // looks configured and does nothing — the worst of the three outcomes.

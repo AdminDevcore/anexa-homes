@@ -46,10 +46,10 @@ import {
  *
  * SPLIT OUT of the equipment manager because an adder stopped being a piece of
  * equipment with a price. It is a priced RULE: how the money is worked out, the
- * words a homeowner reads, the system size that puts it on a deal by itself,
- * and what it does to the house's consumption. Six of those fields on the
- * three-column grid the modules share turned that grid into a form where half
- * the boxes are greyed out whichever kind you are adding.
+ * words a homeowner reads, and the system size that puts it on a deal by
+ * itself. Those fields on the three-column grid the modules share turned that
+ * grid into a form where half the boxes are greyed out whichever kind you are
+ * adding.
  *
  * The order is the selling order — the picker a rep opens shows them exactly
  * like this — so it is edited here rather than by typing rank numbers.
@@ -63,11 +63,8 @@ export type AdderItem = {
   priceCents: number;
   priceMillsPerWatt: number | null;
   costCents: number;
-  isVeryCommon: boolean;
-  showOnProposal: boolean;
   autoApplyMinKw: number | null;
   autoApplyMaxKw: number | null;
-  consumptionAdjustable: boolean;
   crossoverKind: string | null;
   rank: number;
   isActive: boolean;
@@ -298,24 +295,9 @@ function AdderRow({
           <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
             {ADDER_BASES[item.basis].label}
           </span>
-          {item.isVeryCommon && (
-            <span className="rounded-full border chip-good px-2 py-0.5 text-[11px] font-medium">
-              very common
-            </span>
-          )}
-          {item.showOnProposal && (
-            <span className="rounded-full border chip-info px-2 py-0.5 text-[11px] font-medium">
-              on proposal
-            </span>
-          )}
           {band && (
             <span className="rounded-full border chip-violet px-2 py-0.5 text-[11px] font-medium">
               auto · {band}
-            </span>
-          )}
-          {item.consumptionAdjustable && (
-            <span className="rounded-full border chip-info px-2 py-0.5 text-[11px] font-medium">
-              adds usage
             </span>
           )}
           {item.crossoverKind === "reroof" && (
@@ -424,19 +406,15 @@ const EMPTY = {
   minKw: "",
   maxKw: "",
   autoApply: false,
-  isVeryCommon: false,
-  showOnProposal: false,
-  consumptionAdjustable: false,
   crossoverKind: "",
 };
 
 /**
  * The one form an adder is created and edited through.
  *
- * A dialog rather than an inline row, because this is nine fields and three
- * of them are rules with consequences — an auto-apply band silently puts money
- * on somebody's deal — and rules are worth the full width of a sentence
- * explaining them.
+ * A dialog rather than an inline row, because one of these fields is a rule
+ * with consequences — an auto-apply band silently puts money on somebody's
+ * deal — and a rule is worth the full width of a sentence explaining it.
  */
 function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () => void }) {
   const router = useRouter();
@@ -454,9 +432,6 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
           minKw: item.autoApplyMinKw != null ? String(item.autoApplyMinKw) : "",
           maxKw: item.autoApplyMaxKw != null ? String(item.autoApplyMaxKw) : "",
           autoApply: item.autoApplyMinKw != null || item.autoApplyMaxKw != null,
-          isVeryCommon: item.isVeryCommon,
-          showOnProposal: item.showOnProposal,
-          consumptionAdjustable: item.consumptionAdjustable,
           crossoverKind: item.crossoverKind ?? "",
         }
       : EMPTY
@@ -490,9 +465,6 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
         priceCents: isRate ? 0 : f.price ? Math.round(Number(f.price) * 100) : 0,
         // Dollars per watt on screen, mills per watt on the wire. $0.05 → 50.
         priceMillsPerWatt: isRate && f.perWatt.trim() !== "" ? Math.round(Number(f.perWatt) * 1000) : null,
-        isVeryCommon: f.isVeryCommon,
-        showOnProposal: f.showOnProposal,
-        consumptionAdjustable: f.consumptionAdjustable,
         // Both cleared when the rule is switched off, so an unticked box cannot
         // leave a band behind that keeps firing.
         autoApplyMinKw: f.autoApply && f.minKw.trim() !== "" ? Number(f.minKw) : null,
@@ -645,33 +617,6 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
                 onChange={(e) => set("cost", e.target.value)}
               />
             </div>
-          </div>
-
-          <div className="space-y-2.5 border-t border-border pt-3">
-            <Flag
-              id="adder-common"
-              checked={f.isVeryCommon}
-              onChange={(v) => set("isVeryCommon", v)}
-              hint="Pins it to the Very common tab when a rep opens the adder picker."
-            >
-              Label as &ldquo;Very Common&rdquo; tab inside Adder List?
-            </Flag>
-            <Flag
-              id="adder-proposal"
-              checked={f.showOnProposal}
-              onChange={(v) => set("showOnProposal", v)}
-              hint="Names it to the customer under Additional services, with its description — not just as a line in the price breakdown."
-            >
-              Show under Additional Services on proposal page
-            </Flag>
-            <Flag
-              id="adder-consumption"
-              checked={f.consumptionAdjustable}
-              onChange={(v) => set("consumptionAdjustable", v)}
-              hint="For work that changes what the house uses — an EV charger, a pool pump. The rep enters the kWh a year on the deal, and offset is worked out against the higher figure."
-            >
-              Enable Consumption Adjustment
-            </Flag>
           </div>
 
           <div className="space-y-1">
