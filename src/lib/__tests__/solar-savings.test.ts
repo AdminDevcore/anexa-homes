@@ -180,7 +180,7 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
         systemSizeKwDc: 8, year1ProductionKwh: 8_282, offsetPct: 59.16,
         annualUsageKwh: 14_000, moduleLabel: "Qcells · 400W", moduleQty: 20,
         inverterLabel: "Enphase", batteryLabel: null, mountType: "roof",
-        utilityProvider: "ZZ TEST", netMeteringProgram: null,
+        utilityProvider: "ZZ TEST",
         avgMonthlyBillCents: 18_000,
       },
       finance: {
@@ -283,7 +283,7 @@ describe("the snapshot stops carrying what nobody sets", () => {
     systemSizeKwDc: 8, year1ProductionKwh: 9_744, offsetPct: 69.6,
     annualUsageKwh: 14_000, moduleLabel: "Qcells · 400W", moduleQty: 20,
     inverterLabel: null, batteryLabel: null, mountType: "roof",
-    utilityProvider: "ZZ TEST", netMeteringProgram: "Oncor 1:1",
+    utilityProvider: "ZZ TEST",
     avgMonthlyBillCents: 18_000,
   };
 
@@ -304,18 +304,17 @@ describe("the snapshot stops carrying what nobody sets", () => {
       now: new Date("2026-08-18T00:00:00Z"),
     });
 
-  it("nulls the rate plan and TSRF, so the proposal omits both rows", () => {
+  it("nulls the rate plan, TSRF and the net-metering programme, so the proposal omits all three rows", () => {
     // The renderer guards every one of these on null, which is why a field the
     // form stopped collecting disappears from the document rather than printing
     // blank — and why a proposal already SENT still shows what it showed.
+    //
+    // The net-metering programme joined them when the company setting that fed
+    // it was deleted. Nothing supplies one any more, so the snapshot cannot be
+    // handed one: the field is not on the generation input at all.
     const s = snap();
     expect(s.energy.ratePlan).toBeNull();
     expect(s.system.tsrfPct).toBeNull();
-  });
-
-  it("still carries the net-metering programme it was handed", () => {
-    // It comes from company settings now rather than the design, but the
-    // customer-facing document is unchanged.
-    expect(snap().system.netMeteringProgram).toBe("Oncor 1:1");
+    expect(s.system.netMeteringProgram).toBeNull();
   });
 });

@@ -49,7 +49,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     defaultGrossPpw: (settings.defaultGrossPpwCents / 100).toFixed(2),
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
-    netMeteringProgram: settings.netMeteringProgram ?? "",
     homeValueUpliftPct: String(settings.homeValueUpliftPct),
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
@@ -71,7 +70,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       // it, which is how every company behaves until somebody sets a target.
       targetNetPpwCents:
         f.targetNetPpw.trim() === "" ? null : Math.round(Number(f.targetNetPpw) * 100),
-      netMeteringProgram: f.netMeteringProgram.trim() || null,
       // Blank is zero, and zero means the claim is not made at all — the
       // proposal omits the card rather than printing "0%".
       homeValueUpliftPct: f.homeValueUpliftPct.trim() === "" ? 0 : Number(f.homeValueUpliftPct),
@@ -95,25 +93,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           <NumField label="Annual degradation %" value={f.annualDegradationPct} onChange={(v) => set("annualDegradationPct", v)} step="0.1" />
           <NumField label="Utility escalation %/yr" value={f.utilityEscalationPct} onChange={(v) => set("utilityEscalationPct", v)} step="0.1" />
           <NumField label="kWh per kW / year" value={f.kwhPerKwYear} onChange={(v) => set("kwhPerKwYear", v)} hint="Local irradiance" />
-        </div>
-      </section>
-
-      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
-        <h3 className="font-semibold">Utility programme</h3>
-        <div className="space-y-1">
-          <Label className="text-xs" htmlFor="net-metering-programme">
-            Net-metering / buyback programme
-          </Label>
-          <Input
-            id="net-metering-programme"
-            value={f.netMeteringProgram}
-            placeholder="e.g. Oncor 1:1 net metering"
-            onChange={(e) => set("netMeteringProgram", e.target.value)}
-          />
-          <p className="text-[11px] text-muted-foreground">
-            Printed on every proposal, and what the FAQ answer about surplus production points at.
-            The utility sets this, not the house — so it lives here rather than on each design.
-          </p>
         </div>
       </section>
 

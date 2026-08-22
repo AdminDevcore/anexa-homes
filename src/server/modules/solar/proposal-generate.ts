@@ -388,9 +388,6 @@ export async function generateProposalVersion(
       batteryLabel: label(design.battery),
       mountType: design.mountType,
       utilityProvider: design.utilityProvider,
-      // Company-level now: the programme is set by the utility, not by the
-      // house, so it is one value per company rather than one per deal.
-      netMeteringProgram: assumptions.netMeteringProgram,
       avgMonthlyBillCents: design.avgMonthlyBillCents,
       utilityRateMills: design.utilityRateMills,
       module: equip(design.module, design.moduleQty),

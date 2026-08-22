@@ -172,7 +172,7 @@ export const IMPACT_SOURCES = {
 } as const;
 
 export const SOLAR_FAQS = [
-  { q: "What happens if the system makes more power than I use?", a: "Extra production goes back to the grid. What you are credited depends on your utility's net-metering or buyback programme, which is listed in your system specs above." },
+  { q: "What happens if the system makes more power than I use?", a: "Extra production goes back to the grid. What you are credited for it depends on your utility's net-metering or buyback programme — your consultant can tell you which one your address falls under." },
   { q: "What happens when the power goes out?", a: "A standard grid-tied system shuts off during an outage for the safety of line workers. Adding a battery keeps selected circuits running." },
   { q: "Does my roof need work first?", a: "If the roof has less life left than the system, we replace it first. Your surveyor will tell you plainly — it is cheaper to do it now than to remove and reinstall panels later." },
   { q: "What maintenance is there?", a: "Very little. Panels have no moving parts. Rain handles most cleaning, and your system is monitored so we see faults before you do." },
@@ -529,6 +529,13 @@ export type SolarProposalSnapshot = {
     batteryLabel: string | null;
     mountType: string;
     utilityProvider: string | null;
+    /**
+     * HISTORICAL, like `tsrfPct` below. The net-metering programme was a
+     * company setting that got stamped onto every proposal; the setting is
+     * gone, so this is null on every new snapshot. It stays in the type because
+     * a proposal already sent is a frozen document — it keeps printing the
+     * programme it was sold with rather than losing a line retroactively.
+     */
     netMeteringProgram: string | null;
     /** HISTORICAL, like `energy.ratePlan`. Null on every new snapshot. */
     tsrfPct: number | null;
@@ -899,7 +906,6 @@ export function buildProposalSnapshot(args: {
     batteryLabel: string | null;
     mountType: string;
     utilityProvider: string | null;
-    netMeteringProgram: string | null;
     avgMonthlyBillCents: number | null;
     /** The rate a rep was told, when there is one. See resolveUtilityRateMills. */
     utilityRateMills?: number | null;
@@ -1062,7 +1068,8 @@ export function buildProposalSnapshot(args: {
       batteryLabel: design.batteryLabel,
       mountType: design.mountType,
       utilityProvider: design.utilityProvider,
-      netMeteringProgram: design.netMeteringProgram,
+      // Historical, like tsrfPct — see the snapshot type.
+      netMeteringProgram: null,
       tsrfPct: null,
       module: design.module ?? null,
       inverter: design.inverter ?? null,

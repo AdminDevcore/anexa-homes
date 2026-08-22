@@ -1,0 +1,11 @@
+-- The company-wide net-metering / buyback programme is gone.
+--
+-- It was one text field in Solar settings that got stamped onto every proposal
+-- as a "Billing programme" spec row. Proposals already sent keep printing it —
+-- their snapshot froze the value as JSON — so nothing customer-facing changes
+-- retroactively. Only the source of NEW values is being removed.
+--
+-- solar_designs."netMeteringProgram" is deliberately left alone: it holds
+-- per-deal values from before the setting existed, and System info still shows
+-- them on those designs.
+ALTER TABLE "solar_settings" DROP COLUMN IF EXISTS "netMeteringProgram";

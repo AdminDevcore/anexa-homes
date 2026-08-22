@@ -36,7 +36,6 @@ const DESIGN = {
   batteryLabel: null,
   mountType: "roof",
   utilityProvider: "Oncor",
-  netMeteringProgram: "Buyback",
   avgMonthlyBillCents: 21_000,
 };
 

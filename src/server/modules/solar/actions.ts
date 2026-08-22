@@ -31,7 +31,6 @@ const settingsSchema = z.object({
   // Null is meaningful and is the default: derive nothing, leave the sticker as
   // the rep typed it. Set, and gross is computed from the product's dealer fee.
   targetNetPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
-  netMeteringProgram: z.string().max(120).nullable(),
   // What an owned system is claimed to add to a home's value, %. Zero — the
   // default — means the claim is not made and the proposal omits the card.
   // Capped at 20 because the published studies cluster around four, and a
@@ -74,9 +73,8 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
  *
  * Everything else it used to ask for has moved to where the decision is
  * actually made: interconnection details and the equipment a job is built from
- * live on the deal's Operations card, the net-metering programme is one company
- * setting, and the panel comes from the catalogue's default. What is left is
- * what every number on the proposal is derived from.
+ * live on the deal's Operations card, and the panel comes from the catalogue's
+ * default. What is left is what every number on the proposal is derived from.
  */
 const designSchema = z.object({
   leadId: z.string().min(1),

@@ -22,10 +22,6 @@ export const SOLAR_ASSUMPTION_DEFAULTS: SolarAssumptions = {
 };
 
 export type SolarSettingsView = SolarAssumptions & {
-  /// The utility's programme, company-wide. See the schema comment: it is set
-  /// by the utility rather than by the house, so it is one value here instead
-  /// of one retyped onto every design.
-  netMeteringProgram: string | null;
   /// What the company must keep per watt after the lender's cut, cents.
   ///
   /// NOT part of SolarAssumptions: those are the physics-and-pricing inputs
@@ -46,7 +42,6 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
   if (!row) {
     return {
       ...SOLAR_ASSUMPTION_DEFAULTS,
-      netMeteringProgram: null,
       targetNetPpwCents: null,
       homeValueUpliftPct: 0,
     };
@@ -62,7 +57,6 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     maxOffsetPct: row.maxOffsetPct,
     minPpwCents: row.minPpwCents,
     maxPpwCents: row.maxPpwCents,
-    netMeteringProgram: row.netMeteringProgram,
     targetNetPpwCents: row.targetNetPpwCents,
     homeValueUpliftPct: row.homeValueUpliftPct,
   };
