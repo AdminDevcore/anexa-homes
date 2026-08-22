@@ -107,6 +107,15 @@ describe("solar key compatibility", () => {
   // The completion paperwork the install agreement names, each in its own
   // folder so "where is the signed acceptance?" has one answer. PTO left
   // Interconnection's hint and became a folder of its own for the same reason.
+  // Roofing files contractor billing under its broad "Invoices & Payments"
+  // folder. Solar keeps the contractor's invoice on its own so it is not mixed
+  // in with anything else, which is why the two verticals use different keys.
+  it("files the contractor's invoice in its own folder", () => {
+    const folder = SOLAR_FOLDERS.find((f) => f.key === "contractor_invoice");
+    expect(folder).toBeDefined();
+    expect(folder?.special).toBeUndefined();
+  });
+
   it("has a folder for every document the install agreement names", () => {
     const keys = SOLAR_FOLDERS.map((f) => f.key);
     for (const k of [
@@ -130,6 +139,7 @@ describe("solar paperwork stays out of roofing", () => {
   const SOLAR_ONLY = [
     "proposal",
     "certificate_acceptance",
+    "contractor_invoice",
     "attestation_payment",
     "lien_waiver_progress",
     "lien_waiver_final",
