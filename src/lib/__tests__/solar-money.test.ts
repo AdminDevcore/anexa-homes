@@ -7,6 +7,8 @@ import {
   apportionCents,
   capStickerToFinalPpw,
   grossPpwFromNet,
+  basePpwFromSticker,
+  underBaseFloor,
   type FinalPpwCap,
   year1Production,
   offsetPct,
@@ -416,8 +418,11 @@ describe("a rep cannot generate a nonsense proposal", () => {
   });
 
   it("bounds come from settings, so a market can widen them", () => {
+    // A $9.00/W BASE, stickered through an 18% fee. The band is judged on the
+    // base, so that is the figure to put outside it — 900 was a sticker here
+    // until the two sides were made to compare the same number.
     const f: FinanceForValidation = {
-      product: "loan", grossPpwCents: 900, dealerFeePct: 18, contractPriceCents: 5_000_000,
+      product: "loan", grossPpwCents: grossPpwFromNet(900, 18)!, dealerFeePct: 18, contractPriceCents: 5_000_000,
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
       downPaymentCents: null, loanMonthlyPaymentCents: 27_400,
       aprPct: 6.99, loanTermMonths: 300,
@@ -586,5 +591,117 @@ describe("a lender's maximum price per watt caps the CONTRACT, not the sticker",
       stickerPpwCents: uncappedSticker, ...AMOS, systemSizeKwDc: 0, adderTotalCents: 0,
     });
     expect(cap.capped).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A lender's MINIMUM: a floor under what the company keeps
+// ---------------------------------------------------------------------------
+describe("a lender's minimum price per watt floors the BASE, not the sticker", () => {
+  it("reads back the base the sticker was grossed up from", () => {
+    // The exact inverse of the forward direction, at the fee that produced it.
+    expect(basePpwFromSticker(grossPpwFromNet(287, 18)!, 18)).toBe(287);
+    expect(basePpwFromSticker(grossPpwFromNet(350, 30)!, 30)).toBe(350);
+  });
+
+  it("treats a fee it would stand down as no fee, exactly as pricing does", () => {
+    expect(basePpwFromSticker(400, 0)).toBe(400);
+    expect(basePpwFromSticker(400, 100)).toBe(400);
+    expect(basePpwFromSticker(400, -5)).toBe(400);
+  });
+
+  it("no floor set means no deal is ever under it", () => {
+    expect(underBaseFloor(350, 18, null)).toBe(false);
+    expect(underBaseFloor(350, 18, undefined)).toBe(false);
+    expect(underBaseFloor(350, 18, 0)).toBe(false);
+  });
+
+  it("measures the floor against what SURVIVES a cap, not what was typed", () => {
+    // Amos: $5.50/W paper on a 65% fee. Whatever base is typed, the cap solves
+    // the sticker down to 550 and 550 × 0.35 = $1.93/W is all that is left.
+    const capped = capStickerToFinalPpw({
+      stickerPpwCents: grossPpwFromNet(300, 65)!, // a $3.00 base, typed
+      maxFinalPpwCents: 550,
+      systemSizeKwDc: 8.8,
+      dealerFeePct: 65,
+      adderTotalCents: 0,
+    });
+    expect(capped.capped).toBe(true);
+    expect(basePpwFromSticker(capped.stickerPpwCents, 65)).toBe(193);
+
+    // The typed $3.00 clears a $2.00 floor; what is actually kept does not.
+    expect(underBaseFloor(grossPpwFromNet(300, 65)!, 65, 200)).toBe(false);
+    expect(underBaseFloor(capped.stickerPpwCents, 65, 200)).toBe(true);
+    // …and a floor set in the capped world is met.
+    expect(underBaseFloor(capped.stickerPpwCents, 65, 175)).toBe(false);
+  });
+
+  it("adders drag the kept base under the floor, because the cap makes them ours", () => {
+    const withAdder = capStickerToFinalPpw({
+      stickerPpwCents: grossPpwFromNet(300, 65)!,
+      maxFinalPpwCents: 550,
+      systemSizeKwDc: 8.8,
+      dealerFeePct: 65,
+      adderTotalCents: 1_450_000, // a $14,500 re-roof
+    });
+    // Same cap, same fee — but the extra work has eaten the array's share of it.
+    expect(basePpwFromSticker(withAdder.stickerPpwCents, 65)).toBeLessThan(193);
+    expect(underBaseFloor(withAdder.stickerPpwCents, 65, 175)).toBe(true);
+  });
+});
+
+describe("the company band and the lender floor, at the validation layer", () => {
+  const loan = (over: Partial<FinanceForValidation> = {}): FinanceForValidation => ({
+    product: "loan", grossPpwCents: grossPpwFromNet(287, 18)!, dealerFeePct: 18,
+    contractPriceCents: 3_500_000,
+    rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+    downPaymentCents: null, loanMonthlyPaymentCents: 27_400,
+    aprPct: 6.99, loanTermMonths: 300,
+    ...over,
+  });
+  const codes = (f: FinanceForValidation) => validateFinance(f, A).map((i) => i.code);
+
+  it("judges the company band on the BASE, so a high fee no longer trips it", () => {
+    // $5.00/W base on a 45% programme stickers at $9.09/W. The band is
+    // $1.50–$8.00 and the base is comfortably inside it; the sticker is not,
+    // and comparing that one blocked a deal the builder had shown as fine.
+    const f = loan({ grossPpwCents: grossPpwFromNet(500, 45)!, dealerFeePct: 45 });
+    expect(basePpwFromSticker(f.grossPpwCents, 45)).toBe(500);
+    expect(f.grossPpwCents).toBeGreaterThan(A.maxPpwCents);
+    expect(codes(f)).not.toContain("pricing.ppw_out_of_range");
+    expect(canGenerate(validateFinance(f, A))).toBe(true);
+  });
+
+  it("still blocks a base genuinely outside the band", () => {
+    expect(codes(loan({ grossPpwCents: grossPpwFromNet(120, 18)!, dealerFeePct: 18 })))
+      .toContain("pricing.ppw_out_of_range");
+    expect(codes(loan({ grossPpwCents: grossPpwFromNet(900, 18)!, dealerFeePct: 18 })))
+      .toContain("pricing.ppw_out_of_range");
+  });
+
+  it("BLOCKS a deal leaving less than the lender's minimum", () => {
+    const f = loan({ minBasePpwCents: 300 }); // keeps $2.87, demands $3.00
+    expect(codes(f)).toContain("pricing.below_lender_floor");
+    expect(canGenerate(validateFinance(f, A))).toBe(false);
+    expect(validateFinance(f, A).find((i) => i.code === "pricing.below_lender_floor")?.message)
+      .toMatch(/\$2\.87\/W .* \$3\.00\/W minimum/);
+  });
+
+  it("allows a deal exactly ON the floor — it is a minimum, not a margin to beat", () => {
+    expect(codes(loan({ minBasePpwCents: 287 }))).not.toContain("pricing.below_lender_floor");
+  });
+
+  it("raises nothing on a lender that sets no floor, which is nearly all of them", () => {
+    expect(codes(loan())).not.toContain("pricing.below_lender_floor");
+    expect(codes(loan({ minBasePpwCents: null }))).not.toContain("pricing.below_lender_floor");
+  });
+
+  it("never floors a lease or a PPA, which have no base to floor", () => {
+    const lease: FinanceForValidation = {
+      product: "lease", grossPpwCents: 0, dealerFeePct: 0, contractPriceCents: 0,
+      rateMillsPerKwh: null, monthlyPaymentCents: 18_500, escalatorPct: 2.9, termYears: 20,
+      downPaymentCents: null, loanMonthlyPaymentCents: null, minBasePpwCents: 300,
+    };
+    expect(codes(lease)).not.toContain("pricing.below_lender_floor");
   });
 });

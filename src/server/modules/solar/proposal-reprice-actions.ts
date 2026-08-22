@@ -12,7 +12,7 @@ import { generateProposalVersion } from "./proposal-generate";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { annualUsageFromBill, effectiveUsageKwh } from "@/lib/solar-energy";
-import { offsetPct } from "@/lib/solar-money";
+import { basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ValidationIssue } from "@/lib/solar-validation";
 
@@ -236,7 +236,11 @@ export async function repriceProposalAction(
   // price is actually about.
   const design = await prisma.solarDesign.findUnique({
     where: { leadId },
-    select: { systemSizeKwDc: true, lenderId: true },
+    select: {
+      systemSizeKwDc: true,
+      lenderId: true,
+      lender: { select: { minBasePpwCents: true } },
+    },
   });
   const finance = await prisma.solarFinance.findUnique({ where: { leadId } });
   if (!design || !finance) return fail("Complete the system design and financing first.");
@@ -248,16 +252,6 @@ export async function repriceProposalAction(
     d.lenderProductId !== undefined ||
     d.adderEquipmentIds
   ) {
-    // The guard rails, from Solar Settings, enforced here as well as in the
-    // builder — a shortcut through the UI is not a way around the bounds.
-    const ppw = d.grossPpwCents ?? finance.grossPpwCents;
-    const isPurchase = finance.product === "cash" || finance.product === "loan";
-    if (isPurchase && (ppw < assumptions.minPpwCents || ppw > assumptions.maxPpwCents)) {
-      return fail(
-        `$${(ppw / 100).toFixed(2)}/W is outside the allowed range of $${(assumptions.minPpwCents / 100).toFixed(2)}–$${(assumptions.maxPpwCents / 100).toFixed(2)}.`
-      );
-    }
-
     const lenderProductId =
       d.lenderProductId === undefined ? finance.lenderProductId : d.lenderProductId;
 
@@ -305,6 +299,31 @@ export async function repriceProposalAction(
         targetNetPpwCents: assumptions.targetNetPpwCents,
       }
     );
+
+    // ── The guard rails ───────────────────────────────────────────────────
+    // Asked of the PRICED ROW, not of what arrived from the browser, and asked
+    // before anything is written.
+    //
+    // Both halves of that matter. The row is what the fee and the lender's cap
+    // have actually done to the number — a capped partner lowers the sticker
+    // after the fact, so the figure a rep typed is not the figure to police —
+    // and re-pricing is the one path where a rejection after the update leaves
+    // the deal changed and only the document refused.
+    const isPurchase = row.product === "cash" || row.product === "loan";
+    if (isPurchase) {
+      const basePpwCents = basePpwFromSticker(row.grossPpwCents, row.dealerFeePct);
+      if (basePpwCents < assumptions.minPpwCents || basePpwCents > assumptions.maxPpwCents) {
+        return fail(
+          `$${(basePpwCents / 100).toFixed(2)}/W before the lender's cut is outside the allowed range of $${(assumptions.minPpwCents / 100).toFixed(2)}–$${(assumptions.maxPpwCents / 100).toFixed(2)}.`
+        );
+      }
+      const floor = design.lender?.minBasePpwCents ?? null;
+      if (underBaseFloor(row.grossPpwCents, row.dealerFeePct, floor)) {
+        return fail(
+          `That leaves $${(basePpwCents / 100).toFixed(2)}/W before the lender's cut, under this lender's $${((floor ?? 0) / 100).toFixed(2)}/W minimum.`
+        );
+      }
+    }
 
     await prisma.solarFinance.update({ where: { leadId }, data: row });
   }

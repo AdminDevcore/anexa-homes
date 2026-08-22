@@ -657,6 +657,11 @@ export type LenderOption = {
    * ordinary base-times-fee pricing, unchanged.
    */
   maxFinalPpwCents: number | null;
+  /**
+   * The least this partner's deals may leave the company per watt, before its
+   * cut, cents. Null — nearly every lender — means no floor.
+   */
+  minBasePpwCents: number | null;
 };
 
 export type LenderProductOption = {
@@ -1152,6 +1157,14 @@ export function SolarFinancePanel({
         quotedMaxFinalPpwCents={
           chosen && !isCash
             ? (lenders.find((l) => l.id === chosen.lenderId)?.maxFinalPpwCents ?? null)
+            : null
+        }
+        // The floor is the partner's too, and read the same way. Cash has no
+        // lender and therefore no floor — the company band is all that guards
+        // it, which is what "no lender" has always meant here.
+        quotedMinBasePpwCents={
+          chosen && !isCash
+            ? (lenders.find((l) => l.id === chosen.lenderId)?.minBasePpwCents ?? null)
             : null
         }
         quotedLabel={

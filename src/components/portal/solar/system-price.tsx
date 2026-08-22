@@ -4,7 +4,12 @@ import * as React from "react";
 import { Check, Minus, Pencil, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { capStickerToFinalPpw, grossPpwFromNet, pricePurchase } from "@/lib/solar-money";
+import {
+  basePpwFromSticker,
+  capStickerToFinalPpw,
+  grossPpwFromNet,
+  pricePurchase,
+} from "@/lib/solar-money";
 
 /**
  * What this company charges for THIS system, and the one control that moves it.
@@ -45,6 +50,7 @@ export function SystemPriceCard({
   adderTotalCents,
   quotedFeePct,
   quotedMaxFinalPpwCents,
+  quotedMinBasePpwCents,
   quotedLabel,
   canEdit,
   onChange,
@@ -66,6 +72,11 @@ export function SystemPriceCard({
    * $48,400 for the same deal is worse than either figure alone.
    */
   quotedMaxFinalPpwCents: number | null;
+  /**
+   * That publisher's floor under what the company keeps per watt, cents. Null
+   * on cash and on any lender that sets none.
+   */
+  quotedMinBasePpwCents: number | null;
   quotedLabel: string | null;
   canEdit: boolean;
   onChange: (cents: number | null) => void;
@@ -198,6 +209,24 @@ export function SystemPriceCard({
   const offDefault = defaultPpwCents != null && basePpwCents != null && basePpwCents !== defaultPpwCents;
   const outOfBand =
     basePpwCents != null && (basePpwCents < minPpwCents || basePpwCents > maxPpwCents);
+
+  /**
+   * What this deal actually leaves the company, after the fee AND after the cap.
+   *
+   * Not `basePpwCents`. On an uncapped lender they are the same figure and this
+   * says nothing new; on a capped one the sticker was solved back down, so the
+   * base typed into the box above is not the base anybody is getting — Amos at
+   * $5.50/W and 65% leaves $1.93 however confidently $3.00 was typed. A floor
+   * measured against the box would pass a deal that netted a third of it, which
+   * is the entire reason this line exists rather than a comparison inline.
+   */
+  const keptBasePpwCents =
+    customerPpw == null ? basePpwCents : basePpwFromSticker(customerPpw, quotedFeePct ?? 0);
+  const belowFloor =
+    quotedMinBasePpwCents != null &&
+    quotedMinBasePpwCents > 0 &&
+    keptBasePpwCents != null &&
+    keptBasePpwCents < quotedMinBasePpwCents;
 
   return (
     <section
@@ -407,11 +436,23 @@ export function SystemPriceCard({
       </div>
 
       <footer className="space-y-2 border-t border-border/70 bg-muted/20 px-4 py-2.5">
+        {/* "Not a lock" was untrue: readiness BLOCKS on this band and always
+            has, so a rep was told to carry on and then refused at generate. */}
         {outOfBand && (
           <p className="text-[11px] text-amber-700 dark:text-amber-500">
             Outside the company&rsquo;s ${(minPpwCents / 100).toFixed(2)}–$
-            {(maxPpwCents / 100).toFixed(2)}/W band. It will still save — this is a guard rail,
-            not a lock.
+            {(maxPpwCents / 100).toFixed(2)}/W band. The proposal will not generate until this
+            is inside it.
+          </p>
+        )}
+        {belowFloor && (
+          <p className="text-[11px] font-medium text-destructive">
+            This leaves ${((keptBasePpwCents ?? 0) / 100).toFixed(2)}/W before the lender&rsquo;s
+            cut, under {quotedLabel ? "this lender" : "the lender"}&rsquo;s $
+            {((quotedMinBasePpwCents ?? 0) / 100).toFixed(2)}/W minimum.
+            {customerCap?.capped
+              ? " Its cap is holding the customer price down, so the extra work is coming out of your side."
+              : " The proposal will not generate until the price comes up."}
           </p>
         )}
         {customerPpw != null && customerContract != null ? (

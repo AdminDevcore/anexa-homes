@@ -1,5 +1,7 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
+  basePpwFromSticker,
+  underBaseFloor,
   type SolarAssumptions,
 } from "./solar-money";
 import { resolveUtilityRateMills } from "./solar-energy";
@@ -102,8 +104,20 @@ export type DesignForValidation = {
 
 export type FinanceForValidation = {
   product: FinanceProduct;
+  /**
+   * The STICKER — what the customer pays per watt, this lender's fee already
+   * inside it. Not the base, which is why every rule below that means "margin"
+   * runs it back through `basePpwFromSticker` first.
+   */
   grossPpwCents: number;
   dealerFeePct: number;
+  /**
+   * The floor this deal's LENDER puts under the company's margin, cents per
+   * watt. Null on a cash deal, on a lender that sets none, and on every lender
+   * until somebody does. Rides on the finance shape rather than on assumptions
+   * because it belongs to the partner this one deal was designed for.
+   */
+  minBasePpwCents?: number | null;
   contractPriceCents: number;
   rateMillsPerKwh: number | null;
   monthlyPaymentCents: number | null;
@@ -348,12 +362,38 @@ export function validateFinance(
     issues.push({ severity: "warn", code, group, field, message, action: to });
 
   if (f.product === "cash" || f.product === "loan") {
-    if (f.grossPpwCents < a.minPpwCents || f.grossPpwCents > a.maxPpwCents) {
+    // THE BAND IS ON THE BASE, which is not the number stored on the row.
+    //
+    // `grossPpwCents` is the sticker — the fee is already in it — and this
+    // compared it straight against a band the builder was meanwhile applying to
+    // the base. On a low-fee lender the two are close enough that nobody
+    // noticed; on a 65% one they are three times apart, so a $2.80/W base sat
+    // inside the band on screen, stickered at $8.00/W, and hit "outside the
+    // allowed range" at generate — with no warning ever shown while it was
+    // being typed. Same number, both sides, and the discrepancy goes away.
+    const basePpwCents = basePpwFromSticker(f.grossPpwCents, f.dealerFeePct);
+    if (basePpwCents < a.minPpwCents || basePpwCents > a.maxPpwCents) {
       block(
         "pricing.ppw_out_of_range",
         "pricing",
         "grossPpwCents",
-        `$${(f.grossPpwCents / 100).toFixed(2)}/W is outside the allowed range of $${(a.minPpwCents / 100).toFixed(2)}–$${(a.maxPpwCents / 100).toFixed(2)}/W.`
+        `$${(basePpwCents / 100).toFixed(2)}/W is outside the allowed range of $${(a.minPpwCents / 100).toFixed(2)}–$${(a.maxPpwCents / 100).toFixed(2)}/W.`
+      );
+    }
+    // The partner's own floor, on top of the company's. They stack and the
+    // stricter wins by simply both being asked: Settings is the floor under
+    // everything, and a lender may demand more margin but never less.
+    //
+    // Asked of the base for the same reason, and it matters most here: a capped
+    // lender lowers the sticker after the fact, so the base a rep typed is not
+    // the base anyone ends up with, and the floor has to be about the second
+    // one to protect anything at all.
+    if (underBaseFloor(f.grossPpwCents, f.dealerFeePct, f.minBasePpwCents)) {
+      block(
+        "pricing.below_lender_floor",
+        "pricing",
+        "grossPpwCents",
+        `This leaves $${(basePpwCents / 100).toFixed(2)}/W before the lender's cut, under this lender's $${((f.minBasePpwCents ?? 0) / 100).toFixed(2)}/W minimum.`
       );
     }
     // A cash deal has no lender, so it cannot carry a lender's fee.

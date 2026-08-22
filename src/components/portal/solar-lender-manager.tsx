@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatFactor } from "@/lib/solar-loan";
+import { basePpwFromSticker } from "@/lib/solar-money";
 import {
   upsertSolarLenderProductAction,
   setSolarLenderProductActiveAction,
@@ -58,6 +59,11 @@ export type LenderRow = {
    * pricing exactly as it was.
    */
   maxFinalPpwCents: number | null;
+  /**
+   * The least this partner's deals may leave the company per watt, cents,
+   * before its cut. Null — nearly every lender — means no floor.
+   */
+  minBasePpwCents: number | null;
   /** The partner's own mark, when one has been uploaded or fetched. */
   logoUrl: string | null;
   /** How many catalogue items this lender approves. */
@@ -777,6 +783,28 @@ function LenderCard({
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
+  /**
+   * The most this lender's own ceiling can leave the company, per watt.
+   *
+   * Worth spelling out beside the floor box because the two interact in a way
+   * that is not obvious from either one: a capped partner funds one number, so
+   * whatever base is typed, only `cap × (1 − fee)` survives. Amos caps at
+   * $5.50/W on a 65% fee, which is $1.93 — set a $3.00 floor there and every
+   * deal on that partner blocks, with nothing on the screen having warned you.
+   *
+   * Taken against the LOWEST fee on the rate sheet, because that is the
+   * programme that leaves the most; a floor above this is unreachable on any of
+   * them. Null when there is no cap, or no priced product to read a fee from.
+   */
+  const capBasePpwCents = React.useMemo(() => {
+    if (lender.maxFinalPpwCents == null) return null;
+    const fees = lender.products
+      .filter((p) => p.isActive && p.dealerFeePct != null)
+      .map((p) => p.dealerFeePct as number);
+    if (fees.length === 0) return null;
+    return basePpwFromSticker(lender.maxFinalPpwCents, Math.min(...fees));
+  }, [lender.maxFinalPpwCents, lender.products]);
+
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState({
     name: lender.name,
@@ -786,6 +814,7 @@ function LenderCard({
     creditInstructions: lender.creditInstructions ?? "",
     repPayMode: lender.repPayMode,
     maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
+    minBasePpw: ppwToDollars(lender.minBasePpwCents),
   });
   const resetDraft = () =>
     setDraft({
@@ -796,6 +825,7 @@ function LenderCard({
       creditInstructions: lender.creditInstructions ?? "",
       repPayMode: lender.repPayMode,
       maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
+      minBasePpw: ppwToDollars(lender.minBasePpwCents),
     });
 
   type ActionResult = { ok: boolean; error?: string; message?: string };
@@ -823,6 +853,10 @@ function LenderCard({
     if (maxFinalPpwCents === "invalid") {
       return toast.error("Max final $/W has to be a price between $0.50 and $20.00, or blank for no cap.");
     }
+    const minBasePpwCents = ppwToCents(draft.minBasePpw);
+    if (minBasePpwCents === "invalid") {
+      return toast.error("Min base $/W has to be a price between $0.50 and $20.00, or blank for no floor.");
+    }
 
     const res = await act(
       () =>
@@ -834,6 +868,7 @@ function LenderCard({
           creditInstructions: draft.creditInstructions.trim() || null,
           repPayMode: draft.repPayMode,
           maxFinalPpwCents,
+          minBasePpwCents,
         }),
       "Saved"
     );
@@ -910,6 +945,33 @@ function LenderCard({
               your base $/W grossed up by its fee. Set it and the contract is held at or under
               this figure — so extra work comes out of what you keep, not out of the
               customer&rsquo;s price.
+            </p>
+          </div>
+
+          {/* The other end of the same deal. The ceiling above is about the
+              CUSTOMER'S number; this is about YOURS, which is why the two are
+              set separately and neither is derived from the other. */}
+          <div className="space-y-1 rounded-lg border border-border/70 bg-muted/30 p-2.5">
+            <TextField
+              label="Min base $/W — the least this partner's deals may leave you"
+              value={draft.minBasePpw}
+              placeholder="blank — no floor"
+              onChange={(v) => setDraft((d) => ({ ...d, minBasePpw: v }))}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Measured before the dealer fee, on what actually survives it — so on a capped
+              lender it is what the cap leaves you, not what the rep typed. A deal under this
+              cannot be quoted or generated.
+              {capBasePpwCents != null && (
+                <>
+                  {" "}
+                  This lender&rsquo;s cap and fee leave at most{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    ${ppwToDollars(capBasePpwCents)}/W
+                  </span>
+                  , so a floor above that blocks every deal on it.
+                </>
+              )}
             </p>
           </div>
 
@@ -1023,6 +1085,16 @@ function LenderCard({
                 <dd className="font-medium tabular-nums">
                   <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] text-gold-muted">
                     ${ppwToDollars(lender.maxFinalPpwCents)}/W
+                  </span>
+                </dd>
+              </div>
+            )}
+            {lender.minBasePpwCents != null && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Min base $/W</dt>
+                <dd className="font-medium tabular-nums">
+                  <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] text-gold-muted">
+                    ${ppwToDollars(lender.minBasePpwCents)}/W
                   </span>
                 </dd>
               </div>

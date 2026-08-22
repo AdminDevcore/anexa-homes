@@ -32,6 +32,10 @@ export async function readSolarReadiness(
         utilityRateMills: true,
         ratePlan: true, utilityProvider: true, batteryId: true, layoutImageFileId: true,
         lenderId: true,
+        // The partner's margin floor travels with the deal it was designed for.
+        // A cash deal has no lender and therefore no floor, which falls out of
+        // this being null rather than needing a rule of its own.
+        lender: { select: { minBasePpwCents: true } },
         module: { select: { ratingW: true } },
       },
     }),
@@ -140,6 +144,7 @@ export async function readSolarReadiness(
         loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
         aprPct: finance.aprPct,
         loanTermMonths: finance.loanTermMonths,
+        minBasePpwCents: design.lender?.minBasePpwCents ?? null,
       },
       company: {
         name: company?.name ?? null,

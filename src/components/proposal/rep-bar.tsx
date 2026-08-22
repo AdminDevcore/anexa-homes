@@ -192,7 +192,7 @@ export function RepBar({
                 {rep.isPurchase ? (
                   <Field
                     label="Price per watt"
-                    hint="The sticker the customer is quoted, dealer fee included. Solar Settings decides the range this may sit in."
+                    hint="The sticker the customer is quoted, dealer fee included. What it leaves you after that fee has to sit inside Solar Settings' range, and above this lender's own minimum if it sets one."
                   >
                     <Input
                       type="number"

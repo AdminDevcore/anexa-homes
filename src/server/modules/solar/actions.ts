@@ -857,6 +857,16 @@ const lenderSchema = z.object({
    * that partner at 55 cents a watt.
    */
   maxFinalPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
+  /**
+   * The least this partner's deals may leave the company per watt, cents,
+   * BEFORE its cut. Null clears the floor.
+   *
+   * Same band as the ceiling above, and not cross-validated against it: they
+   * govern different numbers — one what the customer signs, one what the
+   * company keeps — and a floor of $1.75 under a cap of $5.50 is the ordinary
+   * arrangement, not a contradiction to reject.
+   */
+  minBasePpwCents: z.number().int().min(50).max(2000).nullable().optional(),
 });
 
 /**

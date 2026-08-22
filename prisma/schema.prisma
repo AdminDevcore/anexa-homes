@@ -2872,6 +2872,23 @@ model SolarLender {
   /// cap, and nothing about that lender's pricing changes.
   maxFinalPpwCents Int?
 
+  /// The least this partner's deals may leave the company, per installed watt,
+  /// in cents, BEFORE its cut. 175 = $1.75/W.
+  ///
+  /// The mirror of the ceiling above, and deliberately not its twin: that one
+  /// caps what the CUSTOMER signs, this one floors what the COMPANY keeps. A
+  /// margin guard, in other words -- the number a discount erodes.
+  ///
+  /// Tested against what is actually kept, not against what a rep typed. On a
+  /// capped lender those differ: Amos funds $5.50/W at a 65% fee, so whatever
+  /// base is typed, the cap solves the sticker down and $1.93/W is all that can
+  /// ever survive it. A floor checked against the typed figure would pass a
+  /// deal that netted a third of it.
+  ///
+  /// Null -- the default, and every lender until somebody sets one -- means no
+  /// floor, and no deal that generates today stops generating.
+  minBasePpwCents  Int?
+
   /// Where YOUR team runs credit for this partner — the dealer portal login.
   /// Rep-facing only: it never reaches a customer-facing document.
   portalUrl          String?

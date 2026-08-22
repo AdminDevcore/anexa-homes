@@ -375,6 +375,54 @@ export function grossPpwFromNet(netPpwCents: number, dealerFeePct: number): numb
 }
 
 /**
+ * What the company actually keeps per installed watt, out of a sticker it quoted.
+ *
+ * The exact inverse of `grossPpwFromNet` above — `sticker × (1 − fee)` where
+ * that one is `base ÷ (1 − fee)` — and it exists as its own function because
+ * the two directions are asked at different moments. Pricing a deal goes
+ * forwards: here is the margin we want, what does it sticker at. Policing one
+ * goes backwards: here is what was quoted, what did we actually end up with.
+ *
+ * THE BACKWARDS DIRECTION IS THE HONEST ONE UNDER A CAP. `capStickerToFinalPpw`
+ * can lower the sticker after the fact — a capped partner funds one number
+ * whatever was typed — and once it has, the base a rep entered is no longer the
+ * base anybody is getting. Amos at $5.50/W and a 65% fee leaves $1.93/W however
+ * confidently $3.00 was typed into the box.
+ *
+ * A fee this file would stand down (negative, or 100% and over) is stood down
+ * here too, so the answer never disagrees with `pricePurchase` about the same
+ * deal.
+ */
+export function basePpwFromSticker(stickerPpwCents: number, dealerFeePct: number): number {
+  const f =
+    Number.isFinite(dealerFeePct) && dealerFeePct > 0 && dealerFeePct < 100
+      ? dealerFeePct / 100
+      : 0;
+  return Math.round(stickerPpwCents * (1 - f));
+}
+
+/**
+ * Is this deal leaving the company less per watt than the lender demands?
+ *
+ * The one place the floor rule lives, because it is asked in three — the
+ * builder as the rep types, the readiness check before a proposal generates,
+ * and the re-price action behind a proposal already sent. Three copies of a
+ * comparison is three chances to get the null case backwards, and getting it
+ * backwards here blocks every deal on every lender that has no floor at all.
+ *
+ * Null or non-positive floor means no floor: the default, and every lender
+ * until somebody sets one.
+ */
+export function underBaseFloor(
+  stickerPpwCents: number,
+  dealerFeePct: number,
+  minBasePpwCents: number | null | undefined
+): boolean {
+  if (minBasePpwCents == null || !(minBasePpwCents > 0)) return false;
+  return basePpwFromSticker(stickerPpwCents, dealerFeePct) < minBasePpwCents;
+}
+
+/**
  * What a capped lender does to a deal.
  *
  * `stickerPpwCents` is what to hand `pricePurchase`; the rest is what the rep
