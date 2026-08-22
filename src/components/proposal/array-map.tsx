@@ -40,14 +40,28 @@ export function ArrayMap({
   imageUrl,
   /** Preferred over the bare drawing when the imagery will not load. */
   fallback,
+  aspect = 1,
 }: {
   lat: number;
   panels: { e: number; n: number }[][];
   /** Builds the proxied image URL for a zoom level. */
   imageUrl: (zoom: number) => string;
   fallback?: React.ReactNode;
+  /**
+   * The frame's width ÷ height. 1 — square — is the proposal's own slide, where
+   * a roof gets a whole screen to itself.
+   *
+   * The imagery is square whatever this is (see IMAGE_PX), so a wider frame
+   * CROPS it rather than squashing it: the image is `object-cover` and the
+   * overlay is a `slice`-fitted viewBox, which is the same transform, so the
+   * panels stay on the shingles they were drawn on. The centring offsets and
+   * the fitting zoom below both take it into account — without that, a 16:9
+   * frame opens a tall array with its top row cut off and its middle nowhere
+   * near the middle.
+   */
+  aspect?: number;
 }) {
-  const fit = React.useMemo(() => bestFitZoom(lat, panels), [lat, panels]);
+  const fit = React.useMemo(() => bestFitZoom(lat, panels, aspect), [lat, panels, aspect]);
   const home = React.useMemo(() => centroid(panels), [panels]);
   const [zoom, setZoom] = React.useState(fit);
   const [nudge, setNudge] = React.useState({ x: 0, y: 0 });
@@ -95,9 +109,16 @@ export function ArrayMap({
     widthPx: IMAGE_PX,
     heightPx: IMAGE_PX,
   });
+  // A `translate` percentage is a percentage of the ELEMENT, and the element is
+  // the frame — while the offsets above are fractions of the IMAGE. Those are
+  // the same thing only in a square frame. `object-cover` scales the square
+  // picture by the frame's LONGER side, so on a 16:9 frame the image is as tall
+  // as the frame is wide, and a vertical nudge has to be scaled up to match.
+  const fx = Math.max(1, 1 / aspect);
+  const fy = Math.max(1, aspect);
   const offset = {
-    x: ((IMAGE_PX / 2 - centre.x) / IMAGE_PX) * 100 + nudge.x,
-    y: ((IMAGE_PX / 2 - centre.y) / IMAGE_PX) * 100 + nudge.y,
+    x: ((IMAGE_PX / 2 - centre.x) / IMAGE_PX) * 100 * fx + nudge.x,
+    y: ((IMAGE_PX / 2 - centre.y) / IMAGE_PX) * 100 * fy + nudge.y,
   };
 
   function onPointerDown(e: React.PointerEvent) {
@@ -125,12 +146,12 @@ export function ArrayMap({
     <div className="relative overflow-hidden rounded-2xl bg-neutral-900 ring-1 ring-white/10">
       <div
         ref={frame}
-        className="relative aspect-square w-full touch-none select-none"
+        className="relative w-full touch-none select-none"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        style={{ cursor: dragging ? "grabbing" : "grab" }}
+        style={{ aspectRatio: aspect, cursor: dragging ? "grabbing" : "grab" }}
       >
         <div
           className="absolute inset-0"
@@ -150,6 +171,10 @@ export function ArrayMap({
 
           <svg
             viewBox={`0 0 ${IMAGE_PX} ${IMAGE_PX}`}
+            // `slice` is `object-cover` for an SVG: fill the box and crop the
+            // overflow. The default (`meet`) letterboxes instead, which on any
+            // non-square frame would float the panels off the roof underneath.
+            preserveAspectRatio="xMidYMid slice"
             className="absolute inset-0 size-full"
             aria-hidden
           >
@@ -260,7 +285,12 @@ export function centroid(panels: { e: number; n: number }[][]): { e: number; n: 
  * homeowner opening the section to find the corner of their roof has been shown
  * nothing at all.
  */
-export function bestFitZoom(lat: number, panels: { e: number; n: number }[][]): number {
+export function bestFitZoom(
+  lat: number,
+  panels: { e: number; n: number }[][],
+  /** The frame's width ÷ height. See ArrayMap's `aspect`. */
+  aspect = 1
+): number {
   const mid = centroid(panels);
   let reach = 0;
   for (const quad of panels) {
@@ -272,7 +302,10 @@ export function bestFitZoom(lat: number, panels: { e: number; n: number }[][]): 
 
   // Fill about 70% of the frame: enough that the array is the subject, with
   // enough roof around it to be recognisable as a house.
-  const halfFramePx = (IMAGE_PX / 2) * 0.7;
+  // Divided by however far from square the frame is: `object-cover` crops the
+  // square picture on its long axis, so the shortest thing a frame can show is
+  // less than its width, and fitting to the width alone clips the array.
+  const halfFramePx = ((IMAGE_PX / 2) * 0.7) / Math.max(1, aspect, 1 / aspect);
   const z = Math.floor(zoomForMetresPerPixel(lat, reach / halfFramePx, 2));
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 }

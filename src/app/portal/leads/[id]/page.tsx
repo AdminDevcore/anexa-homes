@@ -38,7 +38,13 @@ import {
   type SpecSource,
 } from "@/components/portal/solar-system-info";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
-import { blockPanelCount, type LayoutBlock } from "@/lib/solar-layout";
+import {
+  blockPanelCount,
+  panelCorners,
+  parseLayoutBlocks,
+  MODULE_FALLBACK_MM,
+  type LayoutBlock,
+} from "@/lib/solar-layout";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import { financingCard } from "@/lib/solar-deal-header";
 import {
@@ -85,6 +91,9 @@ import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
 import { utcToZonedWallClock } from "@/lib/tz";
 import { daysInStage } from "@/lib/stage-status";
+
+/** Ground metres to the centimetre. See `propertyArray`. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * Roofing books an "appointment"; solar works a "deal". The title follows the
@@ -277,7 +286,14 @@ export default async function LeadDetailPage({
         prisma.solarDesign.findUnique({
           where: { leadId: lead.id },
           include: {
-            module: { select: { manufacturer: true, model: true, ratingW: true } },
+            // The millimetres are for the property card's array overlay: the
+            // panels are drawn at their real size on the roof, and a module
+            // with no dimensions falls back to a standard 60-cell one.
+            module: {
+              select: {
+                manufacturer: true, model: true, ratingW: true, widthMm: true, heightMm: true,
+              },
+            },
             inverter: { select: { manufacturer: true, model: true } },
             battery: { select: { manufacturer: true, model: true } },
           },
@@ -330,6 +346,39 @@ export default async function LeadDetailPage({
     utilityAccountNo: solarDesign?.utilityAccountNo ?? null,
     meterNo: solarDesign?.meterNo ?? null,
   };
+
+  /**
+   * The array, for the property card at the top of the deal.
+   *
+   * The card shows the bare roof until somebody has drawn on it, and the design
+   * from then on — which is the order the work happens in, and the reason it is
+   * not gated on a proposal existing: the drawing is made in the builder, and
+   * from the moment it is saved this card is the fastest way to see it without
+   * reopening the builder to look.
+   *
+   * Read off the LIVE design rather than the last proposal's snapshot, unlike
+   * the System info slide. The two answer different questions: that one reports
+   * what the customer was quoted and must not move under them, this one is the
+   * roof as it stands, so a redraw shows here immediately.
+   *
+   * Ground metres, projected in the browser — the same geometry, from the same
+   * module, that the customer's proposal draws.
+   */
+  const propertyArray = (() => {
+    if (!isSolarDeal || !solarDesign || lead.lat == null || lead.lng == null) return null;
+    const moduleMm = {
+      widthMm: solarDesign.module?.widthMm ?? MODULE_FALLBACK_MM.widthMm,
+      heightMm: solarDesign.module?.heightMm ?? MODULE_FALLBACK_MM.heightMm,
+    };
+    const panels = parseLayoutBlocks(solarDesign.layoutBlocks)
+      .flatMap((b) => panelCorners(b, moduleMm))
+      // Centimetres. The imagery is about three centimetres a pixel, so the
+      // millimetres would be kilobytes of payload nobody can see.
+      .map((quad) => quad.map((c) => ({ e: round2(c.e), n: round2(c.n) })));
+    // An empty design is a design that was opened and not drawn. Nothing to show.
+    if (panels.length === 0) return null;
+    return { lat: lead.lat, panels, sizeKwDc: solarDesign.systemSizeKwDc };
+  })();
 
   /**
    * The system as specifications, for the System info slide.
@@ -881,9 +930,13 @@ export default async function LeadDetailPage({
             icon={Satellite}
             tone={isSolarDeal ? "solar" : "brand"}
             description={
-              isSolarDeal
-                ? "Panel layout still needs a design provider — imagery only for now"
-                : "Aerial imagery. Trace and measure the roof in Production."
+              !isSolarDeal
+                ? "Aerial imagery. Trace and measure the roof in Production."
+                : propertyArray
+                  ? "The array as drawn, on this roof. The same picture the customer's proposal shows."
+                  : solarDesign?.layoutImageFileId
+                    ? "The layout attached to this design. Imagery of the roof is a click away."
+                    : "Aerial imagery. Draw the array in the proposal builder and it appears here."
             }
           >
             <PropertyView
@@ -892,6 +945,8 @@ export default async function LeadDetailPage({
                 .filter(Boolean)
                 .join(" · ")}
               geoStamp={lead.geocodedAt?.toISOString() ?? null}
+              array={propertyArray}
+              layoutImageId={solarDesign?.layoutImageFileId ?? null}
             />
           </Card>
 
