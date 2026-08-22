@@ -705,3 +705,40 @@ describe("the company band and the lender floor, at the validation layer", () =>
     expect(codes(lease)).not.toContain("pricing.below_lender_floor");
   });
 });
+
+describe("capping is safe to do twice, which is what lets generation re-cap", () => {
+  const AMOS = { maxFinalPpwCents: 550, systemSizeKwDc: 11, dealerFeePct: 65 };
+
+  it("a sticker already at the ceiling is left exactly where it is", () => {
+    const once = capStickerToFinalPpw({
+      stickerPpwCents: grossPpwFromNet(300, 65)!, // $3.00 base → $8.57/W uncapped
+      adderTotalCents: 0,
+      ...AMOS,
+    });
+    expect(once.capped).toBe(true);
+    expect(once.stickerPpwCents).toBe(550);
+
+    const twice = capStickerToFinalPpw({
+      stickerPpwCents: once.stickerPpwCents,
+      adderTotalCents: 0,
+      ...AMOS,
+    });
+    expect(twice.capped).toBe(false);
+    expect(twice.stickerPpwCents).toBe(once.stickerPpwCents);
+  });
+
+  it("re-capping a STALE stored sticker lands the contract on the ceiling", () => {
+    // The deal saved before the ceiling existed: the row holds $8.57/W and a
+    // $94,270 contract while the builder's card recomputes and shows $5.50/W
+    // and $60,500. Generation froze the row, so the document and its own
+    // payment menu disagreed by thirty-four thousand dollars.
+    const stale = grossPpwFromNet(300, 65)!;
+    expect(pricePurchase({ product: "loan", stickerPpwCents: stale, adderTotalCents: 0, ...AMOS })
+      .contractPriceCents).toBe(9_427_000);
+
+    const fixed = capStickerToFinalPpw({ stickerPpwCents: stale, adderTotalCents: 0, ...AMOS });
+    expect(pricePurchase({
+      product: "loan", stickerPpwCents: fixed.stickerPpwCents, adderTotalCents: 0, ...AMOS,
+    }).contractPriceCents).toBe(6_050_000); // 11 kW × $5.50/W
+  });
+});

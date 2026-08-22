@@ -14,6 +14,7 @@ import { proposalAlternatives, type CatalogueProgramme } from "@/lib/solar-propo
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { canGenerate, type ValidationIssue } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
+import { capStickerToFinalPpw, pricePurchase } from "@/lib/solar-money";
 import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
 import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
@@ -189,9 +190,57 @@ export async function generateProposalVersion(
     finance.product === "loan" && design.lenderId
       ? await prisma.solarLender.findFirst({
           where: { companyId: user.companyId, id: design.lenderId },
-          select: { id: true, name: true, applyUrl: true, logoUpdatedAt: true },
+          select: {
+            id: true, name: true, applyUrl: true, logoUpdatedAt: true,
+            // The partner's ceiling, needed HERE and not only on the payment
+            // menu below — see the re-cap immediately after this.
+            maxFinalPpwCents: true,
+          },
         })
       : null;
+
+  /**
+   * The deal's own price, held to the partner's ceiling one last time.
+   *
+   * `financeRowForProduct` already caps at save, so on a deal saved since the
+   * ceiling was set this changes nothing. It exists for the deal saved BEFORE
+   * it: the stored sticker is then the uncapped one, the builder's price card
+   * recomputes live and shows the capped figure, and generation froze the
+   * stored number — so a rep was promised $5.50/W and $60,500 on screen while
+   * the document went out at $8.57/W and $94,270. The payment menu on that
+   * same document IS capped, which left the two halves of one page disagreeing
+   * by thirty-four thousand dollars.
+   *
+   * Setting a cap in Settings deliberately does not re-price live designs — a
+   * deal in flight should not move under a rep. But a DOCUMENT may never quote
+   * above what the partner funds, so the ceiling is applied at the moment the
+   * document is made, and written back so the deal screen agrees with the
+   * paper a household is holding.
+   */
+  const capped = capStickerToFinalPpw({
+    stickerPpwCents: finance.grossPpwCents,
+    maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
+    systemSizeKwDc: design.systemSizeKwDc,
+    dealerFeePct: finance.dealerFeePct,
+    adderTotalCents: finance.adderTotalCents,
+  });
+  if (capped.capped) {
+    finance.grossPpwCents = capped.stickerPpwCents;
+    finance.contractPriceCents = pricePurchase({
+      product: "loan",
+      systemSizeKwDc: design.systemSizeKwDc,
+      stickerPpwCents: capped.stickerPpwCents,
+      dealerFeePct: finance.dealerFeePct,
+      adderTotalCents: finance.adderTotalCents,
+    }).contractPriceCents;
+    await prisma.solarFinance.update({
+      where: { leadId },
+      data: {
+        grossPpwCents: finance.grossPpwCents,
+        contractPriceCents: finance.contractPriceCents,
+      },
+    });
+  }
 
   // The catalogue row this deal was quoted from — its payment factors, and the
   // label it carries on the rate sheet. Read for EVERY product, not just a
