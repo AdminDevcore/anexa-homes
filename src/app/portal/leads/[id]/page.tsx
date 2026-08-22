@@ -224,7 +224,11 @@ export default async function LeadDetailPage({
         return false; // canvasser (and any other) — not taggable on follow-ups
       })
     : [];
-  const photoChecklists = project ? await getProjectPhotoChecklists(user.companyId, project.id) : [];
+  // Fetched with or without a job. Before production there is nothing shot yet
+  // and the slots come back empty — but their labels and example photos are
+  // what the rep standing at the house needs to see, and the deal's Survey
+  // folder now shows them there.
+  const photoChecklists = await getProjectPhotoChecklists(user.companyId, project?.id ?? null);
   // Anyone active on the team can be put on an install. Deliberately not
   // filtered to `installer`: the office books a PM onto a tricky job and a
   // manager onto a first install, and a picker that hides them is a picker

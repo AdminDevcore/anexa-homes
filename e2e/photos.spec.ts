@@ -112,6 +112,47 @@ test("photos: admin can add a slot to a photo template", async ({ page }) => {
     .toBe(true);
 });
 
+/**
+ * The example photo: set once in Settings, shown on every job, never mistaken
+ * for one of the job's own photos.
+ *
+ * The count is read BEFORE the example is set and compared after, rather than
+ * asserted against a fixed number: the deal this picks has whatever photos
+ * earlier specs left on it, and an example that quietly became a FileAsset
+ * would show up as a difference either way.
+ */
+test("photos: an example photo shows on the job without counting as one of its photos", async ({ page }) => {
+  await login(page, "admin@anexahomes.com");
+  await openProductionDeal(page);
+  await openFieldProduction(page);
+
+  const slotRow = () => page.getByTestId("photo-slot").filter({ hasText: "Front of house" }).first();
+  await expect(slotRow()).toBeVisible({ timeout: 10000 });
+  const photosBefore = await slotRow().locator('img[src^="/portal/files/"]').count();
+
+  // Set the example on that slot. The first file input on the settings page is
+  // the first slot of the site checklist — the same "Front of house".
+  await page.goto("/portal/settings/photo-templates");
+  await expect(page.getByText("Site / Inspection Photos")).toBeVisible({ timeout: 10000 });
+  await page.locator('input[type="file"][accept="image/jpeg,image/png,image/webp"]').first()
+    .setInputFiles("public/anexa-mark.png");
+  await expect(page.getByText("Example photo set")).toBeVisible({ timeout: 15000 });
+
+  // Back on the job: the slot now offers the example, and holds exactly the
+  // photos it held before — the example is not one of them.
+  await openProductionDeal(page);
+  await openFieldProduction(page);
+  const example = slotRow().getByRole("button", { name: /See an example of/ }).first();
+  await expect(example).toBeVisible({ timeout: 15000 });
+  await expect(example.locator("img")).toHaveAttribute("src", /\/api\/photo-templates\/example\?item=/);
+  expect(await slotRow().locator('img[src^="/portal/files/"]').count()).toBe(photosBefore);
+
+  // And it opens full size, labelled as a reference rather than as evidence.
+  await example.click();
+  await expect(page.getByRole("dialog").getByText(/Example — Front of house/)).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("dialog").getByText(/not part of this job/)).toBeVisible();
+});
+
 test("photos: sales rep cannot access photo-template settings", async ({ page }) => {
   await login(page, "rep@anexahomes.com");
   await page.goto("/portal/settings/photo-templates");

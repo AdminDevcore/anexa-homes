@@ -7,6 +7,7 @@ import { can } from "@/server/rbac/guards";
 import { getPhotoTemplates } from "@/server/modules/photos/queries";
 import { KIND_BLURB, KIND_LABEL } from "@/server/modules/photos/defaults";
 import { VERTICAL_LABEL } from "@/lib/vertical";
+import { photoExampleUrl } from "@/lib/photo-example";
 import { PageHeader } from "@/components/portal/ui";
 import { PhotoTemplatesManager } from "@/components/portal/photo-templates-manager";
 
@@ -38,7 +39,7 @@ export default async function PhotoTemplatesPage() {
       </Link>
       <PageHeader
         title="Photo Templates"
-        description={`The photo checklists reps and crews complete on every ${VERTICAL_LABEL[vertical]} job. Each workspace keeps its own.`}
+        description={`The photo checklists reps and crews complete on every ${VERTICAL_LABEL[vertical]} job. Each workspace keeps its own. Set an example photo on a slot and the crew sees exactly what the shot should look like before they take it.`}
       />
       <PhotoTemplatesManager
         kinds={kinds}
@@ -46,7 +47,12 @@ export default async function PhotoTemplatesPage() {
           id: t.id,
           name: t.name,
           kind: t.kind,
-          items: t.items.map((i) => ({ id: i.id, label: i.label, required: i.required })),
+          items: t.items.map((i) => ({
+            id: i.id,
+            label: i.label,
+            required: i.required,
+            exampleUrl: photoExampleUrl(i.id, i.exampleUpdatedAt),
+          })),
         }))}
       />
     </div>

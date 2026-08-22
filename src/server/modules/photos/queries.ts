@@ -1,10 +1,13 @@
 import { prisma } from "@/server/db/client";
+import { photoExampleUrl } from "@/lib/photo-example";
 
 export type PhotoSlot = {
   itemId: string;
   label: string;
   required: boolean;
   position: number;
+  /** The admin's reference shot for this slot, when one has been uploaded. */
+  exampleUrl: string | null;
   photos: { id: string; name: string }[];
 };
 
@@ -19,10 +22,17 @@ export type PhotoChecklist = {
   requiredDone: number;
 };
 
-/** Photo checklists (Site + Install) for a project, with photos grouped by slot. */
+/**
+ * Photo checklists (Site + Install) for a project, with photos grouped by slot.
+ *
+ * `projectId` is optional because a deal has these checklists before it has a
+ * project. Nothing has been shot yet at that point — the slots come back empty
+ * — but the labels and their example photos are exactly what a rep standing at
+ * a house before production starts needs to see.
+ */
 export async function getProjectPhotoChecklists(
   companyId: string,
-  projectId: string
+  projectId?: string | null
 ): Promise<PhotoChecklist[]> {
   const [templates, photos] = await Promise.all([
     prisma.photoTemplate.findMany({
@@ -30,11 +40,13 @@ export async function getProjectPhotoChecklists(
       orderBy: [{ kind: "asc" }, { position: "asc" }],
       include: { items: { orderBy: { position: "asc" } } },
     }),
-    prisma.fileAsset.findMany({
-      where: { companyId, projectId, kind: "photo", photoTemplateItemId: { not: null } },
-      select: { id: true, name: true, photoTemplateItemId: true },
-      orderBy: { createdAt: "asc" },
-    }),
+    projectId
+      ? prisma.fileAsset.findMany({
+          where: { companyId, projectId, kind: "photo", photoTemplateItemId: { not: null } },
+          select: { id: true, name: true, photoTemplateItemId: true },
+          orderBy: { createdAt: "asc" },
+        })
+      : Promise.resolve([]),
   ]);
 
   const byItem = new Map<string, { id: string; name: string }[]>();
@@ -50,6 +62,7 @@ export async function getProjectPhotoChecklists(
       label: it.label,
       required: it.required,
       position: it.position,
+      exampleUrl: photoExampleUrl(it.id, it.exampleUpdatedAt),
       photos: byItem.get(it.id) ?? [],
     }));
     const required = items.filter((i) => i.required);

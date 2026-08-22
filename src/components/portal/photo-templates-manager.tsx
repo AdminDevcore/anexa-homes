@@ -3,10 +3,18 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, GripVertical, Sparkles, Check, X, Pencil } from "lucide-react";
+import { Plus, Trash2, Loader2, GripVertical, Sparkles, Check, X, Pencil, ImagePlus, ImageOff, Upload } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   addPhotoTemplateItemAction,
   updatePhotoTemplateItemAction,
@@ -14,10 +22,18 @@ import {
   deletePhotoTemplateAction,
   renamePhotoTemplateAction,
   seedPhotoTemplateAction,
+  uploadPhotoExampleAction,
+  removePhotoExampleAction,
 } from "@/server/modules/photos/actions";
 
 type Kind = "site" | "install";
-type Item = { id: string; label: string; required: boolean };
+type Item = {
+  id: string;
+  label: string;
+  required: boolean;
+  /** The reference shot for this slot, once an admin has uploaded one. */
+  exampleUrl: string | null;
+};
 type Template = { id: string; name: string; kind: string; items: Item[] };
 
 /**
@@ -330,6 +346,7 @@ function ItemRow({ item, onChanged }: { item: Item; onChanged: () => void }) {
   return (
     <div className="flex items-center gap-3 px-5 py-2.5">
       <GripVertical className="size-4 shrink-0 text-muted-foreground/50" />
+      <ExampleThumb item={item} onChanged={onChanged} />
       <Input
         value={label}
         onChange={(e) => setLabel(e.target.value)}
@@ -345,5 +362,116 @@ function ItemRow({ item, onChanged }: { item: Item; onChanged: () => void }) {
         <Trash2 className="size-4" />
       </button>
     </div>
+  );
+}
+
+/**
+ * The example photo for one slot: set it, look at it, replace it, drop it.
+ *
+ * An empty slot opens the file picker on the first click — the whole point of
+ * the control is to get a photo in, and making that two clicks is how a
+ * checklist ends up with no examples on it. A slot that already has one opens
+ * the photo instead, because by then "what did I put here?" is the question
+ * being asked, and Replace / Remove live inside that view.
+ */
+function ExampleThumb({ item, onChanged }: { item: Item; onChanged: () => void }) {
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState<null | "upload" | "remove">(null);
+
+  async function upload(files: FileList | null) {
+    const file = files?.[0];
+    if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
+    setBusy("upload");
+    const fd = new FormData();
+    fd.set("file", file);
+    const res = await uploadPhotoExampleAction(item.id, fd);
+    setBusy(null);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Example photo set");
+    setOpen(false);
+    onChanged();
+  }
+
+  async function remove() {
+    setBusy("remove");
+    const res = await removePhotoExampleAction(item.id);
+    setBusy(null);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Example photo removed");
+    setOpen(false);
+    onChanged();
+  }
+
+  return (
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(e) => upload(e.target.files)}
+      />
+      <button
+        type="button"
+        onClick={() => (item.exampleUrl ? setOpen(true) : fileRef.current?.click())}
+        disabled={busy !== null}
+        title={item.exampleUrl ? `Example photo for “${item.label}”` : "Add an example photo"}
+        aria-label={
+          item.exampleUrl ? `Example photo for ${item.label}` : `Add an example photo for ${item.label}`
+        }
+        className={cn(
+          "group relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-50",
+          // Dashed while it is an empty slot asking to be filled; solid once it
+          // holds a photo, so a set example does not keep reading as a to-do.
+          !item.exampleUrl && "border-dashed"
+        )}
+      >
+        {busy === "upload" ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : item.exampleUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={item.exampleUrl} alt="" className="size-full object-cover" loading="lazy" decoding="async" />
+            <span className="absolute inset-0 grid place-items-center bg-foreground/70 opacity-0 transition-opacity group-hover:opacity-100">
+              <ImagePlus className="size-4 text-background" />
+            </span>
+          </>
+        ) : (
+          <ImagePlus className="size-4" />
+        )}
+      </button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{item.label}</DialogTitle>
+            <DialogDescription>
+              What the crew sees beside this slot on every job. It is never counted as one of the
+              job&rsquo;s own photos.
+            </DialogDescription>
+          </DialogHeader>
+          {item.exampleUrl && (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={item.exampleUrl}
+              alt={`Example: ${item.label}`}
+              className="max-h-[60vh] w-full rounded-lg border border-border object-contain"
+            />
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => fileRef.current?.click()}>
+              {busy === "upload" ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              Replace
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy !== null} onClick={remove}>
+              {busy === "remove" ? <Loader2 className="size-4 animate-spin" /> : <ImageOff className="size-4" />}
+              Remove
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

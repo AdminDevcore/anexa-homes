@@ -1351,6 +1351,20 @@ model PhotoTemplateItem {
   required   Boolean       @default(false)
   position   Int           @default(0)
 
+  /// A reference shot for this slot — what a good version of it looks like —
+  /// uploaded once by an admin and shown beside the slot on every job.
+  ///
+  /// Held as bytes of its own rather than as a FileAsset, deliberately: an
+  /// example belongs to the checklist, not to any one deal, and a `files` row
+  /// would need a lead or a project to hang off. It would then show up in that
+  /// deal's photo folder, in its counts and in the compiled PDF report as if
+  /// the crew had taken it. Same reasoning as a lender's logo. Normalised to
+  /// JPEG on the way in, so no mime column is needed.
+  exampleKey       String?
+  /// When the example last changed — the cache-buster in the serving URL. A
+  /// column rather than a request-time clock so the image can be cached hard.
+  exampleUpdatedAt DateTime?
+
   files FileAsset[]
 
   @@index([templateId])

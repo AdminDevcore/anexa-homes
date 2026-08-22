@@ -1,8 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { nanoid } from "nanoid";
+import sharp from "sharp";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
+import { putObject } from "@/server/storage";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
@@ -215,6 +218,89 @@ export async function deletePhotoTemplateItemAction(id: string) {
   });
   if (!item) return fail("Item not found.");
   await prisma.photoTemplateItem.delete({ where: { id } });
+  revalidatePath("/portal/settings/photo-templates");
+  return ok();
+}
+
+/* ── Example photos ──────────────────────────────────────────────────────
+ * The reference shot beside a slot: "this is what this photo looks like when
+ * it is right". Uploaded once by an admin in Settings, read by every rep and
+ * crew on every job.
+ *
+ * The bytes go through the storage driver and the id lands on the slot itself,
+ * not in `files` — see the schema note on PhotoTemplateItem.exampleKey. That is
+ * also what keeps an example out of the job's actual photos: it is not a
+ * FileAsset, so nothing that lists a deal's photos, counts them or compiles
+ * them into the PDF report can pick it up.
+ */
+
+/** A phone photo, downscaled. Examples are looked at, never printed at size. */
+const EXAMPLE_MAX_BYTES = 30 * 1024 * 1024;
+const EXAMPLE_ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "image/heic"]);
+
+/** The slot, scoped to the caller's company. Null means "not yours". */
+async function ownedItem(companyId: string, id: string) {
+  return prisma.photoTemplateItem.findFirst({
+    where: { id, template: { companyId } },
+    select: { id: true, label: true, exampleKey: true },
+  });
+}
+
+export async function uploadPhotoExampleAction(
+  itemId: string,
+  formData: FormData
+): Promise<{ ok: true; exampleUpdatedAt: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Only admins can set example photos.");
+
+  const item = await ownedItem(user.companyId, itemId);
+  if (!item) return fail("Photo slot not found.");
+
+  const file = formData.get("file");
+  if (!(file instanceof File)) return fail("No file provided.");
+  if (file.size > EXAMPLE_MAX_BYTES) return fail("Photo too large (max 30MB).");
+  if (!EXAMPLE_ALLOWED.has(file.type)) return fail("Use a JPG, PNG or WebP image.");
+
+  // 1600px is plenty for "hold this next to what you are looking at" on a phone
+  // and keeps the image small enough to open on site over LTE. `fit: "inside"`
+  // never crops — an example cropped to a square can lose the very thing it was
+  // uploaded to show.
+  let jpeg: Buffer;
+  try {
+    jpeg = await sharp(Buffer.from(await file.arrayBuffer()))
+      .rotate() // respect EXIF orientation
+      .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+  } catch {
+    return fail("Could not read that image.");
+  }
+
+  const key = `companies/${user.companyId}/photo-examples/${nanoid()}.jpg`;
+  await putObject(key, jpeg);
+  await prisma.photoTemplateItem.update({
+    where: { id: item.id },
+    data: { exampleKey: key, exampleUpdatedAt: new Date() },
+  });
+
+  revalidatePath("/portal/settings/photo-templates");
+  return { ok: true, exampleUpdatedAt: Date.now() };
+}
+
+/** Forget the example. The slot keeps working; it just loses its reference shot. */
+export async function removePhotoExampleAction(itemId: string) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Only admins can set example photos.");
+
+  const item = await ownedItem(user.companyId, itemId);
+  if (!item) return fail("Photo slot not found.");
+
+  // The object is left in storage rather than deleted: an admin who removes the
+  // wrong one loses a click, not a file, and nothing else points at the key.
+  await prisma.photoTemplateItem.update({
+    where: { id: item.id },
+    data: { exampleKey: null, exampleUpdatedAt: null },
+  });
   revalidatePath("/portal/settings/photo-templates");
   return ok();
 }
