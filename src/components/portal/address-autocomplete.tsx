@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MapPin, Loader2, X } from "lucide-react";
+import { MapPin, Loader2, X, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { AddressSuggestion, SuggestResult } from "@/server/modules/geo/suggest";
@@ -44,7 +44,11 @@ const portalTransport: SuggestTransport = {
     const res = await fetch(
       `/api/geocode/autocomplete?q=${encodeURIComponent(q)}&session=${encodeURIComponent(sessionToken)}&scope=${scope}`
     );
-    if (!res.ok) return { results: [], source: "none" };
+    if (!res.ok) {
+      // Our own route failed, so nothing downstream was even consulted. Saying
+      // "no matching address" here would blame the customer's house for a 500.
+      return { results: [], source: "none", degraded: `address lookup route returned ${res.status}` };
+    }
     return res.json();
   },
   async resolve(placeId, sessionToken) {
@@ -130,6 +134,8 @@ export function AddressAutocomplete({
     staleTime: 5 * 60 * 1000,
   });
   const results = React.useMemo(() => data?.results ?? [], [data]);
+  // Why the list is empty, when the reason is us rather than the address.
+  const degraded = data?.degraded ?? null;
 
   // A new query means a new result set, so the highlight goes back to the top.
   // Adjusted during render rather than in an effect: an effect would paint one
@@ -250,9 +256,26 @@ export function AddressAutocomplete({
           className="absolute z-[1100] mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg"
         >
           {results.length === 0 ? (
-            <p className="px-2 py-2 text-sm text-muted-foreground">
-              {isFetching ? "Searching…" : "No matching address."}
-            </p>
+            isFetching ? (
+              <p className="px-2 py-2 text-sm text-muted-foreground">Searching…</p>
+            ) : degraded ? (
+              // Every address provider we have was unreachable. The house may
+              // well exist — this field simply cannot say. Telling a rep "no
+              // matching address" here is what let a disabled API hide for
+              // sixteen days: it reads as a fact about the customer.
+              <div className="px-2 py-2">
+                <p className="flex items-start gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  Address lookup is unavailable
+                </p>
+                <p className="mt-0.5 pl-5 text-xs leading-snug text-muted-foreground">
+                  Not a problem with this address — type it in full and carry on. Tell an admin if
+                  it keeps happening.
+                </p>
+              </div>
+            ) : (
+              <p className="px-2 py-2 text-sm text-muted-foreground">No matching address.</p>
+            )
           ) : (
             results.map((r, i) => (
               <button

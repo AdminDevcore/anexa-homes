@@ -192,3 +192,52 @@ test("field map: the search box offers house numbers too", async ({ page }) => {
     timeout: 10000,
   });
 });
+
+/**
+ * The 2026-08-24 failure, from the rep's side.
+ *
+ * Places API (New) had never been enabled on the Google Cloud project, so every
+ * suggestion call came back 403 and the field quietly fell through to a free
+ * geocoder that has no data on new-construction streets. What a rep saw was
+ * "No matching address." — a sentence about the customer's house, for a problem
+ * that was entirely ours. It read as a fact, so nobody reported it, and it
+ * stood for sixteen days.
+ *
+ * The field must now be able to tell the two states apart out loud.
+ */
+async function stubEmptySuggestions(page: Page, degraded: string | null) {
+  await page.route("**/api/geocode/autocomplete*", async (route) => {
+    await route.fulfill({ json: { results: [], source: "none", degraded } });
+  });
+}
+
+test("an outage says the lookup is unavailable, and never blames the address", async ({ page }) => {
+  await stubEmptySuggestions(page, "Address lookup is unavailable.");
+  await login(page, "manager@anexahomes.com");
+  await page.goto("/portal/leads/new");
+
+  const address = addressBox(page);
+  await expect(address).toBeVisible({ timeout: 15000 });
+  await address.fill("23330 wise walk drive katy tx");
+
+  await expect(page.getByText("Address lookup is unavailable")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("No matching address.")).toHaveCount(0);
+  // And the rep is told to carry on, because a broken dropdown must never be a
+  // reason a lead does not get written down.
+  await expect(page.getByText(/type it in full and carry on/i)).toBeVisible();
+});
+
+test("a genuine miss still says so, plainly", async ({ page }) => {
+  await stubEmptySuggestions(page, null);
+  await login(page, "manager@anexahomes.com");
+  await page.goto("/portal/leads/new");
+
+  const address = addressBox(page);
+  await expect(address).toBeVisible({ timeout: 15000 });
+  await address.fill("zzzzqqq nonexistent street");
+
+  // Every provider answered and none of them knew it. That IS a fact about the
+  // address, and the old wording is the right one for it.
+  await expect(page.getByText("No matching address.")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText("Address lookup is unavailable")).toHaveCount(0);
+});

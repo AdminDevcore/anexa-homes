@@ -1,19 +1,33 @@
 import {
   placesAutocomplete,
   placesConfigured,
-  type PlacePrediction,
   type PlaceScope,
+  type PlacesAutocompleteResult,
   type ResolvedAddress,
 } from "./places";
+import { googleGeocodeSuggest, type GeocodeSuggestResult } from "./geocode-suggest";
 
 /**
  * One answer to "what addresses might this half-typed line be", for every form
  * that asks — the same role `resolve.ts` plays for "where is this house".
  *
- * Places first, Nominatim only when Places can't answer. A free coarse
- * suggestion beats an empty dropdown, but it must never outrank a paid exact
- * one: Nominatim's best offer for a TIGER-only street is the street itself,
- * which is what sent reps back to typing house numbers by hand.
+ * Three tiers, best first, each one only consulted because the one above it
+ * came back empty:
+ *
+ *   1. Places (New)      real autocomplete; houses from a half-typed line
+ *   2. Google Geocoding  not an autocomplete, but knows every address Google
+ *                        knows — and is enabled on the same key already
+ *   3. Nominatim         free, keyless, and blind on new construction
+ *
+ * Tier 2 is there because of 2026-08-24: Places API (New) had never been
+ * enabled on the project, so tier 1 returned 403 on every keystroke and tier 3
+ * had never heard of a two-year-old street in Katy. The field told a rep "No
+ * matching address" for a house that Google could describe down to the roof.
+ * One unticked console checkbox should not be able to do that, so now it can't.
+ *
+ * A coarse suggestion beats an empty dropdown, but it must never outrank an
+ * exact one: Nominatim's best offer for a TIGER-only street is the street
+ * itself, which is what sent reps back to typing house numbers by hand.
  *
  * The two geocoders disagree about WHEN the coordinates are known, and the shape
  * below is that disagreement made explicit. Places gives a placeId now and the
@@ -35,11 +49,42 @@ export type AddressSuggestion = {
   parts: ResolvedAddress | null;
 };
 
-export type SuggestSource = "google" | "nominatim" | "none";
-export type SuggestResult = { results: AddressSuggestion[]; source: SuggestSource };
+export type SuggestSource = "google" | "google_geocode" | "nominatim" | "none";
+
+export type SuggestResult = {
+  results: AddressSuggestion[];
+  source: SuggestSource;
+  /**
+   * Set when a provider that IS configured failed to answer — a disabled API,
+   * a spent quota, a dead network. Null when every provider was reachable and
+   * simply had nothing, which is the ordinary "no such address" case.
+   *
+   * The distinction is the entire lesson of this bug. Without it the dropdown
+   * cannot tell a rep whether the house is missing or the lookup is, and it
+   * spent sixteen days confidently telling them the wrong one.
+   */
+  degraded: string | null;
+};
 
 /** Below this, a query is too generic to be worth a billable request. */
 export const MIN_QUERY = 3;
+
+/** What a browser is allowed to be told about an outage. */
+export const DEGRADED_PUBLIC = "Address lookup is unavailable.";
+
+/**
+ * Strip a provider's own words for why it failed before the result leaves the
+ * server.
+ *
+ * Google's 403 helpfully names the cloud project, the disabled service and the
+ * console URL that fixes it. That is exactly the right message for a log line
+ * and for the admin health check, and exactly the wrong one to hand to every
+ * logged-in rep's devtools. The dropdown only ever needed to know THAT the
+ * lookup failed, so that is all it gets.
+ */
+export function forClient(result: SuggestResult): SuggestResult {
+  return result.degraded ? { ...result, degraded: DEGRADED_PUBLIC } : result;
+}
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 
@@ -128,8 +173,9 @@ export function parseNominatimSuggestions(data: unknown): AddressSuggestion[] {
     .filter((s): s is AddressSuggestion => s !== null && !!s.label);
 }
 
-/** Ask Nominatim for suggestions. Polite User-Agent + US scope, as elsewhere. */
-async function nominatimSuggest(q: string): Promise<AddressSuggestion[]> {
+/** Ask Nominatim for suggestions. Polite User-Agent + US scope, as elsewhere.
+ *  Exported so the health probe can reach the last tier directly. */
+export async function nominatimSuggest(q: string): Promise<AddressSuggestion[]> {
   try {
     const url =
       `${NOMINATIM_URL}?format=jsonv2&addressdetails=1&countrycodes=us&limit=6` +
@@ -146,13 +192,19 @@ async function nominatimSuggest(q: string): Promise<AddressSuggestion[]> {
 }
 
 type Deps = {
-  places: (input: string, sessionToken: string, scope: PlaceScope) => Promise<PlacePrediction[]>;
+  places: (
+    input: string,
+    sessionToken: string,
+    scope: PlaceScope
+  ) => Promise<PlacesAutocompleteResult>;
+  geocode: (q: string, scope: PlaceScope) => Promise<GeocodeSuggestResult>;
   nominatim: (q: string) => Promise<AddressSuggestion[]>;
   hasPlaces: () => boolean;
 };
 
 const REAL: Deps = {
   places: (input, sessionToken, scope) => placesAutocomplete(input, sessionToken, { scope }),
+  geocode: (q, scope) => googleGeocodeSuggest(q, scope),
   nominatim: nominatimSuggest,
   hasPlaces: () => placesConfigured(),
 };
@@ -170,18 +222,29 @@ export async function suggestAddresses(
   overrides: Partial<Deps> = {},
   scope: PlaceScope = "address"
 ): Promise<SuggestResult> {
-  const { places, nominatim, hasPlaces } = { ...REAL, ...overrides };
+  const { places, geocode, nominatim, hasPlaces } = { ...REAL, ...overrides };
   const query = q.trim();
-  if (query.length < MIN_QUERY) return { results: [], source: "none" };
+  if (query.length < MIN_QUERY) return { results: [], source: "none", degraded: null };
+
+  // Every provider that was configured, tried, and could not be reached. Carried
+  // to the end even when a later tier saves the lookup, because "it worked, but
+  // your best geocoder is down" is precisely the state nobody noticed for
+  // sixteen days.
+  const problems: string[] = [];
 
   if (hasPlaces()) {
     // A thrown Places call is a reason to fall back, not to fail the field —
     // the rep is mid-keystroke and an empty dropdown reads as "no such address".
-    const hits = await places(query, sessionToken, scope).catch(() => [] as PlacePrediction[]);
-    if (hits.length > 0) {
+    const hit = await places(query, sessionToken, scope).catch((err: Error) => ({
+      predictions: [],
+      failure: `request failed — ${err?.message ?? "unknown"}`,
+    }));
+    if (hit.failure) problems.push(`Places: ${hit.failure}`);
+    if (hit.predictions.length > 0) {
       return {
         source: "google",
-        results: hits.map((h) => ({
+        degraded: null,
+        results: hit.predictions.map((h) => ({
           label: h.label,
           primary: h.primary,
           secondary: h.secondary,
@@ -192,6 +255,31 @@ export async function suggestAddresses(
     }
   }
 
+  // Tier 2. Same key, different API, and the one that actually knows the newest
+  // subdivisions. Arrives complete, so a pick costs no second request.
+  const geo = await geocode(query, scope).catch((err: Error) => ({
+    candidates: [],
+    failure: `request failed — ${err?.message ?? "unknown"}`,
+  }));
+  if (geo.failure) problems.push(`Geocoding: ${geo.failure}`);
+  if (geo.candidates.length > 0) {
+    return {
+      source: "google_geocode",
+      degraded: problems.length > 0 ? problems.join("; ") : null,
+      results: geo.candidates.map((c) => ({
+        label: c.label,
+        primary: c.primary,
+        secondary: c.secondary,
+        placeId: null,
+        parts: c.parts,
+      })),
+    };
+  }
+
   const osm = await nominatim(query).catch(() => [] as AddressSuggestion[]);
-  return { results: osm, source: osm.length > 0 ? "nominatim" : "none" };
+  return {
+    results: osm,
+    source: osm.length > 0 ? "nominatim" : "none",
+    degraded: problems.length > 0 ? problems.join("; ") : null,
+  };
 }

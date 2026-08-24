@@ -36,6 +36,21 @@ export type PlacePrediction = {
   label: string;
 };
 
+/**
+ * What one autocomplete call produced.
+ *
+ * `failure` is the load-bearing half. Places answers "the API is not enabled"
+ * with an `error` envelope and no suggestions — byte-for-byte the same empty
+ * list as "nothing matched" — so a caller that only sees `predictions` cannot
+ * tell an unfindable address from an unreachable provider, and will happily
+ * render "No matching address." over a live outage.
+ */
+export type PlacesAutocompleteResult = {
+  predictions: PlacePrediction[];
+  /** null = the call worked. A string = why it did not, for logs and health checks. */
+  failure: string | null;
+};
+
 /** A picked address, resolved to everything the forms need. */
 export type ResolvedAddress = {
   address: string;
@@ -73,10 +88,54 @@ const CITY_TYPES = [
   "neighborhood",
 ];
 
-type Component = { longText?: string; shortText?: string; types?: string[] };
+export type Component = { longText?: string; shortText?: string; types?: string[] };
 
 function component(list: Component[], type: string): Component | undefined {
   return list.find((c) => (c.types ?? []).includes(type));
+}
+
+/**
+ * Components → the four fields a form actually has.
+ *
+ * Exported because the Geocoding fallback in `geocode-suggest.ts` answers the
+ * same question from a differently-spelled payload, and two copies of this
+ * mapping is how "the city is blank on some addresses" gets shipped twice.
+ */
+export function addressPartsFromComponents(parts: Component[]): {
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+} {
+  const number = component(parts, "street_number")?.longText ?? "";
+  // shortText on a route is the postal abbreviation ("Shoreline St"), which is
+  // what a mailing address wants and what the rest of the app stores.
+  const route = component(parts, "route")?.shortText ?? component(parts, "route")?.longText ?? "";
+
+  let city = "";
+  for (const t of CITY_TYPES) {
+    const hit = component(parts, t);
+    if (hit?.longText) {
+      city = hit.longText;
+      break;
+    }
+  }
+
+  return {
+    address: [number, route].filter(Boolean).join(" ").trim(),
+    city,
+    // Already a two-letter code — the Nominatim path needs a 51-entry name→code
+    // table to get here, Places just says "TX".
+    state: component(parts, "administrative_area_level_1")?.shortText ?? "",
+    zip: component(parts, "postal_code")?.longText ?? "",
+  };
+}
+
+/** Does this address name a specific building? A suggestion without a house
+ *  number sends the rep back to typing it by hand, which is the bug the whole
+ *  Places path exists to kill. */
+export function hasStreetNumber(parts: Component[]): boolean {
+  return !!component(parts, "street_number")?.longText;
 }
 
 /** Split a flat "1 Main St, Dallas, TX, USA" line the way structuredFormat would. */
@@ -151,28 +210,9 @@ export function parsePlaceDetails(data: unknown): ResolvedAddress | null {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
   const parts = d.addressComponents ?? [];
-  const number = component(parts, "street_number")?.longText ?? "";
-  // shortText on a route is the postal abbreviation ("Shoreline St"), which is
-  // what a mailing address wants and what the rest of the app stores.
-  const route = component(parts, "route")?.shortText ?? component(parts, "route")?.longText ?? "";
-
-  let city = "";
-  for (const t of CITY_TYPES) {
-    const hit = component(parts, t);
-    if (hit?.longText) {
-      city = hit.longText;
-      break;
-    }
-  }
-
   const types = d.types ?? [];
   return {
-    address: [number, route].filter(Boolean).join(" ").trim(),
-    city,
-    // Already a two-letter code — the Nominatim path needs a 51-entry name→code
-    // table to get here, Places just says "TX".
-    state: component(parts, "administrative_area_level_1")?.shortText ?? "",
-    zip: component(parts, "postal_code")?.longText ?? "",
+    ...addressPartsFromComponents(parts),
     lat,
     lng,
     formatted: d.formattedAddress ?? "",
@@ -240,9 +280,9 @@ export async function placesAutocomplete(
   input: string,
   sessionToken: string,
   opts: { key?: string; signal?: AbortSignal; scope?: PlaceScope } = {}
-): Promise<PlacePrediction[]> {
+): Promise<PlacesAutocompleteResult> {
   const key = opts.key ?? process.env.GOOGLE_MAPS_API_KEY;
-  if (!key || !input.trim()) return [];
+  if (!key || !input.trim()) return { predictions: [], failure: null };
 
   try {
     const res = await fetch(AUTOCOMPLETE_URL, {
@@ -253,16 +293,20 @@ export async function placesAutocomplete(
       signal: opts.signal,
     });
     const data = await res.json();
-    const results = parseAutocomplete(data);
+    const predictions = parseAutocomplete(data);
     // An empty list is ordinary (nothing matched "zzz"); an error envelope is
     // not, and is the difference between "no such address" and "you never
-    // enabled the API".
-    if (results.length === 0 && data && typeof data === "object" && "error" in data) {
-      console.warn("[geo] places autocomplete failed:", placesStatusReason(data));
+    // enabled the API". That difference used to live only in this log line,
+    // which is how the API sat disabled for sixteen days while the dropdown
+    // told reps their customer's house did not exist.
+    if (predictions.length === 0 && data && typeof data === "object" && "error" in data) {
+      const failure = placesStatusReason(data);
+      console.warn("[geo] places autocomplete failed:", failure);
+      return { predictions, failure };
     }
-    return results;
-  } catch {
-    return [];
+    return { predictions, failure: null };
+  } catch (err) {
+    return { predictions: [], failure: `request failed — ${(err as Error)?.message ?? "unknown"}` };
   }
 }
 

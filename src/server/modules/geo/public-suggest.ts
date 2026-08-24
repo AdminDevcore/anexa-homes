@@ -1,7 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
-import { suggestAddresses, type SuggestResult } from "./suggest";
+import { forClient, suggestAddresses, type SuggestResult } from "./suggest";
 import { placeDetails } from "./places";
 import type { PlaceScope, ResolvedAddress } from "./places";
 import { createThrottle } from "./throttle";
@@ -48,8 +48,9 @@ export async function publicSuggestAddresses(
   sessionToken: string,
   scope: PlaceScope = "address"
 ): Promise<SuggestResult> {
-  if (!suggestThrottle.allow(await callerKey())) return { results: [], source: "none" };
-  return suggestAddresses(q, sessionToken, {}, scope);
+  if (!suggestThrottle.allow(await callerKey()))
+    return { results: [], source: "none", degraded: null };
+  return forClient(await suggestAddresses(q, sessionToken, {}, scope));
 }
 
 /** Resolve a picked prediction for the public form. */

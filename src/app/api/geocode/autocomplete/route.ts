@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/server/auth/session";
-import { suggestAddresses } from "@/server/modules/geo/suggest";
+import { forClient, suggestAddresses } from "@/server/modules/geo/suggest";
 
 /**
  * Address suggestions for entry forms — the New Appointment form, the Edit Job
@@ -17,7 +17,8 @@ import { suggestAddresses } from "@/server/modules/geo/suggest";
 
 export async function GET(req: Request) {
   const user = await getSessionUser();
-  if (!user) return NextResponse.json({ results: [], source: "none" }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ results: [], source: "none", degraded: null }, { status: 401 });
 
   const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
@@ -30,5 +31,5 @@ export async function GET(req: Request) {
   // than a house (the storm coverage centre). Anything else means houses only.
   const scope = url.searchParams.get("scope") === "broad" ? "broad" : "address";
 
-  return NextResponse.json(await suggestAddresses(q, session, {}, scope));
+  return NextResponse.json(forClient(await suggestAddresses(q, session, {}, scope)));
 }
