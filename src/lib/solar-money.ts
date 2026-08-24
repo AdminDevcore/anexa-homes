@@ -38,6 +38,43 @@ export type SolarAssumptions = {
 // ---------------------------------------------------------------------------
 
 /**
+ * The margin every quoted kWh is held back by, as a percentage.
+ *
+ * NOT a loss and NOT part of the model. `derateFactor` is an estimate of what
+ * the equipment actually loses — inverter, wiring, soiling — and PVWatts is a
+ * simulation of what the sky actually delivers; both are attempts at the truth,
+ * and both can be a little high. This is the company deliberately quoting
+ * UNDER whichever of them answered, so that a system lands at or above what the
+ * homeowner was promised rather than a few percent below it. A year-one figure
+ * a customer beats is a referral; one they miss is a complaint.
+ *
+ * It is a constant rather than a Solar Settings field on purpose: it is a
+ * promise the company makes about every quote, not a knob a branch tunes per
+ * market. The one place to change it is here, and everything that prints a kWh
+ * moves with it.
+ *
+ * Applied ONCE, at the leaves — `year1Production`,
+ * `year1ProductionFromArrays`, the measured-plane branch of `systemTotals` and
+ * the monthly curve. Everything downstream (offset, savings, the year-by-year
+ * projection, the auto-prune's target) is built from those and inherits it, so
+ * applying it anywhere else would take the 5% twice.
+ */
+export const PRODUCTION_MARGIN_PCT = 5;
+
+/** What survives the margin: 0.95 at 5%. */
+export const PRODUCTION_MARGIN_FACTOR = 1 - PRODUCTION_MARGIN_PCT / 100;
+
+/**
+ * A modelled kWh figure, held back by the margin above.
+ *
+ * Unrounded — the callers round, and rounding here would round twice.
+ */
+export function withProductionMargin(kwh: number): number {
+  if (!Number.isFinite(kwh) || kwh <= 0) return 0;
+  return kwh * PRODUCTION_MARGIN_FACTOR;
+}
+
+/**
  * The physical ceiling on TSRF, and the point below which a site is a shading
  * problem rather than a design. Both are sanity rails, not business policy —
  * a TSRF of 0 or 140 is a typo, and the proposal must not price it.
@@ -68,7 +105,9 @@ export function year1Production(
 ): number {
   if (systemSizeKwDc <= 0) return 0;
   const tsrf = tsrfPct == null ? 100 : tsrfPct;
-  return Math.round(systemSizeKwDc * a.kwhPerKwYear * a.derateFactor * (tsrf / 100));
+  return Math.round(
+    withProductionMargin(systemSizeKwDc * a.kwhPerKwYear * a.derateFactor * (tsrf / 100))
+  );
 }
 
 /**
@@ -103,7 +142,7 @@ export function year1ProductionFromArrays(
     const factor = Number.isFinite(arr.orientationFactor) ? arr.orientationFactor : 1;
     return sum + arr.kwDc * a.kwhPerKwYear * a.derateFactor * Math.max(0, factor);
   }, 0);
-  return Math.round(kwh);
+  return Math.round(withProductionMargin(kwh));
 }
 
 /**

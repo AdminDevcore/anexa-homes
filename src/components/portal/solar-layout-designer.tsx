@@ -56,7 +56,7 @@ import {
   pitchToTiltDeg,
   COMMON_PITCHES,
 } from "@/lib/solar-orientation";
-import type { YieldAssumptions } from "@/lib/solar-money";
+import { withProductionMargin, type YieldAssumptions } from "@/lib/solar-money";
 import { saveSolarLayoutAction } from "@/server/modules/solar/layout-actions";
 import { setSolarDesignEquipmentAction } from "@/server/modules/solar/equipment-actions";
 import { uploadPanelLayoutAction } from "@/server/modules/solar/proposal-actions";
@@ -497,13 +497,19 @@ export function SolarLayoutDesigner({
         b.tiltDeg == null || b.azimuthDeg == null
           ? null
           : (measuredYields[`${b.tiltDeg}|${b.azimuthDeg}`] ?? null);
-      if (measured != null) return kw * measured * shade;
+      // Held back by the same margin `systemTotals` quotes with, so the panel
+      // this ranks last is worth what the figure beside the roof says it is —
+      // and so the prune-to-usage target is measured in the same kWh the
+      // offset is.
+      if (measured != null) return withProductionMargin(kw * measured * shade);
       const factor = orientationFactor({
         lat,
         tiltDeg: b.tiltDeg ?? null,
         azimuthDeg: b.azimuthDeg ?? null,
       });
-      return kw * assumptions.kwhPerKwYear * assumptions.derateFactor * factor * shade;
+      return withProductionMargin(
+        kw * assumptions.kwhPerKwYear * assumptions.derateFactor * factor * shade
+      );
     },
     [assumptions, lat, measuredYields, moduleRatingW]
   );

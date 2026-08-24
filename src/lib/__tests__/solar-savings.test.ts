@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { savingsModel, buildProposalSnapshot } from "@/lib/solar-proposal";
 import {
   year1Production,
+  PRODUCTION_MARGIN_FACTOR,
   deriveUtilityRateMills,
   pricePurchase,
   type SolarAssumptions,
@@ -28,8 +29,8 @@ describe("production accounts for the roof it is actually going on", () => {
     // The capability stays here for the day roof faces are traced properly.
     const unshaded = year1Production(8, A, 100);
     const shaded = year1Production(8, A, 85);
-    expect(unshaded).toBe(Math.round(8 * 1450 * 0.84));
-    expect(shaded).toBe(Math.round(8 * 1450 * 0.84 * 0.85));
+    expect(unshaded).toBe(Math.round(8 * 1450 * 0.84 * PRODUCTION_MARGIN_FACTOR));
+    expect(shaded).toBe(Math.round(8 * 1450 * 0.84 * 0.85 * PRODUCTION_MARGIN_FACTOR));
     expect(shaded).toBeLessThan(unshaded);
   });
 

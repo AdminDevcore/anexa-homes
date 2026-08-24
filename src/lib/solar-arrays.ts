@@ -14,6 +14,7 @@ import { orientationFactor, compassLabel } from "./solar-orientation";
 import {
   year1ProductionFromArrays,
   blendedOrientationFactor,
+  withProductionMargin,
   type YieldAssumptions,
 } from "./solar-money";
 
@@ -178,7 +179,10 @@ export function monthlyProduction(
     for (let i = 0; i < 12; i++) total[i] += a.kwDc * perKw[i] * a.shadeFactor;
   }
 
-  const rounded = total.map((n) => Math.round(n));
+  // The same margin the annual figure is held back by — see
+  // `PRODUCTION_MARGIN_PCT`. A curve drawn at full model output beside an
+  // annual total quoted 5% under it would not add up to it.
+  const rounded = total.map((n) => Math.round(withProductionMargin(n)));
   // Twelve zeros is a cache row that answered with an empty year, not a system
   // that makes nothing.
   return rounded.some((n) => n > 0) ? rounded : null;
@@ -218,7 +222,7 @@ export function systemTotals(
         year1ProductionFromArrays([{ kwDc: a.kwDc, orientationFactor: a.factor }], opts.assumptions)
       );
     }
-    return sum + Math.round(a.kwDc * a.measuredKwhPerKwYear * a.shadeFactor);
+    return sum + Math.round(withProductionMargin(a.kwDc * a.measuredKwhPerKwYear * a.shadeFactor));
   }, 0);
 
   return {

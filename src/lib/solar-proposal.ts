@@ -7,6 +7,7 @@ import {
   priceThirdParty,
   productionInYear,
   loanPaymentCents,
+  PRODUCTION_MARGIN_PCT,
   type SolarAssumptions,
   type PurchaseBreakdown,
   type ThirdPartyBreakdown,
@@ -642,6 +643,16 @@ export type SolarProposalSnapshot = {
      */
     yieldBasis?: YieldBasis | null;
     /**
+     * How far UNDER the model this document's production was quoted, %.
+     *
+     * Frozen rather than read live from `PRODUCTION_MARGIN_PCT`, and absent on
+     * every proposal built before the margin existed. Those documents were
+     * built at full model output, and printing today's constant on one would
+     * make the assumptions list — the one section whose whole job is to be
+     * true — describe a haircut that number never took.
+     */
+    productionMarginPct?: number;
+    /**
      * What the company is willing to claim an owned system adds to a home's
      * value, %. v4.
      *
@@ -1117,6 +1128,7 @@ export function buildProposalSnapshot(args: {
     assumptions: {
       ...a,
       currentRateMillsPerKwh,
+      productionMarginPct: PRODUCTION_MARGIN_PCT,
       ...(args.yieldBasis ? { yieldBasis: args.yieldBasis } : {}),
       ...(args.homeValueUpliftPct && args.homeValueUpliftPct > 0
         ? { homeValueUpliftPct: args.homeValueUpliftPct }

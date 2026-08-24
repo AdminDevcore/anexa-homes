@@ -12,6 +12,9 @@ import {
   type FinalPpwCap,
   year1Production,
   offsetPct,
+  withProductionMargin,
+  PRODUCTION_MARGIN_PCT,
+  PRODUCTION_MARGIN_FACTOR,
   type SolarAssumptions,
 } from "@/lib/solar-money";
 import {
@@ -476,7 +479,16 @@ describe("a rep cannot generate a nonsense proposal", () => {
 
 describe("production maths", () => {
   it("derives year-one production from size, irradiance and derate", () => {
-    expect(year1Production(10, A)).toBe(Math.round(10 * 1450 * 0.84));
+    expect(year1Production(10, A)).toBe(Math.round(10 * 1450 * 0.84 * PRODUCTION_MARGIN_FACTOR));
+  });
+  it("quotes every figure under the model by the production margin", () => {
+    expect(PRODUCTION_MARGIN_PCT).toBe(5);
+    expect(withProductionMargin(10_000)).toBe(9_500);
+    // A margin is a haircut, never a bonus, and never turns nothing into
+    // something.
+    expect(withProductionMargin(0)).toBe(0);
+    expect(withProductionMargin(-5)).toBe(0);
+    expect(withProductionMargin(Number.NaN)).toBe(0);
   });
   it("offset is production over usage", () => {
     expect(offsetPct(12_180, 14_000)).toBeCloseTo(87, 0);

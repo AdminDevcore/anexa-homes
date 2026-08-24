@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { arrayBreakdown, systemTotals } from "../solar-arrays";
+import { PRODUCTION_MARGIN_FACTOR } from "../solar-money";
 import type { LayoutBlock } from "../solar-layout";
 
 const ASSUMPTIONS = { kwhPerKwYear: 1500, derateFactor: 0.85 };
@@ -44,7 +45,9 @@ describe("shading", () => {
       moduleRatingW: 400,
       assumptions: ASSUMPTIONS,
     });
-    expect(shaded.year1ProductionKwh).toBeCloseTo(clear.year1ProductionKwh / 2, 0);
+    // Within a rounding step: both figures are rounded whole kWh, so half of
+    // one is not exactly the other.
+    expect(shaded.year1ProductionKwh).toBeCloseTo(clear.year1ProductionKwh / 2, -1);
     // Panel count and kW are physical: a tree does not remove a module.
     expect(shaded.panels).toBe(clear.panels);
     expect(shaded.systemSizeKwDc).toBeCloseTo(clear.systemSizeKwDc, 6);
@@ -102,9 +105,9 @@ describe("a measured plane outranks the market average", () => {
       assumptions: ASSUMPTIONS,
       planeYield: measured(1600),
     });
-    // 10 panels × 400 W = 4 kW, at 1,600 kWh/kW.
+    // 10 panels × 400 W = 4 kW, at 1,600 kWh/kW, quoted under by the margin.
     expect(totals.systemSizeKwDc).toBeCloseTo(4, 6);
-    expect(totals.year1ProductionKwh).toBe(6400);
+    expect(totals.year1ProductionKwh).toBe(Math.round(6400 * PRODUCTION_MARGIN_FACTOR));
     expect(totals.measuredArrays).toBe(1);
   });
 
@@ -127,7 +130,7 @@ describe("a measured plane outranks the market average", () => {
     const totals = systemTotals([block({ shadePct: 50 })], {
       lat: LAT, moduleRatingW: 400, assumptions: ASSUMPTIONS, planeYield: measured(1600),
     });
-    expect(totals.year1ProductionKwh).toBe(3200);
+    expect(totals.year1ProductionKwh).toBe(Math.round(3200 * PRODUCTION_MARGIN_FACTOR));
   });
 
   it("falls back to the market average for a plane nothing has answered for", () => {
@@ -159,7 +162,9 @@ describe("a measured plane outranks the market average", () => {
     });
     expect(totals.measuredArrays).toBe(1);
     expect(totals.unorientedArrays).toBe(1);
-    expect(totals.year1ProductionKwh).toBe(6400 + marketOnly.year1ProductionKwh);
+    expect(totals.year1ProductionKwh).toBe(
+      Math.round(6400 * PRODUCTION_MARGIN_FACTOR) + marketOnly.year1ProductionKwh
+    );
   });
 
   it("reports nothing measured when no lookup is given at all", () => {

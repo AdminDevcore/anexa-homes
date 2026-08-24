@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PRODUCTION_MARGIN_FACTOR } from "@/lib/solar-money";
 import {
   arrayProductionKwh,
   derateToLossesPct,
@@ -200,11 +201,15 @@ describe("the sanity rail", () => {
 
 describe("what one array makes", () => {
   it("is its size times its plane's yield", () => {
-    expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: null })).toBe(15000);
+    expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: null })).toBe(
+      15000 * PRODUCTION_MARGIN_FACTOR
+    );
   });
 
   it("takes the shade off afterwards, exactly as the request left it out", () => {
-    expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: 50 })).toBe(7500);
+    expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: 50 })).toBe(
+      7500 * PRODUCTION_MARGIN_FACTOR
+    );
     expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: 100 })).toBe(0);
   });
 
@@ -215,6 +220,8 @@ describe("what one array makes", () => {
 
   it("clamps a shade that arrived out of range", () => {
     expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: 250 })).toBe(0);
-    expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: -50 })).toBe(15000);
+    expect(arrayProductionKwh({ kwDc: 10, kwhPerKwYear: 1500, shadePct: -50 })).toBe(
+      15000 * PRODUCTION_MARGIN_FACTOR
+    );
   });
 });

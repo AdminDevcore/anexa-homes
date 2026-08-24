@@ -27,6 +27,8 @@
  * and a module that fetches cannot be tested without pretending to be the API.
  */
 
+import { withProductionMargin } from "./solar-money";
+
 /** Fixed roof mount runs hotter than an open rack, and PVWatts knows it. */
 export type ArrayType = "roof" | "ground";
 
@@ -183,5 +185,8 @@ export function arrayProductionKwh(args: {
 }): number {
   if (!(args.kwDc > 0) || !(args.kwhPerKwYear > 0)) return 0;
   const shade = Math.max(0, Math.min(100, args.shadePct ?? 0));
-  return args.kwDc * args.kwhPerKwYear * (1 - shade / 100);
+  // Quoted under the model like every other production figure — see
+  // `PRODUCTION_MARGIN_PCT`. This is a leaf: nothing that calls it may apply
+  // the margin again.
+  return withProductionMargin(args.kwDc * args.kwhPerKwYear * (1 - shade / 100));
 }

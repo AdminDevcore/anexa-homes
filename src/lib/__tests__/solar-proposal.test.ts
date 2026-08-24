@@ -8,7 +8,7 @@ import {
   SOLAR_FAQS,
   ESTIMATE_DISCLAIMER,
 } from "@/lib/solar-proposal";
-import type { SolarAssumptions } from "@/lib/solar-money";
+import { PRODUCTION_MARGIN_PCT, type SolarAssumptions } from "@/lib/solar-money";
 
 const A: SolarAssumptions = {
   derateFactor: 0.84,
@@ -71,6 +71,13 @@ describe("the proposal snapshot is self-contained and frozen", () => {
     expect(s.assumptions.kwhPerKwYear).toBe(1450);
     // Derived from the customer's OWN bill, not an invented national average.
     expect(s.assumptions.currentRateMillsPerKwh).toBe(180); // $210×12 / 14,000 kWh
+  });
+
+  it("freezes how far under the model its production was quoted", () => {
+    // The document says so out loud, so the figure has to travel with it — a
+    // proposal that read today's constant would describe a haircut its own
+    // numbers never took the day the constant changes.
+    expect(build().assumptions.productionMarginPct).toBe(PRODUCTION_MARGIN_PCT);
   });
 
   it("carries the non-binding-estimate disclaimer on every proposal", () => {

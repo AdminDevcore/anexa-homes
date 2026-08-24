@@ -10,6 +10,7 @@ import {
   type LayoutBlock,
 } from "../solar-layout";
 import { systemTotals, arrayBreakdown } from "../solar-arrays";
+import { PRODUCTION_MARGIN_FACTOR } from "../solar-money";
 
 const M = MODULE_FALLBACK_MM; // 1.134 m x 1.762 m
 const DFW = 32.9;
@@ -142,13 +143,14 @@ describe("systemTotals", () => {
   });
 
   it("prices an undescribed array exactly as it did before orientation existed", () => {
-    // The no-regression guarantee. 10 x 400 W = 4 kW; 4 x 1450 x 0.85 = 4930.
+    // 10 x 400 W = 4 kW; 4 x 1450 x 0.85 = 4930, less the 5% production
+    // margin every quoted kWh is held back by.
     const totals = systemTotals([roof({ id: "u" })], {
       lat: DFW,
       moduleRatingW: 400,
       assumptions: ASSUMPTIONS,
     });
-    expect(totals.year1ProductionKwh).toBe(4930);
+    expect(totals.year1ProductionKwh).toBe(Math.round(4930 * PRODUCTION_MARGIN_FACTOR));
     expect(totals.unorientedArrays).toBe(1);
     expect(totals.blendedFactor).toBe(1);
   });

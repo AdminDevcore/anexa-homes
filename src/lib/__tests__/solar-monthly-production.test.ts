@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { monthlyProduction, type ArrayBreakdown } from "@/lib/solar-arrays";
+import { PRODUCTION_MARGIN_FACTOR } from "@/lib/solar-money";
 
 /**
  * The rule: a monthly curve is drawn only when every array on the roof was
@@ -29,17 +30,17 @@ const arr = (o: Partial<ArrayBreakdown> = {}): ArrayBreakdown => ({
 describe("the shape of the year", () => {
   it("scales a plane's per-kW year by the array's size", () => {
     const out = monthlyProduction([arr()], () => YEAR)!;
-    expect(out).toEqual(YEAR.map((m) => Math.round(m * 4)));
+    expect(out).toEqual(YEAR.map((m) => Math.round(m * 4 * PRODUCTION_MARGIN_FACTOR)));
   });
 
   it("adds two planes together", () => {
     const out = monthlyProduction([arr(), arr({ id: "a2", kwDc: 2 })], () => YEAR)!;
-    expect(out[0]).toBe(Math.round(YEAR[0] * 6));
+    expect(out[0]).toBe(Math.round(YEAR[0] * 6 * PRODUCTION_MARGIN_FACTOR));
   });
 
   it("takes shading off, exactly as the annual figure does", () => {
     const out = monthlyProduction([arr({ shadeFactor: 0.8, shadePct: 20 })], () => YEAR)!;
-    expect(out[0]).toBe(Math.round(YEAR[0] * 4 * 0.8));
+    expect(out[0]).toBe(Math.round(YEAR[0] * 4 * 0.8 * PRODUCTION_MARGIN_FACTOR));
   });
 
   it("draws nothing when one array on the roof was never simulated", () => {

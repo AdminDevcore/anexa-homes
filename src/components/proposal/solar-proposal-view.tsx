@@ -1266,6 +1266,18 @@ export function SolarProposalView({
                       : ""}
                   </li>
                 )}
+                {/*
+                  Only when the SNAPSHOT carries it. A proposal built before the
+                  margin existed was quoted at full model output, and printing
+                  this on it would describe a haircut its number never took.
+                */}
+                {(s.assumptions.productionMarginPct ?? 0) > 0 && (
+                  <li>
+                    Every production figure above is then quoted{" "}
+                    {s.assumptions.productionMarginPct}% under what that model returns, so the
+                    system is expected to meet or beat what you were shown.
+                  </li>
+                )}
                 <li>Panel degradation: {pct(s.assumptions.annualDegradationPct)} per year</li>
                 <li>Utility rate increase: {pct(s.assumptions.utilityEscalationPct)} per year</li>
                 {s.assumptions.currentRateMillsPerKwh > 0 && (
