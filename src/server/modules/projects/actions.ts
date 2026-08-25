@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
-import type { ProjectStatus, ServiceType, Priority } from "@prisma/client";
+import type { AssignmentKind, ProjectStatus, ServiceType, Priority } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { rawUnscoped } from "@/server/vertical/context";
@@ -238,19 +238,48 @@ export async function unassignCrewAction(projectCrewId: string) {
   return ok();
 }
 
-// --------------------- Install assignees (people, not crews) -----------------
+// --------------------- Visit assignees (people, not crews) -------------------
 
 /**
- * Who is going out on this install.
+ * Everything the deal page has to re-render after a crew change: the job's own
+ * URL, and the DEAL, which is where the crew is actually shown. Only the first
+ * was revalidated before, and `/portal/projects/[id]` is a redirect stub — so
+ * the server cache behind the deal kept serving the old crew and the UI got
+ * away with it purely because the client also calls router.refresh().
+ */
+async function revalidateCrew(projectId: string) {
+  const p = await prisma.project.findUnique({ where: { id: projectId }, select: { leadId: true } });
+  revalidatePath(`/portal/projects/${projectId}`);
+  if (p) revalidatePath(`/portal/leads/${p.leadId}`);
+}
+
+const KIND_LABEL: Record<AssignmentKind, string> = {
+  install: "install",
+  inspection: "inspection",
+};
+
+/**
+ * Who is going out — on ONE of the job's two scheduled visits.
  *
- * People rather than crews: `Crew` exists in the schema but nothing has ever
- * created one, so the crew dropdown hid itself on every job and installs were
- * staffed nowhere. The office knows the names on the day; this records them.
+ * People rather than crews: `Crew` exists in the schema but nothing outside
+ * roofing's seeded three has ever created one, so the crew dropdown hid itself
+ * on every job and installs were staffed nowhere. The office knows the names on
+ * the day; this records them.
+ *
+ * `kind` is what makes the record answer the question that was actually being
+ * asked. An install crew and the inspection crew that follows them are usually
+ * different people, and a row that only says "on this job" cannot be shown
+ * against its own date or filtered onto the right person's calendar.
  *
  * Authorisation deliberately matches crew assignment — whoever could put a crew
  * on a job can put a person on it. Nothing here is a new privilege.
  */
-export async function assignInstallerAction(projectId: string, userId: string, role?: string) {
+export async function assignInstallerAction(
+  projectId: string,
+  userId: string,
+  role?: string,
+  kind: AssignmentKind = "install"
+) {
   const user = await requireUser();
   if (!can(user, "assign", "Crew") && !can(user, "update", "Project")) return fail("Not allowed.");
   if (!(await projectInScope(user, projectId))) return fail("Project not found.");
@@ -263,20 +292,23 @@ export async function assignInstallerAction(projectId: string, userId: string, r
   });
   if (!member) return fail("That person is not on your team.");
 
+  // Scoped to the visit, not the job: the same installer being on both the
+  // install and the inspection is normal, and refusing the second one would be
+  // the bug rather than the guard.
   const existing = await prisma.projectAssignee.findUnique({
-    where: { projectId_userId: { projectId, userId } },
+    where: { projectId_userId_kind: { projectId, userId, kind } },
     select: { id: true },
   });
-  if (existing) return fail("Already on this install.");
+  if (existing) return fail(`Already on this ${KIND_LABEL[kind]}.`);
 
   await prisma.projectAssignee.create({
-    data: { companyId: user.companyId, projectId, userId, role: role?.trim() || null },
+    data: { companyId: user.companyId, projectId, userId, kind, role: role?.trim() || null },
   });
-  revalidatePath(`/portal/projects/${projectId}`);
+  await revalidateCrew(projectId);
   return ok();
 }
 
-/** Change what someone is doing on the install, without removing them. */
+/** Change what someone is doing on the visit, without removing them. */
 export async function setInstallerRoleAction(assigneeId: string, role: string) {
   const user = await requireUser();
   if (!can(user, "assign", "Crew") && !can(user, "update", "Project")) return fail("Not allowed.");
@@ -289,7 +321,7 @@ export async function setInstallerRoleAction(assigneeId: string, role: string) {
     where: { id: assigneeId },
     data: { role: role.trim().slice(0, 60) || null },
   });
-  revalidatePath(`/portal/projects/${row.projectId}`);
+  await revalidateCrew(row.projectId);
   return ok();
 }
 
@@ -302,7 +334,7 @@ export async function unassignInstallerAction(assigneeId: string) {
   });
   if (!row) return fail("Assignment not found.");
   await prisma.projectAssignee.delete({ where: { id: assigneeId } });
-  revalidatePath(`/portal/projects/${row.projectId}`);
+  await revalidateCrew(row.projectId);
   return ok();
 }
 

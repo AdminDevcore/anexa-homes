@@ -1,7 +1,7 @@
 import type { Vertical, Prisma } from "@prisma/client";
 import type { ActiveVertical } from "@/lib/vertical";
 import { prisma } from "@/server/db/client";
-import { listScope } from "@/server/rbac/policies";
+import { installerProjectFilter, listScope } from "@/server/rbac/policies";
 import type { AccessUser } from "@/server/rbac/guards";
 import { runInVertical } from "@/server/vertical/context";
 
@@ -38,7 +38,19 @@ export type CalendarEvent = {
   title: string; // customer / deal
   subtitle: string | null; // address or project #
   rep: string | null;
-  href: string; // deal detail
+  /**
+   * Who is going out on THIS visit — the install crew on an install, the
+   * inspection crew on an inspection. Empty for appointments and adjuster
+   * meetings, which are the rep's own diary and have no crew.
+   */
+  crew: string[];
+  /**
+   * Deal detail, or null when this viewer may see the visit but not the deal
+   * behind it. An installer named on a job gets the where-and-when; the
+   * homeowner's pricing, proposal and documents are not site information. A
+   * null href is the difference between "no link" and a link that 404s.
+   */
+  href: string | null;
   /** Which workspace this event came from — needed once Combined mode mixes them. */
   vertical: ActiveVertical;
 };
@@ -65,6 +77,33 @@ export async function getCalendarEvents(
   const repName = (r: { firstName: string; lastName: string } | null | undefined) =>
     r ? `${r.firstName} ${r.lastName}`.trim() : null;
 
+  /**
+   * An installer sees the visits they are ON, not every visit on a job they
+   * touch. Being on Tuesday's install is not being on Friday's inspection, and
+   * a calendar that showed both would put a date in front of someone who has no
+   * reason to be there.
+   *
+   * ANDed on top of projScope rather than replacing it: projScope is the job
+   * boundary (either visit), this narrows to one. Every other role's calendar
+   * is unchanged — nobody else is scoped by assignment at all.
+   */
+  const visitScope = (kind: "install" | "inspection"): Prisma.ProjectWhereInput[] =>
+    user.role === "installer" ? [installerProjectFilter(user.userId, kind)] : [];
+
+  /** Names on a visit, in the order they were added. */
+  const crewNames = (
+    rows: { user: { firstName: string; lastName: string } }[] | undefined
+  ): string[] => (rows ?? []).map((a) => `${a.user.firstName} ${a.user.lastName}`.trim());
+
+  // The crew on the visit, not the crew on the job — `where: { kind }` is what
+  // keeps the install crew off the inspection and vice versa.
+  const crewSelect = (kind: "install" | "inspection") =>
+    ({
+      where: { kind },
+      orderBy: { createdAt: "asc" },
+      select: { user: { select: { firstName: true, lastName: true } } },
+    }) as const;
+
   // Each source is skipped entirely when its type isn't shown in this vertical —
   // so a hidden type costs no query, and can't leak through a later edit here.
   const [appts, adjusters, installs, inspections] = await Promise.all([
@@ -83,17 +122,47 @@ export async function getCalendarEvents(
       : [],
     calendarShows(vertical, "install")
       ? prisma.project.findMany({
-          where: { AND: [projScope, { lead: { is: { vertical } } }, { installDate: { not: null }, AND: [{ installDate: { gte: from } }, { installDate: { lte: to } }] }] },
-          select: { id: true, projectNumber: true, installDate: true, lead: { select: { id: true, firstName: true, lastName: true, assignedRep: { select: { firstName: true, lastName: true } } } } },
+          where: { AND: [projScope, ...visitScope("install"), { lead: { is: { vertical } } }, { installDate: { not: null }, AND: [{ installDate: { gte: from } }, { installDate: { lte: to } }] }] },
+          select: { id: true, projectNumber: true, installDate: true, assignees: crewSelect("install"), lead: { select: { id: true, firstName: true, lastName: true, address: true, city: true, assignedRep: { select: { firstName: true, lastName: true } } } } },
         })
       : [],
     calendarShows(vertical, "inspection")
       ? prisma.project.findMany({
-          where: { AND: [projScope, { lead: { is: { vertical } } }, { inspectionAt: { not: null }, AND: [{ inspectionAt: { gte: from } }, { inspectionAt: { lte: to } }] }] },
-          select: { id: true, projectNumber: true, inspectionAt: true, lead: { select: { id: true, firstName: true, lastName: true, assignedRep: { select: { firstName: true, lastName: true } } } } },
+          where: { AND: [projScope, ...visitScope("inspection"), { lead: { is: { vertical } } }, { inspectionAt: { not: null }, AND: [{ inspectionAt: { gte: from } }, { inspectionAt: { lte: to } }] }] },
+          select: { id: true, projectNumber: true, inspectionAt: true, assignees: crewSelect("inspection"), lead: { select: { id: true, firstName: true, lastName: true, address: true, city: true, assignedRep: { select: { firstName: true, lastName: true } } } } },
         })
       : [],
   ]);
+
+  /**
+   * Which of these deals this viewer may actually OPEN.
+   *
+   * For every role but one, job visibility and deal visibility are the same
+   * rule, so the answer is "all of them" and there is nothing to ask. The
+   * installer is the exception by design — named on a visit, not admitted to
+   * the customer record — so only that role pays for the extra lookup.
+   *
+   * Asked of the Lead scope rather than assumed from the role, because roofing
+   * installers on a standing crew DO reach the deal today and must keep the
+   * link they have.
+   */
+  const jobLeadIds = [...installs, ...inspections].map((p) => p.lead?.id).filter((id): id is string => !!id);
+  const openableLeadIds =
+    user.role === "installer" && jobLeadIds.length
+      ? new Set(
+          (
+            await prisma.lead.findMany({
+              where: { AND: [leadScope, { id: { in: jobLeadIds } }] },
+              select: { id: true },
+            })
+          ).map((l) => l.id)
+        )
+      : null; // null = no restriction
+  const dealHref = (leadId: string | undefined, projectId: string) => {
+    if (!leadId) return `/portal/projects/${projectId}`;
+    if (openableLeadIds && !openableLeadIds.has(leadId)) return null;
+    return `/portal/leads/${leadId}`;
+  };
 
   const events: CalendarEvent[] = [];
   for (const l of appts) {
@@ -104,6 +173,7 @@ export async function getCalendarEvents(
       title: `${l.firstName} ${l.lastName}`.trim(),
       subtitle: [l.address, l.city].filter(Boolean).join(", ") || null,
       rep: repName(l.assignedRep),
+      crew: [],
       href: `/portal/leads/${l.id}`,
       vertical: vertical as ActiveVertical,
     });
@@ -117,19 +187,30 @@ export async function getCalendarEvents(
       title: `${c.lead.firstName} ${c.lead.lastName}`.trim(),
       subtitle: c.lead.project?.projectNumber ?? "Adjuster meeting",
       rep: repName(c.lead.assignedRep),
+      crew: [],
       href: `/portal/leads/${c.lead.id}`,
       vertical: vertical as ActiveVertical,
     });
   }
+  // The address leads the subtitle on a site visit and the project number
+  // follows it. Someone driving to an install needs the street before the job
+  // number, and for an installer the address is the only thing on the card that
+  // tells them where to be.
+  const siteSubtitle = (
+    lead: { address: string | null; city: string | null } | null,
+    projectNumber: string
+  ) => [lead?.address, lead?.city].filter(Boolean).join(", ") || projectNumber;
+
   for (const p of installs) {
     events.push({
       id: `inst:${p.id}`,
       type: "install",
       date: p.installDate!.toISOString(),
       title: p.lead ? `${p.lead.firstName} ${p.lead.lastName}`.trim() : p.projectNumber,
-      subtitle: p.projectNumber,
+      subtitle: siteSubtitle(p.lead, p.projectNumber),
       rep: repName(p.lead?.assignedRep),
-      href: p.lead ? `/portal/leads/${p.lead.id}` : `/portal/projects/${p.id}`,
+      crew: crewNames(p.assignees),
+      href: dealHref(p.lead?.id, p.id),
       vertical: vertical as ActiveVertical,
     });
   }
@@ -139,9 +220,10 @@ export async function getCalendarEvents(
       type: "inspection",
       date: p.inspectionAt!.toISOString(),
       title: p.lead ? `${p.lead.firstName} ${p.lead.lastName}`.trim() : p.projectNumber,
-      subtitle: p.projectNumber,
+      subtitle: siteSubtitle(p.lead, p.projectNumber),
       rep: repName(p.lead?.assignedRep),
-      href: p.lead ? `/portal/leads/${p.lead.id}` : `/portal/projects/${p.id}`,
+      crew: crewNames(p.assignees),
+      href: dealHref(p.lead?.id, p.id),
       vertical: vertical as ActiveVertical,
     });
   }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { AccessUser } from "../guards";
-import { listScope } from "../policies";
+import { installerCrewFilter, installerProjectFilter, listScope } from "../policies";
 
 // Minimal user factory — listScope only reads userId, companyId, role.
 function u(role: string, opts: { userId?: string; companyId?: string } = {}): AccessUser {
@@ -104,5 +104,47 @@ describe("listScope — deny-by-default", () => {
     // 'marketing' has no Project rule → must fall through to deny, not company-wide.
     const frag = listScope(u("marketing", { userId: "mkt-1" }), "Payroll") as Record<string, unknown>;
     expect(frag.id).toBe("__none__");
+  });
+});
+
+describe("listScope — installer reaches the JOB but not the DEAL", () => {
+  // The two are deliberately different rules. Being named on Tuesday's install
+  // says where to be; it does not say "read this homeowner's contract, pricing
+  // and signed documents".
+  const CREW_ARM = { crewAssignments: { some: { crew: { members: { some: { userId: "inst-2" } } } } } };
+
+  it("Project matches a standing crew OR being named on the job", () => {
+    const frag = listScope(u("installer", { userId: "inst-2" }), "Project") as Record<string, unknown>;
+    expect(frag.companyId).toBe("co-1");
+    expect(frag.OR).toEqual([CREW_ARM, { assignees: { some: { userId: "inst-2" } } }]);
+  });
+
+  it("Lead and Document stay crew-only — roofing's existing access, unwidened", () => {
+    // This is the guarantee that per-visit assignment did not quietly hand
+    // installers the customer record. If it ever fails, someone widened the
+    // wrong filter.
+    const lead = listScope(u("installer", { userId: "inst-2" }), "Lead") as Record<string, unknown>;
+    const doc = listScope(u("installer", { userId: "inst-2" }), "Document") as Record<string, unknown>;
+    expect(lead.project).toEqual(CREW_ARM);
+    expect(doc.lead).toEqual({ project: CREW_ARM });
+    expect(JSON.stringify(lead)).not.toContain("assignees");
+    expect(JSON.stringify(doc)).not.toContain("assignees");
+  });
+});
+
+describe("installerProjectFilter — per-visit narrowing", () => {
+  it("without a kind, either visit counts (being on the job)", () => {
+    expect(installerProjectFilter("inst-2")).toEqual({
+      OR: [installerCrewFilter("inst-2"), { assignees: { some: { userId: "inst-2" } } }],
+    });
+  });
+
+  it("with a kind, only that visit counts (being on someone's calendar)", () => {
+    // Tuesday's install crew must not be handed Friday's inspection.
+    const install = installerProjectFilter("inst-2", "install");
+    const inspection = installerProjectFilter("inst-2", "inspection");
+    expect(install.OR?.[1]).toEqual({ assignees: { some: { userId: "inst-2", kind: "install" } } });
+    expect(inspection.OR?.[1]).toEqual({ assignees: { some: { userId: "inst-2", kind: "inspection" } } });
+    expect(install).not.toEqual(inspection);
   });
 });

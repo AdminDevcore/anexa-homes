@@ -1,4 +1,7 @@
 import { notFound } from "next/navigation";
+import type { Role, Vertical } from "@prisma/client";
+import { isActiveVertical } from "@/lib/vertical";
+import { userVerticals } from "@/server/auth/vertical";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -86,7 +89,7 @@ import { EstimatePanel } from "@/components/portal/estimate-panel";
 // (InstallCrew); roofing keeps the crew picker it has today rather than being
 // changed by a solar request.
 import { QcChecklistEditor, CrewAssigner } from "@/components/portal/project-workflows";
-import { InstallCrew } from "@/components/portal/install-crew";
+import { VisitCrew } from "@/components/portal/install-crew";
 import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
 import { utcToZonedWallClock } from "@/lib/tz";
@@ -151,7 +154,13 @@ export default async function LeadDetailPage({
           crewAssignments: { include: { crew: { include: { members: true } } } },
           assignees: {
             orderBy: { createdAt: "asc" },
-            include: { user: { select: { firstName: true, lastName: true } } },
+            // role + verticals so the deal can say whether this person can even
+            // open the workspace the visit lives in.
+            include: {
+              user: {
+                select: { firstName: true, lastName: true, role: true, verticals: true },
+              },
+            },
           },
           // The relation already existed; it was simply never fetched, so the
           // project manager's name could not be shown anywhere on the deal.
@@ -233,20 +242,48 @@ export default async function LeadDetailPage({
   // filtered to `installer`: the office books a PM onto a tricky job and a
   // manager onto a first install, and a picker that hides them is a picker
   // people work around.
-  const installTeam =
+  // Everyone staffable, each flagged with whether they can actually OPEN this
+  // deal's workspace. Being named on a solar install means nothing to someone
+  // granted roofing only: their calendar reads that workspace and the visit
+  // never appears on it. The office is not blocked from assigning them —
+  // sometimes the grant is the thing that is late — but it is told, at the
+  // moment it matters, instead of finding out on the day.
+  const staffableUsers =
     project && canAssignCrew
-      ? (
-          await prisma.user.findMany({
-            where: { companyId: user.companyId, role: { in: STAFF_ROLES }, status: "active" },
-            orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-            select: { id: true, firstName: true, lastName: true, role: true },
-          })
-        ).map((u) => ({
-          id: u.id,
-          name: `${u.firstName} ${u.lastName}`.trim(),
-          role: u.role.replace(/_/g, " "),
-        }))
+      ? await prisma.user.findMany({
+          where: { companyId: user.companyId, role: { in: STAFF_ROLES }, status: "active" },
+          orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+          select: { id: true, firstName: true, lastName: true, role: true, verticals: true },
+        })
       : [];
+  // `others` is a retired enum value with no workspace to grant, so nobody is
+  // warned about it — an unanswerable warning is worse than none.
+  const lacksDealWorkspace = (u: { role: Role; verticals: Vertical[] }) =>
+    isActiveVertical(lead.vertical) && !userVerticals(u).includes(lead.vertical);
+  const noWorkspaceAccess = new Set(
+    staffableUsers.filter(lacksDealWorkspace).map((u) => u.id)
+  );
+  const installTeam = staffableUsers.map((u) => ({
+    id: u.id,
+    name: `${u.firstName} ${u.lastName}`.trim(),
+    role: u.role.replace(/_/g, " "),
+    noAccess: noWorkspaceAccess.has(u.id),
+  }));
+  // The crew, split by the visit it is going out on. Two lists rather than one
+  // because the install and the inspection are different days and, usually,
+  // different people — and the calendar has to be able to tell them apart.
+  const crewFor = (kind: "install" | "inspection") =>
+    (project?.assignees ?? [])
+      .filter((a) => a.kind === kind)
+      .map((a) => ({
+        id: a.id,
+        userId: a.userId,
+        name: `${a.user.firstName} ${a.user.lastName}`.trim(),
+        role: a.role,
+        noAccess: lacksDealWorkspace(a.user),
+      }));
+  const installCrew = crewFor("install");
+  const inspectionCrew = crewFor("inspection");
   const crews =
     project && canAssignCrew
       ? await prisma.crew.findMany({ where: { companyId: user.companyId, active: true }, select: { id: true, name: true } })
@@ -1028,24 +1065,44 @@ export default async function LeadDetailPage({
                     above it. */}
                 <div className="mb-6 space-y-4">
                   <Section icon={CalendarClock} label="Install date" tone="solar">
-                    <ProjectSchedule
-                      bare
-                      field="install"
-                      leadId={lead.id}
-                      projectId={project?.id ?? null}
-                      value={project?.installDate ? project.installDate.toISOString() : null}
-                      canManage={canManageProd}
-                    />
+                    <div className="space-y-3">
+                      <ProjectSchedule
+                        bare
+                        field="install"
+                        leadId={lead.id}
+                        projectId={project?.id ?? null}
+                        value={project?.installDate ? project.installDate.toISOString() : null}
+                        canManage={canManageProd}
+                      />
+                      <VisitCrew
+                        label="Install crew"
+                        kind="install"
+                        projectId={project?.id ?? null}
+                        team={installTeam}
+                        assignees={installCrew}
+                        canEdit={canAssignCrew}
+                      />
+                    </div>
                   </Section>
                   <Section icon={CalendarCheck} label="Inspection date" tone="solar">
-                    <ProjectSchedule
-                      bare
-                      field="inspection"
-                      leadId={lead.id}
-                      projectId={project?.id ?? null}
-                      value={project?.inspectionAt ? project.inspectionAt.toISOString() : null}
-                      canManage={canManageProd}
-                    />
+                    <div className="space-y-3">
+                      <ProjectSchedule
+                        bare
+                        field="inspection"
+                        leadId={lead.id}
+                        projectId={project?.id ?? null}
+                        value={project?.inspectionAt ? project.inspectionAt.toISOString() : null}
+                        canManage={canManageProd}
+                      />
+                      <VisitCrew
+                        label="Inspection crew"
+                        kind="inspection"
+                        projectId={project?.id ?? null}
+                        team={installTeam}
+                        assignees={inspectionCrew}
+                        canEdit={canAssignCrew}
+                      />
+                    </div>
                   </Section>
                 </div>
 
@@ -1075,23 +1132,6 @@ export default async function LeadDetailPage({
 
                     <Section icon={Camera} label="Site & Install Photos" tone="solar">
                       <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
-                    </Section>
-
-                    {/* People, not crews. `Crew`/`CrewMember` exist but nothing
-                        in the app creates one, so the old picker hid itself on
-                        every job and no install was ever staffed. */}
-                    <Section icon={Users} label="Crew" tone="solar">
-                      <InstallCrew
-                        projectId={project.id}
-                        team={installTeam}
-                        assignees={project.assignees.map((a) => ({
-                          id: a.id,
-                          userId: a.userId,
-                          name: `${a.user.firstName} ${a.user.lastName}`.trim(),
-                          role: a.role,
-                        }))}
-                        canEdit={canAssignCrew}
-                      />
                     </Section>
 
                     <Section icon={ClipboardCheck} label="QC Checklist" tone="solar">

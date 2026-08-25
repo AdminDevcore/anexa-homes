@@ -13,6 +13,10 @@ import { test, expect, type Page } from "@playwright/test";
  *     schema but nothing in the app ever created one, so the crew dropdown hid
  *     itself on every job and production ran with zero crews and zero
  *     assignments. Several people go on one install, each with a role.
+ *
+ *  3. The crew is per VISIT. A job has two dates that send different people —
+ *     the install and the AHJ / utility inspection after it — so each date
+ *     carries its own list, and the calendar can tell them apart.
  */
 const FLAG_ON =
   process.env.SOLAR_VERTICAL_ENABLED === "1" || process.env.SOLAR_VERTICAL_ENABLED === "true";
@@ -95,9 +99,9 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
     await date.fill("2026-11-04");
     await expect(page.getByText(/Install date set|Date saved/)).toBeVisible({ timeout: 15000 });
 
-    // With a job open, the slide carries the crew.
+    // With a job open, the slide carries the crew — under the date it staffs.
     await openInstall(page);
-    await expect(page.getByText(/Nobody assigned yet/)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Nobody on the install yet/)).toBeVisible({ timeout: 15000 });
 
     // More than one person, which is the whole point: an install is a team.
     //
@@ -107,7 +111,7 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
     // has landed — which is exactly how this spec first passed its way into a
     // one-person crew. The picker is rebuilt from server data on refresh, and
     // clicking it too early re-offers somebody already assigned.
-    const crew = page.getByTestId("install-crew");
+    const crew = page.getByTestId("install-crew-install");
     const members = crew.getByRole("listitem");
 
     async function add(nth: number) {
@@ -128,8 +132,10 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
     // option's text runs the name straight into its role ("Carlos Diazinstaller")
     // with no separator, so slicing it is guesswork.
     expect(firstName).not.toEqual(secondName);
+    // The label names the visit as well as the person ("Remove X from the
+    // install"), because the same person can be on both lists on this page.
     const removes = await crew.getByLabel(/^Remove /).evaluateAll((els) =>
-      els.map((e) => e.getAttribute("aria-label")!.replace(/^Remove /, ""))
+      els.map((e) => e.getAttribute("aria-label")!.replace(/^Remove | from the install$/g, ""))
     );
     expect(removes).toHaveLength(2);
     expect(new Set(removes).size).toBe(2);
@@ -199,5 +205,111 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
     // rather than two of the same.
     await expect(page.getByTitle(`Install · ${name}`)).toBeVisible({ timeout: 15000 });
     await expect(page.getByTitle(`Inspection · ${name}`)).toBeVisible({ timeout: 15000 });
+  });
+
+  /**
+   * Two visits, two crews, one job.
+   *
+   * The failure this replaces: one flat list per job that could not say WHICH
+   * date somebody was on. The office could add people and still not answer "who
+   * is going out on the inspection", and nothing could be filtered onto the
+   * right person's calendar because the fact was never recorded.
+   */
+  test("the install crew and the inspection crew are staffed separately", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    const { name } = await newSolarDeal(page);
+    await openInstall(page);
+
+    const anchor = new Date();
+    anchor.setDate(1);
+    anchor.setMonth(anchor.getMonth() + 1);
+    const on = (day: number) =>
+      `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+    await page.getByLabel("Install date").fill(on(12));
+    await expect(page.getByText(/the job is now open/)).toBeVisible({ timeout: 15000 });
+    await openInstall(page);
+    await page.getByLabel("Inspection date").fill(on(22));
+    await expect(page.getByText(/Date saved/)).toBeVisible({ timeout: 15000 });
+    await openInstall(page);
+
+    const installCrew = page.getByTestId("install-crew-install");
+    const inspectionCrew = page.getByTestId("install-crew-inspection");
+    await expect(installCrew).toBeVisible({ timeout: 15000 });
+    await expect(inspectionCrew).toBeVisible();
+
+    // Each list is staffed from its own picker, and the two must not be the
+    // same list rendered twice.
+    async function addTo(list: typeof installCrew, index: number) {
+      await list.getByRole("combobox").click();
+      const option = page.getByRole("option").nth(index);
+      const label = ((await option.textContent()) ?? "").trim();
+      await option.click();
+      await list.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(list.getByRole("listitem")).toHaveCount(1, { timeout: 15000 });
+      return label;
+    }
+
+    const onInstall = await addTo(installCrew, 0);
+    const onInspection = await addTo(inspectionCrew, 1);
+    expect(onInstall).not.toEqual(onInspection);
+
+    // One name each — adding to the install did not add to the inspection.
+    await expect(installCrew.getByRole("listitem")).toHaveCount(1);
+    await expect(inspectionCrew.getByRole("listitem")).toHaveCount(1);
+
+    // The person on the install is not on the inspection's list, and vice
+    // versa. Read off the remove labels, which name both the person and the
+    // visit, rather than off option text that runs a name into its role.
+    const namesOn = async (list: typeof installCrew, visit: string) =>
+      list.getByLabel(new RegExp(`^Remove .* from the ${visit}$`)).evaluateAll((els) =>
+        els.map((e) => e.getAttribute("aria-label")!.replace(new RegExp(`^Remove | from the .*$`, "g"), ""))
+      );
+    const installNames = await namesOn(installCrew, "install");
+    const inspectionNames = await namesOn(inspectionCrew, "inspection");
+    expect(installNames).toHaveLength(1);
+    expect(inspectionNames).toHaveLength(1);
+    expect(installNames[0]).not.toEqual(inspectionNames[0]);
+
+    // …and the calendar carries each crew on its own event, which is the whole
+    // point: the event now says who is going, not just that it is happening.
+    await page.goto("/portal/calendar");
+    await page.getByLabel("Next month").click();
+    const install = page.getByTitle(new RegExp(`^Install · ${name}`));
+    await expect(install).toBeVisible({ timeout: 15000 });
+    await install.click();
+    await expect(page.getByTestId("calendar-event-crew")).toHaveText(installNames[0]);
+    await page.keyboard.press("Escape");
+
+    const inspection = page.getByTitle(new RegExp(`^Inspection · ${name}`));
+    await expect(inspection).toBeVisible({ timeout: 15000 });
+    await inspection.click();
+    await expect(page.getByTestId("calendar-event-crew")).toHaveText(inspectionNames[0]);
+  });
+
+  /**
+   * Assigning somebody who cannot open this workspace.
+   *
+   * The seeded installer is granted ROOFING only, so a solar install will never
+   * reach their calendar no matter how correctly it is assigned. That is the
+   * exact shape of the bug this feature fixes, so it must not be reintroduced
+   * silently: the office is told at the moment it assigns, not on the day.
+   */
+  test("staffing someone without this workspace says so", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await newSolarDeal(page);
+    await openInstall(page);
+    await page.getByLabel("Install date").fill("2026-12-09");
+    await expect(page.getByText(/the job is now open/)).toBeVisible({ timeout: 15000 });
+    await openInstall(page);
+
+    const crew = page.getByTestId("install-crew-install");
+    await crew.getByRole("combobox").click();
+    const option = page.getByRole("option", { name: /no access to this workspace/ }).first();
+    await expect(option).toBeVisible({ timeout: 15000 });
+    await option.click();
+    await crew.getByRole("button", { name: "Add", exact: true }).click();
+
+    await expect(crew.getByText(/No workspace access/)).toBeVisible({ timeout: 15000 });
   });
 });

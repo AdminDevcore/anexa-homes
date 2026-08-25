@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Clock, User, ArrowRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, User, Users, ArrowRight, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,10 @@ type Ev = {
   title: string;
   subtitle: string | null;
   rep: string | null;
-  href: string;
+  /** Who is going out on this visit. Empty for appointments and adjuster meetings. */
+  crew: string[];
+  /** Null when this viewer may see the visit but not the deal behind it. */
+  href: string | null;
   vertical: Vertical;
 };
 
@@ -123,7 +126,7 @@ export function WorkCalendar({
     // (installs/inspections), so both are searchable without being restated.
     // Type and workspace labels are in the haystack too — searching "install"
     // or "solar" narrows a month as naturally as typing a customer name.
-    return [e.title, e.subtitle, e.rep, TYPE_META[e.type].label, VERTICAL_LABEL[e.vertical]]
+    return [e.title, e.subtitle, e.rep, ...e.crew, TYPE_META[e.type].label, VERTICAL_LABEL[e.vertical]]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
@@ -151,6 +154,9 @@ export function WorkCalendar({
    */
   async function openEvent(ev: Ev) {
     const href = ev.href;
+    // Nothing to open: this viewer is on the visit but not admitted to the
+    // deal. The button is hidden in that case; this is the guard behind it.
+    if (!href) return;
     const needsSwitch = !!activeVertical && ev.vertical !== activeVertical;
     setSelected(null);
     if (needsSwitch) {
@@ -271,7 +277,7 @@ export function WorkCalendar({
                     <button
                       key={e.id}
                       onClick={() => setSelected(e)}
-                      title={`${TYPE_META[e.type].label.replace(/s$/, "")} · ${e.title}${e.rep ? ` · ${e.rep}` : ""}${showWorkspace ? ` · ${VERTICAL_LABEL[e.vertical]}` : ""}`}
+                      title={`${TYPE_META[e.type].label.replace(/s$/, "")} · ${e.title}${e.crew.length ? ` · ${e.crew.join(", ")}` : ""}${e.rep ? ` · ${e.rep}` : ""}${showWorkspace ? ` · ${VERTICAL_LABEL[e.vertical]}` : ""}`}
                       className={cn("flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-[11px] font-medium leading-tight hover:opacity-90", TYPE_META[e.type].pill)}
                     >
                       {/* A day cell has no room for a full tag, so the workspace
@@ -323,13 +329,26 @@ export function WorkCalendar({
                     <User className="size-4 shrink-0" /> {selected.rep}
                   </div>
                 )}
+                {/* Who is going out. Only installs and inspections carry a
+                    crew, and "nobody yet" is said out loud rather than left as
+                    a missing row — an empty space reads as "already handled". */}
+                {(selected.type === "install" || selected.type === "inspection") && (
+                  <div className="flex items-start gap-2 text-muted-foreground">
+                    <Users className="mt-0.5 size-4 shrink-0" />
+                    <span data-testid="calendar-event-crew">
+                      {selected.crew.length ? selected.crew.join(", ") : "No crew assigned yet"}
+                    </span>
+                  </div>
+                )}
               </div>
-              <Button
-                onClick={() => void openEvent(selected)}
-                className="mt-2 w-full bg-gold text-gold-foreground hover:bg-gold/90"
-              >
-                Open details <ArrowRight className="size-4" />
-              </Button>
+              {selected.href && (
+                <Button
+                  onClick={() => void openEvent(selected)}
+                  className="mt-2 w-full bg-gold text-gold-foreground hover:bg-gold/90"
+                >
+                  Open details <ArrowRight className="size-4" />
+                </Button>
+              )}
             </>
           )}
         </DialogContent>

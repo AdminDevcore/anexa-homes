@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { AssignmentKind, Prisma } from "@prisma/client";
 import type { AccessUser } from "./guards";
 import type { Resource } from "./matrix";
 
@@ -18,11 +18,45 @@ export function managerTeamUserFilter(managerId: string): Prisma.UserWhereInput 
 }
 
 /**
- * A Prisma `Project` filter matching the jobs an installer is assigned to via
- * their crew. Use against a Project relation, e.g. `{ project: installerProjectFilter(id) }`.
+ * A Prisma `Project` filter matching the jobs an installer is assigned to
+ * through a standing `Crew`. Use against a Project relation, e.g.
+ * `{ project: installerCrewFilter(id) }`.
+ *
+ * The ORIGINAL rule, kept whole and kept separate. Roofing staffs jobs by
+ * assigning a crew and reaches its installers only through this path; every
+ * caller that had it before still has exactly it.
  */
-export function installerProjectFilter(userId: string): Prisma.ProjectWhereInput {
+export function installerCrewFilter(userId: string): Prisma.ProjectWhereInput {
   return { crewAssignments: { some: { crew: { members: { some: { userId } } } } } };
+}
+
+/**
+ * A Prisma `Project` filter matching the jobs an installer is on — by standing
+ * crew, or by being named on the job itself.
+ *
+ * The second arm is the one that makes assignment mean anything. `Crew` /
+ * `CrewMember` model a standing team, nothing in the app has ever created one
+ * outside roofing's seeded three, and the picker on the deal writes
+ * `ProjectAssignee` instead. So the crew-only rule silently granted nothing to
+ * everyone it was supposed to grant to: a person added to an install saw an
+ * empty calendar, which reads exactly like "no work scheduled".
+ *
+ * Pass `kind` to narrow to one scheduled visit. Omit it and both count —
+ * whoever is on the install OR the inspection is on the job. That difference is
+ * deliberate: being on the job is a property of the JOB, but appearing on
+ * someone's calendar is a property of the VISIT, and only the caller knows
+ * which question it is asking.
+ */
+export function installerProjectFilter(
+  userId: string,
+  kind?: AssignmentKind
+): Prisma.ProjectWhereInput {
+  return {
+    OR: [
+      installerCrewFilter(userId),
+      { assignees: { some: { userId, ...(kind ? { kind } : {}) } } },
+    ],
+  };
 }
 
 /**
@@ -62,8 +96,17 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
         return { ...base, OR: [{ assignedRep: team }, { createdBy: team }] };
       }
       if (role === "installer") {
-        // Installers only see leads whose job they're assigned to (via their crew).
-        return { ...base, project: installerProjectFilter(user.userId) };
+        // Crew only, deliberately NOT the widened job filter.
+        //
+        // The DEAL is the whole customer record — pricing, proposal, claim,
+        // documents. Being named on an install says where to be on Tuesday; it
+        // does not say "read this homeowner's contract". Installers named on a
+        // job get the visit on their calendar and nothing more.
+        //
+        // Roofing's standing crews keep the deal access they have today: this
+        // line is unchanged from before per-visit assignment existed, which is
+        // the whole reason it is still the crew filter and not the new one.
+        return { ...base, project: installerCrewFilter(user.userId) };
       }
       if (role === "accounting") return base; // financial role: company-wide read.
       // Any other non-privileged role sees nothing by default (deny-by-default).
@@ -84,6 +127,9 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
         return { ...base, lead: { createdById: user.userId } };
       }
       if (role === "installer") {
+        // The JOB, by either route — this is what puts an install on the
+        // assigned person's calendar. Widened from crew-only; see
+        // installerProjectFilter.
         return { ...base, ...installerProjectFilter(user.userId) };
       }
       if (role === "manager") {
@@ -118,8 +164,10 @@ export function listScope(user: AccessUser, resource: Resource): WhereFragment {
         return { ...base, lead: { createdById: user.userId } };
       }
       if (role === "installer") {
-        // Documents on jobs the installer's crew is assigned to.
-        return { ...base, lead: { project: installerProjectFilter(user.userId) } };
+        // Documents on jobs the installer's crew is assigned to. Crew only, for
+        // the same reason as Lead above: a signed contract is not site
+        // information.
+        return { ...base, lead: { project: installerCrewFilter(user.userId) } };
       }
       if (role === "manager") {
         const team = managerTeamUserFilter(user.userId);

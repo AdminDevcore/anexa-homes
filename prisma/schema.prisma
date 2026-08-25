@@ -1155,14 +1155,30 @@ model ProjectAssignee {
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId    String
   user      User     @relation("ProjectAssignee", fields: [userId], references: [id], onDelete: Cascade)
+  /// WHICH scheduled visit this person is on. A job has two dates that send
+  /// different people to the site — the install and the inspection that
+  /// follows it — so an assignment that does not say which one is not an
+  /// answer to "who is going out, and when".
+  kind      AssignmentKind @default(install)
   role      String?
   createdAt DateTime @default(now())
 
-  /// One row per person per job: assigning someone twice is a mis-click, not a
-  /// second shift.
-  @@unique([projectId, userId])
+  /// One row per person per VISIT. The same installer can be on both the
+  /// install and the inspection; assigning them twice to the same visit is a
+  /// mis-click, not a second shift.
+  @@unique([projectId, userId, kind])
   @@index([companyId, projectId])
+  @@index([userId, kind])
   @@map("project_assignees")
+}
+
+/// The scheduled visits a person can be assigned to. Mirrors the two date
+/// columns on Project (installDate, inspectionAt) and the two calendar event
+/// types they produce — adding a third visit means adding it in all three
+/// places at once, which is the point of naming them.
+enum AssignmentKind {
+  install
+  inspection
 }
 
 model ProjectCrew {

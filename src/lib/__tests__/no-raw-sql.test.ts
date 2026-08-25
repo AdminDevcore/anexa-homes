@@ -48,6 +48,12 @@ const ALLOWED: Record<string, string> = {
   // set up the cross-vertical cases the suite then proves are unreachable.
   "src/server/vertical/__tests__/isolation.itest.ts":
     'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
+  // The calendar's per-visit crew suite resets its own `vertical_test` fixtures
+  // the same way, and on the UNextended client for the same reason: it builds a
+  // solar deal and a roofing deal side by side, because the claim it proves is
+  // that per-visit assignment changed the first without touching the second.
+  "src/server/modules/calendar/__tests__/visit-crew.itest.ts":
+    'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
   // Same pattern as the isolation suite: a whole-schema truncate against
   // `vertical_test` to reset fixtures, on the UNextended client because the
   // cases under test are deliberately cross-vertical (one rep, one deal per
