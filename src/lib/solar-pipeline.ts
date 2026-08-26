@@ -340,14 +340,3 @@ export const SOLAR_OPS_STAGES: SolarStageDef[] = [
 
 /** The full canonical Solar pipeline, in order. */
 export const SOLAR_STAGES: SolarStageDef[] = [...SOLAR_SALES_STAGES, ...SOLAR_OPS_STAGES];
-
-/**
- * Stages at which the site is physically assessed, and therefore where a
- * re-roof or main-panel upgrade gets discovered. Used to prompt the crossover
- * check so it is asked at the right moment rather than remembered later.
- */
-export const CROSSOVER_PROMPT_STAGES = new Set([
-  "site_survey_complete",
-  "engineering_design",
-  "design_redline",
-]);

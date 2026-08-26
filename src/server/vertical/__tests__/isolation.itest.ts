@@ -420,69 +420,6 @@ describe("a tagged row's department comes from the job, not the toggle", () => {
   });
 });
 
-// ── Crossover: the one place we cross the boundary on purpose ─────────────
-describe("solar → roofing crossover", () => {
-  it("creates the linked deal in the TARGET vertical, not the acting one", async () => {
-    const solarLead = await raw.lead.findFirstOrThrow({ where: { vertical: "solar" } });
-
-    // Acting in solar, spawn the roofing job (what createCrossoverDealAction
-    // does internally: read here, write inside runInVertical("roofing")).
-    const roofingDeal = await runInVertical("solar", async () => {
-      const source = await db.lead.findUniqueOrThrow({ where: { id: solarLead.id } });
-      return runInVertical("roofing", () =>
-        db.lead.create({
-          data: {
-            companyId,
-            firstName: source.firstName,
-            lastName: source.lastName,
-            address: source.address,
-            linkedDealId: source.id,
-          },
-        })
-      );
-    });
-
-    expect(roofingDeal.vertical).toBe("roofing");
-    expect(roofingDeal.linkedDealId).toBe(solarLead.id);
-
-    // And it is genuinely in the other workspace: invisible from solar…
-    const fromSolar = await runInVertical("solar", () =>
-      db.lead.findUnique({ where: { id: roofingDeal.id } })
-    );
-    expect(fromSolar).toBeNull();
-    // …but visible from roofing.
-    const fromRoofing = await runInVertical("roofing", () =>
-      db.lead.findUnique({ where: { id: roofingDeal.id } })
-    );
-    expect(fromRoofing?.id).toBe(roofingDeal.id);
-  });
-
-  it("the linked-deal summary read is the ONLY way across, and is narrow", async () => {
-    const solarLead = await raw.lead.findFirstOrThrow({ where: { vertical: "solar" } });
-    const roofingDeal = await runInVertical("roofing", () =>
-      db.lead.create({ data: { companyId, firstName: "Cross", lastName: "Sell" } })
-    );
-    await raw.lead.update({ where: { id: solarLead.id }, data: { linkedDealId: roofingDeal.id } });
-
-    // A plain scoped read from solar cannot see it…
-    await expect(
-      runInVertical("solar", () => db.lead.findUniqueOrThrow({ where: { id: roofingDeal.id } }))
-    ).rejects.toThrow();
-
-    // …the deliberate, audited unscoped read can — identity and stage only.
-    const summary = await runUnscoped("crossover display", () =>
-      db.lead.findFirst({
-        where: { id: roofingDeal.id, companyId },
-        select: { id: true, vertical: true, firstName: true, lastName: true, status: true },
-      })
-    );
-    expect(summary).toMatchObject({ id: roofingDeal.id, vertical: "roofing" });
-    // The select carries no money and no documents by construction.
-    expect(summary).not.toHaveProperty("claimPrice");
-    expect(summary).not.toHaveProperty("value");
-  });
-});
-
 describe("escape hatches", () => {
   it("runUnscoped reads across verticals", async () => {
     const all = await runUnscoped("test: company-wide rollup", () =>

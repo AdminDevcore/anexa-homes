@@ -320,7 +320,7 @@ export default async function LeadDetailPage({
     await getClaimStatuses(user.companyId, lead.vertical)
   );
 
-  // Solar operations: the blocker/follow-up model and the re-roof crossover.
+  // Solar operations: the blocker / follow-up model.
   // Roofing deals never render this — their stages are all internally owned.
   const [solarDesign, solarFinance, solarProposals, creditApps, latestProposal, solarLenders] =
     isSolarDeal

@@ -285,10 +285,9 @@ async function main() {
       { companyId: company.id, kind: "inverter", manufacturer: "SolarEdge", model: "SE7600H-US", ratingW: 7600, costCents: 130000, priceCents: 0 },
       { companyId: company.id, kind: "battery", manufacturer: "Enphase", model: "IQ Battery 5P", ratingW: 5000, costCents: 480000, priceCents: 720000 },
       { companyId: company.id, kind: "battery", manufacturer: "Tesla", model: "Powerwall 3", ratingW: 13500, costCents: 950000, priceCents: 1400000 },
-      // Adders, highest-margin first. The two crossover adders tie back to the
-      // Phase-3 re-roof / MPU branch rather than being silent line items.
-      { companyId: company.id, kind: "adder", model: "Full re-roof (under array)", costCents: 900000, priceCents: 1450000, rank: 1, crossoverKind: "reroof" },
-      { companyId: company.id, kind: "adder", model: "Main panel upgrade (200A)", costCents: 220000, priceCents: 385000, rank: 2, crossoverKind: "mpu" },
+      // Adders, highest-margin first.
+      { companyId: company.id, kind: "adder", model: "Full re-roof (under array)", costCents: 900000, priceCents: 1450000, rank: 1 },
+      { companyId: company.id, kind: "adder", model: "Main panel upgrade (200A)", costCents: 220000, priceCents: 385000, rank: 2 },
       { companyId: company.id, kind: "adder", model: "Ground mount racking", costCents: 400000, priceCents: 650000, rank: 3 },
       { companyId: company.id, kind: "adder", model: "EV charger (Level 2)", costCents: 65000, priceCents: 145000, rank: 4 },
       { companyId: company.id, kind: "adder", model: "Trenching (per 50ft)", costCents: 90000, priceCents: 175000, rank: 5 },

@@ -13,8 +13,6 @@ import {
   RotateCcw,
   Trash2,
   Wrench,
-  Zap,
-  Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -65,7 +63,6 @@ export type AdderItem = {
   costCents: number;
   autoApplyMinKw: number | null;
   autoApplyMaxKw: number | null;
-  crossoverKind: string | null;
   rank: number;
   isActive: boolean;
 };
@@ -147,12 +144,6 @@ export function SolarAdderCatalogue({
           </Button>
         )}
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        Tagging an adder as <strong>Re-roof</strong> or <strong>MPU</strong> ties it to the
-        crossover: picking it on a design raises the flag on the deal and offers the linked
-        Roofing job, instead of quietly becoming a line item nobody follows up.
-      </p>
 
       {items.length === 0 && (
         <p className="py-2 text-sm text-muted-foreground">Nothing yet.</p>
@@ -300,16 +291,6 @@ function AdderRow({
               auto · {band}
             </span>
           )}
-          {item.crossoverKind === "reroof" && (
-            <span className="inline-flex items-center gap-1 rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">
-              <Home className="size-3" /> crossover
-            </span>
-          )}
-          {item.crossoverKind === "mpu" && (
-            <span className="inline-flex items-center gap-1 rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">
-              <Zap className="size-3" /> crossover
-            </span>
-          )}
           {!item.isActive && (
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
               retired
@@ -406,7 +387,6 @@ const EMPTY = {
   minKw: "",
   maxKw: "",
   autoApply: false,
-  crossoverKind: "",
 };
 
 /**
@@ -432,7 +412,6 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
           minKw: item.autoApplyMinKw != null ? String(item.autoApplyMinKw) : "",
           maxKw: item.autoApplyMaxKw != null ? String(item.autoApplyMaxKw) : "",
           autoApply: item.autoApplyMinKw != null || item.autoApplyMaxKw != null,
-          crossoverKind: item.crossoverKind ?? "",
         }
       : EMPTY
   );
@@ -469,7 +448,6 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
         // leave a band behind that keeps firing.
         autoApplyMinKw: f.autoApply && f.minKw.trim() !== "" ? Number(f.minKw) : null,
         autoApplyMaxKw: f.autoApply && f.maxKw.trim() !== "" ? Number(f.maxKw) : null,
-        crossoverKind: (f.crossoverKind || null) as "reroof" | "mpu" | null,
       });
       if (!res.ok) return toast.error(res.error);
       toast.success(item ? "Saved" : "Adder created");
@@ -617,20 +595,6 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
                 onChange={(e) => set("cost", e.target.value)}
               />
             </div>
-          </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="adder-crossover">Crossover</Label>
-            <select
-              id="adder-crossover"
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-              value={f.crossoverKind}
-              onChange={(e) => set("crossoverKind", e.target.value)}
-            >
-              <option value="">— none —</option>
-              <option value="reroof">Re-roof</option>
-              <option value="mpu">MPU / derate</option>
-            </select>
           </div>
         </div>
 
