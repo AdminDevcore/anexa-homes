@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildProposalSnapshot, type ProposalAlternative } from "@/lib/solar-proposal";
+import {
+  buildProposalSnapshot,
+  postSolarUtilityCents,
+  type ProposalAlternative,
+} from "@/lib/solar-proposal";
 import type { SolarAssumptions } from "@/lib/solar-money";
 
 /**
@@ -17,6 +21,7 @@ const A: SolarAssumptions = {
   annualDegradationPct: 0.5,
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
+  utilityMeterFeeCents: 1000,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
@@ -134,9 +139,9 @@ describe("each option carries its own price and its own twenty-five years", () =
   it("reports what the customer still owes the utility each month", () => {
     const s = build({ alternatives: [CASH_ALT] });
     const cash = s.options!.find((o) => o.key === "cash")!;
-    // Year one residual grid, per month — the "post solar utility" figure.
+    // Year one grid top-up PLUS the standing meter fee, per month.
     expect(cash.postSolarMonthlyCents).toBe(
-      Math.round(cash.savings.years[0].residualGridCents / 12)
+      Math.round(postSolarUtilityCents(cash.savings.years[0]) / 12)
     );
   });
 

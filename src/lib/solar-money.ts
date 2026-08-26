@@ -25,6 +25,24 @@ export type SolarAssumptions = {
   annualDegradationPct: number;
   utilityEscalationPct: number;
   kwhPerKwYear: number;
+  /**
+   * The utility's FIXED monthly charge, in cents — meter/service/connection fee.
+   *
+   * The bill has two halves and only one of them is kilowatt-hours. Every
+   * utility bills a standing charge for the meter itself, and it is billed in a
+   * month the system covered 100% of the home's usage exactly as it is billed in
+   * December. A model built only on kWh therefore drives the post-solar bill to
+   * $0 on any system at or above full offset, and prints that $0 next to a
+   * monthly payment on a document a homeowner keeps — who then opens a real bill
+   * for $10 and reads the rest of the proposal differently.
+   *
+   * So it is added to what the household still owes the utility AFTER solar, and
+   * deliberately NOT to the pre-solar utility cost: that side is derived from
+   * the customer's own bill, which already contained the fee. Counting it twice
+   * would inflate the saving; counting it once, on the side that is modelled
+   * rather than observed, holds the projection on the conservative side.
+   */
+  utilityMeterFeeCents: number;
   defaultGrossPpwCents: number;
   defaultDealerFeePct: number;
   minOffsetPct: number;

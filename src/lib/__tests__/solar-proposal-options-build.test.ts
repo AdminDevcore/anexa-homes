@@ -12,6 +12,7 @@ const A: SolarAssumptions = {
   annualDegradationPct: 0.5,
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
+  utilityMeterFeeCents: 1000,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,

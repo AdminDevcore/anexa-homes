@@ -16,8 +16,9 @@ const YEAR = (year: number, utilityYear1: number): SavingsModel["years"][number]
   productionKwh: 10_076,
   utilityCostCents: utilityYear1,
   residualGridCents: 60_430,
+  meterFeeCents: 12_000,
   solarPaymentCents: 0,
-  solarCostCents: 60_430,
+  solarCostCents: 72_430,
   cumulativeSavingsCents: 0,
 });
 

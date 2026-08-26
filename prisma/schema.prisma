@@ -2777,6 +2777,12 @@ model SolarSettings {
   utilityEscalationPct Float @default(3.5)
   /// kWh produced per kW-DC per year in this market. Set from local irradiance.
   kwhPerKwYear         Int   @default(1450)
+  /// The utility's fixed monthly charge in CENTS — meter, service, connection.
+  ///
+  /// Billed whatever the roof produces, so it is added to the post-solar bill
+  /// and never allows it to reach $0. Not added to the pre-solar side: that is
+  /// derived from the customer's own bill, which already contained the fee.
+  utilityMeterFeeCents Int   @default(1000)
   /// RETIRED, and read by nothing. It used to size a target system from usage
   /// alone, which cannot be done: what a kW makes on a roof depends on how its
   /// planes face, their pitch and what shades them. Size now comes out of the
@@ -3150,6 +3156,18 @@ model SolarEquipment {
   /// to download. Rendered on the customer's proposal beside the component, and
   /// omitted when null rather than shown as a dead "View details".
   specSheetUrl          String?
+  /// A photograph of the component, as bytes we hold rather than a link.
+  ///
+  /// Same reasoning as a lender's logo: the customer's proposal is opened from
+  /// an email with no session, and hotlinking a manufacturer's image would put
+  /// a picture in a document a homeowner keeps under someone else's control —
+  /// it goes 404, or it changes, long after the proposal was sent. Normalised
+  /// to PNG on the way in, so no mime column is needed.
+  photoKey              String?
+  /// When the photo last changed — the cache-buster in the serving URL. A
+  /// column rather than `updatedAt` because re-pricing a panel must not
+  /// invalidate every cached copy of an image that did not change.
+  photoUpdatedAt        DateTime?
   specs                 Json               @default("{}")
   isActive              Boolean            @default(true)
   /// The item a new design starts on for this kind. At most one ACTIVE default

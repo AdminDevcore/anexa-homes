@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { SavingsYear } from "@/lib/solar-proposal";
+import { postSolarUtilityCents, type SavingsYear } from "@/lib/solar-proposal";
 import { usd } from "./format";
 
 /**
@@ -94,7 +94,7 @@ export function SavingsScrubber({
       <dl className="mt-8 grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-neutral-200/70 sm:grid-cols-3">
         <Cell k="Utility, that year" v={usd(row.utilityCostCents)} />
         <Cell k="With solar, that year" v={usd(row.solarCostCents)} />
-        <Cell k="Grid power still bought" v={usd(row.residualGridCents)} />
+        <Cell k="Utility bill that year" v={usd(postSolarUtilityCents(row))} />
       </dl>
     </figure>
   );

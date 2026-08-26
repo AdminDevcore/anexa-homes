@@ -298,6 +298,7 @@ function thirdPartyRow(
           annualDegradationPct: basis.annualDegradationPct,
           utilityEscalationPct: 0,
           kwhPerKwYear: 0,
+          utilityMeterFeeCents: 0,
           defaultGrossPpwCents: 0,
           defaultDealerFeePct: 0,
           minOffsetPct: 0,

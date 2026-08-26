@@ -46,6 +46,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     annualDegradationPct: String(settings.annualDegradationPct),
     utilityEscalationPct: String(settings.utilityEscalationPct),
     kwhPerKwYear: String(settings.kwhPerKwYear),
+    utilityMeterFee: (settings.utilityMeterFeeCents / 100).toFixed(2),
     defaultGrossPpw: (settings.defaultGrossPpwCents / 100).toFixed(2),
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
@@ -64,6 +65,10 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       annualDegradationPct: Number(f.annualDegradationPct),
       utilityEscalationPct: Number(f.utilityEscalationPct),
       kwhPerKwYear: Number(f.kwhPerKwYear),
+      // Blank is zero, not "leave it alone": a company clearing this box is
+      // saying its utility bills no standing charge.
+      utilityMeterFeeCents:
+        f.utilityMeterFee.trim() === "" ? 0 : Math.round(Number(f.utilityMeterFee) * 100),
       defaultGrossPpwCents: Math.round(Number(f.defaultGrossPpw) * 100),
       defaultDealerFeePct: Number(f.defaultDealerFeePct),
       // Blank means "derive nothing" — the sticker stays exactly as a rep types
@@ -93,6 +98,13 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           <NumField label="Annual degradation %" value={f.annualDegradationPct} onChange={(v) => set("annualDegradationPct", v)} step="0.1" />
           <NumField label="Utility escalation %/yr" value={f.utilityEscalationPct} onChange={(v) => set("utilityEscalationPct", v)} step="0.1" />
           <NumField label="kWh per kW / year" value={f.kwhPerKwYear} onChange={(v) => set("kwhPerKwYear", v)} hint="Local irradiance" />
+          <NumField
+            label="Utility meter fee $/mo"
+            value={f.utilityMeterFee}
+            onChange={(v) => set("utilityMeterFee", v)}
+            step="0.01"
+            hint="The utility's fixed monthly charge, billed whatever the roof produces. Added to the bill the proposal shows AFTER solar, so a full-offset system never quotes $0 a month to a homeowner who will still get a bill."
+          />
         </div>
       </section>
 

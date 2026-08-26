@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { savingsModel, buildProposalSnapshot } from "@/lib/solar-proposal";
+import { savingsModel, buildProposalSnapshot, postSolarUtilityCents } from "@/lib/solar-proposal";
 import {
   year1Production,
   PRODUCTION_MARGIN_FACTOR,
@@ -13,6 +13,7 @@ const A: SolarAssumptions = {
   annualDegradationPct: 0.5,
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
+  utilityMeterFeeCents: 1000,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
@@ -76,10 +77,13 @@ describe("savings distinguish the bill avoided from what the customer is actuall
     expect(m.solarPaidCents).toBe(purchase.contractPriceCents);
     expect(m.netSavingsCents).toBe(m.utilityCostAvoidedCents - m.solarPaidCents);
     expect(m.netSavingsCents).toBeLessThan(m.utilityCostAvoidedCents);
-    // The identity that matters: net = utility billed − grid still bought − system.
+    // The identity that matters:
+    //   net = utility billed − what the utility still bills afterwards − system.
+    // "Afterwards" is grid power AND the standing meter fee, which is why the
+    // second term is not just `residualGridCents`.
     const billed = m.years.reduce((n, y) => n + y.utilityCostCents, 0);
-    const residual = m.years.reduce((n, y) => n + y.residualGridCents, 0);
-    expect(m.netSavingsCents).toBe(billed - residual - m.solarPaidCents);
+    const afterwards = m.years.reduce((n, y) => n + postSolarUtilityCents(y), 0);
+    expect(m.netSavingsCents).toBe(billed - afterwards - m.solarPaidCents);
   });
 
   it("CASH: the whole price lands in year one and nothing after", () => {
@@ -317,5 +321,80 @@ describe("the snapshot stops carrying what nobody sets", () => {
     expect(s.energy.ratePlan).toBeNull();
     expect(s.system.tsrfPct).toBeNull();
     expect(s.system.netMeteringProgram).toBeNull();
+  });
+});
+
+/**
+ * The half of the utility bill that is not kilowatt-hours.
+ *
+ * The defect these pin: a system at or above full offset drove the residual
+ * grid cost to zero, and the proposal printed "Utility bill afterwards: $0/mo"
+ * beside a monthly payment. No utility bills that way — the meter carries a
+ * standing charge whatever the roof produced that month — so the first real
+ * bill after switch-on contradicted the document the customer kept.
+ */
+describe("the meter fee is billed whatever the roof produces", () => {
+  // Deliberately OVER-produces: 150% of usage, so there is no grid top-up at
+  // all and the fee is the only thing left in the bill.
+  const overproducing = {
+    product: "cash" as const,
+    year1ProductionKwh: 21_000,
+    annualUsageKwh: 14_000,
+    currentRateMillsPerKwh: 154,
+    assumptions: A,
+  };
+
+  it("a fully-offset system still owes the utility something", () => {
+    const m = savingsModel(overproducing);
+    expect(m.years[0].residualGridCents).toBe(0);
+    expect(m.years[0].meterFeeCents).toBe(A.utilityMeterFeeCents * 12);
+    // The number the proposal prints. $10 a month, never $0.
+    expect(Math.round(postSolarUtilityCents(m.years[0]) / 12)).toBe(1_000);
+  });
+
+  it("the fee is inside what the solar path costs, so it cannot be forgotten", () => {
+    const m = savingsModel(overproducing);
+    // Year 1 carries the contract price; every later year carries the fee alone.
+    expect(m.years[1].solarPaymentCents).toBe(0);
+    expect(m.years[1].solarCostCents).toBe(m.years[1].meterFeeCents);
+    expect(m.years[1].solarCostCents).toBeGreaterThan(0);
+  });
+
+  it("escalates with the utility's own rate rather than sitting flat for 25 years", () => {
+    const m = savingsModel(overproducing);
+    expect(m.years[1].meterFeeCents).toBe(
+      Math.round(A.utilityMeterFeeCents * 12 * (1 + A.utilityEscalationPct / 100))
+    );
+    expect(m.years[24].meterFeeCents).toBeGreaterThan(m.years[0].meterFeeCents);
+  });
+
+  it("holds the projection on the conservative side, never the flattering one", () => {
+    const withFee = savingsModel(overproducing);
+    const without = savingsModel({
+      ...overproducing,
+      assumptions: { ...A, utilityMeterFeeCents: 0 },
+    });
+    // Same system, same rate, same everything else: quoting the fee can only
+    // ever REDUCE what the document promises.
+    expect(withFee.netSavingsCents).toBeLessThan(without.netSavingsCents);
+    expect(withFee.utilityCostAvoidedCents).toBeLessThan(without.utilityCostAvoidedCents);
+    // And it is not added to the pre-solar side, which is derived from the
+    // customer's own bill and therefore already contained it. Counting it there
+    // too would inflate the saving straight back out again.
+    expect(withFee.years[0].utilityCostCents).toBe(without.years[0].utilityCostCents);
+  });
+
+  it("a company whose utility charges no standing fee is unchanged", () => {
+    const m = savingsModel({ ...overproducing, assumptions: { ...A, utilityMeterFeeCents: 0 } });
+    expect(m.years[0].meterFeeCents).toBe(0);
+    expect(postSolarUtilityCents(m.years[0])).toBe(0);
+  });
+
+  it("a proposal generated before the fee existed keeps reporting its own numbers", () => {
+    // No `meterFeeCents` key at all — which is exactly what a v4 snapshot in
+    // the database looks like. It was priced without the fee and must not be
+    // silently re-read with today's.
+    const legacy = { residualGridCents: 60_430 } as Parameters<typeof postSolarUtilityCents>[0];
+    expect(postSolarUtilityCents(legacy)).toBe(60_430);
   });
 });

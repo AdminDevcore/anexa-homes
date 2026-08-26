@@ -101,8 +101,10 @@ export function PaymentMenu({
           {/*
             The bill that does NOT go away.
             A proposal that shows a monthly payment and stops there implies the
-            utility bill went to zero, and for most systems it did not: an
-            offset under 100% means grid power is still bought every month.
+            utility bill went to zero, and it never does. An offset under 100%
+            means grid power is still bought every month, and even at full
+            offset the utility bills its standing meter charge — which is why
+            this figure is grid power PLUS that fee and cannot read $0.
             Printing it here, beside the payment, is the difference between a
             homeowner who was told and one who finds out in November.
           */}

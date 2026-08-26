@@ -4,7 +4,12 @@ import * as React from "react";
 import { Leaf, TreePine, Factory, Car, Check, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SolarProposalSnapshot, ProposalPaymentOption } from "@/lib/solar-proposal";
-import { SOLAR_TIMELINE, SOLAR_FAQS, IMPACT_SOURCES } from "@/lib/solar-proposal";
+import {
+  SOLAR_TIMELINE,
+  SOLAR_FAQS,
+  IMPACT_SOURCES,
+  postSolarUtilityCents,
+} from "@/lib/solar-proposal";
 import { coverPitch, lifetimeFigure, lifetimeNote, monthlyToday } from "@/lib/solar-proposal-pitch";
 import { PROPOSAL_NAV_PX } from "@/lib/proposal";
 import { LenderMark } from "@/components/ui/lender-mark";
@@ -89,7 +94,7 @@ function paymentOptions(s: SolarProposalSnapshot): ProposalPaymentOption[] {
       financing: f,
       savings: s.savings,
       monthlyCents,
-      postSolarMonthlyCents: year1 ? Math.round(year1.residualGridCents / 12) : 0,
+      postSolarMonthlyCents: year1 ? Math.round(postSolarUtilityCents(year1) / 12) : 0,
     },
   ];
 }
@@ -313,13 +318,16 @@ export function SolarProposalView({
           {option.monthlyCents != null ? (
             <>
               &ldquo;After&rdquo; is your {usd(option.monthlyCents, 2)} payment plus the{" "}
-              {usd(option.postSolarMonthlyCents, 2)} of grid power the system does not cover — the
-              whole cost of the solar path, not the flattering half of it.
+              {usd(option.postSolarMonthlyCents, 2)} {s.energy.utilityProvider ?? "your utility"}{" "}
+              still bills you — the grid power the system does not cover, and their fixed monthly
+              meter charge, which is billed whatever your roof produces. The whole cost of the
+              solar path, not the flattering half of it.
             </>
           ) : (
             <>
-              &ldquo;After&rdquo; is the grid power the system does not cover. The system itself is
-              paid for once, up front, and is yours from the day it is switched on.
+              &ldquo;After&rdquo; is the grid power the system does not cover, plus your utility&rsquo;s
+              fixed monthly meter charge, which is billed whatever your roof produces. The system
+              itself is paid for once, up front, and is yours from the day it is switched on.
             </>
           )}
         </p>
@@ -1089,6 +1097,13 @@ export function SolarProposalView({
                 )}
                 <li>Panel degradation: {pct(s.assumptions.annualDegradationPct)} per year</li>
                 <li>Utility rate increase: {pct(s.assumptions.utilityEscalationPct)} per year</li>
+                {(s.assumptions.utilityMeterFeeCents ?? 0) > 0 && (
+                  <li>
+                    Utility meter fee: {usd(s.assumptions.utilityMeterFeeCents, 2)} a month, kept in
+                    the bill you still pay after solar because your utility charges it whatever the
+                    system produces
+                  </li>
+                )}
                 {s.assumptions.currentRateMillsPerKwh > 0 && (
                   <li>
                     Current utility rate: $

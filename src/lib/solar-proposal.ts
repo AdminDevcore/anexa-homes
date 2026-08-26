@@ -202,9 +202,18 @@ export type SavingsYear = {
   utilityCostCents: number;
   /** Grid power still bought after solar, this year. */
   residualGridCents: number;
+  /**
+   * The utility's fixed charges for the year — the monthly meter fee times
+   * twelve, escalated with the rate like everything else the utility bills.
+   *
+   * ABSENT on every snapshot generated before the fee was modelled; read it
+   * through `postSolarUtilityCents()` rather than directly, so a document
+   * priced without it keeps reporting the number it was priced at.
+   */
+  meterFeeCents: number;
   /** What solar itself costs this year (purchase price in yr 1, or the lease/PPA payment). */
   solarPaymentCents: number;
-  /** residualGrid + solarPayment — the total cost of the solar path this year. */
+  /** residualGrid + meterFee + solarPayment — the total cost of the solar path this year. */
   solarCostCents: number;
   cumulativeSavingsCents: number;
 };
@@ -212,7 +221,8 @@ export type SavingsYear = {
 export type SavingsModel = {
   years: SavingsYear[];
   /**
-   * Utility bill avoided, BEFORE paying for the system: Σ(utility) − Σ(residual grid).
+   * Utility bill avoided, BEFORE paying for the system:
+   * Σ(utility) − Σ(residual grid + meter fee).
    *
    * This is the number most solar proposals print as "25-year savings". It is
    * not savings — it is the gross reduction in the utility bill, and it ignores
@@ -276,6 +286,18 @@ export function savingsModel(args: {
     const gridKwh = Math.max(0, args.annualUsageKwh - production);
     const residualGridCents = Math.round((gridKwh * utilityRate) / 10);
 
+    // The half of the bill that has nothing to do with kilowatt-hours. It is
+    // escalated with the utility's own rate rather than held flat: this model
+    // already assumes the utility raises what it charges every year, and a
+    // standing charge frozen at today's figure for 25 years is the optimistic
+    // reading of that same assumption.
+    const meterFeeCents = Math.round(
+      a.utilityMeterFeeCents * 12 * Math.pow(1 + a.utilityEscalationPct / 100, year - 1)
+    );
+
+    // Everything the utility still bills after the system is switched on.
+    const postSolarUtility = residualGridCents + meterFeeCents;
+
     // What the solar itself costs this year — kept SEPARATE from the residual
     // grid bill so the proposal can show "bill avoided" and "net of what you
     // paid for the system" as two different, correctly-labelled numbers.
@@ -295,10 +317,10 @@ export function savingsModel(args: {
       }
     }
 
-    const solarCostCents = residualGridCents + solarPaymentCents;
+    const solarCostCents = postSolarUtility + solarPaymentCents;
     cumulative += utilityCostCents - solarCostCents;
     utilityTotal += utilityCostCents;
-    residualTotal += residualGridCents;
+    residualTotal += postSolarUtility;
     solarPaidCents += solarPaymentCents;
     if (paybackYear === null && cumulative > 0) paybackYear = year;
 
@@ -307,6 +329,7 @@ export function savingsModel(args: {
       productionKwh: Math.round(production),
       utilityCostCents,
       residualGridCents,
+      meterFeeCents,
       solarPaymentCents,
       solarCostCents,
       cumulativeSavingsCents: cumulative,
@@ -321,6 +344,20 @@ export function savingsModel(args: {
     totalSavingsCents: cumulative,
     paybackYear,
   };
+}
+
+/**
+ * What the utility still bills in a given year: grid power plus fixed charges.
+ *
+ * Every renderer goes through this rather than reading `residualGridCents`,
+ * because a proposal generated before the meter fee was modelled has no
+ * `meterFeeCents` on its years at all. Defaulting the missing key to zero means
+ * an old document keeps reporting exactly the figure it was priced at, and a
+ * new one reports the whole bill — which is the entire point of freezing a
+ * snapshot in the first place.
+ */
+export function postSolarUtilityCents(y: SavingsYear): number {
+  return y.residualGridCents + ((y as Partial<SavingsYear>).meterFeeCents ?? 0);
 }
 
 /** An equipment line as the customer sees it — catalogue data only, never invented. */
@@ -494,7 +531,11 @@ export type ProposalPaymentOption = {
    * three products arrive at it three different ways.
    */
   monthlyCents: number | null;
-  /** What the customer still pays the utility each month afterwards. */
+  /**
+   * What the customer still pays the utility each month afterwards: the grid
+   * power the system does not cover, PLUS the utility's fixed meter charge —
+   * which is billed at full offset exactly as it is billed at half.
+   */
   postSolarMonthlyCents: number;
 };
 
@@ -919,9 +960,10 @@ function priceOption(args: {
     financing,
     savings,
     monthlyCents,
-    // What still goes to the utility afterwards. Year one, because that is the
-    // year sitting next to the customer's current bill.
-    postSolarMonthlyCents: year1 ? Math.round(year1.residualGridCents / 12) : 0,
+    // What still goes to the utility afterwards — grid power AND the standing
+    // meter charge. Year one, because that is the year sitting next to the
+    // customer's current bill.
+    postSolarMonthlyCents: year1 ? Math.round(postSolarUtilityCents(year1) / 12) : 0,
   };
 }
 export function buildProposalSnapshot(args: {

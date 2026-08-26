@@ -1,0 +1,23 @@
+-- The utility's fixed monthly charge, in cents.
+--
+-- The savings model priced a post-solar bill out of kilowatt-hours alone, so a
+-- system at or above full offset quoted "Utility bill afterwards: $0/mo" on a
+-- document the homeowner keeps. No utility works that way: the meter carries a
+-- standing charge that is billed in a month the roof covered everything exactly
+-- as it is billed in December, and the first real bill after switch-on is the
+-- worst possible place for a customer to discover that.
+--
+-- $10.00 is the default because it is the figure this company sees, and it is a
+-- column rather than a constant so a market with a different one does not need
+-- a deploy. Zero is legitimate and means the utility genuinely bills none.
+--
+-- It lands on the POST-solar side only. The pre-solar side is derived from the
+-- customer's own bill, which already contained the fee -- adding it there too
+-- would count it twice and inflate the saving. Counting it once, on the side
+-- that is modelled rather than observed, holds every projection on the
+-- conservative side.
+--
+-- Moves no existing proposal: every generated snapshot froze its own numbers.
+
+-- AlterTable
+ALTER TABLE "solar_settings" ADD COLUMN "utilityMeterFeeCents" INTEGER NOT NULL DEFAULT 1000;

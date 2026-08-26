@@ -15,6 +15,7 @@ const A: SolarAssumptions = {
   annualDegradationPct: 0.5,
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
+  utilityMeterFeeCents: 1000,
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
@@ -167,8 +168,11 @@ describe("25-year savings model", () => {
       assumptions: A,
     });
     // Degradation means a little grid top-up creeps in, so compare the solar
-    // payment portion only in year 1 vs a flat expectation.
-    expect(years[0].solarCostCents).toBe(18_500 * 12);
+    // payment portion only in year 1 vs a flat expectation. The year's cost
+    // also carries the utility's standing meter fee, which no amount of
+    // production removes.
+    expect(years[0].solarPaymentCents).toBe(18_500 * 12);
+    expect(years[0].solarCostCents).toBe(18_500 * 12 + A.utilityMeterFeeCents * 12);
   });
 
   it("stops charging a lease payment after the term ends", () => {

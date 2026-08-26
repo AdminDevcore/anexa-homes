@@ -27,6 +27,10 @@ const settingsSchema = z.object({
   annualDegradationPct: z.number().min(0).max(3),
   utilityEscalationPct: z.number().min(0).max(15),
   kwhPerKwYear: z.number().int().min(500).max(2500),
+  // The utility's standing monthly charge, cents. Zero is allowed and means the
+  // company is quoting a utility that genuinely bills none; the $100/mo ceiling
+  // is a typo rail, not a policy.
+  utilityMeterFeeCents: z.number().int().min(0).max(10000),
   defaultGrossPpwCents: z.number().int().min(50).max(2000),
   defaultDealerFeePct: z.number().min(0).max(50),
   // Null is meaningful and is the default: derive nothing, leave the sticker as

@@ -77,7 +77,7 @@ export function CompareCards({
                 ? "None — the price is fixed"
                 : null,
           ],
-          ["Grid power still bought", `${usd(option.postSolarMonthlyCents, 0)} a month`],
+          ["Utility bill afterwards", `${usd(option.postSolarMonthlyCents, 0)} a month`],
         ]}
         footK={`Estimated ${years}-year cost`}
         footV={usd(solarTotal)}
