@@ -3,9 +3,10 @@ import {
   eaveOf,
   facingFromEave,
   fillFace,
-  insetPolygon,
+  distanceToBoundary,
   pointInPolygon,
   polygonAreaM2,
+  polygonCentroid,
   splitPolygon,
   DEFAULT_FACE_INSET_M,
   type RoofFace,
@@ -145,24 +146,35 @@ describe("pointInPolygon", () => {
   });
 });
 
-describe("insetPolygon", () => {
-  it("shrinks a square by the inset on every side", () => {
-    const out = insetPolygon(rect(0, 0, 10, 10), 1);
-    expect(polygonAreaM2(out)).toBeCloseTo(64, 4);
+describe("distanceToBoundary", () => {
+  it("measures to the nearest edge, not the nearest corner", () => {
+    const square = rect(0, 0, 10, 10);
+    expect(distanceToBoundary({ e: 5, n: 5 }, square)).toBeCloseTo(5, 6);
+    expect(distanceToBoundary({ e: 1, n: 5 }, square)).toBeCloseTo(1, 6);
+    expect(distanceToBoundary({ e: 5, n: 9.2 }, square)).toBeCloseTo(0.8, 6);
   });
 
-  it("survives a trace wound the other way round", () => {
-    const clockwise = [...rect(0, 0, 10, 10)].reverse();
-    expect(polygonAreaM2(insetPolygon(clockwise, 1))).toBeCloseTo(64, 4);
+  it("is honest about a point outside the ring", () => {
+    // Unsigned: the caller pairs it with an inside test, because a panel three
+    // feet clear of the walls on the OUTSIDE is not on the roof.
+    expect(distanceToBoundary({ e: -2, n: 5 }, rect(0, 0, 10, 10))).toBeCloseTo(2, 6);
   });
 
-  it("collapses rather than turning inside out when the inset eats the shape", () => {
-    const out = insetPolygon(rect(0, 0, 2, 2), 3);
-    expect(polygonAreaM2(out)).toBe(0);
-  });
-
-  it("returns the polygon untouched at zero inset", () => {
-    expect(polygonAreaM2(insetPolygon(rect(0, 0, 10, 10), 0))).toBeCloseTo(100, 6);
+  it("measures into a notch, which is where offsetting fell over", () => {
+    const ell = [
+      { e: 0, n: 0 },
+      { e: 10, n: 0 },
+      { e: 10, n: 4 },
+      { e: 4, n: 4 },
+      { e: 4, n: 10 },
+      { e: 0, n: 10 },
+    ];
+    // Diagonally in from the reflex corner at (4,4). Neither edge of the notch
+    // runs past this point, so the nearest thing on the boundary is the corner
+    // itself — which is exactly the case an edge-offset cannot represent.
+    expect(distanceToBoundary({ e: 3.5, n: 3.5 }, ell)).toBeCloseTo(Math.hypot(0.5, 0.5), 6);
+    // Straight in from the notch's own edge: the edge, not the corner.
+    expect(distanceToBoundary({ e: 6, n: 3.4 }, ell)).toBeCloseTo(0.6, 6);
   });
 });
 
@@ -184,9 +196,35 @@ describe("fillFace", () => {
     const block = fillFace(face(points), { module: SQUARE })!;
     for (const corners of panelCorners(block, SQUARE)) {
       for (const c of corners) {
-        // A hair of tolerance: a panel edge sitting exactly on the traced line
-        // is inside the roof, and an exact comparison there is a coin toss.
-        expect(pointInPolygon({ e: c.e, n: c.n }, insetPolygon(points, -0.001))).toBe(true);
+        // Inside, or on the line to within a millimetre. A panel edge sitting
+        // exactly on the traced line is on the roof, and an exact comparison
+        // there is a coin toss.
+        const inside = pointInPolygon({ e: c.e, n: c.n }, points);
+        expect(inside || distanceToBoundary({ e: c.e, n: c.n }, points) < 0.001).toBe(true);
+      }
+    }
+  });
+
+  it("keeps every panel a full setback clear of a notched outline", () => {
+    // The L-plan half this rewrite exists for: offsetting its edges made them
+    // cross and erased the whole face, so a real roof filled with nothing.
+    const ell = [
+      { e: 0, n: 0 },
+      { e: 14, n: 0 },
+      { e: 14, n: 5 },
+      { e: 7, n: 5 },
+      { e: 7, n: 11 },
+      { e: 0, n: 11 },
+    ];
+    const block = fillFace(face(ell, 0.914), { module: SQUARE })!;
+    expect(block).not.toBeNull();
+    expect(blockPanelCount(block)).toBeGreaterThan(4);
+    for (const corners of panelCorners(block, SQUARE)) {
+      for (const c of corners) {
+        expect(pointInPolygon(c, ell)).toBe(true);
+        // Every corner at least the setback back from every edge, the notch
+        // included — which is the thing the offset could not express.
+        expect(distanceToBoundary(c, ell)).toBeGreaterThan(0.9);
       }
     }
   });
@@ -397,5 +435,51 @@ describe("fillFace with a stated provenance", () => {
     })!;
     expect(block.azimuthDeg).toBe(182);
     expect(block.facingSource).toBe("footprint");
+  });
+});
+
+describe("polygonCentroid", () => {
+  it("balances a rectangle at its middle", () => {
+    const c = polygonCentroid(rect(2, 4, 12, 10));
+    expect(c.e).toBeCloseTo(7, 6);
+    expect(c.n).toBeCloseTo(7, 6);
+  });
+
+  it("is not dragged about by where the corners were clicked", () => {
+    // The same square, with three extra points along one edge. The average
+    // corner moves; the centre of area does not.
+    const plain = rect(0, 0, 10, 10);
+    const dense = [
+      { e: 0, n: 0 },
+      { e: 2.5, n: 0 },
+      { e: 5, n: 0 },
+      { e: 7.5, n: 0 },
+      { e: 10, n: 0 },
+      { e: 10, n: 10 },
+      { e: 0, n: 10 },
+    ];
+    const a = polygonCentroid(plain);
+    const b = polygonCentroid(dense);
+    expect(b.e).toBeCloseTo(a.e, 6);
+    expect(b.n).toBeCloseTo(a.n, 6);
+  });
+
+  it("cuts a building into halves of the same size", () => {
+    // The failure this exists for: splitting through the map pin instead of the
+    // middle of the house gave one slope nineteen columns and the other sixteen.
+    const house = rect(-9, 2, 9, 14);
+    const centre = polygonCentroid(house);
+    const [a, b] = splitPolygon(house, centre, 90);
+    expect(polygonAreaM2(a)).toBeCloseTo(polygonAreaM2(b), 4);
+  });
+});
+
+describe("norm360", () => {
+  it("never hands back 360", () => {
+    // 359.7 wrapped and then rounded is 360: a bearing that is really north,
+    // written as a number no compass has and a 0..359 input rejects.
+    const faces = fillFace(face(rect(-6, -12, 6, -2)), { module: SQUARE })!;
+    expect(faces.azimuthDeg).toBeGreaterThanOrEqual(0);
+    expect(faces.azimuthDeg).toBeLessThan(360);
   });
 });

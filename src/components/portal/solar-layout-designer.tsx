@@ -54,6 +54,7 @@ import { autoFillRoof, pruneToCount, pruneToTarget } from "@/lib/solar-autofill"
 import {
   DEFAULT_FACE_INSET_M,
   fillFace,
+  polygonCentroid,
   splitPolygon,
   type RoofFace,
 } from "@/lib/solar-face-fill";
@@ -813,9 +814,17 @@ export function SolarLayoutDesigner({
       if (ridgeDeg == null) {
         return [{ face: { points: fp.points, insetM: inset }, azimuthDeg: null }];
       }
-      // The ridge runs through the middle of the building, which for these
-      // purposes is the pin: the deal's coordinate is a ROOFTOP geocode.
-      const halves = splitPolygon(fp.points, { e: 0, n: 0 }, ridgeDeg);
+      /**
+       * THE RIDGE RUNS THROUGH THE MIDDLE OF THE BUILDING, not through the pin.
+       *
+       * The pin is a rooftop geocode, which puts it ON the roof but not at its
+       * centre — on this company's own test address it sits four metres off,
+       * and cutting there gave one slope nineteen columns and the other
+       * sixteen. A roof's two faces are not that different, and the lopsided
+       * pair prices the design wrong in both directions.
+       */
+      const centre = polygonCentroid(fp.points);
+      const halves = splitPolygon(fp.points, centre, ridgeDeg);
       return halves
         .filter((half) => half.length >= 3)
         .map((half) => {
@@ -825,13 +834,22 @@ export function SolarLayoutDesigner({
             (t, q) => ({ e: t.e + q.e / half.length, n: t.n + q.n / half.length }),
             { e: 0, n: 0 }
           );
-          const away = norm360((Math.atan2(mid.e, mid.n) * 180) / Math.PI);
+          const away = norm360(
+            (Math.atan2(mid.e - centre.e, mid.n - centre.n) * 180) / Math.PI
+          );
+          /**
+           * The perpendicular that points the same way this half lies from the
+           * ridge — NEARER to `away`, not further from it.
+           *
+           * It was the wrong way round, and the wrong way round is invisible:
+           * every array still got a plausible bearing, the arrows still pointed
+           * somewhere sensible, and the south slope of this company's own test
+           * house was priced as north. A facing is only ever wrong by 180°, and
+           * 180° out is the difference between the best roof and the worst.
+           */
           const perp = [norm360(ridgeDeg + 90), norm360(ridgeDeg - 90)];
-          const pick =
-            Math.abs(((perp[0] - away + 540) % 360) - 180) <
-            Math.abs(((perp[1] - away + 540) % 360) - 180)
-              ? perp[1]
-              : perp[0];
+          const off = (deg: number) => Math.abs(((deg - away + 540) % 360) - 180);
+          const pick = off(perp[0]) <= off(perp[1]) ? perp[0] : perp[1];
           return { face: { points: half, insetM: inset }, azimuthDeg: pick };
         });
     },
@@ -1153,10 +1171,24 @@ export function SolarLayoutDesigner({
   const fitted = React.useRef(false);
   React.useEffect(() => {
     const el = viewportRef.current;
-    // Deliberately NOT gated on the imagery having loaded. The canvas has a
-    // size either way, and a failed tile is exactly when a rep least wants the
-    // picture to also be three times the height of the screen.
-    if (!el || !loaded) return;
+    /**
+     * NOT GATED ON THE IMAGERY, and it used to be — the comment here said one
+     * thing and the line under it did the other.
+     *
+     * `loaded` is set by the satellite tile's own load or error handler, so
+     * until one of them fires the fit never ran and the canvas stayed at 1:1:
+     * 1280 pixels of roof in a screen a few hundred shorter, with the bottom
+     * half of the house below the fold. Everything down there is unreachable
+     * until somebody thinks to scroll, which on a picture with no visible edges
+     * is not an obvious thing to think.
+     *
+     * A tile that is slow, or a Maps key that is wrong, is exactly when a rep
+     * least wants the picture to also be three times the height of the screen.
+     * The canvas has a size either way — `canvasW`/`canvasH` fall back to the
+     * default until the real dimensions arrive, and both are in the deps, so
+     * this re-fits the moment they do.
+     */
+    if (!el) return;
     const fit = () => {
       const f = Math.min(el.clientWidth / canvasW, el.clientHeight / canvasH);
       if (Number.isFinite(f) && f > 0) setViewScale(Math.max(0.2, Math.min(2, f)));
@@ -2321,6 +2353,16 @@ export function SolarLayoutDesigner({
           <canvas
             ref={canvasRef}
             data-testid="layout-canvas"
+            /**
+             * How many corners the shape in progress has, for the tests.
+             *
+             * A trace lives entirely on the canvas, so a spec that closes one
+             * and gets nothing can only report "no panels" — which is the same
+             * symptom whether the corners never registered, the shape never
+             * closed, or the fill found no room. Three different bugs behind
+             * one message is three afternoons.
+             */
+            data-trace-points={pending?.length ?? 0}
             width={canvasW}
             height={canvasH}
             onPointerDown={onPointerDown}
@@ -3320,7 +3362,10 @@ const COMPASS_POINTS = [
 
 /** 0..359, so a flip past north and a negative bearing both read normally. */
 function norm360(deg: number): number {
-  return Math.round(((deg % 360) + 360) % 360);
+  // Rounded FIRST, then wrapped. Wrapping first leaves 359.7 to round up to
+  // 360 — a bearing that is really north, written as a number no compass has,
+  // that a 0..359 input rejects and that misses the yield cache keyed on 0.
+  return Math.round(((deg % 360) + 360) % 360) % 360;
 }
 
 /**

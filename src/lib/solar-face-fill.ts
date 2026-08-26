@@ -107,9 +107,9 @@ const SAME_CORNER_M = 0.01;
  * here as a ring whose first point is repeated at the end, which is to say a
  * ring with a zero-length edge in it.
  *
- * An edge of no length has no direction, so the inset offsets it along a
- * meaningless normal, the neighbouring edges intersect somewhere absurd, and
- * the whole face folds into a bow tie that `insetPolygon` then throws away.
+ * An edge of no length has no direction, and a ring carrying one puts a corner
+ * of the roof in two places at once — which throws off the eave, the bounding
+ * box the grid is laid in, and the distance every panel is measured against.
  * The rep sees "no panel fits inside that outline" on a perfectly good roof,
  * which is the least believable error message this tool could produce.
  *
@@ -177,115 +177,69 @@ export function pointInPolygon(
 }
 
 /**
- * The face pulled in from its own edges by `d` metres.
+ * How far a point is from the nearest edge of a ring, metres.
  *
- * Every edge is moved inward along its normal and the neighbours re-intersected
- * — a straight-skeleton inset, minus the skeleton, which is more than this
- * needs. A roof face is a handful of corners at sane angles; the failure mode
- * worth guarding is not a bad mitre but an inset deep enough to turn the shape
- * inside out, which reads as a face too small to put a panel on and returns
- * nothing rather than an inverted polygon full of panels off the roof.
+ * THIS REPLACED INSETTING THE POLYGON, and the reason is a real building. A
+ * fire setback is "no panel within three feet of the edge", and the obvious way
+ * to honour it is to shrink the outline by three feet and fill what is left.
+ * That works on a rectangle and falls apart on anything else: offsetting the
+ * edges of a concave shape makes them cross, and the L-plan house this company
+ * tests on came back with one of its two slopes eroded to nothing. No panels,
+ * no explanation, on half a roof that plainly has room.
  *
- * Winding is normalised first, so it does not matter which way round the rep
- * traced. That is not a detail: clicking corners clockwise is as natural as
- * anticlockwise and a tool that only worked one way round would look broken
- * every other time.
+ * Measuring the clearance of each panel instead is exact whatever the shape,
+ * because it never tries to build a smaller polygon at all — it asks the only
+ * question the rule actually poses, of the only points that matter.
  */
-export function insetPolygon(
-  points: { e: number; n: number }[],
-  d: number
-): { e: number; n: number }[] {
-  const clean = cleanRing(points);
-  if (clean.length < 3) return [];
-  if (d === 0) return clean.map((p) => ({ ...p }));
-
-  // Anticlockwise, so the inward normal is a consistent quarter-turn.
-  const ring = signedArea2(clean) < 0 ? [...clean].reverse() : [...clean];
-  const before = polygonAreaM2(ring);
-
-  const out: { e: number; n: number }[] = [];
+export function distanceToBoundary(
+  p: { e: number; n: number },
+  ring: { e: number; n: number }[]
+): number {
+  let best = Infinity;
   for (let i = 0; i < ring.length; i++) {
-    const prev = ring[(i - 1 + ring.length) % ring.length];
-    const curr = ring[i];
-    const next = ring[(i + 1) % ring.length];
-
-    // The two edges meeting at this corner, moved inward by d.
-    const in1 = inwardOffset(prev, curr, d);
-    const in2 = inwardOffset(curr, next, d);
-    const hit = intersect(in1, in2);
-    // Parallel edges — a corner that is not really one. The offset point on
-    // either line is the same place, so take it.
-    out.push(hit ?? { e: curr.e + in2.dE, n: curr.n + in2.dN });
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const dE = b.e - a.e;
+    const dN = b.n - a.n;
+    const lenSq = dE * dE + dN * dN;
+    // A zero-length edge is a repeated corner; its distance is the corner's.
+    const t = lenSq < 1e-12 ? 0 : Math.max(0, Math.min(1, ((p.e - a.e) * dE + (p.n - a.n) * dN) / lenSq));
+    const d = Math.hypot(p.e - (a.e + dE * t), p.n - (a.n + dN * t));
+    if (d < best) best = d;
   }
-
-  // Inside out, or eaten to nothing: no roof left to put a panel on.
-  const after = polygonAreaM2(out);
-  if (d > 0 && (after >= before || after < 1e-6)) return [];
-  if (selfCrossing(out)) return [];
-  return out;
-}
-
-/** One edge shifted d metres toward the inside of an anticlockwise ring. */
-function inwardOffset(
-  a: { e: number; n: number },
-  b: { e: number; n: number },
-  d: number
-): { a: { e: number; n: number }; b: { e: number; n: number }; dE: number; dN: number } {
-  const len = Math.hypot(b.e - a.e, b.n - a.n) || 1;
-  // Quarter-turn left of the direction of travel: inward on an anticlockwise ring.
-  const dE = (-(b.n - a.n) / len) * d;
-  const dN = ((b.e - a.e) / len) * d;
-  return { a: { e: a.e + dE, n: a.n + dN }, b: { e: b.e + dE, n: b.n + dN }, dE, dN };
-}
-
-/** Where two infinite lines cross, or null if they are parallel. */
-function intersect(
-  l1: { a: { e: number; n: number }; b: { e: number; n: number } },
-  l2: { a: { e: number; n: number }; b: { e: number; n: number } }
-): { e: number; n: number } | null {
-  const d1 = { e: l1.b.e - l1.a.e, n: l1.b.n - l1.a.n };
-  const d2 = { e: l2.b.e - l2.a.e, n: l2.b.n - l2.a.n };
-  const denom = d1.e * d2.n - d1.n * d2.e;
-  if (Math.abs(denom) < 1e-9) return null;
-  const t = ((l2.a.e - l1.a.e) * d2.n - (l2.a.n - l1.a.n) * d2.e) / denom;
-  return { e: l1.a.e + d1.e * t, n: l1.a.n + d1.n * t };
+  return best;
 }
 
 /**
- * Does the ring cross itself?
+ * The centre of area of a ring — where its ridge runs through.
  *
- * An inset that folds a thin part of the shape over produces a bow tie whose
- * area can still look plausible. Filling one puts panels in the fold, which is
- * to say off the roof, so a crossing ring is thrown away entirely.
+ * NOT the average of the corners, which is pulled toward whichever end of the
+ * building has more of them: an L-plan traced with six points down one wing and
+ * three down the other has its "average corner" inside the long wing. The
+ * centroid of the AREA is where the shape actually balances, which is where a
+ * roof's ridge sits.
  */
-function selfCrossing(ring: { e: number; n: number }[]): boolean {
-  for (let i = 0; i < ring.length; i++) {
-    for (let j = i + 2; j < ring.length; j++) {
-      // Adjacent edges share a vertex; the last and the first do too.
-      if (i === 0 && j === ring.length - 1) continue;
-      if (
-        segmentsCross(ring[i], ring[(i + 1) % ring.length], ring[j], ring[(j + 1) % ring.length])
-      ) {
-        return true;
-      }
-    }
+export function polygonCentroid(points: { e: number; n: number }[]): { e: number; n: number } {
+  let twice = 0;
+  let e = 0;
+  let n = 0;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const q = points[(i + 1) % points.length];
+    const cross = p.e * q.n - q.e * p.n;
+    twice += cross;
+    e += (p.e + q.e) * cross;
+    n += (p.n + q.n) * cross;
   }
-  return false;
-}
-
-function segmentsCross(
-  p1: { e: number; n: number },
-  p2: { e: number; n: number },
-  p3: { e: number; n: number },
-  p4: { e: number; n: number }
-): boolean {
-  const side = (a: typeof p1, b: typeof p1, c: typeof p1) =>
-    Math.sign((b.e - a.e) * (c.n - a.n) - (b.n - a.n) * (c.e - a.e));
-  const d1 = side(p3, p4, p1);
-  const d2 = side(p3, p4, p2);
-  const d3 = side(p1, p2, p3);
-  const d4 = side(p1, p2, p4);
-  return d1 !== d2 && d3 !== d4 && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0;
+  // A degenerate ring has no area to balance; fall back to the plain average.
+  if (Math.abs(twice) < 1e-9) {
+    const k = Math.max(1, points.length);
+    return {
+      e: points.reduce((t, p) => t + p.e, 0) / k,
+      n: points.reduce((t, p) => t + p.n, 0) / k,
+    };
+  }
+  return { e: e / (3 * twice), n: n / (3 * twice) };
 }
 
 /**
@@ -428,7 +382,10 @@ export function facingFromEave(
 
 /** 0..359, so a flip past north and a negative bearing both read normally. */
 function norm360(deg: number): number {
-  return Math.round(((deg % 360) + 360) % 360);
+  // Rounded FIRST, then wrapped. Wrapping first leaves 359.7 to round up to
+  // 360 — a bearing that is really north, written as a number no compass has,
+  // that a 0..359 input rejects and that misses the yield cache keyed on 0.
+  return Math.round(((deg % 360) + 360) % 360) % 360;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,8 +438,8 @@ export function fillFace(face: RoofFace, opts: FillFaceOptions): LayoutBlock | n
   const points = cleanRing(face.points);
   if (points.length < 3) return null;
 
-  const usable = insetPolygon(points, Math.max(0, face.insetM));
-  if (usable.length < 3 || polygonAreaM2(usable) < 1e-6) return null;
+  if (polygonAreaM2(points) < 1e-6) return null;
+  const clearM = Math.max(0, face.insetM);
 
   const pin = opts.pin ?? { e: 0, n: 0 };
   const eave = eaveOf(points, pin);
@@ -493,7 +450,7 @@ export function fillFace(face: RoofFace, opts: FillFaceOptions): LayoutBlock | n
   let bestCount = 0;
 
   for (const orientation of ["portrait", "landscape"] as const) {
-    const candidate = fillAt(usable, rotationDeg, orientation, opts.module, steps, opts.keepOut);
+    const candidate = fillAt(points, rotationDeg, orientation, opts.module, steps, clearM, opts.keepOut);
     if (candidate && candidate.count > bestCount) {
       bestCount = candidate.count;
       best = candidate.block;
@@ -524,11 +481,12 @@ export function fillFace(face: RoofFace, opts: FillFaceOptions): LayoutBlock | n
  * is what picks up the edge column that was hanging half off.
  */
 function fillAt(
-  usable: { e: number; n: number }[],
+  ring: { e: number; n: number }[],
   rotationDeg: number,
   orientation: Orientation,
   module: ModuleMm,
   steps: number,
+  clearM: number,
   keepOut?: { e: number; n: number }[][]
 ): { block: LayoutBlock; count: number } | null {
   const { w, h } = panelSizeM(module, orientation);
@@ -538,7 +496,7 @@ function fillAt(
   // The face in the grid's own frame, so the bounding box is the box the panels
   // actually lie in rather than a north-aligned one around a rotated roof.
   const frame = { originE: 0, originN: 0, rotationDeg };
-  const local = usable.map((p) => groundToBlockLocal(frame, p.e, p.n));
+  const local = ring.map((p) => groundToBlockLocal(frame, p.e, p.n));
   const minX = Math.min(...local.map((p) => p.x));
   const maxX = Math.max(...local.map((p) => p.x));
   const minY = Math.min(...local.map((p) => p.y));
@@ -579,7 +537,7 @@ function fillAt(
       let count = 0;
       for (let index = 0; index < gridCols * gridRows; index++) {
         const corners = cellCorners(block, module, index);
-        if (onFace(corners, usable) && !blocked(corners, keepOut)) count++;
+        if (onFace(corners, ring, clearM) && !blocked(corners, keepOut)) count++;
         else omitted.push(index);
       }
       if (count > (best?.count ?? 0)) {
@@ -591,23 +549,32 @@ function fillAt(
 }
 
 /**
- * Whether one cell is on the traced face.
+ * Whether one cell is on the roof, and far enough in from its edge.
  *
- * Its centre and its four corners, the corners pulled in slightly — the same
- * test and the same tolerance the plane fill uses. Pulling the corners in is
- * the tolerance in place of growing the polygon, which would have loosened the
- * centre test too and let a cell whose middle is off the roof stay on it.
+ * Its centre and its four corners, the corners pulled in by a whisker so a
+ * panel edge sitting exactly on the traced line is not a coin toss — and every
+ * one of them at least `clearM` from the nearest edge, which is the setback.
+ *
+ * BOTH TESTS ARE NEEDED. Distance alone would accept a panel sitting three feet
+ * clear of the walls on the OUTSIDE of the building, and inside-ness alone
+ * would put modules hard against the eave. Together they are the rule as it is
+ * written: on the roof, and this far back from the edge of it.
  */
 function onFace(
   corners: { e: number; n: number }[],
-  usable: { e: number; n: number }[]
+  ring: { e: number; n: number }[],
+  clearM: number
 ): boolean {
   const cx = (corners[0].e + corners[2].e) / 2;
   const cy = (corners[0].n + corners[2].n) / 2;
-  if (!pointInPolygon({ e: cx, n: cy }, usable)) return false;
+  const centre = { e: cx, n: cy };
+  if (!pointInPolygon(centre, ring)) return false;
+  if (clearM > 0 && distanceToBoundary(centre, ring) < clearM) return false;
+
   for (const c of corners) {
     const p = { e: cx + (c.e - cx) * CORNER_INSET, n: cy + (c.n - cy) * CORNER_INSET };
-    if (!pointInPolygon(p, usable)) return false;
+    if (!pointInPolygon(p, ring)) return false;
+    if (clearM > 0 && distanceToBoundary(p, ring) < clearM) return false;
   }
   return true;
 }

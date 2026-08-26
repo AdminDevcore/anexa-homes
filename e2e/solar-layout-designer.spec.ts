@@ -930,14 +930,19 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
       [0.88, 0.72],
       [0.55, 0.72],
     ];
-    for (const [fx, fy] of corners) {
+    const canvas = page.getByTestId("layout-canvas");
+    for (const [i, [fx, fy]] of corners.entries()) {
       const p = at(fx, fy);
       await page.mouse.click(p.x, p.y);
+      // Each corner lands before the next one is aimed. Without this a dropped
+      // click shows up much later as "the fill found no room".
+      await expect(canvas).toHaveAttribute("data-trace-points", String(i + 1));
     }
     // Back onto the first dot: how a shape is closed here and in every mapping
     // tool there is.
     const first = at(corners[0][0], corners[0][1]);
     await page.mouse.click(first.x, first.y);
+    await expect(canvas).toHaveAttribute("data-trace-points", "0");
 
     await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
 
