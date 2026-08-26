@@ -78,10 +78,18 @@ export function SavingsScrubber({
       : "The system — already paid for in year one"
     : "What you pay for the system this year";
 
+  /**
+   * Named where the programme has a name of its own. Where the office has only
+   * recorded a generic one — "Battery programme" is what several of them are
+   * called on the provider list — appending "for your battery" produces
+   * "Battery programme pays you for your battery", so the tail is dropped.
+   */
   const batteryLabel =
-    vpp.length === 1
-      ? `${vpp[0].programme} pays you for your battery`
-      : "Battery programmes pay you";
+    vpp.length !== 1
+      ? "Battery programmes pay you"
+      : /batter/i.test(vpp[0].programme)
+        ? `${vpp[0].programme} pays you`
+        : `${vpp[0].programme} pays you for your battery`;
 
   // Only worth showing when it explains something. With no battery and no
   // payment left to make, "with solar" simply IS the remaining utility bill and
