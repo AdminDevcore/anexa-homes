@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
+import { dashboardLeadWhere, dashboardProjectWhere } from "./scope";
 import type { Prisma, Role, Vertical } from "@prisma/client";
 
 // Roles allowed to see company financials on the dashboard: revenue, deal/lead
@@ -28,8 +29,8 @@ export type DashboardStats = {
 
 export async function getDashboardStats(user: SessionUser, vertical: Vertical): Promise<DashboardStats> {
   // Deal-flow stats are isolated to the active vertical workspace.
-  const leadWhere: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), vertical };
-  const projectWhere: Prisma.ProjectWhereInput = { ...(listScope(user, "Project") as Prisma.ProjectWhereInput), lead: { vertical } };
+  const leadWhere = dashboardLeadWhere(user, vertical);
+  const projectWhere = dashboardProjectWhere(user, vertical);
   const docWhere = listScope(user, "Document") as Prisma.DocumentPackageWhereInput;
 
   const canSeePayroll = can(user, "read", "Payroll");
@@ -98,7 +99,7 @@ export async function getDashboardStats(user: SessionUser, vertical: Vertical): 
 }
 
 export async function getRecentLeads(user: SessionUser, vertical: Vertical, take = 6) {
-  const where: Prisma.LeadWhereInput = { ...(listScope(user, "Lead") as Prisma.LeadWhereInput), vertical };
+  const where = dashboardLeadWhere(user, vertical);
   const leads = await prisma.lead.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -115,7 +116,7 @@ export async function getRecentLeads(user: SessionUser, vertical: Vertical, take
 }
 
 export async function getRecentProjects(user: SessionUser, vertical: Vertical, take = 6) {
-  const where: Prisma.ProjectWhereInput = { ...(listScope(user, "Project") as Prisma.ProjectWhereInput), lead: { vertical } };
+  const where = dashboardProjectWhere(user, vertical);
   return prisma.project.findMany({
     where,
     orderBy: { updatedAt: "desc" },
