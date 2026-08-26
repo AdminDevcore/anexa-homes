@@ -376,6 +376,17 @@ export type SnapshotEquipment = {
    * somebody is holding at a different component's spec sheet.
    */
   specSheetUrl?: string | null;
+  /**
+   * A photograph of the component. v5 and later; absent on older snapshots.
+   *
+   * A URL to our own serving route, carrying the item's `photoUpdatedAt` as a
+   * cache-buster — the same treatment `lenderLogoUrl` gets, and frozen the same
+   * way: the document keeps the URL it was generated with. The BYTES behind it
+   * are live, so re-photographing a panel updates it everywhere, which is the
+   * right answer for a product shot and the wrong one for a price. Nothing
+   * quoted is stored this way.
+   */
+  photoUrl?: string | null;
 };
 
 /**

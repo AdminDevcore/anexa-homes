@@ -270,21 +270,46 @@ export function EquipCard({
     ratingW: number | null;
     qty: number;
     specSheetUrl?: string | null;
+    photoUrl?: string | null;
   } | null;
   unit: string;
 }) {
   if (!e) return null;
+  const name = [e.manufacturer, e.model].filter(Boolean).join(" ");
   return (
     <div
       data-stagger
       style={{ ["--i" as string]: i } as React.CSSProperties}
       className="flex flex-col rounded-2xl bg-white p-5 shadow-sm ring-1 ring-neutral-200/60"
     >
+      {/*
+        The hardware, pictured.
+
+        Absent rather than framed when there is no photo: an empty tile with a
+        placeholder glyph on the one page that has to look trustworthy reads as
+        a document that was not finished. `object-contain` on a white tile,
+        because product shots arrive at every aspect ratio and cropping a panel
+        to a square cuts the panel in half.
+      */}
+      {e.photoUrl && (
+        <span className="mb-4 flex h-28 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-neutral-900/[0.06] [print-color-adjust:exact] [-webkit-print-color-adjust:exact]">
+          {/* eslint-disable-next-line @next/next/no-img-element -- served from a
+              route, not the image pipeline, and rendered on the public proposal
+              where next/image's optimiser is not in play. */}
+          <img
+            src={e.photoUrl}
+            alt={name ? `${name} — ${label.toLowerCase()}` : label}
+            className="size-full object-contain p-2"
+            loading="lazy"
+            decoding="async"
+          />
+        </span>
+      )}
       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
         {label}
       </p>
       <p className="mt-2 font-medium leading-snug text-neutral-900">
-        {[e.manufacturer, e.model].filter(Boolean).join(" ")}
+        {name}
       </p>
       <p className="mt-2 text-sm tabular-nums text-neutral-500">
         {e.ratingW ? `${e.ratingW.toLocaleString()} ${unit}` : "—"}

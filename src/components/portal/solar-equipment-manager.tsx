@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Star, Archive, RotateCcw, Landmark, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, Star, Archive, RotateCcw, Landmark, Check, ImagePlus, X } from "lucide-react";
 import type { SolarEquipmentKind } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,10 @@ import {
   setSolarEquipmentActiveAction,
   setEquipmentLendersAction,
 } from "@/server/modules/solar/actions";
+import {
+  uploadSolarEquipmentPhotoAction,
+  removeSolarEquipmentPhotoAction,
+} from "@/server/modules/solar/equipment-photo-actions";
 
 type Item = {
   id: string;
@@ -29,6 +33,8 @@ type Item = {
   isDefault: boolean;
   avlYear: number | null;
   lenderIds: string[];
+  /** The serving route with a cache-buster, or null when none is set. */
+  photoUrl: string | null;
 };
 
 export type Lender = { id: string; name: string; isActive: boolean; rank: number; notes: string | null };
@@ -151,7 +157,11 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
   return (
     <>
     <div className={`flex flex-wrap items-center gap-2 py-2.5 text-sm ${item.isActive ? "" : "opacity-60"}`}>
-      <span className="min-w-[14rem] flex-1 font-medium">
+      {/* The photo the customer will see, at the size it is worth checking:
+          big enough to notice a wrong product or a screenshot with a white
+          border, small enough not to turn a catalogue into a gallery. */}
+      <PhotoCell item={item} canEdit={canEdit} />
+      <span className="min-w-[12rem] flex-1 font-medium">
         {item.manufacturer ? `${item.manufacturer} ` : ""}
         {item.model}
       </span>
@@ -284,6 +294,108 @@ function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdi
       </div>
     )}
     </>
+  );
+}
+
+/**
+ * One catalogue item's photograph, and the controls to change it.
+ *
+ * Sits at the head of the row rather than behind a dialog, because the mistake
+ * this is here to catch — the wrong product, or a screenshot with a white
+ * border baked in — is only visible when the picture is on screen beside the
+ * model name it claims to be.
+ */
+function PhotoCell({ item, canEdit }: { item: Item; canEdit: boolean }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const input = React.useRef<HTMLInputElement>(null);
+
+  async function upload(file: File) {
+    setBusy(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await uploadSolarEquipmentPhotoAction(item.id, fd);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Photo updated");
+    router.refresh();
+  }
+
+  async function clear() {
+    setBusy(true);
+    const res = await removeSolarEquipmentPhotoAction(item.id);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error);
+    toast.success("Photo removed");
+    router.refresh();
+  }
+
+  const tile =
+    "relative flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-white";
+
+  if (!canEdit) {
+    return item.photoUrl ? (
+      <span className={tile}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- served from a
+            route, not the image pipeline. */}
+        <img src={item.photoUrl} alt="" className="size-full object-contain p-1" loading="lazy" />
+      </span>
+    ) : (
+      <span className={`${tile} text-muted-foreground/40`} aria-hidden>
+        <ImagePlus className="size-4" />
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      <input
+        ref={input}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          // Cleared so picking the SAME file again still fires a change event —
+          // which is exactly what somebody does after re-exporting a bad crop.
+          e.target.value = "";
+          if (f) void upload(f);
+        }}
+      />
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => input.current?.click()}
+        title={item.photoUrl ? "Replace the photo shown on the proposal" : "Add a photo for the proposal"}
+        aria-label={
+          item.photoUrl
+            ? `Replace the photo for ${item.model}`
+            : `Add a photo for ${item.model}`
+        }
+        className={`${tile} transition-colors hover:border-foreground/30 disabled:opacity-50`}
+      >
+        {busy ? (
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        ) : item.photoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.photoUrl} alt="" className="size-full object-contain p-1" loading="lazy" />
+        ) : (
+          <ImagePlus className="size-4 text-muted-foreground/50" />
+        )}
+      </button>
+      {item.photoUrl && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={clear}
+          title="Remove the photo"
+          aria-label={`Remove the photo for ${item.model}`}
+          className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </span>
   );
 }
 

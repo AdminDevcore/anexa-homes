@@ -35,10 +35,13 @@ const fail = (error: string) => ({ ok: false as const, error });
 
 
 type EquipRow = {
+  id?: string;
   manufacturer: string | null;
   model: string;
   ratingW: number | null;
   specSheetUrl?: string | null;
+  photoKey?: string | null;
+  photoUpdatedAt?: Date | null;
 } | null;
 
 function label(e: EquipRow) {
@@ -61,6 +64,14 @@ function equip(e: EquipRow, qty: number): SnapshotEquipment | null {
     // how it says "nobody recorded one" in exactly the same way — both render
     // no link, and neither prints the word undefined at a homeowner.
     ...(e.specSheetUrl ? { specSheetUrl: e.specSheetUrl } : {}),
+    // Same rule for the photograph. The cache-buster is the item's own
+    // photoUpdatedAt, so a re-photographed component is a different URL rather
+    // than a stale image sitting in somebody's browser cache.
+    ...(e.id && e.photoKey
+      ? {
+          photoUrl: `/api/solar/equipment-photo?equipment=${e.id}&v=${(e.photoUpdatedAt ?? new Date()).getTime()}`,
+        }
+      : {}),
   };
 }
 
@@ -126,10 +137,11 @@ export async function generateProposalVersion(
           select: {
             manufacturer: true, model: true, ratingW: true,
             widthMm: true, heightMm: true, specSheetUrl: true,
+            id: true, photoKey: true, photoUpdatedAt: true,
           },
         },
-        inverter: { select: { manufacturer: true, model: true, ratingW: true, specSheetUrl: true } },
-        battery: { select: { manufacturer: true, model: true, ratingW: true, specSheetUrl: true } },
+        inverter: { select: { id: true, manufacturer: true, model: true, ratingW: true, specSheetUrl: true, photoKey: true, photoUpdatedAt: true } },
+        battery: { select: { id: true, manufacturer: true, model: true, ratingW: true, specSheetUrl: true, photoKey: true, photoUpdatedAt: true } },
       },
     }),
     prisma.solarFinance.findUnique({ where: { leadId } }),

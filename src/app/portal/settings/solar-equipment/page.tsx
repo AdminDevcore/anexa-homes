@@ -59,6 +59,13 @@ export default async function SolarEquipmentPage() {
             isDefault: i.isDefault,
             avlYear: i.avlYear,
             lenderIds: i.lenderApprovals.map((a) => a.lenderId),
+            // The serving route, cache-busted on the photo's own timestamp, so
+            // replacing a product shot shows the new one immediately instead of
+            // whatever the browser kept. Null when there is no photo — the
+            // manager renders an upload control rather than a broken frame.
+            photoUrl: i.photoKey
+              ? `/api/solar/equipment-photo?equipment=${i.id}&v=${(i.photoUpdatedAt ?? new Date()).getTime()}`
+              : null,
           }))}
       />
       {/* Adders are their own list: a priced rule rather than a product, and
