@@ -56,7 +56,7 @@ import {
   SolarActivityFeed,
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
-import { pricePurchase } from "@/lib/solar-money";
+import { priceStoredPurchase } from "@/lib/solar-money";
 import { leadStageTimeline } from "@/server/modules/pipeline/stage-history-queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
@@ -369,7 +369,13 @@ export default async function LeadDetailPage({
         prisma.solarLender.findMany({
           where: { companyId: user.companyId },
           orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
-          select: { id: true, name: true, isActive: true, logoUpdatedAt: true },
+          // `maxFinalPpwCents` is the partner's ceiling on the customer's price
+          // per watt. Read here so this page prices the deal the way the
+          // proposal builder does — see priceStoredPurchase.
+          select: {
+            id: true, name: true, isActive: true, logoUpdatedAt: true,
+            maxFinalPpwCents: true,
+          },
         }),
       ])
     : [null, null, [], [], null, []];
@@ -597,15 +603,28 @@ export default async function LeadDetailPage({
     if (!isSolarDeal || !solarDesign) return null;
     const watts = Math.round(solarDesign.systemSizeKwDc * 1000);
     const fin = solarFinance;
-    const breakdown = fin && (fin.product === "cash" || fin.product === "loan")
-      ? pricePurchase({
+    /**
+     * The partner this deal is financed through, and what it will fund.
+     *
+     * Read off the LENDER, never the programme row — the ceiling belongs to the
+     * bank, not to one of its rate-sheet lines. Without it this page priced the
+     * stored sticker raw and printed $8.57/W on a partner that funds a flat
+     * $5.50, while the builder two clicks away showed $5.50 for the same deal.
+     */
+    const dealLender = solarDesign.lenderId
+      ? (solarLenders.find((l) => l.id === solarDesign.lenderId) ?? null)
+      : null;
+    const priced = fin && (fin.product === "cash" || fin.product === "loan")
+      ? priceStoredPurchase({
           product: fin.product,
           systemSizeKwDc: solarDesign.systemSizeKwDc,
           stickerPpwCents: fin.grossPpwCents,
           dealerFeePct: fin.dealerFeePct,
           adderTotalCents: fin.adderTotalCents,
+          maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
         })
       : null;
+    const breakdown = priced?.breakdown ?? null;
     return {
       sizeKwDc: solarDesign.systemSizeKwDc,
       year1ProductionKwh: solarDesign.year1ProductionKwh,
@@ -635,6 +654,18 @@ export default async function LeadDetailPage({
       // Derived rather than the stored column, so a deal priced before adders
       // moved inside the dealer fee reads at what it would sign for today.
       contractPriceCents: breakdown?.contractPriceCents ?? fin?.contractPriceCents ?? 0,
+      /**
+       * The partner's ceiling, and whether it is what is holding this price.
+       *
+       * Said out loud on the ladder, because a capped deal is the one case
+       * where the rungs stop being arithmetic a reader can follow: the base is
+       * solved BACKWARDS out of the ceiling, so $3.00 typed in the builder
+       * comes back as $1.93 here and the line looks like a bug unless the
+       * screen names the reason.
+       */
+      maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
+      cappedByLender: priced?.cap.capped ?? false,
+      lenderName: dealLender?.name ?? null,
     };
   })();
 
@@ -1411,7 +1442,14 @@ export default async function LeadDetailPage({
                     product={solarFinance?.product ?? null}
                     systemSizeKwDc={solarDesign?.systemSizeKwDc ?? null}
                     offsetPct={solarDesign?.offsetPct ?? null}
-                    contractPriceCents={solarFinance?.contractPriceCents ?? null}
+                    // The DERIVED price, the same one the ladder below prints,
+                    // held to the partner's ceiling. The stored column is only
+                    // as capped as the lender was on the day it was saved, and
+                    // a headline sitting a whole cap away from the breakdown on
+                    // the same page is worse than either figure alone.
+                    contractPriceCents={
+                      solarMoney?.contractPriceCents ?? solarFinance?.contractPriceCents ?? null
+                    }
                     monthlyPaymentCents={solarFinance?.monthlyPaymentCents ?? null}
                     rateMillsPerKwh={solarFinance?.rateMillsPerKwh ?? null}
                     canBuild={can(user, "create", "Proposal") || can(user, "update", "Proposal")}

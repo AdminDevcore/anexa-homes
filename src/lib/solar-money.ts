@@ -557,6 +557,50 @@ export function capStickerToFinalPpw(input: {
 }
 
 /**
+ * What a SAVED deal prices at today, held to its partner's ceiling.
+ *
+ * `pricePurchase` prices whatever sticker it is handed. That is right for the
+ * builder, where the rep is typing the price — and wrong for every screen that
+ * reads the STORED sticker back, because the stored figure is only as capped as
+ * the lender was on the day it was saved.
+ *
+ * The gap that produced this: `financeRowForProduct` caps at save and
+ * generation caps and writes back, so a deal priced after its partner had a
+ * ceiling is fine. Set the ceiling AFTERWARDS — which is what happens, since
+ * nobody publishes a rate sheet before they have quoted anything on it — and
+ * every deal already on that partner keeps its uncapped sticker. The proposal
+ * builder recomputes and shows the capped figure; the deal page and the payroll
+ * engine read the row and did not. One deal, $5.50/W on one screen and $8.57/W
+ * on the next, and the rep quoted from whichever they opened first.
+ *
+ * So the ceiling is applied wherever the deal is priced, not only where it is
+ * written. Nothing is stored here: a cap set in Settings still does not rewrite
+ * a saved row — see the note in proposal-generate.ts — it just stops every
+ * screen quoting a contract the partner will not fund.
+ *
+ * `capped` comes back so the UI can SAY the price is being held rather than
+ * silently printing a number that does not divide by the base above it.
+ */
+export function priceStoredPurchase(input: PurchaseInput & {
+  /** The partner's ceiling on the final $/W. Null, or cash, means uncapped. */
+  maxFinalPpwCents: number | null | undefined;
+}): { breakdown: PurchaseBreakdown; cap: FinalPpwCap } {
+  const cap = capStickerToFinalPpw({
+    stickerPpwCents: input.stickerPpwCents,
+    // Cash has no lender and therefore no partner ceiling — the same rule the
+    // builder's price card and the finance-row save already follow.
+    maxFinalPpwCents: input.product === "cash" ? null : input.maxFinalPpwCents,
+    systemSizeKwDc: input.systemSizeKwDc,
+    dealerFeePct: input.dealerFeePct,
+    adderTotalCents: input.adderTotalCents,
+  });
+  return {
+    breakdown: pricePurchase({ ...input, stickerPpwCents: cap.stickerPpwCents }),
+    cap,
+  };
+}
+
+/**
  * A lease product prices per kW-DC per month; `priceThirdParty` takes a fixed
  * monthly. This is the one line between them, kept here so the conversion is
  * not re-derived at each call site.

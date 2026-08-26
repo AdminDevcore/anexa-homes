@@ -56,6 +56,11 @@ export type SystemMoney = {
   dealerFeePpwCents: number;
   finalPpwCents: number;
   contractPriceCents: number;
+  /** The partner's ceiling on the final $/W, cents. Null when uncapped. */
+  maxFinalPpwCents: number | null;
+  /** True when that ceiling is what is holding this price down. */
+  cappedByLender: boolean;
+  lenderName: string | null;
 };
 
 export function SolarSystemMoneyPanel({
@@ -135,6 +140,18 @@ export function SolarSystemMoneyPanel({
           Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut. The dealer
           fee is a share of the final price, so the adders carry it too.
         </p>
+        {/* A CAPPED LADDER HAS TO SAY SO. The base is solved backwards out of
+            the ceiling once the cap bites, so a rep who typed $3.00/W in the
+            builder reads $1.93/W here. Unexplained that looks like the page
+            has lost the price; named, it is the partner's own limit doing
+            exactly what it was set to do. */}
+        {money.cappedByLender && money.maxFinalPpwCents != null && (
+          <p className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-500">
+            Held at {money.lenderName ?? "this lender"}&rsquo;s ceiling of{" "}
+            {usdc(money.maxFinalPpwCents)}/W, fee and adders included. The base above is what
+            survives it — not the price typed on the deal.
+          </p>
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

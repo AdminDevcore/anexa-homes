@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { Db } from "@/server/db/types";
-import { pricePurchase } from "@/lib/solar-money";
+import { priceStoredPurchase } from "@/lib/solar-money";
 import { resolveSolarPayTerms, solarRepPayCents, solarPayLabel, type SolarPayTerms } from "@/lib/solar-pay";
 import { VERTICAL_LABEL } from "@/lib/vertical";
 
@@ -31,7 +31,13 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
     }),
     db.solarDesign.findUnique({
       where: { leadId },
-      select: { systemSizeKwDc: true, lender: { select: { repPayMode: true } } },
+      // The partner's ceiling comes with its pay mode: a capped lender funds
+      // one number whatever was typed, and a commission measured on the typed
+      // figure pays on money that never arrives.
+      select: {
+        systemSizeKwDc: true,
+        lender: { select: { repPayMode: true, maxFinalPpwCents: true } },
+      },
     }),
   ]);
   if (!finance || !design) return null;
@@ -40,15 +46,22 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
   // Cash and loan are priced per watt; lease and PPA sell electricity and have
   // no system price at all, so their base is zero and only a per-watt basis can
   // reach them. `pricePurchase` already refuses to apply a dealer fee to cash.
+  //
+  // HELD TO THE PARTNER'S CEILING, like every other screen that prices a saved
+  // deal. On a capped lender the stored sticker is what the rep typed, not what
+  // the bank funds — Amos at $5.50/W and a 65% fee leaves $1.93/W however
+  // confidently $3.00 was entered — so paying a redline overage or an override
+  // percentage on the uncapped figure pays out of money nobody is ever sent.
   const purchase =
     finance.product === "cash" || finance.product === "loan"
-      ? pricePurchase({
+      ? priceStoredPurchase({
           product: finance.product,
           systemSizeKwDc: design.systemSizeKwDc,
           stickerPpwCents: finance.grossPpwCents,
           dealerFeePct: finance.dealerFeePct,
           adderTotalCents: finance.adderTotalCents,
-        })
+          maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
+        }).breakdown
       : null;
 
   return {

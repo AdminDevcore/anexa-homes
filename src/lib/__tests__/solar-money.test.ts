@@ -6,6 +6,7 @@ import {
   solarCommissionCents,
   apportionCents,
   capStickerToFinalPpw,
+  priceStoredPurchase,
   grossPpwFromNet,
   basePpwFromSticker,
   underBaseFloor,
@@ -603,6 +604,69 @@ describe("a lender's maximum price per watt caps the CONTRACT, not the sticker",
       stickerPpwCents: uncappedSticker, ...AMOS, systemSizeKwDc: 0, adderTotalCents: 0,
     });
     expect(cap.capped).toBe(false);
+  });
+});
+
+describe("a SAVED deal is priced against its partner's ceiling, not the sticker on the row", () => {
+  /**
+   * The real deal that surfaced this: 11.00 kW on Amos Capital Fund, saved on
+   * 22 Aug with a base of $3.00/W and a 65% fee, four days before anybody set
+   * Amos's $5.50/W ceiling in Settings.
+   *
+   * The row is not rewritten when a ceiling appears — a deal in flight does not
+   * move under a rep — so every screen that read the stored sticker straight
+   * printed $8.57/W and $94,270 on paper the partner funds at $5.50/W and
+   * $60,500. The proposal builder recomputed and showed $5.50. Same deal, two
+   * screens, $33,770 apart.
+   */
+  const SAVED = {
+    product: "loan" as const,
+    systemSizeKwDc: 11,
+    stickerPpwCents: 857, // $3.00/W base grossed up by 65%, uncapped
+    dealerFeePct: 65,
+    adderTotalCents: 0,
+  };
+
+  it("holds a deal saved before the ceiling existed to that ceiling", () => {
+    const raw = pricePurchase(SAVED);
+    expect(raw.finalPpwCents).toBe(857);
+    expect(raw.contractPriceCents).toBe(9_427_000); // what the deal page printed
+
+    const { breakdown, cap } = priceStoredPurchase({ ...SAVED, maxFinalPpwCents: 550 });
+    expect(cap.capped).toBe(true);
+    expect(breakdown.finalPpwCents).toBe(550);
+    expect(breakdown.contractPriceCents).toBe(6_050_000); // $60,500
+
+    // And the base the company actually keeps is what survives the fee under
+    // the cap — $1.93/W once the deal page rounds it, not the $3.00 typed into
+    // the builder.
+    expect(breakdown.basePpwCents).toBeCloseTo(192.5, 5);
+    expect(Math.round(breakdown.basePpwCents)).toBe(193);
+  });
+
+  it("leaves an uncapped partner exactly where it was", () => {
+    // The guarantee that this changed no price on any lender without a ceiling,
+    // which is most of them.
+    const { breakdown, cap } = priceStoredPurchase({ ...SAVED, maxFinalPpwCents: null });
+    expect(cap.capped).toBe(false);
+    expect(breakdown).toEqual(pricePurchase(SAVED));
+  });
+
+  it("never caps cash — a cash deal has no lender to have a ceiling", () => {
+    // Cash pays the gross. A ceiling read off the design's lender must not
+    // reach a deal nobody is financing, or the customer's own money gets
+    // capped by a bank that is not in the transaction.
+    const cash = { ...SAVED, product: "cash" as const, stickerPpwCents: 857, dealerFeePct: 0 };
+    const { breakdown, cap } = priceStoredPurchase({ ...cash, maxFinalPpwCents: 550 });
+    expect(cap.capped).toBe(false);
+    expect(breakdown.contractPriceCents).toBe(pricePurchase(cash).contractPriceCents);
+  });
+
+  it("keeps the customer's price under the ceiling when the deal carries adders", () => {
+    const { breakdown } = priceStoredPurchase({
+      ...SAVED, adderTotalCents: 500_000, maxFinalPpwCents: 550,
+    });
+    expect(breakdown.finalPpwCents).toBeLessThanOrEqual(550);
   });
 });
 
