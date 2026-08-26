@@ -790,7 +790,11 @@ export function SolarProposalView({
               {/* The honest caveat, next to the money rather than in the small
                   print at the end. Enrolment is the homeowner's to keep. */}
               <p className="mt-4 max-w-[62ch] text-xs leading-relaxed text-neutral-500">
-                Counted for all {sv.years.length} years above at today&rsquo;s rate. Enrolment is
+                {/* The count and its noun in ONE expression on purpose. The JSX
+                    transform drops a space that sits directly after an
+                    expression container, and `{n} years` compiled to "25years"
+                    on a document a homeowner reads. */}
+                Counted for all {`${sv.years.length} years`} above at today&rsquo;s rate. Enrolment is
                 between you and {vpp.length === 1 ? vpp[0].provider : "your provider"}, and the
                 programme&rsquo;s terms are theirs to change — these payments are an estimate on the
                 same footing as the rest of this page, not a guarantee.
