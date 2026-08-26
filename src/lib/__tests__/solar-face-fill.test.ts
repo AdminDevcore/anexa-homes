@@ -299,8 +299,39 @@ describe("fillFace", () => {
     expect(blockPanelCount(blocked)).toBeGreaterThan(0);
   });
 
+  it("survives a trace that closes on its own first corner", () => {
+    // What a person actually produces: four corners and then a click back on
+    // the dot they started from. The ring arrives with its first point
+    // repeated at the end, a zero-length edge in the middle of it, and the
+    // inset turned the whole face to nothing — so a perfectly good roof came
+    // back "no panel fits inside that outline".
+    const open = rect(0, 0, 12, 9);
+    const closed = [...open, { ...open[0] }];
+    const a = fillFace(face(open, DEFAULT_FACE_INSET_M), { module: SQUARE })!;
+    const b = fillFace(face(closed, DEFAULT_FACE_INSET_M), { module: SQUARE })!;
+    expect(b).not.toBeNull();
+    expect(blockPanelCount(b)).toBe(blockPanelCount(a));
+  });
+
+  it("ignores a corner clicked twice by a hand that slipped", () => {
+    // Two clicks a centimetre apart is one corner, not an edge a centimetre
+    // long. Treating it as an edge is what produced the bow tie.
+    const points = [...rect(0, 0, 12, 9)];
+    points.splice(1, 0, { e: points[1].e + 0.008, n: points[1].n - 0.004 });
+    const block = fillFace(face(points, DEFAULT_FACE_INSET_M), { module: SQUARE })!;
+    expect(block).not.toBeNull();
+    expect(blockPanelCount(block)).toBe(
+      blockPanelCount(fillFace(face(rect(0, 0, 12, 9), DEFAULT_FACE_INSET_M), { module: SQUARE })!)
+    );
+  });
+
   it("refuses a trace that is not a shape", () => {
     expect(fillFace(face([{ e: 0, n: 0 }, { e: 5, n: 0 }]), { module: SQUARE })).toBeNull();
     expect(fillFace(face([]), { module: SQUARE })).toBeNull();
+    // Three clicks in the same place is one point, however many times it was
+    // pressed — and one point is not a roof.
+    expect(
+      fillFace(face([{ e: 1, n: 1 }, { e: 1, n: 1.001 }, { e: 1.002, n: 1 }]), { module: SQUARE })
+    ).toBeNull();
   });
 });

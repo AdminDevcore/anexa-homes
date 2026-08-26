@@ -89,6 +89,51 @@ const CORNER_INSET = 0.999;
 
 export type Edge = { a: { e: number; n: number }; b: { e: number; n: number } };
 
+/**
+ * Two corners closer than this are one corner, metres.
+ *
+ * A centimetre is finer than anybody can aim on an aerial and coarser than the
+ * jitter of a hand closing a shape, so it separates "another corner" from "the
+ * same corner, pressed again".
+ */
+const SAME_CORNER_M = 0.01;
+
+/**
+ * A traced ring with its repeated corners taken out.
+ *
+ * THE CLOSING CLICK IS THE REASON THIS EXISTS. A person draws a shape by
+ * clicking its corners and then clicking the first one again — that is what
+ * closing means, in this tool and in every mapping tool there is. It arrives
+ * here as a ring whose first point is repeated at the end, which is to say a
+ * ring with a zero-length edge in it.
+ *
+ * An edge of no length has no direction, so the inset offsets it along a
+ * meaningless normal, the neighbouring edges intersect somewhere absurd, and
+ * the whole face folds into a bow tie that `insetPolygon` then throws away.
+ * The rep sees "no panel fits inside that outline" on a perfectly good roof,
+ * which is the least believable error message this tool could produce.
+ *
+ * The same cleaning handles a corner clicked twice by a slipping hand, which
+ * is the same defect a centimetre apart instead of zero.
+ */
+function cleanRing(points: { e: number; n: number }[]): { e: number; n: number }[] {
+  const out: { e: number; n: number }[] = [];
+  for (const p of points) {
+    const last = out[out.length - 1];
+    if (last && Math.hypot(p.e - last.e, p.n - last.n) <= SAME_CORNER_M) continue;
+    out.push(p);
+  }
+  // The wrap-around pair: the closing click, and the only one the loop above
+  // cannot see because its neighbour is at the other end of the array.
+  while (
+    out.length > 1 &&
+    Math.hypot(out[0].e - out[out.length - 1].e, out[0].n - out[out.length - 1].n) <= SAME_CORNER_M
+  ) {
+    out.pop();
+  }
+  return out;
+}
+
 /** Twice the signed area. Positive is anticlockwise in an east/north frame. */
 function signedArea2(points: { e: number; n: number }[]): number {
   let sum = 0;
@@ -150,11 +195,12 @@ export function insetPolygon(
   points: { e: number; n: number }[],
   d: number
 ): { e: number; n: number }[] {
-  if (points.length < 3) return [];
-  if (d === 0) return points.map((p) => ({ ...p }));
+  const clean = cleanRing(points);
+  if (clean.length < 3) return [];
+  if (d === 0) return clean.map((p) => ({ ...p }));
 
   // Anticlockwise, so the inward normal is a consistent quarter-turn.
-  const ring = signedArea2(points) < 0 ? [...points].reverse() : [...points];
+  const ring = signedArea2(clean) < 0 ? [...clean].reverse() : [...clean];
   const before = polygonAreaM2(ring);
 
   const out: { e: number; n: number }[] = [];
@@ -362,7 +408,10 @@ export type FillFaceOptions = {
  * invisible array on the design that still asks to be given a facing.
  */
 export function fillFace(face: RoofFace, opts: FillFaceOptions): LayoutBlock | null {
-  const points = face.points;
+  // Cleaned once, here, so the eave, the mask and the outline stored on the
+  // block are all read off the same ring. Cleaning it twice in two places is
+  // how a face gets filled to one shape and drawn as another.
+  const points = cleanRing(face.points);
   if (points.length < 3) return null;
 
   const usable = insetPolygon(points, Math.max(0, face.insetM));

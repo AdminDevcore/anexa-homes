@@ -61,8 +61,49 @@ async function openDesigner(page: Page): Promise<string> {
  * aimed at the toolbar".
  */
 async function pickTool(page: Page, name: string) {
-  await page.getByRole("button", { name, exact: true }).click();
+  const button = page.getByRole("button", { name, exact: true });
+  await button.click();
+  /**
+   * WAIT FOR THE TOOL TO ACTUALLY BE THE TOOL.
+   *
+   * The canvas reads `tool` out of the closure it was rendered with, so a click
+   * that lands before React has committed the change is handled by the PREVIOUS
+   * tool. A test that then traces a shape loses its first corner, tries to
+   * close on a dot that is not there, and reports that tracing is broken —
+   * intermittently, depending on how the render happened to land.
+   *
+   * Only the four tools press; the fill buttons do not, so they are let past.
+   */
+  if (await button.getAttribute("aria-pressed")) {
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+  }
   return (await page.getByTestId("layout-canvas").boundingBox())!;
+}
+
+/**
+ * The pointer, which is where five of the six old tools went.
+ *
+ * `Add panel`, `Move panel`, `Remove panels` and `Move array` were all the same
+ * gesture — press on a roof — separated only by which palette button was lit,
+ * which is a mode a rep has to keep in their head while talking to a homeowner.
+ * They are modifiers on the default pointer now, so a spec that used to pick a
+ * tool holds a key instead.
+ */
+async function usePointer(page: Page) {
+  return pickTool(page, "Pointer");
+}
+
+/** The modifier that means "one module": ⌘ on a Mac, Ctrl everywhere else. */
+const ONE_PANEL = process.platform === "darwin" ? "Meta" : "Control";
+
+/** Click while holding a key down, and let go afterwards whatever happens. */
+async function clickWith(page: Page, key: string, x: number, y: number) {
+  await page.keyboard.down(key);
+  try {
+    await page.mouse.click(x, y);
+  } finally {
+    await page.keyboard.up(key);
+  }
 }
 
 /**
@@ -98,10 +139,19 @@ async function panelsOnRoof(page: Page): Promise<number> {
 async function clickCanvasColour(
   page: Page,
   what: "ghost" | "panel",
-  pick: "rightmost" | "largest" | "smallest" | "first" = "largest"
+  pick: "rightmost" | "largest" | "smallest" | "first" = "largest",
+  /**
+   * A modifier to hold for the click.
+   *
+   * The events here are synthesised inside the page rather than driven by the
+   * mouse, so the flag has to be set ON the event — pressing the key with
+   * `keyboard.down` would leave `metaKey` false on an event the page made up,
+   * and the handler would read it as a plain click.
+   */
+  mod?: "Meta" | "Control" | "Alt"
 ): Promise<boolean> {
   return page.evaluate(
-    ({ what, pick }) => {
+    ({ what, pick, mod }) => {
       const c = document.querySelector('[data-testid="layout-canvas"]') as HTMLCanvasElement;
       const ctx = c.getContext("2d")!;
       const d = ctx.getImageData(0, 0, c.width, c.height).data;
@@ -140,6 +190,9 @@ async function clickCanvasColour(
             new PointerEvent(t, {
               ...pos, bubbles: true, pointerId: 1, isPrimary: true, button: 0,
               buttons: t === "pointerup" ? 0 : 1,
+              metaKey: mod === "Meta",
+              ctrlKey: mod === "Control",
+              altKey: mod === "Alt",
             })
           );
         }
@@ -197,7 +250,7 @@ async function clickCanvasColour(
 
       return at(chosen.cx, chosen.cy);
     },
-    { what, pick }
+    { what, pick, mod }
   );
 }
 
@@ -210,7 +263,7 @@ async function clickCanvasColour(
  * tells you nothing about the code.
  */
 async function clearRoof(page: Page) {
-  await page.getByRole("button", { name: "Move array", exact: true }).click();
+  await page.getByRole("button", { name: "Pointer", exact: true }).click();
   let last = Number.POSITIVE_INFINITY;
   for (let i = 0; i < 80; i++) {
     const n = await panelsOnRoof(page);
@@ -225,6 +278,81 @@ async function clearRoof(page: Page) {
   // Loud on failure: a test that quietly starts on someone else's 400 panels
   // fails later, somewhere else, for a reason that has nothing to do with it.
   expect(await panelsOnRoof(page)).toBe(0);
+}
+
+/**
+ * Where the facing arrow's head is, in client coordinates, and where its tail
+ * sits — the array centre it swings around.
+ *
+ * Found by colour, like everything else here: the arrow is the only amber
+ * (#fbbf24) thing on the picture. Asking the canvas beats guessing at a
+ * fraction of it, which moves whenever the fitted zoom does.
+ *
+ * TELLING THE TWO ENDS APART IS THE WHOLE JOB, and the obvious rule gets it
+ * backwards. The head is a fat triangle and the shaft is three pixels wide, so
+ * the blob's centroid sits toward the head — which makes the TAIL the pixel
+ * farthest from it. Aim there and the press lands in the middle of the array,
+ * moves it, and the test reports that swinging the arrow does nothing.
+ *
+ * So both ends are found, and the shape decides: the head has far more amber
+ * packed around it than a three-pixel shaft ever does.
+ */
+async function facingHead(
+  page: Page
+): Promise<{ x: number; y: number; cx: number; cy: number } | null> {
+  return page.evaluate(() => {
+    const c = document.querySelector('[data-testid="layout-canvas"]') as HTMLCanvasElement;
+    const ctx = c.getContext("2d")!;
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    const pts: { x: number; y: number }[] = [];
+    for (let y = 0; y < c.height; y++) {
+      for (let x = 0; x < c.width; x++) {
+        const i = (y * c.width + x) * 4;
+        // #fbbf24, give or take the antialiasing at the edges.
+        if (d[i] > 235 && d[i + 1] > 175 && d[i + 1] < 210 && d[i + 2] < 70) pts.push({ x, y });
+      }
+    }
+    if (pts.length < 8) return null;
+
+    const mid = {
+      x: pts.reduce((t, p) => t + p.x, 0) / pts.length,
+      y: pts.reduce((t, p) => t + p.y, 0) / pts.length,
+    };
+    const from = (q: { x: number; y: number }) => (p: { x: number; y: number }) =>
+      Math.hypot(p.x - q.x, p.y - q.y);
+    const farthest = (q: { x: number; y: number }, pool = pts) =>
+      pool.reduce((best, p) => (from(q)(p) > from(q)(best) ? p : best), pool[0]);
+
+    // The two ends of the arrow: one extreme, and the point farthest from it.
+    const endA = farthest(mid);
+    const endB = farthest(endA);
+    const bulk = (q: { x: number; y: number }) => pts.filter((p) => from(q)(p) < 11).length;
+    const head = bulk(endA) >= bulk(endB) ? endA : endB;
+    const tail = head === endA ? endB : endA;
+
+    const r = c.getBoundingClientRect();
+    const toClient = (p: { x: number; y: number }) => ({
+      x: r.left + (p.x / c.width) * r.width,
+      y: r.top + (p.y / c.height) * r.height,
+    });
+    /**
+     * A few pixels back down the shaft from the very tip, which is the one part
+     * of the arrowhead that is a single pixel wide.
+     *
+     * A FIXED distance, not a fraction of the arrow. The arrow grows with the
+     * array — it is over two hundred pixels long on a ten-by-seven — so "18% of
+     * the way back" was forty pixels, well outside the grip, and the press
+     * landed on bare roof.
+     */
+    const back = 6;
+    const len = Math.max(1, Math.hypot(tail.x - head.x, tail.y - head.y));
+    const aim = toClient({
+      x: head.x + ((tail.x - head.x) / len) * back,
+      y: head.y + ((tail.y - head.y) / len) * back,
+    });
+    const centre = toClient(tail);
+    return { ...aim, cx: centre.x, cy: centre.y };
+  });
 }
 
 /** A rectangle dragged across a clear part of the picture. */
@@ -354,10 +482,11 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await openDesigner(page);
     await clearRoof(page);
 
-    // ONE panel, placed by clicking. The whole reason this tool grew a
-    // per-panel mode: a rectangle drag cannot put a module beside a vent.
-    const box = await pickTool(page, "Add panel");
-    await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
+    // ONE panel, placed by clicking with the one-module modifier held. The
+    // whole reason this tool has a per-panel gesture: a rectangle drag cannot
+    // put a module beside a vent.
+    const box = await usePointer(page);
+    await clickWith(page, ONE_PANEL, box.x + box.width * 0.45, box.y + box.height * 0.45);
     await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(1);
     await expect(page.getByText("Panel", { exact: true })).toBeVisible();
 
@@ -394,10 +523,10 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     const drawn = await panelsOnRoof(page);
 
     // Aim at the green ghost just past the array's edge — the cell where the
-    // lattice continues. Under Add panel that is ONE panel, not the whole
-    // column a ghost click gives under Move array.
-    await pickTool(page, "Add panel");
-    expect(await clickCanvasColour(page, "ghost", "rightmost")).toBe(true);
+    // lattice continues. Held with the one-module modifier that is ONE panel,
+    // not the whole column a bare ghost click grows.
+    await usePointer(page);
+    expect(await clickCanvasColour(page, "ghost", "rightmost", ONE_PANEL)).toBe(true);
     await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(drawn + 1);
 
     // And it joined: the selection is the array, not a loose module.
@@ -406,7 +535,7 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
 
     // Three more clicks, three more panels — one each, still on one array.
     for (let i = 2; i <= 4; i++) {
-      expect(await clickCanvasColour(page, "ghost", "rightmost")).toBe(true);
+      expect(await clickCanvasColour(page, "ghost", "rightmost", ONE_PANEL)).toBe(true);
       await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(drawn + i);
     }
     await expect(page.getByText(/^Array · /)).toBeVisible();
@@ -425,11 +554,13 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     // Grab a module out of the middle of the grid and drag it clear. It leaves
     // the array and becomes its own panel; the total is untouched, because the
     // hole it came from is knocked out at the same moment.
-    const box = await pickTool(page, "Move panel");
+    const box = await usePointer(page);
+    await page.keyboard.down(ONE_PANEL);
     await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.45);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.82, box.y + box.height * 0.8, { steps: 10 });
     await page.mouse.up();
+    await page.keyboard.up(ONE_PANEL);
 
     expect(await panelsOnRoof(page)).toBe(drawn);
     await expect(page.getByText("Panel", { exact: true })).toBeVisible();
@@ -461,8 +592,8 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
 
     // Take one back out. The array keeps its grid — the modules either side
     // stay exactly where they were — so the count drops by exactly one.
-    await pickTool(page, "Remove panels");
-    expect(await clickCanvasColour(page, "panel")).toBe(true);
+    await usePointer(page);
+    expect(await clickCanvasColour(page, "panel", "first", "Alt")).toBe(true);
     await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(afterGrow - 1);
 
     // And the gap it left is a ghost now: clicking it puts the module back, in
@@ -472,7 +603,7 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     // selected, and clicking a panel to "make sure" would land on the hole
     // (it is the middle of the array, which is where the panel blob's centroid
     // is) and refill it early.
-    await pickTool(page, "Move array");
+    await usePointer(page);
     expect(await clickCanvasColour(page, "ghost", "smallest")).toBe(true);
     await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(afterGrow);
   });
@@ -513,7 +644,7 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await page.reload();
     await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
     // Reselect the array the reload deselected, then read its figure back.
-    await pickTool(page, "Move array");
+    await usePointer(page);
     expect(await clickCanvasColour(page, "panel")).toBe(true);
     await expect(page.getByTestId("orientation-factor")).toBeVisible({ timeout: 10000 });
     expect(parseInt((await page.getByTestId("orientation-factor").textContent())!, 10)).toBe(north);
@@ -588,7 +719,7 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await expect(page.getByText(/panels? saved/)).toBeVisible({ timeout: 15000 });
     await page.reload();
     await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
-    await pickTool(page, "Move array");
+    await usePointer(page);
     expect(await clickCanvasColour(page, "panel")).toBe(true);
     await expect(page.getByLabel("Facing (azimuth)")).toHaveValue("180", { timeout: 10000 });
   });
@@ -652,7 +783,7 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     });
     await openDesigner(page);
     await imagery;
-    await pickTool(page, "Draw setbacks");
+    await pickTool(page, "Setbacks");
     const box = await (async () => {
       let last = "";
       for (let i = 0; i < 40; i++) {
@@ -713,6 +844,158 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await page.mouse.dblclick(dbl.x, dbl.y);
     await expect(tracing).toBeHidden();
     await expect(footer).toContainText("3 setbacks");
+  });
+
+  /**
+   * THE BUG THIS SUITE EXISTS TO STOP COMING BACK.
+   *
+   * Sliding one module out of a bank is a real gesture and the tool has to keep
+   * it. It used to happen on pointer-DOWN, before the pointer had moved a
+   * pixel — so a plain click on a panel, to select the array it is part of,
+   * permanently split that module out. What was left sat exactly where the cell
+   * had been: identical on screen, priced the same, and separately asking to be
+   * told which way it faced.
+   */
+  test("clicking a panel selects its array instead of splitting it", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    const drawBox = await pickTool(page, "Draw array");
+    await dragArray(page, drawBox);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(1);
+    const drawn = await panelsOnRoof(page);
+
+    await usePointer(page);
+    // Every one of these is a click, not a drag. Three of them, because the
+    // failure was intermittent-looking: the split happened on the press, so it
+    // depended on nothing except pressing.
+    for (let i = 0; i < 3; i++) {
+      expect(await clickCanvasColour(page, "panel", "first", ONE_PANEL)).toBe(true);
+      expect(await panelsOnRoof(page)).toBe(drawn);
+      // Still one array. A lone panel would call itself "Panel" in the bar.
+      await expect(page.getByText(/^Array · /)).toBeVisible();
+      await expect(page.getByText("Panel", { exact: true })).toHaveCount(0);
+    }
+
+    // And the gesture it was protecting still works: hold the modifier and
+    // actually drag, and the module comes out.
+    await page.keyboard.down(ONE_PANEL);
+    await page.mouse.move(drawBox.x + drawBox.width * 0.55, drawBox.y + drawBox.height * 0.45);
+    await page.mouse.down();
+    await page.mouse.move(drawBox.x + drawBox.width * 0.85, drawBox.y + drawBox.height * 0.85, {
+      steps: 10,
+    });
+    await page.mouse.up();
+    await page.keyboard.up(ONE_PANEL);
+    expect(await panelsOnRoof(page)).toBe(drawn);
+    await expect(page.getByText("Panel", { exact: true })).toBeVisible();
+  });
+
+  /**
+   * Trace one plane of the roof, and the tool covers it.
+   *
+   * The fill that already existed only ever ran off Google's roof model, and
+   * the Solar API is switched off on this account — every call comes back
+   * SERVICE_DISABLED, so the button was never once on screen for a rep. A
+   * traced outline is the mask instead, and its outer edge is an eave, which is
+   * where the facing comes from.
+   */
+  test("a traced roof face fills with panels and takes its facing from the eave", async ({
+    page,
+  }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    const box = await pickTool(page, "Roof face");
+    const at = (fx: number, fy: number) => ({
+      x: box.x + box.width * fx,
+      y: box.y + box.height * fy,
+    });
+    // Well clear of the palette on the left, the metrics on the right and the
+    // hint along the bottom: a click that lands on a floating panel is a click
+    // the canvas never sees.
+    const corners: [number, number][] = [
+      [0.55, 0.4],
+      [0.88, 0.4],
+      [0.88, 0.72],
+      [0.55, 0.72],
+    ];
+    for (const [fx, fy] of corners) {
+      const p = at(fx, fy);
+      await page.mouse.click(p.x, p.y);
+    }
+    // Back onto the first dot: how a shape is closed here and in every mapping
+    // tool there is.
+    const first = at(corners[0][0], corners[0][1]);
+    await page.mouse.click(first.x, first.y);
+
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+
+    // The fill lands selected, as an ordinary array — not a locked object.
+    await expect(page.getByText(/^Array · /)).toBeVisible();
+
+    // And it came with a facing, marked as the inference it is rather than
+    // wearing the badge a measurement off the building would.
+    const facing = page.getByLabel("Facing (azimuth)");
+    await expect(facing).not.toHaveValue("");
+    await expect(page.getByTestId("facing-source")).toContainText("from your trace");
+
+    // Max roof re-covers the same outline without the roof being traced again,
+    // which is the whole reason the trace is kept on the block.
+    const filled = await panelsOnRoof(page);
+    await page.getByTestId("max-roof").click();
+    await expect(page.getByText(/Filled 1 plane/)).toBeVisible({ timeout: 10000 });
+    expect(await panelsOnRoof(page)).toBe(filled);
+  });
+
+  /**
+   * The facing is the one property on this screen that cannot be seen, and it
+   * used to be a number typed into a box — with an arrow that only appeared
+   * once the number had already been typed.
+   */
+  test("the facing arrow can be swung, flipped and nudged", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    const drawBox = await pickTool(page, "Draw array");
+    await dragArray(page, drawBox);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+
+    const facing = page.getByLabel("Facing (azimuth)");
+    await facing.fill("180");
+    await facing.blur();
+    await expect(facing).toHaveValue("180");
+
+    // Grab the head and swing it. The head is the far end of the arrow, which
+    // the canvas has already drawn — so ask the canvas where it is rather than
+    // guessing at a fraction of the picture.
+    const head = await facingHead(page);
+    expect(head).not.toBeNull();
+    await page.mouse.move(head!.x, head!.y);
+    await page.mouse.down();
+    // Swing it a long way round, to a bearing no snap could confuse with south.
+    await page.mouse.move(head!.cx - 260, head!.cy, { steps: 14 });
+    await page.mouse.up();
+
+    const swung = Number(await facing.inputValue());
+    expect(swung).not.toBe(180);
+    // West-ish, and landed on something a person would say out loud.
+    expect(swung % 5).toBe(0);
+    expect(Math.abs(swung - 270)).toBeLessThan(25);
+
+    // Square brackets are the fine adjustment, for a rep who knows the number.
+    // No click on the canvas first: a press on bare roof deselects, and the
+    // facing box belongs to the selection.
+    await facing.fill("215");
+    await facing.blur();
+    await page.keyboard.press("]");
+    await expect(facing).toHaveValue("220");
+    await page.keyboard.press("[");
+    await page.keyboard.press("[");
+    await expect(facing).toHaveValue("210");
   });
 
 });
