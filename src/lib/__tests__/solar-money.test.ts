@@ -607,6 +607,145 @@ describe("a lender's maximum price per watt caps the CONTRACT, not the sticker",
   });
 });
 
+describe("a FLAT partner sells at one price per watt, in both directions", () => {
+  /**
+   * Amos Capital Fund: $5.50/W flat. Not a maximum — the price. Whatever base a
+   * rep types, whatever extra work lands on the job, whatever the array comes
+   * to, the homeowner's paper says $5.50 a watt and the only choice anybody
+   * makes is which of Amos's products to write it on.
+   *
+   * A ceiling gets the dear deals right and the cheap ones wrong: price an 11 kW
+   * job off a $1.00/W base and a ceiling happily quotes $2.86/W, which is not a
+   * number that partner has ever funded either.
+   */
+  const AMOS_FLAT = {
+    systemSizeKwDc: 11,
+    dealerFeePct: 65,
+    maxFinalPpwCents: 550,
+    mode: "flat" as const,
+  };
+  const contractOf = (sticker: number, adderTotalCents: number) =>
+    pricePurchase({
+      product: "loan",
+      systemSizeKwDc: 11,
+      stickerPpwCents: sticker,
+      dealerFeePct: 65,
+      adderTotalCents,
+    });
+
+  it("raises a deal that would have priced UNDER the flat rate", () => {
+    // The case a ceiling gets wrong. $1.00/W base stickers at $2.86/W, which is
+    // well under $5.50, so `cap` leaves it there and the customer is quoted a
+    // price the partner does not sell at.
+    const asCap = capStickerToFinalPpw({
+      stickerPpwCents: 286, ...AMOS_FLAT, mode: "cap", adderTotalCents: 0,
+    });
+    expect(asCap.capped).toBe(false);
+    expect(contractOf(asCap.stickerPpwCents, 0).finalPpwCents).toBe(286);
+
+    const asFlat = capStickerToFinalPpw({
+      stickerPpwCents: 286, ...AMOS_FLAT, adderTotalCents: 0,
+    });
+    expect(asFlat.capped).toBe(true);
+    expect(asFlat.stickerPpwCents).toBe(550);
+    expect(contractOf(asFlat.stickerPpwCents, 0).contractPriceCents).toBe(6_050_000);
+  });
+
+  it("lowers a deal that would have priced over it, exactly as the ceiling did", () => {
+    const flat = capStickerToFinalPpw({
+      stickerPpwCents: 857, ...AMOS_FLAT, adderTotalCents: 0,
+    });
+    expect(flat.stickerPpwCents).toBe(550);
+    expect(contractOf(flat.stickerPpwCents, 0).contractPriceCents).toBe(6_050_000);
+  });
+
+  it("does not move the homeowner's price when work is added", () => {
+    // "5.5 flat no matter what adders we have" — the adders come out of the
+    // company's share, and the customer's number does not move.
+    const bare = capStickerToFinalPpw({ stickerPpwCents: 857, ...AMOS_FLAT, adderTotalCents: 0 });
+    const laden = capStickerToFinalPpw({
+      stickerPpwCents: 857, ...AMOS_FLAT, adderTotalCents: 500_000,
+    });
+    const bareP = contractOf(bare.stickerPpwCents, 0);
+    const ladenP = contractOf(laden.stickerPpwCents, 500_000);
+
+    // LANDS ON the flat rate rather than under it. A ceiling floors the sticker
+    // so as never to exceed the partner's limit; a price list has no such
+    // worry, and flooring there printed $5.49/W on every job with extra work.
+    // Within half a cent a watt — so it ROUNDS to $5.50 on every screen that
+    // prints it, rather than to the $5.49 flooring produced.
+    expect(Math.round(ladenP.finalPpwCents)).toBe(550);
+    expect(Math.round(bareP.finalPpwCents)).toBe(550);
+    // Paid for out of the company's side, not the homeowner's.
+    expect(ladenP.grossPriceCents).toBeLessThan(bareP.grossPriceCents);
+  });
+
+  it("lands on the flat rate to the cent on a job whose adders do not divide evenly", () => {
+    // The real 24.64 kW deal: $2,000 of adders, which grossed up at 65% is
+    // $5,714.29 and leaves the system sticker on a fraction of a cent.
+    for (const adder of [1, 99, 200_000, 333_333, 777_777]) {
+      const cap = capStickerToFinalPpw({
+        stickerPpwCents: 857,
+        maxFinalPpwCents: 550,
+        mode: "flat",
+        systemSizeKwDc: 24.64,
+        dealerFeePct: 65,
+        adderTotalCents: adder,
+      });
+      const priced = pricePurchase({
+        product: "loan",
+        systemSizeKwDc: 24.64,
+        stickerPpwCents: cap.stickerPpwCents,
+        dealerFeePct: 65,
+        adderTotalCents: adder,
+      });
+      // Within half a cent a watt of the published price — the closest a
+      // whole-cent sticker can come to it, and on either side rather than
+      // always short.
+      expect(Math.abs(priced.finalPpwCents - 550)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("says the price did not move when the deal was already at the flat rate", () => {
+    // A notice reading "held at $5.50/W" on a deal that was always $5.50/W is
+    // an explanation for something that did not happen.
+    const flat = capStickerToFinalPpw({
+      stickerPpwCents: 550, ...AMOS_FLAT, adderTotalCents: 0,
+    });
+    expect(flat.stickerPpwCents).toBe(550);
+    expect(flat.capped).toBe(false);
+  });
+
+  it("is inert on a partner with no figure set, whatever the mode says", () => {
+    // The mode is meaningless without a price, and must not become a third
+    // state that changes anything on its own.
+    const flat = capStickerToFinalPpw({
+      stickerPpwCents: 857,
+      maxFinalPpwCents: null,
+      mode: "flat",
+      systemSizeKwDc: 11,
+      dealerFeePct: 65,
+      adderTotalCents: 0,
+    });
+    expect(flat).toEqual({ stickerPpwCents: 857, capped: false, adderOverrun: false });
+  });
+
+  it("prices a stored deal at the flat rate through priceStoredPurchase", () => {
+    const { breakdown, cap } = priceStoredPurchase({
+      product: "loan",
+      systemSizeKwDc: 11,
+      stickerPpwCents: 286, // would have quoted $31,460
+      dealerFeePct: 65,
+      adderTotalCents: 0,
+      maxFinalPpwCents: 550,
+      finalPpwMode: "flat",
+    });
+    expect(cap.capped).toBe(true);
+    expect(breakdown.finalPpwCents).toBe(550);
+    expect(breakdown.contractPriceCents).toBe(6_050_000);
+  });
+});
+
 describe("a SAVED deal is priced against its partner's ceiling, not the sticker on the row", () => {
   /**
    * The real deal that surfaced this: 11.00 kW on Amos Capital Fund, saved on

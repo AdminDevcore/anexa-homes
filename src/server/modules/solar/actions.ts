@@ -854,6 +854,15 @@ const lenderSchema = z.object({
    */
   maxFinalPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
   /**
+   * Whether the figure above is a ceiling or this partner's flat price.
+   *
+   * Accepted always and simply stored: it is meaningless without a figure to
+   * apply, and the pricing code already ignores it in that case, so refusing
+   * one here would only make a lender impossible to pre-configure before its
+   * rate is known.
+   */
+  finalPpwMode: z.enum(["cap", "flat"]).optional(),
+  /**
    * The least this partner's deals may leave the company per watt, cents,
    * BEFORE its cut. Null clears the floor.
    *

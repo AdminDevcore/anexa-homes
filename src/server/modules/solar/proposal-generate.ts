@@ -196,6 +196,11 @@ export async function generateProposalVersion(
             // The partner's ceiling, needed HERE and not only on the payment
             // menu below — see the re-cap immediately after this.
             maxFinalPpwCents: true,
+            // …and whether that figure is a ceiling or this partner's flat
+            // price. A flat partner overrides the stored sticker in BOTH
+            // directions, so a document generated without it would quote a
+            // cheap deal under the price list its own lender publishes.
+            finalPpwMode: true,
           },
         })
       : null;
@@ -221,6 +226,7 @@ export async function generateProposalVersion(
   const capped = capStickerToFinalPpw({
     stickerPpwCents: finance.grossPpwCents,
     maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
+    mode: dealLender?.finalPpwMode,
     systemSizeKwDc: design.systemSizeKwDc,
     dealerFeePct: finance.dealerFeePct,
     adderTotalCents: finance.adderTotalCents,
@@ -299,11 +305,12 @@ export async function generateProposalVersion(
       lender: {
         select: {
           id: true, name: true, rank: true, applyUrl: true, logoUpdatedAt: true,
-          // The partner's ceiling on the final price per watt. Selected here
-          // because the menu is PRICED at generation and frozen; a cap missing
-          // from this select quotes a household a number the lender does not
-          // fund, in a document nobody can correct afterwards.
+          // The partner's price rule for the final price per watt. Selected
+          // here because the menu is PRICED at generation and frozen; a rule
+          // missing from this select quotes a household a number the lender
+          // does not fund, in a document nobody can correct afterwards.
           maxFinalPpwCents: true,
+          finalPpwMode: true,
         },
       },
     },
@@ -343,6 +350,7 @@ export async function generateProposalVersion(
           applyUrl: p.lender.applyUrl,
           logoUrl: lenderLogoUrl(p.lender.id, p.lender.logoUpdatedAt),
           maxFinalPpwCents: p.lender.maxFinalPpwCents,
+          finalPpwMode: p.lender.finalPpwMode,
         },
       })
     ),

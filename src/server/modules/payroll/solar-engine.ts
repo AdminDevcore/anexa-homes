@@ -36,7 +36,7 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
       // figure pays on money that never arrives.
       select: {
         systemSizeKwDc: true,
-        lender: { select: { repPayMode: true, maxFinalPpwCents: true } },
+        lender: { select: { repPayMode: true, maxFinalPpwCents: true, finalPpwMode: true } },
       },
     }),
   ]);
@@ -61,6 +61,7 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
           dealerFeePct: finance.dealerFeePct,
           adderTotalCents: finance.adderTotalCents,
           maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
+          finalPpwMode: design.lender?.finalPpwMode,
         }).breakdown
       : null;
 

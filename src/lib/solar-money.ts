@@ -467,6 +467,9 @@ export function underBaseFloor(
  * `stickerPpwCents` is what to hand `pricePurchase`; the rest is what the rep
  * needs told, because a price that silently moved is a price nobody trusts.
  */
+/** Whether a partner's stated $/W is a ceiling or the price itself. */
+export type FinalPpwMode = "cap" | "flat";
+
 export type FinalPpwCap = {
   /** The system sticker to price with. Unchanged when the cap did not bite. */
   stickerPpwCents: number;
@@ -497,15 +500,34 @@ export type FinalPpwCap = {
  * give in it. That is the whole behaviour in one sentence: under a cap, extra
  * work comes out of the company's side, and the homeowner's number never moves.
  *
- * A CEILING, NOT A FIXED PRICE. A deal already priced under the cap is left
- * exactly where it is. A cap is protection against quoting a partner more than
- * they fund, not a floor that drags cheap deals up to it.
+ * TWO RULES, ONE SOLVE — `mode` decides which.
+ *
+ * `cap` is a CEILING. A deal already priced under it is left exactly where it
+ * is: protection against quoting a partner more than they fund, not a floor
+ * that drags cheap deals up to it.
+ *
+ * `flat` is THE PRICE. The partner's paper is this figure per watt and nothing
+ * moves it — not the base a rep typed, not the extra work, not the size of the
+ * array — so the solve runs in both directions and a deal that would have come
+ * out cheaper is written at the partner's own number. Amos Capital Fund sells
+ * this way: $5.50/W, and the only thing anybody chooses is which of their
+ * products it goes on.
+ *
+ * The arithmetic is identical either way, which is the point of not writing it
+ * twice: pin the contract, solve the system sticker backwards out of it, leave
+ * the adders grossing up by the fee. Only the question "does this rule bite?"
+ * differs, and on `flat` the answer is always yes.
  */
 export function capStickerToFinalPpw(input: {
-  /** What this deal would sticker at with no cap — base ÷ (1 − fee). */
+  /** What this deal would sticker at with no rule — base ÷ (1 − fee). */
   stickerPpwCents: number;
-  /** The lender's ceiling, cents per watt. Null or ≤ 0 means uncapped. */
+  /** The lender's figure, cents per watt. Null or ≤ 0 means no rule at all. */
   maxFinalPpwCents: number | null | undefined;
+  /**
+   * Whether that figure is a ceiling or the price. Defaults to `cap`, so every
+   * caller written before flat partners existed keeps its exact behaviour.
+   */
+  mode?: FinalPpwMode;
   systemSizeKwDc: number;
   dealerFeePct: number;
   adderTotalCents: number;
@@ -532,7 +554,10 @@ export function capStickerToFinalPpw(input: {
 
   const uncappedContract = Math.round(systemWatts * input.stickerPpwCents) + adderStickerCents;
   const cappedContract = max * systemWatts;
-  if (uncappedContract <= cappedContract) return uncapped;
+  // A ceiling only bites downwards. A flat price is the price, so it binds a
+  // deal that would have come out cheaper just as firmly as one that came out
+  // dear — that is the entire difference between the two modes.
+  if (input.mode !== "flat" && uncappedContract <= cappedContract) return uncapped;
 
   // What is left for the array once the grossed-up extras have taken their
   // share of the ceiling. Negative means the extras alone have blown through
@@ -543,15 +568,31 @@ export function capStickerToFinalPpw(input: {
     return { stickerPpwCents: 0, capped: true, adderOverrun: true };
   }
 
-  // FLOOR, not round. The sticker is a whole number of cents per watt — that is
-  // the granularity the whole model stores prices at — so the solved figure
-  // almost never lands exactly on the ceiling. Rounding up half the time quotes
-  // a partner a few cents a watt more than they fund, which on a 20 kW job is
-  // a real number and is the one outcome a maximum exists to prevent. Rounding
-  // down leaves the contract fractionally under the cap instead.
+  /**
+   * The sticker is a whole number of cents per watt — the granularity the whole
+   * model stores prices at, `SolarFinance.grossPpwCents` being an integer — so
+   * the solved figure almost never lands exactly on the partner's number. Which
+   * way it is taken depends on what that number MEANS.
+   *
+   * A MAXIMUM rounds DOWN. Rounding up half the time quotes a partner a few
+   * cents a watt more than they fund, which on a 20 kW job is a real number and
+   * is the one outcome a ceiling exists to prevent. Under is always safe.
+   *
+   * A FLAT price rounds to NEAREST, because there the target is not a limit to
+   * stay under but a figure to land on: a partner selling at $5.50/W wants
+   * $5.50/W on the paper, and floor prints $5.49 on any job carrying adders.
+   * Half a cent per watt either side of a published price is the closest a
+   * whole-cent sticker can get to it.
+   */
+  const exact = baseStickerCents / systemWatts;
+  const stickerPpwCents = input.mode === "flat" ? Math.round(exact) : Math.floor(exact);
   return {
-    stickerPpwCents: Math.floor(baseStickerCents / systemWatts),
-    capped: true,
+    stickerPpwCents,
+    // Whether the RULE MOVED THE PRICE, which is what every caller shows a
+    // human. A flat partner whose figure happens to land on the price the deal
+    // already had has not overridden anybody, and saying so would put a notice
+    // on a screen with nothing to explain.
+    capped: stickerPpwCents !== input.stickerPpwCents,
     adderOverrun: false,
   };
 }
@@ -582,14 +623,17 @@ export function capStickerToFinalPpw(input: {
  * silently printing a number that does not divide by the base above it.
  */
 export function priceStoredPurchase(input: PurchaseInput & {
-  /** The partner's ceiling on the final $/W. Null, or cash, means uncapped. */
+  /** The partner's stated final $/W. Null, or cash, means no rule at all. */
   maxFinalPpwCents: number | null | undefined;
+  /** Whether that figure is a ceiling or the price. Defaults to `cap`. */
+  finalPpwMode?: FinalPpwMode;
 }): { breakdown: PurchaseBreakdown; cap: FinalPpwCap } {
   const cap = capStickerToFinalPpw({
     stickerPpwCents: input.stickerPpwCents,
-    // Cash has no lender and therefore no partner ceiling — the same rule the
-    // builder's price card and the finance-row save already follow.
+    // Cash has no lender and therefore no partner rule — the same line the
+    // builder's price card and the finance-row save already draw.
     maxFinalPpwCents: input.product === "cash" ? null : input.maxFinalPpwCents,
+    mode: input.finalPpwMode,
     systemSizeKwDc: input.systemSizeKwDc,
     dealerFeePct: input.dealerFeePct,
     adderTotalCents: input.adderTotalCents,

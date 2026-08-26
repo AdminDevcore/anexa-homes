@@ -32,6 +32,7 @@ const loan = (over: Partial<OfferProduct> = {}): OfferProduct => ({
   lenderId: "l1",
   lenderName: "Amos Capital Fund",
   label: "Amos 30 yr",
+  finalPpwMode: "cap",
   product: "loan",
   aprPct: 4.99,
   termMonths: 300,

@@ -6,6 +6,7 @@ import {
   loanPaymentCents,
   pricePurchase,
   priceThirdParty,
+  type FinalPpwMode,
 } from "@/lib/solar-money";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor } from "@/lib/solar-loan";
 
@@ -55,6 +56,8 @@ export type OfferProduct = {
    * so that pricing a column needs one object and not two.
    */
   maxFinalPpwCents: number | null;
+  /** Whether that figure is that lender's ceiling or its flat price. */
+  finalPpwMode: FinalPpwMode;
   isActive: boolean;
 };
 
@@ -114,9 +117,11 @@ export type CompareRow = {
    * to see what the deal is worth without opening the payroll module.
    */
   netPpwCents: number | null;
-  /** The lender's ceiling, when it has one, so the card can name the figure. */
+  /** The lender's stated $/W, when it has one, so the card can name it. */
   maxFinalPpwCents: number | null;
-  /** True when that ceiling actually lowered this column's price. */
+  /** Whether that figure is a ceiling or this partner's flat price. */
+  finalPpwMode: FinalPpwMode;
+  /** True when that rule actually moved this column's price. */
   capped: boolean;
   /** True when the adders alone exceed it — see `capStickerToFinalPpw`. */
   adderOverrun: boolean;
@@ -161,6 +166,7 @@ function purchaseRow(
   // nobody is borrowing from.
   const dealerFeePct = cash ? 0 : (offer as OfferProduct).dealerFeePct ?? 0;
   const maxFinalPpwCents = cash ? null : (offer as OfferProduct).maxFinalPpwCents ?? null;
+  const finalPpwMode = cash ? undefined : (offer as OfferProduct).finalPpwMode;
   const uncappedPpwCents = stickerCents(basis, dealerFeePct);
 
   // The ceiling is applied to the sticker BEFORE pricing rather than to the
@@ -174,6 +180,7 @@ function purchaseRow(
       : capStickerToFinalPpw({
           stickerPpwCents: uncappedPpwCents,
           maxFinalPpwCents,
+          mode: finalPpwMode,
           systemSizeKwDc: basis.systemSizeKwDc,
           dealerFeePct,
           adderTotalCents: basis.adderTotalCents,
@@ -203,6 +210,7 @@ function purchaseRow(
     netPpwCents:
       priced && priced.systemWatts > 0 ? priced.grossPriceCents / priced.systemWatts : null,
     maxFinalPpwCents,
+    finalPpwMode: finalPpwMode ?? "cap",
     capped: cap?.capped ?? false,
     adderOverrun: cap?.adderOverrun ?? false,
     totalPaidCents: null,
@@ -314,6 +322,7 @@ function thirdPartyRow(
     contractPriceCents: null,
     netPpwCents: null,
     maxFinalPpwCents: null,
+    finalPpwMode: "cap",
     capped: false,
     adderOverrun: false,
     totalPaidCents: lifetime?.lifetimeCostCents ?? null,

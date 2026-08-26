@@ -32,6 +32,7 @@ export default async function SolarLendersPage() {
       id: true, name: true, isActive: true, rank: true, notes: true, repPayMode: true,
       portalUrl: true, applyUrl: true, creditInstructions: true,
       logoUpdatedAt: true, maxFinalPpwCents: true, minBasePpwCents: true,
+      finalPpwMode: true,
       _count: { select: { approvals: true, designs: true } },
       products: {
         orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
@@ -78,6 +79,7 @@ export default async function SolarLendersPage() {
           creditInstructions: l.creditInstructions,
           repPayMode: l.repPayMode,
           maxFinalPpwCents: l.maxFinalPpwCents,
+          finalPpwMode: l.finalPpwMode,
           minBasePpwCents: l.minBasePpwCents,
           logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
           approvedCount: l._count.approvals,

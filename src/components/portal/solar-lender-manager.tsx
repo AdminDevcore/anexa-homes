@@ -59,6 +59,8 @@ export type LenderRow = {
    * pricing exactly as it was.
    */
   maxFinalPpwCents: number | null;
+  /** Whether that figure is a ceiling or this partner's flat price. */
+  finalPpwMode: "cap" | "flat";
   /**
    * The least this partner's deals may leave the company per watt, cents,
    * before its cut. Null — nearly every lender — means no floor.
@@ -814,6 +816,7 @@ function LenderCard({
     creditInstructions: lender.creditInstructions ?? "",
     repPayMode: lender.repPayMode,
     maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
+    finalPpwMode: lender.finalPpwMode,
     minBasePpw: ppwToDollars(lender.minBasePpwCents),
   });
   const resetDraft = () =>
@@ -825,6 +828,7 @@ function LenderCard({
       creditInstructions: lender.creditInstructions ?? "",
       repPayMode: lender.repPayMode,
       maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
+      finalPpwMode: lender.finalPpwMode,
       minBasePpw: ppwToDollars(lender.minBasePpwCents),
     });
 
@@ -868,6 +872,7 @@ function LenderCard({
           creditInstructions: draft.creditInstructions.trim() || null,
           repPayMode: draft.repPayMode,
           maxFinalPpwCents,
+          finalPpwMode: draft.finalPpwMode,
           minBasePpwCents,
         }),
       "Saved"
@@ -929,22 +934,42 @@ function LenderCard({
             </p>
           </div>
 
-          {/* A CEILING on what the customer signs, not a price list. Some
-              partners fund a flat rate whatever the job — Amos is $5.50/W —
-              and priced the ordinary way their dealer fee stickers that at
-              three times the figure they actually advance. */}
+          {/* WHAT THIS PARTNER CHARGES A HOMEOWNER, and whether that is a
+              limit or the whole price list. Some partners fund a flat rate
+              whatever the job — Amos is $5.50/W — and priced the ordinary way
+              their dealer fee stickers that at three times the figure they
+              actually advance.
+
+              The mode sits WITH the figure rather than in its own section: on
+              its own "cap or flat" is a question about nothing, and the two
+              only ever mean anything together. */}
           <div className="space-y-1 rounded-lg border border-border/70 bg-muted/30 p-2.5">
             <TextField
-              label="Max final $/W — the most this partner ever charges a homeowner"
+              label="Final $/W — what this partner charges a homeowner"
               value={draft.maxFinalPpw}
-              placeholder="blank — no cap"
+              placeholder="blank — prices the normal way"
               onChange={(v) => setDraft((d) => ({ ...d, maxFinalPpw: v }))}
             />
+            {draft.maxFinalPpw.trim() !== "" && (
+              <Select
+                value={draft.finalPpwMode}
+                onValueChange={(v) =>
+                  setDraft((d) => ({ ...d, finalPpwMode: v as LenderRow["finalPpwMode"] }))
+                }
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cap">Maximum — a cheaper deal quotes cheaper</SelectItem>
+                  <SelectItem value="flat">Flat price — every deal is this figure</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             <p className="text-[11px] text-muted-foreground">
               Dealer fee and adders included. Leave blank and this lender prices the normal way:
-              your base $/W grossed up by its fee. Set it and the contract is held at or under
-              this figure — so extra work comes out of what you keep, not out of the
-              customer&rsquo;s price.
+              your base $/W grossed up by its fee.{" "}
+              {draft.finalPpwMode === "flat"
+                ? "On FLAT, this is the price — the base you type on a deal and any extra work never move it, they only change what you keep."
+                : "On MAXIMUM, the contract is held at or under this figure — so extra work comes out of what you keep, not out of the customer's price."}
             </p>
           </div>
 
@@ -1081,7 +1106,9 @@ function LenderCard({
                 nobody anything. */}
             {lender.maxFinalPpwCents != null && (
               <div className="flex justify-between gap-2">
-                <dt className="text-muted-foreground">Max final $/W</dt>
+                <dt className="text-muted-foreground">
+                  {lender.finalPpwMode === "flat" ? "Flat final $/W" : "Max final $/W"}
+                </dt>
                 <dd className="font-medium tabular-nums">
                   <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] text-gold-muted">
                     ${ppwToDollars(lender.maxFinalPpwCents)}/W

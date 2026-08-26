@@ -2,7 +2,7 @@ import type { FinanceProduct } from "@prisma/client";
 import { financeRowForProduct } from "./solar-finance-row";
 import { lenderProductLabel } from "./solar-lender-product";
 import type { ProposalAlternative, ProposalFinanceInput } from "./solar-proposal";
-import type { SolarAssumptions } from "./solar-money";
+import type { SolarAssumptions, FinalPpwMode } from "./solar-money";
 
 /**
  * Turning a company's rate sheet into the menu a homeowner can actually choose
@@ -52,6 +52,8 @@ export type CatalogueProgramme = {
      * frozen into the snapshot and outlive anybody's chance to correct it.
      */
     maxFinalPpwCents: number | null;
+    /** Ceiling, or this partner's flat price. See SolarFinalPpwMode. */
+    finalPpwMode: FinalPpwMode;
   };
 };
 
@@ -164,6 +166,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
           escalatorPct: p.escalatorPct,
           termYears: p.termYears,
           maxFinalPpwCents: p.lender.maxFinalPpwCents,
+          finalPpwMode: p.lender.finalPpwMode,
         },
         targetNetPpwCents: input.targetNetPpwCents,
       }

@@ -50,6 +50,7 @@ export function SystemPriceCard({
   adderTotalCents,
   quotedFeePct,
   quotedMaxFinalPpwCents,
+  quotedFinalPpwMode,
   quotedMinBasePpwCents,
   quotedLabel,
   canEdit,
@@ -72,6 +73,14 @@ export function SystemPriceCard({
    * $48,400 for the same deal is worse than either figure alone.
    */
   quotedMaxFinalPpwCents: number | null;
+  /**
+   * Whether that figure is a ceiling or this partner's flat price.
+   *
+   * On `flat` the base box below is no longer the price of anything a customer
+   * sees — the partner's rate is — so the card says so rather than leaving a
+   * rep typing into a number with no effect on the quote.
+   */
+  quotedFinalPpwMode: "cap" | "flat";
   /**
    * That publisher's floor under what the company keeps per watt, cents. Null
    * on cash and on any lender that sets none.
@@ -184,18 +193,31 @@ export function SystemPriceCard({
     basePpwCents != null && quotedFeePct != null && quotedFeePct > 0
       ? grossPpwFromNet(basePpwCents, quotedFeePct)
       : null;
+  /**
+   * A FLAT partner does not need a base to have a price.
+   *
+   * Every figure below is solved out of the customer's number, and on a flat
+   * lender that number is published rather than derived — so the footer can
+   * quote the deal before anybody has typed a base, which is exactly the state
+   * a rep is in when they pick "Amos 30 Y" and expect $5.50/W to appear.
+   */
+  const flatSeedPpw =
+    quotedFinalPpwMode === "flat" && quotedMaxFinalPpwCents != null
+      ? (uncappedCustomerPpw ?? quotedMaxFinalPpwCents)
+      : uncappedCustomerPpw;
   const customerCap =
-    uncappedCustomerPpw == null
+    flatSeedPpw == null
       ? null
       : capStickerToFinalPpw({
-          stickerPpwCents: uncappedCustomerPpw,
+          stickerPpwCents: flatSeedPpw,
           maxFinalPpwCents: quotedMaxFinalPpwCents,
+          mode: quotedFinalPpwMode,
           systemSizeKwDc,
           dealerFeePct: quotedFeePct ?? 0,
           adderTotalCents,
         });
-  const customerPpw = customerCap?.stickerPpwCents ?? uncappedCustomerPpw;
-  const customerContract =
+  const customerPpw = customerCap?.stickerPpwCents ?? flatSeedPpw;
+  const customerPriced =
     customerPpw != null && watts > 0
       ? pricePurchase({
           product: "loan",
@@ -203,8 +225,20 @@ export function SystemPriceCard({
           stickerPpwCents: customerPpw,
           dealerFeePct: quotedFeePct ?? 0,
           adderTotalCents,
-        }).contractPriceCents
+        })
       : null;
+  const customerContract = customerPriced?.contractPriceCents ?? null;
+  /**
+   * The rate the FOOTER quotes, which is the contract divided by the watts —
+   * not `customerPpw`.
+   *
+   * Those are the same number only on a job with no extra work. `customerPpw`
+   * is the SYSTEM's sticker; the adders gross up and sit on top of it, so on a
+   * 24.6 kW deal carrying $2,000 of work the footer was printing "$5.26/W ·
+   * $135,321" — two figures that do not divide into each other, side by side,
+   * under the words "the customer's final price".
+   */
+  const customerFinalPpw = customerPriced?.finalPpwCents ?? null;
 
   const offDefault = defaultPpwCents != null && basePpwCents != null && basePpwCents !== defaultPpwCents;
   const outOfBand =
@@ -458,7 +492,13 @@ export function SystemPriceCard({
         {customerPpw != null && customerContract != null ? (
           <p className="text-[11px] text-muted-foreground">
             <span className="font-medium text-foreground">{quotedLabel}</span>{" "}
-            {customerCap?.capped && quotedMaxFinalPpwCents != null ? (
+            {quotedFinalPpwMode === "flat" && quotedMaxFinalPpwCents != null ? (
+              <>
+                sells at a flat ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, fee and adders
+                included — the base above only changes what you keep, so the customer&rsquo;s
+                final price is{" "}
+              </>
+            ) : customerCap?.capped && quotedMaxFinalPpwCents != null ? (
               <>
                 never charges more than ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, fee and
                 adders included, so the customer&rsquo;s final price is held at{" "}
@@ -473,7 +513,8 @@ export function SystemPriceCard({
               data-testid="customer-final"
               className="font-medium tabular-nums text-foreground"
             >
-              ${(customerPpw / 100).toFixed(2)}/W · ${Math.round(customerContract / 100).toLocaleString()}
+              ${((customerFinalPpw ?? customerPpw) / 100).toFixed(2)}/W · $
+              {Math.round(customerContract / 100).toLocaleString()}
             </span>
             . Cash pays the gross.
           </p>

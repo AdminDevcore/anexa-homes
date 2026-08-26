@@ -5,6 +5,7 @@ import {
   grossPpwFromNet,
   leaseMonthlyCents,
   type SolarAssumptions,
+  type FinalPpwMode,
 } from "./solar-money";
 
 /**
@@ -65,6 +66,8 @@ export type LenderProductTerms = {
    * it constrains the same number the dealer fee produces.
    */
   maxFinalPpwCents?: number | null;
+  /** Whether that figure is a ceiling or the price itself. */
+  finalPpwMode?: FinalPpwMode | null;
 };
 
 export type FinanceRow = {
@@ -151,6 +154,10 @@ export function financeRowForProduct(
     ? capStickerToFinalPpw({
         stickerPpwCents: uncappedPpwCents,
         maxFinalPpwCents: lp?.maxFinalPpwCents ?? null,
+        // A FLAT partner overrides the typed price outright rather than only
+        // holding it down — see SolarFinalPpwMode. On such a lender the box a
+        // rep types in stops being the price of anything the customer sees.
+        mode: lp?.finalPpwMode ?? undefined,
         systemSizeKwDc: ctx.systemSizeKwDc,
         dealerFeePct,
         adderTotalCents: f.adderTotalCents ?? 0,

@@ -1,4 +1,5 @@
 import type { LenderProductTerms } from "@/lib/solar-finance-row";
+import type { FinalPpwMode } from "@/lib/solar-money";
 
 /**
  * The terms a deal is priced from, read off a rate-sheet row.
@@ -30,19 +31,23 @@ export const LENDER_TERMS_SELECT = {
   rateMillsPerKwh: true,
   escalatorPct: true,
   termYears: true,
-  lender: { select: { maxFinalPpwCents: true } },
+  lender: { select: { maxFinalPpwCents: true, finalPpwMode: true } },
 } as const;
 
 /** What that select comes back as. */
-export type LenderTermsRow = Omit<LenderProductTerms, "maxFinalPpwCents"> & {
-  lender: { maxFinalPpwCents: number | null };
+export type LenderTermsRow = Omit<LenderProductTerms, "maxFinalPpwCents" | "finalPpwMode"> & {
+  lender: { maxFinalPpwCents: number | null; finalPpwMode: FinalPpwMode };
 };
 
-/** Flatten the partner's ceiling onto the programme's own terms. */
+/** Flatten the partner's price rule onto the programme's own terms. */
 export function toLenderProductTerms(row: LenderTermsRow): LenderProductTerms;
 export function toLenderProductTerms(row: LenderTermsRow | null): LenderProductTerms | null;
 export function toLenderProductTerms(row: LenderTermsRow | null): LenderProductTerms | null {
   if (!row) return null;
   const { lender, ...terms } = row;
-  return { ...terms, maxFinalPpwCents: lender.maxFinalPpwCents };
+  return {
+    ...terms,
+    maxFinalPpwCents: lender.maxFinalPpwCents,
+    finalPpwMode: lender.finalPpwMode,
+  };
 }

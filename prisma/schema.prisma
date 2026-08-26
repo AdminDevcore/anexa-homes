@@ -2842,6 +2842,23 @@ enum SolarRepPayMode {
   per_watt
 }
 
+/// How a partner's stated price per watt behaves.
+enum SolarFinalPpwMode {
+  /// A CEILING. Price the deal the ordinary way -- base grossed up by the fee
+  /// -- and hold the contract down to this figure only if it comes out above.
+  /// A cheaper deal quotes cheaper.
+  cap
+  /// A FIXED PRICE. This partner's paper is this figure per watt and nothing
+  /// moves it: not the base a rep types, not the adders on the job, not the
+  /// size of the array. Amos Capital Fund sells this way -- $5.50/W, and the
+  /// only thing a rep chooses is which of their products to write it on.
+  ///
+  /// The base stops being an input here and becomes an OUTPUT: what is left of
+  /// the company's share once the partner has taken its cut and the extra work
+  /// has been paid for.
+  flat
+}
+
 /// A finance partner whose approved-vendor list constrains what can be sold.
 ///
 /// Managed data, not free text: the whole point is that a rep picks "Credit
@@ -2887,6 +2904,15 @@ model SolarLender {
   /// Null -- the default and every lender until somebody sets one -- means no
   /// cap, and nothing about that lender's pricing changes.
   maxFinalPpwCents Int?
+
+  /// Whether the figure above is a ceiling or the price itself.
+  ///
+  /// `cap` is the default and what every lender did before this existed, so
+  /// setting nothing changes nothing. `flat` is for a partner like Amos whose
+  /// paper is one number per watt whatever is on the job -- see
+  /// SolarFinalPpwMode. Ignored entirely when `maxFinalPpwCents` is null,
+  /// because a mode with no figure to apply is not a pricing rule.
+  finalPpwMode SolarFinalPpwMode @default(cap)
 
   /// The least this partner's deals may leave the company, per installed watt,
   /// in cents, BEFORE its cut. 175 = $1.75/W.

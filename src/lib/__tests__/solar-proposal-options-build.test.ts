@@ -5,7 +5,7 @@ import {
   MAX_PAYMENT_OPTIONS,
   type CatalogueProgramme,
 } from "@/lib/solar-proposal-options";
-import type { SolarAssumptions } from "@/lib/solar-money";
+import type { SolarAssumptions, FinalPpwMode } from "@/lib/solar-money";
 
 const A: SolarAssumptions = {
   derateFactor: 0.84,
@@ -20,13 +20,20 @@ const A: SolarAssumptions = {
   maxPpwCents: 800,
 };
 
-const lender = (id: string, name: string, rank = 0, maxFinalPpwCents: number | null = null) => ({
+const lender = (
+  id: string,
+  name: string,
+  rank = 0,
+  maxFinalPpwCents: number | null = null,
+  finalPpwMode: FinalPpwMode = "cap"
+) => ({
   id,
   name,
   rank,
   applyUrl: `https://${id}.example/apply`,
   logoUrl: `/logo/${id}`,
   maxFinalPpwCents,
+  finalPpwMode,
 });
 
 const loanProgramme = (

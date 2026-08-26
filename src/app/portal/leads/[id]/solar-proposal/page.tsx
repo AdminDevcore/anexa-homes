@@ -93,6 +93,7 @@ export default async function SolarProposalBuilderPage({
       select: {
         id: true, name: true, isActive: true, portalUrl: true, creditInstructions: true,
         logoUpdatedAt: true, maxFinalPpwCents: true, minBasePpwCents: true,
+        finalPpwMode: true,
       },
     }),
     // EVERY lender's rate sheet, not just the chosen one's: the Financing step
@@ -222,6 +223,7 @@ export default async function SolarProposalBuilderPage({
           creditInstructions: l.creditInstructions,
           logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
           maxFinalPpwCents: l.maxFinalPpwCents,
+          finalPpwMode: l.finalPpwMode,
           minBasePpwCents: l.minBasePpwCents,
         }))}
         lenderId={design?.lenderId ?? null}

@@ -34,6 +34,7 @@ import {
   leaseMonthlyCents,
   pricePurchase,
   type YieldAssumptions,
+  type FinalPpwMode,
 } from "@/lib/solar-money";
 import { SystemPriceCard } from "@/components/portal/solar/system-price";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
@@ -652,11 +653,16 @@ export type LenderOption = {
   /** The partner's mark. Null falls back to a monogram, never to nothing. */
   logoUrl: string | null;
   /**
-   * The most this partner's paper ever puts in front of a homeowner per watt,
-   * fee and adders included, cents. Null — nearly every lender — means the
-   * ordinary base-times-fee pricing, unchanged.
+   * This partner's stated price per watt to a homeowner, fee and adders
+   * included, cents. Null — nearly every lender — means the ordinary
+   * base-times-fee pricing, unchanged.
    */
   maxFinalPpwCents: number | null;
+  /**
+   * Whether that figure is a CEILING or the PRICE. A flat partner sells at one
+   * number whatever the base and whatever the adders; see SolarFinalPpwMode.
+   */
+  finalPpwMode: FinalPpwMode;
   /**
    * The least this partner's deals may leave the company per watt, before its
    * cut, cents. Null — nearly every lender — means no floor.
@@ -768,6 +774,20 @@ export function SolarFinancePanel({
   const chosen = products.find((p) => p.id === lenderProductId) ?? null;
 
   /**
+   * The chosen partner's flat rate, if it sells at one.
+   *
+   * Named on the terms line because on such a lender it IS the deal: the
+   * homeowner's price is not derived from anything on this screen, and a rep
+   * reading the terms is entitled to see the number their paper carries.
+   * Null on a partner that prices the ordinary way.
+   */
+  const quotedFlatPpwCents = (() => {
+    if (!chosen) return null;
+    const l = lenders.find((x) => x.id === chosen.lenderId);
+    return l && l.finalPpwMode === "flat" ? l.maxFinalPpwCents : null;
+  })();
+
+  /**
    * The deal's base price per watt — what Anexa charges before a lender's cut.
    *
    * Recovered from the stored row rather than kept in a column of its own:
@@ -865,6 +885,7 @@ export function SolarFinancePanel({
                 lenderName: l.name,
                 label: lenderProductLabel(p),
                 maxFinalPpwCents: l.maxFinalPpwCents,
+                finalPpwMode: l.finalPpwMode,
               },
             ]
           : [];
@@ -1159,6 +1180,14 @@ export function SolarFinancePanel({
             ? (lenders.find((l) => l.id === chosen.lenderId)?.maxFinalPpwCents ?? null)
             : null
         }
+        // Read the same way and from the same row: a mode without its figure
+        // is not a pricing rule, and the two arriving from different places is
+        // how one of them goes stale.
+        quotedFinalPpwMode={
+          chosen && !isCash
+            ? (lenders.find((l) => l.id === chosen.lenderId)?.finalPpwMode ?? "cap")
+            : "cap"
+        }
         // The floor is the partner's too, and read the same way. Cash has no
         // lender and therefore no floor — the company band is all that guards
         // it, which is what "no lender" has always meant here.
@@ -1315,33 +1344,62 @@ export function SolarFinancePanel({
           </header>
 
           <div className="space-y-3 p-4">
-            {/* TextField, not bare Label+Input: it wires htmlFor/id, so a screen
-                reader announces each figure and the label is clickable.
+            {/* ONLY WHAT SOMEBODY ACTUALLY TYPES.
 
-                The fee sits in the same row as the terms it belongs to, and is
-                the RATE SHEET's rather than this screen's whenever a programme
-                is quoted — the save action reads it off the same row, so an
-                editable box here would show a number that does not survive
-                Save. Shown and locked rather than hidden: it is the figure that
-                explains why this lender's sticker is higher than the next
-                one's. Only a hand-quoted loan, with no programme behind it,
-                gets to type one. */}
+                Five boxes used to sit here, and on a quoted programme three of
+                them were already decided: the dealer fee, the APR and the term
+                all come off the rate-sheet row, the save action reads them from
+                that row whatever is posted, and two of the three were editable
+                anyway — so a rep could change a number, save, and watch it
+                come back as it was.
+
+                They are a STATEMENT now, not a form. What is left is the pair
+                that genuinely arrives from the approval and exists nowhere
+                else: the down payment and the monthly. A hand-quoted loan with
+                no programme behind it still gets all five, because there is no
+                rate sheet to state.
+
+                TextField, not bare Label+Input: it wires htmlFor/id, so a
+                screen reader announces each figure and the label is
+                clickable. */}
+            {chosen ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {[lender?.name, lenderProductLabel(chosen)].filter(Boolean).join(" · ")}
+                </span>
+                {" — "}
+                {[
+                  chosen.aprPct != null ? `${chosen.aprPct}% APR` : null,
+                  chosen.termMonths ? `${chosen.termMonths} months` : null,
+                  chosen.dealerFeePct != null ? `${chosen.dealerFeePct}% dealer fee` : null,
+                  quotedFlatPpwCents != null
+                    ? `$${(quotedFlatPpwCents / 100).toFixed(2)}/W flat`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              <TextField
-                label="Dealer fee %"
-                type="number"
-                value={form.dealerFeePct}
-                disabled={!canEdit || chosen != null}
-                onChange={(v) => set("dealerFeePct", v)}
-              />
-              <TextField label="APR %" type="number" step="0.01" value={form.aprPct} disabled={!canEdit} onChange={(v) => set("aprPct", v)} />
-              <TextField label="Term (months)" type="number" value={form.loanTermMonths} disabled={!canEdit} onChange={(v) => set("loanTermMonths", v)} />
+              {!chosen && (
+                <>
+                  <TextField
+                    label="Dealer fee %"
+                    type="number"
+                    value={form.dealerFeePct}
+                    disabled={!canEdit}
+                    onChange={(v) => set("dealerFeePct", v)}
+                  />
+                  <TextField label="APR %" type="number" step="0.01" value={form.aprPct} disabled={!canEdit} onChange={(v) => set("aprPct", v)} />
+                  <TextField label="Term (months)" type="number" value={form.loanTermMonths} disabled={!canEdit} onChange={(v) => set("loanTermMonths", v)} />
+                </>
+              )}
               <TextField label="Down payment $" type="number" value={form.downPayment} disabled={!canEdit} onChange={(v) => set("downPayment", v)} />
               <TextField label="Monthly payment $" type="number" step="0.01" value={form.loanMonthly} disabled={!canEdit} onChange={(v) => set("loanMonthly", v)} />
             </div>
             <p className="text-[11px] text-muted-foreground">
               {chosen
-                ? `The dealer fee is ${lender?.name ?? "this lender"}'s, off the rate sheet. `
+                ? `Those terms are ${lender?.name ?? "this lender"}'s, off the rate sheet, and are not set here. `
                 : ""}
               Enter the lender&rsquo;s own figures from the approval — these are never calculated
               here.

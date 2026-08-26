@@ -56,9 +56,11 @@ export type SystemMoney = {
   dealerFeePpwCents: number;
   finalPpwCents: number;
   contractPriceCents: number;
-  /** The partner's ceiling on the final $/W, cents. Null when uncapped. */
+  /** The partner's stated final $/W, cents. Null when it publishes none. */
   maxFinalPpwCents: number | null;
-  /** True when that ceiling is what is holding this price down. */
+  /** Whether that figure is a ceiling or this partner's flat price. */
+  finalPpwMode: "cap" | "flat";
+  /** True when that rule is what set this price, rather than the base. */
   cappedByLender: boolean;
   lenderName: string | null;
 };
@@ -140,16 +142,30 @@ export function SolarSystemMoneyPanel({
           Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut. The dealer
           fee is a share of the final price, so the adders carry it too.
         </p>
-        {/* A CAPPED LADDER HAS TO SAY SO. The base is solved backwards out of
-            the ceiling once the cap bites, so a rep who typed $3.00/W in the
-            builder reads $1.93/W here. Unexplained that looks like the page
-            has lost the price; named, it is the partner's own limit doing
-            exactly what it was set to do. */}
+        {/* A LADDER THE PARTNER SET HAS TO SAY SO. Once the partner's figure
+            decides the price, the base is solved backwards out of it — a rep
+            who typed $3.00/W in the builder reads $1.93/W here. Unexplained
+            that looks like the page has lost the price; named, it is the
+            partner's own rate doing exactly what it was set to do.
+
+            A FLAT partner is not "held" at anything, it simply sells at one
+            number, and a notice that says "held" invites a rep to go looking
+            for the price it was held down FROM. */}
         {money.cappedByLender && money.maxFinalPpwCents != null && (
           <p className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-500">
-            Held at {money.lenderName ?? "this lender"}&rsquo;s ceiling of{" "}
-            {usdc(money.maxFinalPpwCents)}/W, fee and adders included. The base above is what
-            survives it — not the price typed on the deal.
+            {money.finalPpwMode === "flat" ? (
+              <>
+                {money.lenderName ?? "This lender"} sells at a flat{" "}
+                {usdc(money.maxFinalPpwCents)}/W, fee and adders included — the base above is
+                what is left of it, not a price typed on this deal.
+              </>
+            ) : (
+              <>
+                Held at {money.lenderName ?? "this lender"}&rsquo;s ceiling of{" "}
+                {usdc(money.maxFinalPpwCents)}/W, fee and adders included. The base above is
+                what survives it — not the price typed on the deal.
+              </>
+            )}
           </p>
         )}
       </div>

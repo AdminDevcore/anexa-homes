@@ -374,7 +374,7 @@ export default async function LeadDetailPage({
           // proposal builder does — see priceStoredPurchase.
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
-            maxFinalPpwCents: true,
+            maxFinalPpwCents: true, finalPpwMode: true,
           },
         }),
       ])
@@ -622,6 +622,7 @@ export default async function LeadDetailPage({
           dealerFeePct: fin.dealerFeePct,
           adderTotalCents: fin.adderTotalCents,
           maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
+          finalPpwMode: dealLender?.finalPpwMode,
         })
       : null;
     const breakdown = priced?.breakdown ?? null;
@@ -664,6 +665,7 @@ export default async function LeadDetailPage({
        * screen names the reason.
        */
       maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
+      finalPpwMode: dealLender?.finalPpwMode ?? "cap",
       cappedByLender: priced?.cap.capped ?? false,
       lenderName: dealLender?.name ?? null,
     };
