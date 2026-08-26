@@ -237,6 +237,15 @@ export function SolarProposalView({
    * as none — exactly what those documents were priced with.
    */
   const vpp = s.vpp ?? [];
+  /**
+   * What the battery earns every year, and who pays it — for the sentence under
+   * the table that has to account for a "with solar" column smaller than the
+   * utility bill inside it. The upfront enrolment money is deliberately left
+   * out: it lands once, in year one, and folding it into a per-year figure
+   * would overstate every other year.
+   */
+  const vppAnnualCents = vpp.reduce((n, v) => n + v.annualCents, 0);
+  const vppPayer = vpp.length === 1 ? vpp[0].provider : "your battery programme";
   const afterAllCents =
     option.monthlyCents != null
       ? option.monthlyCents + option.postSolarMonthlyCents
@@ -816,7 +825,7 @@ export function SolarProposalView({
           {/* Year by year, with a handle on it. Some households read the table
               below as the proof and some read it as a wall of numbers; this is
               the same model, one year at a time. */}
-          <SavingsScrubber years={sv.years} paybackYear={sv.paybackYear} />
+          <SavingsScrubber years={sv.years} paybackYear={sv.paybackYear} vpp={vpp} />
 
           <div className="mt-10 overflow-x-auto">
             <table className="w-full min-w-[30rem] text-sm">
@@ -829,13 +838,13 @@ export function SolarProposalView({
                     Year
                   </th>
                   <th scope="col" className="py-3 pr-4 text-right font-semibold">
-                    Utility
+                    If you stay with the utility
                   </th>
                   <th scope="col" className="py-3 pr-4 text-right font-semibold">
-                    With solar
+                    If you go solar
                   </th>
                   <th scope="col" className="py-3 text-right font-semibold">
-                    Cumulative saved
+                    Kept so far
                   </th>
                 </tr>
               </thead>
@@ -859,11 +868,28 @@ export function SolarProposalView({
               </tbody>
             </table>
           </div>
-          <p className="mt-3 text-xs text-neutral-500">
-            &ldquo;With solar&rdquo; includes any grid power you still buy, plus what you pay for
-            the system in that year
-            {vpp.length > 0 ? ", less what the battery programme pays you" : ""}.
-          </p>
+          {/* HOW TO READ THE COLUMN. One template literal per sentence rather
+              than prose with expressions sitting in it — see the note in the
+              battery block above for what JSX does to the spaces otherwise. */}
+          <div className="mt-3 max-w-[72ch] space-y-1.5 text-xs leading-relaxed text-neutral-500">
+            <p>
+              {`\u201cIf you go solar\u201d is the power you still buy from the utility, plus what you pay for the system that year${
+                vppAnnualCents > 0
+                  ? `, less the ${usd(vppAnnualCents)} a year ${vppPayer} pays you for your battery`
+                  : ""
+              }.`}
+            </p>
+            {sv.years.some((y) => y.solarCostCents < 0) && (
+              <p>
+                {`Where that column is a minus figure, the battery is earning more than the power you still buy costs \u2014 your electricity pays you that year instead of costing you.`}
+              </p>
+            )}
+            {sv.years[0] != null && sv.years[0].solarPaymentCents > 0 && sv.years[1]?.solarPaymentCents === 0 && (
+              <p>
+                {`Year 1 carries the whole price of the system, ${usd(sv.years[0].solarPaymentCents)}, however you pay for it. Financing spreads that same amount across the term of the loan rather than removing it, so the years after it show only what the power costs.`}
+              </p>
+            )}
+          </div>
         </Chapter>
       )}
 
