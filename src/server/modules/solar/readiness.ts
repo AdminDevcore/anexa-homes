@@ -87,6 +87,21 @@ export async function readSolarReadiness(
   // them on a catalogue nobody has filled in would be a migration that broke
   // production. So the finding appears exactly when the terms exist and the deal
   // ignores them.
+  /**
+   * The programme this deal is quoted from, if any.
+   *
+   * Read for two of the rules below: whether the dealer fee is a partner's
+   * published rate or a number somebody keyed in, and whether that programme
+   * publishes a payment factor. Both change a block into a non-issue, so
+   * getting the row is worth the query.
+   */
+  const quotedProduct = finance.lenderProductId
+    ? await prisma.solarLenderProduct.findFirst({
+        where: { companyId, id: finance.lenderProductId },
+        select: { factorWithPaydownMicros: true, factorWithoutPaydownMicros: true },
+      })
+    : null;
+
   const productIssues: ValidationIssue[] = [];
   if (finance.product !== "cash" && !finance.lenderProductId && design.lenderId) {
     const available = await prisma.solarLenderProduct.count({
@@ -145,6 +160,10 @@ export async function readSolarReadiness(
         aprPct: finance.aprPct,
         loanTermMonths: finance.loanTermMonths,
         minBasePpwCents: design.lender?.minBasePpwCents ?? null,
+        fromRateSheet: !!finance.lenderProductId,
+        hasPaymentFactor:
+          (quotedProduct?.factorWithPaydownMicros ?? 0) > 0 ||
+          (quotedProduct?.factorWithoutPaydownMicros ?? 0) > 0,
       },
       company: {
         name: company?.name ?? null,

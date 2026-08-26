@@ -460,6 +460,76 @@ describe("a rep cannot generate a nonsense proposal", () => {
     expect(canGenerate(validateFinance(complete, A))).toBe(true);
   });
 
+  it("lets a real deal off a real rate sheet generate: 65% fee, 0% APR, no approval yet", () => {
+    /**
+     * Amos Capital Fund, exactly as it is configured: a flat $5.50/W to the
+     * homeowner, a 65% dealer fee, and an "Amos 30 Y" product written at 0%
+     * over 360 months. Every one of those three tripped a rule.
+     *
+     * The fee, because half the contract to a lender was treated as a typo —
+     * which it is, when somebody keys it in, and is not when it is published on
+     * the partner's own rate sheet. The APR, because 0% was read as "not
+     * entered", and a quoted deal takes its APR FROM the sheet, so there was no
+     * box left that could clear it. And the payment, because the approval had
+     * not come back — on a deal whose payment is arithmetic.
+     */
+    const amos: FinanceForValidation = {
+      product: "loan",
+      grossPpwCents: 550,
+      dealerFeePct: 65,
+      contractPriceCents: 6_050_000,
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null,
+      loanMonthlyPaymentCents: null,
+      aprPct: 0,
+      loanTermMonths: 360,
+      fromRateSheet: true,
+    };
+    const issues = validateFinance(amos, { ...A, minPpwCents: 150, maxPpwCents: 800 });
+    expect(canGenerate(issues)).toBe(true);
+    expect(issues.map((i) => i.code)).not.toContain("pricing.dealer_fee_implausible");
+    expect(issues.map((i) => i.code)).not.toContain("financing.loan_apr_missing");
+    // The missing payment is SAID, just not as a wall: the document quotes an
+    // estimate and tells the homeowner it is one.
+    const monthly = issues.find((i) => i.code === "financing.loan_monthly_estimated");
+    expect(monthly?.severity).toBe("warn");
+  });
+
+  it("still stops a 65% fee somebody typed from memory", () => {
+    // The typo guard has to survive the exemption, or it protects nothing.
+    const typed: FinanceForValidation = {
+      product: "loan", grossPpwCents: 550, dealerFeePct: 65, contractPriceCents: 6_050_000,
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: 16_806, aprPct: 0, loanTermMonths: 360,
+    };
+    const issues = validateFinance(typed, { ...A, minPpwCents: 150, maxPpwCents: 800 });
+    expect(issues.map((i) => i.code)).toContain("pricing.dealer_fee_implausible");
+    expect(canGenerate(issues)).toBe(false);
+  });
+
+  it("still BLOCKS a payment nothing can produce", () => {
+    // No approval, no factor, and no term to amortise over. The document would
+    // have to print a blank where the monthly goes.
+    const noTerm: FinanceForValidation = {
+      product: "loan", grossPpwCents: 350, dealerFeePct: 18, contractPriceCents: 3_885_000,
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: null, aprPct: 6.99, loanTermMonths: null,
+      fromRateSheet: true,
+    };
+    const issues = validateFinance(noTerm, A);
+    expect(issues.map((i) => i.code)).toContain("financing.loan_monthly_missing");
+    expect(canGenerate(issues)).toBe(false);
+  });
+
+  it("BLOCKS a negative APR, which is not a rate at all", () => {
+    const negative: FinanceForValidation = {
+      product: "loan", grossPpwCents: 350, dealerFeePct: 18, contractPriceCents: 3_885_000,
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: 27_400, aprPct: -1, loanTermMonths: 300,
+    };
+    expect(validateFinance(negative, A).map((i) => i.code)).toContain("financing.loan_apr_negative");
+  });
+
   it("BLOCKS an APR left behind on a lease by a product switch", () => {
     // The defect this guards: switching Loan -> Lease used to leave aprPct on
     // the row, and the customer-facing proposal renders an APR whenever one is

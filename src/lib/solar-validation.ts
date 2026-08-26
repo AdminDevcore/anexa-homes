@@ -127,6 +127,22 @@ export type FinanceForValidation = {
   loanMonthlyPaymentCents: number | null;
   aprPct?: number | null;
   loanTermMonths?: number | null;
+  /**
+   * True when this deal's terms were QUOTED from one of the lender's published
+   * programmes rather than typed from memory.
+   *
+   * Changes what the sanity rules below are for. A figure a person keyed in is
+   * worth guarding against typos; the same figure read off a rate sheet is a
+   * fact about a partner, and refusing it tells a rep their own lender is not
+   * plausible — with no box left to correct, because a quoted deal reads its
+   * terms from the sheet.
+   */
+  fromRateSheet?: boolean;
+  /**
+   * True when that programme publishes a payment factor, so a monthly can be
+   * quoted before any approval comes back. See `factorQuote`.
+   */
+  hasPaymentFactor?: boolean;
 };
 
 export type CustomerForValidation = {
@@ -403,8 +419,25 @@ export function validateFinance(
     if (f.product === "loan" && f.dealerFeePct <= 0) {
       warn("pricing.loan_no_dealer_fee", "pricing", "dealerFeePct", "This loan has no dealer fee. Confirm with the lender — that is unusual.");
     }
-    if (f.dealerFeePct >= 50) {
-      block("pricing.dealer_fee_implausible", "pricing", "dealerFeePct", `A dealer fee of ${f.dealerFeePct}% is not plausible.`);
+    /**
+     * A TYPO GUARD, and only that.
+     *
+     * Half the contract going to the lender is not a number anybody keys in by
+     * accident twice, so on a hand-quoted deal it is worth stopping. Off a rate
+     * sheet it is not a typo at all: Amos Capital Fund publishes 65% against a
+     * flat $5.50/W, and that arrangement is the entire reason the flat mode
+     * exists. Blocking it told a rep their own partner was implausible — and
+     * since a quoted deal reads its fee from the sheet, left them no field to
+     * change. What actually protects margin here is the lender's own floor
+     * above, which is measured on what survives the fee.
+     */
+    if (f.dealerFeePct >= 50 && !f.fromRateSheet) {
+      block(
+        "pricing.dealer_fee_implausible",
+        "pricing",
+        "dealerFeePct",
+        `A dealer fee of ${f.dealerFeePct}% is not plausible. If that really is this lender's rate, put it on their rate sheet and quote the deal from it.`
+      );
     }
     if (f.contractPriceCents <= 0) {
       block("pricing.contract_price_zero", "pricing", "contractPriceCents", "Contract price has not been calculated.");
@@ -432,11 +465,48 @@ export function validateFinance(
     // proposal quotes a monthly payment; quoting one we never received, or
     // omitting it entirely, is the difference between a quote and a guess.
     if (f.product === "loan") {
+      /**
+       * A DOCUMENT MAY NEVER QUOTE NO MONTHLY — but it does not need the
+       * lender's own figure to quote one.
+       *
+       * The snapshot already takes the payment from three sources in order: the
+       * approval, the rate sheet's published factor, then our amortisation of
+       * the quoted APR and term — and it records which, so a homeowner reading
+       * an estimate is told it is one. Blocking here on the first of those
+       * refused to generate a document that was fully prepared to handle its
+       * absence, on a deal whose payment is not even in doubt: 0% over 360
+       * months on a fixed price is arithmetic, not a negotiation.
+       *
+       * So this blocks only when NOTHING can produce a payment. When one can,
+       * the rep is told the document will carry an estimate until the approval
+       * lands, which is true and is what the document itself says.
+       */
+      const canDerivePayment =
+        !!f.hasPaymentFactor ||
+        (f.aprPct != null && f.aprPct >= 0 && !!f.loanTermMonths && f.loanTermMonths > 0);
       if (!f.loanMonthlyPaymentCents || f.loanMonthlyPaymentCents <= 0) {
-        block("financing.loan_monthly_missing", "financing", "loanMonthlyPaymentCents", "Enter the lender's monthly payment from the approval.");
+        if (canDerivePayment) {
+          warn(
+            "financing.loan_monthly_estimated",
+            "financing",
+            "loanMonthlyPaymentCents",
+            "No monthly payment from the lender yet, so the proposal will quote an estimate and say so. Enter the approved figure when it comes back."
+          );
+        } else {
+          block("financing.loan_monthly_missing", "financing", "loanMonthlyPaymentCents", "Enter the lender's monthly payment from the approval.");
+        }
       }
-      if (f.aprPct == null || f.aprPct <= 0) {
+      /**
+       * ZERO IS AN APR. A dealer-fee-buydown loan is written at 0% — that is
+       * what the 65% fee bought — and treating it as "not entered" blocked
+       * every deal on the product, unfixably: the APR is read off the rate
+       * sheet, so there was no number a rep could type to satisfy it. Missing
+       * is null; negative is nonsense; nought is a rate.
+       */
+      if (f.aprPct == null) {
         block("financing.loan_apr_missing", "financing", "aprPct", "Enter the loan's APR from the approval.");
+      } else if (f.aprPct < 0) {
+        block("financing.loan_apr_negative", "financing", "aprPct", "A loan's APR cannot be negative.");
       }
       if (!f.loanTermMonths || f.loanTermMonths <= 0) {
         block("financing.loan_term_missing", "financing", "loanTermMonths", "Enter the loan term in months from the approval.");
