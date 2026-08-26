@@ -7,32 +7,15 @@ import * as React from "react";
  *
  * The same seven chapters serve two audiences that read them differently: a
  * homeowner scrolling a phone, and a rep advancing chapters on a tablet at a
- * kitchen table. Rather than building two documents, the chapters snap.
+ * kitchen table. Both get ONE behaviour: the scroll is theirs.
  *
- * Three deliberate limits:
- *
- *  1. **`proximity`, never `mandatory`.** Chapters 4 and 5 are taller than a
- *     viewport — a payment table and a 25-year projection legitimately are.
- *     Mandatory snap fights a reader trying to scroll INSIDE one of those and
- *     yanks them back to its top, which is unusable on exactly the two screens
- *     that carry the terms somebody is being asked to sign.
- *  2. **Wide screens only.** Below 768px there is no rep and no keyboard, just
- *     a thumb, and snapping a thumb-scroll is worse than not.
- *  3. **Never in print, never under reduced motion.**
+ * There is no CSS scroll-snap here, deliberately. It was tried — `y proximity`,
+ * wide screens only — and even proximity captures a scroll that ends near a
+ * chapter edge and drags it to the boundary. A reader nudging a few lines down
+ * a page gets thrown to the next chapter instead, which reads as the document
+ * fighting them. Chapters are still reachable on purpose, by the nav links and
+ * by the keys below; nothing moves the page that the reader did not ask for.
  */
-export function DeckStyles() {
-  return (
-    <style>{`
-      @media (min-width: 768px) and (prefers-reduced-motion: no-preference) {
-        html:has(#proposal-root) { scroll-snap-type: y proximity; }
-        #proposal-root [data-chapter] { scroll-snap-align: start; }
-      }
-      @media print {
-        html:has(#proposal-root) { scroll-snap-type: none; }
-      }
-    `}</style>
-  );
-}
 
 /** Elements that own their own arrow keys. The deck never steals from these. */
 function isTyping(el: EventTarget | null): boolean {

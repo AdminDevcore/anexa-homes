@@ -26,7 +26,7 @@ import { Chapter, Stat, SpecList, DarkRow, EquipCard, Impact, SourceLink, Contac
 import { Cover, BillSwap } from "./cover";
 import { CumulativeCostChart } from "./chart";
 import { AcceptForm, PrintStyles } from "./accept";
-import { DeckStyles, useDeckKeys } from "./deck";
+import { useDeckKeys } from "./deck";
 
 /**
  * The customer-facing solar proposal.
@@ -263,7 +263,6 @@ export function SolarProposalView({
       }}
     >
       <PrintStyles />
-      <DeckStyles />
 
       {/* Above the sticky nav ON PURPOSE: an internal notice scrolls away, it
           does not follow a rep down a document they are reviewing. */}
