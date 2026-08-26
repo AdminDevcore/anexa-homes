@@ -213,9 +213,49 @@ export type SavingsYear = {
   meterFeeCents: number;
   /** What solar itself costs this year (purchase price in yr 1, or the lease/PPA payment). */
   solarPaymentCents: number;
-  /** residualGrid + meterFee + solarPayment — the total cost of the solar path this year. */
+  /**
+   * What a battery programme pays the homeowner this year — the VPP money,
+   * already multiplied by how many batteries are on the design, plus the
+   * one-off enrolment payment in year one.
+   *
+   * SUBTRACTED from `solarCostCents` rather than added to the utility side,
+   * because it is not a smaller bill: it is income, and folding it into
+   * "utility bill avoided" would overstate a figure whose whole job is to say
+   * what the utility stops charging.
+   *
+   * ABSENT on every snapshot generated before this existed — read it through
+   * `vppCreditCents()` rather than directly, for the reason `meterFeeCents`
+   * gives above.
+   */
+  vppCreditCents: number;
+  /** residualGrid + meterFee + solarPayment − vppCredit. The solar path, this year. */
   solarCostCents: number;
   cumulativeSavingsCents: number;
+};
+
+/**
+ * A battery programme's money, as it lands on ONE customer's proposal.
+ *
+ * The figures are already multiplied by the battery count: the office records
+ * what one battery earns, the design says how many there are, and multiplying
+ * at the boundary keeps the arithmetic out of every renderer downstream.
+ *
+ * Frozen onto the snapshot with everything else. A programme the utility ends
+ * next year must not silently rewrite a document a homeowner has already
+ * signed — the same rule the adder lines and the lender's terms follow.
+ */
+export type VppCredit = {
+  /** What the customer signs up to — "Renew Home", not the retailer's name. */
+  programme: string;
+  /** Who runs it, for the sentence that says where the money comes from. */
+  provider: string;
+  /** Money a year, already × the battery count. Flat: a programme pays what it
+   *  pays, and escalating it would be inventing a raise nobody has promised. */
+  annualCents: number;
+  /** One-off enrolment money, already × the battery count. Year one only. */
+  upfrontCents: number;
+  /** How many batteries the figures were multiplied by, so the document can say. */
+  batteryQty: number;
 };
 
 export type SavingsModel = {
@@ -240,6 +280,8 @@ export type SavingsModel = {
   netSavingsCents: number;
   /** Kept as an alias of netSavingsCents so existing callers stay correct. */
   totalSavingsCents: number;
+  /** Σ(battery-programme payments) over the horizon. Zero when there are none. */
+  vppCreditTotalCents: number;
   /** First year in which cumulative savings turn positive; null if never. */
   paybackYear: number | null;
 };
@@ -265,6 +307,11 @@ export function savingsModel(args: {
   termYears?: number | null;
   assumptions: SolarAssumptions;
   years?: number;
+  /**
+   * Battery programmes this customer qualifies for. Empty — the ordinary case
+   * — leaves every figure exactly as it was before this existed.
+   */
+  vppCredits?: VppCredit[];
 }): SavingsModel {
   const a = args.assumptions;
   const horizon = args.years ?? 25;
@@ -273,7 +320,11 @@ export function savingsModel(args: {
   let utilityTotal = 0;
   let residualTotal = 0;
   let solarPaidCents = 0;
+  let vppCreditTotalCents = 0;
   let paybackYear: number | null = null;
+
+  const vppAnnualCents = (args.vppCredits ?? []).reduce((n, v) => n + v.annualCents, 0);
+  const vppUpfrontCents = (args.vppCredits ?? []).reduce((n, v) => n + v.upfrontCents, 0);
 
   for (let year = 1; year <= horizon; year++) {
     const production = productionInYear(args.year1ProductionKwh, year, a);
@@ -317,11 +368,17 @@ export function savingsModel(args: {
       }
     }
 
-    const solarCostCents = postSolarUtility + solarPaymentCents;
+    // What the battery earns, flat. The enrolment payment is a one-off, so it
+    // lands in year one and never again — and it is the reason payback can
+    // arrive a year sooner on a system with a battery than without one.
+    const vppCredit = vppAnnualCents + (year === 1 ? vppUpfrontCents : 0);
+
+    const solarCostCents = postSolarUtility + solarPaymentCents - vppCredit;
     cumulative += utilityCostCents - solarCostCents;
     utilityTotal += utilityCostCents;
     residualTotal += postSolarUtility;
     solarPaidCents += solarPaymentCents;
+    vppCreditTotalCents += vppCredit;
     if (paybackYear === null && cumulative > 0) paybackYear = year;
 
     rows.push({
@@ -331,6 +388,7 @@ export function savingsModel(args: {
       residualGridCents,
       meterFeeCents,
       solarPaymentCents,
+      vppCreditCents: vppCredit,
       solarCostCents,
       cumulativeSavingsCents: cumulative,
     });
@@ -342,6 +400,7 @@ export function savingsModel(args: {
     solarPaidCents,
     netSavingsCents: cumulative,
     totalSavingsCents: cumulative,
+    vppCreditTotalCents,
     paybackYear,
   };
 }
@@ -358,6 +417,18 @@ export function savingsModel(args: {
  */
 export function postSolarUtilityCents(y: SavingsYear): number {
   return y.residualGridCents + ((y as Partial<SavingsYear>).meterFeeCents ?? 0);
+}
+
+/**
+ * What a battery programme paid in a given year, zero on any document priced
+ * before programmes were modelled.
+ *
+ * Same rule as the meter fee above, and for the same reason: an old snapshot
+ * has no such key, and reading it raw would print `undefined` on a proposal a
+ * homeowner already holds.
+ */
+export function vppCreditCents(y: SavingsYear): number {
+  return (y as Partial<SavingsYear>).vppCreditCents ?? 0;
 }
 
 /** An equipment line as the customer sees it — catalogue data only, never invented. */
@@ -633,6 +704,16 @@ export type SolarProposalSnapshot = {
   financing: SnapshotFinancing;
   savings: SavingsModel;
   /**
+   * The battery programmes priced into the model above, so the document can say
+   * where the money comes from rather than showing a savings figure that is
+   * simply larger than the arithmetic on the page explains.
+   *
+   * ABSENT, not empty, on any proposal generated before programmes existed —
+   * and absent is the honest answer there: those documents were priced without
+   * one, and the renderer says nothing rather than implying a zero.
+   */
+  vpp?: VppCredit[];
+  /**
    * Every way this customer may pay, the quoted one first. v4 and later.
    *
    * Absent on an older document, and absent is not the same as empty: a
@@ -793,6 +874,13 @@ function priceOption(args: {
   loanFactors: PaymentFactors | null;
   assumptions: SolarAssumptions;
   currentRateMillsPerKwh: number;
+  /**
+   * The battery programmes this customer qualifies for. Passed to EVERY option,
+   * not just the quoted one: the battery is on the roof whichever way they pay,
+   * so a menu that credited it on the loan and not on the cash column would be
+   * comparing two different houses.
+   */
+  vppCredits: VppCredit[];
 }): {
   financing: SnapshotFinancing;
   savings: SavingsModel;
@@ -839,6 +927,7 @@ function priceOption(args: {
     escalatorPct: finance.escalatorPct,
     termYears: finance.termYears,
     assumptions: a,
+    vppCredits: args.vppCredits,
   });
 
   /**
@@ -1034,9 +1123,21 @@ export function buildProposalSnapshot(args: {
   homeValueUpliftPct?: number | null;
   /** Which model produced the design's production figure, if not the average. */
   yieldBasis?: YieldBasis | null;
+  /**
+   * Battery programmes this customer qualifies for, already resolved against
+   * the provider list and already multiplied by the battery count.
+   *
+   * Resolved by the CALLER rather than here, because eligibility is a database
+   * question — which providers the deal names, what each one enrols, which
+   * lender product it was quoted on — and this module prices what it is given.
+   */
+  vppCredits?: VppCredit[];
   now: Date;
 }): SolarProposalSnapshot {
   const { design, finance, assumptions: a } = args;
+  const vppCredits = (args.vppCredits ?? []).filter(
+    (v) => v.annualCents > 0 || v.upfrontCents > 0
+  );
 
   // Today's rate, derived from the customer's OWN bill. There is deliberately no
   // fallback: this used to default to 150 mills when the bill was missing, which
@@ -1053,6 +1154,7 @@ export function buildProposalSnapshot(args: {
     },
     assumptions: a,
     currentRateMillsPerKwh,
+    vppCredits,
   };
 
   // The deal's own terms. This is the option the document is ABOUT: it stays at
@@ -1173,6 +1275,10 @@ export function buildProposalSnapshot(args: {
     site: args.site ?? null,
     financing: quoted.financing,
     savings: quoted.savings,
+    // Spread, not assigned an empty array: a document priced without a
+    // programme has no such key, and the renderer prints nothing rather than
+    // an empty "battery programme" heading.
+    ...(vppCredits.length > 0 ? { vpp: vppCredits } : {}),
     options,
     monthly,
     environmental: environmentalImpact(lifetimeKwh),

@@ -231,6 +231,12 @@ export function SolarProposalView({
     priceCents: f.contractPriceCents,
   });
   const lifetime = lifetimeFigure(sv);
+  /**
+   * Battery programmes, from the snapshot rather than the live provider list.
+   * ABSENT on every document generated before they were modelled, which reads
+   * as none — exactly what those documents were priced with.
+   */
+  const vpp = s.vpp ?? [];
   const afterAllCents =
     option.monthlyCents != null
       ? option.monthlyCents + option.postSolarMonthlyCents
@@ -750,6 +756,48 @@ export function SolarProposalView({
             />
           </div>
 
+          {/* WHERE THE EXTRA MONEY COMES FROM.
+              The programme's payments are already inside every figure above, so
+              without this block the savings are simply larger than the
+              arithmetic on the page explains — and a number a homeowner cannot
+              trace is a number they stop believing. Named, with its own terms
+              stated, so they can check it against their own enrolment. */}
+          {vpp.length > 0 && (
+            <div className="mt-10 rounded-2xl border border-neutral-900/12 bg-white p-6">
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
+                Included above
+              </span>
+              <div className="mt-3 space-y-3">
+                {vpp.map((v) => (
+                  <div key={`${v.provider}-${v.programme}`}>
+                    <p className="font-display text-lg font-semibold text-neutral-900">
+                      {v.programme}
+                      {v.annualCents > 0 && (
+                        <span className="ml-2 tabular-nums">{usd(v.annualCents)}/yr</span>
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-sm leading-relaxed text-neutral-600">
+                      {v.provider} pays you for letting them draw on your battery
+                      {v.batteryQty > 1 ? ` (${v.batteryQty} batteries)` : ""}
+                      {v.upfrontCents > 0
+                        ? `, plus ${usd(v.upfrontCents)} when you enrol`
+                        : ""}
+                      .
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {/* The honest caveat, next to the money rather than in the small
+                  print at the end. Enrolment is the homeowner's to keep. */}
+              <p className="mt-4 max-w-[62ch] text-xs leading-relaxed text-neutral-500">
+                Counted for all {sv.years.length} years above at today&rsquo;s rate. Enrolment is
+                between you and {vpp.length === 1 ? vpp[0].provider : "your provider"}, and the
+                programme&rsquo;s terms are theirs to change — these payments are an estimate on the
+                same footing as the rest of this page, not a guarantee.
+              </p>
+            </div>
+          )}
+
           <p className="mt-8 max-w-[62ch] leading-relaxed text-neutral-600">
             Assumes your utility rate rises {pct(s.assumptions.utilityEscalationPct)} a year and
             your panels lose {pct(s.assumptions.annualDegradationPct)} output annually. Both are
@@ -804,7 +852,8 @@ export function SolarProposalView({
           </div>
           <p className="mt-3 text-xs text-neutral-500">
             &ldquo;With solar&rdquo; includes any grid power you still buy, plus what you pay for
-            the system in that year.
+            the system in that year
+            {vpp.length > 0 ? ", less what the battery programme pays you" : ""}.
           </p>
         </Chapter>
       )}

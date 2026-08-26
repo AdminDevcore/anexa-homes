@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import type { SessionUser } from "@/server/auth/session";
+import { resolveVppCredits } from "@/server/modules/solar/vpp-credits";
 import { resolveLayoutAsset } from "./layout-asset";
 import { getSolarSettings } from "./settings";
 import { readSolarReadiness } from "./readiness";
@@ -345,6 +346,24 @@ export async function generateProposalVersion(
     : [];
   const approvedLenderIds = approvals.length > 0 ? approvals.map((a) => a.lenderId) : null;
 
+  /**
+   * What the battery earns, if this deal clears the programme's conditions.
+   *
+   * Read at GENERATION and frozen onto the snapshot with everything else: a
+   * utility that ends its programme next spring must not quietly rewrite the
+   * savings figure on a document a homeowner has already signed.
+   */
+  const vppCredits = await resolveVppCredits({
+    companyId: user.companyId,
+    utilityProvider: design.utilityProvider,
+    electricProvider: design.electricProvider,
+    batteryId: design.batteryId,
+    batteryQty: design.batteryQty,
+    batteryLabel: label(design.battery),
+    financeProduct: finance.product,
+    financeProductId: finance.lenderProductId,
+  });
+
   const alternatives = proposalAlternatives({
     quoted: {
       product: finance.product,
@@ -526,6 +545,7 @@ export async function generateProposalVersion(
       : undefined,
     assumptions,
     homeValueUpliftPct: assumptions.homeValueUpliftPct,
+    vppCredits,
     // What the design recorded about which model produced its production
     // figure. Null keeps the document listing the market average, which is what
     // it was built on.

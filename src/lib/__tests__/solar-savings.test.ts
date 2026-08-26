@@ -398,3 +398,110 @@ describe("the meter fee is billed whatever the roof produces", () => {
     expect(postSolarUtilityCents(legacy)).toBe(60_430);
   });
 });
+
+describe("a battery programme's money reaches the customer's savings", () => {
+  const base = {
+    year1ProductionKwh: 8_282,
+    annualUsageKwh: 14_000,
+    currentRateMillsPerKwh: 154,
+    assumptions: A,
+  };
+
+  const purchase = pricePurchase({
+    product: "cash" as const, systemSizeKwDc: 8, stickerPpwCents: 350,
+    dealerFeePct: 0, adderTotalCents: 0,
+  });
+
+  /** $400/yr and $500 to enrol, on ONE battery. */
+  const RENEW = {
+    programme: "Renew Home",
+    provider: "Oncor Electric Delivery",
+    annualCents: 40_000,
+    upfrontCents: 50_000,
+    batteryQty: 1,
+  };
+
+  it("changes nothing at all when there is no programme", () => {
+    // The state of every deal until an office fills a programme in, and the
+    // reason this could ship without re-pricing anything already quoted.
+    const without = savingsModel({ ...base, product: "cash", purchase });
+    const empty = savingsModel({ ...base, product: "cash", purchase, vppCredits: [] });
+    expect(empty.netSavingsCents).toBe(without.netSavingsCents);
+    expect(empty.vppCreditTotalCents).toBe(0);
+  });
+
+  it("adds the annual payment for every year, plus the enrolment money once", () => {
+    const m = savingsModel({ ...base, product: "cash", purchase, vppCredits: [RENEW] });
+    // 25 × $400 + $500 enrolled once.
+    expect(m.vppCreditTotalCents).toBe(40_000 * 25 + 50_000);
+    expect(m.years[0].vppCreditCents).toBe(90_000);
+    expect(m.years[1].vppCreditCents).toBe(40_000);
+    expect(m.years[24].vppCreditCents).toBe(40_000);
+  });
+
+  it("does not escalate the payment", () => {
+    // The utility's rate compounds because the utility raises it. A programme
+    // pays what it pays, and escalating it would invent a raise nobody promised.
+    const m = savingsModel({ ...base, product: "cash", purchase, vppCredits: [RENEW] });
+    expect(m.years[24].vppCreditCents).toBe(m.years[1].vppCreditCents);
+  });
+
+  it("lands in net savings and nowhere near the bill avoided", () => {
+    // The distinction the whole model is built on: this is income, not a
+    // smaller utility bill. Folding it into "utility bill avoided" would
+    // overstate the one figure whose job is to say what the utility stops
+    // charging.
+    const without = savingsModel({ ...base, product: "cash", purchase });
+    const with_ = savingsModel({ ...base, product: "cash", purchase, vppCredits: [RENEW] });
+
+    expect(with_.utilityCostAvoidedCents).toBe(without.utilityCostAvoidedCents);
+    expect(with_.solarPaidCents).toBe(without.solarPaidCents);
+    expect(with_.netSavingsCents).toBe(
+      without.netSavingsCents + with_.vppCreditTotalCents
+    );
+  });
+
+  it("multiplies by the battery count, because the money is per battery", () => {
+    const two = savingsModel({
+      ...base, product: "cash", purchase,
+      vppCredits: [{ ...RENEW, annualCents: 80_000, upfrontCents: 100_000, batteryQty: 2 }],
+    });
+    const one = savingsModel({ ...base, product: "cash", purchase, vppCredits: [RENEW] });
+    expect(two.vppCreditTotalCents).toBe(one.vppCreditTotalCents * 2);
+  });
+
+  it("brings payback forward rather than leaving it where it was", () => {
+    // A battery that earns is a battery that pays for part of the system, so
+    // the cumulative line crosses zero sooner. If it did not, the credit was
+    // not really in the model.
+    const without = savingsModel({ ...base, product: "cash", purchase });
+    const with_ = savingsModel({
+      ...base, product: "cash", purchase,
+      vppCredits: [{ ...RENEW, annualCents: 120_000, batteryQty: 3, upfrontCents: 0 }],
+    });
+    expect(with_.paybackYear).not.toBeNull();
+    expect(with_.paybackYear!).toBeLessThan(without.paybackYear!);
+  });
+
+  it("sums more than one programme", () => {
+    const m = savingsModel({
+      ...base, product: "cash", purchase,
+      vppCredits: [RENEW, { ...RENEW, provider: "Rhythm", programme: "Battery Rewards", upfrontCents: 0 }],
+    });
+    expect(m.years[1].vppCreditCents).toBe(80_000);
+  });
+
+  it("shows up as a smaller cost of going solar, year by year", () => {
+    // Which is what puts it in the table on the customer's page without any
+    // renderer having to know the rule: "With solar" is simply lower.
+    const without = savingsModel({ ...base, product: "cash", purchase });
+    const with_ = savingsModel({ ...base, product: "cash", purchase, vppCredits: [RENEW] });
+    expect(with_.years[5].solarCostCents).toBe(
+      without.years[5].solarCostCents - 40_000
+    );
+    // And the utility side is untouched — same bill, same meter fee.
+    expect(postSolarUtilityCents(with_.years[5])).toBe(
+      postSolarUtilityCents(without.years[5])
+    );
+  });
+});
