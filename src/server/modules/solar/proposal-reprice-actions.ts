@@ -11,7 +11,7 @@ import { recomputeDesignFigures } from "./recompute";
 import { generateProposalVersion } from "./proposal-generate";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
-import { annualUsageFromBill, effectiveUsageKwh } from "@/lib/solar-energy";
+import { annualUsageFromBill, effectiveUsageKwh, monthlyBillFromUsage } from "@/lib/solar-energy";
 import { basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ValidationIssue } from "@/lib/solar-validation";
@@ -152,7 +152,17 @@ export async function repriceProposalAction(
     await prisma.solarDesign.update({
       where: { leadId },
       data: {
-        avgMonthlyBillCents: bill,
+        /**
+         * On the RATE basis the bill is the derived side — usage × rate — so a
+         * figure posted here is recomputed rather than stored. Keeping a typed
+         * bill next to a typed rate and a typed usage is the three-editable-
+         * boxes problem the Energy step exists to prevent, and it would show up
+         * as a document whose "you pay today" disagreed with its own rate.
+         */
+        avgMonthlyBillCents:
+          design.usageBasis === "rate"
+            ? (monthlyBillFromUsage(usage, design.utilityRateMills) ?? bill)
+            : bill,
         annualUsageKwh: usage,
         // Plus whatever this deal's adders add to the household's year — an EV
         // charger on the quote is load the array has to cover.

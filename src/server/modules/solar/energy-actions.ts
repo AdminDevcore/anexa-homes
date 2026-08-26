@@ -5,7 +5,12 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { annualFromMonthlyKwh, annualUsageFromBill, effectiveUsageKwh } from "@/lib/solar-energy";
+import {
+  annualFromMonthlyKwh,
+  annualUsageFromBill,
+  effectiveUsageKwh,
+  monthlyBillFromUsage,
+} from "@/lib/solar-energy";
 import { offsetPct } from "@/lib/solar-money";
 import { addressChanged } from "@/server/modules/geo/resolve";
 import { leadContactFields } from "@/server/modules/leads/contact-fields";
@@ -22,12 +27,12 @@ const energySchema = z.object({
   leadId: z.string().min(1),
   utilityProvider: z.string().max(120).nullable(),
   electricProvider: z.string().max(120).nullable(),
-  basis: z.enum(["usage", "bill"]),
+  basis: z.enum(["usage", "bill", "rate"]),
   avgMonthlyBillCents: z.number().int().min(0).max(1_000_000).nullable(),
   // usage basis: either of these, whichever the rep had to hand
   annualUsageKwh: z.number().int().min(0).max(1_000_000).nullable(),
   avgMonthlyUsageKwh: z.number().min(0).max(100_000).nullable(),
-  // bill basis
+  // bill and rate bases
   utilityRateMills: z.number().int().min(0).max(2_000).nullable(),
 });
 
@@ -57,6 +62,23 @@ export async function saveSolarEnergyAction(input: z.infer<typeof energySchema>)
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
+  /**
+   * TWO FIGURES IN, THE THIRD WORKED OUT. Which two depends on the basis:
+   *
+   *   usage  — kWh and the bill; the rate falls out of bill ÷ usage
+   *   bill   — the bill and the rate; the usage falls out of bill ÷ rate
+   *   rate   — kWh and the rate; the bill falls out of usage × rate
+   *
+   * The third basis exists because the first one could only ever DERIVE the
+   * rate, and a derived rate is bill ÷ usage — which quietly includes every
+   * fixed charge on the bill, the delivery fee and the meter charge and the
+   * taxes, spread across the kilowatt-hours as though they were energy. On a
+   * $180 bill against 14,000 kWh that reads $0.154/kWh when the customer's
+   * actual energy rate is nearer $0.11, and every savings figure on the
+   * proposal is built on the wrong one. A rep holding the bill can read the
+   * real rate off it; there was nowhere to type it unless they also let the
+   * usage be derived, which they usually do not want.
+   */
   const annualUsageKwh =
     d.basis === "bill"
       ? annualUsageFromBill(d.avgMonthlyBillCents, d.utilityRateMills)
@@ -82,11 +104,18 @@ export async function saveSolarEnergyAction(input: z.infer<typeof energySchema>)
     utilityProvider: d.utilityProvider,
     electricProvider: d.electricProvider,
     usageBasis: d.basis,
-    avgMonthlyBillCents: d.avgMonthlyBillCents,
+    // On the rate basis the bill is the DERIVED side, so it is computed here
+    // rather than trusted from the browser — the same discipline the usage
+    // gets. A bill posted from the form on that basis is ignored.
+    avgMonthlyBillCents:
+      d.basis === "rate"
+        ? monthlyBillFromUsage(annualUsageKwh, d.utilityRateMills)
+        : d.avgMonthlyBillCents,
     annualUsageKwh,
-    // Only the bill basis has a rate the rep was told. In usage basis the rate
-    // stays DERIVED, so storing one here would quietly make it un-derivable.
-    utilityRateMills: d.basis === "bill" ? d.utilityRateMills : null,
+    // The two bases where the rep was TOLD a rate keep it; the usage basis
+    // leaves it null so it stays derived from bill ÷ usage. Storing one there
+    // would quietly make it un-derivable.
+    utilityRateMills: d.basis === "usage" ? null : d.utilityRateMills,
     offsetPct: computedOffset,
   };
 

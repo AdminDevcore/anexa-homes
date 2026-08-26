@@ -8,7 +8,11 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { annualFromMonthlyKwh, annualUsageFromBill } from "@/lib/solar-energy";
+import {
+  annualFromMonthlyKwh,
+  annualUsageFromBill,
+  monthlyBillFromUsage,
+} from "@/lib/solar-energy";
 import { deriveUtilityRateMills } from "@/lib/solar-money";
 import { saveSolarEnergyAction } from "@/server/modules/solar/energy-actions";
 import type { ProviderOption } from "@/server/modules/solar/providers";
@@ -23,7 +27,7 @@ export type SolarEnergyView = {
   usageBasis: string | null;
 } | null;
 
-type Basis = "usage" | "bill";
+type Basis = "usage" | "bill" | "rate";
 
 const OTHER = "__other";
 
@@ -32,12 +36,20 @@ const OTHER = "__other";
  *
  * A homeowner rarely knows their annual kWh — it is the number they are least
  * likely to have to hand. They know what they pay a month, and often what they
- * pay per kWh. So there are two ways in, and a switch picks which two figures
+ * pay per kWh. So there are three ways in, and a switch picks which TWO figures
  * the rep types: the third is calculated and read-only.
  *
  * That read-only third is the point. Three editable boxes let a rep store a
  * usage, a bill and a rate that do not reconcile, with nothing on screen saying
  * which one the proposal actually used.
+ *
+ * The third way in — usage and rate — exists because the first could only
+ * DERIVE the rate, and bill ÷ usage is not the customer's energy rate: it has
+ * every fixed charge on the bill folded into it, the delivery fee and the meter
+ * charge and the taxes, spread across the kilowatt-hours as though they were
+ * energy. That reads high, and it reads high on the one number the entire
+ * savings model is built on. A rep holding the bill can read the real rate off
+ * it, and now has somewhere to put it without giving up the usage they know.
  */
 export function SolarEnergyPanel({
   leadId,
@@ -57,7 +69,9 @@ export function SolarEnergyPanel({
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
-  const [basis, setBasis] = React.useState<Basis>(energy?.usageBasis === "bill" ? "bill" : "usage");
+  const [basis, setBasis] = React.useState<Basis>(
+    energy?.usageBasis === "bill" ? "bill" : energy?.usageBasis === "rate" ? "rate" : "usage"
+  );
 
   const [utility, setUtility] = React.useState(() => seedProvider(utilities, energy?.utilityProvider));
   const [retail, setRetail] = React.useState(() => seedProvider(retailers, energy?.electricProvider));
@@ -83,7 +97,10 @@ export function SolarEnergyPanel({
       ? annualUsageFromBill(billCents, rateMills)
       : (Number(annualUsage) || null) ?? annualFromMonthlyKwh(Number(monthlyUsage) || null);
 
-  const resolvedRate = basis === "bill" ? rateMills : deriveUtilityRateMills(billCents, annual);
+  // Typed on two of the three bases, worked out on the first.
+  const resolvedRate = basis === "usage" ? deriveUtilityRateMills(billCents, annual) : rateMills;
+  /** The bill the rate basis calculates, so the rep sees what they just implied. */
+  const derivedBillCents = basis === "rate" ? monthlyBillFromUsage(annual, rateMills) : null;
 
   async function save() {
     setBusy(true);
@@ -93,9 +110,9 @@ export function SolarEnergyPanel({
       electricProvider: providerValue(retail),
       basis,
       avgMonthlyBillCents: billCents,
-      annualUsageKwh: basis === "usage" && Number(annualUsage) ? Number(annualUsage) : null,
-      avgMonthlyUsageKwh: basis === "usage" && Number(monthlyUsage) ? Number(monthlyUsage) : null,
-      utilityRateMills: basis === "bill" ? rateMills : null,
+      annualUsageKwh: basis !== "bill" && Number(annualUsage) ? Number(annualUsage) : null,
+      avgMonthlyUsageKwh: basis !== "bill" && Number(monthlyUsage) ? Number(monthlyUsage) : null,
+      utilityRateMills: basis === "usage" ? null : rateMills,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -148,6 +165,7 @@ export function SolarEnergyPanel({
           {([
             ["usage", "From their usage"],
             ["bill", "From their bill"],
+            ["rate", "From their rate"],
           ] as const).map(([id, label]) => (
             <label key={id} className="flex items-center gap-1.5 text-sm">
               <input
@@ -162,6 +180,17 @@ export function SolarEnergyPanel({
             </label>
           ))}
         </fieldset>
+
+        {/* Which two boxes each choice asks for, said out loud. "From their
+            rate" does not name the usage it also needs, and a rep should not
+            have to click a radio to find out what it wants. */}
+        <p className="text-[11px] text-muted-foreground">
+          {basis === "usage"
+            ? "Type the usage and the bill — the rate is worked out. Note it includes fixed charges, so it reads higher than the energy rate on the bill."
+            : basis === "bill"
+              ? "Type the bill and the rate — the usage is worked out."
+              : "Type the usage and the rate off their bill — the bill is worked out. Use this when you have the real energy rate."}
+        </p>
 
         {basis === "usage" ? (
           <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
@@ -188,7 +217,7 @@ export function SolarEnergyPanel({
               disabled={!canEdit}
             />
           </div>
-        ) : (
+        ) : basis === "bill" ? (
           <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
             <NumberField
               id="avg-monthly-bill"
@@ -210,6 +239,40 @@ export function SolarEnergyPanel({
               <Label className="text-xs">Annual usage (kWh)</Label>
               <div className="flex h-9 items-center rounded-md border border-dashed border-input px-3 text-sm text-muted-foreground">
                 {annual ? annual.toLocaleString() : "—"}
+                <span className="ml-1.5 text-[11px]">(calculated)</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid max-w-3xl gap-3 sm:grid-cols-3">
+            <NumberField
+              id="annual-usage"
+              label="Annual usage (kWh)"
+              value={annualUsage}
+              onChange={setAnnualUsage}
+              disabled={!canEdit}
+            />
+            <NumberField
+              id="avg-monthly-kwh"
+              label="Avg monthly kWh"
+              value={monthlyUsage}
+              onChange={setMonthlyUsage}
+              disabled={!canEdit || Boolean(Number(annualUsage))}
+              hint={Number(annualUsage) ? "Using the annual figure" : "× 12"}
+            />
+            <NumberField
+              id="rate-per-kwh"
+              label="Rate ($/kWh)"
+              value={rate}
+              onChange={setRate}
+              step="0.001"
+              disabled={!canEdit}
+              hint="The energy rate off their bill"
+            />
+            <div className="space-y-1 sm:col-span-3">
+              <Label className="text-xs">Average monthly bill ($)</Label>
+              <div className="flex h-9 max-w-[13rem] items-center rounded-md border border-dashed border-input px-3 text-sm text-muted-foreground">
+                {derivedBillCents ? `$${(derivedBillCents / 100).toFixed(0)}` : "—"}
                 <span className="ml-1.5 text-[11px]">(calculated)</span>
               </div>
             </div>

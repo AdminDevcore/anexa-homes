@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { runInVertical } from "@/server/vertical/context";
-import { annualUsageFromBill, resolveUtilityRateMills } from "@/lib/solar-energy";
+import { annualUsageFromBill, monthlyBillFromUsage, resolveUtilityRateMills } from "@/lib/solar-energy";
 import { listSolarProviders } from "@/server/modules/solar/providers";
 import { addressChanged } from "@/server/modules/geo/resolve";
 
@@ -73,6 +73,35 @@ describe("entering consumption from usage", () => {
     const row = await db.solarDesign.findUnique({ where: { leadId } });
     expect(row?.utilityRateMills).toBeNull();
     expect(resolveUtilityRateMills(row!)).toBe(154);
+  });
+});
+
+describe("entering consumption from usage AND the rate", () => {
+  it("keeps the typed rate and works the bill out of it", async () => {
+    /**
+     * The reason this basis exists. On the usage basis the rate is bill ÷
+     * usage, which folds every fixed charge — delivery, meter, taxes — into
+     * what looks like an energy rate: $180 against 14,000 kWh reads $0.154/kWh
+     * when the bill's actual energy line is $0.11. Every savings figure on the
+     * proposal is built on that number.
+     */
+    await db.solarDesign.create({
+      data: {
+        companyId, leadId, usageBasis: "rate",
+        annualUsageKwh: 14_000,
+        utilityRateMills: 110,
+        avgMonthlyBillCents: monthlyBillFromUsage(14_000, 110),
+      },
+    });
+
+    const row = await db.solarDesign.findUnique({ where: { leadId } });
+    // The rate is the one that was typed, NOT bill ÷ usage.
+    expect(resolveUtilityRateMills(row!)).toBe(110);
+    // And the bill is the third side, worked out: 14,000 × $0.11 ÷ 12.
+    expect(row?.avgMonthlyBillCents).toBe(12_833);
+    // The derived rate that the usage basis would have produced from that same
+    // bill agrees, which is what makes the three figures reconcile.
+    expect(resolveUtilityRateMills({ ...row!, utilityRateMills: null })).toBe(110);
   });
 });
 
