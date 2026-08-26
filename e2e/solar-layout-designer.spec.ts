@@ -93,6 +93,14 @@ async function usePointer(page: Page) {
   return pickTool(page, "Pointer");
 }
 
+/**
+ * Every named tool is back on the palette.
+ *
+ * They were folded into modifiers on the pointer, and the first thing back from
+ * the field was "I can't find things". The modifiers stayed as accelerators —
+ * the tests below exercise both, because both have to keep working.
+ */
+
 /** The modifier that means "one module": ⌘ on a Mac, Ctrl everywhere else. */
 const ONE_PANEL = process.platform === "darwin" ? "Meta" : "Control";
 
@@ -996,6 +1004,166 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await page.keyboard.press("[");
     await page.keyboard.press("[");
     await expect(facing).toHaveValue("210");
+  });
+
+
+  /**
+   * The palette is whole again.
+   *
+   * Collapsing six tools into three and a set of modifiers made the screen
+   * unusable for the person who had learned where things were. Every one of
+   * them has a button, and every button still does what its name says.
+   */
+  test("every tool has a button, and the modifiers still work too", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    for (const name of [
+      "Pointer",
+      "Roof face",
+      "Draw array",
+      "Add panel",
+      "Move panel",
+      "Remove panels",
+      "Setbacks",
+    ]) {
+      await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+    }
+
+    // Add panel, by the button.
+    const box = await pickTool(page, "Add panel");
+    await page.mouse.click(box.x + box.width * 0.42, box.y + box.height * 0.42);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(1);
+
+    // Remove panels, by the button. The array was its last panel, so it goes.
+    await pickTool(page, "Remove panels");
+    expect(await clickCanvasColour(page, "panel", "first")).toBe(true);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(0);
+
+    // And the accelerator does the same thing without leaving the pointer.
+    const p = await usePointer(page);
+    await clickWith(page, ONE_PANEL, p.x + p.width * 0.42, p.y + p.height * 0.42);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(1);
+    expect(await clickCanvasColour(page, "panel", "first", "Alt")).toBe(true);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(0);
+  });
+
+  /**
+   * "Max roof" was a button that told you to go and do some work: on a house
+   * nobody had traced it refused and switched tools. It now always tries
+   * something — Google's planes, then the building's own outline.
+   */
+  test("max roof covers the roof without anything being traced first", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    /**
+     * OpenStreetMap is a free service this suite must not depend on, so the
+     * building comes from the route, stubbed: a 16 x 10 m house with its long
+     * axis east-west, which is a ridge running east-west and two slopes.
+     */
+    await page.route("**/api/property/footprint*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          footprint: {
+            points: [
+              { e: -8, n: -5 },
+              { e: 8, n: -5 },
+              { e: 8, n: 5 },
+              { e: -8, n: 5 },
+            ],
+            areaM2: 160,
+          },
+          ridgeDeg: 90,
+          facings: [0, 180],
+        }),
+      })
+    );
+
+    await page.getByTestId("max-roof").click();
+    await expect(page.getByText(/from the building outline/)).toBeVisible({ timeout: 15000 });
+    const filled = await panelsOnRoof(page);
+    expect(filled).toBeGreaterThan(0);
+
+    // Two slopes, not one. The ridge splits the outline, so the north half is
+    // priced as north — which is what makes the trim take the right panels off.
+    await expect(page.getByText(/Filled 2 planes/)).toBeVisible();
+
+    // Trimming is its own press. It is never a dead button: with no usage on
+    // the deal it says what is missing rather than sitting there greyed out.
+    await page.getByTestId("trim-to-usage").click();
+    await expect(page.getByText(/nothing to trim to yet|Trimmed \d+/)).toBeVisible({
+      timeout: 10000,
+    });
+    expect(await panelsOnRoof(page)).toBeLessThanOrEqual(filled);
+  });
+
+  /**
+   * Losing a drawing is the worst thing this screen can do, and it happened.
+   */
+  test("the saved design can always be put back", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    const drawBox = await pickTool(page, "Draw array");
+    await dragArray(page, drawBox);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText(/panels? saved/)).toBeVisible({ timeout: 15000 });
+
+    await page.reload();
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
+    const saved = await panelsOnRoof(page);
+    expect(saved).toBeGreaterThan(0);
+
+    // Wipe it, the way a rep would by accident: select and delete, repeatedly.
+    await usePointer(page);
+    for (let i = 0; i < 40 && (await panelsOnRoof(page)) > 0; i++) {
+      if (!(await clickCanvasColour(page, "panel", "first"))) break;
+      await page.keyboard.press("Delete");
+    }
+    expect(await panelsOnRoof(page)).toBe(0);
+
+    // One press brings the whole design back.
+    await page.getByTestId("revert-saved").click();
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBe(saved);
+  });
+
+  /** The commonest answer on any roof, as a button rather than a drag. */
+  test("a compass point sets the facing in one click", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    const drawBox = await pickTool(page, "Draw array");
+    await dragArray(page, drawBox);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+
+    const facing = page.getByLabel("Facing (azimuth)");
+    const compass = page.getByRole("group", { name: "Facing" });
+
+    await compass.getByRole("button", { name: "SW", exact: true }).click();
+    await expect(facing).toHaveValue("225");
+    await expect(compass.getByRole("button", { name: "SW", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+
+    await compass.getByRole("button", { name: "S", exact: true }).click();
+    await expect(facing).toHaveValue("180");
+
+    // A bearing off the building lights its nearest point rather than none.
+    await facing.fill("184");
+    await facing.blur();
+    await expect(compass.getByRole("button", { name: "S", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
   });
 
 });

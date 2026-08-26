@@ -1,4 +1,9 @@
-import { readOverpassFootprint, ridgeFrom, type RidgeReading } from "@/lib/solar-footprint";
+import {
+  readOverpassFootprint,
+  ridgeFrom,
+  type Footprint,
+  type RidgeReading,
+} from "@/lib/solar-footprint";
 
 /**
  * Asking OpenStreetMap what shape the building is.
@@ -74,6 +79,48 @@ export async function resolveFootprintFacing(
     const footprint = readOverpassFootprint(await res.json(), { lat, lng });
     if (!footprint) return null;
     return ridgeFrom(footprint, lat);
+  } catch (err) {
+    console.warn("[footprint] request failed", err);
+    return null;
+  }
+}
+
+/**
+ * The building's outline AND its ridge, for a caller that wants to draw on it.
+ *
+ * `resolveFootprintFacing` throws the polygon away and keeps the angle, because
+ * all it ever needed was which way an array points. The designer needs the
+ * shape itself: it is the mask Max roof fills when Google has no model of the
+ * house, which is every house until the Solar API is switched on.
+ *
+ * Both go through the same request. Keeping two functions that each ask
+ * Overpass for the same building would double the load on a free, rate-limited,
+ * community-run service to save passing one extra field.
+ */
+export async function resolveFootprint(
+  lat: number | null,
+  lng: number | null
+): Promise<{ footprint: Footprint; ridge: RidgeReading | null } | null> {
+  if (lat == null || lng == null) return null;
+
+  const query = `[out:json][timeout:20];way["building"](around:${SEARCH_RADIUS_M},${lat},${lng});out geom;`;
+
+  try {
+    // Same eight seconds as the facing lookup, and for the same reason: a rep
+    // pressing a button must not be left watching a free service being busy.
+    const res = await fetch(OVERPASS_URL, {
+      method: "POST",
+      body: new URLSearchParams({ data: query }),
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) {
+      console.warn(`[footprint] overpass ${res.status}`);
+      return null;
+    }
+    const footprint = readOverpassFootprint(await res.json(), { lat, lng });
+    if (!footprint) return null;
+    return { footprint, ridge: ridgeFrom(footprint, lat) };
   } catch (err) {
     console.warn("[footprint] request failed", err);
     return null;

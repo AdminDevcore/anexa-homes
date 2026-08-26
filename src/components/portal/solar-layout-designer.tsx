@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Compass, Loader2, MapPin, Minus, MousePointer2, Pentagon, Plus,
-  Layers, RotateCcw, Ruler, Scissors, Square, Sun, Trash2, Wand2, ZoomIn, ZoomOut,
+  ArrowLeft, Compass, Eraser, Loader2, MapPin, Minus, MousePointer2, Move, Pentagon,
+  Plus, Layers, RotateCcw, RotateCw, Ruler, Scissors, Square, Sun, Trash2, Wand2,
+  ZoomIn, ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,12 @@ import {
   type RoofPlanes,
 } from "@/lib/solar-roof-planes";
 import { autoFillRoof, pruneToCount, pruneToTarget } from "@/lib/solar-autofill";
-import { DEFAULT_FACE_INSET_M, fillFace, type RoofFace } from "@/lib/solar-face-fill";
+import {
+  DEFAULT_FACE_INSET_M,
+  fillFace,
+  splitPolygon,
+  type RoofFace,
+} from "@/lib/solar-face-fill";
 import {
   compassLabel,
   optimalTiltDeg,
@@ -150,20 +156,18 @@ function setbackVertexAt(
 }
 
 /**
- * THREE TOOLS, and a pointer that reads what is under it.
+ * EVERY TOOL HAS A BUTTON, and the pointer can do all of them without one.
  *
- * There were six: draw, add panel, move array, move panel, remove panels,
- * trace setbacks. Five of them were the same gesture — press on a roof — and
- * differed only in what the tool palette had been told a press meant, which is
- * a mode a rep has to be holding in their head while they talk to a homeowner.
- * Miss it and the tool does something confident and wrong.
+ * These were collapsed to three on the theory that five of the six were the
+ * same gesture wearing different hats, which is true of the CODE and beside the
+ * point for the person using it. A rep who has learned where "Remove panels"
+ * lives does not want to be told it is now Alt — they want the button. The
+ * first thing back from the field was "I can't find things".
  *
- * What is left is the three that genuinely start something new — a traced
- * plane, a dragged rectangle, a traced setback — and a default pointer that
- * moves what you press, slides a panel you hold a modifier on, and knocks one
- * out you hold another on. Every one of those is still one press.
+ * So the palette is whole again, and the modifiers stay as accelerators on the
+ * pointer for whoever wants them. Nothing is only reachable by holding a key.
  */
-type Tool = "select" | "draw" | "face" | "setback";
+type Tool = "select" | "draw" | "face" | "panel" | "movePanel" | "erase" | "setback";
 type Zoom = 20 | 21;
 
 type Drag =
@@ -211,6 +215,22 @@ type Drag =
   | null;
 
 const uid = () => `b${Math.random().toString(36).slice(2, 10)}`;
+
+/**
+ * The letter that picks each tool.
+ *
+ * ONE table, read by both the palette and the keydown handler — a hint printed
+ * on a button that does not match the key that fires is worse than no hint.
+ */
+const TOOL_KEYS: Record<Tool, string> = {
+  select: "v",
+  face: "r",
+  draw: "a",
+  panel: "d",
+  movePanel: "g",
+  erase: "e",
+  setback: "s",
+};
 
 /** Nudge distances. A rail is 2 cm, so 5 cm is "just off" and 50 cm is "over a bit". */
 const NUDGE_FINE_M = 0.05;
@@ -350,6 +370,21 @@ export function SolarLayoutDesigner({
    * anyone slow enough for a repaint between the two events never did, which
    * is what made it look like the tool worked for some people and not others.
    */
+  /**
+   * THE DESIGN AS THE SERVER LAST HANDED IT OVER, frozen at mount.
+   *
+   * The way back from a roof that has gone empty. Undo covers one slip, but a
+   * rep who has clicked around for a minute and looked up to find their twenty
+   * five panels gone does not want to guess how many times to press it — and if
+   * the wipe happened before the first history entry there is nothing to press.
+   *
+   * A ref rather than the prop, because `router.refresh()` re-renders this
+   * component with fresh props: after a save, `initialBlocks` becomes whatever
+   * was just saved, and the escape hatch would quietly start pointing at the
+   * damage instead of away from it.
+   */
+  const savedRef = React.useRef<LayoutBlock[]>(initialBlocks);
+
   const [blocks, setBlocksState] = React.useState<LayoutBlock[]>(initialBlocks);
   const blocksRef = React.useRef<LayoutBlock[]>(initialBlocks);
   const setBlocks = React.useCallback(
@@ -526,6 +561,14 @@ export function SolarLayoutDesigner({
     tool === "setback" ? setbackVertexAt(pending, ghostPoint, setbackSnapM(viewScale, mpp)) : null;
   const selected = blocks.find((b) => b.id === selectedId) ?? null;
   const count = panelCount(blocks);
+  /**
+   * What the roof held when this screen opened — see `savedRef`.
+   *
+   * Computed from the prop, not from the ref: a ref read during render is a
+   * render that cannot be replayed, and this value is the same either way
+   * because the ref is only ever the initial prop.
+   */
+  const savedPanels = React.useMemo(() => panelCount(initialBlocks), [initialBlocks]);
 
   const totals = React.useMemo(
     () =>
@@ -654,11 +697,11 @@ export function SolarLayoutDesigner({
    * Both end in the same place — blocks with cells knocked out — so everything
    * downstream, the prune included, cannot tell them apart.
    */
-  const fillSource: "planes" | "faces" | "none" = planes
+  const fillSource: "planes" | "faces" | "building" = planes
     ? "planes"
     : blocks.some((b) => b.face)
       ? "faces"
-      : "none";
+      : "building";
 
   /**
    * Areas a fill must keep off: the setback bands the rep has traced.
@@ -723,6 +766,9 @@ export function SolarLayoutDesigner({
    */
   const [fillCount, setFillCount] = React.useState<number | null>(null);
 
+  /** True while Max roof is asking what shape the building is. */
+  const [filling, setFilling] = React.useState(false);
+
   /**
    * Cover the roof with panels.
    *
@@ -736,48 +782,158 @@ export function SolarLayoutDesigner({
    * undoable like any other edit: a rep who wanted to keep what they had
    * presses undo and has it back.
    */
+  /**
+   * The building's own outline, once anybody has asked for it.
+   *
+   * Undefined means nobody has; null means asked and there is none. The
+   * difference matters: the second is a house OpenStreetMap has never been told
+   * about, and Max roof has to say so rather than ask again on every press.
+   */
+  const footprintRef = React.useRef<
+    { points: { e: number; n: number }[]; ridgeDeg: number | null } | null | undefined
+  >(undefined);
+
+  /**
+   * Roof faces for this house, without anybody drawing one.
+   *
+   * The building's outline, cut in two along the ridge its shape implies, so
+   * each half carries the slope it is actually on. Filling the whole footprint
+   * as one face would price the north slope as south, which on an ordinary
+   * house overstates the year by about a fifth — and it would also defeat the
+   * trim, whose whole job is to take the worst-facing panels off first.
+   *
+   * A footprint too square to have a ridge comes back as ONE face with no
+   * facing, which is the honest answer: the shape genuinely does not say, and
+   * the rep swings the arrow.
+   */
+  const facesFromBuilding = React.useCallback(
+    (fp: { points: { e: number; n: number }[]; ridgeDeg: number | null }) => {
+      const inset = faceInsetRef.current;
+      const ridgeDeg = fp.ridgeDeg;
+      if (ridgeDeg == null) {
+        return [{ face: { points: fp.points, insetM: inset }, azimuthDeg: null }];
+      }
+      // The ridge runs through the middle of the building, which for these
+      // purposes is the pin: the deal's coordinate is a ROOFTOP geocode.
+      const halves = splitPolygon(fp.points, { e: 0, n: 0 }, ridgeDeg);
+      return halves
+        .filter((half) => half.length >= 3)
+        .map((half) => {
+          // Each slope falls away from the ridge, so the facing is the
+          // perpendicular pointing from the ridge toward that half.
+          const mid = half.reduce(
+            (t, q) => ({ e: t.e + q.e / half.length, n: t.n + q.n / half.length }),
+            { e: 0, n: 0 }
+          );
+          const away = norm360((Math.atan2(mid.e, mid.n) * 180) / Math.PI);
+          const perp = [norm360(ridgeDeg + 90), norm360(ridgeDeg - 90)];
+          const pick =
+            Math.abs(((perp[0] - away + 540) % 360) - 180) <
+            Math.abs(((perp[1] - away + 540) % 360) - 180)
+              ? perp[1]
+              : perp[0];
+          return { face: { points: half, insetM: inset }, azimuthDeg: pick };
+        });
+    },
+    []
+  );
+
+  /**
+   * Cover the roof with panels. ONE PRESS, and never a dead button.
+   *
+   * WHERE THE ROOF COMES FROM, in order of how much it actually knows:
+   *   1. Google's model of this building — every plane, its pitch and its
+   *      facing, measured photogrammetrically. Needs the Solar API switched on.
+   *   2. The building's outline from OpenStreetMap, cut at the ridge its shape
+   *      implies. Knows the walls, not the roof: no hips, no dormers, no pitch.
+   *   3. Faces the rep traced by hand, which beat all of it when they disagree,
+   *      because the rep can see the house.
+   *
+   * The first version of this only had the third, so on a house nobody had
+   * traced the button told the rep to go and do some work — which is not a
+   * button, and was the first thing said about it. Something is always tried.
+   *
+   * MAXIMAL BY DEFAULT, and trimming is its own button: get everything the roof
+   * holds on screen, look at it with the homeowner, then take off what the
+   * house does not need. A fill that quietly pruned itself would be answering a
+   * question before it had been asked.
+   */
   const maxRoof = React.useCallback(
-    (targetPanels?: number) => {
+    async (targetPanels?: number) => {
       const roofPlanesNow = planesRef.current;
       const current = blocksRef.current;
 
-      let filled: LayoutBlock[];
-      let kept: LayoutBlock[];
+      let filled: LayoutBlock[] = [];
+      let kept: LayoutBlock[] = [];
+      let note = "";
+
+      const traced = current.filter((b) => b.face);
 
       if (roofPlanesNow) {
         filled = autoFillRoof(roofPlanesNow, { module: moduleMm });
-        if (filled.length === 0) {
-          return toast.error("Nothing to fill — Google modelled no usable plane on this roof.");
-        }
         // The plane fill claims the whole roof, so it replaces the drawing.
         kept = [];
-      } else {
-        // Every face the rep has traced, re-filled from its own outline. Arrays
-        // drawn by hand are left exactly where they are: they are not this
-        // control's to move.
-        const faces = current.filter((b) => b.face);
-        if (faces.length === 0) {
-          setTraceKind("face");
-          setTool("face");
-          return toast.error(
-            "Trace a roof face first — click round one plane of the roof, then click the first dot to close it."
-          );
-        }
-        filled = faces.flatMap((b) => {
+      } else if (traced.length > 0) {
+        filled = traced.flatMap((b) => {
           const block = fillFace(b.face!, {
             module: moduleMm,
             keepOut,
             id: b.id,
             azimuthDeg: b.facingSource === "traced" ? null : (b.azimuthDeg ?? null),
+            facingSource: b.facingSource ?? null,
             tiltDeg: b.tiltDeg ?? null,
             shadePct: b.shadePct ?? null,
           });
           return block ? [block] : [];
         });
-        if (filled.length === 0) {
-          return toast.error("No panel fits inside those outlines once the edge setback is taken off.");
-        }
+        // Arrays drawn by hand are not this control's to move.
         kept = current.filter((b) => !b.face);
+      } else {
+        setFilling(true);
+        try {
+          if (footprintRef.current === undefined) {
+            const body = await fetch(
+              `/api/property/footprint?leadId=${encodeURIComponent(leadId)}`
+            )
+              .then((r) => (r.ok ? r.json() : { footprint: null }))
+              .catch(() => ({ footprint: null }));
+            footprintRef.current = body.footprint
+              ? { points: body.footprint.points, ridgeDeg: body.ridgeDeg ?? null }
+              : null;
+          }
+        } finally {
+          setFilling(false);
+        }
+
+        const fp = footprintRef.current;
+        if (!fp) {
+          setTraceKind("face");
+          setTool("face");
+          return toast.error(
+            "Nothing knows the shape of this building — no roof model, and OpenStreetMap has not mapped it. Trace one plane of the roof and this will fill it."
+          );
+        }
+
+        filled = facesFromBuilding(fp).flatMap(({ face, azimuthDeg }) => {
+          const block = fillFace(face, {
+            module: moduleMm,
+            keepOut,
+            id: uid(),
+            azimuthDeg,
+            // Inferred from an outline, and labelled as such — the proposal
+            // has to keep being able to tell this from a measurement.
+            facingSource: azimuthDeg == null ? null : "footprint",
+          });
+          return block ? [block] : [];
+        });
+        kept = [];
+        note = " from the building outline";
+      }
+
+      if (filled.length === 0) {
+        return toast.error(
+          "No panel fits anywhere this tool can see a roof. Trace a plane by hand and it will fill that."
+        );
       }
 
       const result =
@@ -787,17 +943,37 @@ export function SolarLayoutDesigner({
 
       const live = result.blocks.filter((b) => blockPanelCount(b) > 0);
       const panels = live.reduce((n, b) => n + blockPanelCount(b), 0);
+
+      /**
+       * A FILL THAT FOUND NOTHING LEAVES THE ROOF ALONE.
+       *
+       * The plane and outline paths replace the drawing — that is the honest
+       * move for a control claiming to lay out the whole roof. But a fill can
+       * hand back blocks with every cell knocked out, and every one of those is
+       * dropped by the filter above. If they all go, `kept` is empty too and
+       * the commit is an empty layout: one press and a rep's design is gone,
+       * with a success toast on top of it.
+       *
+       * There is no version of "cover the roof in panels" that ends with fewer
+       * panels than it started, so it refuses instead.
+       */
+      if (live.length === 0) {
+        return toast.error(
+          "That fill came back empty, so nothing was changed — no plane here is big enough for a module."
+        );
+      }
+
       commit([...kept, ...live]);
       setSelectedId(live[0]?.id ?? null);
       setFillCount(panels);
 
       if (targetPanels == null) {
         toast.success(
-          `Filled ${live.length} ${live.length === 1 ? "plane" : "planes"} — ${panels} panels.`
+          `Filled ${live.length} ${live.length === 1 ? "plane" : "planes"}${note} — ${panels} panels. Trim to usage takes off what the house does not need.`
         );
       }
     },
-    [commit, keepOut, moduleMm, panelKwh, setTraceKind]
+    [commit, facesFromBuilding, keepOut, leadId, moduleMm, panelKwh, setTraceKind]
   );
 
   /**
@@ -812,7 +988,9 @@ export function SolarLayoutDesigner({
    */
   const trimToUsage = React.useCallback(() => {
     if (!annualUsageKwh || annualUsageKwh <= 0) {
-      return toast.error("No annual usage on this deal yet — fill in the Energy step and there is a target to trim to.");
+      return toast.error(
+        "There is nothing to trim to yet — this deal has no annual usage on it. Fill in the bill on the Energy step and this will cut the system down to what the house actually uses."
+      );
     }
     const result = pruneToTarget(blocksRef.current, panelKwh, annualUsageKwh);
     if (result.removed === 0) {
@@ -1404,6 +1582,82 @@ export function SolarLayoutDesigner({
     return norm360(Math.round(deg / FACING_SNAP_DEG) * FACING_SNAP_DEG);
   };
 
+  /**
+   * Knock one panel out, and delete the array if that was its last.
+   *
+   * Shared by the Remove panels tool and Alt on the pointer, so the two cannot
+   * drift. Erasing the LAST panel deletes the block whatever its grid says: it
+   * used to be only a 1x1 that went, so an 8x1 rubbed out cell by cell left an
+   * 8-cell grid holding nothing — invisible, still clickable, still showing its
+   * ghosts, and counting zero modules. A deal reached the financing step with
+   * three of those on it and no system size at all.
+   */
+  const removePanelAt = (target: { block: LayoutBlock; index: number }) => {
+    const last = blockPanelCount(target.block) <= 1;
+    commit(
+      last
+        ? blocksRef.current.filter((b) => b.id !== target.block.id)
+        : blocksRef.current.map((b) =>
+            b.id === target.block.id ? { ...b, omitted: [...b.omitted, target.index] } : b
+          )
+    );
+    if (selectedId === target.block.id && last) setSelectedId(null);
+  };
+
+  /**
+   * Put one module down, joining the nearest array if there is one to join.
+   *
+   * A press within a cell or two of an existing array lands on THAT array's
+   * lattice — same bearing, same rows, same rail gaps — which is what makes
+   * adding panels feel like laying tile rather than dropping confetti. Further
+   * out and the rep is plainly starting something new, so they get a free panel
+   * aligned to the last array's rotation.
+   */
+  const addPanelAt = (m: { e: number; n: number }, p: { x: number; y: number }) => {
+    const host = nearestBlockFor(m);
+    if (host) {
+      const grown = addPanelAtCell(host.block, cellAt(host.block, moduleMm, m), moduleMm);
+      // Where the new panel ended up, asked of the GROWN block: adding a column
+      // on the left moves every cell along, so the index it had in the old grid
+      // is not the one it has now.
+      const landed = cellAt(grown, moduleMm, m);
+      const index = landed.row * Math.max(1, grown.cols) + landed.col;
+      if (
+        wouldOverlap(cellCorners(grown, moduleMm, index), blocksRef.current, moduleMm, host.block.id)
+      ) {
+        return toast.error("There is already a panel there.");
+      }
+      commit(blocksRef.current.map((x) => (x.id === host.block.id ? grown : x)));
+      return setSelectedId(host.block.id);
+    }
+
+    const near = selected ?? blocksRef.current[blocksRef.current.length - 1];
+    const b = lonePanelAt(m, near?.rotationDeg ?? 0, near?.orientation ?? "portrait");
+    // Nothing goes on top of anything. A design reached production with two
+    // modules 18 cm apart — 82% of one panel on another — and the count, the
+    // system size and the price were all built on panels that cannot both be
+    // up there.
+    if (wouldOverlap(cellCorners(b, moduleMm, 0), blocksRef.current, moduleMm)) {
+      return toast.error("There is already a panel there.");
+    }
+    // No history entry here — pointerup records one for the whole gesture, so a
+    // single undo takes back the panel AND the slide that positioned it.
+    setBlocks([...blocksRef.current, b]);
+    setSelectedId(b.id);
+    setDirty(true);
+    setDrag({
+      kind: "move",
+      id: b.id,
+      fromE: m.e,
+      fromN: m.n,
+      originE: b.originE,
+      originN: b.originN,
+      startX: p.x,
+      startY: p.y,
+      moved: true,
+    });
+  };
+
   function onPointerDown(ev: React.PointerEvent) {
     if (!canEdit || lat == null) return;
     const p = toCanvas(ev);
@@ -1429,6 +1683,50 @@ export function SolarLayoutDesigner({
     // Everything this gesture is about to change, so pointerup can record one
     // undo step for the whole of it rather than one per stage.
     gestureBeforeRef.current = blocksRef.current;
+
+    /**
+     * ERASE: a press knocks out the panel under it.
+     *
+     * Its own tool again as well as Alt on the pointer. Tested before anything
+     * that could move an array, since the whole gesture is aimed at one cell.
+     */
+    if (tool === "erase") {
+      const target = hit(m);
+      if (target) removePanelAt(target);
+      gestureBeforeRef.current = null;
+      return;
+    }
+
+    /** ADD PANEL: one module, on the nearest array's lattice if there is one. */
+    if (tool === "panel") {
+      gestureBeforeRef.current = null;
+      return addPanelAt(m, p);
+    }
+
+    /**
+     * MOVE PANEL: slide one module out of its bank.
+     *
+     * Nothing happens on the press — see `pendingPanel`. The detach waits for
+     * the pointer to actually go somewhere, which is the whole of the fix for
+     * a click splitting an array.
+     */
+    if (tool === "movePanel") {
+      const target = hit(m);
+      if (!target) {
+        gestureBeforeRef.current = null;
+        return setSelectedId(null);
+      }
+      setSelectedId(target.block.id);
+      return setDrag({
+        kind: "pendingPanel",
+        id: target.block.id,
+        index: target.index,
+        fromE: m.e,
+        fromN: m.n,
+        startX: p.x,
+        startY: p.y,
+      });
+    }
 
     /**
      * DRAW ARRAY DRAWS, WHATEVER IS UNDER THE POINTER.
@@ -1457,27 +1755,7 @@ export function SolarLayoutDesigner({
      * that mode and comes back to it later erases the panel they meant to drag.
      */
     if (h && (ev.altKey || ev.button === 2)) {
-      // Erasing the LAST panel deletes the block, whatever its grid says.
-      //
-      // It used to be only a 1x1 that went, so an 8x1 rubbed out cell by cell
-      // left an 8-cell grid holding nothing: invisible, still clickable, still
-      // showing its ghosts, and counting zero modules. A deal reached the
-      // financing step with three of those on it and no system size at all,
-      // which is a roof that looks drawn and prices like an empty one.
-      //
-      // Anything with panels left keeps its grid and loses one cell, so the
-      // modules either side stay exactly where the rep put them. Re-flowing
-      // them to close the gap is what "it doesn't put them all symmetric"
-      // describes.
-      const last = blockPanelCount(h.block) <= 1;
-      commit(
-        last
-          ? blocksRef.current.filter((b) => b.id !== h.block.id)
-          : blocksRef.current.map((b) =>
-              b.id === h.block.id ? { ...b, omitted: [...b.omitted, h.index] } : b
-            )
-      );
-      if (selectedId === h.block.id && last) setSelectedId(null);
+      removePanelAt(h);
       gestureBeforeRef.current = null;
       return;
     }
@@ -1564,28 +1842,12 @@ export function SolarLayoutDesigner({
     /**
      * BARE ROOF BESIDE AN ARRAY IS ONE MORE PANEL.
      *
-     * What the Add panel tool did, minus the tool. A press within a cell or two
-     * of an existing array lands on that array's own lattice — same bearing,
-     * same rows, same rail gaps — which is what makes adding panels feel like
-     * laying tile rather than dropping confetti. Further out than that and the
-     * rep is plainly pressing on empty roof, which deselects.
+     * What the Add panel tool does, without having to be in it. Only when the
+     * press is within a cell or two of an array — further out is empty roof,
+     * and pressing empty roof deselects.
      */
-    const host = nearestBlockFor(m);
-    if (host) {
-      const grown = addPanelAtCell(host.block, cellAt(host.block, moduleMm, m), moduleMm);
-      // Where the new panel ended up, asked of the GROWN block: adding a column
-      // on the left moves every cell along, so the index it had in the old grid
-      // is not the one it has now.
-      const landed = cellAt(grown, moduleMm, m);
-      const index = landed.row * Math.max(1, grown.cols) + landed.col;
-      // The cell was free on the host's own grid, but another array can cross
-      // the same ground — nothing goes on top of anything.
-      if (wouldOverlap(cellCorners(grown, moduleMm, index), blocksRef.current, moduleMm, host.block.id)) {
-        gestureBeforeRef.current = null;
-        return toast.error("There is already a panel there.");
-      }
-      commit(blocksRef.current.map((x) => (x.id === host.block.id ? grown : x)));
-      setSelectedId(host.block.id);
+    if (nearestBlockFor(m)) {
+      addPanelAt(m, p);
       gestureBeforeRef.current = null;
       return;
     }
@@ -1594,41 +1856,15 @@ export function SolarLayoutDesigner({
      * COMMAND ON BARE ROOF PUTS ONE PANEL THERE.
      *
      * The same modifier that slides a single panel out of an array places a
-     * single panel on its own, so ⌘ means "one module" wherever the pointer is.
-     * This is the only way onto a patch of roof no array is near — the first
-     * panel on an empty house, or one on a detached garage — since a plain
-     * click that far out is a deselection.
-     *
-     * It matches whatever is already up there, so a panel added near a rotated
-     * array lands square with it rather than pointing north.
+     * single panel on its own, so it means "one module" wherever the pointer
+     * is. This is the only way onto a patch of roof no array is near without
+     * changing tool — the first panel on an empty house, or one on a detached
+     * garage — since a plain click that far out is a deselection.
      */
     if (ev.metaKey || ev.ctrlKey) {
-      const near = selected ?? blocksRef.current[blocksRef.current.length - 1];
-      const b = lonePanelAt(m, near?.rotationDeg ?? 0, near?.orientation ?? "portrait");
-      // Nothing goes on top of anything. A design reached production with two
-      // modules 18 cm apart — 82% of one panel on another — and the count, the
-      // system size and the price were all built on panels that cannot both be
-      // up there.
-      if (wouldOverlap(cellCorners(b, moduleMm, 0), blocksRef.current, moduleMm)) {
-        gestureBeforeRef.current = null;
-        return toast.error("There is already a panel there.");
-      }
-      // No history entry here — pointerup records one for the whole gesture, so
-      // a single undo takes back the panel AND the slide that positioned it.
-      setBlocks([...blocksRef.current, b]);
-      setSelectedId(b.id);
-      setDirty(true);
-      return setDrag({
-        kind: "move",
-        id: b.id,
-        fromE: m.e,
-        fromN: m.n,
-        originE: b.originE,
-        originN: b.originN,
-        startX: p.x,
-        startY: p.y,
-        moved: true,
-      });
+      addPanelAt(m, p);
+      gestureBeforeRef.current = null;
+      return;
     }
 
     gestureBeforeRef.current = null;
@@ -1888,8 +2124,8 @@ export function SolarLayoutDesigner({
         return;
       }
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-        const pick: Record<string, Tool> = { v: "select", r: "face", a: "draw", s: "setback" };
-        const next = pick[e.key.toLowerCase()];
+        const typed = e.key.toLowerCase();
+        const next = (Object.keys(TOOL_KEYS) as Tool[]).find((t) => TOOL_KEYS[t] === typed);
         if (next) {
           e.preventDefault();
           if (pendingRef.current) finishTrace();
@@ -2101,8 +2337,10 @@ export function SolarLayoutDesigner({
             className={cn(
               "block max-w-none",
               canEdit &&
-                (tool === "draw" || tool === "face" || tool === "setback") &&
+                (tool === "draw" || tool === "face" || tool === "setback" || tool === "panel") &&
                 "cursor-crosshair",
+              canEdit && tool === "movePanel" && "cursor-grab",
+              canEdit && tool === "erase" && "cursor-cell",
               // Over the dot that ends the trace it stops being a crosshair,
               // because this click is not another corner.
               canEdit && setbackSnap && "!cursor-pointer",
@@ -2122,6 +2360,9 @@ export function SolarLayoutDesigner({
                   ["select", "Pointer", MousePointer2],
                   ["face", "Roof face", Pentagon],
                   ["draw", "Draw array", Square],
+                  ["panel", "Add panel", Plus],
+                  ["movePanel", "Move panel", Move],
+                  ["erase", "Remove panels", Eraser],
                   ["setback", "Setbacks", Ruler],
                 ] as const
               ).map(([id, label, Icon]) => (
@@ -2150,7 +2391,7 @@ export function SolarLayoutDesigner({
                     aria-hidden="true"
                     className="ml-auto text-[10px] font-normal opacity-60"
                   >
-                    {id === "select" ? "V" : id === "face" ? "R" : id === "draw" ? "A" : "S"}
+                    {TOOL_KEYS[id].toUpperCase()}
                   </kbd>
                 </button>
               ))}
@@ -2169,29 +2410,42 @@ export function SolarLayoutDesigner({
               <button
                 type="button"
                 data-testid="max-roof"
+                disabled={filling}
                 title={
                   fillSource === "planes"
                     ? "Cover every roof plane Google modelled with panels. Replaces the fill — undo puts it back."
                     : fillSource === "faces"
                       ? "Cover every roof face you have traced with as many panels as it holds. Replaces the fill — undo puts it back."
-                      : "Trace a roof face first, then this covers it with panels."
+                      : "Cover the roof with panels, working from the building's outline. Replaces the fill — undo puts it back."
                 }
-                onClick={() => maxRoof()}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                onClick={() => void maxRoof()}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100 disabled:opacity-60"
               >
-                <Wand2 className="size-4" /> Max roof
+                {filling ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Wand2 className="size-4" />
+                )}{" "}
+                {filling ? "Reading the building…" : "Max roof"}
               </button>
+              {/*
+                NOT DISABLED WHEN THERE IS NO TARGET.
+                
+                It was greyed out on any deal without an annual usage figure,
+                with the reason hidden in a tooltip — which is a control that
+                looks broken to everyone who does not hover. It presses, and it
+                says what is missing and where to fill it in.
+              */}
               <button
                 type="button"
                 data-testid="trim-to-usage"
-                disabled={!annualUsageKwh || annualUsageKwh <= 0}
                 title={
                   annualUsageKwh && annualUsageKwh > 0
                     ? `Take the worst-facing panels off until the system just covers ${Math.round(annualUsageKwh).toLocaleString()} kWh a year.`
-                    : "No annual usage on this deal yet — fill in the Energy step and there is a target to trim to."
+                    : "Needs the home's annual usage, which comes from the Energy step."
                 }
                 onClick={trimToUsage}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100 disabled:opacity-40"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
               >
                 <Scissors className="size-4" /> Trim to usage
               </button>
@@ -2234,7 +2488,7 @@ export function SolarLayoutDesigner({
                 A homeowner asks "what does one more panel do to the payment",
                 never "what does another 640 kWh do", so the control counts
                 panels and the figures beside it move as they are added. */}
-            {fillSource !== "none" && fillCount != null && (
+            {fillCount != null && (
               <div className="pointer-events-auto absolute left-3 top-[21rem] w-44 rounded-lg border border-black/10 bg-white p-2 text-neutral-900 shadow-lg">
                 <div className="px-1 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-500">
                   Fill size
@@ -2244,7 +2498,7 @@ export function SolarLayoutDesigner({
                     type="button"
                     aria-label="One panel fewer"
                     disabled={fillCount <= 1}
-                    onClick={() => maxRoof(fillCount - 1)}
+                    onClick={() => void maxRoof(fillCount - 1)}
                     className="rounded border border-neutral-300 p-1.5 hover:bg-neutral-100 disabled:opacity-40"
                   >
                     <Minus className="size-3.5" />
@@ -2255,7 +2509,7 @@ export function SolarLayoutDesigner({
                   <button
                     type="button"
                     aria-label="One panel more"
-                    onClick={() => maxRoof(fillCount + 1)}
+                    onClick={() => void maxRoof(fillCount + 1)}
                     className="rounded border border-neutral-300 p-1.5 hover:bg-neutral-100"
                   >
                     <Plus className="size-3.5" />
@@ -2304,7 +2558,7 @@ export function SolarLayoutDesigner({
                 {blocks.some((b) => b.face) && (
                   <button
                     type="button"
-                    onClick={() => maxRoof()}
+                    onClick={() => void maxRoof()}
                     className="mt-2 w-full rounded border border-neutral-300 px-2 py-1 text-xs font-medium hover:bg-neutral-100"
                   >
                     Re-fill traced faces at this setback
@@ -2632,6 +2886,49 @@ export function SolarLayoutDesigner({
               </span>
             )}
 
+            {/*
+              EIGHT POINTS, ONE CLICK EACH.
+              
+              The arrow is the precise control and the box is the exact one, and
+              between them they still made the commonest answer on any roof —
+              "it faces south-west" — a drag or a typed number. A rep says the
+              compass point out loud to the homeowner; this is that sentence as
+              a button.
+              
+              The one that is currently set is lit, so the row doubles as the
+              readout: eight buttons where one is on say more, faster, than a
+              number and a two-letter abbreviation beside it.
+            */}
+            <div
+              className="flex overflow-hidden rounded border border-white/20"
+              role="group"
+              aria-label="Facing"
+            >
+              {COMPASS_POINTS.map(({ label, deg }) => {
+                // The nearest point lights up, not only an exact match: a
+                // facing of 182 read off the building is south, and a row of
+                // eight buttons with none of them lit says nothing.
+                const on =
+                  selected.azimuthDeg != null &&
+                  Math.abs(((norm360(selected.azimuthDeg) - deg + 540) % 360) - 180) < 22.5;
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={on}
+                    title={`Face ${deg}° — ${label}`}
+                    onClick={() => patchSelected({ azimuthDeg: deg, facingSource: null })}
+                    className={cn(
+                      "px-1.5 py-1 text-[11px] font-semibold tabular-nums",
+                      on ? "bg-solar text-solar-foreground" : "text-white/75 hover:bg-white/15"
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
             <Button
               type="button"
               size="sm"
@@ -2654,7 +2951,7 @@ export function SolarLayoutDesigner({
               className="h-7 border-white/20 bg-white/10 text-white hover:bg-white/20"
               onClick={() =>
                 patchSelected({
-                  azimuthDeg: norm360((selected.azimuthDeg ?? 0) + 180),
+                  azimuthDeg: norm360((selected.azimuthDeg ?? facingBearing(selected)) + 180),
                   facingSource: null,
                 })
               }
@@ -2737,6 +3034,32 @@ export function SolarLayoutDesigner({
             >
               <RotateCcw className="size-4" /> Undo
             </Button>
+
+            {/*
+              PUT THE SAVED DESIGN BACK. Only offered when what is on screen is
+              not what was opened, so it is invisible on a design nobody has
+              touched — and it goes through `commit`, so pressing it by mistake
+              is itself one undo away.
+            */}
+            {savedPanels > 0 && count !== savedPanels && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-testid="revert-saved"
+                className="h-8 text-white/70 hover:bg-white/10 hover:text-white"
+                title={`Put back the ${savedPanels} ${savedPanels === 1 ? "panel" : "panels"} this design was opened with. Undo brings your changes back.`}
+                onClick={() => {
+                  commit(savedRef.current);
+                  setSelectedId(null);
+                  toast.success(
+                    `Back to the saved design — ${savedPanels} ${savedPanels === 1 ? "panel" : "panels"}.`
+                  );
+                }}
+              >
+                <RotateCw className="size-4" /> Back to saved ({savedPanels})
+              </Button>
+            )}
             {/*
               For a roof that has already accumulated strays. Adding panels used
               to drop a free-standing module wherever the pointer was, so a
@@ -2976,6 +3299,24 @@ function SliderRow({
     </div>
   );
 }
+
+/**
+ * The eight points of the compass, as a rep says them.
+ *
+ * Eight rather than sixteen: nobody looks at an aerial photograph and concludes
+ * west-north-west. The arrow and the number box are there for the roof that
+ * really does face 187.
+ */
+const COMPASS_POINTS = [
+  { label: "N", deg: 0 },
+  { label: "NE", deg: 45 },
+  { label: "E", deg: 90 },
+  { label: "SE", deg: 135 },
+  { label: "S", deg: 180 },
+  { label: "SW", deg: 225 },
+  { label: "W", deg: 270 },
+  { label: "NW", deg: 315 },
+] as const;
 
 /** 0..359, so a flip past north and a negative bearing both read normally. */
 function norm360(deg: number): number {

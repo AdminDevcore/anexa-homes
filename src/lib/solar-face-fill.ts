@@ -288,6 +288,64 @@ function segmentsCross(
   return d1 !== d2 && d3 !== d4 && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0;
 }
 
+/**
+ * Cut a building's outline in two along its ridge.
+ *
+ * WHY A ROOF IS NOT ONE FACE. Filling a whole footprint gives every panel on it
+ * a single facing, which is a lie on any house with a ridge: half the modules
+ * are on the south slope and half are on the north, and pricing them all as
+ * south overstates the year by a fifth. Cutting first means each half carries
+ * the slope it is actually on, and the prune that follows takes the north face
+ * off first — which is the entire point of covering the roof and then trimming.
+ *
+ * Sutherland–Hodgman against a half-plane, run twice with the normal flipped.
+ * It is exact for the convex case and correct for the concave one that matters
+ * here — an L-plan house — because a single infinite cutting line can only ever
+ * remove area, never fold the ring back on itself.
+ *
+ * A line that misses the building entirely returns the whole outline on one
+ * side and nothing on the other, which is the honest answer for a footprint too
+ * square to have a ridge: one face, and the caller says so.
+ */
+export function splitPolygon(
+  points: { e: number; n: number }[],
+  through: { e: number; n: number },
+  bearingDeg: number
+): [{ e: number; n: number }[], { e: number; n: number }[]] {
+  if (points.length < 3) return [[], []];
+  const rad = (bearingDeg * Math.PI) / 180;
+  // The ridge direction, and the normal to it that the two sides are measured
+  // along. Bearings are clockwise from north: east is sin, north is cos.
+  const nE = Math.cos(rad);
+  const nN = -Math.sin(rad);
+  const side = (p: { e: number; n: number }) =>
+    (p.e - through.e) * nE + (p.n - through.n) * nN;
+  return [clipHalfPlane(points, side, 1), clipHalfPlane(points, side, -1)];
+}
+
+/** The part of a ring on one side of a line, `sign` choosing which side. */
+function clipHalfPlane(
+  points: { e: number; n: number }[],
+  side: (p: { e: number; n: number }) => number,
+  sign: 1 | -1
+): { e: number; n: number }[] {
+  const out: { e: number; n: number }[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const curr = points[i];
+    const next = points[(i + 1) % points.length];
+    const dc = side(curr) * sign;
+    const dn = side(next) * sign;
+    if (dc >= 0) out.push(curr);
+    // The edge crosses the line: keep the crossing point, so the cut edge is
+    // the line itself rather than a staircase of whichever corners survived.
+    if ((dc >= 0) !== (dn >= 0)) {
+      const t = dc / (dc - dn);
+      out.push({ e: curr.e + (next.e - curr.e) * t, n: curr.n + (next.n - curr.n) * t });
+    }
+  }
+  return out.length >= 3 ? out : [];
+}
+
 // ---------------------------------------------------------------------------
 // Which edge is the eave, and therefore which way the roof falls
 // ---------------------------------------------------------------------------
@@ -383,6 +441,15 @@ export type FillFaceOptions = {
   pin?: { e: number; n: number };
   /** Already know the facing? A re-fill at a new size does; a fresh trace does not. */
   azimuthDeg?: number | null;
+  /**
+   * Where a supplied `azimuthDeg` came from.
+   *
+   * Defaults to null — a person's own figure — which is right for a rep's typed
+   * angle and wrong for one the building's outline supplied. A caller that
+   * knows the provenance says so, and the proposal keeps being able to tell a
+   * measurement from an inference from a guess.
+   */
+  facingSource?: LayoutBlock["facingSource"];
   tiltDeg?: number | null;
   shadePct?: number | null;
   /** Areas nothing may sit on: setback bands, an obstruction, another array. */
@@ -443,7 +510,7 @@ export function fillFace(face: RoofFace, opts: FillFaceOptions): LayoutBlock | n
     azimuthDeg: opts.azimuthDeg ?? azimuthDeg,
     tiltDeg: opts.tiltDeg ?? null,
     shadePct: opts.shadePct ?? null,
-    facingSource: opts.azimuthDeg == null ? "traced" : null,
+    facingSource: opts.azimuthDeg == null ? "traced" : (opts.facingSource ?? null),
     face: { points: points.map((p) => ({ ...p })), insetM: Math.max(0, face.insetM) },
   };
 }

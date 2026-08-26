@@ -6,6 +6,7 @@ import {
   insetPolygon,
   pointInPolygon,
   polygonAreaM2,
+  splitPolygon,
   DEFAULT_FACE_INSET_M,
   type RoofFace,
 } from "@/lib/solar-face-fill";
@@ -333,5 +334,68 @@ describe("fillFace", () => {
     expect(
       fillFace(face([{ e: 1, n: 1 }, { e: 1, n: 1.001 }, { e: 1.002, n: 1 }]), { module: SQUARE })
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cutting a building in two at its ridge
+// ---------------------------------------------------------------------------
+
+describe("splitPolygon", () => {
+  it("halves a rectangle along a ridge running east-west", () => {
+    const whole = rect(-6, -4, 6, 4);
+    const [a, b] = splitPolygon(whole, { e: 0, n: 0 }, 90);
+    expect(polygonAreaM2(a)).toBeCloseTo(48, 4);
+    expect(polygonAreaM2(b)).toBeCloseTo(48, 4);
+    // Together they are the whole building and nothing more.
+    expect(polygonAreaM2(a) + polygonAreaM2(b)).toBeCloseTo(polygonAreaM2(whole), 4);
+  });
+
+  it("halves it along a ridge running north-south", () => {
+    const [a, b] = splitPolygon(rect(-6, -4, 6, 4), { e: 0, n: 0 }, 0);
+    expect(polygonAreaM2(a)).toBeCloseTo(48, 4);
+    expect(polygonAreaM2(b)).toBeCloseTo(48, 4);
+  });
+
+  it("cuts on a diagonal ridge without losing or inventing area", () => {
+    const whole = rect(-6, -4, 6, 4);
+    const [a, b] = splitPolygon(whole, { e: 0, n: 0 }, 35);
+    expect(polygonAreaM2(a) + polygonAreaM2(b)).toBeCloseTo(polygonAreaM2(whole), 3);
+    expect(polygonAreaM2(a)).toBeGreaterThan(1);
+    expect(polygonAreaM2(b)).toBeGreaterThan(1);
+  });
+
+  it("cuts an L-plan house, notch and all", () => {
+    const ell = [
+      { e: -6, n: -4 },
+      { e: 6, n: -4 },
+      { e: 6, n: 0 },
+      { e: 0, n: 0 },
+      { e: 0, n: 4 },
+      { e: -6, n: 4 },
+    ];
+    const [a, b] = splitPolygon(ell, { e: 0, n: 0 }, 90);
+    expect(polygonAreaM2(a) + polygonAreaM2(b)).toBeCloseTo(polygonAreaM2(ell), 3);
+  });
+
+  it("gives one side the whole building when the line misses it", () => {
+    const whole = rect(-6, -4, 6, 4);
+    // A ridge well north of the roof: everything falls on one side of it.
+    const [a, b] = splitPolygon(whole, { e: 0, n: 40 }, 90);
+    const areas = [polygonAreaM2(a), polygonAreaM2(b)].sort((x, y) => x - y);
+    expect(areas[0]).toBeCloseTo(0, 6);
+    expect(areas[1]).toBeCloseTo(polygonAreaM2(whole), 4);
+  });
+});
+
+describe("fillFace with a stated provenance", () => {
+  it("keeps the source the caller gives it", () => {
+    const block = fillFace(face(rect(-6, 1, 6, 6)), {
+      module: SQUARE,
+      azimuthDeg: 182,
+      facingSource: "footprint",
+    })!;
+    expect(block.azimuthDeg).toBe(182);
+    expect(block.facingSource).toBe("footprint");
   });
 });
