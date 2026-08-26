@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,11 @@ import { SolarEnergyChart } from "@/components/portal/solar-energy-chart";
 import {
   buybackLine,
   hasProviderTerms,
+  vppEligibility,
   vppLine,
+  vppRequirementsLine,
+  vppVerdictLine,
+  type VppDealFacts,
 } from "@/lib/solar-provider-terms";
 
 export type SolarEnergyView = {
@@ -61,6 +66,7 @@ export function SolarEnergyPanel({
   energy,
   utilities,
   retailers,
+  vppDeal,
   year1ProductionKwh,
   canEdit,
 }: {
@@ -68,6 +74,8 @@ export function SolarEnergyPanel({
   energy: SolarEnergyView;
   utilities: ProviderOption[];
   retailers: ProviderOption[];
+  /** The battery and financing this deal currently holds. */
+  vppDeal: VppDealFacts;
   /** What the array as drawn makes in year one, for the comparison below. */
   year1ProductionKwh: number;
   canEdit: boolean;
@@ -136,6 +144,7 @@ export function SolarEnergyPanel({
             id="utility-provider"
             label="Utility (delivers the power)"
             options={utilities}
+            vppDeal={vppDeal}
             state={utility}
             onChange={setUtility}
             disabled={!canEdit}
@@ -144,6 +153,7 @@ export function SolarEnergyPanel({
             id="electric-provider"
             label="Electric provider (bills the customer)"
             options={retailers}
+            vppDeal={vppDeal}
             state={retail}
             onChange={setRetail}
             disabled={!canEdit}
@@ -349,12 +359,13 @@ function providerValue(s: ProviderState): string | null {
 
 /** Module scope on purpose — react-hooks/static-components is an error here. */
 function ProviderField({
-  id, label, options, state, onChange, disabled,
+  id, label, options, state, vppDeal, onChange, disabled,
 }: {
   id: string;
   label: string;
   options: ProviderOption[];
   state: ProviderState;
+  vppDeal: VppDealFacts;
   onChange: (s: ProviderState) => void;
   disabled?: boolean;
 }) {
@@ -386,7 +397,10 @@ function ProviderField({
           onChange={(e) => onChange({ ...state, other: e.target.value })}
         />
       )}
-      <ProviderTermsNote option={options.find((o) => o.name === state.selected) ?? null} />
+      <ProviderTermsNote
+        option={options.find((o) => o.name === state.selected) ?? null}
+        vppDeal={vppDeal}
+      />
     </div>
   );
 }
@@ -405,7 +419,13 @@ function ProviderField({
  * this, blank space reads as "no" when it means "nobody has checked", and a rep
  * will quote the first one.
  */
-function ProviderTermsNote({ option }: { option: ProviderOption | null }) {
+function ProviderTermsNote({
+  option,
+  vppDeal,
+}: {
+  option: ProviderOption | null;
+  vppDeal: VppDealFacts;
+}) {
   if (!option) return null;
   const lines = [buybackLine(option), vppLine(option)].filter(Boolean);
   if (lines.length === 0 && !option.notes) {
@@ -417,10 +437,40 @@ function ProviderTermsNote({ option }: { option: ProviderOption | null }) {
       </p>
     );
   }
+
+  /**
+   * A VPP is not offered to everyone who buys a battery, and the money above is
+   * the sentence a rep repeats. So the conditions print with it, and the
+   * verdict on THIS deal prints under them — computed from the design the rep
+   * has already saved, which is why it is honest the moment they come back to
+   * this step after choosing a battery.
+   *
+   * It blocks nothing. A list the office wrote after one phone call is not
+   * something that should be able to stop a rep selling.
+   */
+  const requirements = vppRequirementsLine(option);
+  const verdict = vppEligibility(option, vppDeal);
+  const verdictLine = vppVerdictLine(verdict);
+
   return (
     <div className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-1.5">
       {lines.length > 0 && (
         <p className="text-[11px] font-medium text-foreground">{lines.join(" · ")}</p>
+      )}
+      {requirements && (
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{requirements}</p>
+      )}
+      {verdictLine && (
+        <p
+          className={cn(
+            "mt-0.5 text-[11px] font-medium",
+            verdict.state === "eligible" && "text-emerald-700 dark:text-emerald-400",
+            verdict.state === "ineligible" && "text-amber-700 dark:text-amber-400",
+            verdict.state === "unknown" && "text-muted-foreground"
+          )}
+        >
+          {verdictLine}
+        </p>
       )}
       {option.notes && (
         <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-muted-foreground">

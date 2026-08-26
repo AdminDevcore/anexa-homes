@@ -24,6 +24,7 @@ import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { SolarCustomerPanel, type SolarCustomerView } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
 import type { ProviderOption } from "@/server/modules/solar/providers";
+import type { VppDealFacts } from "@/lib/solar-provider-terms";
 
 export type StepId = "customer" | "energy" | "design" | "financing" | "generate";
 
@@ -113,6 +114,7 @@ export function SolarProposalBuilder({
   energy,
   utilities,
   retailers,
+  vppDeal,
   hasLayout,
 }: {
   leadId: string;
@@ -163,6 +165,8 @@ export function SolarProposalBuilder({
   energy: SolarEnergyView;
   utilities: ProviderOption[];
   retailers: ProviderOption[];
+  /** The battery and financing a provider's VPP programme is judged against. */
+  vppDeal: VppDealFacts;
   /** Whether a layout already exists — an address change would invalidate it. */
   hasLayout: boolean;
 }) {
@@ -211,6 +215,7 @@ export function SolarProposalBuilder({
               energy={energy}
               utilities={utilities}
               retailers={retailers}
+              vppDeal={vppDeal}
               year1ProductionKwh={year1ProductionKwh}
               canEdit={canEditDeal}
             />

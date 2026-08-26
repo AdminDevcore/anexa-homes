@@ -350,6 +350,16 @@ const providerTermsSchema = z.object({
   vppProgramme: z.string().max(120).nullable(),
   vppUpfrontCents: z.number().int().min(0).max(100_000_00).nullable(),
   vppAnnualCents: z.number().int().min(0).max(100_000_00).nullable(),
+  /**
+   * Who the programme is open to. Every list EMPTY MEANS NO RESTRICTION, which
+   * is why they are plain arrays with no "restrict?" flag beside them: there is
+   * no difference worth storing between "open to everyone" and "nobody has
+   * narrowed it", and a flag that could disagree with its own list is a third
+   * state for a screen to render wrong.
+   */
+  vppFinanceProducts: z.array(z.enum(["cash", "loan", "lease", "ppa"])),
+  vppBatteryIds: z.array(z.string().uuid()),
+  vppProductIds: z.array(z.string().uuid()),
   notes: z.string().max(2_000).nullable(),
 });
 
@@ -369,6 +379,28 @@ export async function saveSolarProviderTermsAction(
   });
   if (!row) return fail("Provider not found.");
 
+  /**
+   * Only this company's catalogue, and only this company's rate sheet.
+   *
+   * The ids arrive from a browser, and a join row written against another
+   * company's battery would put a name nobody here recognises on a programme —
+   * the same reason every other action re-reads its foreign keys rather than
+   * trusting the payload. Ids that survive the filter are the ones we write;
+   * ones that do not are simply dropped.
+   */
+  const [batteries, products] = d.vpp
+    ? await Promise.all([
+        prisma.solarEquipment.findMany({
+          where: { id: { in: d.vppBatteryIds }, companyId: user.companyId },
+          select: { id: true },
+        }),
+        prisma.solarLenderProduct.findMany({
+          where: { id: { in: d.vppProductIds }, companyId: user.companyId },
+          select: { id: true },
+        }),
+      ])
+    : [[], []];
+
   await prisma.solarProvider.update({
     where: { id },
     data: {
@@ -381,6 +413,19 @@ export async function saveSolarProviderTermsAction(
       vppProgramme: d.vpp ? (d.vppProgramme?.trim() || null) : null,
       vppUpfrontCents: d.vpp ? d.vppUpfrontCents : null,
       vppAnnualCents: d.vpp ? d.vppAnnualCents : null,
+      // The conditions follow their flag, exactly as the figures do. A battery
+      // list left behind on a provider somebody has just said runs NO programme
+      // is a condition on nothing, and it would come back the day the flag is
+      // ticked again saying something nobody has checked since.
+      vppFinanceProducts: d.vpp ? d.vppFinanceProducts : [],
+      vppEquipment: {
+        deleteMany: {},
+        create: batteries.map((b) => ({ equipmentId: b.id })),
+      },
+      vppProducts: {
+        deleteMany: {},
+        create: products.map((p) => ({ productId: p.id })),
+      },
       // Notes survive either flag: "checked with them in March, they do not"
       // is worth keeping on a provider that does neither.
       notes: d.notes?.trim() || null,
@@ -564,9 +609,6 @@ const equipmentSchema = z.object({
   autoApplyMinKw: z.number().min(0).max(1000).nullable().optional(),
   autoApplyMaxKw: z.number().min(0).max(1000).nullable().optional(),
   rank: z.number().int().min(0).max(999).optional(),
-  // Ties a "Re-roof" / "MPU" adder to the Phase-3 crossover so selecting it
-  // raises the flag on the deal instead of quietly becoming a line item.
-  crossoverKind: z.enum(["reroof", "mpu"]).nullable().optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
   // The AVL turns over annually. Bounded to a sane window so a typo cannot file

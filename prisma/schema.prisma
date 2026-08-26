@@ -623,7 +623,7 @@ model SolarProvider {
   // the provider they just picked.
 
   /// Does this provider buy back exported power at all?
-  buyback          Boolean  @default(false)
+  buyback          Boolean @default(false)
   /// What they pay for an exported kWh, in mills. 95 = $0.095/kWh. Null when
   /// they buy back but the rate varies, or nobody has recorded it — which is
   /// why the flag is separate from the figure rather than derived from it.
@@ -639,17 +639,87 @@ model SolarProvider {
   /// Recurring money, cents a year.
   vppAnnualCents  Int?
 
-  /// Everything the fields above cannot hold: term lengths, which batteries
-  /// qualify, enrolment windows, whichever condition this programme has that
-  /// no other one does. Free text on purpose — a schema that tried to model
-  /// every utility's small print would be wrong by the next quarter.
-  notes           String?
+  // ── Who the programme is actually open to ────────────────────────────────
+  //
+  // A VPP is not offered to everyone who buys a battery. It runs on SOME ways
+  // of paying and SOME hardware, and a rep who reads "$500/yr" without reading
+  // the conditions has promised a homeowner money they will not receive.
+  //
+  // Three axes, each empty by default and each meaning "no restriction" when
+  // empty, so a list nobody has edited behaves exactly as it did before this
+  // existed. They are ANDed: the deal has to clear all three.
 
-  createdAt DateTime          @default(now())
+  /// Which ways of paying qualify. Empty is ANY.
+  ///
+  /// Separate from the product list below because CASH HAS NO LENDER ROW — a
+  /// list of named products can never say "a cash deal qualifies", and most of
+  /// these programmes turn on who ends up owning the battery rather than on
+  /// which line of a rate sheet got signed. `cash` is a legitimate member here
+  /// even though it is never a member of SolarLenderProduct.
+  vppFinanceProducts FinanceProduct[] @default([])
+
+  /// Which batteries the programme enrols, and which named finance products it
+  /// accepts. Both empty is ANY, for the reason above.
+  vppEquipment SolarProviderVppEquipment[]
+  vppProducts  SolarProviderVppProduct[]
+
+  /// Everything the fields above cannot hold: term lengths, enrolment windows,
+  /// whichever condition this programme has that no other one does. Free text
+  /// on purpose — a schema that tried to model every utility's small print
+  /// would be wrong by the next quarter.
+  notes String?
+
+  createdAt DateTime @default(now())
 
   @@unique([companyId, kind, name])
   @@index([companyId, kind, active])
   @@map("solar_providers")
+}
+
+/// Which batteries a provider's VPP programme will actually enrol.
+///
+/// Modelled exactly like SolarEquipmentLender — an explicit join rather than an
+/// implicit relation — for the same two reasons: the membership is genuinely
+/// many-to-many (one battery is on several programmes, one programme lists
+/// several batteries), and an explicit row can carry its own facts later (the
+/// date the programme added it, the enrolment cap it comes with) without a
+/// migration that rewrites the relation.
+///
+/// NO ROWS MEANS ANY BATTERY, not none. An office that has never opened this
+/// screen has recorded no restriction, and reading that as "nothing qualifies"
+/// would turn every existing programme ineligible on every deal overnight.
+model SolarProviderVppEquipment {
+  providerId  String
+  provider    SolarProvider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  equipmentId String
+  equipment   SolarEquipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
+
+  @@id([providerId, equipmentId])
+  @@index([equipmentId])
+  @@map("solar_provider_vpp_equipment")
+}
+
+/// Which named finance products a provider's VPP programme will accept.
+///
+/// This NARROWS `vppFinanceProducts`, it does not replace it: the type list
+/// says "loans qualify", this says "and only these loans". A deal quoting a
+/// product that is not on a non-empty list fails the finance axis even when its
+/// type is allowed — which is the whole case this exists for, a lender whose
+/// 25-year paper is in the programme and whose lease is not.
+///
+/// A cash offer names no product at all, so it is judged on the type list alone
+/// and a non-empty product list never rules it out.
+model SolarProviderVppProduct {
+  providerId String
+  provider   SolarProvider      @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  productId  String
+  product    SolarLenderProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt  DateTime           @default(now())
+
+  @@id([providerId, productId])
+  @@index([productId])
+  @@map("solar_provider_vpp_products")
 }
 
 model LeadSource {
@@ -871,19 +941,6 @@ model Lead {
   /// When the chase reminder last fired, so the cadence repeats instead of
   /// firing once and going quiet.
   lastChaseAlertAt DateTime?
-
-  // ── Solar → Roofing crossover ───────────────────────────────────────────
-  /// Flagged at site survey / design: the roof must be replaced before install.
-  /// The highest-margin cross-sell we have — surfaced as its own card on the
-  /// deal, never buried in a note.
-  needsReroof     Boolean @default(false)
-  /// Flagged at site survey / design: main panel upgrade or derate required.
-  needsMpu        Boolean @default(false)
-  /// The deal in the OTHER vertical for the same property/contact (a solar deal
-  /// pointing at its re-roof job, or vice versa). One relationship, two jobs.
-  linkedDealId    String?
-  linkedDeal      Lead?   @relation("DealCrossover", fields: [linkedDealId], references: [id], onDelete: SetNull)
-  linkedFromDeals Lead[]  @relation("DealCrossover")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1183,20 +1240,20 @@ model CrewMember {
 /// and whatever a crew calls the person who does the roof penetrations are not
 /// a fixed set worth migrating for, and payroll does not read this.
 model ProjectAssignee {
-  id        String   @id @default(uuid())
+  id        String         @id @default(uuid())
   companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation("ProjectAssignee", fields: [userId], references: [id], onDelete: Cascade)
+  user      User           @relation("ProjectAssignee", fields: [userId], references: [id], onDelete: Cascade)
   /// WHICH scheduled visit this person is on. A job has two dates that send
   /// different people to the site — the install and the inspection that
   /// follows it — so an assignment that does not say which one is not an
   /// answer to "who is going out, and when".
   kind      AssignmentKind @default(install)
   role      String?
-  createdAt DateTime @default(now())
+  createdAt DateTime       @default(now())
 
   /// One row per person per VISIT. The same installer can be on both the
   /// install and the inspection; assigning them twice to the same visit is a
@@ -2970,7 +3027,7 @@ model SolarLender {
   ///
   /// Null -- the default, and every lender until somebody sets one -- means no
   /// floor, and no deal that generates today stops generating.
-  minBasePpwCents  Int?
+  minBasePpwCents Int?
 
   /// Where YOUR team runs credit for this partner — the dealer portal login.
   /// Rep-facing only: it never reaches a customer-facing document.
@@ -3082,7 +3139,9 @@ model SolarLenderProduct {
   /// Display order, so the products you lead with lead.
   rank     Int     @default(0)
 
-  quotedOn SolarFinance[]
+  quotedOn     SolarFinance[]
+  /// Which providers' VPP programmes accept this product.
+  vppProviders SolarProviderVppProduct[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3179,10 +3238,6 @@ model SolarEquipment {
   consumptionAdjustable Boolean            @default(false)
   /// Adders only: display order, so the highest-margin ones lead.
   rank                  Int                @default(0)
-  /// Adders only: ties an adder to the Phase-3 crossover so picking "Re-roof"
-  /// or "MPU" on a design raises the flag on the deal rather than quietly
-  /// becoming a line item. One of: "reroof" | "mpu" | null.
-  crossoverKind         String?
   /// The manufacturer's own datasheet, as a link.
   ///
   /// A LINK rather than a stored PDF: this is the manufacturer's document, it
@@ -3219,12 +3274,14 @@ model SolarEquipment {
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
-  designsAsModule   SolarDesign[]          @relation("DesignModule")
-  designsAsInverter SolarDesign[]          @relation("DesignInverter")
-  designsAsBattery  SolarDesign[]          @relation("DesignBattery")
+  designsAsModule   SolarDesign[]               @relation("DesignModule")
+  designsAsInverter SolarDesign[]               @relation("DesignInverter")
+  designsAsBattery  SolarDesign[]               @relation("DesignBattery")
   dealAdders        SolarDealAdder[]
   /// Which lenders' approved-vendor lists this item appears on.
   lenderApprovals   SolarEquipmentLender[]
+  /// Which providers' VPP programmes will enrol this item.
+  vppProviders      SolarProviderVppEquipment[]
 
   @@index([companyId, kind, isActive])
   // Catalogue identity is (kind, manufacturer, model, rating) within a company.

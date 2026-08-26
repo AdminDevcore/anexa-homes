@@ -12,6 +12,9 @@ import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
 import { catalogueBasis, listDealAdders } from "@/server/modules/solar/adders";
+import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
+import { lenderProductLabel } from "@/lib/solar-lender-product";
+import type { VppDealFacts } from "@/lib/solar-provider-terms";
 
 export const dynamic = "force-dynamic";
 
@@ -142,6 +145,41 @@ export default async function SolarProposalBuilderPage({
     }),
     listDealAdders(user.companyId, lead.id),
   ]);
+
+  /**
+   * The three facts a provider's VPP programme is judged against.
+   *
+   * Gathered HERE rather than inside the Energy panel because the panel is a
+   * client component and these are three different tables. The battery is
+   * looked up for its NAME: a verdict that reads "this battery is not on the
+   * programme" tells a rep nothing they can act on, and the one that names the
+   * Powerwall 2 on the design tells them exactly what to change.
+   */
+  const battery = design?.batteryId
+    ? await prisma.solarEquipment.findFirst({
+        where: { id: design.batteryId, companyId: user.companyId },
+        select: { manufacturer: true, model: true, ratingW: true },
+      })
+    : null;
+
+  const quotedProduct = finance?.lenderProductId
+    ? lenderProducts.find((p) => p.id === finance.lenderProductId)
+    : null;
+
+  const vppDeal: VppDealFacts = {
+    batteryId: design?.batteryId ?? null,
+    batteryLabel: battery ? solarEquipmentLabel(battery) : null,
+    financeProduct: finance?.product ?? null,
+    financeProductId: finance?.lenderProductId ?? null,
+    financeProductLabel: quotedProduct
+      ? [
+          lenders.find((l) => l.id === quotedProduct.lenderId)?.name,
+          lenderProductLabel(quotedProduct),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : null,
+  };
 
   // A provider a design already names stays in its own list even after being
   // retired — otherwise the select falls back to "not set" and the next save
@@ -288,6 +326,7 @@ export default async function SolarProposalBuilderPage({
           state: lead.state,
           zip: lead.zip,
         }}
+        vppDeal={vppDeal}
         energy={
           design && {
             utilityProvider: design.utilityProvider,

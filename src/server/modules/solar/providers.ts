@@ -1,6 +1,8 @@
 import { prisma } from "@/server/db/client";
 import type { SolarProviderKind } from "@prisma/client";
 import type { ProviderTerms } from "@/lib/solar-provider-terms";
+import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
+import { lenderProductLabel } from "@/lib/solar-lender-product";
 
 export type ProviderOption = {
   id: string;
@@ -43,8 +45,49 @@ export async function listSolarProviders(
       id: true, name: true, active: true,
       buyback: true, buybackRateMills: true,
       vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
+      vppFinanceProducts: true,
       notes: true,
+      /**
+       * The programme's conditions travel with it for the same reason its money
+       * does: the rep reading "$500/yr" is the one who has to know it only runs
+       * on some batteries, and a second query to find that out is a second thing
+       * to forget on the next screen that lists providers.
+       *
+       * Retired items stay on the list. A battery the office has since stopped
+       * selling is still a battery this programme enrols, and dropping it here
+       * would silently shorten a list somebody deliberately wrote.
+       */
+      vppEquipment: {
+        select: {
+          equipment: { select: { id: true, manufacturer: true, model: true, ratingW: true } },
+        },
+      },
+      vppProducts: {
+        select: {
+          product: {
+            select: {
+              id: true, name: true, product: true, aprPct: true, termMonths: true,
+              dealerFeePct: true, leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true,
+              escalatorPct: true, termYears: true,
+              lender: { select: { name: true } },
+            },
+          },
+        },
+      },
     },
   });
-  return rows;
+
+  return rows.map(({ vppEquipment, vppProducts, ...r }) => ({
+    ...r,
+    vppBatteries: vppEquipment.map((e) => ({
+      id: e.equipment.id,
+      label: solarEquipmentLabel(e.equipment),
+    })),
+    // The lender's name leads: "25 yr · 4.99%" is a row on somebody's rate
+    // sheet, and which somebody is the half a rep needs to act on it.
+    vppProducts: vppProducts.map((p) => ({
+      id: p.product.id,
+      label: `${p.product.lender.name} ${lenderProductLabel(p.product)}`,
+    })),
+  }));
 }

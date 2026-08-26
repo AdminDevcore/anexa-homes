@@ -7,6 +7,8 @@ import { can } from "@/server/rbac/guards";
 import { PageHeader } from "@/components/portal/ui";
 import { prisma } from "@/server/db/client";
 import { SolarProviderManager } from "@/components/portal/solar-provider-manager";
+import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
+import { lenderProductLabel } from "@/lib/solar-lender-product";
 
 export const dynamic = "force-dynamic";
 
@@ -37,9 +39,75 @@ export default async function SolarProvidersPage() {
       // What the office has confirmed each provider does for a solar customer.
       buyback: true, buybackRateMills: true,
       vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
+      vppFinanceProducts: true,
       notes: true,
+      // Who each programme is open to, with the names spelled out: a retired
+      // battery still on a list has to stay tickable, and the picker can only
+      // offer it back if this row says what it was called.
+      vppEquipment: {
+        select: {
+          equipment: { select: { id: true, manufacturer: true, model: true, ratingW: true } },
+        },
+      },
+      vppProducts: {
+        select: {
+          product: {
+            select: {
+              id: true, name: true, product: true, aprPct: true, termMonths: true,
+              dealerFeePct: true, leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true,
+              escalatorPct: true, termYears: true,
+              lender: { select: { name: true } },
+            },
+          },
+        },
+      },
     },
   });
+
+  /**
+   * What the pickers choose from.
+   *
+   * ACTIVE items only. A retired battery already on a programme's list stays on
+   * it — the ids above are the record — but it is not something to newly add to
+   * one, and putting last year's catalogue back in front of the office is how a
+   * discontinued product gets ticked onto next year's programme.
+   */
+  const [batteries, lenderProducts] = await Promise.all([
+    prisma.solarEquipment.findMany({
+      where: { companyId: user.companyId, kind: "battery", isActive: true },
+      orderBy: [{ manufacturer: "asc" }, { model: "asc" }],
+      select: { id: true, manufacturer: true, model: true, ratingW: true },
+    }),
+    prisma.solarLenderProduct.findMany({
+      where: { companyId: user.companyId, isActive: true, lender: { isActive: true } },
+      orderBy: [{ lender: { rank: "asc" } }, { rank: "asc" }],
+      select: {
+        id: true, name: true, product: true, aprPct: true, termMonths: true,
+        dealerFeePct: true, leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true,
+        escalatorPct: true, termYears: true,
+        lender: { select: { name: true } },
+      },
+    }),
+  ]);
+
+  const batteryOptions = batteries.map((b) => ({ id: b.id, label: solarEquipmentLabel(b) }));
+  const productOptions = lenderProducts.map((p) => ({
+    id: p.id,
+    lender: p.lender.name,
+    label: lenderProductLabel(p),
+  }));
+
+  const providers = rows.map(({ vppEquipment, vppProducts, ...r }) => ({
+    ...r,
+    vppBatteries: vppEquipment.map((e) => ({
+      id: e.equipment.id,
+      label: solarEquipmentLabel(e.equipment),
+    })),
+    vppProducts: vppProducts.map((p) => ({
+      id: p.product.id,
+      label: `${p.product.lender.name} ${lenderProductLabel(p.product)}`,
+    })),
+  }));
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -57,8 +125,10 @@ export default async function SolarProvidersPage() {
 
       <div className="mt-6">
         <SolarProviderManager
-          utilities={rows.filter((r) => r.kind === "utility")}
-          retailers={rows.filter((r) => r.kind === "retail")}
+          utilities={providers.filter((r) => r.kind === "utility")}
+          retailers={providers.filter((r) => r.kind === "retail")}
+          batteries={batteryOptions}
+          lenderProducts={productOptions}
           canEdit={can(user, "update", "Settings")}
         />
       </div>
