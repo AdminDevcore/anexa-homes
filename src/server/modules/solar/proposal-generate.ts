@@ -15,6 +15,7 @@ import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { canGenerate, type ValidationIssue } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
 import { capStickerToFinalPpw, pricePurchase } from "@/lib/solar-money";
+import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
 import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
@@ -598,6 +599,26 @@ export async function generateProposalVersion(
       select: { id: true, version: true, publicToken: true },
     }),
   ]);
+
+  /**
+   * The deal's own value, stamped from the document that was just made.
+   *
+   * `Lead.value` is what the pipeline board, the dashboard and the funnel
+   * report add up, and nothing on a solar deal ever wrote to it — so a
+   * department selling eighty-thousand-dollar systems showed a pipeline worth
+   * nothing. The deal page derives its figure from the snapshot and never
+   * needed this; every list that reads the column does.
+   *
+   * OUTSIDE the transaction above, with the activity log. That one exists to
+   * keep the customer's live link and the new version in step, and a
+   * denormalised total is not worth widening its blast radius: a failure here
+   * leaves the proposal standing and one number stale, which the next
+   * generation corrects.
+   */
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { value: solarLeadValueCents(snapshot.financing) },
+  });
 
   await prisma.activityLog.create({
     data: {

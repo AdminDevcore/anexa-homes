@@ -50,6 +50,7 @@ import {
 } from "@/lib/solar-layout";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import { financingCard } from "@/lib/solar-deal-header";
+import { formatSolarDealValue, solarDealValue } from "@/lib/solar-deal-value";
 import {
   SolarSystemMoneyPanel,
   SolarActivityFeed,
@@ -636,6 +637,49 @@ export default async function LeadDetailPage({
       contractPriceCents: breakdown?.contractPriceCents ?? fin?.contractPriceCents ?? 0,
     };
   })();
+
+  /**
+   * DEAL VALUE, on a solar deal.
+   *
+   * `Lead.value` is a typed-in field and nothing on a solar deal types into it,
+   * so the Summary card reported $0 on deals that had been quoted, sent and
+   * signed. The figure is derived instead — see src/lib/solar-deal-value.ts for
+   * why a lease and a PPA are not a "value" of the same kind.
+   *
+   * READ OFF THE LAST PROPOSAL, exactly like the System info slide: what this
+   * customer was last quoted, frozen, rather than a live design a rep may be
+   * halfway through redrawing. The live price is the fallback only while no
+   * proposal exists at all — that being the one moment the working figure IS
+   * the best account of the deal, and it is labelled as such rather than passed
+   * off as something a customer has seen.
+   */
+  const solarValue = isSolarDeal
+    ? (() => {
+        const quoted = latestSnapshot
+          ? solarDealValue({
+              product: latestSnapshot.financing.product,
+              contractPriceCents: latestSnapshot.financing.contractPriceCents,
+              monthlyPaymentCents: latestSnapshot.financing.monthlyPaymentCents,
+              rateMillsPerKwh: latestSnapshot.financing.rateMillsPerKwh,
+            })
+          : ({ kind: "none" } as const);
+        if (quoted.kind !== "none" && latestProposal) {
+          return {
+            value: formatSolarDealValue(quoted, fmt.money),
+            hint: `Proposal v${latestProposal.version}`,
+          };
+        }
+        const working = solarDealValue({
+          product: solarFinance?.product ?? null,
+          contractPriceCents: solarMoney?.contractPriceCents ?? null,
+          monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+          rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
+        });
+        return working.kind !== "none"
+          ? { value: formatSolarDealValue(working, fmt.money), hint: "Priced — no proposal yet" }
+          : { value: "—", hint: "Not priced yet" };
+      })()
+    : null;
 
   // Which lender is actually funding this deal. A deal shopped to four lenders
   // has four rows, and the newest is often a decline that arrived after the
@@ -1509,7 +1553,10 @@ export default async function LeadDetailPage({
             display={{
               serviceTypeLabel: serviceTypeLabel(lead.serviceType),
               appointment: lead.appointmentAt ? fmt.dateTime(lead.appointmentAt) : "Not scheduled",
-              value: fmt.money(lead.value),
+              // Solar's value is derived from what the customer was quoted;
+              // roofing's is the number somebody typed into this very card.
+              value: solarValue ? solarValue.value : fmt.money(lead.value),
+              valueHint: solarValue?.hint ?? null,
               assignedRep: lead.assignedRep
                 ? `${lead.assignedRep.firstName} ${lead.assignedRep.lastName}`
                 : null,

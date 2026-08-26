@@ -81,6 +81,11 @@ export function DealSummaryPanel({
     serviceTypeLabel: string;
     appointment: string;
     value: string;
+    /**
+     * Where a DERIVED value came from — "Proposal v3". Null on roofing, whose
+     * value is typed into this card and needs no provenance.
+     */
+    valueHint: string | null;
     assignedRep: string | null;
     propertyValue: string | null;
     lastSale: string | null;
@@ -257,7 +262,12 @@ export function DealSummaryPanel({
           <Detail label={isSolar ? "Consult Date" : "Appointment Date"} value={display.appointment} />
         )}
 
-        {editing ? (
+        {/* SOLAR'S VALUE IS NOT TYPED, IT IS QUOTED. It comes off the last
+            proposal — the design, the lender's fee and the adders decide it —
+            so there is no box here on a solar deal. There used to be, and what
+            it wrote was never read back: the card kept showing the derived
+            figure, so a rep who corrected the number watched it snap back. */}
+        {editing && !isSolar ? (
           <FieldRow label="Deal Value">
             <Input
               type="number"
@@ -271,7 +281,20 @@ export function DealSummaryPanel({
             />
           </FieldRow>
         ) : (
-          <Detail label="Deal Value" value={display.value} />
+          <Detail
+            label="Deal Value"
+            capitalize={false}
+            value={
+              <>
+                {display.value}
+                {display.valueHint && (
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    {display.valueHint}
+                  </span>
+                )}
+              </>
+            }
+          />
         )}
 
         {editing ? (
