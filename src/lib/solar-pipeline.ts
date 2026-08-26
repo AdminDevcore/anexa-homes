@@ -289,6 +289,20 @@ export const SOLAR_OPS_STAGES: SolarStageDef[] = [
     escalationDays: 1,
   },
   {
+    // THE COMMISSION GATE. The lender's first milestone payment, released once
+    // the system is on the roof. It is the first money the company actually
+    // receives on a solar deal, and no rep is paid before it lands — see
+    // server/modules/payroll/gate.ts. Externally blocked because the lender
+    // decides when it funds; we can only chase it.
+    key: "m1_funding",
+    name: "M1 Funding",
+    color: "#14B8A6",
+    stageType: "externally_blocked",
+    ownerRole: "finance",
+    followUpDays: 3,
+    defaultBlocker: "lender",
+  },
+  {
     key: "inspection",
     name: "Building / Electrical Inspection",
     color: "#2DD4BF",

@@ -30,27 +30,34 @@ export async function generateCommissionsAction() {
   const user = await requireUser();
   if (!can(user, "update", "Commission")) return fail("Not allowed.");
 
-  // Only deals that have reached the "Depreciation Requested" stage (or later)
-  // are eligible — commissions/payroll can't be generated before then.
+  // Only deals at or past their pipeline's gate are eligible — Roofing waits on
+  // the depreciation request, Solar on the lender's M1 funding. See
+  // ./gate.ts for why the two verticals gate in different places.
   const eligibleStageIds = await getCommissionEligibleStageIds(user.companyId);
-  if (eligibleStageIds.size === 0) {
-    // The gate differs by workspace — Roofing waits on the depreciation request,
-    // Solar on the signed contract — so name the one the user is actually behind.
-    const gate = commissionGateLabel(await getActiveVertical(user));
-    return { ok: true as const, created: 0, message: `No deals have reached ${gate} yet.` };
-  }
+  // Name the gate the user is actually behind, in the workspace they're standing in.
+  const gate = commissionGateLabel(await getActiveVertical(user));
 
-  const projects = await prisma.project.findMany({
-    where: { companyId: user.companyId, lead: { stageId: { in: [...eligibleStageIds] } } },
-    select: { id: true },
-  });
+  const projects = eligibleStageIds.size
+    ? await prisma.project.findMany({
+        where: { companyId: user.companyId, lead: { stageId: { in: [...eligibleStageIds] } } },
+        select: { id: true },
+      })
+    : [];
 
   let created = 0;
   for (const p of projects) {
     created += await computeCommissionsForProject(prisma, user.companyId, p.id);
   }
   revalidatePath("/portal/commissions");
-  return { ok: true as const, created };
+  // "0 generated" on its own reads as a broken button. Say WHY nothing came out:
+  // either no deal has reached the gate, or the ones that have are already paid out.
+  const message =
+    created > 0
+      ? undefined
+      : projects.length === 0
+        ? `No deals have reached ${gate} yet, so there is nothing to pay out.`
+        : `Nothing new — every deal at or past ${gate} already has its commission lines.`;
+  return { ok: true as const, created, message };
 }
 
 // --------------------------- Commission status ------------------------------

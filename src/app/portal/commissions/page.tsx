@@ -7,6 +7,7 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
+import { commissionGateLabel } from "@/server/modules/payroll/eligibility";
 import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
 import { CommissionRowActions, CommissionsToolbar } from "@/components/portal/commission-actions";
 import { ListFilter } from "@/components/portal/list-filter";
@@ -75,7 +76,7 @@ export default async function CommissionsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Commissions"
-        description="Track earned, approved, and paid commissions. Generate runs only on deals that have reached Depreciation Requested."
+        description={`Track earned, approved, and paid commissions. Generate runs only on deals that have reached ${commissionGateLabel(vertical)}.`}
         action={canManage ? <CommissionsToolbar pendingCount={pendingCount} /> : undefined}
       />
 

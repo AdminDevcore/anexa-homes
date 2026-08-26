@@ -16,19 +16,26 @@ import {
 function useAction() {
   const router = useRouter();
   const [pending, setPending] = React.useState(false);
-  async function run(fn: () => Promise<{ ok: boolean; error?: string; created?: number; count?: number }>, msg?: string) {
+  async function run(
+    fn: () => Promise<{ ok: boolean; error?: string; created?: number; count?: number; message?: string }>,
+    msg?: string
+  ) {
     setPending(true);
     const res = await fn();
     setPending(false);
     if (res.ok) {
-      toast.success(
+      // An action that produced nothing explains itself (`message`) — a bare
+      // "0 commission(s) generated" reads as a bug rather than as the gate doing its job.
+      const text =
         msg ??
-          (typeof res.created === "number"
-            ? `${res.created} commission(s) generated`
-            : typeof res.count === "number"
-              ? `${res.count} approved`
-              : "Done")
-      );
+        res.message ??
+        (typeof res.created === "number"
+          ? `${res.created} commission(s) generated`
+          : typeof res.count === "number"
+            ? `${res.count} approved`
+            : "Done");
+      if (res.message && !res.created) toast.info(text);
+      else toast.success(text);
       router.refresh();
     } else {
       toast.error(res.error ?? "Action failed");

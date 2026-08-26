@@ -13,8 +13,9 @@
  *
  * So this adds, on the local copy only: the eight role logins the /login demo
  * panel expects, a full commission configuration for both verticals, and five
- * demo deals placed either side of the commission gate so a drag between stages
- * visibly generates a payout.
+ * demo deals placed either side of each vertical's commission gate (roofing's
+ * depreciation request, solar's M1 funding) so a drag between stages visibly
+ * generates a payout.
  *
  * Everything it writes is deterministic — fixed ids, fixed marker — so running
  * it twice changes nothing and never accumulates duplicates. Live's own rows are
@@ -28,8 +29,12 @@
  */
 import { PrismaClient, type Vertical } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { findGateStage } from "../src/server/modules/payroll/gate";
 
 const DEMO_PASSWORD = "Passw0rd!";
+
+/** Placeholder stage key meaning "this vertical's commission gate, whatever it is called". */
+const AT_GATE = "__commission_gate__";
 
 /** Marker on everything this script creates, so a re-run replaces its own work. */
 const DEMO_TAG = "LOCAL-DEMO";
@@ -337,7 +342,7 @@ const SOLAR_DEALS: SolarDeal[] = [
   {
     n: 4, first: "Elena", last: "Alvarez",
     address: "2312 Sunfield Way", city: "Allen",
-    stageKey: "contract_signed",          // the SOLAR gate — pays immediately
+    stageKey: "install_scheduled",        // BEFORE the M1 gate — cannot pay yet
     kwDc: 8.4, stickerPpwCents: 320, dealerFeePct: 20,
     lenderName: "Climate First",          // redline lender → rep keeps the overage
     status: "not_started",
@@ -345,7 +350,7 @@ const SOLAR_DEALS: SolarDeal[] = [
   {
     n: 5, first: "Trent", last: "Brooks",
     address: "615 Harper Field Rd", city: "Prosper",
-    stageKey: "install_scheduled",
+    stageKey: AT_GATE,                    // AT M1 Funding — the lender has paid, so the rep can
     kwDc: 11.2, stickerPpwCents: 305, dealerFeePct: 20,
     lenderName: "Amos Capital Fund",      // per-watt lender → flat rate, price irrelevant
     status: "in_production",
@@ -353,6 +358,16 @@ const SOLAR_DEALS: SolarDeal[] = [
 ];
 
 async function seedDeals(companyId: string) {
+  // Wipe the commissions this overlay's OWN deals are carrying. They were
+  // generated against wherever the gate stood at the time, so leaving them in
+  // place after a deal moves — or after the gate itself moves — produces the one
+  // thing the demo is meant to disprove: a paid-out line on a deal that has not
+  // reached its gate. Only the fixed demo project ids are touched; live's rows
+  // are never in this list.
+  await db.commission.deleteMany({
+    where: { companyId, projectId: { in: [1, 2, 3, 4, 5].map((n) => ID.project(n)) } },
+  });
+
   const pipelines = await db.pipeline.findMany({
     where: { companyId },
     select: { id: true, vertical: true, stages: { select: { id: true, key: true, name: true, position: true } } },
@@ -361,8 +376,12 @@ async function seedDeals(companyId: string) {
   const solarPipe = pipelines.find((p) => p.vertical === "solar");
   if (!roofPipe || !solarPipe) throw new Error("Live's roofing and solar pipelines were not found.");
 
+  // AT_GATE resolves to whatever stage that vertical's commission gate lives on.
+  // Live's solar gate is a hand-made stage whose key is `partial_funding_26`,
+  // an artefact of it having been created as "Partial Funding" and renamed to
+  // "M1 Funding" afterwards — so the demo must not hardcode a key here.
   const stageOf = (p: typeof roofPipe, key: string) => {
-    const s = p!.stages.find((x) => x.key === key);
+    const s = key === AT_GATE ? findGateStage(p!.vertical, p!.stages) : p!.stages.find((x) => x.key === key);
     if (!s) throw new Error(`Stage '${key}' not found in the ${p!.vertical} pipeline.`);
     return s;
   };
@@ -585,16 +604,19 @@ async function main() {
   console.log("\n  Live's real accounts — type the address, same password:");
   for (const r of real) console.log(`    ${r.email.padEnd(30)} ${r.role.padEnd(12)} ${r.firstName} ${r.lastName}`);
 
-  const gate = await db.pipelineStage.findFirst({
-    where: { pipeline: { companyId: company.id, vertical: "roofing" }, key: "depreciation_requested" },
-    select: { name: true },
+  const pipes = await db.pipeline.findMany({
+    where: { companyId: company.id },
+    select: { vertical: true, stages: { select: { id: true, key: true, name: true } } },
   });
+  const gateName = (v: string) =>
+    findGateStage(v, pipes.find((p) => p.vertical === v)?.stages ?? [])?.name ?? "the gate";
   console.log(`\n  Watching a commission appear:`);
   console.log(`    1. Sign in as owner@anexahomes.com and open Commissions.`);
-  console.log(`    2. Press Generate. Ramirez, Nair, Alvarez and Brooks pay out;`);
-  console.log(`       Whitaker does not — it is one stage short of "${gate?.name ?? "the gate"}".`);
-  console.log(`    3. Drag Whitaker into that stage on the pipeline, Generate again,`);
-  console.log(`       and its lines appear. Approve them to move them into payroll.\n`);
+  console.log(`    2. Roofing gates at "${gateName("roofing")}", Solar at "${gateName("solar")}".`);
+  console.log(`    3. Press Generate. Ramirez, Nair and Brooks pay out. Whitaker and`);
+  console.log(`       Alvarez do not — both sit short of their pipeline's gate.`);
+  console.log(`    4. Drag one of them into its gate stage, Generate again, and its`);
+  console.log(`       lines appear. Approve them to move them into payroll.\n`);
 }
 
 main()

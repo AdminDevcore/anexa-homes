@@ -53,6 +53,9 @@ const SOLAR_STAGES = [
   { key: "permitting", name: "Permitting", color: "#A78BFA" },
   { key: "install_scheduled", name: "Install Scheduled", color: "#60A5FA" },
   { key: "installed", name: "Installed", color: "#34D399" },
+  // The solar commission gate: the lender's first milestone payment, and the
+  // first money the company sees on the deal. Nothing pays a rep before it.
+  { key: "m1_funding", name: "M1 Funding", color: "#14B8A6" },
   { key: "pto", name: "PTO / Activated", color: "#22C55E" },
   { key: "paid", name: "Paid", color: "#16A34A", isWon: true },
 ];
