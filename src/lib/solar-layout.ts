@@ -54,9 +54,13 @@ export type LayoutBlock = {
    *                 when no roof model exists. One ridge for the whole house,
    *                 so it can be wrong on an L-plan and cannot tell the faces
    *                 of a hip apart. An estimate, and the proposal says so.
+   *   "traced"    — square off the eave of a roof face the rep traced, which
+   *                 is the outer edge of a shape a person drew while looking
+   *                 at the house. Better than a coin toss and worse than a
+   *                 measurement: it is only ever as good as the trace.
    *   null        — a person's own figure, or nothing at all.
    */
-  facingSource?: "roof" | "footprint" | null;
+  facingSource?: "roof" | "footprint" | "traced" | null;
   /**
    * How much of this array's year the surroundings take away, 0..100.
    *
@@ -71,6 +75,36 @@ export type LayoutBlock = {
    * asked for a per-module figure they would be inventing precision.
    */
   shadePct?: number | null;
+  /**
+   * The roof plane a rep traced to produce this array, if they did.
+   *
+   * Carried ON the block rather than in a column of its own, which is what let
+   * the whole traced-face feature ship without a migration: `layoutBlocks` is
+   * already JSON and already round-trips whatever shape this file parses.
+   *
+   * It is kept so the fill can be REPEATED. The panel stepper beside the fill
+   * re-covers the roof at a new size, and a design reopened next week has to
+   * be able to do that without the rep tracing the roof a second time. Without
+   * this the trace would be a gesture that produced an array and then evaporated.
+   *
+   * Absent on every array drawn by hand, and on every array that existed before
+   * tracing did. Nothing reads it except the fill.
+   */
+  face?: RoofFace | null;
+};
+
+/**
+ * A roof plane as a person drew it: a closed ring in ground metres, plus how
+ * far in from that line panels have to stay.
+ *
+ * Lives here rather than in `solar-face-fill` because `LayoutBlock` carries one
+ * and this file may not import that one — the dependency runs the other way.
+ */
+export type RoofFace = {
+  /** A closed ring. The first point is NOT repeated at the end. */
+  points: { e: number; n: number }[];
+  /** How far in from the traced edge panels must stay, metres. */
+  insetM: number;
 };
 
 export type ModuleMm = { widthMm: number; heightMm: number };
@@ -601,6 +635,84 @@ export function tidyBlocks(blocks: LayoutBlock[], m: ModuleMm): TidyResult {
 }
 
 /**
+ * Put a lone panel back into the array it belongs to.
+ *
+ * The other half of `detachPanel`, and the reason a click is no longer
+ * destructive. Pulling a panel out is how "slide this one over" works; the
+ * failure mode was that there was no way back, so a rep who grabbed a panel and
+ * changed their mind was left with a 1x1 block sitting exactly where a cell of
+ * the array used to be — visually identical, priced the same, and separately
+ * asking to be told which way it faces.
+ *
+ * Absorbing happens on RELEASE, not on save, so it is visible: the panel snaps
+ * into the grid under the pointer and the selection follows it. Nothing is
+ * moved that the rep did not just move themselves.
+ *
+ * Null means leave it loose, which is an ordinary answer: a panel deliberately
+ * placed off the array's lattice, one turned to another angle, or one dropped
+ * on a cell that is already taken. `tidyBlocks` is still there for a roof that
+ * has accumulated strays; this only ever acts on the panel in the rep's hand.
+ */
+export function absorbPanel(
+  blocks: LayoutBlock[],
+  looseId: string,
+  m: ModuleMm
+): { blocks: LayoutBlock[]; hostId: string } | null {
+  const loose = blocks.find((b) => b.id === looseId);
+  // Only a single panel is ever put back. A whole array dropped on another is a
+  // rep moving a bank of modules, not a mistake to undo.
+  if (!loose || loose.cols !== 1 || loose.rows !== 1 || blockPanelCount(loose) !== 1) return null;
+
+  for (const host of blocks) {
+    if (host.id === looseId) continue;
+    // Same grid, same bearing, same rail gaps — or it is not the same array.
+    if (!sharesLattice(host, loose, m)) continue;
+
+    // Aim at the panel's CENTRE. Its corner sits exactly on a lattice line,
+    // where a hair of drift picks the neighbouring cell instead — the same trap
+    // `tidyBlocks` documents.
+    const corners = cellCorners(loose, m, 0);
+    const centre = {
+      e: (corners[0].e + corners[2].e) / 2,
+      n: (corners[0].n + corners[2].n) / 2,
+    };
+    /**
+     * NEAR ENOUGH TO BE PART OF THIS ARRAY, which is a separate question from
+     * sharing its lattice — the lattice is infinite, so a panel dropped nine
+     * metres away across the garden still lands on it, and folding that one in
+     * grows the array eleven rows to reach it.
+     *
+     * One cell is touching an edge. Beyond that the rep has plainly put the
+     * panel somewhere else on purpose, which is the same line `Add panel`
+     * already draws for the same reason.
+     */
+    const cell = cellAt(host, m, centre);
+    if (cellDistance(host, cell) > 1) continue;
+
+    const before = blockPanelCount(host);
+    const grown = addPanelAtCell(host, cell, m);
+    // The cell was already taken: putting it back would stack two modules on
+    // one patch of roof, which is the exact defect `wouldOverlap` exists for.
+    if (blockPanelCount(grown) === before) return null;
+
+    // The host's own grid had room, but another array can cross the same
+    // ground. Nothing goes on top of anything.
+    const landed = cellAt(grown, m, centre);
+    const index = landed.row * Math.max(1, grown.cols) + landed.col;
+    const others = blocks.filter((b) => b.id !== looseId && b.id !== host.id);
+    if (wouldOverlap(cellCorners(grown, m, index), others, m)) return null;
+
+    return {
+      blocks: blocks.flatMap((b) =>
+        b.id === looseId ? [] : b.id === host.id ? [grown] : [b]
+      ),
+      hostId: host.id,
+    };
+  }
+  return null;
+}
+
+/**
  * Which cell of a block's lattice a ground point falls in.
  *
  * Indices may be NEGATIVE or past the end — that is the point. The lattice is
@@ -801,8 +913,39 @@ export function parseLayoutBlocks(raw: unknown): LayoutBlock[] {
         ? ("roof" as const)
         : (b as LayoutBlock).facingSource === "footprint"
           ? ("footprint" as const)
-          : null,
+          : (b as LayoutBlock).facingSource === "traced"
+            ? ("traced" as const)
+            : null,
+    // A malformed trace reads as no trace, never as a shape with a hole in it:
+    // the fill would put panels wherever the missing corner used to be.
+    face: parseRoofFace((b as LayoutBlock).face),
   }));
+}
+
+/**
+ * One traced roof face off the wire, or null.
+ *
+ * Three corners is the fewest that enclose anything. Anything less is a line,
+ * and a line filled with panels is a row of modules in mid-air.
+ */
+export function parseRoofFace(raw: unknown): RoofFace | null {
+  if (!raw || typeof raw !== "object") return null;
+  const x = raw as Record<string, unknown>;
+  if (!Array.isArray(x.points)) return null;
+  const points = x.points.flatMap((pt) => {
+    if (!pt || typeof pt !== "object") return [];
+    const p = pt as Record<string, unknown>;
+    return typeof p.e === "number" && Number.isFinite(p.e) &&
+      typeof p.n === "number" && Number.isFinite(p.n)
+      ? [{ e: p.e, n: p.n }]
+      : [];
+  });
+  if (points.length !== x.points.length || points.length < 3) return null;
+  const insetM =
+    typeof x.insetM === "number" && Number.isFinite(x.insetM) && x.insetM >= 0
+      ? Math.min(10, x.insetM)
+      : DEFAULT_SETBACK_M;
+  return { points, insetM };
 }
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,11 @@ import {
   blockSpanM,
   PANEL_GAP_M,
   MODULE_FALLBACK_MM,
+  absorbPanel,
+  blockPanelCount,
+  detachPanel,
   type LayoutBlock,
+  type ModuleMm,
 } from "@/lib/solar-layout";
 
 const block = (over: Partial<LayoutBlock> = {}): LayoutBlock => ({
@@ -225,5 +229,89 @@ describe("the block's own frame", () => {
     const { spanX, spanY } = blockSpanM(block({ cols: 3, rows: 2 }), MODULE_FALLBACK_MM);
     expect(spanX).toBeCloseTo(3 * w + 2 * PANEL_GAP_M, 9);
     expect(spanY).toBeCloseTo(2 * h + 1 * PANEL_GAP_M, 9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Putting a panel back
+// ---------------------------------------------------------------------------
+
+describe("absorbPanel", () => {
+  const M: ModuleMm = { widthMm: 1000, heightMm: 1000 };
+
+  /** A 3 x 2 array at the origin, pointing north, with nothing knocked out. */
+  const grid = (): LayoutBlock => ({
+    id: "grid",
+    originE: 0,
+    originN: 0,
+    rotationDeg: 0,
+    cols: 3,
+    rows: 2,
+    orientation: "portrait",
+    omitted: [],
+  });
+
+  it("puts a panel back in the hole it came out of", () => {
+    const pulled = detachPanel([grid()], "grid", 4, M, "loose")!;
+    expect(pulled.blocks).toHaveLength(2);
+
+    const back = absorbPanel(pulled.blocks, "loose", M);
+    expect(back).not.toBeNull();
+    expect(back!.blocks).toHaveLength(1);
+    expect(back!.blocks[0].id).toBe("grid");
+    expect(blockPanelCount(back!.blocks[0])).toBe(6);
+    expect(back!.blocks[0].omitted).toHaveLength(0);
+  });
+
+  it("leaves a panel dragged well clear of the array alone", () => {
+    const pulled = detachPanel([grid()], "grid", 4, M, "loose")!;
+    const moved = pulled.blocks.map((b) =>
+      b.id === "loose" ? { ...b, originE: b.originE + 9, originN: b.originN - 9 } : b
+    );
+    expect(absorbPanel(moved, "loose", M)).toBeNull();
+  });
+
+  it("takes a panel nudged a few centimetres as meant for its own cell", () => {
+    const pulled = detachPanel([grid()], "grid", 4, M, "loose")!;
+    // Eight centimetres off — a hand that did not quite land, not a decision.
+    const nudged = pulled.blocks.map((b) =>
+      b.id === "loose" ? { ...b, originE: b.originE + 0.08, originN: b.originN + 0.05 } : b
+    );
+    const back = absorbPanel(nudged, "loose", M)!;
+    expect(back.blocks).toHaveLength(1);
+    expect(blockPanelCount(back.blocks[0])).toBe(6);
+  });
+
+  it("grows the array when the panel is dropped just off its edge", () => {
+    const pulled = detachPanel([grid()], "grid", 4, M, "loose")!;
+    // One whole cell to the right of the array's last column.
+    const out = pulled.blocks.map((b) =>
+      b.id === "loose" ? { ...b, originE: 3 * (1 + PANEL_GAP_M) } : b
+    );
+    const back = absorbPanel(out, "loose", M)!;
+    expect(back.blocks).toHaveLength(1);
+    expect(back.blocks[0].cols).toBe(4);
+    expect(blockPanelCount(back.blocks[0])).toBe(6);
+  });
+
+  it("refuses to stack a panel on one already there", () => {
+    const pulled = detachPanel([grid()], "grid", 4, M, "loose")!;
+    // Back onto cell 0, which still has its panel.
+    const onTop = pulled.blocks.map((b) =>
+      b.id === "loose" ? { ...b, originE: 0, originN: 0 } : b
+    );
+    expect(absorbPanel(onTop, "loose", M)).toBeNull();
+  });
+
+  it("will not fold a panel into an array lying at another angle", () => {
+    const pulled = detachPanel([grid()], "grid", 4, M, "loose")!;
+    const turned = pulled.blocks.map((b) =>
+      b.id === "loose" ? { ...b, rotationDeg: 35 } : b
+    );
+    expect(absorbPanel(turned, "loose", M)).toBeNull();
+  });
+
+  it("does nothing to an array that is not a lone panel", () => {
+    expect(absorbPanel([grid()], "grid", M)).toBeNull();
   });
 });

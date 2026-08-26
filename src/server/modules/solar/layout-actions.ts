@@ -34,12 +34,33 @@ const blockSchema = z.object({
   // reason as the two above: a design saved before shading existed has none,
   // and none has to keep pricing exactly as it did.
   shadePct: z.number().finite().min(0).max(100).nullish(),
-  // Where the two angles above came from. Only one value is meaningful and the
-  // rest of the enum is deliberately absent: a client that sends anything else
-  // is claiming a measurement nobody made.
-  // Both of the values the server writes. A browser is free to send either
-  // back unchanged; anything else is a person's own figure and parses to null.
-  facingSource: z.enum(["roof", "footprint"]).nullish(),
+  // Where the two angles above came from. Every value the server itself writes,
+  // and nothing else: a browser is free to send one of these back unchanged,
+  // but anything outside the list is claiming a provenance nobody earned and
+  // parses to null — a person's own figure.
+  facingSource: z.enum(["roof", "footprint", "traced"]).nullish(),
+  /**
+   * The roof plane the rep traced to produce this array.
+   *
+   * Bounded exactly like the setbacks and the origins are, and for the same
+   * reason: a residential roof is a few tens of metres across, so a corner 200
+   * m out is a bad payload rather than an eave. Nullish because every array
+   * drawn by hand has none, which is most of them.
+   */
+  face: z
+    .object({
+      points: z
+        .array(
+          z.object({
+            e: z.number().finite().min(-200).max(200),
+            n: z.number().finite().min(-200).max(200),
+          })
+        )
+        .min(3)
+        .max(60),
+      insetM: z.number().finite().min(0).max(10),
+    })
+    .nullish(),
 });
 
 /**
