@@ -790,14 +790,19 @@ export function SolarProposalView({
               {/* The honest caveat, next to the money rather than in the small
                   print at the end. Enrolment is the homeowner's to keep. */}
               <p className="mt-4 max-w-[62ch] text-xs leading-relaxed text-neutral-500">
-                {/* The count and its noun in ONE expression on purpose. The JSX
-                    transform drops a space that sits directly after an
-                    expression container, and `{n} years` compiled to "25years"
-                    on a document a homeowner reads. */}
-                Counted for all {`${sv.years.length} years`} above at today&rsquo;s rate. Enrolment is
-                between you and {vpp.length === 1 ? vpp[0].provider : "your provider"}, and the
-                programme&rsquo;s terms are theirs to change — these payments are an estimate on the
-                same footing as the rest of this page, not a guarantee.
+                {/* ONE template literal, deliberately, rather than prose with
+                    `{n}` sitting in it.
+
+                    Where a literal ends in a space and an expression follows,
+                    the JSX transform keeps only ONE of the two spaces around
+                    the boundary and attaches it to the text BEFORE — so
+                    `all {n} years above` compiles to "all 25years above", and
+                    moving the space inside the expression only pushes the
+                    problem to "25 yearsabove". A homeowner reads this sentence;
+                    it does not get to depend on that rule. */}
+                {`Counted for all ${sv.years.length} years above at today\u2019s rate. Enrolment is between you and ${
+                  vpp.length === 1 ? vpp[0].provider : "your provider"
+                }, and the programme\u2019s terms are theirs to change \u2014 these payments are an estimate on the same footing as the rest of this page, not a guarantee.`}
               </p>
             </div>
           )}
