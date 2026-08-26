@@ -334,6 +334,64 @@ export async function saveSolarProviderAction(input: z.infer<typeof providerSche
 }
 
 /**
+ * What a provider does for a solar customer.
+ *
+ * A separate action from the rename above, deliberately. That one is called
+ * from an inline text box on every row and posts a name; this one is a form
+ * somebody opens on one provider and fills in. Folding them together would mean
+ * every rename posted seven nullable fields, and any of them missing from the
+ * payload would blank a rate the office had recorded.
+ */
+const providerTermsSchema = z.object({
+  buyback: z.boolean(),
+  /** Mills per exported kWh. 95 = $0.095. Null when the rate varies or is unknown. */
+  buybackRateMills: z.number().int().min(0).max(2_000).nullable(),
+  vpp: z.boolean(),
+  vppProgramme: z.string().max(120).nullable(),
+  vppUpfrontCents: z.number().int().min(0).max(100_000_00).nullable(),
+  vppAnnualCents: z.number().int().min(0).max(100_000_00).nullable(),
+  notes: z.string().max(2_000).nullable(),
+});
+
+export async function saveSolarProviderTermsAction(
+  id: string,
+  input: z.infer<typeof providerTermsSchema>
+) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = providerTermsSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid provider terms.");
+  const d = parsed.data;
+
+  const row = await prisma.solarProvider.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!row) return fail("Provider not found.");
+
+  await prisma.solarProvider.update({
+    where: { id },
+    data: {
+      buyback: d.buyback,
+      // The figures follow their flag. Leaving a rate behind on a provider
+      // somebody has just said does NOT buy back is the same class of bug as an
+      // APR stranded on a lease: it is invisible until the day it is read.
+      buybackRateMills: d.buyback ? d.buybackRateMills : null,
+      vpp: d.vpp,
+      vppProgramme: d.vpp ? (d.vppProgramme?.trim() || null) : null,
+      vppUpfrontCents: d.vpp ? d.vppUpfrontCents : null,
+      vppAnnualCents: d.vpp ? d.vppAnnualCents : null,
+      // Notes survive either flag: "checked with them in March, they do not"
+      // is worth keeping on a provider that does neither.
+      notes: d.notes?.trim() || null,
+    },
+  });
+
+  revalidatePath("/portal/settings/solar-providers");
+  return ok();
+}
+
+/**
  * Retire a provider rather than deleting it.
  *
  * Designs store the provider's NAME, so a delete leaves deals naming something

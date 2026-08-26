@@ -610,6 +610,41 @@ model SolarProvider {
   name      String
   position  Int               @default(0)
   active    Boolean           @default(true)
+
+  // ── What this provider does for a solar customer ─────────────────────────
+  //
+  // Recorded per provider because it is a fact about the PROVIDER, not about
+  // any one deal, and because it is the question a rep gets asked at the
+  // kitchen table and cannot answer from the CRM: "do they pay me for what I
+  // send back, and is there anything for the battery?"
+  //
+  // Every field is optional and nothing here reaches the customer's proposal
+  // or its arithmetic. It is what the office knows, shown to the rep beside
+  // the provider they just picked.
+
+  /// Does this provider buy back exported power at all?
+  buyback          Boolean  @default(false)
+  /// What they pay for an exported kWh, in mills. 95 = $0.095/kWh. Null when
+  /// they buy back but the rate varies, or nobody has recorded it — which is
+  /// why the flag is separate from the figure rather than derived from it.
+  buybackRateMills Int?
+
+  /// Does this provider run a battery / virtual-power-plant programme?
+  vpp             Boolean @default(false)
+  /// Its name, where the programme is branded separately from the provider —
+  /// a customer signs up to "Renew Home", not to their retailer.
+  vppProgramme    String?
+  /// One-off enrolment money, cents.
+  vppUpfrontCents Int?
+  /// Recurring money, cents a year.
+  vppAnnualCents  Int?
+
+  /// Everything the fields above cannot hold: term lengths, which batteries
+  /// qualify, enrolment windows, whichever condition this programme has that
+  /// no other one does. Free text on purpose — a schema that tried to model
+  /// every utility's small print would be wrong by the next quarter.
+  notes           String?
+
   createdAt DateTime          @default(now())
 
   @@unique([companyId, kind, name])

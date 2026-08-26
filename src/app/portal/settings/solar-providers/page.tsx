@@ -32,7 +32,13 @@ export default async function SolarProvidersPage() {
   const rows = await prisma.solarProvider.findMany({
     where: { companyId: user.companyId },
     orderBy: [{ active: "desc" }, { position: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, active: true, position: true, kind: true },
+    select: {
+      id: true, name: true, active: true, position: true, kind: true,
+      // What the office has confirmed each provider does for a solar customer.
+      buyback: true, buybackRateMills: true,
+      vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
+      notes: true,
+    },
   });
 
   return (

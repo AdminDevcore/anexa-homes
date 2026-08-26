@@ -1,7 +1,12 @@
 import { prisma } from "@/server/db/client";
 import type { SolarProviderKind } from "@prisma/client";
+import type { ProviderTerms } from "@/lib/solar-provider-terms";
 
-export type ProviderOption = { id: string; name: string; active: boolean };
+export type ProviderOption = {
+  id: string;
+  name: string;
+  active: boolean;
+} & ProviderTerms;
 
 /**
  * A company's provider list for one kind.
@@ -26,7 +31,20 @@ export async function listSolarProviders(
       ...(keepName ? { OR: [{ active: true }, { name: keepName }] } : { active: true }),
     },
     orderBy: [{ position: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, active: true },
+    /**
+     * The terms travel with the option.
+     *
+     * A rep picking a provider on the Energy step is exactly the moment the
+     * question "do they buy back, is there anything for the battery?" comes up,
+     * and a second query to answer it would be a second thing to forget on the
+     * next screen that lists providers.
+     */
+    select: {
+      id: true, name: true, active: true,
+      buyback: true, buybackRateMills: true,
+      vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
+      notes: true,
+    },
   });
   return rows;
 }

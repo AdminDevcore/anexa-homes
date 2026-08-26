@@ -17,6 +17,11 @@ import { deriveUtilityRateMills } from "@/lib/solar-money";
 import { saveSolarEnergyAction } from "@/server/modules/solar/energy-actions";
 import type { ProviderOption } from "@/server/modules/solar/providers";
 import { SolarEnergyChart } from "@/components/portal/solar-energy-chart";
+import {
+  buybackLine,
+  hasProviderTerms,
+  vppLine,
+} from "@/lib/solar-provider-terms";
 
 export type SolarEnergyView = {
   utilityProvider: string | null;
@@ -380,6 +385,47 @@ function ProviderField({
           placeholder="Type the provider's name"
           onChange={(e) => onChange({ ...state, other: e.target.value })}
         />
+      )}
+      <ProviderTermsNote option={options.find((o) => o.name === state.selected) ?? null} />
+    </div>
+  );
+}
+
+/**
+ * What the office has confirmed this provider does, read back the moment a rep
+ * picks them.
+ *
+ * This is the question that gets asked across the kitchen table — "do they pay
+ * me for what I send back, and is there anything for the battery?" — and until
+ * now the answer lived in somebody's head. It is a NOTE, not a quote: none of
+ * it reaches the customer's document or its arithmetic, which is why it renders
+ * here beside the picker and nowhere near the savings model.
+ *
+ * A provider with nothing recorded says so. On a panel whose job is to answer
+ * this, blank space reads as "no" when it means "nobody has checked", and a rep
+ * will quote the first one.
+ */
+function ProviderTermsNote({ option }: { option: ProviderOption | null }) {
+  if (!option) return null;
+  const lines = [buybackLine(option), vppLine(option)].filter(Boolean);
+  if (lines.length === 0 && !option.notes) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        {hasProviderTerms(option)
+          ? "No buyback or battery programme."
+          : "Buyback and VPP not recorded for this provider."}
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/30 px-2.5 py-1.5">
+      {lines.length > 0 && (
+        <p className="text-[11px] font-medium text-foreground">{lines.join(" · ")}</p>
+      )}
+      {option.notes && (
+        <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
+          {option.notes}
+        </p>
       )}
     </div>
   );
