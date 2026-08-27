@@ -1,5 +1,9 @@
 import { prisma } from "@/server/db/client";
 import { objectExists } from "@/server/storage";
+import { DESIGNER_LAYOUT_FILENAME } from "@/lib/solar-layout";
+
+/** The folder key a panel layout is filed under. See lib/deal-folders.ts. */
+export const LAYOUT_CATEGORY = "solar_layout";
 
 /**
  * Is this layout actually renderable, right now?
@@ -37,4 +41,71 @@ export async function resolveLayoutAsset(
   });
   if (!file) return null;
   return (await objectExists(file.storageKey)) ? file : null;
+}
+
+/**
+ * Drop the drawings this deal has outgrown.
+ *
+ * The designer re-renders its picture of the array on every save and files it
+ * as a new FileAsset, then points the design at it. Nothing ever pointed at the
+ * one before, so a roof drawn eight times left eight near-identical aerials
+ * sitting on the deal — the second half of the bug that also put them all in
+ * "Other".
+ *
+ * THREE THINGS ARE NEVER SWEPT:
+ *
+ *  1. `keepFileId` — the drawing the design points at now.
+ *  2. Anything a proposal froze into its snapshot. `serveLayoutImage` reads the
+ *     file row by the id in `snapshot.layout.fileId`, so deleting the row takes
+ *     the picture off a link a homeowner may already be looking at. Drafts are
+ *     protected too: an unsent version can still be sent.
+ *  3. Anything not named `DESIGNER_LAYOUT_FILENAME` — that is a rep's own
+ *     upload from Aurora or the like, and replacing it is not permission to
+ *     throw it away.
+ *
+ * Row-only, matching `removeFiledCopies` and `deleteFileAction`: the stored
+ * object stays. A prune we get wrong should cost a database row, never bytes.
+ *
+ * Returns how many rows went, and never throws — a failed cleanup must not
+ * cost the rep the save that triggered it.
+ */
+export async function pruneSupersededLayouts(
+  companyId: string,
+  leadId: string,
+  keepFileId: string,
+): Promise<number> {
+  try {
+    const candidates = await prisma.fileAsset.findMany({
+      where: {
+        companyId,
+        leadId,
+        kind: "photo",
+        category: LAYOUT_CATEGORY,
+        name: DESIGNER_LAYOUT_FILENAME,
+        id: { not: keepFileId },
+      },
+      select: { id: true },
+    });
+    if (candidates.length === 0) return 0;
+
+    // One count per candidate rather than one query loading every snapshot:
+    // a snapshot is several hundred kilobytes and there are usually one or two
+    // candidates. Asking the database the narrow question is far cheaper than
+    // pulling the documents across to answer it here.
+    const doomed: string[] = [];
+    for (const { id } of candidates) {
+      const frozen = await prisma.solarProposal.count({
+        where: { companyId, leadId, snapshot: { path: ["layout", "fileId"], equals: id } },
+      });
+      if (frozen === 0) doomed.push(id);
+    }
+    if (doomed.length === 0) return 0;
+
+    const { count } = await prisma.fileAsset.deleteMany({
+      where: { companyId, leadId, id: { in: doomed } },
+    });
+    return count;
+  } catch {
+    return 0;
+  }
 }

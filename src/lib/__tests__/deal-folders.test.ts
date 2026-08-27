@@ -98,10 +98,27 @@ describe("solar key compatibility", () => {
       "permits",
       "interconnection",
       "install_photos",
+      "solar_layout",
       "other",
     ]) {
       expect(keys).toContain(k);
     }
+  });
+
+  // The panel-layout designer has written `solar_layout` since it shipped, so
+  // every drawing ever saved fell into "Other" for want of this one key. It is
+  // the same failure as `signed_contract` below, and this is the test that
+  // stops the folder being renamed back out from under those files.
+  it("files the designer's panel layout in its own folder, not Other", () => {
+    expect(folderKeyFor("solar", "solar_layout")).toBe("solar_layout");
+    expect(folderLabel("solar", "solar_layout")).toBe("Panel Layout");
+  });
+
+  // A drawing is a document a rep opens and reads, not a checklist slot. Giving
+  // it `special` would swap the file list for a photo checklist that has no
+  // slots to fill.
+  it("shows the layout as an ordinary file list", () => {
+    expect(SOLAR_FOLDERS.find((f) => f.key === "solar_layout")?.special).toBeUndefined();
   });
 
   // The completion paperwork the install agreement names, each in its own
@@ -144,6 +161,7 @@ describe("solar paperwork stays out of roofing", () => {
     "lien_waiver_progress",
     "lien_waiver_final",
     "pto",
+    "solar_layout",
   ];
 
   it("gives roofing none of those folders", () => {

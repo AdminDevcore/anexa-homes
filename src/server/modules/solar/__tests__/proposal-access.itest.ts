@@ -2,8 +2,13 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { getPublicSolarProposal, recordProposalView } from "@/server/modules/solar/proposal-public";
-import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
-import { putObject } from "@/server/storage";
+import {
+  LAYOUT_CATEGORY,
+  pruneSupersededLayouts,
+  resolveLayoutAsset,
+} from "@/server/modules/solar/layout-asset";
+import { DESIGNER_LAYOUT_FILENAME } from "@/lib/solar-layout";
+import { objectExists, putObject } from "@/server/storage";
 import { randomBytes } from "node:crypto";
 
 /**
@@ -255,5 +260,120 @@ describe("a layout is only rendered when it can actually be fetched", () => {
     const f = await makeFile(false);
     expect(await resolveLayoutAsset(companyId, leadId, f.id)).toBeNull();
     expect(await db.fileAsset.findUnique({ where: { id: f.id } })).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Superseded layout drawings
+// ---------------------------------------------------------------------------
+
+/**
+ * The designer re-renders its picture of the array and files it as a NEW
+ * FileAsset on every save, then re-points the design at it. Nothing ever
+ * pointed at the copy before, so a roof drawn eight times left eight
+ * near-identical aerials on the deal.
+ *
+ * Pruning them is a delete, so what it must NEVER take is the interesting part:
+ * the current drawing, anything a proposal froze into its snapshot, and
+ * anything a rep uploaded themselves.
+ */
+describe("superseded panel layouts are pruned, but only the safe ones", () => {
+  async function makeLayout(name = DESIGNER_LAYOUT_FILENAME, lead = leadId, company = companyId) {
+    const key = `test/prune-${randomBytes(6).toString("hex")}.jpg`;
+    await putObject(key, Buffer.from("not-really-a-jpeg-but-nonzero"));
+    return db.fileAsset.create({
+      data: {
+        companyId: company, leadId: lead, kind: "photo", name,
+        category: LAYOUT_CATEGORY, storageKey: key, mimeType: "image/jpeg", size: 28,
+      },
+      select: { id: true, storageKey: true },
+    });
+  }
+
+  const alive = async (id: string) =>
+    (await db.fileAsset.findUnique({ where: { id }, select: { id: true } })) !== null;
+
+  beforeEach(async () => {
+    await db.fileAsset.deleteMany({ where: { companyId } });
+  });
+
+  it("drops the drawings the deal has outgrown and keeps the current one", async () => {
+    const old1 = await makeLayout();
+    const old2 = await makeLayout();
+    const current = await makeLayout();
+
+    expect(await pruneSupersededLayouts(companyId, leadId, current.id)).toBe(2);
+    expect(await alive(old1.id)).toBe(false);
+    expect(await alive(old2.id)).toBe(false);
+    expect(await alive(current.id)).toBe(true);
+  });
+
+  it("keeps a drawing frozen into a SENT proposal — the customer's link reads that row", async () => {
+    // serveLayoutImage looks the file up by snapshot.layout.fileId. Delete the
+    // row and the homeowner's proposal loses its picture.
+    const old = await makeLayout();
+    const current = await makeLayout();
+    await makeProposal({ status: "sent", sentAt: new Date(), layoutFileId: old.id });
+
+    expect(await pruneSupersededLayouts(companyId, leadId, current.id)).toBe(0);
+    expect(await alive(old.id)).toBe(true);
+  });
+
+  it("keeps one frozen into an UNSENT proposal too — a draft can still be sent", async () => {
+    const old = await makeLayout();
+    const current = await makeLayout();
+    await makeProposal({ status: "draft", layoutFileId: old.id });
+
+    expect(await pruneSupersededLayouts(companyId, leadId, current.id)).toBe(0);
+    expect(await alive(old.id)).toBe(true);
+  });
+
+  it("never touches a layout the rep uploaded by hand", async () => {
+    // Same category, same folder, different thing entirely: an export from
+    // another design tool. Replacing it is not permission to delete it.
+    const theirs = await makeLayout("aurora-export.png");
+    const current = await makeLayout();
+
+    expect(await pruneSupersededLayouts(companyId, leadId, current.id)).toBe(0);
+    expect(await alive(theirs.id)).toBe(true);
+  });
+
+  it("stays inside the deal it was asked about", async () => {
+    const pipeline = await db.pipeline.findFirstOrThrow({ where: { companyId } });
+    const stage = await db.pipelineStage.findFirstOrThrow({ where: { pipelineId: pipeline.id } });
+    const other = await db.lead.create({
+      data: {
+        companyId, vertical: "solar", pipelineId: pipeline.id, stageId: stage.id,
+        firstName: "Other", lastName: "Deal",
+      },
+      select: { id: true },
+    });
+    const theirs = await makeLayout(DESIGNER_LAYOUT_FILENAME, other.id);
+    const mine = await makeLayout();
+    const current = await makeLayout();
+
+    expect(await pruneSupersededLayouts(companyId, leadId, current.id)).toBe(1);
+    expect(await alive(mine.id)).toBe(false);
+    expect(await alive(theirs.id)).toBe(true);
+
+    await db.fileAsset.deleteMany({ where: { leadId: other.id } });
+    await db.lead.delete({ where: { id: other.id } });
+  });
+
+  it("deletes the ROW and leaves the bytes in storage", async () => {
+    // Same rule as removeFiledCopies and deleteFileAction: a prune we get wrong
+    // should cost a database row, never the picture itself.
+    const old = await makeLayout();
+    const current = await makeLayout();
+    await pruneSupersededLayouts(companyId, leadId, current.id);
+
+    expect(await alive(old.id)).toBe(false);
+    expect(await objectExists(old.storageKey)).toBe(true);
+  });
+
+  it("does nothing on a deal with a single drawing", async () => {
+    const only = await makeLayout();
+    expect(await pruneSupersededLayouts(companyId, leadId, only.id)).toBe(0);
+    expect(await alive(only.id)).toBe(true);
   });
 });

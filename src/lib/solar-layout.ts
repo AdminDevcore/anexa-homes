@@ -116,6 +116,22 @@ export const MODULE_FALLBACK_MM: ModuleMm = { widthMm: 1134, heightMm: 1762 };
 export const PANEL_GAP_M = 0.02;
 
 /**
+ * The filename the designer saves its own snapshot of the array under.
+ *
+ * LOAD-BEARING, and the only thing that tells the designer's drawing apart from
+ * a layout a rep exported from another tool and uploaded by hand. Both arrive
+ * through the same action and are filed under the same category, but they are
+ * not the same kind of thing: the designer re-renders its picture on EVERY
+ * save, so yesterday's copy is superseded and gets pruned, while a rep's upload
+ * is a document they chose to put on the deal and is never touched.
+ *
+ * Change it in one place and the pruner stops recognising every drawing saved
+ * before the change — they stay on the deal instead of being cleaned up, which
+ * is the harmless direction to fail in.
+ */
+export const DESIGNER_LAYOUT_FILENAME = "panel-layout.jpg";
+
+/**
  * Web Mercator ground resolution — the whole tool's accuracy rests here.
  *
  * Re-exported rather than defined here since the customer-facing proposal

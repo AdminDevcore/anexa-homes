@@ -12,6 +12,11 @@
  * why every photo and recording already on a deal shows up in the right folder
  * the moment this ships. Rename one and you orphan its files into "Other".
  *
+ * `solar_layout` is the same kind of key: it is the category
+ * `uploadPanelLayoutAction` has always written for the panel-layout drawing.
+ * Until this folder existed the key matched nothing in the set, so every
+ * drawing the designer produced landed in "Other".
+ *
  * Solar spells its photo folders `survey_photos` / `install_photos` and roofing
  * spells them `survey` / `install`. That inconsistency is deliberate and
  * harmless: `foldersFor` never mixes the two sets, and each spelling matches
@@ -34,6 +39,7 @@ import {
   Folder,
   Hammer,
   HandCoins,
+  LayoutGrid,
   Package,
   Phone,
   Plug,
@@ -101,6 +107,7 @@ export const SOLAR_FOLDERS: DealFolder[] = [
   { key: "proposal", label: "Proposal", hint: "The proposal as presented — the copy of what was sold", icon: FileText },
   { key: "contract", label: "Contract", hint: "Proposals sent for signature, the signed agreement, change orders", icon: FileSignature, hostsPackages: true },
   { key: "utility_bill", label: "Utility Bill", hint: "12 months of usage — the basis for the design", icon: Zap },
+  { key: "solar_layout", label: "Panel Layout", hint: "The array as drawn — the picture the proposal shows", icon: LayoutGrid },
   { key: "personal_files", label: "Personal Files", hint: "ID, proof of income, anything the lender asked for", icon: UserRound },
   { key: "materials", label: "Materials", hint: "Spec sheets and datasheets for what is going on the roof", icon: Package },
   { key: "survey_photos", label: "Survey Photos", hint: "Roof, attic, main panel, meter", icon: Camera, special: "photos" },

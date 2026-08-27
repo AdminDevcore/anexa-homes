@@ -8,7 +8,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
-import { resolveLayoutAsset } from "./layout-asset";
+import { LAYOUT_CATEGORY, pruneSupersededLayouts, resolveLayoutAsset } from "./layout-asset";
 import { generateProposalVersion } from "./proposal-generate";
 import { approveProposalVersion, unapproveProposalVersion } from "./proposal-approval";
 import type { ValidationIssue } from "@/lib/solar-validation";
@@ -377,7 +377,7 @@ export async function uploadPanelLayoutAction(formData: FormData) {
       storageKey: key,
       mimeType: "image/jpeg",
       size: buffer.length,
-      category: "solar_layout",
+      category: LAYOUT_CATEGORY,
       leadId,
       uploadedById: user.userId,
     },
@@ -400,6 +400,11 @@ export async function uploadPanelLayoutAction(formData: FormData) {
       layoutApprovedAt: null,
     },
   });
+
+  // Only AFTER the design points at the new drawing. Prune first and a failure
+  // between the two would leave the deal with no layout at all — the order here
+  // is the difference between losing a duplicate and losing the picture.
+  await pruneSupersededLayouts(user.companyId, leadId, asset.id);
 
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   revalidatePath(`/portal/leads/${leadId}`);
