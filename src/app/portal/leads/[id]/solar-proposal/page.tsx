@@ -5,6 +5,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
+import { approverNames } from "@/server/modules/solar/proposal-approval";
 import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
@@ -120,9 +121,14 @@ export default async function SolarProposalBuilderPage({
         id: true, version: true, status: true, publicToken: true, supersededAt: true,
         sentAt: true, viewedAt: true, signedAt: true, createdAt: true,
         showComparison: true,
+        approvedAt: true, approvedFileId: true, approvedById: true,
       },
     }),
   ]);
+
+  // Who approved the final version, for the badge on the version list. One row
+  // at most — the database allows a single approved version per deal.
+  const approverName = await approverNames(user.companyId, proposals);
 
   // The panel the design is sized from, for the designer's live kW figure and
   // for true-scale panels. A catalogue entry with no dimensions falls back to a
@@ -307,6 +313,10 @@ export default async function SolarProposalBuilderPage({
         annualDegradationPct={settings.annualDegradationPct}
         layoutAvailable={layoutAvailable}
         canApproveLayout={can(user, "update", "Settings")}
+        // Declaring which version the deal sold is an authority call, the same
+        // one that marks a layout final — a rep still generates, previews and
+        // sends. See setProposalApprovalAction.
+        canApproveProposal={can(user, "update", "Settings")}
         lat={lead.lat}
         moduleRatingW={sizingModule?.ratingW ?? null}
         initialBlocks={parseLayoutBlocks(design?.layoutBlocks)}
@@ -352,6 +362,9 @@ export default async function SolarProposalBuilderPage({
           signedAt: v.signedAt?.toISOString() ?? null,
           createdAt: v.createdAt.toISOString(),
           showComparison: v.showComparison,
+          approvedAt: v.approvedAt?.toISOString() ?? null,
+          approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
+          approvedFileId: v.approvedFileId,
         }))}
       />
     </div>

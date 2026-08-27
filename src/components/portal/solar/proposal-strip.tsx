@@ -52,6 +52,7 @@ export function SolarProposalStrip({
   versions,
   canBuild,
   canEdit,
+  canApprove = false,
 }: {
   leadId: string;
   /** Where the proposal stands. Derived — see lib/solar-proposal-state.ts. */
@@ -67,6 +68,12 @@ export function SolarProposalStrip({
   versions: ProposalVersion[];
   canBuild: boolean;
   canEdit: boolean;
+  /**
+   * Whether this user may declare which version the deal sold. Admins only —
+   * everyone else still sees the approved badge, which is the useful half and
+   * is not privileged information.
+   */
+  canApprove?: boolean;
 }) {
   // One headline the way the customer would hear it: a lease is a monthly, a
   // PPA is a rate, a purchase is a price. Quoting a PPA a contract price is how
@@ -126,7 +133,7 @@ export function SolarProposalStrip({
         </p>
       )}
 
-      <ProposalVersionList versions={versions} canEdit={canEdit} />
+      <ProposalVersionList versions={versions} canEdit={canEdit} canApprove={canApprove} />
 
       {canBuild && (
         <Button asChild className="w-full bg-solar text-solar-foreground hover:bg-solar/90 sm:w-auto">

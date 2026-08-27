@@ -105,16 +105,33 @@ changes.
 Filed as `FileAsset { kind: "document", category: "proposal", leadId }`, named
 `Proposal v7 — <customer>.pdf`.
 
-### 4 · Approval commits before the PDF is attempted
+### 4 · Approving and filing are two calls, not one
 
-Chromium cold-starting inside a serverless function is the least reliable part
-of this. It must not be able to prevent an approval.
+A Server Action approves. A separate `POST
+/api/solar/proposals/[id]/file-copy` renders and files. The UI makes both back
+to back; the row's **Retry** makes the second one again.
 
-So the action writes the approval, then attempts the PDF. A failed render
-leaves the version approved with `approvedFileId` null, and the row reads
-`Copy not filed — Retry`. The inverse — refusing to approve because a browser
-binary did not launch — makes a business decision hostage to an infrastructure
-one.
+Two reasons, both load-bearing:
+
+**Reliability.** Chromium cold-starting inside a serverless function is the
+least reliable part of this, and it must not be able to prevent an approval. A
+failed render leaves the version approved with `approvedFileId` null and the row
+reading `Copy not filed — Retry`. The inverse — refusing to approve because a
+browser binary did not launch — makes a business decision hostage to an
+infrastructure one.
+
+**Bundle size.** `@sparticuz/chromium` is a 66MB browser, and Next traces it
+into every function whose import graph reaches it. Called from a Server Action
+it landed in *both* pages that host the approve button — measured at 220 traced
+browser files in each of `/portal/leads/[id]` and
+`/portal/leads/[id]/solar-proposal`. With the render behind its own route those
+two pages trace **0** and the route traces 220. `maxDuration = 60` then sits on
+the segment that actually renders, rather than on two pages that do not.
+
+This is also why `fileApprovedCopy` lives in its own module
+(`proposal-file-copy.ts`) rather than beside `approveProposalVersion`: the
+import graph is the deployment boundary, so it has to be kept narrow
+deliberately.
 
 ### 5 · The control
 
@@ -139,11 +156,22 @@ badge is the useful half and it is not privileged information.
 - Integration: approve → single approved row; approve a second → the first
   clears; unapprove → the FileAsset is gone; the partial index rejects a
   hand-written second approval.
-- E2E: approve from the builder, assert the badge and the file in the Proposal
-  folder; unapprove, assert it is gone.
-- The PDF render itself is exercised by the existing
-  `e2e/solar-proposal-print.spec.ts` machinery rather than a new Chromium boot
-  in CI.
+- Live verification against the dev app with the real renderer, real print
+  route and real storage: approve a superseded version → 1.6MB PDF filed and
+  readable with a valid header; swap → folder holds exactly one; unapprove →
+  folder empty.
+- PDF fidelity checked by rasterising the output: 16 pages all 612×792pt (the
+  `@page` box survived), no date/URL furniture, and the dark chapters measured
+  dark — `print-color-adjust` is honoured through the render path.
+
+**Known gap — no e2e.** The seeded solar lead has a design and a finance row but
+no drawn panel layout, and the module count (hence the price) comes from the
+layout, so the seed cannot generate a solar proposal at all;
+`e2e/solar-proposal-print.spec.ts` already skips for this reason. An approval
+e2e would skip with it and assert nothing. Writing a permanently-skipped test
+would read as coverage that does not exist, so the gap is recorded here
+instead. Fixing it means giving the seed a layout, which is its own piece of
+work.
 
 ## Out of scope
 

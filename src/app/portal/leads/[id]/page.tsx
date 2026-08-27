@@ -71,6 +71,7 @@ import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
 import { SolarProductChip } from "@/components/portal/solar/product-chip";
 import { SolarProposalStrip } from "@/components/portal/solar/proposal-strip";
 import { readSolarReadiness } from "@/server/modules/solar/readiness";
+import { approverNames } from "@/server/modules/solar/proposal-approval";
 import { canGenerate } from "@/lib/solar-validation";
 import { solarProposalState } from "@/lib/solar-proposal-state";
 import { PropertyView } from "@/components/portal/property-view";
@@ -348,6 +349,7 @@ export default async function LeadDetailPage({
             id: true, version: true, status: true, publicToken: true, supersededAt: true,
             sentAt: true, viewedAt: true, signedAt: true, createdAt: true,
             showComparison: true,
+            approvedAt: true, approvedFileId: true, approvedById: true,
           },
         }),
         // A deal can be shopped to several lenders (declined by one, approved by
@@ -379,6 +381,10 @@ export default async function LeadDetailPage({
         }),
       ])
     : [null, null, [], [], null, []];
+
+  // Who approved the final proposal, for the badge on the version list. One row
+  // at most — the database allows a single approved version per deal.
+  const approverName = await approverNames(user.companyId, solarProposals);
 
   /**
    * The interconnection half of the System info slide.
@@ -1456,6 +1462,7 @@ export default async function LeadDetailPage({
                     rateMillsPerKwh={solarFinance?.rateMillsPerKwh ?? null}
                     canBuild={can(user, "create", "Proposal") || can(user, "update", "Proposal")}
                     canEdit={can(user, "create", "Proposal")}
+                    canApprove={can(user, "update", "Settings")}
                     versions={solarProposals.map((v) => ({
                       id: v.id,
                       leadId: lead.id,
@@ -1467,7 +1474,10 @@ export default async function LeadDetailPage({
                       viewedAt: v.viewedAt?.toISOString() ?? null,
                       signedAt: v.signedAt?.toISOString() ?? null,
                       createdAt: v.createdAt.toISOString(),
-          showComparison: v.showComparison,
+                      showComparison: v.showComparison,
+                      approvedAt: v.approvedAt?.toISOString() ?? null,
+                      approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
+                      approvedFileId: v.approvedFileId,
                     }))}
                   />
                 </Card>

@@ -24,7 +24,16 @@ const nextConfig: NextConfig = {
   // dev server's `.next` (set NEXT_DIST_DIR=.next-e2e for the test webServer).
   distDir: process.env.NEXT_DIST_DIR || ".next",
   // Keep the AWS SDK out of the bundle/trace; it's loaded on demand server-side.
-  serverExternalPackages: ["@aws-sdk/client-s3", "sharp"],
+  // Kept out of the bundle/trace; all three are loaded on demand server-side.
+  // Chromium in particular ships a ~50MB brotli-packed browser that Next must
+  // not try to walk into — and puppeteer-core resolves its own binaries at
+  // runtime, which a bundler cannot follow.
+  serverExternalPackages: [
+    "@aws-sdk/client-s3",
+    "sharp",
+    "puppeteer-core",
+    "@sparticuz/chromium",
+  ],
   experimental: {
     // Uploads (photos, training files, videos) go through Server Actions; raise
     // the 1MB default well above it. Photos compress server-side after arriving;

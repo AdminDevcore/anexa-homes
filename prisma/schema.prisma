@@ -3595,6 +3595,40 @@ model SolarProposal {
   /// is how every proposal generated before the switcher existed reads.
   showPaymentOptions Boolean @default(true)
 
+  /**
+   * Which version this deal actually sold — set on exactly one row per lead.
+   *
+   * NOT the same question as "which is newest" or "which has not been
+   * superseded", and that is the whole point. A deal accumulates ten versions
+   * while a rep works a price at the table; the one that was agreed is
+   * frequently not the last one generated, and until this column existed
+   * nothing on the deal could say which it was.
+   *
+   * INTERNAL. The customer's link and what it resolves to are untouched by
+   * this — approving is a record of a decision already made, not a way to
+   * publish one.
+   *
+   * "Exactly one" is enforced by a PARTIAL UNIQUE INDEX on (leadId) WHERE
+   * approvedAt IS NOT NULL, written by hand in the migration because Prisma's
+   * schema language cannot express one. Two admins approving different
+   * versions in the same second is then a lost race rather than a deal with
+   * two final proposals.
+   */
+  approvedAt   DateTime?
+  approvedById String?
+
+  /**
+   * The PDF filed into the deal's Proposal folder when this version was
+   * approved.
+   *
+   * Held so unapproving removes the copy it put there rather than guessing at
+   * one by category, and so a render that failed is distinguishable from one
+   * that never ran: approved with a null file id means "approve succeeded, the
+   * PDF did not" and the UI offers a retry. Approval is deliberately allowed to
+   * commit without it — see setProposalApprovalAction.
+   */
+  approvedFileId String?
+
   /// Set when a newer version replaces this one.
   supersededAt      DateTime?
   /// The e-sign envelope, once sent for signature.
@@ -3611,6 +3645,7 @@ model SolarProposal {
 
   @@unique([leadId, version])
   @@index([companyId, leadId])
+  @@index([leadId, approvedAt])
   @@map("solar_proposals")
 }
 

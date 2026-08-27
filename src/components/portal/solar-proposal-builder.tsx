@@ -106,6 +106,7 @@ export function SolarProposalBuilder({
   versions,
   layoutAvailable,
   canApproveLayout,
+  canApproveProposal,
   lat,
   moduleRatingW,
   initialBlocks,
@@ -128,6 +129,15 @@ export function SolarProposalBuilder({
   canEditDeal: boolean;
   /** ...while generating a customer-facing proposal is its own. */
   canCreateProposal: boolean;
+  /**
+   * ...and declaring which version the deal SOLD is a third, narrower one.
+   *
+   * Kept separate from `canApproveLayout` even though both resolve from
+   * `update Settings` today. They are two different authorities that happen to
+   * be held by the same people, and a prop that says which one it means is what
+   * lets one of them move without hunting for the other.
+   */
+  canApproveProposal: boolean;
   design: SolarDesignView;
   finance: SolarFinanceView;
   /** Every lender the company works with — the Financing step picks one. */
@@ -258,6 +268,7 @@ export function SolarProposalBuilder({
               customerEmail={customer.email}
               customerPhone={customer.phone}
               canEdit={canCreateProposal}
+              canApprove={canApproveProposal}
               versions={versions}
               onOpenStep={setStep}
             />

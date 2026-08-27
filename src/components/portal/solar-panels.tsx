@@ -51,6 +51,7 @@ import {
 import {
   generateSolarProposalAction,
   markProposalSentAction,
+  setProposalApprovalAction,
   uploadPanelLayoutAction,
   removePanelLayoutAction,
   setLayoutApprovalAction,
@@ -1447,6 +1448,16 @@ export type ProposalVersion = {
   createdAt: string;
   /** Whether the customer's copy carries the 25-year comparison. */
   showComparison: boolean;
+  /** Set on the ONE version this deal sold. See setProposalApprovalAction. */
+  approvedAt: string | null;
+  /** Who approved it, for the badge. Null when nobody has. */
+  approvedByName: string | null;
+  /**
+   * The PDF filed into the deal's Proposal folder. Null on an unapproved
+   * version — and also on an approved one whose render failed, which is the
+   * state the retry affordance reads.
+   */
+  approvedFileId: string | null;
 };
 
 export function SolarProposalGate({
@@ -1455,6 +1466,7 @@ export function SolarProposalGate({
   customerPhone,
   versions,
   canEdit,
+  canApprove = false,
   onOpenStep,
 }: {
   leadId: string;
@@ -1463,6 +1475,8 @@ export function SolarProposalGate({
   customerPhone: string | null;
   versions: ProposalVersion[];
   canEdit: boolean;
+  /** Whether this user may declare which version the deal sold. Admins only. */
+  canApprove?: boolean;
   /** Sends the rep to the builder step that fixes a finding. See ValidationList. */
   onOpenStep?: (step: BuilderStep) => void;
 }) {
@@ -1550,28 +1564,118 @@ export function SolarProposalGate({
         />
       )}
 
-      <ProposalVersionList versions={versions} canEdit={canEdit} />
+      <ProposalVersionList versions={versions} canEdit={canEdit} canApprove={canApprove} />
     </div>
   );
 }
 
 /**
- * The versions of a proposal, with the two things you can still do to one:
- * open it as the customer sees it, and record that it went out.
+ * The versions of a proposal, and the three things you can still do to one:
+ * open it as the customer sees it, record that it went out, and say which one
+ * this deal actually sold.
  *
- * Shared with the deal page's Proposal card — generating a proposal now happens
- * in the builder, but READING one is exactly what you want from the deal, and
- * two copies of this list would drift.
+ * Shared with the deal page's Proposal card — generating a proposal happens in
+ * the builder, but READING one is exactly what you want from the deal, and two
+ * copies of this list would drift.
  */
 export function ProposalVersionList({
   versions,
   canEdit,
+  canApprove = false,
 }: {
   versions: ProposalVersion[];
   canEdit: boolean;
+  /**
+   * Whether this user may declare the final version. Admins only — the same
+   * authority that marks a panel layout final.
+   *
+   * Everyone still SEES the approved badge. Which proposal the company sold is
+   * not privileged information; deciding it is.
+   */
+  canApprove?: boolean;
 }) {
   const router = useRouter();
+  const [busyId, setBusyId] = React.useState<string | null>(null);
   if (versions.length === 0) return null;
+
+  const approved = versions.find((v) => v.approvedAt);
+
+  /**
+   * Render the approved copy into the deal's Proposal folder.
+   *
+   * A plain POST rather than a Server Action: the render boots Chromium, and
+   * that browser is 66MB traced into whichever function reaches it — as an
+   * action it landed in both pages that show this list. See the route.
+   *
+   * Returns the error text rather than toasting, so the two callers (approve,
+   * and Retry) can each say the right thing about it.
+   */
+  async function postFileCopy(proposalId: string): Promise<string | null> {
+    try {
+      const res = await fetch(`/api/solar/proposals/${proposalId}/file-copy`, { method: "POST" });
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !body?.ok) return body?.error || `The copy could not be rendered (${res.status}).`;
+      return null;
+    } catch {
+      return "The copy could not be rendered — the request did not complete.";
+    }
+  }
+
+  async function setApproval(v: ProposalVersion, next: boolean) {
+    // Approving while another version holds the approval MOVES the filed copy
+    // out of the deal's Proposal folder. That is not visible from a button
+    // labelled "Approve", so it gets asked about rather than done quietly.
+    if (next && approved && approved.id !== v.id) {
+      const ok = window.confirm(
+        `v${approved.version} is currently the approved proposal. Approving v${v.version} replaces it, and swaps the copy filed on this deal.`
+      );
+      if (!ok) return;
+    }
+
+    setBusyId(v.id);
+    try {
+      const res = await setProposalApprovalAction(v.id, next);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      if (!next) {
+        toast.success(`v${v.version} is no longer the approved proposal`);
+        router.refresh();
+        return;
+      }
+
+      // Approved. The copy is a separate, slower step that is allowed to fail
+      // without taking the decision down with it — so the list refreshes first
+      // and the badge appears immediately, then the PDF fills in.
+      router.refresh();
+      const fileError = await postFileCopy(v.id);
+      if (fileError) {
+        // Said plainly: the folder will be empty, and a silent success would be
+        // a lie about it.
+        toast.warning(`v${v.version} approved, but the PDF could not be filed.`, {
+          description: "Use Retry on the row to try again.",
+        });
+      } else {
+        toast.success(`v${v.version} approved — the PDF is in the Proposal folder`);
+      }
+      router.refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function refile(v: ProposalVersion) {
+    setBusyId(v.id);
+    try {
+      const fileError = await postFileCopy(v.id);
+      if (fileError) return toast.error(fileError);
+      toast.success("Filed into the Proposal folder");
+      router.refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div className="space-y-2">
@@ -1579,62 +1683,127 @@ export function ProposalVersionList({
         Versions
       </div>
       <ul className="divide-y divide-border rounded-lg border border-border">
-        {versions.map((v) => (
-          <li key={v.id} className="flex flex-wrap items-center gap-2 p-2.5 text-sm">
-            <span className="font-medium">v{v.version}</span>
-            <span
+        {versions.map((v) => {
+          const isApproved = !!v.approvedAt;
+          const busy = busyId === v.id;
+          return (
+            <li
+              key={v.id}
               className={cn(
-                "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                v.signedAt
-                  ? "bg-emerald-100 text-emerald-700"
-                  : v.supersededAt
-                    ? "bg-muted text-muted-foreground"
-                    : "bg-sky-100 text-sky-700"
+                "flex flex-wrap items-center gap-2 p-2.5 text-sm",
+                // The approved row is the answer to the question the list is
+                // read for, so it is findable without reading every row.
+                isApproved && "bg-emerald-50/60"
               )}
             >
-              {v.supersededAt ? "superseded" : v.status}
-            </span>
-            <span className="flex-1 text-[11px] text-muted-foreground">
-              {new Date(v.createdAt).toLocaleDateString()}
-              {v.viewedAt ? " · viewed" : ""}
-              {v.signedAt ? ` · accepted ${new Date(v.signedAt).toLocaleDateString()}` : ""}
-            </span>
-            {/* The public link is offered ONLY once the proposal has actually
-                been sent. Before that there is no token and no public surface;
-                reviewing your own work goes through the internal preview, which
-                does not mint a customer view or handle the token. */}
-            <Link
-              href={`/portal/leads/${v.leadId}/solar-proposal/preview?v=${v.version}`}
-              className="text-xs underline underline-offset-2"
-            >
-              Preview
-            </Link>
-            {v.publicToken && (
-              <a
-                href={`/proposal/${v.publicToken}`}
-                target="_blank"
-                rel="noreferrer"
+              <span className="font-medium">v{v.version}</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                  v.signedAt
+                    ? "bg-emerald-100 text-emerald-700"
+                    : v.supersededAt
+                      ? "bg-muted text-muted-foreground"
+                      : "bg-sky-100 text-sky-700"
+                )}
+              >
+                {v.supersededAt ? "superseded" : v.status}
+              </span>
+
+              {/* Deliberately its own badge rather than a replacement for the
+                  status one. "Approved" and "superseded" are both true of the
+                  common case — the deal was sold on v7 and three scenarios were
+                  run afterwards — and collapsing them would hide one. */}
+              {isApproved && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
+                  <BadgeCheck className="size-3" /> Approved
+                </span>
+              )}
+
+              <span className="flex-1 text-[11px] text-muted-foreground">
+                {new Date(v.createdAt).toLocaleDateString()}
+                {v.viewedAt ? " · viewed" : ""}
+                {v.signedAt ? ` · accepted ${new Date(v.signedAt).toLocaleDateString()}` : ""}
+                {isApproved && v.approvedByName ? ` · approved by ${v.approvedByName}` : ""}
+              </span>
+
+              {/* The public link is offered ONLY once the proposal has actually
+                  been sent. Before that there is no token and no public surface;
+                  reviewing your own work goes through the internal preview, which
+                  does not mint a customer view or handle the token. */}
+              <Link
+                href={`/portal/leads/${v.leadId}/solar-proposal/preview?v=${v.version}`}
                 className="text-xs underline underline-offset-2"
               >
-                Customer link
-              </a>
-            )}
-            {canEdit && !v.sentAt && !v.supersededAt && (
-              <button
-                className="text-xs underline underline-offset-2"
-                title="For a proposal sent some other way — this records the send without delivering anything."
-                onClick={async () => {
-                  const res = await markProposalSentAction(v.id);
-                  if (!res.ok) return toast.error(res.error);
-                  toast.success("Marked as sent");
-                  router.refresh();
-                }}
-              >
-                Mark sent by hand
-              </button>
-            )}
-          </li>
-        ))}
+                Preview
+              </Link>
+              {v.publicToken && (
+                <a
+                  href={`/proposal/${v.publicToken}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs underline underline-offset-2"
+                >
+                  Customer link
+                </a>
+              )}
+
+              {/* The filed copy, reachable from the row that caused it. */}
+              {isApproved && v.approvedFileId && (
+                <a
+                  href={`/portal/files/${v.approvedFileId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs underline underline-offset-2"
+                >
+                  PDF in Proposal
+                </a>
+              )}
+              {isApproved && !v.approvedFileId && (
+                <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+                  <TriangleAlert className="size-3.5" /> Copy not filed
+                  {canApprove && (
+                    <button
+                      className="underline underline-offset-2 disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() => refile(v)}
+                    >
+                      Retry
+                    </button>
+                  )}
+                </span>
+              )}
+
+              {canEdit && !v.sentAt && !v.supersededAt && (
+                <button
+                  className="text-xs underline underline-offset-2"
+                  title="For a proposal sent some other way — this records the send without delivering anything."
+                  onClick={async () => {
+                    const res = await markProposalSentAction(v.id);
+                    if (!res.ok) return toast.error(res.error);
+                    toast.success("Marked as sent");
+                    router.refresh();
+                  }}
+                >
+                  Mark sent by hand
+                </button>
+              )}
+
+              {canApprove && (
+                <Button
+                  size="sm"
+                  variant={isApproved ? "outline" : "secondary"}
+                  className="h-7 px-2 text-xs"
+                  disabled={busy}
+                  onClick={() => setApproval(v, !isApproved)}
+                >
+                  {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  {isApproved ? "Unapprove" : "Approve"}
+                </Button>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

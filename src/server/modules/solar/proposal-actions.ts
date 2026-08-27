@@ -10,6 +10,7 @@ import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
 import { resolveLayoutAsset } from "./layout-asset";
 import { generateProposalVersion } from "./proposal-generate";
+import { approveProposalVersion, unapproveProposalVersion } from "./proposal-approval";
 import type { ValidationIssue } from "@/lib/solar-validation";
 import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 
@@ -224,6 +225,59 @@ export async function sendSolarProposalAction(input: {
   revalidatePath(`/portal/leads/${p.leadId}`);
   revalidatePath(`/portal/leads/${p.leadId}/solar-proposal`);
   return { ok: true as const, delivered, failed, link };
+}
+
+/**
+ * Mark one version as the proposal this deal actually sold — or take that back.
+ *
+ * A deal accumulates versions while a price is worked at the table; ten is
+ * ordinary. Which one is NEWEST and which have been SUPERSEDED were the only
+ * two things the list could say, and neither is the question anybody asks of
+ * it. This answers the question that is actually asked, and files the copy that
+ * answer implies into the deal's Proposal folder.
+ *
+ * A SUPERSEDED VERSION IS APPROVABLE, deliberately. The agreed proposal is
+ * frequently not the last one generated — a rep runs three more scenarios after
+ * the handshake — and a rule that only the current version may be approved
+ * would make the feature unable to record the common case.
+ *
+ * Gated on `update Settings`, the same permission that marks a panel layout
+ * final: approving is an authority call about what the company sold, not part
+ * of ordinary deal editing. A rep can still generate, preview and send.
+ *
+ * The PDF is NOT rendered here. Filing the copy is a separate POST to
+ * api/solar/proposals/[id]/file-copy, which the caller makes straight
+ * afterwards — see the note on approveProposalVersion for why the browser is
+ * kept out of this module's import graph.
+ */
+export async function setProposalApprovalAction(proposalId: string, approved: boolean) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) {
+    return fail("Only an admin can approve the final proposal.");
+  }
+
+  const p = await prisma.solarProposal.findFirst({
+    where: { companyId: user.companyId, id: proposalId },
+    select: { id: true, leadId: true, version: true, approvedAt: true, approvedFileId: true },
+  });
+  if (!p) return fail("Proposal not found.");
+
+  if (approved) {
+    await approveProposalVersion(
+      { companyId: user.companyId, userId: user.userId, fullName: user.fullName },
+      p,
+    );
+  } else {
+    if (!p.approvedAt) return fail("That version is not approved.");
+    await unapproveProposalVersion(
+      { companyId: user.companyId, userId: user.userId, fullName: user.fullName },
+      p,
+    );
+  }
+
+  revalidatePath(`/portal/leads/${p.leadId}`);
+  revalidatePath(`/portal/leads/${p.leadId}/solar-proposal`);
+  return { ok: true as const };
 }
 
 /**
