@@ -10,6 +10,7 @@ import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { getMembership } from "@/server/modules/chat/queries";
 import { foldersFor } from "@/lib/deal-folders";
+import { photoGroupFor } from "@/lib/photo-groups";
 import sharp from "sharp";
 
 const MAX_BYTES = 30 * 1024 * 1024; // 30MB (phone photos); compressed after upload
@@ -81,6 +82,25 @@ function safeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "file";
 }
 
+/**
+ * The extension for the bytes we are about to store — keyed off the mime type
+ * we actually wrote, not the one the phone sent. `compressImage` turns a PNG
+ * into a JPEG, so trusting the original name would produce a "…png" holding
+ * JPEG bytes. Falls back to whatever the original name ended in.
+ */
+const EXT_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/heic": "heic",
+  "application/pdf": "pdf",
+};
+
+function extensionFor(mimeType: string, originalName: string): string {
+  return EXT_BY_MIME[mimeType] ?? /\.([a-z0-9]{1,5})$/i.exec(originalName)?.[1].toLowerCase() ?? "jpg";
+}
+
 export type ChatAttachment = { id: string; name: string; kind: "photo" | "document"; mimeType: string; size: number };
 
 /** Upload a single chat attachment (pre-send). Returns metadata to preview + link on send. */
@@ -139,10 +159,14 @@ export async function uploadFileAction(formData: FormData) {
   const file = formData.get("file");
   const projectId = (formData.get("projectId") as string) || null;
   const leadId = (formData.get("leadId") as string) || null;
-  const category = (formData.get("category") as string) || null;
   const photoTemplateItemId = (formData.get("photoTemplateItemId") as string) || null;
+  // Both are rewritten below for a checklist photo — the slot decides where it
+  // is filed and what it is called. See "A checklist photo is not a loose
+  // upload" further down.
+  let category = (formData.get("category") as string) || null;
 
   if (!(file instanceof File)) return { ok: false as const, error: "No file provided." };
+  let name = file.name;
 
   // Call recordings get audio mime types + a higher size cap; everything else
   // keeps the image/PDF rules.
@@ -156,23 +180,83 @@ export async function uploadFileAction(formData: FormData) {
     return { ok: false as const, error: isCall ? "Unsupported audio type." : "Unsupported file type." };
   }
 
-  // Scope check: the target project/lead must be visible to this user.
+  // Scope check: the target project/lead must be visible to this user. The rows
+  // are kept rather than discarded — a checklist photo needs the deal's vertical
+  // to know which folder it belongs in.
+  let project: { leadId: string; vertical: string } | null = null;
   if (projectId) {
     const scope = listScope(user, "Project") as Prisma.ProjectWhereInput;
-    const p = await prisma.project.findFirst({ where: { AND: [{ id: projectId }, scope] }, select: { id: true } });
-    if (!p) return { ok: false as const, error: "Project not found or access denied." };
+    project = await prisma.project.findFirst({
+      where: { AND: [{ id: projectId }, scope] },
+      select: { leadId: true, vertical: true },
+    });
+    if (!project) return { ok: false as const, error: "Project not found or access denied." };
   }
+  let lead: { vertical: string } | null = null;
   if (leadId) {
     const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
-    const l = await prisma.lead.findFirst({ where: { AND: [{ id: leadId }, scope] }, select: { id: true } });
-    if (!l) return { ok: false as const, error: "Lead not found or access denied." };
+    lead = await prisma.lead.findFirst({
+      where: { AND: [{ id: leadId }, scope] },
+      select: { vertical: true },
+    });
+    if (!lead) return { ok: false as const, error: "Lead not found or access denied." };
   }
 
   const kind: FileKind = file.type.startsWith("image/") ? "photo" : "document";
   const raw = Buffer.from(await file.arrayBuffer());
   const { buffer, mimeType } = kind === "photo" ? await compressImage(raw, file.type) : { buffer: raw, mimeType: file.type };
+
+  /* ── A checklist photo is not a loose upload ────────────────────────────
+   * It was taken for one slot on the Site Survey or Installation checklist, so
+   * the slot — not the phone, and not the caller — settles three things about
+   * it. All three are decided here so that every way of taking one (the
+   * checklist on the deal, the same checklist opened inside its folder, the
+   * presentation builder) files the photo identically.
+   *
+   *  WHICH FOLDER.  Callers used to send `category = the slot's label`, which is
+   *    not a folder key in either vertical. So every photo ever shot against a
+   *    checklist landed in "Other", and the Survey Photos and Installation
+   *    Photos folders both read 0 while the checklist beside them was full.
+   *
+   *  WHICH DEAL.  The checklist hangs off the job, so it sent `projectId` alone
+   *    — and the folder grid lists the DEAL's files. A photo with no `leadId`
+   *    was therefore in no folder at all, not even "Other". Taking it from the
+   *    project rather than the form is safe: the project's scope check above
+   *    already passed, and a project belongs to exactly one lead.
+   *
+   *  ITS NAME.  "IMG_4821.jpg" says nothing about what was photographed. The
+   *    slot's label does, and it is what the deal's photo report prints as the
+   *    caption and what anyone opening the file sees.
+   */
+  let dealLeadId = leadId;
+  if (photoTemplateItemId) {
+    const slot = await prisma.photoTemplateItem.findFirst({
+      where: { id: photoTemplateItemId, template: { companyId: user.companyId } },
+      select: { label: true, template: { select: { kind: true } } },
+    });
+    if (slot) {
+      dealLeadId = leadId ?? project?.leadId ?? null;
+      category = photoGroupFor(
+        lead?.vertical ?? project?.vertical,
+        slot.template.kind as "site" | "install",
+      );
+      // A slot can hold several shots ("each slope"), and they cannot all be
+      // called the same thing. Counting first means the second is "(2)" — the
+      // uploader posts one file per call, in order, so the count is stable.
+      const already = await prisma.fileAsset.count({
+        where: {
+          companyId: user.companyId,
+          photoTemplateItemId,
+          ...(projectId ? { projectId } : dealLeadId ? { leadId: dealLeadId } : {}),
+        },
+      });
+      const suffix = already > 0 ? ` (${already + 1})` : "";
+      name = `${slot.label}${suffix}.${extensionFor(mimeType, file.name)}`;
+    }
+  }
+
   const id = nanoid();
-  const key = `companies/${user.companyId}/uploads/${id}-${safeName(file.name)}`;
+  const key = `companies/${user.companyId}/uploads/${id}-${safeName(name)}`;
   await putObject(key, buffer);
 
   // One recording per call slot: replace any existing file in this slot.
@@ -184,12 +268,12 @@ export async function uploadFileAction(formData: FormData) {
     data: {
       companyId: user.companyId,
       kind,
-      name: file.name,
+      name,
       storageKey: key,
       mimeType,
       size: buffer.length,
       category,
-      leadId,
+      leadId: dealLeadId,
       projectId,
       photoTemplateItemId,
       uploadedById: user.userId,
@@ -197,7 +281,7 @@ export async function uploadFileAction(formData: FormData) {
   });
 
   if (projectId) revalidatePath(`/portal/projects/${projectId}`);
-  if (leadId) revalidatePath(`/portal/leads/${leadId}`);
+  if (dealLeadId) revalidatePath(`/portal/leads/${dealLeadId}`);
   return { ok: true as const };
 }
 

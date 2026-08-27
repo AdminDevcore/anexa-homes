@@ -115,8 +115,11 @@ function PhotoSlotRow({ projectId, slot }: { projectId: string; slot: Slot }) {
       const fd = new FormData();
       fd.set("file", file);
       fd.set("projectId", projectId);
+      // The slot id is the only tag sent. The server reads the slot off it and
+      // files the photo into this deal's Survey / Installation folder under the
+      // slot's label — this used to send `category = slot.label`, which is not a
+      // folder key, so every checklist photo ended up in "Other".
       fd.set("photoTemplateItemId", slot.itemId);
-      fd.set("category", slot.label);
       const res = await uploadFileAction(fd);
       if (!res.ok) failed += 1;
     }

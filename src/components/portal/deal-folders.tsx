@@ -16,11 +16,11 @@ import {
   visibleFiles,
   type DealFolder,
 } from "@/lib/deal-folders";
-import type { PhotoGroup } from "@/lib/photo-groups";
+import { GROUP_KIND, type PhotoGroup } from "@/lib/photo-groups";
 import type { CallGroup } from "@/lib/call-groups";
 import type { PhotoChecklist } from "@/server/modules/photos/queries";
 import { uploadFileAction, deleteFileAction, moveFileAction } from "@/server/modules/files/actions";
-import { GROUP_KIND, PhotoGroupBody, type GroupPhoto } from "./deal-photos";
+import { PhotoGroupBody, type GroupPhoto } from "./deal-photos";
 import { DealCallRecordings, type CallRecording } from "./deal-call-recordings";
 
 export type FolderFile = {

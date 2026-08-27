@@ -29,6 +29,24 @@ async function openProductionDeal(page: Page) {
   }
 }
 
+/**
+ * The number on one folder tile in the deal's Documents & Files grid. Read off
+ * the tile rather than counted from its contents: the count is what tells a
+ * user something is filed there, and it is what read 0 while the checklist
+ * beside it was full.
+ */
+async function folderCount(page: Page, label: string): Promise<number> {
+  const tile = page
+    .getByTestId("deal-folders")
+    .getByRole("button", { name: new RegExp(`^${label}\\b`) })
+    .first();
+  await expect(tile).toBeVisible({ timeout: 15000 });
+  const text = await tile.innerText();
+  const found = /(\d+)/.exec(text);
+  expect(found, `no count on the ${label} tile: ${text}`).toBeTruthy();
+  return Number(found![1]);
+}
+
 test("photos: deal shows Site & Install checklists and accepts an upload", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await openProductionDeal(page);
@@ -40,6 +58,49 @@ test("photos: deal shows Site & Install checklists and accepts an upload", async
   const input = page.locator('input[type="file"][accept="image/*"]').first();
   await input.setInputFiles("public/anexa-mark.png");
   await expect(page.getByText("Photo added")).toBeVisible({ timeout: 15000 });
+});
+
+/**
+ * A photo shot against a checklist slot is a document ON THE DEAL, not just a
+ * thumbnail on the job.
+ *
+ * It used to be filed with `category = the slot's LABEL`, which is not a folder
+ * key in either vertical, and — taken from the job's checklist — with no
+ * `leadId` at all. So it appeared in no folder on the deal: Survey Photos read
+ * 0 with the checklist beside it full, and nothing landed in Other either.
+ *
+ * All three halves of the fix are pinned here: the right tile counts it, the
+ * fallback drawer does not, and the stored file carries the slot's name rather
+ * than whatever the phone called it.
+ */
+test("photos: a checklist photo files itself into the Survey folder under the slot's name", async ({ page }) => {
+  await login(page, "manager@anexahomes.com");
+  await openProductionDeal(page);
+
+  const surveyBefore = await folderCount(page, "Survey Photos");
+  const otherBefore = await folderCount(page, "Other");
+
+  await openFieldProduction(page);
+  const slot = () => page.getByTestId("photo-slot").filter({ hasText: "Front of house" }).first();
+  await expect(slot()).toBeVisible({ timeout: 10000 });
+  await slot().locator('input[type="file"]').first().setInputFiles("public/anexa-mark.png");
+  await expect(page.getByText(/^Photo added$/)).toBeVisible({ timeout: 15000 });
+
+  await page.reload();
+  expect(await folderCount(page, "Survey Photos")).toBe(surveyBefore + 1);
+  expect(await folderCount(page, "Other")).toBe(otherBefore);
+
+  // The newest shot in that slot — photos come back oldest first. Matched on
+  // the file route, so the office's example photo (served from
+  // /api/photo-templates/example) can never be the one picked up.
+  await openFieldProduction(page);
+  const src = await slot().locator('img[src^="/portal/files/"]').last().getAttribute("src");
+  const res = await page.request.get(src!);
+  expect(res.status()).toBe(200);
+  // Named for the slot: this is the caption the deal's photo report prints and
+  // the filename anyone downloading it gets. "anexa-mark.png" would mean the
+  // slot never got a say.
+  expect(res.headers()["content-disposition"]).toContain("Front_of_house");
 });
 
 test("photos: compiles a PDF photo report for a deal", async ({ page }) => {

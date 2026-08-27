@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { PHOTO_GROUPS, PHOTO_GROUP_KEYS, type PhotoGroup } from "../photo-groups";
-import { ROOFING_FOLDERS, SOLAR_FOLDERS } from "../deal-folders";
+import {
+  GROUP_KIND,
+  PHOTO_GROUPS,
+  PHOTO_GROUP_KEYS,
+  photoGroupFor,
+  type PhotoGroup,
+} from "../photo-groups";
+import { ROOFING_FOLDERS, SOLAR_FOLDERS, folderKeyFor, FALLBACK_FOLDER_KEY } from "../deal-folders";
 import { defaultItems, defaultName } from "../../server/modules/photos/defaults";
 
 /**
@@ -10,16 +16,7 @@ import { defaultItems, defaultName } from "../../server/modules/photos/defaults"
  * `special: "photos"` folder key — in EITHER vertical — being a known photo
  * group. Solar's two were not, which is why its photo folders rendered as plain
  * file lists with no checklist and no report.
- *
- * GROUP_KIND lives in a "use client" module, so it is re-stated here rather
- * than imported; the assertion below pins the keys it must cover.
  */
-const GROUP_KIND: Record<PhotoGroup, "site" | "install"> = {
-  survey: "site",
-  install: "install",
-  survey_photos: "site",
-  install_photos: "install",
-};
 
 describe("photo groups cover every photo folder", () => {
   it("has a group for each vertical's photo folder keys", () => {
@@ -65,5 +62,50 @@ describe("default checklists", () => {
         expect(new Set(labels).size).toBe(labels.length);
       }
     }
+  });
+});
+
+/**
+ * The round trip that puts a checklist photo in its folder.
+ *
+ * `uploadFileAction` stamps `category = photoGroupFor(vertical, slot's kind)`;
+ * the folder grid then finds it with `folderKeyFor(vertical, category)`. If
+ * those two ever disagree the photo does not go missing loudly — it quietly
+ * lands in "Other" while the folder it belongs to reads 0, which is exactly the
+ * bug this pair replaced (the label was being written into `category`).
+ */
+describe("filing a checklist photo", () => {
+  it("files into a real folder of the deal's own vertical", () => {
+    for (const [vertical, folders] of [
+      ["roofing", ROOFING_FOLDERS],
+      ["solar", SOLAR_FOLDERS],
+    ] as const) {
+      for (const kind of ["site", "install"] as const) {
+        const group = photoGroupFor(vertical, kind);
+        // Filed where the grid will look for it, not in the fallback drawer.
+        expect(folderKeyFor(vertical, group)).toBe(group);
+        expect(folderKeyFor(vertical, group)).not.toBe(FALLBACK_FOLDER_KEY);
+        // And that folder is the one that opens this very checklist back up.
+        const folder = folders.find((f) => f.key === group);
+        expect(folder?.special).toBe("photos");
+        expect(GROUP_KIND[group]).toBe(kind);
+      }
+    }
+  });
+
+  it("treats any non-solar vertical as roofing, matching foldersFor", () => {
+    for (const v of [null, undefined, "roofing", "something-new"]) {
+      expect(photoGroupFor(v, "site")).toBe("survey");
+      expect(photoGroupFor(v, "install")).toBe("install");
+    }
+  });
+
+  it("keeps the two verticals' keys distinct", () => {
+    expect(photoGroupFor("solar", "site")).toBe("survey_photos");
+    expect(photoGroupFor("solar", "install")).toBe("install_photos");
+    // A solar key on a roofing deal is not a roofing folder, and vice versa —
+    // which is why the vertical has to be read off the deal, not assumed.
+    expect(folderKeyFor("roofing", "survey_photos")).toBe(FALLBACK_FOLDER_KEY);
+    expect(folderKeyFor("solar", "survey")).toBe(FALLBACK_FOLDER_KEY);
   });
 });

@@ -139,7 +139,7 @@ export function PresentationBuilder({
     if (await save()) { toast.success("Saved"); router.refresh(); }
   }
 
-  async function onFiles(itemId: string, label: string, files: FileList | null) {
+  async function onFiles(itemId: string, files: FileList | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
     let failed = 0;
@@ -147,8 +147,10 @@ export function PresentationBuilder({
       const fd = new FormData();
       fd.set("file", file);
       fd.set("leadId", leadId);
+      // No category: the server derives it from the slot, so a photo taken here
+      // is filed in the same folder, under the same name, as one taken from the
+      // checklist on the deal.
       fd.set("photoTemplateItemId", itemId);
-      fd.set("category", label);
       const res = await uploadFileAction(fd);
       if (!res.ok) failed += 1;
     }
@@ -348,7 +350,7 @@ export function PresentationBuilder({
                       {it.required ? "Recommended" : "Optional"}{has ? ` · ${counts[it.id]} photo(s)` : ""}
                     </span>
                   </span>
-                  <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={busy} onChange={(e) => onFiles(it.id, it.label, e.target.files)} />
+                  <input type="file" accept="image/*" capture="environment" multiple className="hidden" disabled={busy} onChange={(e) => onFiles(it.id, e.target.files)} />
                 </label>
               );
             })}
