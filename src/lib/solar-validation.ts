@@ -469,32 +469,33 @@ export function validateFinance(
        * A DOCUMENT MAY NEVER QUOTE NO MONTHLY — but it does not need the
        * lender's own figure to quote one.
        *
-       * The snapshot already takes the payment from three sources in order: the
-       * approval, the rate sheet's published factor, then our amortisation of
-       * the quoted APR and term — and it records which, so a homeowner reading
-       * an estimate is told it is one. Blocking here on the first of those
-       * refused to generate a document that was fully prepared to handle its
-       * absence, on a deal whose payment is not even in doubt: 0% over 360
-       * months on a fixed price is arithmetic, not a negotiation.
+       * The snapshot takes the payment from the rate sheet's published factor,
+       * falling back to our amortisation of the quoted APR and term. Both are
+       * the programme's own numbers; neither is in doubt on a deal like 0% over
+       * 360 months at a fixed price, which is arithmetic rather than a
+       * negotiation.
        *
-       * So this blocks only when NOTHING can produce a payment. When one can,
-       * the rep is told the document will carry an estimate until the approval
-       * lands, which is true and is what the document itself says.
+       * There is no longer a third source above those two. `loanMonthlyPayment`
+       * — the lender's figure re-keyed from an approval — had its own form on
+       * the financing step and nobody ever filled it in, so the form went and
+       * the warning that pointed at it went with it: telling a rep to enter a
+       * number no screen accepts is worse than saying nothing.
+       *
+       * So this blocks only when NOTHING can produce a payment — a quoted
+       * programme with neither a factor nor a term to amortise over. A stored
+       * figure on a row written before the form was removed still outranks
+       * both, which is why it satisfies this rule too.
        */
       const canDerivePayment =
         !!f.hasPaymentFactor ||
         (f.aprPct != null && f.aprPct >= 0 && !!f.loanTermMonths && f.loanTermMonths > 0);
-      if (!f.loanMonthlyPaymentCents || f.loanMonthlyPaymentCents <= 0) {
-        if (canDerivePayment) {
-          warn(
-            "financing.loan_monthly_estimated",
-            "financing",
-            "loanMonthlyPaymentCents",
-            "No monthly payment from the lender yet, so the proposal will quote an estimate and say so. Enter the approved figure when it comes back."
-          );
-        } else {
-          block("financing.loan_monthly_missing", "financing", "loanMonthlyPaymentCents", "Enter the lender's monthly payment from the approval.");
-        }
+      if (!canDerivePayment && !(f.loanMonthlyPaymentCents && f.loanMonthlyPaymentCents > 0)) {
+        block(
+          "financing.loan_monthly_missing",
+          "financing",
+          "loanMonthlyPaymentCents",
+          "This programme publishes neither a payment factor nor a term to amortise over, so no monthly payment can be quoted. Add them to its rate sheet."
+        );
       }
       /**
        * ZERO IS AN APR. A dealer-fee-buydown loan is written at 0% — that is

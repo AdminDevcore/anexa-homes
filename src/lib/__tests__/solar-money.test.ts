@@ -490,10 +490,13 @@ describe("a rep cannot generate a nonsense proposal", () => {
     expect(canGenerate(issues)).toBe(true);
     expect(issues.map((i) => i.code)).not.toContain("pricing.dealer_fee_implausible");
     expect(issues.map((i) => i.code)).not.toContain("financing.loan_apr_missing");
-    // The missing payment is SAID, just not as a wall: the document quotes an
-    // estimate and tells the homeowner it is one.
-    const monthly = issues.find((i) => i.code === "financing.loan_monthly_estimated");
-    expect(monthly?.severity).toBe("warn");
+    // …and the absent approval is not even mentioned. It used to raise a
+    // warning telling the rep to key the figure in when it came back; the form
+    // that accepted it has been removed, so the warning would point nowhere.
+    // 0% over 360 months on a flat $5.50/W is the payment, not an estimate of
+    // one.
+    expect(issues.map((i) => i.code)).not.toContain("financing.loan_monthly_estimated");
+    expect(issues.map((i) => i.code)).not.toContain("financing.loan_monthly_missing");
   });
 
   it("still stops a 65% fee somebody typed from memory", () => {

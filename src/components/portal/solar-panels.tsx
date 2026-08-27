@@ -693,14 +693,6 @@ export type LenderProductOption = {
   isActive: boolean;
 };
 
-/**
- * A blank box is "not set"; a typed 0 is a real zero. Module scope so the live
- * quote can use the same rule as the save path — two readings of "0" is how a
- * 0% escalator becomes an empty column.
- */
-const numOrNullPure = (s: string, scale = 1) =>
-  s.trim() === "" ? null : Number.isFinite(Number(s)) ? Math.round(Number(s) * scale) : null;
-
 export function SolarFinancePanel({
   leadId,
   finance,
@@ -762,11 +754,11 @@ export function SolarFinancePanel({
     termYears: num(f?.termYears),
     aprPct: num(f?.aprPct),
     loanTermMonths: num(f?.loanTermMonths),
-    downPayment: num(f?.downPaymentCents, 100),
-    loanMonthly: num(f?.loanMonthlyPaymentCents, 100),
   });
+  // Carried, not typed into. Every figure here is published on the rate sheet
+  // and arrives by quoting a programme; the state exists so the save path
+  // posts back what the row already holds rather than nulling it.
   const [form, setForm] = React.useState(() => seed(finance));
-  const set = (k: keyof ReturnType<typeof seed>, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const isPurchase = product === "cash" || product === "loan";
   const isLoan = product === "loan";
   const isCash = product === "cash";
@@ -858,9 +850,6 @@ export function SolarFinancePanel({
           : "",
       escalatorPct: p.product === "loan" ? "" : num(p.escalatorPct),
       termYears: p.product === "loan" ? "" : num(p.termYears),
-      // An approval belongs to the programme it was run on. Carrying one over
-      // would quote a homeowner a payment a different lender issued.
-      loanMonthly: "",
     }));
   };
 
@@ -923,7 +912,9 @@ export function SolarFinancePanel({
     systemSizeKwDc,
     year1ProductionKwh,
     adderTotalCents,
-    downPaymentCents: numOrNullPure(form.downPayment, 100) ?? 0,
+    // Always nothing down. Solar here is sold financed in full — see the
+    // financing section below for why a down-payment box no longer exists.
+    downPaymentCents: 0,
     basePpwCents,
     annualDegradationPct,
   };
@@ -1000,59 +991,25 @@ export function SolarFinancePanel({
           }).contractPriceCents
         : null;
 
-    // The sheet's own factor arithmetic, computed BEFORE the approved-figure
-    // short-circuit. An approval outranks it as the quoted payment, but a rep
-    // still needs to see what the sheet said next to what the lender came back
-    // with — hiding it the moment an approval lands is how a mismatch goes
-    // unnoticed.
-    const principalNow =
-      isLoan && contractNow != null
-        ? contractNow - (numOrNullPure(form.downPayment, 100) ?? 0)
-        : 0;
+    // The whole contract is financed. Nothing on this screen takes money off
+    // the top, so the principal IS the price — see the note where the approved
+    // loan terms used to be.
     const factors =
-      isLoan && chosen && hasPaymentFactor(chosen)
-        ? factorQuote(chosen, Math.round(principalNow))
+      isLoan && chosen && contractNow != null && hasPaymentFactor(chosen)
+        ? factorQuote(chosen, Math.round(contractNow))
         : null;
 
-    const approvedCents = numOrNullPure(form.loanMonthly, 100);
-    if (isLoan && approvedCents != null) {
-      // The estimate is kept alongside rather than replaced. An approval that
-      // comes back $66 above what the rate sheet prices is worth seeing; a
-      // screen that swaps one number for the other silently is how the gap
-      // gets found by the customer instead.
-      const sheetCents =
-        factors && factorMonthlyCents(factors)
-          ? factorMonthlyCents(factors)
-          : chosen && contractNow != null
-            ? loanPaymentCents({
-                principalCents: contractNow - (numOrNullPure(form.downPayment, 100) ?? 0),
-                aprPct: chosen.aprPct,
-                termMonths: chosen.termMonths,
-              })
-            : null;
-      return {
-        monthlyCents: approvedCents,
-        approved: true,
-        fromFactor: false,
-        factors,
-        sheetCents: sheetCents !== approvedCents ? sheetCents : null,
-      };
-    }
     if (!chosen) return null;
 
     if (product === "lease" && chosen.leaseRateCentsPerKwMonth != null) {
       return {
         monthlyCents: leaseMonthlyCents(chosen.leaseRateCentsPerKwMonth, systemSizeKwDc),
-        approved: false,
         fromFactor: false,
         factors: null,
-        sheetCents: null,
       };
     }
     if (product === "ppa") return null; // priced per kWh produced, not per month
     if (!isLoan || contractNow == null) return null;
-
-    const principal = contractNow - (numOrNullPure(form.downPayment, 100) ?? 0);
 
     // A PUBLISHED payment factor outranks our amortisation. The factor already
     // carries the fee and whatever promotional structure the program has, so it
@@ -1062,22 +1019,20 @@ export function SolarFinancePanel({
     const monthlyCents =
       (factors && factorMonthlyCents(factors)) ??
       loanPaymentCents({
-        principalCents: principal,
+        principalCents: contractNow,
         aprPct: chosen.aprPct,
         termMonths: chosen.termMonths,
       });
     if (monthlyCents == null) return null;
     return {
       monthlyCents,
-      approved: false,
       /** True when the figure came off the sheet rather than out of a formula. */
       fromFactor: factors != null && factorMonthlyCents(factors) != null,
       factors,
-      sheetCents: null,
     };
   }, [
     chosen, product, isLoan, systemSizeKwDc, stickerPpwCents, feePct,
-    adderTotalCents, form.downPayment, form.loanMonthly,
+    adderTotalCents,
   ]);
 
   /** What the boxes above currently add up to. Purchase only — see solar-money. */
@@ -1134,8 +1089,12 @@ export function SolarFinancePanel({
       termYears: rawOrNull(form.termYears),
       aprPct: rawOrNull(form.aprPct),
       loanTermMonths: rawOrNull(form.loanTermMonths),
-      downPaymentCents: numOrNull(form.downPayment, 100),
-      loanMonthlyPaymentCents: numOrNull(form.loanMonthly, 100),
+      // Down payment and the lender's own monthly are deliberately NOT sent,
+      // which CLEARS them on the row: nothing on this screen — or any other —
+      // sets either any more, and a figure no interface can reach quietly
+      // steering the customer's payment is exactly what was removed. Neither
+      // has ever been filled in on a real deal, so there is nothing to lose;
+      // saving a row written before the form went is what clears it.
       lenderProductId: lenderProductId || null,
     });
     setBusy(false);
@@ -1252,9 +1211,9 @@ export function SolarFinancePanel({
         onOpenDesign={onOpenDesign}
       />
 
-      {/* What the deal is quoted on right now, in one strip: the programme, the
-          payment, and — when the sheet publishes factors — both versions of it,
-          never just the flattering one. */}
+      {/* What the deal is quoted on right now, in one strip: the programme, its
+          terms, the payment, and — when the sheet publishes factors — both
+          versions of it, never just the flattering one. */}
       {quote && (
         <section className="rounded-xl border border-border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
@@ -1265,28 +1224,53 @@ export function SolarFinancePanel({
                   {chosen ? lenderProductLabel(chosen) : "Cash"}
                 </div>
                 <div className="text-[11px] text-muted-foreground">
-                  {quote.approved
-                    ? "The lender's own figure from the approval — this is what the customer sees."
-                    : quote.fromFactor
-                      ? "From the rate sheet's payment factor, the lender's own published figure."
-                      : "Estimated from the programme's terms. The approved figure replaces it below."}
+                  {quote.fromFactor
+                    ? "From the rate sheet's payment factor, the lender's own published figure."
+                    : "Amortised from the programme's APR and term."}
                 </div>
               </div>
             </div>
             <div className="text-right">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                {quote.approved ? "Monthly · approved" : "Monthly · estimate"}
+                Monthly
               </div>
               <div className="font-display text-2xl font-semibold tabular-nums">
                 ${(quote.monthlyCents / 100).toFixed(2)}
               </div>
-              {quote.sheetCents != null && (
-                <div className="text-[11px] text-muted-foreground tabular-nums">
-                  rate sheet priced ${(quote.sheetCents / 100).toFixed(2)}
-                </div>
-              )}
             </div>
           </div>
+
+          {/* The terms this payment came off, stated, with the dealer portal on
+              the same line: they belong to the rate sheet and are not set here
+              — see where the "Approved loan terms" form used to be. Running
+              credit is the next thing a rep does once a programme is quoted,
+              so it sits on the programme rather than in a card of its own. */}
+          {chosen && isLoan && (
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t border-border/70 px-4 py-2 text-[11px] text-muted-foreground">
+              <span>
+                {[
+                  chosen.aprPct != null ? `${chosen.aprPct}% APR` : null,
+                  chosen.termMonths ? `${chosen.termMonths} months` : null,
+                  chosen.dealerFeePct != null ? `${chosen.dealerFeePct}% dealer fee` : null,
+                  quotedFlatPpwCents != null
+                    ? `$${(quotedFlatPpwCents / 100).toFixed(2)}/W flat`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              {lender?.portalUrl && (
+                <a
+                  href={lender.portalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+                >
+                  Run credit at {lender.name} <ExternalLink className="size-3" />
+                </a>
+              )}
+            </div>
+          )}
 
           {/* Both payments: the low figure is conditional on a paydown the
               customer has to actually make, and a customer who never applies
@@ -1316,108 +1300,41 @@ export function SolarFinancePanel({
               )}
             </dl>
           )}
-        </section>
-      )}
 
-      {/* The lender's terms, as issued. Loan only — a cash deal has no lender,
-          no down payment (it is paid in full) and no monthly.
-          The monthly is TYPED IN, never computed from amount + APR + term:
-          promotional periods, fees and re-amortisation mean a derived figure
-          can contradict the lender's real one, and the number a customer is
-          quoted must be the number the lender issued. */}
-      {isLoan && (
-        <section className="rounded-xl border border-border bg-card">
-          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-2.5">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Approved loan terms
-            </h4>
-            {lender?.portalUrl && (
-              <a
-                href={lender.portalUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-              >
-                Run credit at {lender.name} <ExternalLink className="size-3" />
-              </a>
-            )}
-          </header>
-
-          <div className="space-y-3 p-4">
-            {/* ONLY WHAT SOMEBODY ACTUALLY TYPES.
-
-                Five boxes used to sit here, and on a quoted programme three of
-                them were already decided: the dealer fee, the APR and the term
-                all come off the rate-sheet row, the save action reads them from
-                that row whatever is posted, and two of the three were editable
-                anyway — so a rep could change a number, save, and watch it
-                come back as it was.
-
-                They are a STATEMENT now, not a form. What is left is the pair
-                that genuinely arrives from the approval and exists nowhere
-                else: the down payment and the monthly. A hand-quoted loan with
-                no programme behind it still gets all five, because there is no
-                rate sheet to state.
-
-                TextField, not bare Label+Input: it wires htmlFor/id, so a
-                screen reader announces each figure and the label is
-                clickable. */}
-            {chosen ? (
-              <p className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  {[lender?.name, lenderProductLabel(chosen)].filter(Boolean).join(" · ")}
-                </span>
-                {" — "}
-                {[
-                  chosen.aprPct != null ? `${chosen.aprPct}% APR` : null,
-                  chosen.termMonths ? `${chosen.termMonths} months` : null,
-                  chosen.dealerFeePct != null ? `${chosen.dealerFeePct}% dealer fee` : null,
-                  quotedFlatPpwCents != null
-                    ? `$${(quotedFlatPpwCents / 100).toFixed(2)}/W flat`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
+          {/* Folded, because it is a procedure a rep reads once and then knows,
+              and an open block of it would push the payment off the screen. */}
+          {isLoan && lender?.creditInstructions && (
+            <details className="border-t border-border/70 px-4 py-2">
+              <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
+                How to run credit at {lender.name}
+              </summary>
+              <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
+                {lender.creditInstructions}
               </p>
-            ) : null}
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {!chosen && (
-                <>
-                  <TextField
-                    label="Dealer fee %"
-                    type="number"
-                    value={form.dealerFeePct}
-                    disabled={!canEdit}
-                    onChange={(v) => set("dealerFeePct", v)}
-                  />
-                  <TextField label="APR %" type="number" step="0.01" value={form.aprPct} disabled={!canEdit} onChange={(v) => set("aprPct", v)} />
-                  <TextField label="Term (months)" type="number" value={form.loanTermMonths} disabled={!canEdit} onChange={(v) => set("loanTermMonths", v)} />
-                </>
-              )}
-              <TextField label="Down payment $" type="number" value={form.downPayment} disabled={!canEdit} onChange={(v) => set("downPayment", v)} />
-              <TextField label="Monthly payment $" type="number" step="0.01" value={form.loanMonthly} disabled={!canEdit} onChange={(v) => set("loanMonthly", v)} />
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {chosen
-                ? `Those terms are ${lender?.name ?? "this lender"}'s, off the rate sheet, and are not set here. `
-                : ""}
-              Enter the lender&rsquo;s own figures from the approval — these are never calculated
-              here.
-            </p>
-
-            {lender?.creditInstructions && (
-              <details className="rounded-lg border border-border/70 p-2">
-                <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
-                  How to run credit at {lender.name}
-                </summary>
-                <p className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
-                  {lender.creditInstructions}
-                </p>
-              </details>
-            )}
-          </div>
+            </details>
+          )}
         </section>
       )}
+
+      {/* A LOAN'S TERMS ARE NOT SET HERE, so there is no form for them.
+
+          A five-box "Approved loan terms" card used to sit at this point: the
+          dealer fee, the APR and the term, then a down payment and the
+          lender's own monthly from the approval. Every one of the first three
+          came off the rate-sheet row and was overwritten on save whatever a
+          rep typed, so they were reduced to a statement — and the statement now
+          rides on the quoted strip above, where the payment it explains is.
+
+          The last two went with them. Nobody had ever filled either in: solar
+          is sold financed in full, so there is no down payment, and the
+          payment a customer is quoted comes from the lender's own published
+          factor, which is the lender's figure already. A pair of empty boxes
+          asking a rep to re-key an approval that never arrives is not a
+          safeguard, it is a form nobody can finish.
+
+          What was genuinely only reachable from that card — the dealer portal
+          and how to run credit at this partner — moves to the strip above,
+          next to the programme it belongs to. */}
 
       {/* A lease's monthly, its escalator, its term and a PPA's $/kWh used to be
           four boxes here for a rep to type into. They are not this screen's to

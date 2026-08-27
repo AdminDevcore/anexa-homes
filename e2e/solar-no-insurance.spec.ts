@@ -405,49 +405,36 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     }
   });
 
-  test("the lender's own loan figures round-trip and are loan-only", async ({ page }) => {
+  test("the lender's figures are reported on the deal, never typed on the builder", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
 
-    // Seeded values reach the read-only summary near the top of the page.
-    // `exact` is load-bearing: a loose "Down payment" also matches the
-    // "Down payment $" input label in the financing card further down.
+    // The deal REPORTS what the row holds — a seeded down payment and monthly
+    // still read out here, which is the whole point of storing rather than
+    // deriving.
     await expect(page.getByText("Down payment", { exact: true })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("$5,000", { exact: true })).toBeVisible();
     await expect(page.getByText("$274/mo")).toBeVisible();
 
-    // Edit them where the sibling financing fields are edited — step 2 of the
-    // builder. The deal REPORTS these figures; only the proposal sets them.
+    // And nothing on the builder asks a rep to key them in. An "Approved loan
+    // terms" card used to sit on the Financing step with five boxes; the three
+    // that came off the rate sheet were overwritten on save whatever was typed,
+    // and the two that did not — the down payment and the lender's own monthly
+    // — were never once filled in. The terms are a statement on the quoted
+    // programme now.
     await page.getByRole("link", { name: /Build Proposal/ }).first().click();
     await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
     await step(page, "Financing").click();
 
-    await expect(page.getByText("Approved loan terms")).toBeVisible();
-    await page.getByLabel("Down payment $").fill("7500");
-    await page.getByLabel("Monthly payment $").fill("259.40");
-    await page.getByRole("button", { name: "Save financing" }).click();
-    // Wait for the action to actually land. Navigating straight off the click
-    // races it and re-renders the OLD row.
-    await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
-
-    // …and they persist, back on the deal. This is the whole point of storing
-    // rather than deriving: the number shown is the number that was entered.
-    await page.goBack();
-    await page.reload();
-    await expect(page.getByText("$7,500", { exact: true })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("$259/mo")).toBeVisible();
-
-    // Switching to Cash removes the block entirely — a cash deal is paid in
-    // full, so it has neither a down payment nor a lender's monthly. Two clicks
-    // because the shelf separates the two questions: shortlisting a card asks
-    // "what would this cost", quoting it answers "this is the deal".
-    await page.getByRole("link", { name: /Build Proposal/ }).first().click();
-    await page.waitForURL(/\/solar-proposal$/, { timeout: 15000 });
-    await step(page, "Financing").click();
-    await expect(page.getByText("Approved loan terms")).toBeVisible();
-    await page.getByRole("button", { name: /Cash.*No lender, so no dealer fee/ }).click();
-    await page.getByRole("button", { name: "Quote this: Cash" }).click();
-    await expect(page.getByText("Approved loan terms")).toBeHidden();
+    // Anchored on the step's own Save, not on the quoted strip: this seeded
+    // deal has no programme quoted, so the strip is not rendered — and waiting
+    // on something absent would pass this test for the wrong reason.
+    await expect(page.getByRole("button", { name: "Save financing" })).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByText("Approved loan terms")).toHaveCount(0);
+    await expect(page.getByLabel("Down payment $")).toHaveCount(0);
+    await expect(page.getByLabel("Monthly payment $")).toHaveCount(0);
   });
 
   test("the new-appointment form is a solar form on solar and a roofing one on roofing", async ({ page }) => {
