@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actions";
+import { PhotoAttachments, PhotoDownloadButton, type AttachmentFile } from "./photo-attachments";
 
 type Slot = {
   itemId: string;
@@ -40,7 +41,22 @@ type Checklist = {
   requiredDone: number;
 };
 
-export function ProjectPhotos({ projectId, checklists }: { projectId: string; checklists: Checklist[] }) {
+export function ProjectPhotos({
+  projectId,
+  checklists,
+  extraFiles = [],
+}: {
+  projectId: string;
+  checklists: Checklist[];
+  /**
+   * Photos sitting in this folder that belong to no slot — bulk uploads taken
+   * before the job reached production and grew a checklist. The checklist above
+   * cannot show them (it renders slots), so without this they are files nobody
+   * can reach. Only meaningful when a single checklist is rendered, i.e. inside
+   * one folder; the deal page passes both checklists and no extras.
+   */
+  extraFiles?: AttachmentFile[];
+}) {
   if (checklists.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -86,6 +102,16 @@ export function ProjectPhotos({ projectId, checklists }: { projectId: string; ch
           {c.items.map((slot) => (
             <PhotoSlotRow key={slot.itemId} projectId={projectId} slot={slot} />
           ))}
+
+          {/* The same photos again, as files you can take one at a time. */}
+          <PhotoAttachments
+            groups={[
+              ...c.items.map((slot) => ({ label: slot.label, files: slot.photos })),
+              ...(checklists.length === 1 && extraFiles.length > 0
+                ? [{ label: "Not filed under a checklist slot", files: extraFiles }]
+                : []),
+            ]}
+          />
         </TabsContent>
       ))}
     </Tabs>
@@ -241,6 +267,11 @@ function PhotoSlotRow({ projectId, slot }: { projectId: string; slot: Slot }) {
                 src={`/portal/files/${p.id}`}
                 alt={slot.label}
                 className="size-20 rounded-lg border border-border object-cover"
+              />
+              <PhotoDownloadButton
+                id={p.id}
+                name={p.name}
+                className="absolute -left-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background opacity-0 transition-opacity group-hover:opacity-100"
               />
               <button
                 onClick={() => remove(p.id)}

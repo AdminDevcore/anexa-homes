@@ -15,6 +15,7 @@ import {
 import { PHOTO_GROUPS, type PhotoGroup } from "@/lib/photo-groups";
 import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actions";
 import { ProjectPhotos } from "./project-photos";
+import { PhotoAttachments, PhotoDownloadButton } from "./photo-attachments";
 import type { PhotoChecklist } from "@/server/modules/photos/queries";
 
 export type GroupPhoto = { id: string; name: string; group: PhotoGroup };
@@ -85,9 +86,19 @@ export function PhotoGroupBody({
 
   if (useChecklist) {
     // Real templated checklist (slots + per-slot Add) for this group.
+    //
+    // The folder holds every photo in the group; the checklist only knows the
+    // ones shot against a slot. Anything left over was bulk-uploaded before
+    // this deal reached production — hand it down so the attachment list can
+    // still offer it, otherwise those photos are unreachable from here.
+    const slotted = new Set(checklist!.items.flatMap((i) => i.photos.map((p) => p.id)));
     return (
       <div className={inline ? "" : "max-h-[72vh] overflow-y-auto pr-1"}>
-        <ProjectPhotos projectId={projectId!} checklists={[checklist!]} />
+        <ProjectPhotos
+          projectId={projectId!}
+          checklists={[checklist!]}
+          extraFiles={photos.filter((p) => !slotted.has(p.id))}
+        />
       </div>
     );
   }
@@ -147,6 +158,11 @@ export function PhotoGroupBody({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={`/portal/files/${p.id}`} alt={p.name} className="size-full object-cover" loading="lazy" decoding="async" />
                     </a>
+                    <PhotoDownloadButton
+                      id={p.id}
+                      name={p.name}
+                      className="absolute left-1 top-1 rounded-md bg-black/60 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    />
                     {canDelete && (
                       <button
                         onClick={() => remove(p.id)}
@@ -160,6 +176,9 @@ export function PhotoGroupBody({
                 ))}
               </div>
             )}
+
+            {/* Same photos, listed as files you can take one at a time. */}
+            <PhotoAttachments groups={[{ label: def.label, files: photos }]} />
     </div>
   );
 }

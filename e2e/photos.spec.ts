@@ -103,6 +103,39 @@ test("photos: a checklist photo files itself into the Survey folder under the sl
   expect(res.headers()["content-disposition"]).toContain("Front_of_house");
 });
 
+test("photos: every checklist photo is a separately downloadable attachment", async ({ page }) => {
+  await login(page, "manager@anexahomes.com");
+  await openProductionDeal(page);
+  await openFieldProduction(page);
+
+  // Put a shot in a known slot so there is something to take back out.
+  const slot = () => page.getByTestId("photo-slot").filter({ hasText: "Front of house" }).first();
+  await expect(slot()).toBeVisible({ timeout: 10000 });
+  await slot().locator('input[type="file"]').first().setInputFiles("public/anexa-mark.png");
+  await expect(page.getByText(/^Photo added$/)).toBeVisible({ timeout: 15000 });
+
+  // The capture checklist is one view of these photos; the attachment list is
+  // the other — the one you use to hand them to a lender one file at a time.
+  // Scoped to the visible tab: the other checklist's panel is still in the DOM.
+  const list = page.getByTestId("photo-attachments").locator("visible=true").first();
+  await expect(list).toBeVisible({ timeout: 15000 });
+  const row = list.locator("li").filter({ hasText: "Front of house" }).first();
+  await expect(row).toBeVisible();
+
+  // A download link, not a preview link: the browser must save the file rather
+  // than open it, and save it under the slot's label.
+  const href = await row.getByRole("link", { name: /^Download / }).getAttribute("href");
+  expect(href).toMatch(/\/portal\/files\/[^?]+\?download=1$/);
+  const res = await page.request.get(href!);
+  expect(res.status()).toBe(200);
+  const disposition = res.headers()["content-disposition"];
+  expect(disposition).toContain("attachment");
+  expect(disposition).toContain("Front_of_house");
+  // The ASCII fallback squashes the spaces; filename* is what actually reaches
+  // the downloads folder, so it has to carry the label as written.
+  expect(disposition).toContain("filename*=UTF-8''Front%20of%20house");
+});
+
 test("photos: compiles a PDF photo report for a deal", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await openProductionDeal(page);
