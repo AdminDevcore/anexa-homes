@@ -9,6 +9,7 @@ import {
   priceStoredPurchase,
   grossPpwFromNet,
   basePpwFromSticker,
+  bandPpwCents,
   underBaseFloor,
   type FinalPpwCap,
   year1Production,
@@ -780,6 +781,117 @@ describe("a FLAT partner sells at one price per watt, in both directions", () =>
     }
   });
 
+  /**
+   * THE ROOF, which is the one thing Amos's flat rate is not a price for.
+   *
+   * His words: "Amos' fixed price doesn't change $5.50 except one scenario.
+   * Whenever there is a roof adder, that thing applies onto the loan. Any other
+   * adder does not apply. So the system is 10 kW on a $5.50 — that's $55,000.
+   * If we have a $7k roof, it's gonna bump it to $62,000 and continue the
+   * payments as usual."
+   *
+   * Every figure below is that sentence, done by hand.
+   */
+  it("adds a roof to the loan on top of the flat rate, at what the roof costs", () => {
+    const TEN_KW = { systemSizeKwDc: 10, dealerFeePct: 65 };
+    const ROOF = 700_000; // $7,000
+
+    const cap = capStickerToFinalPpw({
+      stickerPpwCents: 857,
+      maxFinalPpwCents: 550,
+      mode: "flat",
+      ...TEN_KW,
+      // The roof is NOT among the adders the ceiling is solved against.
+      adderTotalCents: 0,
+    });
+    // The system still stickers at exactly the published rate: a roof does not
+    // move the price of the array, which is the whole point of the exception.
+    expect(cap.stickerPpwCents).toBe(550);
+
+    const priced = pricePurchase({
+      product: "loan",
+      ...TEN_KW,
+      stickerPpwCents: cap.stickerPpwCents,
+      adderTotalCents: 0,
+      onTopAdderTotalCents: ROOF,
+    });
+    expect(priced.baseStickerCents).toBe(5_500_000);
+    expect(priced.contractPriceCents).toBe(6_200_000); // $62,000, his figure
+    expect(priced.adderStickerCents).toBe(ROOF); // at face, not grossed up
+    // And it is a PASS-THROUGH: the partner takes its 65% of the system and
+    // nothing of the roof, so the company is left with the roof's price whole
+    // rather than 35% of it.
+    expect(priced.dealerFeeCents).toBe(0.65 * 5_500_000);
+    expect(priced.grossPriceCents).toBe(0.35 * 5_500_000 + ROOF);
+    // The base per watt — what a redline and a lender floor are measured on —
+    // is the same as it would be with no roof on the job at all.
+    expect(priced.basePpwCents).toBe(192.5);
+  });
+
+  it("leaves an ordinary adder inside the flat rate, roof or no roof", () => {
+    // "Any other adder do not apply." A $2,550 trenching line still comes out
+    // of the company's side; only the roof rides above the rate.
+    const TEN_KW = { systemSizeKwDc: 10, dealerFeePct: 65 };
+    const cap = capStickerToFinalPpw({
+      stickerPpwCents: 857, maxFinalPpwCents: 550, mode: "flat", ...TEN_KW,
+      adderTotalCents: 255_000,
+    });
+    const priced = pricePurchase({
+      product: "loan",
+      ...TEN_KW,
+      stickerPpwCents: cap.stickerPpwCents,
+      adderTotalCents: 255_000,
+      onTopAdderTotalCents: 700_000,
+    });
+    // $55,000 for the whole capped side — trenching included — plus the roof.
+    // Within half a cent a watt, which on 10 kW is $50: the sticker is a whole
+    // number of cents and is solved backwards out of the ceiling, so a job
+    // carrying extra work lands beside the published rate rather than on it.
+    // That residual is documented on `capStickerToFinalPpw` and predates this.
+    expect(Math.abs(priced.contractPriceCents - 6_200_000)).toBeLessThanOrEqual(5_000);
+    // The trenching came out of the array's share; the roof did not.
+    expect(priced.baseStickerCents).toBeLessThan(5_500_000);
+  });
+
+  it("prices a roof identically with no partner rule in play", () => {
+    // A lender with no fixed or maximum $/W has no rate for anything to be on
+    // top OF, so the flag must not quietly reprice those deals. Both halves
+    // still reach the customer; only the ceiling arithmetic is skipped.
+    const split = pricePurchase({
+      product: "loan",
+      systemSizeKwDc: 10,
+      stickerPpwCents: 350,
+      dealerFeePct: 18,
+      adderTotalCents: 100_000,
+      onTopAdderTotalCents: 700_000,
+    });
+    // The roof is still passed through at face on any lender: the flag says the
+    // partner advances it and keeps none of it, and that is not a statement
+    // about ceilings.
+    expect(split.adderStickerCents).toBe(Math.round(100_000 / 0.82) + 700_000);
+    expect(split.adderTotalCents).toBe(800_000);
+    expect(split.baseStickerCents + split.adderStickerCents).toBe(split.contractPriceCents);
+  });
+
+  it("keeps gross + fee equal to the contract with a roof on the job", () => {
+    // The three lines a homeowner reads and adds up. A cent of drift here is a
+    // phone call, and the on-top adder is a fourth term in that sum.
+    for (const onTop of [0, 1, 99, 700_000, 1_450_000]) {
+      const p = pricePurchase({
+        product: "loan",
+        systemSizeKwDc: 11.3,
+        stickerPpwCents: 550,
+        dealerFeePct: 65,
+        adderTotalCents: 233_333,
+        onTopAdderTotalCents: onTop,
+      });
+      expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
+      expect(p.baseStickerCents + p.adderStickerCents).toBe(p.contractPriceCents);
+      expect(p.adderTotalCents).toBe(233_333 + onTop);
+      expect(p.onTopAdderTotalCents).toBe(onTop);
+    }
+  });
+
   it("says the price did not move when the deal was already at the flat rate", () => {
     // A notice reading "held at $5.50/W" on a deal that was always $5.50/W is
     // an explanation for something that did not happen.
@@ -992,6 +1104,136 @@ describe("the company band and the lender floor, at the validation layer", () =>
       downPaymentCents: null, loanMonthlyPaymentCents: null, minBasePpwCents: 300,
     };
     expect(codes(lease)).not.toContain("pricing.below_lender_floor");
+  });
+});
+
+/**
+ * The company's band, on the one partner whose base nobody sets.
+ *
+ * THE DEFECT, in the exact numbers it shipped in: Amos sells at a flat $5.50/W
+ * on a 65% fee, so the whole job leaves $1.93/W. Put $5,250 of trenching and a
+ * main-panel upgrade on an 11 kW deal and $0.48/W of that goes to the extra
+ * work, leaving a base of $1.45/W — under the company's $1.50 minimum, so the
+ * proposal refused to generate. Nothing was mispriced. The deal carried adders,
+ * and on a flat partner adders come out of the base by construction, so every
+ * Amos job over about $4,700 of extra work was blocked with no box a rep could
+ * change to release it.
+ *
+ * This is the THIRD time this band has been asked of a number whose meaning
+ * moved: first the sticker instead of the base, then the base before the cap
+ * bit, now the base after the adders came out of it.
+ */
+describe("the company band is asked of a number the rep can actually move", () => {
+  // $5.50/W flat, 65% fee, 11 kW, $5,250 inside the partner's price.
+  const AMOS_FLAT = {
+    dealerFeePct: 65,
+    maxFinalPpwCents: 550,
+    finalPpwMode: "flat" as const,
+  };
+  // What `capStickerToFinalPpw` solves the system sticker down to, which is
+  // what lands on the finance row and is what every enforcer reads.
+  const capped = capStickerToFinalPpw({
+    stickerPpwCents: grossPpwFromNet(300, 65)!,
+    maxFinalPpwCents: 550,
+    mode: "flat",
+    systemSizeKwDc: 11,
+    dealerFeePct: 65,
+    adderTotalCents: 525_000,
+  });
+
+  it("reproduces the block: the residual base really is under the floor", () => {
+    // Not a straw man — this is the number the old rule compared.
+    expect(basePpwFromSticker(capped.stickerPpwCents, 65)).toBeLessThan(150);
+    expect(basePpwFromSticker(capped.stickerPpwCents, 65)).toBe(145);
+  });
+
+  it("measures a flat partner on the gross, which the adders cannot move", () => {
+    const band = bandPpwCents({ stickerPpwCents: capped.stickerPpwCents, ...AMOS_FLAT });
+    // $5.50 less a 65% fee. The Gross row already on the price card.
+    expect(band).toBe(193);
+    expect(band).toBeGreaterThanOrEqual(150);
+  });
+
+  it("gives the SAME answer whatever the adders are, which is the whole point", () => {
+    const at = (adderTotalCents: number) =>
+      bandPpwCents({
+        stickerPpwCents: capStickerToFinalPpw({
+          stickerPpwCents: grossPpwFromNet(300, 65)!,
+          maxFinalPpwCents: 550,
+          mode: "flat",
+          systemSizeKwDc: 11,
+          dealerFeePct: 65,
+          adderTotalCents,
+        }).stickerPpwCents,
+        ...AMOS_FLAT,
+      });
+    // A bare deal, a trenching job, and a very heavy one all leave the same
+    // $1.93 — because the customer pays $5.50/W in every one of them.
+    expect(at(0)).toBe(193);
+    expect(at(525_000)).toBe(193);
+    expect(at(1_200_000)).toBe(193);
+  });
+
+  it("still fails a flat partner whose own price leaves the company too little", () => {
+    // $2.00/W flat on a 65% fee leaves $0.70/W for the whole job. That is a
+    // real problem with the partner, and the band is right to say so.
+    const thin = capStickerToFinalPpw({
+      stickerPpwCents: grossPpwFromNet(300, 65)!,
+      maxFinalPpwCents: 200,
+      mode: "flat",
+      systemSizeKwDc: 11,
+      dealerFeePct: 65,
+      adderTotalCents: 0,
+    });
+    expect(
+      bandPpwCents({
+        stickerPpwCents: thin.stickerPpwCents,
+        dealerFeePct: 65,
+        maxFinalPpwCents: 200,
+        finalPpwMode: "flat",
+      })
+    ).toBeLessThan(150);
+  });
+
+  it("leaves every other lender exactly where it was", () => {
+    // A ceiling is not a flat price: the rep still sets the base under it, so
+    // the band goes on reading the base and an adder still costs the customer.
+    const cap = { dealerFeePct: 18, maxFinalPpwCents: 550, finalPpwMode: "cap" as const };
+    const sticker = grossPpwFromNet(287, 18)!;
+    expect(bandPpwCents({ stickerPpwCents: sticker, ...cap })).toBe(287);
+    expect(basePpwFromSticker(sticker, 18)).toBe(287);
+    // …and with no partner rule recorded at all.
+    expect(bandPpwCents({ stickerPpwCents: sticker, dealerFeePct: 18 })).toBe(287);
+    // …and flat mode with no figure behind it is not a rule either.
+    expect(
+      bandPpwCents({ stickerPpwCents: sticker, dealerFeePct: 18, finalPpwMode: "flat" })
+    ).toBe(287);
+  });
+
+  it("generation is no longer blocked on the deal that reported this", () => {
+    const f: FinanceForValidation = {
+      product: "loan",
+      grossPpwCents: capped.stickerPpwCents,
+      dealerFeePct: 65,
+      contractPriceCents: 6_054_000,
+      maxFinalPpwCents: 550,
+      finalPpwMode: "flat",
+      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
+      downPaymentCents: null, loanMonthlyPaymentCents: 16_817,
+      aprPct: 0, loanTermMonths: 360, fromRateSheet: true,
+    };
+    expect(validateFinance(f, A).map((i) => i.code)).not.toContain("pricing.ppw_out_of_range");
+  });
+
+  it("a flat partner with no figure behind it falls back to the base, never to a guess", () => {
+    expect(
+      bandPpwCents({
+        stickerPpwCents: capped.stickerPpwCents,
+        dealerFeePct: 65,
+        maxFinalPpwCents: null,
+        finalPpwMode: "flat",
+      })
+    ).toBe(basePpwFromSticker(capped.stickerPpwCents, 65));
   });
 });
 

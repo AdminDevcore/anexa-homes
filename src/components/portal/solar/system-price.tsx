@@ -5,6 +5,7 @@ import { Check, Minus, Pencil, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
+  bandPpwCents,
   basePpwFromSticker,
   capStickerToFinalPpw,
   grossPpwFromNet,
@@ -48,6 +49,7 @@ export function SystemPriceCard({
   minPpwCents,
   maxPpwCents,
   adderTotalCents,
+  onTopAdderTotalCents,
   quotedFeePct,
   quotedMaxFinalPpwCents,
   quotedFinalPpwMode,
@@ -63,7 +65,17 @@ export function SystemPriceCard({
   defaultPpwCents: number | null;
   minPpwCents: number;
   maxPpwCents: number;
+  /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
+  /**
+   * The adders financed ON TOP of it — a roof on a flat-rate partner.
+   *
+   * Kept apart from the figure above because the two move different numbers:
+   * the ordinary adders come out of a ceiling, and these ride above it. A card
+   * that summed them into the cap solve would print a customer price the
+   * financing step below is not going to quote.
+   */
+  onTopAdderTotalCents: number;
   /** The dealer fee on the programme this deal is quoted on. Null on cash. */
   quotedFeePct: number | null;
   /**
@@ -176,8 +188,13 @@ export function SystemPriceCard({
   };
 
   const baseTotalCents = basePpwCents == null || watts === 0 ? null : basePpwCents * watts;
-  const grossCents = baseTotalCents == null ? null : baseTotalCents + adderTotalCents;
-  const adderPpw = watts > 0 ? adderTotalCents / watts : 0;
+  // Both halves. The ladder on the right is what the COMPANY keeps, and a roof
+  // financed on top is kept whole exactly like an adder inside the fee — what
+  // differs is which side of the partner's ceiling it is paid out of, not
+  // whether it is paid.
+  const allAdderCents = adderTotalCents + onTopAdderTotalCents;
+  const grossCents = baseTotalCents == null ? null : baseTotalCents + allAdderCents;
+  const adderPpw = watts > 0 ? allAdderCents / watts : 0;
   const grossPpw = grossCents != null && watts > 0 ? grossCents / watts : null;
 
   /**
@@ -214,6 +231,7 @@ export function SystemPriceCard({
           mode: quotedFinalPpwMode,
           systemSizeKwDc,
           dealerFeePct: quotedFeePct ?? 0,
+          // Only the work the partner's figure is a price FOR.
           adderTotalCents,
         });
   const customerPpw = customerCap?.stickerPpwCents ?? flatSeedPpw;
@@ -225,6 +243,7 @@ export function SystemPriceCard({
           stickerPpwCents: customerPpw,
           dealerFeePct: quotedFeePct ?? 0,
           adderTotalCents,
+          onTopAdderTotalCents,
         })
       : null;
   const customerContract = customerPriced?.contractPriceCents ?? null;
@@ -241,8 +260,26 @@ export function SystemPriceCard({
   const customerFinalPpw = customerPriced?.finalPpwCents ?? null;
 
   const offDefault = defaultPpwCents != null && basePpwCents != null && basePpwCents !== defaultPpwCents;
-  const outOfBand =
-    basePpwCents != null && (basePpwCents < minPpwCents || basePpwCents > maxPpwCents);
+  /**
+   * THE SAME NUMBER THE SERVER BLOCKS ON. Twice now this note and readiness
+   * have measured the band on different figures and a rep was told to carry on
+   * and then refused at generate; `bandPpwCents` is the one definition, and on
+   * a flat partner it reads the gross rather than a base that is only what the
+   * adders left behind.
+   */
+  const bandPpw =
+    basePpwCents == null
+      ? null
+      : bandPpwCents({
+          // No usable fee to gross up by means the sticker IS the base — the
+          // same stand-down `pricePurchase` makes for the identical input.
+          stickerPpwCents:
+            customerPpw ?? grossPpwFromNet(basePpwCents, quotedFeePct ?? 0) ?? basePpwCents,
+          dealerFeePct: quotedFeePct ?? 0,
+          maxFinalPpwCents: quotedMaxFinalPpwCents,
+          finalPpwMode: quotedFinalPpwMode ?? null,
+        });
+  const outOfBand = bandPpw != null && (bandPpw < minPpwCents || bandPpw > maxPpwCents);
 
   /**
    * What this deal actually leaves the company, after the fee AND after the cap.
@@ -457,7 +494,7 @@ export function SystemPriceCard({
             extra work. The dealer fee goes on top of it, in the footer. */}
         <dl className="self-center rounded-lg bg-muted/50 p-3 text-sm">
           <Rung label="Base" ppw={basePpwCents} total={baseTotalCents} />
-          <Rung label="Adders" ppw={watts > 0 ? adderPpw : null} total={adderTotalCents} muted />
+          <Rung label="Adders" ppw={watts > 0 ? adderPpw : null} total={allAdderCents} muted />
           <Rung
             label="Gross"
             ppw={grossPpw}
@@ -495,13 +532,16 @@ export function SystemPriceCard({
             {quotedFinalPpwMode === "flat" && quotedMaxFinalPpwCents != null ? (
               <>
                 sells at a flat ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, fee and adders
-                included — the base above only changes what you keep, so the customer&rsquo;s
-                final price is{" "}
+                included{onTopAdderTotalCents > 0 ? " apart from the work financed on top" : ""}{" "}
+                — the base above only changes what you keep, so the customer&rsquo;s final
+                price is{" "}
               </>
             ) : customerCap?.capped && quotedMaxFinalPpwCents != null ? (
               <>
                 never charges more than ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, fee and
-                adders included, so the customer&rsquo;s final price is held at{" "}
+                adders included
+                {onTopAdderTotalCents > 0 ? " apart from the work financed on top" : ""}, so the
+                customer&rsquo;s final price is held at{" "}
               </>
             ) : (
               <>
@@ -516,7 +556,17 @@ export function SystemPriceCard({
               ${((customerFinalPpw ?? customerPpw) / 100).toFixed(2)}/W · $
               {Math.round(customerContract / 100).toLocaleString()}
             </span>
-            . Cash pays the gross.
+            .{" "}
+            {/* The one figure on this card that is ABOVE the partner's rate.
+                Without saying so, a rep reads "$5.50/W flat" beside "$6.20/W"
+                and has to guess which of the two the customer signs. */}
+            {onTopAdderTotalCents > 0 && (
+              <>
+                That includes ${Math.round(onTopAdderTotalCents / 100).toLocaleString()} of work
+                financed on top of the rate.{" "}
+              </>
+            )}
+            Cash pays the gross.
           </p>
         ) : (
           <p className="text-[11px] text-muted-foreground">

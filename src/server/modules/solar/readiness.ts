@@ -35,7 +35,7 @@ export async function readSolarReadiness(
         // The partner's margin floor travels with the deal it was designed for.
         // A cash deal has no lender and therefore no floor, which falls out of
         // this being null rather than needing a rule of its own.
-        lender: { select: { minBasePpwCents: true } },
+        lender: { select: { minBasePpwCents: true, finalPpwMode: true, maxFinalPpwCents: true } },
         module: { select: { ratingW: true } },
       },
     }),
@@ -160,6 +160,10 @@ export async function readSolarReadiness(
         aprPct: finance.aprPct,
         loanTermMonths: finance.loanTermMonths,
         minBasePpwCents: design.lender?.minBasePpwCents ?? null,
+        // Only so the company's band is measured on a number a rep can move —
+        // on a flat partner the base is a residual. See `bandPpwCents`.
+        finalPpwMode: design.lender?.finalPpwMode ?? null,
+        maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
         fromRateSheet: !!finance.lenderProductId,
         hasPaymentFactor:
           (quotedProduct?.factorWithPaydownMicros ?? 0) > 0 ||

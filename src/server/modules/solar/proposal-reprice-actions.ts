@@ -12,7 +12,7 @@ import { generateProposalVersion } from "./proposal-generate";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { annualUsageFromBill, effectiveUsageKwh, monthlyBillFromUsage } from "@/lib/solar-energy";
-import { basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
+import { bandPpwCents, basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ValidationIssue } from "@/lib/solar-validation";
 
@@ -186,7 +186,7 @@ export async function repriceProposalAction(
       select: {
         id: true, manufacturer: true, model: true, description: true,
         adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-        showOnProposal: true, rank: true,
+        showOnProposal: true, financedOnTop: true, rank: true,
       },
       orderBy: [{ rank: "asc" }, { model: "asc" }],
     });
@@ -249,7 +249,7 @@ export async function repriceProposalAction(
     select: {
       systemSizeKwDc: true,
       lenderId: true,
-      lender: { select: { minBasePpwCents: true } },
+      lender: { select: { minBasePpwCents: true, finalPpwMode: true, maxFinalPpwCents: true } },
     },
   });
   const finance = await prisma.solarFinance.findUnique({ where: { leadId } });
@@ -280,7 +280,7 @@ export async function repriceProposalAction(
       : null;
     if (lenderProductId && !lenderProduct) return fail("That financing programme is not available.");
 
-    const adderTotalCents = await resolveAdderTotal(user.companyId, leadId);
+    const adders = await resolveAdderTotal(user.companyId, leadId);
 
     const row = financeRowForProduct(
       {
@@ -291,7 +291,7 @@ export async function repriceProposalAction(
         product: lenderProduct?.product ?? finance.product,
         grossPpwCents: d.grossPpwCents ?? finance.grossPpwCents,
         dealerFeePct: finance.dealerFeePct,
-        adderTotalCents,
+        ...adders,
         rateMillsPerKwh: finance.rateMillsPerKwh,
         monthlyPaymentCents: finance.monthlyPaymentCents,
         escalatorPct: finance.escalatorPct,
@@ -321,16 +321,25 @@ export async function repriceProposalAction(
     // the deal changed and only the document refused.
     const isPurchase = row.product === "cash" || row.product === "loan";
     if (isPurchase) {
-      const basePpwCents = basePpwFromSticker(row.grossPpwCents, row.dealerFeePct);
-      if (basePpwCents < assumptions.minPpwCents || basePpwCents > assumptions.maxPpwCents) {
+      // TWO DIFFERENT NUMBERS ON PURPOSE. The company's band asks what the
+      // partner's price leaves for the job; the lender's floor asks what is
+      // left for the SYSTEM once the extra work is paid for. On every lender
+      // but a flat one they are the same figure — see `bandPpwCents`.
+      const bandPpw = bandPpwCents({
+        stickerPpwCents: row.grossPpwCents,
+        dealerFeePct: row.dealerFeePct,
+        maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
+        finalPpwMode: design.lender?.finalPpwMode ?? null,
+      });
+      if (bandPpw < assumptions.minPpwCents || bandPpw > assumptions.maxPpwCents) {
         return fail(
-          `$${(basePpwCents / 100).toFixed(2)}/W before the lender's cut is outside the allowed range of $${(assumptions.minPpwCents / 100).toFixed(2)}–$${(assumptions.maxPpwCents / 100).toFixed(2)}.`
+          `$${(bandPpw / 100).toFixed(2)}/W before the lender's cut is outside the allowed range of $${(assumptions.minPpwCents / 100).toFixed(2)}–$${(assumptions.maxPpwCents / 100).toFixed(2)}.`
         );
       }
       const floor = design.lender?.minBasePpwCents ?? null;
       if (underBaseFloor(row.grossPpwCents, row.dealerFeePct, floor)) {
         return fail(
-          `That leaves $${(basePpwCents / 100).toFixed(2)}/W before the lender's cut, under this lender's $${((floor ?? 0) / 100).toFixed(2)}/W minimum.`
+          `That leaves $${(basePpwFromSticker(row.grossPpwCents, row.dealerFeePct) / 100).toFixed(2)}/W before the lender's cut, under this lender's $${((floor ?? 0) / 100).toFixed(2)}/W minimum.`
         );
       }
     }

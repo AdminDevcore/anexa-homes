@@ -1,7 +1,8 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
-  basePpwFromSticker,
+  bandPpwCents,
   underBaseFloor,
+  type FinalPpwMode,
   type SolarAssumptions,
 } from "./solar-money";
 import { resolveUtilityRateMills } from "./solar-energy";
@@ -118,6 +119,18 @@ export type FinanceForValidation = {
    * because it belongs to the partner this one deal was designed for.
    */
   minBasePpwCents?: number | null;
+  /**
+   * Whether this deal's LENDER states a ceiling or a flat price, and the adders
+   * riding inside it — both only so the company's own band is measured on a
+   * number the rep can actually move. See `bandPpwCents`.
+   */
+  finalPpwMode?: FinalPpwMode | null;
+  /**
+   * The partner's own $/W figure. Optional: absent, the band falls back to the
+   * base exactly as it read before flat partners existed, which is the safe
+   * direction for a caller that has not been updated.
+   */
+  maxFinalPpwCents?: number | null;
   contractPriceCents: number;
   rateMillsPerKwh: number | null;
   monthlyPaymentCents: number | null;
@@ -387,7 +400,15 @@ export function validateFinance(
     // inside the band on screen, stickered at $8.00/W, and hit "outside the
     // allowed range" at generate — with no warning ever shown while it was
     // being typed. Same number, both sides, and the discrepancy goes away.
-    const basePpwCents = basePpwFromSticker(f.grossPpwCents, f.dealerFeePct);
+    // …and on a FLAT partner it is asked of the gross instead, because the base
+    // there is a residual rather than a price. `bandPpwCents` carries the whole
+    // argument, and all three enforcers of this band call it.
+    const basePpwCents = bandPpwCents({
+      stickerPpwCents: f.grossPpwCents,
+      dealerFeePct: f.dealerFeePct,
+      maxFinalPpwCents: f.maxFinalPpwCents,
+      finalPpwMode: f.finalPpwMode,
+    });
     if (basePpwCents < a.minPpwCents || basePpwCents > a.maxPpwCents) {
       block(
         "pricing.ppw_out_of_range",

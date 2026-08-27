@@ -229,6 +229,16 @@ export type PurchaseInput = {
   dealerFeePct: number;
   /** The extra work at its CATALOGUE price, before any dealer fee. */
   adderTotalCents: number;
+  /**
+   * The extra work that rides ON TOP of the partner's price, at its catalogue
+   * price — the re-roof on a flat-rate lender. See `pricePurchase`.
+   *
+   * Optional and zero by default, so every caller written before on-top adders
+   * existed keeps its exact arithmetic. Disjoint from `adderTotalCents`: a line
+   * is in one or the other, never both, and the two together are the whole
+   * catalogue price of the work on the deal.
+   */
+  onTopAdderTotalCents?: number;
   /** Our hard cost, for the margin basis. */
   equipmentCostCents?: number;
 };
@@ -243,8 +253,10 @@ export type PurchaseBreakdown = {
   /** Base per installed watt. The rate a redline is measured against. */
   basePpwCents: number;
 
-  /** ADDERS — the extra work at its catalogue price, before the cut. */
+  /** ADDERS — ALL the extra work at its catalogue price, before the cut. */
   adderTotalCents: number;
+  /** Of that, the part financed on top of the partner's price. */
+  onTopAdderTotalCents: number;
 
   /** GROSS — base + adders, still before the cut. What the company keeps. */
   grossPriceCents: number;
@@ -263,7 +275,13 @@ export type PurchaseBreakdown = {
 
   /** The system at sticker, fee included, adders excluded. "System price". */
   baseStickerCents: number;
-  /** The adders at sticker, fee included. "Additional work". */
+  /**
+   * What the customer pays for the extra work: the ordinary adders grossed up
+   * by the fee, PLUS the on-top ones at their own price. "Additional work".
+   *
+   * `baseStickerCents + adderStickerCents === contractPriceCents` always, which
+   * is the invariant the customer's own breakdown is printed from.
+   */
   adderStickerCents: number;
 
   /** Gross minus our cost. Only meaningful when cost is known. */
@@ -294,13 +312,25 @@ export type PurchaseBreakdown = {
  * job carrying extra work. So the adder grosses up by the same fee the system
  * does, and the company is left holding exactly what the catalogue said.
  *
+ * EXCEPT AN ADDER FINANCED ON TOP, which is the one kind the partner adds to
+ * the loan at its own price and takes no cut of. Amos Capital Fund's paper is
+ * the case: a flat $5.50/W however big the job, and a roof on top at what the
+ * roof costs. Ten kilowatts is $55,000, the same job with a $7,000 roof under
+ * it is $62,000, and the payment amortises the larger number. So `onTop` does
+ * not gross up, does not move the system's sticker, and — in
+ * `capStickerToFinalPpw` — is not measured against the partner's ceiling at
+ * all. It is a pass-through: the customer borrows it, the company keeps it.
+ *
  * Cash has no lender and therefore no fee; passing one is rejected rather than
  * silently applied, because a cash deal quoted with a dealer fee is simply
- * overpriced.
+ * overpriced. Cash prices an on-top adder identically to an ordinary one, there
+ * being no fee for either to be inside or outside of.
  */
 export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
   const systemWatts = Math.round(input.systemSizeKwDc * 1000);
-  const adderTotalCents = Math.round(input.adderTotalCents);
+  const insideAdderCents = Math.round(input.adderTotalCents);
+  const onTopAdderTotalCents = Math.round(input.onTopAdderTotalCents ?? 0);
+  const adderTotalCents = insideAdderCents + onTopAdderTotalCents;
 
   // A fee at or above 100% has no honest gross-up — it divides by zero or goes
   // negative. Standing the fee down beats putting an Infinity in front of a
@@ -313,8 +343,11 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
   const basePriceCents = baseStickerCents - Math.round(baseStickerCents * f);
 
   // The adders, grossed up by the SAME fee, so that what survives the lender's
-  // cut is the catalogue price and not 82% of it.
-  const adderStickerCents = f > 0 ? Math.round(adderTotalCents / (1 - f)) : adderTotalCents;
+  // cut is the catalogue price and not 82% of it. The on-top ones are added
+  // AFTER that gross-up, at face: the partner advances them and keeps nothing
+  // of them, so there is no cut for the customer's price to have to cover.
+  const insideStickerCents = f > 0 ? Math.round(insideAdderCents / (1 - f)) : insideAdderCents;
+  const adderStickerCents = insideStickerCents + onTopAdderTotalCents;
 
   const contractPriceCents = baseStickerCents + adderStickerCents;
   const grossPriceCents = basePriceCents + adderTotalCents;
@@ -332,6 +365,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     basePriceCents,
     basePpwCents: systemWatts > 0 ? basePriceCents / systemWatts : 0,
     adderTotalCents,
+    onTopAdderTotalCents,
     grossPriceCents,
     grossPpwCents: systemWatts > 0 ? grossPriceCents / systemWatts : 0,
     dealerFeeCents,
@@ -459,6 +493,61 @@ export function basePpwFromSticker(stickerPpwCents: number, dealerFeePct: number
 }
 
 /**
+ * The $/W the COMPANY'S OWN Min/Max band is measured against.
+ *
+ * The band is a guard on what a rep prices a system at. That only means
+ * something where the rep sets the price — and on a FLAT partner they do not.
+ * Amos sells at $5.50/W whatever is typed, so `capStickerToFinalPpw` solves the
+ * system sticker back down until system + adders lands on $5.50, and the base
+ * that comes out the other side is not a price anybody chose: it is what is
+ * left after the extra work is paid for out of a fixed number.
+ *
+ * Which made the band bite on the adders. Amos at 65% leaves $1.93/W for the
+ * whole job; put $5,250 of trenching and a panel upgrade on an 11 kW deal and
+ * $0.48/W of that goes to the extra work, leaving $1.45/W — under a $1.50
+ * company minimum, so the proposal would not generate. Not because anything was
+ * mispriced: because the deal carried adders at all. Every Amos job over about
+ * $4,700 of extra work was blocked, permanently, with no box a rep could change
+ * to release it. That is the third time this band has been asked of a number
+ * whose meaning moved underneath it — see `basePpwFromSticker` for the second.
+ *
+ * So on a flat partner it is asked of the GROSS: base plus what the adders
+ * leave, which is the partner's fixed price less the fee — $1.93/W here, the
+ * figure already printed on the price card's Gross row. Stable, it cannot be
+ * moved by attaching extra work, and it still fails honestly if a partner's
+ * flat price genuinely leaves the company under its own floor.
+ *
+ * Everywhere else this is `basePpwFromSticker` exactly as before.
+ *
+ * WHETHER THE COMPANY IS KEEPING ENOUGH once the extra work is paid for is a
+ * real question, and it already has an answer that is not this one:
+ * `underBaseFloor`, per lender, deliberately unset on Amos because a floor it
+ * can never clear blocks every deal on it.
+ */
+export function bandPpwCents(input: {
+  /** The system sticker this deal prices at — already lowered by any partner rule. */
+  stickerPpwCents: number;
+  dealerFeePct: number;
+  /** The partner's own figure, cents per watt. Null or ≤ 0 means no rule at all. */
+  maxFinalPpwCents?: number | null;
+  /** `flat` when that figure IS the price rather than a ceiling. */
+  finalPpwMode?: FinalPpwMode | null;
+}): number {
+  const base = basePpwFromSticker(input.stickerPpwCents, input.dealerFeePct);
+  const flat = input.maxFinalPpwCents;
+  if (input.finalPpwMode !== "flat" || flat == null || !(flat > 0)) return base;
+
+  // The partner's fixed price less the fee, and nothing else in it.
+  //
+  // Deliberately NOT base-plus-what-the-adders-leave, which is the same figure
+  // and was the first way this was written: adding two separately rounded
+  // per-watt numbers drifts a cent at some adder totals, so the answer moved
+  // with the adders after all — by one cent, on a rule whose entire purpose is
+  // that they cannot move it. Read off the partner instead and it is exact.
+  return basePpwFromSticker(flat, input.dealerFeePct);
+}
+
+/**
  * Is this deal leaving the company less per watt than the lender demands?
  *
  * The one place the floor rule lives, because it is asked in three — the
@@ -518,6 +607,16 @@ export type FinalPpwCap = {
  * give in it. That is the whole behaviour in one sentence: under a cap, extra
  * work comes out of the company's side, and the homeowner's number never moves.
  *
+ * ONE KIND OF WORK IS OUTSIDE THE RULE. An adder marked `financedOnTop` — a
+ * roof — is not part of what the partner's $/W is a price FOR. Amos publishes
+ * $5.50/W and funds a roof above it at what the roof costs, so a 10 kW job with
+ * a $7,000 roof is $55,000 + $7,000 and not $55,000 with the roof taken out of
+ * the company's margin. It is therefore excluded from the ceiling on both
+ * sides: it does not eat into what is left for the array, and it does not count
+ * towards the figure being tested against the ceiling. `onTopAdderTotalCents`
+ * is not returned here at all — the caller hands the same number to
+ * `pricePurchase`, which adds it to the contract afterwards.
+ *
  * TWO RULES, ONE SOLVE — `mode` decides which.
  *
  * `cap` is a CEILING. A deal already priced under it is left exactly where it
@@ -548,6 +647,7 @@ export function capStickerToFinalPpw(input: {
   mode?: FinalPpwMode;
   systemSizeKwDc: number;
   dealerFeePct: number;
+  /** The adders INSIDE the rule — everything not financed on top. */
   adderTotalCents: number;
 }): FinalPpwCap {
   const uncapped: FinalPpwCap = {
@@ -654,6 +754,8 @@ export function priceStoredPurchase(input: PurchaseInput & {
     mode: input.finalPpwMode,
     systemSizeKwDc: input.systemSizeKwDc,
     dealerFeePct: input.dealerFeePct,
+    // Only the adders the ceiling is a price FOR. The on-top ones ride above it
+    // and are added back by `pricePurchase` below — see `capStickerToFinalPpw`.
     adderTotalCents: input.adderTotalCents,
   });
   return {
