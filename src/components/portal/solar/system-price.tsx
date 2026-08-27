@@ -49,7 +49,7 @@ export function SystemPriceCard({
   minPpwCents,
   maxPpwCents,
   adderTotalCents,
-  onTopAdderTotalCents,
+  onTopAdderTotalCents = 0,
   quotedFeePct,
   quotedMaxFinalPpwCents,
   quotedFinalPpwMode,
@@ -74,8 +74,13 @@ export function SystemPriceCard({
    * the ordinary adders come out of a ceiling, and these ride above it. A card
    * that summed them into the cap solve would print a customer price the
    * financing step below is not going to quote.
+   *
+   * OPTIONAL, defaulting to none, because the screen that supplies it is still
+   * being built. Required, it shipped a card whose own caller did not compile
+   * and turned main red for everybody; a caller that knows about on-top work
+   * says so, and one that does not has none.
    */
-  onTopAdderTotalCents: number;
+  onTopAdderTotalCents?: number;
   /** The dealer fee on the programme this deal is quoted on. Null on cash. */
   quotedFeePct: number | null;
   /**

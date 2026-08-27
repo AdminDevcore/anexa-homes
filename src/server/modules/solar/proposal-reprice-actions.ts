@@ -186,7 +186,7 @@ export async function repriceProposalAction(
       select: {
         id: true, manufacturer: true, model: true, description: true,
         adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-        showOnProposal: true, financedOnTop: true, rank: true,
+        showOnProposal: true, rank: true,
       },
       orderBy: [{ rank: "asc" }, { model: "asc" }],
     });
