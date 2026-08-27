@@ -312,6 +312,28 @@ export function savingsModel(args: {
    * — leaves every figure exactly as it was before this existed.
    */
   vppCredits?: VppCredit[];
+  /**
+   * A LOAN's actual repayment schedule, so the model bills what the household
+   * is billed: twelve payments a year for the term, and nothing afterwards.
+   *
+   * Without this the loan branch below charges the whole contract price to
+   * year one. That is right for cash and wrong for finance, and it is wrong in
+   * the most alarming way a proposal can be: a homeowner on a $168 payment
+   * opened year one and read "$60,500 — the system itself, paid for this
+   * year", a number they will never be asked for and cannot pay.
+   *
+   * OPTIONAL, and ignored unless it carries both a payment and a term. A
+   * programme that publishes neither a factor nor an APR and term has no
+   * schedule to spread, and inventing one would be quoting a payment nobody
+   * offered — so that deal keeps the lump-sum shape it has always had.
+   */
+  loan?: {
+    /** The same monthly the document prints, cents. See `priceOption`. */
+    monthlyPaymentCents: number | null;
+    termMonths: number | null;
+    /** Paid at signing, on top of the payments. Always 0 today. */
+    downPaymentCents?: number | null;
+  } | null;
 }): SavingsModel {
   const a = args.assumptions;
   const horizon = args.years ?? 25;
@@ -325,6 +347,24 @@ export function savingsModel(args: {
 
   const vppAnnualCents = (args.vppCredits ?? []).reduce((n, v) => n + v.annualCents, 0);
   const vppUpfrontCents = (args.vppCredits ?? []).reduce((n, v) => n + v.upfrontCents, 0);
+
+  /**
+   * The loan, as a schedule rather than a price — but only when there IS one.
+   *
+   * Both halves are required. A payment with no term cannot be spread over
+   * anything, and a term with no payment has nothing to spread; either way the
+   * honest answer is to fall back to the contract price in year one rather
+   * than to guess at the missing half in a document a household signs.
+   */
+  const loanMonthlyCents =
+    args.product === "loan" &&
+    (args.loan?.monthlyPaymentCents ?? 0) > 0 &&
+    (args.loan?.termMonths ?? 0) > 0
+      ? args.loan!.monthlyPaymentCents!
+      : null;
+  const loanTermMonths = loanMonthlyCents != null ? args.loan!.termMonths! : 0;
+  const loanDownCents =
+    loanMonthlyCents != null ? Math.max(0, args.loan?.downPaymentCents ?? 0) : 0;
 
   for (let year = 1; year <= horizon; year++) {
     const production = productionInYear(args.year1ProductionKwh, year, a);
@@ -354,9 +394,20 @@ export function savingsModel(args: {
     // paid for the system" as two different, correctly-labelled numbers.
     let solarPaymentCents = 0;
     if (args.product === "cash" || args.product === "loan") {
-      // The system is paid for up front (or financed outside this model), so
-      // year-one carries the contract price and later years carry nothing.
-      if (year === 1) solarPaymentCents = args.purchase?.contractPriceCents ?? 0;
+      if (loanMonthlyCents != null) {
+        // Financed: twelve payments a year until the term runs out, and a
+        // final year that carries only the months actually left in it. A
+        // 30-year loan therefore bills all twenty-five years of this model and
+        // a 10-year loan stops billing in year 11 — which is the whole reason
+        // the payment is spread rather than lumped.
+        const monthsPaid = Math.min(12, Math.max(0, loanTermMonths - (year - 1) * 12));
+        solarPaymentCents = loanMonthlyCents * monthsPaid + (year === 1 ? loanDownCents : 0);
+      } else if (year === 1) {
+        // Bought outright — or financed on terms this document could not
+        // resolve — so year one carries the contract price and later years
+        // carry nothing.
+        solarPaymentCents = args.purchase?.contractPriceCents ?? 0;
+      }
     } else {
       const esc = Math.pow(1 + (args.escalatorPct ?? 0) / 100, year - 1);
       const withinTerm = !args.termYears || year <= args.termYears;
@@ -531,6 +582,12 @@ export type SnapshotFinancing = {
   aprPct: number | null;
   /** Loan only: what the customer pays each month. */
   loanMonthlyPaymentCents: number | null;
+  /**
+   * How many payments there are. Loan only, and ABSENT on every snapshot
+   * generated before the savings model spread a loan over its term — guard on
+   * `!= null` rather than on the key, so an old document simply omits the row.
+   */
+  loanTermMonths?: number | null;
   /**
    * True when that figure is the lender's own from an approval, false when it
    * is amortised from the quoted product. The document says which, because a
@@ -915,6 +972,51 @@ function priceOption(args: {
       )
     : undefined;
 
+  /**
+   * What a payment factor gets applied to: the contract price less anything the
+   * customer puts down. Never the gross — a down payment is not borrowed, and
+   * applying the factor to it quotes a payment on money nobody owes.
+   */
+  const loanPrincipalCents =
+    (purchase?.contractPriceCents ?? 0) - (finance.downPaymentCents ?? 0);
+  const loanFactorQuote =
+    finance.product === "loan" && args.loanFactors && hasPaymentFactor(args.loanFactors)
+      ? factorQuote(args.loanFactors, loanPrincipalCents)
+      : null;
+
+  /**
+   * The loan's monthly, resolved ONCE — before the twenty-five years are
+   * modelled, because the model now bills it.
+   *
+   * Two sources, in order of authority:
+   *   1. the rate sheet's PUBLISHED payment factor
+   *   2. our amortisation of the quoted APR and term
+   * (1) beats (2) because a factor bakes in the dealer fee and the promotional
+   * structure, so the two disagree — and quoting the derived one when the
+   * lender printed a factor misquotes the customer.
+   *
+   * `finance.loanMonthlyPaymentCents` still leads where a row carries one. No
+   * form sets it any more, but proposals are regenerated from rows that were
+   * written when one did.
+   *
+   * Where the programme has a paydown, this is the WITH-paydown figure — the
+   * same one printed on the cost chapter, and the one the higher
+   * `loanMonthlyWithoutPaydownCents` is shown directly beneath. Modelling one
+   * payment for the whole term and the other beside it would put two different
+   * twenty-five-year answers on one page; the caveat carries that instead.
+   */
+  const loanMonthlyCents =
+    finance.product === "loan"
+      ? (finance.loanMonthlyPaymentCents ??
+        (loanFactorQuote && factorMonthlyCents(loanFactorQuote)) ??
+        loanPaymentCents({
+          principalCents: loanPrincipalCents,
+          aprPct: finance.aprPct,
+          termMonths: finance.loanTermMonths ?? null,
+        }) ??
+        null)
+      : null;
+
   const savings = savingsModel({
     product: finance.product,
     year1ProductionKwh: design.year1ProductionKwh,
@@ -928,19 +1030,17 @@ function priceOption(args: {
     termYears: finance.termYears,
     assumptions: a,
     vppCredits: args.vppCredits,
+    // A financed system is paid for monthly, so the years carry the payments
+    // rather than the price. Both halves or neither — see `savingsModel`.
+    loan:
+      finance.product === "loan"
+        ? {
+            monthlyPaymentCents: loanMonthlyCents,
+            termMonths: finance.loanTermMonths ?? null,
+            downPaymentCents: finance.downPaymentCents ?? 0,
+          }
+        : null,
   });
-
-  /**
-   * What a payment factor gets applied to: the contract price less anything the
-   * customer puts down. Never the gross — a down payment is not borrowed, and
-   * applying the factor to it quotes a payment on money nobody owes.
-   */
-  const loanPrincipalCents =
-    (purchase?.contractPriceCents ?? 0) - (finance.downPaymentCents ?? 0);
-  const loanFactorQuote =
-    finance.product === "loan" && args.loanFactors && hasPaymentFactor(args.loanFactors)
-      ? factorQuote(args.loanFactors, loanPrincipalCents)
-      : null;
 
   const financing: SnapshotFinancing = {
     product: finance.product,
@@ -1007,26 +1107,23 @@ function priceOption(args: {
     escalatorPct: isPurchase ? null : finance.escalatorPct,
     termYears: finance.termYears,
     aprPct: finance.product === "loan" ? finance.aprPct : null,
-    // Three sources, in order of authority:
-    //   1. the lender's own figure from a real approval
-    //   2. the rate sheet's PUBLISHED payment factor
-    //   3. our amortisation of the quoted APR and term
-    // (2) beats (3) because a factor bakes in the dealer fee and the
-    // promotional structure, so the two disagree — and quoting the derived
-    // one when the lender printed a factor misquotes the customer.
-    loanMonthlyPaymentCents:
-      finance.product === "loan"
-        ? (finance.loanMonthlyPaymentCents ??
-          (loanFactorQuote && factorMonthlyCents(loanFactorQuote)) ??
-          loanPaymentCents({
-            principalCents: loanPrincipalCents,
-            aprPct: finance.aprPct,
-            termMonths: finance.loanTermMonths ?? null,
-          }) ??
-          null)
-        : null,
+    // Resolved above, BEFORE the savings model, because the model bills it.
+    // One figure, one place: the payment the customer reads on this chapter is
+    // the payment the twenty-five years were built from.
+    loanMonthlyPaymentCents: loanMonthlyCents,
     loanPaymentApproved:
       finance.product === "loan" && finance.loanMonthlyPaymentCents != null,
+    /**
+     * How long the payments run, in months.
+     *
+     * On the document because the years now show them running: a household
+     * reading twelve payments in year one is entitled to know how many years
+     * of them there are, and `termYears` is a LEASE's field — no loan row has
+     * ever carried one, so the cost chapter showed a payment with no term
+     * beside it. Null on anything that is not a loan, and absent on every
+     * snapshot generated before this existed, which renders as no row at all.
+     */
+    loanTermMonths: finance.product === "loan" ? (finance.loanTermMonths ?? null) : null,
     loanMonthlyWithoutPaydownCents: loanFactorQuote?.withoutPaydownMonthlyCents ?? null,
     loanPaydownCents: loanFactorQuote?.paydownCents ?? null,
     loanPaydownMonths: loanFactorQuote?.paydownMonths ?? null,

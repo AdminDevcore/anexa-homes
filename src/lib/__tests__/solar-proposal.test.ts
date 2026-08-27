@@ -191,6 +191,75 @@ describe("25-year savings model", () => {
   });
 });
 
+/**
+ * The whole chain, on a real loan: rate sheet → payment → twenty-five years.
+ *
+ * The unit tests prove `savingsModel` spreads a schedule it is handed. This
+ * proves the schedule is actually handed to it — the payment is resolved once,
+ * BEFORE the model runs, so the figure printed on the cost chapter is the
+ * figure the years were built from. When those two came from different places
+ * they disagreed, and a document that quotes $168 a month and then bills
+ * $60,500 in year one is not one a homeowner can be walked through.
+ */
+describe("a financed proposal bills the payment it quotes", () => {
+  const FINANCED = { ...LOAN, aprPct: 0, loanTermMonths: 360, termYears: null };
+
+  it("the year-one figure is twelve of the payment on the cost chapter", () => {
+    const s = build({ finance: FINANCED });
+    const monthly = s.financing.loanMonthlyPaymentCents!;
+    expect(monthly).toBeGreaterThan(0);
+    expect(s.savings.years[0].solarPaymentCents).toBe(monthly * 12);
+    // And emphatically NOT the whole contract.
+    expect(s.savings.years[0].solarPaymentCents).not.toBe(s.financing.contractPriceCents);
+  });
+
+  it("carries the term, so the payment is not quoted open-ended", () => {
+    const s = build({ finance: FINANCED });
+    expect(s.financing.loanTermMonths).toBe(360);
+    // `termYears` is the lease's field and no loan row has ever held one — the
+    // reason a loan used to show a payment with no term beside it.
+    expect(s.financing.termYears).toBeNull();
+  });
+
+  it("puts nothing in the loan term of a cash proposal", () => {
+    const s = build({
+      finance: {
+        product: "cash" as const, grossPpwCents: 350, dealerFeePct: 0, adderTotalCents: 0,
+        rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null,
+        termYears: null, aprPct: null,
+      },
+      lender: null,
+    });
+    expect(s.financing.loanTermMonths).toBeNull();
+    expect(s.savings.years[0].solarPaymentCents).toBe(s.financing.contractPriceCents);
+  });
+
+  it("prices every option in the menu the same way", () => {
+    // A menu that spread the quoted loan and lumped the alternatives would be
+    // comparing a monthly against a cheque.
+    const s = build({
+      finance: FINANCED,
+      alternatives: [
+        {
+          key: "loan:alt",
+          label: "Climate First · 25 yr",
+          lender: "Climate First",
+          finance: {
+            product: "loan" as const, grossPpwCents: 320, dealerFeePct: 20,
+            adderTotalCents: 0, rateMillsPerKwh: null, monthlyPaymentCents: null,
+            escalatorPct: null, termYears: null, aprPct: 7.25, loanTermMonths: 300,
+          },
+        },
+      ],
+    });
+    const alt = s.options!.find((o) => o.key === "loan:alt")!;
+    expect(alt.monthlyCents).toBeGreaterThan(0);
+    expect(alt.savings.years[0].solarPaymentCents).toBe(alt.monthlyCents! * 12);
+    // 25 years of a 25-year loan: every year of the model carries payments.
+    expect(alt.savings.years[24].solarPaymentCents).toBe(alt.monthlyCents! * 12);
+  });
+});
+
 describe("customer-facing content", () => {
   it("has the six timeline steps in order", () => {
     expect(SOLAR_TIMELINE.map((s) => s.key)).toEqual([

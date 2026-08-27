@@ -399,6 +399,127 @@ describe("the meter fee is billed whatever the roof produces", () => {
   });
 });
 
+/**
+ * A financed system is paid for MONTHLY, and the model has to bill it that way.
+ *
+ * The defect these pin: the loan branch charged the whole contract price to
+ * year one, so a household on a $168 payment opened the twenty-five years and
+ * read "$60,500 — the system itself, paid for this year". They will never be
+ * asked for that money in that year, and it is the single most alarming number
+ * a proposal can put in front of somebody who has just agreed to finance.
+ */
+describe("a loan is paid over its term, not in year one", () => {
+  const base = {
+    product: "loan" as const,
+    year1ProductionKwh: 8_282,
+    annualUsageKwh: 14_000,
+    currentRateMillsPerKwh: 154,
+    assumptions: A,
+  };
+  const purchase = pricePurchase({
+    product: "loan", systemSizeKwDc: 8, stickerPpwCents: 350,
+    dealerFeePct: 18, adderTotalCents: 0,
+  });
+
+  it("bills twelve payments a year for the term and nothing after it", () => {
+    const m = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: 16_800, termMonths: 120 },
+    });
+    expect(m.years[0].solarPaymentCents).toBe(16_800 * 12);
+    expect(m.years[9].solarPaymentCents).toBe(16_800 * 12);
+    // Ten years of payments: year 11 onwards is the power alone.
+    expect(m.years[10].solarPaymentCents).toBe(0);
+    expect(m.years[24].solarPaymentCents).toBe(0);
+    expect(m.solarPaidCents).toBe(16_800 * 120);
+  });
+
+  it("does not put the contract price in year one at all", () => {
+    const m = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: 16_800, termMonths: 360 },
+    });
+    expect(m.years[0].solarPaymentCents).not.toBe(purchase.contractPriceCents);
+    expect(m.years[0].solarPaymentCents).toBe(16_800 * 12);
+  });
+
+  it("keeps paying past the horizon when the term outlives it", () => {
+    // A 30-year loan on a 25-year projection: every year of the model carries
+    // twelve payments, and the five years still owed are simply not shown.
+    const m = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: 16_800, termMonths: 360 },
+    });
+    expect(m.years.every((y) => y.solarPaymentCents === 16_800 * 12)).toBe(true);
+    expect(m.solarPaidCents).toBe(16_800 * 12 * 25);
+  });
+
+  it("carries only the months left in the final year", () => {
+    // 90 months = seven years and six. Year 8 bills six payments, not twelve.
+    const m = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: 16_800, termMonths: 90 },
+    });
+    expect(m.years[6].solarPaymentCents).toBe(16_800 * 12);
+    expect(m.years[7].solarPaymentCents).toBe(16_800 * 6);
+    expect(m.years[8].solarPaymentCents).toBe(0);
+    expect(m.solarPaidCents).toBe(16_800 * 90);
+  });
+
+  it("adds a down payment to year one and to no other year", () => {
+    const m = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: 16_800, termMonths: 120, downPaymentCents: 500_000 },
+    });
+    expect(m.years[0].solarPaymentCents).toBe(16_800 * 12 + 500_000);
+    expect(m.years[1].solarPaymentCents).toBe(16_800 * 12);
+  });
+
+  it("falls back to the price in year one when the terms cannot be resolved", () => {
+    // A programme publishing neither a factor nor an APR and term has no
+    // schedule to spread. Inventing one would quote a payment nobody offered,
+    // so the deal keeps the shape it has always had.
+    const noTerms = savingsModel({ ...base, purchase });
+    expect(noTerms.years[0].solarPaymentCents).toBe(purchase.contractPriceCents);
+    const halfTerms = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: 16_800, termMonths: null },
+    });
+    expect(halfTerms.years[0].solarPaymentCents).toBe(purchase.contractPriceCents);
+    const otherHalf = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: null, termMonths: 360 },
+    });
+    expect(otherHalf.years[0].solarPaymentCents).toBe(purchase.contractPriceCents);
+  });
+
+  it("counts the interest, so financing costs more than the sticker", () => {
+    // The old model charged the contract price and stopped, which quietly told
+    // every financed household their loan was free.
+    const m = savingsModel({
+      ...base, purchase,
+      loan: { monthlyPaymentCents: 25_000, termMonths: 300 },
+    });
+    expect(m.solarPaidCents).toBeGreaterThan(purchase.contractPriceCents);
+    expect(m.netSavingsCents).toBe(m.utilityCostAvoidedCents - m.solarPaidCents);
+  });
+
+  it("leaves cash exactly where it was", () => {
+    // Cash really is one payment in year one, and the loan schedule must never
+    // reach it — a `loan` block on a cash deal is ignored outright.
+    const cash = pricePurchase({
+      product: "cash", systemSizeKwDc: 8, stickerPpwCents: 350,
+      dealerFeePct: 0, adderTotalCents: 0,
+    });
+    const m = savingsModel({
+      ...base, product: "cash", purchase: cash,
+      loan: { monthlyPaymentCents: 16_800, termMonths: 360 },
+    });
+    expect(m.years[0].solarPaymentCents).toBe(cash.contractPriceCents);
+    expect(m.years[1].solarPaymentCents).toBe(0);
+  });
+});
+
 describe("a battery programme's money reaches the customer's savings", () => {
   const base = {
     year1ProductionKwh: 8_282,

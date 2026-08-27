@@ -16,6 +16,7 @@ import { LenderMark } from "@/components/ui/lender-mark";
 import { ProposalChrome, type ChromeNavItem } from "../proposal-chrome";
 import { PaymentMenu } from "../payment-menu";
 import { SavingsScrubber } from "../savings-scrubber";
+import { BatteryCredit } from "../battery-credit";
 import { YearChart } from "../year-chart";
 import { CompareCards } from "../compare-cards";
 import { HowItWorks } from "../how-it-works";
@@ -113,6 +114,25 @@ function firstName(full: string | null | undefined): string {
   if (!raw) return "";
   if (raw !== raw.toLowerCase()) return raw;
   return raw.replace(/(^|[-'’])(\p{L})/gu, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
+}
+
+/**
+ * A loan's term, written the way the household will experience it.
+ *
+ * The payment count is stated as well as the years, because the years below
+ * now bill twelve payments each and "30 years" alone leaves a customer
+ * multiplying in their head to check the arithmetic on their own proposal.
+ */
+function loanTermLabel(months: number): string {
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  const span =
+    rest === 0
+      ? `${years} year${years === 1 ? "" : "s"}`
+      : years === 0
+        ? `${rest} month${rest === 1 ? "" : "s"}`
+        : `${years} yr ${rest} mo`;
+  return `${span} · ${months} payments`;
 }
 
 export function SolarProposalView({
@@ -245,6 +265,8 @@ export function SolarProposalView({
    * would overstate every other year.
    */
   const vppAnnualCents = vpp.reduce((n, v) => n + v.annualCents, 0);
+  /** The one-off enrolment money, for the lifetime total that does count it. */
+  const vppUpfrontCents = vpp.reduce((n, v) => n + v.upfrontCents, 0);
   const vppPayer = vpp.length === 1 ? vpp[0].provider : "your battery programme";
   const afterAllCents =
     option.monthlyCents != null
@@ -634,6 +656,14 @@ export function SolarProposalView({
           )}
           {f.escalatorPct != null && <DarkRow k="Annual increase" v={pct(f.escalatorPct)} />}
           {f.termYears != null && <DarkRow k="Term" v={`${f.termYears} years`} />}
+          {/* A LOAN's term, which `termYears` has never carried — that column
+              belongs to leases, so a financed document showed a monthly payment
+              with nothing beside it saying how many there were. It matters more
+              now that the years below bill the payment rather than the price.
+              Guarded on `termYears` too, so nothing can print two Term rows. */}
+          {f.termYears == null && f.loanTermMonths != null && f.loanTermMonths > 0 && (
+            <DarkRow k="Term" v={loanTermLabel(f.loanTermMonths)} />
+          )}
           {f.aprPct != null && <DarkRow k="APR" v={pct(f.aprPct)} />}
           {/* A loan's monthly. Labelled "estimated" until a credit approval
               settles it, because quoting an amortised figure as final is how a
@@ -671,6 +701,13 @@ export function SolarProposalView({
             />
           )}
         </dl>
+
+        {/* WHAT THE BATTERY EARNS, next to the payment it offsets.
+            Here rather than in the twenty-five-year chapter because this is the
+            chapter about what the household pays each month, and because a rep
+            can turn that chapter off — the credit was priced into this deal
+            either way and must not disappear with the table. */}
+        <BatteryCredit vpp={vpp} monthlyCents={option.monthlyCents} lender={f.lender} />
 
         {/*
           ADDITIONAL SERVICES — the extra work, in sentences rather than as a
@@ -796,6 +833,31 @@ export function SolarProposalView({
                   </div>
                 ))}
               </div>
+              {/* WHAT IT COMES TO OVER THE PROJECTION — the figure this
+                  chapter is for, and the one the monthly card on the cost
+                  chapter deliberately does not state. A programme paying $400 a
+                  year is a rounding error in a sentence and $10,000 over the
+                  table above, and only one of those two readings explains why
+                  the solar column sits where it does. */}
+              <div className="mt-5 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-t border-neutral-900/10 pt-4">
+                <span className="text-sm text-neutral-600">
+                  {`Over the ${sv.years.length} years above${
+                    vppAnnualCents > 0
+                      ? ` — ${usd(vppAnnualCents)} a year × ${sv.years.length}${
+                          vppUpfrontCents > 0 ? `, plus ${usd(vppUpfrontCents)} to enrol` : ""
+                        }`
+                      : ""
+                  }`}
+                </span>
+                <span className="font-display text-2xl font-bold tabular-nums text-neutral-900">
+                  {/* Straight off the model, so it agrees with the table to
+                      the cent. Safe to read directly: a snapshot old enough to
+                      lack this total is old enough to have no `vpp` either, and
+                      this whole block is behind that. */}
+                  {usd(sv.vppCreditTotalCents)}
+                </span>
+              </div>
+
               {/* The honest caveat, next to the money rather than in the small
                   print at the end. Enrolment is the homeowner's to keep. */}
               <p className="mt-4 max-w-[62ch] text-xs leading-relaxed text-neutral-500">
@@ -825,7 +887,12 @@ export function SolarProposalView({
           {/* Year by year, with a handle on it. Some households read the table
               below as the proof and some read it as a wall of numbers; this is
               the same model, one year at a time. */}
-          <SavingsScrubber years={sv.years} paybackYear={sv.paybackYear} vpp={vpp} />
+          <SavingsScrubber
+            years={sv.years}
+            paybackYear={sv.paybackYear}
+            vpp={vpp}
+            monthlyCents={option.monthlyCents}
+          />
 
           <div className="mt-10 overflow-x-auto">
             <table className="w-full min-w-[30rem] text-sm">
@@ -884,11 +951,51 @@ export function SolarProposalView({
                 {`Where that column is a minus figure, the battery is earning more than the power you still buy costs \u2014 your electricity pays you that year instead of costing you.`}
               </p>
             )}
-            {sv.years[0] != null && sv.years[0].solarPaymentCents > 0 && sv.years[1]?.solarPaymentCents === 0 && (
+            {/* WHAT YEAR ONE MEANS, and it is not the same sentence for both.
+                Bought outright, the whole price really does land in year one.
+                Financed, it never does — the years carry the payments, which is
+                what the household is actually billed. This paragraph used to
+                say the first thing to everybody, on a document quoting a
+                monthly payment. */}
+            {sv.years[0] != null &&
+              sv.years[0].solarPaymentCents > 0 &&
+              sv.years[1]?.solarPaymentCents === 0 && (
+                <p>
+                  {`Year 1 carries the whole price of the system, ${usd(sv.years[0].solarPaymentCents)}, because it is bought outright. Every year after it shows only what the power costs.`}
+                </p>
+              )}
+            {option.monthlyCents != null && sv.years[0] != null && sv.years[0].solarPaymentCents > 0 && (
               <p>
-                {`Year 1 carries the whole price of the system, ${usd(sv.years[0].solarPaymentCents)}, however you pay for it. Financing spreads that same amount across the term of the loan rather than removing it, so the years after it show only what the power costs.`}
+                {`You pay for the system in twelve payments of ${usd(option.monthlyCents, 2)} a year${
+                  f.loanTermMonths != null && f.loanTermMonths > 0
+                    ? `, for ${loanTermLabel(f.loanTermMonths)}`
+                    : ""
+                } — never the whole price in one year. ${
+                  f.loanTermMonths != null &&
+                  f.loanTermMonths > 0 &&
+                  f.loanTermMonths < sv.years.length * 12
+                    ? `From year ${Math.floor(f.loanTermMonths / 12) + 1} it is paid off, and the column shows only what the power costs.`
+                    : ""
+                }`.trim()}
               </p>
             )}
+            {/* A TERM LONGER THAN THE TABLE. The rows stop at year 25 and a
+                30-year loan does not, so the total above is not everything the
+                household pays — it is everything they pay inside the window the
+                table draws. Saying which is the difference between a projection
+                and a figure that turns out to have been missing five years of
+                payments. */}
+            {option.monthlyCents != null &&
+              f.loanTermMonths != null &&
+              f.loanTermMonths > sv.years.length * 12 && (
+                <p>
+                  {`Your loan runs ${loanTermLabel(f.loanTermMonths)}, which is longer than the ${sv.years.length} years shown here. The ${
+                    f.loanTermMonths - sv.years.length * 12
+                  } payments after the last row — about ${usd(
+                    (f.loanTermMonths - sv.years.length * 12) * option.monthlyCents
+                  )} — are not in the totals above.`}
+                </p>
+              )}
           </div>
         </Chapter>
       )}

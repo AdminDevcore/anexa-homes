@@ -35,6 +35,7 @@ export function SavingsScrubber({
   years,
   paybackYear,
   vpp = [],
+  monthlyCents = null,
 }: {
   years: SavingsYear[];
   /** Highlighted on the track, when the model has one. */
@@ -44,6 +45,15 @@ export function SavingsScrubber({
    * name who is paying rather than showing an unexplained credit.
    */
   vpp?: VppCredit[];
+  /**
+   * The payment behind the system line, when there is one — so a year of a
+   * financed system reads "12 × $168.06" rather than an unexplained $2,017.
+   *
+   * Used ONLY where it reconciles to the cent against the frozen row, which is
+   * why a lease's escalating year and a loan's short final year fall back to
+   * the plain label instead of quoting a payment that no longer applies.
+   */
+  monthlyCents?: number | null;
 }) {
   const last = years.length;
   const [year, setYear] = React.useState(1);
@@ -72,11 +82,23 @@ export function SavingsScrubber({
   const paidUpFront =
     last > 1 && years[0].solarPaymentCents > 0 && years[1].solarPaymentCents === 0;
 
+  /**
+   * Whether this year is exactly twelve of the payment printed on the cost
+   * chapter. Checked rather than assumed: a lease escalates, and a loan's last
+   * year carries only the months left in it.
+   */
+  const twelvePayments =
+    monthlyCents != null && monthlyCents > 0 && systemPayment === monthlyCents * 12;
+
   const systemLabel = paidUpFront
     ? row.year === 1
       ? "The system itself, paid for this year"
       : "The system — already paid for in year one"
-    : "What you pay for the system this year";
+    : systemPayment === 0
+      ? "The system — paid off, nothing owed this year"
+      : twelvePayments
+        ? `Your payments for the system — 12 × ${usd(monthlyCents!, 2)}`
+        : "What you pay for the system this year";
 
   /**
    * Named where the programme has a name of its own. Where the office has only
@@ -120,7 +142,12 @@ export function SavingsScrubber({
       </p>
       <p className="mt-3 max-w-[54ch] text-sm leading-relaxed text-neutral-500">
         {positive
-          ? `Everything you kept in years 1–${row.year}, after paying for the system, versus staying with the utility for the same years.`
+          ? row.year === 1
+            ? // A financed system that costs less a year than the utility is
+              // ahead from the first year, so this is now the ordinary reading
+              // rather than an edge case. "Years 1–1" is what a machine writes.
+              "Everything you kept in year 1, after paying for the system, versus staying with the utility for that year."
+            : `Everything you kept in years 1–${row.year}, after paying for the system, versus staying with the utility for the same years.`
           : paybackYear != null
             ? `The system has not paid for itself yet at this point. On these assumptions it does in year ${paybackYear}, and every year after that is money kept.`
             : "The system has not paid for itself yet at this point."}
