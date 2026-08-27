@@ -70,6 +70,7 @@ const base = {
   design: { systemSizeKwDc: 10 },
   adders: [],
   adderTotalCents: 0,
+  onTopAdderTotalCents: 0,
   assumptions: A,
   targetNetPpwCents: null,
 };

@@ -71,7 +71,16 @@ const isCash = (o: Offer): o is CashOffer => "kind" in o && o.kind === "cash";
 export type CompareBasis = {
   systemSizeKwDc: number;
   year1ProductionKwh: number;
+  /** The adders INSIDE each partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
+  /**
+   * The adders financed ON TOP of it — a roof on a flat-rate partner.
+   *
+   * The same figure on every column, deliberately: whether a roof rides above
+   * the price or comes out of it is a property of the WORK, and a comparison
+   * that quoted a different job per lender would not be a comparison.
+   */
+  onTopAdderTotalCents: number;
   downPaymentCents: number;
   /**
    * The deal's base price per watt, cents — what the company charges BEFORE any
@@ -195,6 +204,7 @@ function purchaseRow(
           stickerPpwCents: grossPpwCents,
           dealerFeePct,
           adderTotalCents: basis.adderTotalCents,
+          onTopAdderTotalCents: basis.onTopAdderTotalCents,
         })
       : null;
 

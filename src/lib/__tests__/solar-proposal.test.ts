@@ -496,6 +496,31 @@ describe("the extra work is named on the customer's copy", () => {
     );
   });
 
+  it("prints a roof financed on top at its own price, not grossed up", () => {
+    // The Amos exception on the customer's own page. The re-roof is added to
+    // the loan at $14,500 and the steep-roof charge still carries the fee, so
+    // the two lines are priced by different rules on one breakdown — and the
+    // three rows still have to add up to the total printed under them.
+    const s = build({
+      finance: {
+        ...LOAN,
+        adderTotalCents: 96_000,
+        onTopAdderTotalCents: 1_450_000,
+        adders: [
+          { ...ADDERS[0], financedOnTop: true },
+          ADDERS[1],
+        ],
+      },
+    });
+    const [roof, steep] = s.financing.adders!;
+    expect(roof.amountCents).toBe(1_450_000); // at face
+    expect(steep.amountCents).toBe(Math.round(96_000 / 0.82)); // fee included
+    expect(roof.amountCents + steep.amountCents).toBe(s.financing.adderTotalCents);
+    expect(s.financing.basePriceCents! + s.financing.adderTotalCents!).toBe(
+      s.financing.contractPriceCents
+    );
+  });
+
   /**
    * The document is frozen. A rename in the catalogue next quarter must not
    * retitle a line on a proposal a homeowner has already read.

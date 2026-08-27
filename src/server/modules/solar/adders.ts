@@ -32,6 +32,11 @@ export type DealAdderRow = AdderLine & {
   description: string | null;
   /** Named to the customer under "Additional services" on their proposal. */
   showOnProposal: boolean;
+  /**
+   * Added to the loan ON TOP of a partner's fixed or maximum $/W, at its own
+   * price. Copied off the catalogue at pick time, like the price and the basis.
+   */
+  financedOnTop: boolean;
   /** What this adds to the household's yearly consumption, kWh. */
   consumptionKwhPerYear: number | null;
   /** The system-size rule put this here, so the same rule may take it away. */
@@ -49,7 +54,8 @@ export async function listDealAdders(
     select: {
       id: true, label: true, description: true, basis: true, flatCents: true,
       millsPerWatt: true, qty: true, sortOrder: true, equipmentId: true,
-      showOnProposal: true, consumptionKwhPerYear: true, autoApplied: true,
+      showOnProposal: true, financedOnTop: true, consumptionKwhPerYear: true,
+      autoApplied: true,
     },
   });
   return rows.map((r) => ({ ...r, basis: r.basis as AdderLine["basis"] }));
@@ -86,7 +92,8 @@ async function autoApplyRules(companyId: string) {
     select: {
       id: true, manufacturer: true, model: true, description: true,
       adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-      showOnProposal: true, autoApplyMinKw: true, autoApplyMaxKw: true,
+      showOnProposal: true, financedOnTop: true, autoApplyMinKw: true,
+      autoApplyMaxKw: true,
     },
   });
 }
@@ -101,6 +108,7 @@ export function lineFromCatalogue(item: {
   priceCents: number;
   priceMillsPerWatt: number | null;
   showOnProposal: boolean;
+  financedOnTop: boolean;
 }) {
   const basis = catalogueBasis(item);
   return {
@@ -113,6 +121,10 @@ export function lineFromCatalogue(item: {
     flatCents: basis === "perWatt" ? null : item.priceCents,
     millsPerWatt: basis === "perWatt" ? item.priceMillsPerWatt : null,
     showOnProposal: item.showOnProposal,
+    // COPIED like the price, and for the same reason: this decides what the
+    // customer's contract comes to, and re-reading it through the catalogue
+    // would let a settings tick move the total on a quote already shown.
+    financedOnTop: item.financedOnTop,
   };
 }
 
@@ -203,7 +215,8 @@ export async function applyAutoAdders(
 }
 
 /**
- * Recompute `SolarFinance.adderTotalCents` from the lines and the drawn system.
+ * Recompute `SolarFinance.adderTotalCents` and `onTopAdderTotalCents` from the
+ * lines and the drawn system.
  *
  * The cached total is what pricing, commissions and the customer's proposal all
  * read, so it has to be refreshed by everything that can move it — and there
@@ -237,24 +250,46 @@ export async function applyAutoAdders(
  * Applies the same rule `recomputeAdderTotal` does: the lines win the moment
  * there is one, and a legacy typed total survives until somebody itemises it.
  */
+export type AdderSplit = {
+  /** Inside the partner's price: grosses up by the fee, eats into a ceiling. */
+  adderTotalCents: number;
+  /** On top of it, at its own price. A roof on a flat-rate partner. */
+  onTopAdderTotalCents: number;
+};
+
 export async function resolveAdderTotal(
   companyId: string,
   leadId: string
-): Promise<number> {
+): Promise<AdderSplit> {
   const [lines, design, finance] = await Promise.all([
     listDealAdders(companyId, leadId),
     prisma.solarDesign.findUnique({ where: { leadId }, select: { systemSizeKwDc: true } }),
-    prisma.solarFinance.findUnique({ where: { leadId }, select: { adderTotalCents: true } }),
+    prisma.solarFinance.findUnique({
+      where: { leadId },
+      select: { adderTotalCents: true, onTopAdderTotalCents: true },
+    }),
   ]);
-  if (lines.length === 0) return finance?.adderTotalCents ?? 0;
-  return adderTotals(lines, Math.round((design?.systemSizeKwDc ?? 0) * 1000)).totalCents;
+  // The legacy branch keeps BOTH stored figures, not just the one: a deal with
+  // no lines has nothing to re-derive either half from, and rebuilding one of
+  // them from an empty table would move the customer's price.
+  if (lines.length === 0) {
+    return {
+      adderTotalCents: finance?.adderTotalCents ?? 0,
+      onTopAdderTotalCents: finance?.onTopAdderTotalCents ?? 0,
+    };
+  }
+  const totals = adderTotals(lines, Math.round((design?.systemSizeKwDc ?? 0) * 1000));
+  return {
+    adderTotalCents: totals.financedInCents,
+    onTopAdderTotalCents: totals.onTopCents,
+  };
 }
 
 export async function recomputeAdderTotal(
   companyId: string,
   leadId: string,
   opts: { force?: boolean } = {}
-): Promise<number> {
+): Promise<AdderSplit> {
   const [lines, design, finance] = await Promise.all([
     listDealAdders(companyId, leadId),
     prisma.solarDesign.findUnique({
@@ -268,12 +303,16 @@ export async function recomputeAdderTotal(
     }),
     prisma.solarFinance.findUnique({
       where: { leadId },
-      select: { id: true, adderTotalCents: true },
+      select: { id: true, adderTotalCents: true, onTopAdderTotalCents: true },
     }),
   ]);
 
   const watts = Math.round((design?.systemSizeKwDc ?? 0) * 1000);
-  const { totalCents } = adderTotals(lines, watts);
+  const { financedInCents, onTopCents } = adderTotals(lines, watts);
+  const next: AdderSplit = {
+    adderTotalCents: financedInCents,
+    onTopAdderTotalCents: onTopCents,
+  };
 
   /**
    * The consumption side, kept in step with the money side.
@@ -299,19 +338,22 @@ export async function recomputeAdderTotal(
     }
   }
 
-  if (!finance) return totalCents;
+  if (!finance) return next;
 
   // The legacy case: a typed total, nothing itemised, and nobody has touched
   // the adders. Leave it exactly as it is.
   if (!opts.force && lines.length === 0 && finance.adderTotalCents > 0) {
-    return finance.adderTotalCents;
+    return {
+      adderTotalCents: finance.adderTotalCents,
+      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+    };
   }
 
-  if (finance.adderTotalCents !== totalCents) {
-    await prisma.solarFinance.update({
-      where: { leadId },
-      data: { adderTotalCents: totalCents },
-    });
+  if (
+    finance.adderTotalCents !== next.adderTotalCents ||
+    finance.onTopAdderTotalCents !== next.onTopAdderTotalCents
+  ) {
+    await prisma.solarFinance.update({ where: { leadId }, data: next });
   }
-  return totalCents;
+  return next;
 }

@@ -27,7 +27,10 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
   const [finance, design] = await Promise.all([
     db.solarFinance.findUnique({
       where: { leadId },
-      select: { product: true, grossPpwCents: true, dealerFeePct: true, adderTotalCents: true, contractPriceCents: true },
+      select: {
+        product: true, grossPpwCents: true, dealerFeePct: true,
+        adderTotalCents: true, onTopAdderTotalCents: true, contractPriceCents: true,
+      },
     }),
     db.solarDesign.findUnique({
       where: { leadId },
@@ -60,6 +63,7 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
           stickerPpwCents: finance.grossPpwCents,
           dealerFeePct: finance.dealerFeePct,
           adderTotalCents: finance.adderTotalCents,
+          onTopAdderTotalCents: finance.onTopAdderTotalCents,
           maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
           finalPpwMode: design.lender?.finalPpwMode,
         }).breakdown

@@ -91,6 +91,7 @@ export default async function SolarEquipmentPage() {
             costCents: i.costCents,
             autoApplyMinKw: i.autoApplyMinKw,
             autoApplyMaxKw: i.autoApplyMaxKw,
+            financedOnTop: i.financedOnTop,
             rank: i.rank,
             isActive: i.isActive,
           }))}

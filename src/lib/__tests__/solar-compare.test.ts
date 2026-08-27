@@ -22,6 +22,7 @@ const BASIS: CompareBasis = {
   systemSizeKwDc: 8,
   year1ProductionKwh: 12_000,
   adderTotalCents: 0,
+  onTopAdderTotalCents: 0,
   downPaymentCents: 0,
   // $2.80/W is what the company charges, whatever the lender then adds.
   basePpwCents: 280,

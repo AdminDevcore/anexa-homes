@@ -146,7 +146,7 @@ export default async function SolarProposalBuilderPage({
       select: {
         id: true, manufacturer: true, model: true, description: true,
         adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-        isVeryCommon: true, consumptionAdjustable: true,
+        isVeryCommon: true, consumptionAdjustable: true, financedOnTop: true,
       },
     }),
     listDealAdders(user.companyId, lead.id),
@@ -306,6 +306,7 @@ export default async function SolarProposalBuilderPage({
           priceMillsPerWatt: a.priceMillsPerWatt,
           isVeryCommon: a.isVeryCommon,
           consumptionAdjustable: a.consumptionAdjustable,
+          financedOnTop: a.financedOnTop,
         }))}
         adderLines={adderLines}
         systemSizeKwDc={design?.systemSizeKwDc ?? 0}

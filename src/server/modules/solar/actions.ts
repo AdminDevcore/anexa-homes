@@ -41,6 +41,10 @@ const settingsSchema = z.object({
   // Capped at 20 because the published studies cluster around four, and a
   // number an order of magnitude above them is a typo reaching a homeowner.
   homeValueUpliftPct: z.number().min(0).max(20).optional(),
+  // How many batteries a design starts with once a rep picks one. Minimum one:
+  // zero would mean "a battery, none of them", which is not a system anybody
+  // can build. Optional so a client that predates the field leaves it alone.
+  defaultBatteryQty: z.number().int().min(1).max(20).optional(),
   minOffsetPct: z.number().min(0).max(200),
   maxOffsetPct: z.number().min(0).max(500),
   minPpwCents: z.number().int().min(0).max(2000),
@@ -528,11 +532,11 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   // The adders are the DEAL's, read here rather than taken from the request.
   // Nothing was sending them, so every save wrote a zero over the cached total
   // and priced the contract without the extra work in it.
-  const adderTotalCents = await resolveAdderTotal(user.companyId, f.leadId);
+  const adders = await resolveAdderTotal(user.companyId, f.leadId);
 
   // Every product-specific column is gated on the product — see
   // financeRowForProduct for why "most of them" was a customer-facing defect.
-  const data = financeRowForProduct({ ...f, adderTotalCents }, {
+  const data = financeRowForProduct({ ...f, ...adders }, {
     systemSizeKwDc: design?.systemSizeKwDc ?? 0,
     assumptions,
     lenderProduct: toLenderProductTerms(lenderProduct),
@@ -545,6 +549,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     update: data,
     select: {
       product: true, grossPpwCents: true, dealerFeePct: true, adderTotalCents: true,
+      onTopAdderTotalCents: true,
       contractPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
       monthlyPaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,
       loanTermMonths: true, downPaymentCents: true, loanMonthlyPaymentCents: true,
@@ -608,6 +613,9 @@ const equipmentSchema = z.object({
   // decimal point in the wrong place disabling the rule.
   autoApplyMinKw: z.number().min(0).max(1000).nullable().optional(),
   autoApplyMaxKw: z.number().min(0).max(1000).nullable().optional(),
+  // Adders only: this work is added to the loan ON TOP of a partner's fixed or
+  // maximum $/W, at its own price, rather than coming out of the system price.
+  financedOnTop: z.boolean().optional(),
   rank: z.number().int().min(0).max(999).optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
@@ -676,6 +684,12 @@ export async function upsertSolarEquipmentAction(
     if (d.autoApplyMinKw != null || d.autoApplyMaxKw != null) {
       return fail("Only an adder can be applied automatically by system size.");
     }
+    if (d.financedOnTop) return fail("Only an adder can be financed on top of a fixed price.");
+  }
+  // A credit that rides ON TOP of a partner's price is money coming off a
+  // number the partner did not fund — a rule with no arithmetic behind it.
+  if (d.financedOnTop && d.adderBasis === "discount") {
+    return fail("A discount cannot be financed on top of a fixed price.");
   }
   // A band that ends before it starts fires on nothing, which is a rule that
   // looks configured and does nothing — the worst of the three outcomes.

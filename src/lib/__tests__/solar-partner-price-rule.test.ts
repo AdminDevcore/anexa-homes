@@ -72,6 +72,67 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/**
+ * The SECOND guard, and it fails silently in a way the first one does not.
+ *
+ * `SolarFinance.adderTotalCents` stopped meaning "the extra work" the day a
+ * roof could be financed on top of a partner's price: it means the half of it
+ * inside that price, and `onTopAdderTotalCents` is the other half. A caller
+ * that reads the first column and forgets the second still compiles, still
+ * prices, and quietly drops a $7,000 roof off the contract — the customer signs
+ * $55,000 for a job that was supposed to be $62,000, and nothing on any screen
+ * says so.
+ *
+ * So a file that reads `adderTotalCents` off a SolarFinance row — the tell is
+ * `finance.adderTotalCents` or `fin.adderTotalCents` — must also mention
+ * `onTopAdderTotalCents` somewhere, or say in ALLOWED_ADDER_SPLIT why it does
+ * not.
+ */
+const READS_FINANCE_ADDERS = /\b(finance|fin|f|row)\??\.adderTotalCents\b/;
+const READS_ON_TOP = /\bonTopAdderTotalCents\b/;
+
+const ALLOWED_ADDER_SPLIT: Record<string, string> = {
+  // Reads the column only to decide whether a LEGACY deal — one priced before
+  // adders were itemised — should keep its typed total. Never prices with it.
+  "src/server/modules/solar/adders.ts": "reads it to preserve a legacy typed total",
+  // Renders the SNAPSHOT, whose `adderTotalCents` is a different figure from
+  // the database column of that name: it is what the customer pays for the
+  // extra work, at sticker, with a roof financed on top already inside it —
+  // `purchase.adderStickerCents`. There is no second half left to read.
+  "src/components/proposal/solar/index.tsx": "renders the snapshot's combined sticker figure",
+};
+
+describe("no screen loses a roof that is financed on top", () => {
+  it("every reader of a finance row's adder total also reads the on-top half", () => {
+    const offenders: string[] = [];
+
+    for (const dir of SCAN_DIRS) {
+      for (const file of walk(join(REPO_ROOT, dir))) {
+        const rel = relative(REPO_ROOT, file).split(sep).join("/");
+        const source = readFileSync(file, "utf8");
+
+        const reads = source
+          .split("\n")
+          .some((line) => !COMMENT.test(line) && READS_FINANCE_ADDERS.test(line));
+        if (!reads) continue;
+
+        if (rel in ALLOWED_ADDER_SPLIT) continue;
+        if (READS_ON_TOP.test(source)) continue;
+
+        offenders.push(rel);
+      }
+    }
+
+    expect(
+      offenders,
+      `These files read a deal's adder total but never the half financed on top, ` +
+        `so a roof added to the loan would be missing from whatever they price. ` +
+        `Read onTopAdderTotalCents too, or add the file to ALLOWED_ADDER_SPLIT ` +
+        `with the reason it does not price anything.`
+    ).toEqual([]);
+  });
+});
+
 describe("a deal is never priced without its partner's rule", () => {
   it("every pricePurchase caller applies the cap, or is a reviewed exception", () => {
     const offenders: string[] = [];

@@ -63,6 +63,11 @@ export type AdderItem = {
   costCents: number;
   autoApplyMinKw: number | null;
   autoApplyMaxKw: number | null;
+  /**
+   * This work is added to the loan ON TOP of a partner's fixed or maximum $/W,
+   * at its own price, instead of coming out of the system price. The re-roof.
+   */
+  financedOnTop: boolean;
   rank: number;
   isActive: boolean;
 };
@@ -387,6 +392,7 @@ const EMPTY = {
   minKw: "",
   maxKw: "",
   autoApply: false,
+  financedOnTop: false,
 };
 
 /**
@@ -412,6 +418,7 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
           minKw: item.autoApplyMinKw != null ? String(item.autoApplyMinKw) : "",
           maxKw: item.autoApplyMaxKw != null ? String(item.autoApplyMaxKw) : "",
           autoApply: item.autoApplyMinKw != null || item.autoApplyMaxKw != null,
+          financedOnTop: item.financedOnTop,
         }
       : EMPTY
   );
@@ -448,6 +455,7 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
         // leave a band behind that keeps firing.
         autoApplyMinKw: f.autoApply && f.minKw.trim() !== "" ? Number(f.minKw) : null,
         autoApplyMaxKw: f.autoApply && f.maxKw.trim() !== "" ? Number(f.maxKw) : null,
+        financedOnTop: f.financedOnTop,
       });
       if (!res.ok) return toast.error(res.error);
       toast.success(item ? "Saved" : "Adder created");
@@ -549,6 +557,15 @@ function AdderDialog({ item, onClose }: { item: AdderItem | null; onClose: () =>
               </p>
             </div>
           )}
+
+          <Flag
+            id="adder-on-top"
+            checked={f.financedOnTop}
+            onChange={(v) => set("financedOnTop", v)}
+            hint="For work a partner adds to the loan at its own price — a roof. On a lender with a fixed or maximum $/W, this is added on top of that rate instead of coming out of the system price: 10 kW at $5.50/W is $55,000, and $62,000 with a $7,000 roof under it. Every other adder still comes out of the rate. Nothing changes on a lender with no fixed rate."
+          >
+            Financed on top of a fixed price?
+          </Flag>
 
           <div className="space-y-1">
             <Label htmlFor="adder-description">Description</Label>

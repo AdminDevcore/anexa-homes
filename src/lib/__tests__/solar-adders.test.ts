@@ -94,6 +94,31 @@ describe("adderTotals", () => {
     expect(t.totalCents).toBe(370000);
   });
 
+  it("splits the lines by which side of the partner's price they fall", () => {
+    // Two lines, one flagged. The total is still what the extra work costs;
+    // the two halves are what pricing needs, because a roof is added to the
+    // loan at its own price and trenching comes out of the partner's rate.
+    const t = adderTotals(
+      [
+        line({ id: "roof", flatCents: 700_000, financedOnTop: true }),
+        line({ id: "trench", flatCents: 255_000 }),
+      ],
+      WATTS
+    );
+    expect(t.totalCents).toBe(955_000);
+    expect(t.onTopCents).toBe(700_000);
+    expect(t.financedInCents).toBe(255_000);
+    // The two halves are disjoint and complete. Anything else double-counts a
+    // line onto the contract or drops one off it.
+    expect(t.financedInCents + t.onTopCents).toBe(t.totalCents);
+  });
+
+  it("puts everything inside the price when nothing is flagged", () => {
+    const t = adderTotals([line({ flatCents: 270_000 })], WATTS);
+    expect(t.onTopCents).toBe(0);
+    expect(t.financedInCents).toBe(t.totalCents);
+  });
+
   it("expresses the total per installed watt", () => {
     const t = adderTotals([line({ flatCents: 100000 })], WATTS);
     // $1,000 over 20,000 W is 5 cents a watt.

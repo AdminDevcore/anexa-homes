@@ -52,6 +52,13 @@ export type AdderOption = {
   isVeryCommon: boolean;
   /** This adder changes what the house uses, so the line takes a kWh figure. */
   consumptionAdjustable: boolean;
+  /**
+   * Added to the loan on top of a fixed-price partner's $/W, at its own price.
+   * Shown at PICK time as well as on the line, because it is the difference
+   * between a $7,000 roof the customer borrows and a $7,000 roof that comes out
+   * of the company's margin.
+   */
+  financedOnTop: boolean;
 };
 
 export type DealAdderLine = AdderLine & {
@@ -61,6 +68,15 @@ export type DealAdderLine = AdderLine & {
   consumptionKwhPerYear: number | null;
   autoApplied: boolean;
 };
+
+/**
+ * `financedOnTop` rides in on `AdderLine`, and it is worth saying here why the
+ * chip below matters: it is COPIED off the catalogue when the line is added.
+ * Ticking the box in Settings therefore changes nothing on a line already on a
+ * deal — deliberately, exactly like a price change — so a rep who needs an
+ * existing roof line to ride on top has to remove it and add it again. The chip
+ * is how they can tell which state a line is in without opening Settings.
+ */
 
 /**
  * The extra work on a deal, itemised.
@@ -102,6 +118,7 @@ export function SolarAddersPanel({
     basis: "custom" as AdderBasis,
     rate: "",
     qty: "1",
+    financedOnTop: false,
   });
 
   const totals = React.useMemo(() => adderTotals(lines, systemWatts), [lines, systemWatts]);
@@ -152,9 +169,14 @@ export function SolarAddersPanel({
         // the rest to one regardless, so this is the form agreeing with it.
         qty: ADDER_BASES[custom.basis].counted ? Math.max(1, Number(custom.qty) || 1) : 1,
         showOnProposal: false,
+        // Only honoured on a ONE-OFF. A line picked off the catalogue takes the
+        // catalogue's answer — see `addDealAdderAction`.
+        financedOnTop: custom.basis === "discount" ? false : custom.financedOnTop,
       })
     );
-    setCustom({ label: "", amount: "", basis: "custom", rate: "", qty: "1" });
+    setCustom({
+      label: "", amount: "", basis: "custom", rate: "", qty: "1", financedOnTop: false,
+    });
     setAdding(false);
   }
 
@@ -209,6 +231,18 @@ export function SolarAddersPanel({
                   title="Added automatically because of the system size. Remove it and it stays off this deal."
                 >
                   auto
+                </span>
+              )}
+              {/* The one line whose money does NOT come out of a fixed-price
+                  partner's rate. Two identical-looking roof lines can be priced
+                  differently — one added before the box was ticked in Settings,
+                  one after — and nothing else on this row would say so. */}
+              {l.financedOnTop && (
+                <span
+                  className="rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium"
+                  title="Financed on top of the lender's fixed or maximum $/W, at its own price, instead of coming out of the system price."
+                >
+                  on top
                 </span>
               )}
               {l.consumptionKwhPerYear != null && l.consumptionKwhPerYear > 0 && (
@@ -424,6 +458,27 @@ export function SolarAddersPanel({
                   </div>
                 )}
               </div>
+              {/* The one-off equivalent of the catalogue's own tick. A roof
+                  priced on the day is still a roof, and on a fixed-price
+                  partner it rides on the loan rather than out of the system
+                  price — see `financedOnTop`. Hidden on a discount, which the
+                  server refuses for the same reason. */}
+              {custom.basis !== "discount" && (
+                <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={custom.financedOnTop}
+                    onChange={(e) =>
+                      setCustom((c) => ({ ...c, financedOnTop: e.target.checked }))
+                    }
+                  />
+                  <span>
+                    Financed on top of the lender&rsquo;s fixed price — a roof. Added to the
+                    loan at its own price instead of coming out of the system price.
+                  </span>
+                </label>
+              )}
               <div className="flex gap-2">
                 <Button type="button" size="sm" disabled={busy !== null} onClick={() => void addCustom()}>
                   {busy === "add:custom" && <Loader2 className="size-4 animate-spin" />} Add line
@@ -669,6 +724,7 @@ function AdderPicker({
                       {ADDER_BASES[o.basis].counted &&
                         ` · enter ${adderCountLabel(o.basis)?.toLowerCase()} on the line`}
                       {o.consumptionAdjustable && " · changes usage"}
+                      {o.financedOnTop && " · financed on top of a fixed price"}
                       {onDealIds.has(o.id) && " · already on the quote"}
                     </span>
                   </span>

@@ -54,6 +54,11 @@ const addSchema = z.object({
   millsPerWatt: z.number().int().min(0).max(10_000).nullish(),
   qty: z.number().int().min(1).max(10_000).default(1),
   showOnProposal: z.boolean().default(false),
+  /**
+   * Only meaningful on a ONE-OFF typed straight onto the deal. A line picked
+   * off the catalogue takes the catalogue's answer, whatever arrives here.
+   */
+  financedOnTop: z.boolean().default(false),
   consumptionKwhPerYear: z.number().int().min(0).max(CONSUMPTION_MAX).nullish(),
 });
 
@@ -80,6 +85,18 @@ async function guard(
   if (!lead) return { ok: false, error: "Deal not found." };
   if (lead.vertical !== "solar") return { ok: false, error: "This is not a solar deal." };
   return { ok: true, user };
+}
+
+/**
+ * Recompute both cached adder totals and return what the extra work comes to.
+ *
+ * The two halves are priced by different rules — see `financedOnTop` — but a
+ * caller being told what it just changed wants ONE number, and every one of
+ * these actions returns the same one it always did.
+ */
+async function adderGrandTotal(companyId: string, leadId: string): Promise<number> {
+  const split = await recomputeAdderTotal(companyId, leadId, { force: true });
+  return split.adderTotalCents + split.onTopAdderTotalCents;
 }
 
 /** Everything that has to be re-rendered once the money moves. */
@@ -110,12 +127,19 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
 
   // A catalogue item has to be one of OUR adders. Passing another company's id,
   // or a module id, would put a line on the quote that the catalogue disowns.
+  //
+  // It also decides whether this line rides ON TOP of a partner's price. Read
+  // off the row rather than taken from the request for the same reason the
+  // price of a quoted programme is: a flag a caller can post is a flag anybody
+  // can post, and this one moves what the customer signs.
+  let financedOnTop = parsed.data.financedOnTop ?? false;
   if (equipmentId) {
     const item = await prisma.solarEquipment.findFirst({
       where: { id: equipmentId, companyId: g.user.companyId, kind: "adder" },
-      select: { id: true },
+      select: { id: true, financedOnTop: true },
     });
     if (!item) return fail("That adder is not in the catalogue.");
+    financedOnTop = item.financedOnTop;
   }
 
   const last = await prisma.solarDealAdder.findFirst({
@@ -136,12 +160,13 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
       millsPerWatt,
       qty,
       showOnProposal: parsed.data.showOnProposal,
+      financedOnTop,
       consumptionKwhPerYear: parsed.data.consumptionKwhPerYear ?? null,
       sortOrder: (last?.sortOrder ?? 0) + 1,
     },
   });
 
-  const totalCents = await recomputeAdderTotal(g.user.companyId, leadId, { force: true });
+  const totalCents = await adderGrandTotal(g.user.companyId, leadId);
   revalidateDeal(leadId);
   return { ok: true as const, totalCents };
 }
@@ -206,7 +231,7 @@ export async function updateDealAdderAction(input: z.infer<typeof updateSchema>)
     },
   });
 
-  const totalCents = await recomputeAdderTotal(g.user.companyId, leadId, { force: true });
+  const totalCents = await adderGrandTotal(g.user.companyId, leadId);
   revalidateDeal(leadId);
   return { ok: true as const, totalCents };
 }
@@ -243,7 +268,7 @@ export async function removeDealAdderAction(input: { leadId: string; id: string 
     await rememberOptOut(parsed.data.leadId, [line.equipmentId], "add");
   }
 
-  const totalCents = await recomputeAdderTotal(g.user.companyId, parsed.data.leadId, { force: true });
+  const totalCents = await adderGrandTotal(g.user.companyId, parsed.data.leadId);
   revalidateDeal(parsed.data.leadId);
   return { ok: true as const, totalCents };
 }
@@ -292,6 +317,7 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
       priceCents: true,
       priceMillsPerWatt: true,
       showOnProposal: true,
+      financedOnTop: true,
       rank: true,
     },
     orderBy: [{ rank: "asc" }, { model: "asc" }],
@@ -342,7 +368,7 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
   if (autoOff.length) await rememberOptOut(leadId, autoOff, "add");
   if (wanted.length) await rememberOptOut(leadId, wanted, "remove");
 
-  const totalCents = await recomputeAdderTotal(g.user.companyId, leadId, { force: true });
+  const totalCents = await adderGrandTotal(g.user.companyId, leadId);
   revalidateDeal(leadId);
   return { ok: true as const, totalCents, added: add.length, removed: drop.length };
 }

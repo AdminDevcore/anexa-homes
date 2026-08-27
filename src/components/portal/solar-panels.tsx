@@ -264,6 +264,7 @@ export type SolarFinanceView = {
   grossPpwCents: number;
   dealerFeePct: number;
   adderTotalCents: number;
+  onTopAdderTotalCents: number;
   contractPriceCents: number;
   itcEstimateCents: number;
   rateMillsPerKwh: number | null;
@@ -820,10 +821,19 @@ export function SolarFinancePanel({
    * recomputing that from an empty list would show a homeowner's quote dropping
    * by the price of their re-roof. The moment there is one line, the lines win.
    */
-  const adderTotalCents = React.useMemo(() => {
-    if (adderLines.length === 0) return finance?.adderTotalCents ?? 0;
-    return adderTotals(adderLines, Math.round(systemSizeKwDc * 1000)).totalCents;
-  }, [adderLines, finance?.adderTotalCents, systemSizeKwDc]);
+  const adderSplit = React.useMemo(() => {
+    if (adderLines.length === 0) {
+      return {
+        adderTotalCents: finance?.adderTotalCents ?? 0,
+        onTopAdderTotalCents: finance?.onTopAdderTotalCents ?? 0,
+      };
+    }
+    const t = adderTotals(adderLines, Math.round(systemSizeKwDc * 1000));
+    return { adderTotalCents: t.financedInCents, onTopAdderTotalCents: t.onTopCents };
+  }, [
+    adderLines, finance?.adderTotalCents, finance?.onTopAdderTotalCents, systemSizeKwDc,
+  ]);
+  const { adderTotalCents, onTopAdderTotalCents } = adderSplit;
 
   /**
    * The fee this deal is quoted under, and the sticker the base grosses up to.
@@ -925,6 +935,7 @@ export function SolarFinancePanel({
     systemSizeKwDc,
     year1ProductionKwh,
     adderTotalCents,
+    onTopAdderTotalCents,
     // Always nothing down. Solar here is sold financed in full — see the
     // financing section below for why a down-payment box no longer exists.
     downPaymentCents: 0,
@@ -1017,12 +1028,13 @@ export function SolarFinancePanel({
       stickerPpwCents,
       dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
       adderTotalCents,
+      onTopAdderTotalCents,
       maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
       finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
     });
   }, [
     isPurchase, product, systemSizeKwDc, stickerPpwCents, feePct, adderTotalCents,
-    quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
+    onTopAdderTotalCents, quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
   ]);
 
   /**
@@ -1173,6 +1185,7 @@ export function SolarFinancePanel({
         minPpwCents={minPpwCents}
         maxPpwCents={maxPpwCents}
         adderTotalCents={adderTotalCents}
+        onTopAdderTotalCents={onTopAdderTotalCents}
         quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
         // The ceiling belongs to the partner, so it is read off the LENDER the
         // chosen programme was published by — never off the programme row — and
@@ -1204,7 +1217,7 @@ export function SolarFinancePanel({
         catalogue={adderCatalogue}
         lines={adderLines}
         systemWatts={Math.round(systemSizeKwDc * 1000)}
-        storedTotalCents={finance?.adderTotalCents ?? 0}
+        storedTotalCents={(finance?.adderTotalCents ?? 0) + (finance?.onTopAdderTotalCents ?? 0)}
       />
 
       {/* The rate sheets ARE the interface. Four abstract product types used to

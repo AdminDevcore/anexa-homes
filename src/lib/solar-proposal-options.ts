@@ -90,9 +90,16 @@ export type AlternativesInput = {
    */
   approvedLenderIds: string[] | null;
   design: { systemSizeKwDc: number };
-  /** The extra work, at CATALOGUE price. Grossed up per option by its own fee. */
-  adders: { label: string; amountCents: number }[];
+  /**
+   * The extra work, at CATALOGUE price. Grossed up per option by its own fee —
+   * except the lines flagged `financedOnTop`, which every option adds at their
+   * own price on top of whatever it is quoting.
+   */
+  adders: { label: string; amountCents: number; financedOnTop?: boolean }[];
+  /** The adders INSIDE each partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
+  /** The adders financed ON TOP of it — a roof on a flat-rate partner. */
+  onTopAdderTotalCents: number;
   assumptions: SolarAssumptions;
   /** What the company must keep per watt after the lender's cut, cents. */
   targetNetPpwCents: number | null;
@@ -124,6 +131,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         dealerFeePct: 0,
         adders: input.adders,
         adderTotalCents: input.adderTotalCents,
+        onTopAdderTotalCents: input.onTopAdderTotalCents,
       }),
     });
   }
@@ -151,7 +159,11 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
     usedLenders.add(p.lender.id);
 
     const row = financeRowForProduct(
-      { product: p.product, adderTotalCents: input.adderTotalCents },
+      {
+        product: p.product,
+        adderTotalCents: input.adderTotalCents,
+        onTopAdderTotalCents: input.onTopAdderTotalCents,
+      },
       {
         systemSizeKwDc: input.design.systemSizeKwDc,
         assumptions: input.assumptions,
@@ -192,7 +204,10 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         grossPpwCents: row.grossPpwCents,
         dealerFeePct: row.dealerFeePct,
         adderTotalCents: row.adderTotalCents,
-        ...(row.adderTotalCents > 0 ? { adders: input.adders } : {}),
+        onTopAdderTotalCents: row.onTopAdderTotalCents,
+        ...(row.adderTotalCents + row.onTopAdderTotalCents > 0
+          ? { adders: input.adders }
+          : {}),
         rateMillsPerKwh: row.rateMillsPerKwh,
         monthlyPaymentCents: row.monthlyPaymentCents,
         escalatorPct: row.escalatorPct,
@@ -241,15 +256,17 @@ function purchaseFinance(a: {
   product: "cash";
   grossPpwCents: number;
   dealerFeePct: number;
-  adders: { label: string; amountCents: number }[];
+  adders: { label: string; amountCents: number; financedOnTop?: boolean }[];
   adderTotalCents: number;
+  onTopAdderTotalCents: number;
 }): ProposalFinanceInput {
   return {
     product: a.product,
     grossPpwCents: a.grossPpwCents,
     dealerFeePct: a.dealerFeePct,
     adderTotalCents: a.adderTotalCents,
-    ...(a.adderTotalCents > 0 ? { adders: a.adders } : {}),
+    onTopAdderTotalCents: a.onTopAdderTotalCents,
+    ...(a.adderTotalCents + a.onTopAdderTotalCents > 0 ? { adders: a.adders } : {}),
     rateMillsPerKwh: null,
     monthlyPaymentCents: null,
     escalatorPct: null,

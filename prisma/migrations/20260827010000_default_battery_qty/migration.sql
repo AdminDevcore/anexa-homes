@@ -1,0 +1,22 @@
+-- How many batteries land on a design the moment a rep picks one.
+--
+-- Nothing has ever written a battery count on its own. The column on the design
+-- defaults to 0, the designer's quantity box only appears once a battery is
+-- chosen, and every reader downstream turned a chosen-battery-with-no-count
+-- into ONE. For a company whose standard offer is two Powerwalls that is the
+-- wrong answer twice over: the second unit was quoted for free, and the battery
+-- programme -- which pays PER battery -- earned for one of them.
+--
+-- Two is the default because it is this company's standard offer, and it is a
+-- column rather than a constant so a market that sells one, or three, does not
+-- need a deploy. A rep can still move the count on any individual deal.
+--
+-- Applied ONLY when a battery lands on a design that had none. Swapping a
+-- chosen battery for a different model keeps whatever quantity a rep set
+-- deliberately -- a default that overwrites a decision is not a default.
+--
+-- Moves no existing design and no existing proposal: this decides what a FUTURE
+-- pick writes, and every generated snapshot froze its own numbers.
+
+-- AlterTable
+ALTER TABLE "solar_settings" ADD COLUMN "defaultBatteryQty" INTEGER NOT NULL DEFAULT 2;

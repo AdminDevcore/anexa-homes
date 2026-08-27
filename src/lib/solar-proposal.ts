@@ -874,13 +874,18 @@ export type ProposalFinanceInput = {
   product: FinanceProduct;
   grossPpwCents: number;
   dealerFeePct: number;
+  /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
-  /** The lines behind that total, already priced against this system. */
+  /** The adders financed ON TOP of it — a roof on a flat-rate partner. */
+  onTopAdderTotalCents?: number;
+  /** The lines behind BOTH totals, already priced against this system. */
   adders?: {
     label: string;
     amountCents: number;
     description?: string | null;
     showOnProposal?: boolean;
+    /** True on a line that rides on top of the partner's price. */
+    financedOnTop?: boolean;
   }[];
   rateMillsPerKwh: number | null;
   monthlyPaymentCents: number | null;
@@ -954,6 +959,7 @@ function priceOption(args: {
         stickerPpwCents: finance.grossPpwCents,
         dealerFeePct: finance.dealerFeePct,
         adderTotalCents: finance.adderTotalCents,
+        onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
       })
     : undefined;
 
@@ -1054,9 +1060,11 @@ function priceOption(args: {
     basePriceCents: purchase?.baseStickerCents ?? null,
     // Likewise at sticker: the lender takes its percentage of the re-roof as
     // well as of the array, so the re-roof appears on the contract carrying
-    // its share of the fee. Null, not 0, when there are no adders — the
-    // renderer omits the row rather than printing an "Adders $0" line the
-    // customer has to parse.
+    // its share of the fee — unless it is financed ON TOP, in which case it
+    // appears at exactly its own price, which is what `adderStickerCents`
+    // already holds. Null, not 0, when there are no adders — the renderer omits
+    // the row rather than printing an "Adders $0" line the customer has to
+    // parse.
     adderTotalCents:
       purchase && purchase.adderStickerCents > 0 ? purchase.adderStickerCents : null,
     // Only lines that cost something, and only on a purchase. A lease or a
@@ -1078,17 +1086,27 @@ function priceOption(args: {
     // printed beneath them to the cent. Rounding each line's own gross-up
     // leaves a breakdown a few cents out from its own total, which is a
     // question a homeowner with a calculator is entitled to ask.
+    //
+    // APPORTIONED WITHIN THE FEE-BEARING HALF ONLY. A line financed on top does
+    // not carry a share of the dealer fee — that is the whole meaning of the
+    // flag — so it is printed at its own amount, and only the rest is spread
+    // across the grossed-up total. Sharing the fee out over all of them would
+    // put part of the array's cut on the roof line and leave the roof reading
+    // $20,000 on a contract that added $7,000 for it.
     ...(purchase && finance.adders?.some((x) => x.amountCents > 0)
       ? (() => {
           const lines = finance.adders!.filter((x) => x.amountCents > 0);
-          const grossed = apportionCents(
-            purchase.adderStickerCents,
-            lines.map((x) => x.amountCents)
+          const inside = lines.filter((x) => !x.financedOnTop);
+          const grossedInside = apportionCents(
+            purchase.adderStickerCents - purchase.onTopAdderTotalCents,
+            inside.map((x) => x.amountCents)
           );
+          const byLine = new Map<(typeof lines)[number], number>();
+          inside.forEach((x, i) => byLine.set(x, grossedInside[i]));
           return {
-            adders: lines.map((x, i) => ({
+            adders: lines.map((x) => ({
               label: x.label,
-              amountCents: grossed[i],
+              amountCents: x.financedOnTop ? x.amountCents : (byLine.get(x) ?? 0),
               // Spread, not assigned undefined: the snapshot is asserted to
               // hold no undefined anywhere, because an undefined reaching a
               // renderer prints as "undefined" in front of a homeowner.

@@ -242,6 +242,8 @@ export async function generateProposalVersion(
     mode: dealLender?.finalPpwMode,
     systemSizeKwDc: design.systemSizeKwDc,
     dealerFeePct: finance.dealerFeePct,
+    // The adders the partner's figure is a price FOR. A roof financed on top
+    // rides above it and is added back by `pricePurchase` below.
     adderTotalCents: finance.adderTotalCents,
   });
   if (capped.capped) {
@@ -252,6 +254,7 @@ export async function generateProposalVersion(
       stickerPpwCents: capped.stickerPpwCents,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
+      onTopAdderTotalCents: finance.onTopAdderTotalCents,
     }).contractPriceCents;
     await prisma.solarFinance.update({
       where: { leadId },
@@ -392,8 +395,10 @@ export async function generateProposalVersion(
       amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
       description: l.description,
       showOnProposal: l.showOnProposal,
+      financedOnTop: l.financedOnTop,
     })),
     adderTotalCents: finance.adderTotalCents,
+    onTopAdderTotalCents: finance.onTopAdderTotalCents,
     assumptions,
     targetNetPpwCents: assumptions.targetNetPpwCents,
   });
@@ -503,6 +508,7 @@ export async function generateProposalVersion(
       grossPpwCents: finance.grossPpwCents,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
+      onTopAdderTotalCents: finance.onTopAdderTotalCents,
       // Named and priced HERE, then frozen into the snapshot. Reading them back
       // through the catalogue at render time would let a later rename retitle a
       // line on a document a homeowner has already been shown.
@@ -511,6 +517,7 @@ export async function generateProposalVersion(
         amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
         description: l.description,
         showOnProposal: l.showOnProposal,
+        financedOnTop: l.financedOnTop,
       })),
       rateMillsPerKwh: finance.rateMillsPerKwh,
       monthlyPaymentCents: finance.monthlyPaymentCents,

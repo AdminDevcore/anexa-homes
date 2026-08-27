@@ -101,6 +101,15 @@ export type AdderLine = {
   millsPerWatt: number | null;
   /** Units on `perUnit`, feet on `perFoot`, otherwise 1. */
   qty: number;
+  /**
+   * This work is added to the loan ON TOP of a partner's fixed or maximum
+   * final $/W, at its own price — the re-roof on Amos's flat $5.50/W paper.
+   *
+   * Optional so that a caller assembling a line by hand cannot forget it into
+   * being true; absent reads as false, which is the rule every adder followed
+   * before this existed. See `capStickerToFinalPpw` for what it does to a price.
+   */
+  financedOnTop?: boolean;
 };
 
 /** Mills per watt → dollars per watt, for display. 50 → 0.05. */
@@ -201,13 +210,28 @@ export function adderConsumptionKwh(
 
 export type AdderTotals<L extends AdderLine = AdderLine> = {
   lines: (L & { amountCents: number })[];
+  /** Every line, whichever side of the partner's price it falls. */
   totalCents: number;
+  /**
+   * The lines that sit INSIDE the partner's price: they gross up by the dealer
+   * fee and, under a ceiling, come out of the system's share of it.
+   *
+   * This is the figure pricing wants — `PurchaseInput.adderTotalCents` and the
+   * `SolarFinance` column of the same name both mean this one, not the total.
+   */
+  financedInCents: number;
+  /**
+   * The lines financed ON TOP of the partner's price, at their own price.
+   * `PurchaseInput.onTopAdderTotalCents`.
+   */
+  onTopCents: number;
   /**
    * The adders expressed per installed watt, cents.
    *
    * The figure that goes between base PPW and final PPW on the pricing
    * breakdown, and the reason a rep can see at a glance that a $14,500 re-roof
-   * has moved the job by seventy cents a watt.
+   * has moved the job by seventy cents a watt. ALL of them: this is what the
+   * extra work on the job comes to, not what one side of the fee comes to.
    */
   ppwCents: number;
 };
@@ -226,9 +250,15 @@ export function adderTotals<L extends AdderLine>(
 ): AdderTotals<L> {
   const priced = lines.map((l) => ({ ...l, amountCents: adderAmountCents(l, systemWatts) }));
   const totalCents = priced.reduce((n, l) => n + l.amountCents, 0);
+  // Split HERE rather than at each call site, because the two halves are priced
+  // by different rules and a caller that sums them itself is one `filter` away
+  // from putting a roof inside a ceiling it is supposed to sit on top of.
+  const onTopCents = priced.reduce((n, l) => n + (l.financedOnTop ? l.amountCents : 0), 0);
   return {
     lines: priced,
     totalCents,
+    financedInCents: totalCents - onTopCents,
+    onTopCents,
     // Not rounded to the cent: this is a rate, and rounding it here before it is
     // added to a base rate is how a breakdown stops adding up on screen.
     ppwCents: systemWatts > 0 ? totalCents / systemWatts : 0,

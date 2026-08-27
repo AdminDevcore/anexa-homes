@@ -2914,6 +2914,18 @@ model SolarSettings {
   /// card is omitted rather than printed as "0%".
   homeValueUpliftPct Float @default(0)
 
+  // ── Equipment defaults ──────────────────────────────────────────────────
+  /// How many batteries land on a design the moment a rep picks one.
+  ///
+  /// A quantity nobody typed used to be read as ONE everywhere, which is the
+  /// wrong answer for a company whose standard offer is two: the second unit
+  /// was quoted for free and the battery programme paid for one. So the count
+  /// is the company's to state, and picking a battery writes it.
+  ///
+  /// Only ever applied to a design with NO battery on it — swapping a chosen
+  /// battery for another model keeps whatever quantity a rep deliberately set.
+  defaultBatteryQty Int @default(2)
+
   // ── Validation bounds ───────────────────────────────────────────────────
   // A rep must not be able to generate a physically impossible proposal.
   // These are the guard rails; see src/lib/solar-validation.ts.
@@ -3221,6 +3233,20 @@ model SolarEquipment {
   /// breakdown. Off by default — plenty of adders are internal cost lines a
   /// homeowner has no reason to read a paragraph about.
   showOnProposal        Boolean            @default(false)
+  /// Adders only: this work is added to the loan ON TOP of a partner's fixed
+  /// or maximum final $/W, at its own price, instead of coming out of the
+  /// system price.
+  ///
+  /// The re-roof is the case, and it is Amos Capital Fund's own rule: their
+  /// paper is a flat $5.50/W however big the job, EXCEPT that a roof rides on
+  /// the loan at what the roof costs. A 10 kW system is $55,000 and the same
+  /// job with a $7,000 roof under it is $62,000, with the payment amortised
+  /// over the larger number. Every other adder still comes out of the ceiling,
+  /// which is what makes this a flag on the ADDER rather than on the lender.
+  ///
+  /// Off means the rule that has always applied: the adder grosses up by the
+  /// dealer fee and, under a ceiling, eats into the system price.
+  financedOnTop         Boolean            @default(false)
   /// Adders only: the system-size band, kW DC, in which this lands on a deal by
   /// itself. Both null means never automatic. A small-system charge that
   /// applies under 5 kW is `autoApplyMinKw = null, autoApplyMaxKw = 5`.
@@ -3461,8 +3487,19 @@ model SolarFinance {
   grossPpwCents      Int   @default(0)
   /// Lender fee as a % of gross. Zero for cash by definition.
   dealerFeePct       Float @default(0)
-  /// Sum of selected adders, cents.
+  /// Sum of the selected adders that sit INSIDE the partner's price, cents.
+  /// See `onTopAdderTotalCents` — the two are disjoint and together they are
+  /// the whole catalogue price of the extra work on this deal.
   adderTotalCents    Int   @default(0)
+  /// Sum of the adders financed ON TOP of a partner's fixed or maximum $/W,
+  /// cents. Zero on every deal carrying none, which is nearly all of them.
+  ///
+  /// SEPARATE COLUMN rather than a flag summed at read time, for the same
+  /// reason `adderTotalCents` is cached at all: pricing, commissions and the
+  /// customer's proposal all read it, and none of them should have to sum a
+  /// table to find out what the customer signs. `SolarDealAdder.financedOnTop`
+  /// is the truth both are recomputed from.
+  onTopAdderTotalCents Int @default(0)
   /// Final contract price, cents.
   contractPriceCents Int   @default(0)
   /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
@@ -3732,6 +3769,11 @@ model SolarDealAdder {
   qty                   Int             @default(1)
   /// Named to the customer under "Additional services", with its description.
   showOnProposal        Boolean         @default(false)
+  /// COPIED from the catalogue at pick time, like the price and the basis, and
+  /// for the same reason: this decides what the customer's contract comes to,
+  /// and re-reading it through the relation would let a settings change move
+  /// the total on a quote somebody has already been shown.
+  financedOnTop         Boolean         @default(false)
   /// What this adder does to the household's annual consumption, kWh. An EV
   /// charger is roughly +3,000. Added to the design's usage before offset is
   /// worked out, so a rep who sells a charger does not then quote an offset

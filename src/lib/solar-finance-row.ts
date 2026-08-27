@@ -31,7 +31,10 @@ export type FinanceInput = {
   product: FinanceProduct;
   grossPpwCents?: number;
   dealerFeePct?: number;
+  /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents?: number;
+  /** The adders financed ON TOP of it — a roof on a flat-rate partner. */
+  onTopAdderTotalCents?: number;
   rateMillsPerKwh?: number | null;
   monthlyPaymentCents?: number | null;
   escalatorPct?: number | null;
@@ -75,6 +78,7 @@ export type FinanceRow = {
   grossPpwCents: number;
   dealerFeePct: number;
   adderTotalCents: number;
+  onTopAdderTotalCents: number;
   contractPriceCents: number;
   itcEstimateCents: number;
   rateMillsPerKwh: number | null;
@@ -160,6 +164,8 @@ export function financeRowForProduct(
         mode: lp?.finalPpwMode ?? undefined,
         systemSizeKwDc: ctx.systemSizeKwDc,
         dealerFeePct,
+        // Only the work the partner's figure is a price FOR. A roof rides on
+        // top of it and is added to the contract below.
         adderTotalCents: f.adderTotalCents ?? 0,
       })
     : null;
@@ -173,6 +179,7 @@ export function financeRowForProduct(
       stickerPpwCents: grossPpwCents,
       dealerFeePct,
       adderTotalCents: f.adderTotalCents ?? 0,
+      onTopAdderTotalCents: f.onTopAdderTotalCents ?? 0,
     });
     contractPriceCents = breakdown.contractPriceCents;
   }
@@ -184,6 +191,7 @@ export function financeRowForProduct(
     grossPpwCents: isPurchase ? grossPpwCents : 0,
     dealerFeePct,
     adderTotalCents: isPurchase ? (f.adderTotalCents ?? 0) : 0,
+    onTopAdderTotalCents: isPurchase ? (f.onTopAdderTotalCents ?? 0) : 0,
     contractPriceCents,
     // No incentive is quoted anywhere, so the column exists only to keep the
     // NOT NULL contract on rows written before incentives were removed.

@@ -605,6 +605,14 @@ export default async function LeadDetailPage({
 
   // The pricing breakdown is DERIVED from the design + finance rows — no new
   // figures are entered anywhere, so it can never disagree with the proposal.
+  /**
+   * What the extra work comes to when there is no priced breakdown to read it
+   * off — a lease, a PPA, or a deal nobody has chosen a product for. The two
+   * columns are disjoint halves of one figure; see `financedOnTop`.
+   */
+  const adderAll = (f: { adderTotalCents: number; onTopAdderTotalCents: number } | null) =>
+    f ? f.adderTotalCents + f.onTopAdderTotalCents : 0;
+
   const solarMoney = (() => {
     if (!isSolarDeal || !solarDesign) return null;
     const watts = Math.round(solarDesign.systemSizeKwDc * 1000);
@@ -627,6 +635,7 @@ export default async function LeadDetailPage({
           stickerPpwCents: fin.grossPpwCents,
           dealerFeePct: fin.dealerFeePct,
           adderTotalCents: fin.adderTotalCents,
+          onTopAdderTotalCents: fin.onTopAdderTotalCents,
           maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
           finalPpwMode: dealLender?.finalPpwMode,
         })
@@ -650,8 +659,13 @@ export default async function LeadDetailPage({
       // does not belong on the base rung — reading it there was showing a rep a
       // base of $3.50 under a "final" of $2.87, which is a ladder pointing down.
       basePpwCents: Math.round(breakdown?.basePpwCents ?? 0),
-      adderPpwCents: watts > 0 ? Math.round((fin?.adderTotalCents ?? 0) / watts) : 0,
-      adderTotalCents: fin?.adderTotalCents ?? 0,
+      // BOTH halves: the rung says what the extra work on this job costs, and a
+      // roof financed on top of the partner's price is extra work like any
+      // other — it is only the pricing rule that differs. `breakdown` sums them
+      // for exactly this reason.
+      adderPpwCents:
+        watts > 0 ? Math.round((breakdown?.adderTotalCents ?? adderAll(fin)) / watts) : 0,
+      adderTotalCents: breakdown?.adderTotalCents ?? adderAll(fin),
       grossPpwCents: Math.round(breakdown?.grossPpwCents ?? 0),
       grossPriceCents: breakdown?.grossPriceCents ?? 0,
       dealerFeePct: fin && fin.product === "loan" ? fin.dealerFeePct : 0,
