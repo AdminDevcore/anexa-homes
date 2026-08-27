@@ -99,11 +99,11 @@ export function ProjectPhotos({
               <FileDown className="size-4" /> Compile PDF report
             </a>
           </div>
-          {c.items.map((slot) => (
-            <PhotoSlotRow key={slot.itemId} projectId={projectId} slot={slot} />
-          ))}
-
-          {/* The same photos again, as files you can take one at a time. */}
+          {/* ABOVE the checklist, not below it. These are the same photos a
+              second way — one row per file, each with its own Download — and
+              buried under fifteen slot rows they may as well not exist: the
+              folder opens on the checklist and looks unchanged. Taking the
+              photos back out is half of what this folder is for. */}
           <PhotoAttachments
             groups={[
               ...c.items.map((slot) => ({ label: slot.label, files: slot.photos })),
@@ -112,6 +112,11 @@ export function ProjectPhotos({
                 : []),
             ]}
           />
+
+          {c.items.map((slot) => (
+            <PhotoSlotRow key={slot.itemId} projectId={projectId} slot={slot} />
+          ))}
+
         </TabsContent>
       ))}
     </Tabs>
@@ -271,7 +276,7 @@ function PhotoSlotRow({ projectId, slot }: { projectId: string; slot: Slot }) {
               <PhotoDownloadButton
                 id={p.id}
                 name={p.name}
-                className="absolute -left-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background opacity-0 transition-opacity group-hover:opacity-100"
+                className="absolute -left-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm"
               />
               <button
                 onClick={() => remove(p.id)}

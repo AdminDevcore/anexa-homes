@@ -161,7 +161,7 @@ export function PhotoGroupBody({
                     <PhotoDownloadButton
                       id={p.id}
                       name={p.name}
-                      className="absolute left-1 top-1 rounded-md bg-black/60 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                      className="absolute left-1 top-1 rounded-md bg-black/60 p-1 text-white"
                     />
                     {canDelete && (
                       <button

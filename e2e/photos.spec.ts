@@ -134,6 +134,19 @@ test("photos: every checklist photo is a separately downloadable attachment", as
   // The ASCII fallback squashes the spaces; filename* is what actually reaches
   // the downloads folder, so it has to carry the label as written.
   expect(disposition).toContain("filename*=UTF-8''Front%20of%20house");
+
+  // And the same list must be reachable from the FOLDER, which is where anyone
+  // collecting files for a lender actually goes — above the slots, not buried
+  // under fifteen of them, or opening the folder looks unchanged.
+  await page.getByTestId("deal-folders").getByRole("button", { name: /^Survey Photos/ }).click();
+  const inFolder = page.getByTestId("deal-folders").getByTestId("photo-attachments");
+  await expect(inFolder).toBeVisible({ timeout: 15000 });
+  await expect(inFolder.getByRole("link", { name: /^Download Front of house/ }).first()).toBeVisible();
+  // Scoped to the folder: the deal page renders its own copy of the checklist
+  // elsewhere, and a page-wide .first() measures that one instead.
+  const slotTop = await page.getByTestId("deal-folders").getByTestId("photo-slot").first().boundingBox();
+  const listTop = await inFolder.boundingBox();
+  expect(listTop!.y).toBeLessThan(slotTop!.y);
 });
 
 test("photos: compiles a PDF photo report for a deal", async ({ page }) => {
