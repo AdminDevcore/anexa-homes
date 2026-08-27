@@ -9,6 +9,7 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { getMembership } from "@/server/modules/chat/queries";
+import { companyExportLabel } from "@/lib/company-exports";
 import { foldersFor } from "@/lib/deal-folders";
 import { photoGroupFor } from "@/lib/photo-groups";
 import sharp from "sharp";
@@ -178,6 +179,26 @@ export async function uploadFileAction(formData: FormData) {
   }
   if (!allowed.has(file.type)) {
     return { ok: false as const, error: isCall ? "Unsupported audio type." : "Unsupported file type." };
+  }
+
+  /* ── A company report is not job paperwork ─────────────────────────────
+   * A file filed on a deal is authorised by DEAL scope and nothing else — the
+   * file route never consults the Report permission — so a payroll or P&L
+   * export dropped here becomes readable by everyone who can open the job.
+   * That is how a year-to-date Payroll report, holding every person's pay,
+   * came to sit in one customer's "Other" folder: it was exported minutes
+   * earlier and was the top entry in the Downloads folder when the file picker
+   * opened. Refused by NAME — see company-exports.ts for why that is both
+   * enough and deliberately defeatable.
+   *
+   * No admin exemption. The upload that prompted this was made by the owner.
+   */
+  const exportLabel = (leadId || projectId) && companyExportLabel(file.name);
+  if (exportLabel) {
+    return {
+      ok: false as const,
+      error: `That looks like the ${exportLabel} exported from Reports, not paperwork for this job. Company reports hold other people's information and anyone who can open this deal could read it here, so they can't be filed on a job.`,
+    };
   }
 
   // Scope check: the target project/lead must be visible to this user. The rows
