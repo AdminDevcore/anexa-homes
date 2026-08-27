@@ -23,6 +23,7 @@ import {
   ADDER_BASIS_ORDER,
   adderAmountCents,
   adderCountLabel,
+  adderPriceUnit,
   adderRateLabel,
   adderTotals,
   dollarsToMillsPerWatt,
@@ -216,7 +217,62 @@ export function SolarAddersPanel({
                   </span>
                 )}
               </span>
-              <span className="text-xs text-muted-foreground">{adderRateLabel(l)}</span>
+              {/* THE PRICE, and a rep can type it here.
+                  It is copied off the catalogue when the line is added and then
+                  belongs to this deal, which is the whole reason it is a copy —
+                  a re-roof is a different number on every house, and a
+                  catalogue row cannot hold a number that is different every
+                  time. Without a box here the only prices reachable on a deal
+                  were the ones somebody had already guessed in Settings, and an
+                  adder priced at zero could not be priced at all.
+
+                  What is being typed depends on the basis, exactly as the
+                  stored column does: a per-watt line takes a RATE and every
+                  other takes an amount. The resolved total stays on the right,
+                  where it can disagree with the rate and show its working. */}
+              {canEdit ? (
+                <span className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground">
+                    {l.basis === "discount" ? "−$" : "$"}
+                  </span>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={l.basis === "perWatt" ? "0.001" : "1"}
+                    aria-label={`Price for ${l.label}`}
+                    className="h-7 w-24 text-sm"
+                    defaultValue={
+                      l.basis === "perWatt"
+                        ? millsPerWattToDollars(l.millsPerWatt ?? 0)
+                        : (l.flatCents ?? 0) / 100
+                    }
+                    onBlur={(e) => {
+                      const typed = Number(e.target.value);
+                      if (!Number.isFinite(typed) || typed < 0) return;
+                      if (l.basis === "perWatt") {
+                        const mills = Math.round(typed * 1000);
+                        if (mills === (l.millsPerWatt ?? 0)) return;
+                        void run(`price:${l.id}`, () =>
+                          updateDealAdderAction({ leadId, id: l.id, millsPerWatt: mills })
+                        );
+                        return;
+                      }
+                      const cents = Math.round(typed * 100);
+                      if (cents === (l.flatCents ?? 0)) return;
+                      void run(`price:${l.id}`, () =>
+                        updateDealAdderAction({ leadId, id: l.id, flatCents: cents })
+                      );
+                    }}
+                  />
+                  {adderPriceUnit(l.basis) && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {adderPriceUnit(l.basis)}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">{adderRateLabel(l)}</span>
+              )}
               {l.basis === "perWatt" && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
                   follows the array

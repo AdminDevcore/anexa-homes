@@ -295,6 +295,22 @@ export function adderRateLabel(line: Pick<AdderLine, "basis" | "flatCents" | "mi
  * the box also has to label it, and "Qty" over a trenching run is how 120 feet
  * gets typed as 120 trenches.
  */
+/**
+ * What the price a rep types is PER, for the suffix beside the box: "/ft",
+ * "/W", " each", or nothing at all.
+ *
+ * Separate from `adderRateLabel` on purpose. That renders the whole rule as one
+ * read-only string — "$15/ft" — which is right beside a figure nobody can
+ * change and wrong beside an input, where the dollars are already in the box
+ * and only the unit is still missing.
+ */
+export function adderPriceUnit(basis: AdderBasis): string | null {
+  if (basis === "perFoot") return "/ft";
+  if (basis === "perWatt") return "/W";
+  if (basis === "perUnit") return "each";
+  return null;
+}
+
 export function adderCountLabel(basis: AdderBasis): string | null {
   if (basis === "perFoot") return "Feet";
   if (basis === "perUnit") return "Units";
