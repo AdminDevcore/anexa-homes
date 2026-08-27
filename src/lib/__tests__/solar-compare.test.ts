@@ -6,6 +6,7 @@ import {
   type CompareBasis,
   type OfferProduct,
 } from "@/lib/solar-compare";
+import { grossPpwFromNet, loanPaymentCents, priceStoredPurchase } from "@/lib/solar-money";
 
 /**
  * What a rep puts in front of a homeowner when four ways to pay are on the
@@ -328,5 +329,108 @@ describe("a lender's maximum price per watt reaches the comparison", () => {
     expect(amosRow.capped).toBe(true);
     expect(otherRow.capped).toBe(false);
     expect(otherRow.grossPpwCents).toBe(693); // 568 / (1 − 0.18)
+  });
+});
+
+describe("the builder's quoted strip and the shelf above it price one deal", () => {
+  /**
+   * The reported deal, to the cent: 11.00 kW, Amos Capital Fund at a flat
+   * $5.50/W and a 65% dealer fee, 0% over 360 months, base typed at $1.93/W —
+   * which is exactly what $5.50 flat leaves the company — and a $2,550
+   * trenching adder added afterwards.
+   *
+   * Three things on the financing step quote that deal: the shelf of lender
+   * cards, the strip underneath them, and the unsaved-changes banner beside
+   * Save. The shelf priced through `compareOffers` and therefore through the
+   * partner's rule; the other two multiplied the typed base out themselves and
+   * did not. So one screen said $168.13/mo and $60,526, and the same screen
+   * eight inches lower said $188.60/mo and $67,896 — a payment twenty dollars a
+   * month dearer, on a partner whose entire selling point is that its price
+   * does not move.
+   *
+   * The strip now prices through `priceStoredPurchase`, which is the same cap
+   * and the same arithmetic `compareOffers` runs. This pins the two together on
+   * the deal that caught them apart.
+   */
+  const AMOS_FLAT_BASIS: CompareBasis = {
+    ...BASIS,
+    systemSizeKwDc: 11,
+    basePpwCents: 193,
+    adderTotalCents: 255_000,
+  };
+  const amosFlat = loan({
+    dealerFeePct: 65,
+    maxFinalPpwCents: 550,
+    finalPpwMode: "flat",
+    aprPct: 0,
+    termMonths: 360,
+  });
+
+  /** What the financing step now hands `priceStoredPurchase` for this deal. */
+  const strip = (basis: CompareBasis) =>
+    priceStoredPurchase({
+      product: "loan",
+      systemSizeKwDc: basis.systemSizeKwDc,
+      stickerPpwCents: grossPpwFromNet(basis.basePpwCents!, 65)!,
+      dealerFeePct: 65,
+      adderTotalCents: basis.adderTotalCents,
+      maxFinalPpwCents: 550,
+      finalPpwMode: "flat",
+    });
+
+  it("quotes the same contract and the same payment on both", () => {
+    const [card] = compareOffers([amosFlat], AMOS_FLAT_BASIS);
+    const { breakdown } = strip(AMOS_FLAT_BASIS);
+
+    expect(card.contractPriceCents).toBe(6_052_571); // $60,525.71
+    expect(breakdown.contractPriceCents).toBe(card.contractPriceCents);
+
+    const stripMonthly = loanPaymentCents({
+      principalCents: breakdown.contractPriceCents,
+      aprPct: 0,
+      termMonths: 360,
+    });
+    expect(card.monthlyCents).toBe(16_813); // $168.13
+    expect(stripMonthly).toBe(card.monthlyCents);
+  });
+
+  it("is not the uncapped arithmetic the strip used to print", () => {
+    // $1.93 ÷ 0.35 stickers at $5.51/W, and the adder grosses up on top of it:
+    // $67,895.71 and $188.60 a month, on paper that funds $5.50/W. Kept as an
+    // explicit expectation so a future change that reintroduces it fails here
+    // rather than in front of a homeowner.
+    const uncappedSticker = grossPpwFromNet(193, 65)!;
+    expect(uncappedSticker).toBe(551);
+    const uncapped = uncappedSticker * 11_000 + Math.round(255_000 / 0.35);
+    expect(uncapped).toBe(6_789_571); // $67,895.71
+    expect(loanPaymentCents({ principalCents: uncapped, aprPct: 0, termMonths: 360 })).toBe(18_860);
+
+    const { breakdown } = strip(AMOS_FLAT_BASIS);
+    expect(breakdown.contractPriceCents).toBeLessThan(uncapped);
+  });
+
+  it("does not move the homeowner's payment when the adder is added", () => {
+    // The rep's complaint in one assertion. Adding work to a flat partner's
+    // deal comes out of the company's side: the customer's payment holds, and
+    // only what we keep goes down.
+    const bare = strip({ ...AMOS_FLAT_BASIS, adderTotalCents: 0 });
+    const laden = strip(AMOS_FLAT_BASIS);
+
+    const monthly = (cents: number) =>
+      loanPaymentCents({ principalCents: cents, aprPct: 0, termMonths: 360 })!;
+
+    expect(bare.breakdown.contractPriceCents).toBe(6_050_000); // $60,500 — $5.50 × 11 kW
+    // Within the half-cent-a-watt the whole-cent sticker can land on either
+    // side of a published price — seven cents a month, not twenty dollars.
+    // See `capStickerToFinalPpw` for why a flat price rounds to nearest.
+    expect(
+      Math.abs(monthly(laden.breakdown.contractPriceCents) - monthly(bare.breakdown.contractPriceCents))
+    ).toBeLessThanOrEqual(10);
+    // Paid for out of the company's side, which is the point of a flat partner:
+    // the SYSTEM's share of a price that did not move shrinks by what the
+    // trenching costs. Measured on `basePriceCents` and not on the gross, which
+    // still carries the adder's own money and therefore barely moves.
+    expect(laden.breakdown.basePriceCents).toBeLessThan(bare.breakdown.basePriceCents);
+    expect(bare.breakdown.basePriceCents - laden.breakdown.basePriceCents).toBeGreaterThan(200_000);
   });
 });

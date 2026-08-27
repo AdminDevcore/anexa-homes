@@ -32,7 +32,7 @@ import {
   loanPaymentCents,
   grossPpwFromNet,
   leaseMonthlyCents,
-  pricePurchase,
+  priceStoredPurchase,
   type YieldAssumptions,
   type FinalPpwMode,
 } from "@/lib/solar-money";
@@ -766,6 +766,21 @@ export function SolarFinancePanel({
   const chosen = products.find((p) => p.id === lenderProductId) ?? null;
 
   /**
+   * The partner whose paper this deal is written on, resolved ONCE.
+   *
+   * Everything on this screen that has to respect a price rule — the price
+   * card's ceiling, its floor, the flat rate on the terms line, and the live
+   * pricing below — reads it from here rather than doing its own `find`. Five
+   * lookups of the same lender is five chances for one of them to be spelled
+   * differently, and the one that was spelled differently is how the strip came
+   * to quote a payment the shelf of cards above it disagreed with.
+   *
+   * Cash has no lender and therefore no rule, which is the line every other
+   * file draws in the same place.
+   */
+  const quotedLender = chosen && !isCash ? (lenders.find((x) => x.id === chosen.lenderId) ?? null) : null;
+
+  /**
    * The chosen partner's flat rate, if it sells at one.
    *
    * Named on the terms line because on such a lender it IS the deal: the
@@ -773,11 +788,8 @@ export function SolarFinancePanel({
    * reading the terms is entitled to see the number their paper carries.
    * Null on a partner that prices the ordinary way.
    */
-  const quotedFlatPpwCents = (() => {
-    if (!chosen) return null;
-    const l = lenders.find((x) => x.id === chosen.lenderId);
-    return l && l.finalPpwMode === "flat" ? l.maxFinalPpwCents : null;
-  })();
+  const quotedFlatPpwCents =
+    quotedLender?.finalPpwMode === "flat" ? quotedLender.maxFinalPpwCents : null;
 
   /**
    * The deal's base price per watt — what Anexa charges before a lender's cut.
@@ -967,6 +979,52 @@ export function SolarFinancePanel({
   }
 
   /**
+   * What the customer would sign at the figures currently on screen, HELD TO
+   * THE PARTNER'S RULE.
+   *
+   * Priced through `priceStoredPurchase`, which is `capStickerToFinalPpw` and
+   * then `pricePurchase`, for two reasons that are easy to lose separately.
+   *
+   * Through `pricePurchase` at all, rather than multiplied out by hand: the
+   * adders carry the dealer fee too, so `sticker × watts + adders` is short by
+   * the lender's cut on the extra work, and a payment quoted off a short
+   * principal is a payment the customer is not going to be held to.
+   *
+   * Through the CAP, rather than the raw sticker: a capped or flat partner
+   * funds its own number whatever a rep typed, and this screen already knows
+   * that everywhere else. The shelf of cards prices each column through
+   * `compareOffers`, which caps; the price card at the top caps; the server
+   * caps at save and again at generation. These two figures did not, so on
+   * Amos Capital Fund — $5.50/W flat, fee and adders included — adding a $2,550
+   * trenching adder to an 11 kW deal moved the strip's payment from $168.13 to
+   * $188.60 while the Amos card six inches above it went on saying $168.13, and
+   * the banner offered to save a $67,896 contract the server was only ever
+   * going to write as $60,526. Under a flat partner extra work comes out of the
+   * company's side and the homeowner's payment does not move at all, which is
+   * the whole reason a rep quotes one.
+   *
+   * Same inputs as the matching column in `compareOffers`, deliberately: one
+   * base, one fee off the same rate-sheet row, one adder total, one partner
+   * rule. That is what makes the strip and the card agree by construction
+   * rather than by coincidence.
+   */
+  const livePrice = React.useMemo(() => {
+    if (!isPurchase || stickerPpwCents == null || !(systemSizeKwDc > 0)) return null;
+    return priceStoredPurchase({
+      product,
+      systemSizeKwDc,
+      stickerPpwCents,
+      dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
+      adderTotalCents,
+      maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
+      finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
+    });
+  }, [
+    isPurchase, product, systemSizeKwDc, stickerPpwCents, feePct, adderTotalCents,
+    quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
+  ]);
+
+  /**
    * What this deal costs a month, live, before anything is saved.
    *
    * Mirrors the server rather than reading a stored figure: the rep moves the
@@ -974,22 +1032,7 @@ export function SolarFinancePanel({
    * because both sides compute them the same way.
    */
   const quote = React.useMemo(() => {
-    // What the customer would sign at the figures currently on screen.
-    //
-    // Priced through `pricePurchase`, not multiplied out by hand: the adders
-    // carry the dealer fee too, so `sticker × watts + adders` is short by the
-    // lender's cut on the extra work — and a payment quoted off a short
-    // principal is a payment the customer is not going to be held to.
-    const contractNow =
-      chosen && stickerPpwCents != null && systemSizeKwDc > 0
-        ? pricePurchase({
-            product: isLoan ? "loan" : "cash",
-            systemSizeKwDc,
-            stickerPpwCents,
-            dealerFeePct: isLoan && Number.isFinite(feePct) ? feePct : 0,
-            adderTotalCents,
-          }).contractPriceCents
-        : null;
+    const contractNow = chosen ? (livePrice?.breakdown.contractPriceCents ?? null) : null;
 
     // The whole contract is financed. Nothing on this screen takes money off
     // the top, so the principal IS the price — see the note where the approved
@@ -1030,22 +1073,20 @@ export function SolarFinancePanel({
       fromFactor: factors != null && factorMonthlyCents(factors) != null,
       factors,
     };
-  }, [
-    chosen, product, isLoan, systemSizeKwDc, stickerPpwCents, feePct,
-    adderTotalCents,
-  ]);
+  }, [chosen, product, isLoan, systemSizeKwDc, livePrice]);
 
-  /** What the boxes above currently add up to. Purchase only — see solar-money. */
-  const liveContractCents = React.useMemo(() => {
-    if (!isPurchase || stickerPpwCents == null || !(systemSizeKwDc > 0)) return null;
-    return pricePurchase({
-      product,
-      systemSizeKwDc,
-      stickerPpwCents,
-      dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
-      adderTotalCents,
-    }).contractPriceCents;
-  }, [isPurchase, product, systemSizeKwDc, stickerPpwCents, feePct, adderTotalCents]);
+  /**
+   * What the boxes above currently add up to. Purchase only — see solar-money.
+   *
+   * The SAME capped figure the payment is quoted off, because this one is
+   * compared against the stored contract to decide whether the deal has
+   * unsaved changes. Priced without the partner's rule it could never equal
+   * what the server writes — `financeRowForProduct` caps on the way in — so on
+   * a flat partner "Saved at $60,500, this quote comes to $67,896" stayed on
+   * the screen through every save, and the one signal a rep has that the price
+   * has moved became a permanent fixture.
+   */
+  const liveContractCents = livePrice?.breakdown.contractPriceCents ?? null;
 
   // A blank box means "not set" (null); a typed "0" is a real zero and is sent
   // as one. `form.x ? … : null` is safe here ONLY because these are STRINGS —
@@ -1133,28 +1174,18 @@ export function SolarFinancePanel({
         adderTotalCents={adderTotalCents}
         quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
         // The ceiling belongs to the partner, so it is read off the LENDER the
-        // chosen programme was published by — never off the programme row.
-        quotedMaxFinalPpwCents={
-          chosen && !isCash
-            ? (lenders.find((l) => l.id === chosen.lenderId)?.maxFinalPpwCents ?? null)
-            : null
-        }
+        // chosen programme was published by — never off the programme row — and
+        // off the one `quotedLender` already resolved, so this card and the
+        // payment below it cannot be holding two different partners' rules.
+        quotedMaxFinalPpwCents={quotedLender?.maxFinalPpwCents ?? null}
         // Read the same way and from the same row: a mode without its figure
         // is not a pricing rule, and the two arriving from different places is
         // how one of them goes stale.
-        quotedFinalPpwMode={
-          chosen && !isCash
-            ? (lenders.find((l) => l.id === chosen.lenderId)?.finalPpwMode ?? "cap")
-            : "cap"
-        }
+        quotedFinalPpwMode={quotedLender?.finalPpwMode ?? "cap"}
         // The floor is the partner's too, and read the same way. Cash has no
         // lender and therefore no floor — the company band is all that guards
         // it, which is what "no lender" has always meant here.
-        quotedMinBasePpwCents={
-          chosen && !isCash
-            ? (lenders.find((l) => l.id === chosen.lenderId)?.minBasePpwCents ?? null)
-            : null
-        }
+        quotedMinBasePpwCents={quotedLender?.minBasePpwCents ?? null}
         quotedLabel={
           chosen ? [lender?.name, chosen.name].filter(Boolean).join(" · ") || lenderProductLabel(chosen) : null
         }
