@@ -144,6 +144,95 @@ test.describe(FLAG_ON ? "solar proposal in print" : "solar proposal in print (fl
     expect(chapters.slice(1).every((c) => c.breakBefore === "page")).toBe(true);
   });
 
+  test("the sheet is landscape, and nothing else in the app is", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await documentOrSkip(page);
+    await page.emulateMedia({ media: "print" });
+
+    /*
+      Read the page box back out of the CSSOM, never out of the source. Chrome
+      ACCEPTS `size: letter landscape`, parses it, and silently keeps only
+      `letter` — the orientation is discarded and a source grep would pass over
+      a document that prints portrait. Explicit dimensions are the only spelling
+      that survives.
+
+      Two @page rules reach this document: the app-wide portrait box in
+      globals.css, and this document's named landscape one. The named rule is
+      what makes the choice deterministic — two unnamed rules would be settled
+      by source order, which nothing enforces.
+    */
+    const rules = await page.evaluate(() => {
+      const out: string[] = [];
+      for (const sheet of Array.from(document.styleSheets)) {
+        let cssRules;
+        try { cssRules = sheet.cssRules; } catch { continue; }
+        for (const r of Array.from(cssRules ?? [])) {
+          if (r.cssText?.startsWith("@page")) out.push(r.cssText);
+        }
+      }
+      return out;
+    });
+
+    const named = rules.find((r) => r.includes("anexa-solar"));
+    expect(named, "the solar document declares its own page box").toBeTruthy();
+    expect(named).toMatch(/size:\s*11in\s+8\.5in/);
+    expect(named).not.toMatch(/size:\s*letter/);
+    // Zero margin is the only thing denying Chrome somewhere to draw the date,
+    // the tab title and the page URL.
+    expect(named).toMatch(/margin:\s*0(px)?\b/);
+
+    // The app-wide box is still portrait: this document changed its own paper,
+    // not the contracts' and not the roofing proposal's.
+    const appWide = rules.find((r) => !r.includes("anexa-solar"));
+    expect(appWide, "globals.css still sets the app-wide page box").toBeTruthy();
+    expect(appWide).toMatch(/size:\s*8\.5in\s+11in/);
+
+    const usesNamed = await page.evaluate(
+      () => getComputedStyle(document.documentElement).page,
+    );
+    expect(usesNamed, "the document actually claims the named box").toBe("anexa-solar");
+  });
+
+  test("every sheet carries something", async ({ page }) => {
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+    await login(page, "admin@anexahomes.com");
+    await documentOrSkip(page);
+    await page.emulateMedia({ media: "print" });
+
+    /*
+      `preferCSSPageSize`, never `format` — a format OVERRIDES the document's
+      own @page box, which is where both the landscape size and the zero margin
+      live, and would render something that looks fine and is not the document.
+      This mirrors renderProposalPdf exactly.
+    */
+    const buf = await page.pdf({
+      preferCSSPageSize: true,
+      printBackground: true,
+      displayHeaderFooter: false,
+    });
+    const doc = await getDocument({ data: new Uint8Array(buf) }).promise;
+
+    for (let i = 1; i <= doc.numPages; i++) {
+      const p = await doc.getPage(i);
+      const { width, height } = p.getViewport({ scale: 1 });
+      expect(Math.round(width), `page ${i} landscape width in pt`).toBe(792);
+      expect(Math.round(height), `page ${i} landscape height in pt`).toBe(612);
+
+      /*
+        A chapter that runs a few pixels past the fold prints an extra sheet
+        carrying nothing but background, and there is no way to see that from
+        the screen. Text is the cheap proxy: the only page in this document that
+        legitimately holds none is one that is a photograph, and there is none.
+      */
+      const text = (await p.getTextContent()).items
+        .map((it) => ("str" in it ? it.str : ""))
+        .join("")
+        .trim();
+      expect(text.length, `page ${i} of ${doc.numPages} is a blank sheet`).toBeGreaterThan(0);
+    }
+  });
+
   test("the FAQ prints its questions, the disclosures collapse", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await documentOrSkip(page);

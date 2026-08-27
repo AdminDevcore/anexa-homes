@@ -26,7 +26,8 @@ import { usd, kwh, pct, pctWhole } from "../format";
 import { Chapter, Stat, SpecList, DarkRow, EquipCard, Impact, SourceLink, ContactCard } from "./primitives";
 import { Cover, BillSwap } from "./cover";
 import { CumulativeCostChart } from "./chart";
-import { AcceptForm, PrintStyles } from "./accept";
+import { AcceptForm } from "./accept";
+import { PrintStyles } from "./print";
 import { useDeckKeys } from "./deck";
 
 /**
@@ -459,7 +460,10 @@ export function SolarProposalView({
         title="Your system"
         wide
       >
-        <dl className="grid grid-cols-1 gap-x-12 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
+        <dl
+          data-print-slot="specs"
+          className="grid grid-cols-1 gap-x-12 gap-y-6 sm:grid-cols-2 lg:grid-cols-3"
+        >
           {(
             [
               ["Size", `${s.system.sizeKwDc.toFixed(2)} kW-DC`],
@@ -498,7 +502,11 @@ export function SolarProposalView({
             empty frame, and never the bare aerial photo with no array on it
             standing in for a design that was not done. */}
         {hasLayout && (
-          <figure data-dark-ground className="mt-12 overflow-hidden rounded-2xl bg-neutral-950 p-4 ring-1 ring-neutral-900/10 [print-color-adjust:exact] [-webkit-print-color-adjust:exact] sm:p-5">
+          <figure
+            data-dark-ground
+            data-print-slot="plate"
+            className="mt-12 overflow-hidden rounded-2xl bg-neutral-950 p-4 ring-1 ring-neutral-900/10 [print-color-adjust:exact] [-webkit-print-color-adjust:exact] sm:p-5"
+          >
             {hasArrayMap && s.site ? (
               <ArrayMap
                 lat={s.site.lat}
@@ -542,6 +550,10 @@ export function SolarProposalView({
           </figure>
         )}
 
+        {/* The hardware and the explainer, wrapped together because on paper
+            they SHARE a sheet — the cards read down the left and the five steps
+            beside them. The wrapper carries no screen styling. */}
+        <div data-print-break data-print-slot="hardware">
         {hasEquipment && (
           <>
             <p className="mt-14 mb-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-neutral-400">
@@ -563,13 +575,17 @@ export function SolarProposalView({
             reading this alone at ten at night will not ring anyone to ask what
             an inverter is, and they will not sign something they do not
             understand — but it does not deserve a full stop in the argument. */}
-        <div className="mt-16 border-t border-neutral-900/12 pt-10">
+        <div
+          data-print-slot="how"
+          className="mt-16 border-t border-neutral-900/12 pt-10"
+        >
           <h3 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
             How solar actually works
           </h3>
           <div className="mt-6">
             <HowItWorks />
           </div>
+        </div>
         </div>
       </Chapter>
 
@@ -713,7 +729,9 @@ export function SolarProposalView({
             chapter about what the household pays each month, and because a rep
             can turn that chapter off — the credit was priced into this deal
             either way and must not disappear with the table. */}
-        <BatteryCredit vpp={vpp} monthlyCents={option.monthlyCents} lender={f.lender} />
+        <div data-print-break data-print-slot="battery">
+          <BatteryCredit vpp={vpp} monthlyCents={option.monthlyCents} lender={f.lender} />
+        </div>
 
         {/*
           ADDITIONAL SERVICES — the extra work, in sentences rather than as a
@@ -774,19 +792,22 @@ export function SolarProposalView({
           eyebrow="The maths"
           title={`Twenty-five years, both ways`}
           wide
+          printLayout="stack"
         >
           {/* The two futures, side by side. The column most proposals forget
               to price is the one where the homeowner does nothing. */}
-          <CompareCards snapshot={s} option={option} />
+          <div data-print-slot="compare">
+            <CompareCards snapshot={s} option={option} />
+          </div>
 
-          <div className="mt-10">
+          <div data-print-break data-print-slot="chart" className="mt-10">
             <CumulativeCostChart years={sv.years} paybackYear={sv.paybackYear} />
           </div>
 
           {/* The lifetime figure. Once, here, named for what it actually is —
               see @/lib/solar-proposal-pitch for why a negative result is called
               a cost and is not given the accent colour. */}
-          <div className="mt-10">
+          <div data-print-tight className="mt-10">
             <LifetimeBlock
               label={lifetime.label}
               value={usd(lifetime.cents)}
@@ -815,7 +836,11 @@ export function SolarProposalView({
               trace is a number they stop believing. Named, with its own terms
               stated, so they can check it against their own enrolment. */}
           {vpp.length > 0 && (
-            <div className="mt-10 rounded-2xl border border-neutral-900/12 bg-white p-6">
+            <div
+              data-print-break
+              data-print-slot="programme"
+              className="mt-10 rounded-2xl border border-neutral-900/12 bg-white p-6"
+            >
               <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
                 Included above
               </span>
@@ -1021,8 +1046,9 @@ export function SolarProposalView({
         eyebrow="The plan"
         title="What happens next"
         wide
+        printLayout="stack"
       >
-        <ol className="relative space-y-1">
+        <ol data-print-slot="steps" className="relative space-y-1">
           <span
             className="pointer-events-none absolute bottom-8 left-[24px] top-8 w-px bg-neutral-900/15 print:hidden"
             aria-hidden
@@ -1075,7 +1101,7 @@ export function SolarProposalView({
           No dates are scheduled yet — your site survey is booked once you go ahead.
         </p>
 
-        <div className="mt-14 border-t border-neutral-900/12 pt-10">
+        <div data-print-tight className="mt-14 border-t border-neutral-900/12 pt-10">
           <h3 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
             And what it does beyond the bill
           </h3>
@@ -1086,7 +1112,10 @@ export function SolarProposalView({
             </strong>{" "}
             of electricity that does not have to be burned into existence.
           </p>
-          <div className="mt-8 grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-4">
+          <div
+            data-print-slot="impact"
+            className="mt-8 grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-4"
+          >
             <Impact
               i={0}
               icon={Leaf}
@@ -1131,7 +1160,10 @@ export function SolarProposalView({
           {s.assumptions.homeValueUpliftPct != null &&
             s.assumptions.homeValueUpliftPct > 0 &&
             isPurchase && (
-              <div className="mt-10 flex flex-wrap items-baseline gap-x-8 gap-y-3 border-t border-neutral-900/12 pt-6">
+              <div
+                data-print-slot="uplift"
+                className="mt-10 flex flex-wrap items-baseline gap-x-8 gap-y-3 border-t border-neutral-900/12 pt-6"
+              >
                 <div className="min-w-[16rem] flex-1">
                   <p className="font-display text-xl font-semibold tracking-tight text-neutral-900">
                     And it stays with the house
@@ -1163,9 +1195,11 @@ export function SolarProposalView({
         data-chapter
         data-reveal
         data-dark-ground
+        data-print-layout="rail"
         className="relative scroll-mt-[var(--proposal-chrome-h)] overflow-hidden bg-neutral-950 px-6 py-24 text-white [print-color-adjust:exact] [-webkit-print-color-adjust:exact] sm:px-10 print:break-before-page print:py-10"
       >
-        <div className="mx-auto w-full max-w-3xl">
+        <div data-chapter-inner className="mx-auto w-full max-w-3xl">
+          <div data-chapter-head>
           <div className="flex items-center gap-4">
             <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--proposal-accent)]">
               Let&rsquo;s get started
@@ -1179,8 +1213,10 @@ export function SolarProposalView({
           <h2 className="mt-5 font-display text-[clamp(2.1rem,4.6vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.022em] text-white">
             Ready to go ahead?
           </h2>
+          </div>
 
-          <div className="mt-10 max-w-xl">
+          <div data-chapter-body className="mt-10">
+          <div className="max-w-xl">
             {signed ? (
               <div className="flex items-center gap-3 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-6 text-emerald-100">
                 <Check className="size-5 shrink-0" />
@@ -1220,11 +1256,12 @@ export function SolarProposalView({
               ))}
             </div>
           </div>
+          </div>
         </div>
       </section>
 
       {/* ── COMPANY, REPRESENTATIVE & DISCLOSURES ─────────────────────────── */}
-      <footer className="bg-[#efeae2] px-6 py-16 sm:px-10">
+      <footer data-colophon className="bg-[#efeae2] px-6 py-16 sm:px-10">
         <div className="mx-auto w-full max-w-3xl">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-neutral-400">
             Who is doing the work
@@ -1243,7 +1280,10 @@ export function SolarProposalView({
             )}
           </div>
 
-          <div className="mt-12 space-y-3 border-t border-neutral-300/70 pt-8">
+          <div
+            data-colophon-legal
+            className="mt-12 space-y-3 border-t border-neutral-300/70 pt-8"
+          >
             <h2 className="font-display text-sm font-semibold text-neutral-700">
               Important disclosures
             </h2>
@@ -1361,6 +1401,7 @@ function LifetimeBlock({
   return (
     <div
       data-dark-ground
+      data-lifetime
       className="overflow-hidden rounded-2xl bg-neutral-950 p-8 text-white sm:p-10 [print-color-adjust:exact] [-webkit-print-color-adjust:exact]"
     >
       <div className="flex flex-wrap items-end justify-between gap-x-12 gap-y-8">
@@ -1373,7 +1414,10 @@ function LifetimeBlock({
           >
             {label}
           </p>
-          <p className="mt-3 font-display text-[clamp(3rem,8vw,5.2rem)] font-semibold leading-[0.92] tracking-[-0.035em] tabular-nums text-white">
+          <p
+            data-lifetime-figure
+            className="mt-3 font-display text-[clamp(3rem,8vw,5.2rem)] font-semibold leading-[0.92] tracking-[-0.035em] tabular-nums text-white"
+          >
             {value}
           </p>
         </div>

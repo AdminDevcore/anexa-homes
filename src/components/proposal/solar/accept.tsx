@@ -64,28 +64,3 @@ export function AcceptForm({ token, onSigned }: { token: string; onSigned: () =>
     </div>
   );
 }
-
-/**
- * Print rules that belong to THIS document.
- *
- * The heavy lifting — print-color-adjust on every descendant of #proposal-root,
- * the chapter break rules, the zero page margin — lives in globals.css and now
- * applies here too, because this document finally carries that id. What is left
- * is the one thing globals cannot know: the assumptions block is a <details>,
- * and a printed proposal has to show what is inside it.
- */
-export function PrintStyles() {
-  return (
-    <style>{`
-      @media print {
-        html, body { background: #fff !important; }
-        details { display: block; }
-        details > summary { display: none; }
-        /* The FAQ prints as question-and-answer; only the disclosure
-           accordions collapse their own summary away. */
-        details[data-keep-summary] > summary { display: flex; }
-        a[href]::after { content: ""; }
-      }
-    `}</style>
-  );
-}

@@ -20,6 +20,21 @@ import { cn } from "@/lib/utils";
 export type ChapterTone = "paper" | "dark";
 
 /**
+ * How a chapter arranges itself on PAPER.
+ *
+ * `rail` is the default and the reason the printed document is landscape: the
+ * chapter mark, the title and the lede move into a narrow left column and the
+ * content takes the rest of the sheet. On screen that furniture stacks above
+ * the content and costs two inches of height, which on an 8.5in-tall sheet is
+ * the difference between a composed page and a page with a hole in it.
+ *
+ * `stack` keeps the screen arrangement for the two chapters whose content is a
+ * DRAWING — the roof and the twenty-five-year chart. Those want the full 10in
+ * of paper more than they want the title beside them.
+ */
+export type ChapterPrintLayout = "rail" | "stack";
+
+/**
  * One chapter of the document.
  *
  * A chapter is a SNAP TARGET: on a wide screen the deck settles it under the
@@ -30,6 +45,10 @@ export type ChapterTone = "paper" | "dark";
  * `min-h` rather than a fixed height, because chapters 4 and 5 are genuinely
  * taller than a viewport and clipping a payment table to make the deck tidy
  * would hide the terms somebody is being asked to sign.
+ *
+ * The three `data-chapter-*` attributes carry NO screen styling. They exist so
+ * the print sheet can rearrange the chapter into a rail without this component
+ * having to know what paper looks like — see ./print.
  */
 export function Chapter({
   id,
@@ -40,6 +59,7 @@ export function Chapter({
   lede,
   tone = "paper",
   wide = false,
+  printLayout = "rail",
   children,
 }: {
   id: string;
@@ -51,6 +71,8 @@ export function Chapter({
   lede?: React.ReactNode;
   tone?: ChapterTone;
   wide?: boolean;
+  /** How this chapter lays itself out on paper. See ChapterPrintLayout. */
+  printLayout?: ChapterPrintLayout;
   children: React.ReactNode;
 }) {
   const dark = tone === "dark";
@@ -63,6 +85,7 @@ export function Chapter({
       // every one of them without parsing a computed colour. Tailwind emits
       // oklch(), and a test that greps for rgb() passes by finding nothing.
       data-dark-ground={dark ? "" : undefined}
+      data-print-layout={printLayout}
       className={cn(
         "relative scroll-mt-[var(--proposal-chrome-h)] overflow-hidden px-6 sm:px-10",
         "flex min-h-[calc(100svh-var(--proposal-chrome-h))] flex-col justify-center",
@@ -75,27 +98,34 @@ export function Chapter({
           : "bg-transparent text-neutral-900",
       )}
     >
-      <div className={cn("relative mx-auto w-full", wide ? "max-w-5xl" : "max-w-3xl")}>
-        <ChapterMark index={index} total={total} eyebrow={eyebrow} dark={dark} />
-        <h2
-          className={cn(
-            "mt-5 font-display text-[clamp(2.1rem,4.6vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.022em] text-balance",
-            dark ? "text-white" : "text-neutral-950",
-          )}
-        >
-          {title}
-        </h2>
-        {lede && (
-          <p
+      <div
+        data-chapter-inner
+        className={cn("relative mx-auto w-full", wide ? "max-w-5xl" : "max-w-3xl")}
+      >
+        <div data-chapter-head>
+          <ChapterMark index={index} total={total} eyebrow={eyebrow} dark={dark} />
+          <h2
             className={cn(
-              "mt-5 max-w-[46ch] text-lg leading-relaxed",
-              dark ? "text-neutral-300" : "text-neutral-600",
+              "mt-5 font-display text-[clamp(2.1rem,4.6vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.022em] text-balance",
+              dark ? "text-white" : "text-neutral-950",
             )}
           >
-            {lede}
-          </p>
-        )}
-        <div className="mt-10">{children}</div>
+            {title}
+          </h2>
+          {lede && (
+            <p
+              className={cn(
+                "mt-5 max-w-[46ch] text-lg leading-relaxed",
+                dark ? "text-neutral-300" : "text-neutral-600",
+              )}
+            >
+              {lede}
+            </p>
+          )}
+        </div>
+        <div data-chapter-body className="mt-10">
+          {children}
+        </div>
       </div>
     </section>
   );
