@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { recomputeDesignFigures } from "./recompute";
+import { DEFAULT_BATTERY_QTY } from "./settings";
 
 /**
  * Choosing what this system is built from, on the screen where it is drawn.
@@ -37,10 +38,11 @@ const schema = z.object({
   /**
    * How many of that battery are going on the house.
    *
-   * Nothing has ever written this. Every reader defaulted a missing count to
-   * one — including the battery programme, which multiplies its money by it —
-   * so a house with two Powerwalls earned for one, silently, and no screen in
-   * the product could say otherwise. Undefined still leaves it alone.
+   * Undefined leaves it alone, EXCEPT on the pick that puts a battery on an
+   * empty slot — that one starts at the company's standard quantity, from
+   * Settings → Solar. Every reader defaults a missing count to one, including
+   * the battery programme which multiplies its money by it, so a design that
+   * never picked up a count quoted and earned for a single unit.
    */
   batteryQty: z.number().int().min(1).max(20).optional(),
 });
@@ -75,6 +77,37 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
     if (!found) return fail(`That ${kind} is not in your catalogue.`);
   }
 
+  /**
+   * A battery landing on a design that had none arrives at the company's
+   * standard quantity.
+   *
+   * The count used to start at zero and every reader downstream turned that
+   * into ONE, so a company selling two batteries as its standard offer quoted
+   * the second one for free and earned the battery programme's money on one of
+   * them — unless a rep noticed the small quantity box beside the picker, which
+   * only appears after the battery is chosen.
+   *
+   * Applied ONLY to a design with nothing in the battery slot. Swapping a
+   * chosen battery for a different model keeps whatever the rep set: a default
+   * that overwrites a deliberate decision is not a default. And an explicit
+   * count in this call always wins — that IS the rep deciding.
+   */
+  let startingQty: number | undefined;
+  if (batteryQty === undefined && typeof batteryId === "string") {
+    const current = await prisma.solarDesign.findUnique({
+      where: { leadId },
+      select: { batteryId: true, batteryQty: true },
+    });
+    const hadOne = !!current?.batteryId && (current?.batteryQty ?? 0) > 0;
+    if (!hadOne) {
+      const settings = await prisma.solarSettings.findUnique({
+        where: { companyId: user.companyId },
+        select: { defaultBatteryQty: true },
+      });
+      startingQty = Math.max(1, settings?.defaultBatteryQty ?? DEFAULT_BATTERY_QTY);
+    }
+  }
+
   // Upsert, because choosing a panel is a perfectly reasonable first thing to
   // do on a deal that has no design row yet.
   const data = {
@@ -82,15 +115,17 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
     ...(inverterId !== undefined ? { inverterId } : {}),
     ...(batteryId !== undefined ? { batteryId } : {}),
     ...(batteryQty !== undefined ? { batteryQty } : {}),
+    ...(startingQty !== undefined ? { batteryQty: startingQty } : {}),
     // Taking the battery off the design takes its count with it. A count left
     // behind on a slot with nothing in it is the sort of thing that comes back
     // as "two batteries" the next time somebody picks one.
     ...(batteryId === null ? { batteryQty: 0 } : {}),
   };
-  await prisma.solarDesign.upsert({
+  const saved = await prisma.solarDesign.upsert({
     where: { leadId },
     create: { companyId: user.companyId, leadId, ...data },
     update: data,
+    select: { batteryQty: true },
   });
 
   // The panel decides what every panel on the roof is worth, so the size, the
@@ -100,5 +135,7 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
   revalidatePath(`/portal/leads/${leadId}`);
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   revalidatePath(`/portal/leads/${leadId}/solar-proposal/design`);
-  return { ok: true as const, figures };
+  // The count comes back so the screen can show what was actually written
+  // rather than the "1" it would otherwise display until the refresh lands.
+  return { ok: true as const, figures, batteryQty: saved.batteryQty };
 }

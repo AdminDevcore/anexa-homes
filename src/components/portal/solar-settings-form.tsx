@@ -51,6 +51,7 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
     homeValueUpliftPct: String(settings.homeValueUpliftPct),
+    defaultBatteryQty: String(settings.defaultBatteryQty),
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
     minPpw: (settings.minPpwCents / 100).toFixed(2),
@@ -78,6 +79,9 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       // Blank is zero, and zero means the claim is not made at all — the
       // proposal omits the card rather than printing "0%".
       homeValueUpliftPct: f.homeValueUpliftPct.trim() === "" ? 0 : Number(f.homeValueUpliftPct),
+      // Blank falls back to one rather than zero: an empty box is a company
+      // that has not said, and "a battery, none of them" is not a system.
+      defaultBatteryQty: f.defaultBatteryQty.trim() === "" ? 1 : Number(f.defaultBatteryQty),
       minOffsetPct: Number(f.minOffsetPct),
       maxOffsetPct: Number(f.maxOffsetPct),
       minPpwCents: Math.round(Number(f.minPpw) * 100),
@@ -117,6 +121,19 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
             onChange={(v) => set("homeValueUpliftPct", v)}
             step="0.1"
             hint="What you are willing to say an owned system adds to a home's value. The published studies cluster around 4% and disagree by market, so this is yours to stand behind. Leave it at 0 and the proposal makes no such claim."
+          />
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+        <h3 className="font-semibold">Equipment defaults</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <NumField
+            label="Batteries per system"
+            value={f.defaultBatteryQty}
+            onChange={(v) => set("defaultBatteryQty", v)}
+            step="1"
+            hint="How many batteries a design starts with the moment a rep picks one, on the roof designer. Your standard offer — a rep can still change it on any deal, and changing this never touches a deal that already has a battery on it."
           />
         </div>
       </section>

@@ -36,7 +36,19 @@ export type SolarSettingsView = SolarAssumptions & {
   /// default, means the company makes none and the card is omitted rather than
   /// printed as "0%".
   homeValueUpliftPct: number;
+  /// How many batteries a design starts with once a rep picks one.
+  ///
+  /// Not a SolarAssumption either: it reaches no calculation. It decides what
+  /// gets WRITTEN on a design the first time a battery lands on it, and from
+  /// there the ordinary equipment figures follow.
+  defaultBatteryQty: number;
 };
+
+/// What a company that has never opened the settings page sells: two batteries,
+/// this company's standard offer. Mirrors the column default in the schema —
+/// the two have to agree, because a company with no settings row and a company
+/// with an untouched one are the same company.
+export const DEFAULT_BATTERY_QTY = 2;
 
 export async function getSolarSettings(companyId: string): Promise<SolarSettingsView> {
   const row = await prisma.solarSettings.findUnique({ where: { companyId } });
@@ -45,6 +57,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
       ...SOLAR_ASSUMPTION_DEFAULTS,
       targetNetPpwCents: null,
       homeValueUpliftPct: 0,
+      defaultBatteryQty: DEFAULT_BATTERY_QTY,
     };
   }
   return {
@@ -61,5 +74,6 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     maxPpwCents: row.maxPpwCents,
     targetNetPpwCents: row.targetNetPpwCents,
     homeValueUpliftPct: row.homeValueUpliftPct,
+    defaultBatteryQty: row.defaultBatteryQty,
   };
 }

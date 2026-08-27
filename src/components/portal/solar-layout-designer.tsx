@@ -538,6 +538,11 @@ export function SolarLayoutDesigner({
       setPendingEquip(null);
       return toast.error(res.error);
     }
+    // Picking a battery writes the company's standard quantity, so hold the
+    // count the SERVER wrote on screen until the refresh carries it in. Without
+    // this the box reads "1" for as long as the round trip takes, which is the
+    // one number the rep is most likely to believe.
+    setPendingEquip({ ...patch, batteryQty: res.batteryQty });
     router.refresh();
     setPendingEquip(null);
   }
@@ -2327,10 +2332,15 @@ export function SolarLayoutDesigner({
             quantity box beside an empty slot is a question with no meaning.
             It matters beyond the equipment list: the battery programme pays
             per battery, so a second Powerwall nobody could record was a second
-            Powerwall nobody got paid for. */}
+            Powerwall nobody got paid for.
+
+            Labelled "Qty" rather than "×": a bare multiplication sign beside a
+            dropdown is the reason people looked for this control and reported
+            it missing. It starts at the company's standard quantity — see
+            Settings → Solar. */}
         {equip.batteryId && (
           <label className="flex items-center gap-1.5 text-xs text-neutral-400">
-            <span>×</span>
+            <span>Qty</span>
             <select
               className="h-8 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white disabled:opacity-50"
               value={Math.max(1, equip.batteryQty)}
@@ -2338,7 +2348,14 @@ export function SolarLayoutDesigner({
               disabled={!canEdit || equipBusy}
               onChange={(e) => void pickEquipment({ batteryQty: Number(e.target.value) })}
             >
-              {[1, 2, 3, 4, 5, 6].map((n) => (
+              {/* Always long enough to contain the number actually on the
+                  design: a company whose standard is eight would otherwise
+                  land on a select with no matching option, which renders
+                  blank and reads as "no batteries". */}
+              {Array.from(
+                { length: Math.max(6, Math.max(1, equip.batteryQty)) },
+                (_, i) => i + 1
+              ).map((n) => (
                 <option className="text-black" key={n} value={n}>
                   {n}
                 </option>
