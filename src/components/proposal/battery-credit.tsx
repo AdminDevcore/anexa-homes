@@ -67,10 +67,17 @@ export function BatteryCredit({
           Your battery earns its keep
         </p>
         <p className="mt-2 font-display text-xl font-bold text-white">
-          {programme} pays you {usd(annualCents)} a year
+          Your battery earns you {usd(annualCents)} a year
         </p>
+        {/* WHO PAYS IS NOT IN THE DATA, so this no longer claims to know.
+            A provider row is a TERRITORY — this company files the same
+            programme under five different utilities — and the sentence used to
+            read "<utility> pays you", naming the wires company for a
+            retailer's programme. What IS known: the programme, the network the
+            battery is enrolled on, and what it pays. */}
         <p className="mt-1 text-sm leading-relaxed text-neutral-400">
-          {payer} pays you for letting them draw on your battery
+          Enrolled in {programme} on {payer}&rsquo;s network, and paid for letting them draw on it
+          when the grid is short
           {batteries > 1 ? ` — ${batteries} batteries` : ""}
           {perBatteryCents != null ? `, at ${usd(perBatteryCents)} each` : ""}
           {upfrontCents > 0 ? `, plus ${usd(upfrontCents)} when you enrol` : ""}.
@@ -108,8 +115,8 @@ export function BatteryCredit({
           <p className="max-w-[62ch] text-sm leading-relaxed text-amber-200">
             <strong className="font-semibold text-amber-100">Your payment does not change.</strong>{" "}
             You owe {lender ?? "your lender"} {usd(monthlyCents!, 2)} every month for the system,
-            whatever the battery earns. The {usd(annualCents)} is separate money {payer} pays you
-            — it is what the year nets out to, not a smaller bill from the bank.
+            whatever the battery earns. The {usd(annualCents)} is separate money the programme
+            pays you — it is what the year nets out to, not a smaller bill from the bank.
           </p>
         </div>
       )}

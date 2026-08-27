@@ -37,6 +37,7 @@ import {
   tidyBlocks,
   wouldOverlap,
   DEFAULT_SETBACK_M,
+  DESIGNER_LAYOUT_FILENAME,
   type GrowSide,
   type LayoutBlock,
   type LayoutSetback,
@@ -318,7 +319,13 @@ export function SolarLayoutDesigner({
   /** Everything this company sells, for the three pickers in the top bar. */
   catalogue: { module: EquipOption[]; inverter: EquipOption[]; battery: EquipOption[] };
   /** What this design already names. Null in a slot means nothing chosen. */
-  chosen: { moduleId: string | null; inverterId: string | null; batteryId: string | null };
+  chosen: {
+    moduleId: string | null;
+    inverterId: string | null;
+    batteryId: string | null;
+    /** How many batteries. 0 or absent reads as one, the way every reader does. */
+    batteryQty: number;
+  };
   /** What the house uses, so offset is live rather than a saved snapshot. */
   annualUsageKwh: number | null;
   /**
@@ -2252,7 +2259,10 @@ export function SolarLayoutDesigner({
       if (blob) {
         const fd = new FormData();
         fd.set("leadId", leadId);
-        fd.set("file", new File([blob], "panel-layout.jpg", { type: "image/jpeg" }));
+        // The name is how the server tells this auto-rendered copy apart from a
+        // layout a rep uploaded by hand — see DESIGNER_LAYOUT_FILENAME. Only
+        // ours is superseded on the next save.
+        fd.set("file", new File([blob], DESIGNER_LAYOUT_FILENAME, { type: "image/jpeg" }));
         fd.set("designProvider", "Anexa Designer");
         fd.set("designExternalRef", "");
         const up = await uploadPanelLayoutAction(fd);
@@ -2313,6 +2323,29 @@ export function SolarLayoutDesigner({
           disabled={!canEdit || equipBusy}
           onChange={(id) => void pickEquipment({ batteryId: id })}
         />
+        {/* HOW MANY OF THEM. Only once there is a battery to count — a
+            quantity box beside an empty slot is a question with no meaning.
+            It matters beyond the equipment list: the battery programme pays
+            per battery, so a second Powerwall nobody could record was a second
+            Powerwall nobody got paid for. */}
+        {equip.batteryId && (
+          <label className="flex items-center gap-1.5 text-xs text-neutral-400">
+            <span>×</span>
+            <select
+              className="h-8 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white disabled:opacity-50"
+              value={Math.max(1, equip.batteryQty)}
+              aria-label="How many batteries"
+              disabled={!canEdit || equipBusy}
+              onChange={(e) => void pickEquipment({ batteryQty: Number(e.target.value) })}
+            >
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <option className="text-black" key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <select
           className="h-8 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white"
           value={zoom}

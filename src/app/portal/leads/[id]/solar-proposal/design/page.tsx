@@ -66,6 +66,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
       moduleId: true,
       inverterId: true,
       batteryId: true,
+      batteryQty: true,
     },
   });
 
@@ -178,6 +179,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         moduleId: design?.moduleId ?? sizingModule?.id ?? null,
         inverterId: design?.inverterId ?? null,
         batteryId: design?.batteryId ?? null,
+        batteryQty: design?.batteryQty ?? 0,
       }}
       annualUsageKwh={design?.annualUsageKwh ?? null}
       initialBlocks={blocks}

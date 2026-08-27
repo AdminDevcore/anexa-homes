@@ -34,6 +34,15 @@ const schema = z.object({
   moduleId: z.string().min(1).nullish(),
   inverterId: z.string().min(1).nullish(),
   batteryId: z.string().min(1).nullish(),
+  /**
+   * How many of that battery are going on the house.
+   *
+   * Nothing has ever written this. Every reader defaulted a missing count to
+   * one — including the battery programme, which multiplies its money by it —
+   * so a house with two Powerwalls earned for one, silently, and no screen in
+   * the product could say otherwise. Undefined still leaves it alone.
+   */
+  batteryQty: z.number().int().min(1).max(20).optional(),
 });
 
 export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema>) {
@@ -41,7 +50,7 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
   if (!can(user, "update", "Lead")) return fail("Not allowed.");
   const parsed = schema.safeParse(input);
   if (!parsed.success) return fail("That equipment could not be read.");
-  const { leadId, moduleId, inverterId, batteryId } = parsed.data;
+  const { leadId, moduleId, inverterId, batteryId, batteryQty } = parsed.data;
 
   const lead = await prisma.lead.findFirst({
     where: { companyId: user.companyId, id: leadId },
@@ -72,6 +81,11 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
     ...(moduleId !== undefined ? { moduleId } : {}),
     ...(inverterId !== undefined ? { inverterId } : {}),
     ...(batteryId !== undefined ? { batteryId } : {}),
+    ...(batteryQty !== undefined ? { batteryQty } : {}),
+    // Taking the battery off the design takes its count with it. A count left
+    // behind on a slot with nothing in it is the sort of thing that comes back
+    // as "two batteries" the next time somebody picks one.
+    ...(batteryId === null ? { batteryQty: 0 } : {}),
   };
   await prisma.solarDesign.upsert({
     where: { leadId },

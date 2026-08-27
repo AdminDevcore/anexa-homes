@@ -267,7 +267,13 @@ export function SolarProposalView({
   const vppAnnualCents = vpp.reduce((n, v) => n + v.annualCents, 0);
   /** The one-off enrolment money, for the lifetime total that does count it. */
   const vppUpfrontCents = vpp.reduce((n, v) => n + v.upfrontCents, 0);
-  const vppPayer = vpp.length === 1 ? vpp[0].provider : "your battery programme";
+  /**
+   * The PROGRAMME's name where there is exactly one, because the programme is
+   * what pays. The provider row it is filed under is a territory — this
+   * company files one programme under five different utilities — so naming the
+   * provider here credited the wires company with a retailer's money.
+   */
+  const vppPayer = vpp.length === 1 ? vpp[0].programme : "your battery programme";
   const afterAllCents =
     option.monthlyCents != null
       ? option.monthlyCents + option.postSolarMonthlyCents
@@ -822,8 +828,11 @@ export function SolarProposalView({
                         <span className="ml-2 tabular-nums">{usd(v.annualCents)}/yr</span>
                       )}
                     </p>
+                    {/* An enrolment, not a cheque from the wires company —
+                        see the note in ../battery-credit. */}
                     <p className="mt-0.5 text-sm leading-relaxed text-neutral-600">
-                      {v.provider} pays you for letting them draw on your battery
+                      Your battery is enrolled on {v.provider}&rsquo;s network and paid for letting
+                      them draw on it when the grid is short
                       {v.batteryQty > 1 ? ` (${v.batteryQty} batteries)` : ""}
                       {v.upfrontCents > 0
                         ? `, plus ${usd(v.upfrontCents)} when you enrol`
@@ -942,7 +951,7 @@ export function SolarProposalView({
             <p>
               {`\u201cIf you go solar\u201d is the power you still buy from the utility, plus what you pay for the system that year${
                 vppAnnualCents > 0
-                  ? `, less the ${usd(vppAnnualCents)} a year ${vppPayer} pays you for your battery`
+                  ? `, less the ${usd(vppAnnualCents)} a year your battery earns from ${vppPayer}`
                   : ""
               }.`}
             </p>
