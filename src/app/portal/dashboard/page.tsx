@@ -8,6 +8,11 @@ import {
   DollarSign,
   CheckCircle2,
   TrendingUp,
+  Coins,
+  Timer,
+  Target,
+  AlarmClock,
+  Hourglass,
 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import {
@@ -15,6 +20,7 @@ import {
   getRecentLeads,
   getRecentProjects,
 } from "@/server/modules/dashboard/queries";
+import { canSeeTeamOps, getOverrideEarnings, getTeamOps } from "@/server/modules/dashboard/ops";
 import { PageHeader, StatCard } from "@/components/portal/ui";
 import { currentFormatters } from "@/lib/format-server";
 import { roleLabel } from "@/lib/roles";
@@ -30,11 +36,19 @@ export default async function DashboardPage() {
   const user = await requireUser();
 
   const vertical = await getActiveVertical(user);
-  const [stats, leads, projects] = await Promise.all([
+  // Managers have no Report grant, so /portal/reports bounces them back here —
+  // their team + operations numbers have to live on this page or nowhere.
+  const seesTeamOps = canSeeTeamOps(user);
+  const [stats, leads, projects, overrides, ops] = await Promise.all([
     getDashboardStats(user, vertical),
     getRecentLeads(user, vertical),
     getRecentProjects(user, vertical),
+    getOverrideEarnings(user),
+    seesTeamOps ? getTeamOps(user, vertical) : Promise.resolve(null),
   ]);
+
+  const days = (n: number | null) => (n == null ? "—" : `${n} ${n === 1 ? "day" : "days"}`);
+  const pct = (n: number | null) => (n == null ? "—" : `${Math.round(n)}%`);
 
   // If the active workspace is empty but the user has others, guide them to switch
   // (so an empty workspace isn't mistaken for "I can't see the company's deals").
@@ -83,7 +97,105 @@ export default async function DashboardPage() {
             icon={Wallet}
           />
         )}
+        {/* What this person earns off other people's deals. Absent entirely for
+            anyone who doesn't earn overrides, rather than showing them a $0. */}
+        {overrides && (
+          <StatCard
+            label="Total Overrides"
+            value={fmt.money(overrides.earnedCents, { compact: true })}
+            icon={Coins}
+            hint={`${fmt.money(overrides.pendingCents, { compact: true })} pending`}
+          />
+        )}
       </div>
+
+      {ops && (
+        <section className="space-y-4">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Team &amp; operations
+          </h2>
+
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+            <StatCard
+              label="Avg Turnaround"
+              value={days(ops.days)}
+              icon={Timer}
+              hint={
+                ops.sample > 0
+                  ? `lead → install complete · ${ops.sample} job${ops.sample === 1 ? "" : "s"}`
+                  : "lead → install complete"
+              }
+            />
+            <StatCard
+              label="Close Rate"
+              value={pct(ops.closeRatePct)}
+              icon={Target}
+              hint={`${ops.wonLeads} won of ${stats.totalLeads}`}
+            />
+            <StatCard
+              label="Overdue Jobs"
+              value={ops.overdueJobs}
+              icon={AlarmClock}
+              hint="past their stage day-limit"
+            />
+            <StatCard
+              label="Avg Days in Stage"
+              value={days(ops.avgDaysInStage)}
+              icon={Hourglass}
+              hint={`${ops.openDeals} open deal${ops.openDeals === 1 ? "" : "s"}`}
+            />
+          </div>
+
+          <div className="rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <h3 className="font-semibold">Team Performance</h3>
+              <Link href="/portal/team" className="text-sm text-gold-muted hover:underline">
+                View team
+              </Link>
+            </div>
+            {ops.team.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+                No deals assigned to a rep yet.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="px-5 py-2.5 text-left font-medium">Rep</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Appts</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Won</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Close</th>
+                      {ops.canSeeFinancials && (
+                        <th className="px-5 py-2.5 text-right font-medium">Sold</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {ops.team.map((row) => (
+                      <tr key={row.userId}>
+                        <td className="px-5 py-3">
+                          <Link href={`/portal/team/${row.userId}`} className="font-medium hover:text-gold-muted">
+                            {row.name}
+                          </Link>
+                        </td>
+                        <td className="px-3 py-3 text-right tabular-nums">{row.appointments}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{row.won}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{pct(row.closeRatePct)}</td>
+                        {ops.canSeeFinancials && (
+                          <td className="px-5 py-3 text-right tabular-nums">
+                            {row.soldCents == null ? "—" : fmt.money(row.soldCents, { compact: true })}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Recent leads */}
