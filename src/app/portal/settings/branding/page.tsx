@@ -69,6 +69,7 @@ export default async function BrandingSettingsPage() {
             name: company?.name ?? "",
             phone: company?.phone ?? "",
             email: company?.email ?? "",
+            website: company?.website ?? "",
             address: company?.address ?? "",
             city: company?.city ?? "",
             state: company?.state ?? "",

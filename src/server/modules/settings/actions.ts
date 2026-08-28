@@ -737,6 +737,7 @@ const companyIdentitySchema = z.object({
   // rather than with the portal's own support contacts in CompanySettings.
   phone: z.string().max(40).optional().or(z.literal("")),
   email: z.string().max(160).optional().or(z.literal("")),
+  website: z.string().max(200).optional().or(z.literal("")),
   address: z.string().max(200).optional().or(z.literal("")),
   city: z.string().max(80).optional().or(z.literal("")),
   state: z.string().max(40).optional().or(z.literal("")),
@@ -760,6 +761,7 @@ export async function updateCompanyIdentityAction(input: z.infer<typeof companyI
       name: d.name.trim(),
       phone: set(d.phone),
       email: set(d.email),
+      website: set(d.website),
       address: set(d.address),
       city: set(d.city),
       state: set(d.state),

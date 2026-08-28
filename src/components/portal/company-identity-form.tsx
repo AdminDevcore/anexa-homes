@@ -17,6 +17,7 @@ export function CompanyIdentityForm({
     name: string;
     phone: string;
     email: string;
+    website: string;
     address: string;
     city: string;
     state: string;
@@ -28,6 +29,7 @@ export function CompanyIdentityForm({
   const [name, setName] = React.useState(initial.name);
   const [phone, setPhone] = React.useState(initial.phone);
   const [email, setEmail] = React.useState(initial.email);
+  const [website, setWebsite] = React.useState(initial.website);
   const [address, setAddress] = React.useState(initial.address);
   const [city, setCity] = React.useState(initial.city);
   const [state, setState] = React.useState(initial.state);
@@ -41,6 +43,7 @@ export function CompanyIdentityForm({
       name,
       phone,
       email,
+      website,
       address,
       city,
       state,
@@ -92,6 +95,15 @@ export function CompanyIdentityForm({
             type="email"
           />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Website</Label>
+        <Input
+          value={website}
+          onChange={(e) => setWebsite(e.target.value)}
+          placeholder="anexahomes.com"
+        />
       </div>
 
       <div className="space-y-1.5">
