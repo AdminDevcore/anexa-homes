@@ -109,21 +109,62 @@ async function emailSignedCopies(opts: {
   }
 }
 
+/**
+ * Send a template out for signature as a logged-in user.
+ *
+ * A thin authorisation shell over `createSignaturePackage`. The scope check has
+ * to live HERE because this is the only layer where a user exists to scope
+ * against; the core below is also reached by the automation engine, which has
+ * no session at all.
+ */
 export async function sendForSignature(user: SessionUser, input: SendInput) {
   requireCan(user, "create", "Document");
 
+  const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  const visible = await prisma.lead.findFirst({
+    where: { AND: [{ id: input.leadId }, leadScope] },
+    select: { id: true },
+  });
+  if (!visible) throw new Error("Lead not found or access denied.");
+
+  return createSignaturePackage({
+    companyId: user.companyId,
+    actor: { id: user.userId, name: user.fullName },
+    input,
+  });
+}
+
+/**
+ * Create and send a signature envelope with NO session.
+ *
+ * The automation engine reaches this directly. It cannot go through
+ * `sendForSignature` above, whose `requireCan` and `listScope` both need a
+ * SessionUser — the same reason leads/intake.ts works straight against Prisma
+ * for the public web form. Authorisation is the caller's job: it must have
+ * resolved companyId itself, and the workspace is enforced by the isolation
+ * extension on every query below.
+ *
+ * `actor` is null when an automation did it. Every audit row it writes then
+ * reads "Automation", which is the truth — nobody clicked anything.
+ */
+export async function createSignaturePackage(args: {
+  companyId: string;
+  actor: { id: string; name: string } | null;
+  input: SendInput;
+}) {
+  const { companyId, actor, input } = args;
+
   const template = await prisma.documentTemplate.findFirst({
-    where: { id: input.templateId, companyId: user.companyId },
+    where: { id: input.templateId, companyId },
     include: { fields: true },
   });
   if (!template) throw new Error("Template not found.");
 
-  const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   const lead = await prisma.lead.findFirst({
-    where: { AND: [{ id: input.leadId }, leadScope] },
+    where: { id: input.leadId, companyId },
     include: { project: true },
   });
-  if (!lead) throw new Error("Lead not found or access denied.");
+  if (!lead) throw new Error("Lead not found.");
 
   const snapshot: Snapshot = {
     pages: (template.pages as unknown as Snapshot["pages"]) ?? [{ width: 612, height: 792 }],
@@ -149,7 +190,7 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
   const pkg = await prisma.$transaction(async (tx) => {
     const created = await tx.documentPackage.create({
       data: {
-        companyId: user.companyId,
+        companyId,
         templateId: template.id,
         leadId: lead.id,
         projectId: lead.project?.id ?? null,
@@ -162,7 +203,7 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
         folderKey: template.folderKey,
         sentAt: new Date(),
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30),
-        createdById: user.userId,
+        createdById: actor?.id ?? null,
       },
     });
 
@@ -171,7 +212,7 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
       tokens.push({ name: s.name, email: s.email || null, raw });
       await tx.documentSigner.create({
         data: {
-          companyId: user.companyId,
+          companyId,
           packageId: created.id,
           role: s.role,
           order: s.order,
@@ -184,28 +225,28 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
     }
 
     await appendDocumentEvent(tx, {
-      companyId: user.companyId,
+      companyId,
       packageId: created.id,
       type: "created",
-      actor: user.fullName,
+      actor: actor?.name ?? "Automation",
     });
     await appendDocumentEvent(tx, {
-      companyId: user.companyId,
+      companyId,
       packageId: created.id,
       type: "sent",
-      actor: user.fullName,
+      actor: actor?.name ?? "Automation",
     });
     return created;
   });
 
-  await fireEvent({ companyId: user.companyId, event: "document_sent", actorId: user.userId, documentId: pkg.id, leadId: lead.id });
+  await fireEvent({ companyId, event: "document_sent", actorId: actor?.id ?? null, documentId: pkg.id, leadId: lead.id });
 
   const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const links = tokens.map((t) => ({ name: t.name, url: `${base}/sign/${t.raw}` }));
 
   // Auto-email the signing link to each signer that has an email (best-effort).
   const company = await prisma.company.findUnique({
-    where: { id: user.companyId },
+    where: { id: companyId },
     select: { name: true },
   });
   const companyName = company?.name ?? "Anexa Homes";
@@ -216,7 +257,7 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
         await emailSigningLink({
           to: t.email,
           signerName: t.name,
-          companyId: user.companyId,
+          companyId,
           companyName,
           title: pkg.title,
           url: `${base}/sign/${t.raw}`,
