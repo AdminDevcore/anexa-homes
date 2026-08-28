@@ -65,6 +65,7 @@ export type SettingsSectionKey =
   | "document_templates"
   | "commission_rules"
   | "notification_rules"
+  | "automations"
   | "storm_homeowner"
   | "photo_templates"
   | "inspection_outcomes"
@@ -154,6 +155,15 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     // project-manager line for a rule to pay out to — so on solar this card
     // opened a page there was never anything to put in.
     verticals: ["roofing"],
+  },
+  {
+    icon: Zap,
+    key: "automations",
+    title: "Automations",
+    body: "Do the paperwork when a deal hits a milestone.",
+    href: "/portal/settings/automations",
+    group: "money",
+    keywords: ["workflow", "trigger", "rules", "milestone", "auto", "generate", "when"],
   },
   {
     icon: Bell,
