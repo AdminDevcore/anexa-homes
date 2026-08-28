@@ -61,6 +61,7 @@ import { leadStageTimeline } from "@/server/modules/pipeline/stage-history-queri
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
 import { DealFolders } from "@/components/portal/deal-folders";
+import { ALL_DROPBOX_KEYS } from "@/lib/deal-folders";
 import { LeadTasks } from "@/components/portal/lead-tasks";
 import { ProjectPhotos } from "@/components/portal/project-photos";
 import { StartProductionButton } from "@/components/portal/start-production-button";
@@ -132,6 +133,19 @@ export default async function LeadDetailPage({
   // HIDDEN here, never deleted — Claim holds live roofing money.
   const isSolarDeal = lead.vertical === "solar";
   const isInsurance = !isSolarDeal && lead.dealType !== "cash";
+
+  // Write-only files are counted here and then withheld from the grid
+  // entirely — nobody reads a contractor's bill from the job, whatever their
+  // role. src/lib/contractor-invoice.ts has the reasoning.
+  //
+  // Stripped by ALL_DROPBOX_KEYS, not by this deal's own folder set: an
+  // invoice submitted from a ROOFING job carries a key roofing's grid does not
+  // know, and an unknown key falls into "Other" — which would list the very
+  // document this feature exists to withhold. See the note on the constant.
+  const dealDropboxCounts: Record<string, number> = {};
+  for (const key of ALL_DROPBOX_KEYS) {
+    dealDropboxCounts[key] = lead.files.filter((f) => f.category === key).length;
+  }
 
   const claim = lead.claims[0];
   const canNote = can(user, "create", "Note");
@@ -1532,12 +1546,18 @@ export default async function LeadDetailPage({
               projectId={project?.id ?? null}
               vertical={lead.vertical}
               checklists={photoChecklists}
-              files={lead.files.map((f) => ({
-                id: f.id,
-                name: f.name,
-                kind: f.kind,
-                category: f.category,
-              }))}
+              files={lead.files
+                // Letter-slot files never cross to the browser — see
+                // src/lib/contractor-invoice.ts. Filtering in the component
+                // would still have shipped the ids, and an id is a URL.
+                .filter((f) => !ALL_DROPBOX_KEYS.has(f.category ?? ""))
+                .map((f) => ({
+                  id: f.id,
+                  name: f.name,
+                  kind: f.kind,
+                  category: f.category,
+                }))}
+              dropboxCounts={dealDropboxCounts}
               packages={lead.documentPackages.map((d) => ({
                 id: d.id,
                 title: d.title,

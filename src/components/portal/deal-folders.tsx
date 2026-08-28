@@ -22,6 +22,7 @@ import type { PhotoChecklist } from "@/server/modules/photos/queries";
 import { uploadFileAction, deleteFileAction, moveFileAction } from "@/server/modules/files/actions";
 import { PhotoGroupBody, type GroupPhoto } from "./deal-photos";
 import { DealCallRecordings, type CallRecording } from "./deal-call-recordings";
+import { InvoiceDropBox } from "./invoice-drop-box";
 
 export type FolderFile = {
   id: string;
@@ -60,6 +61,7 @@ export function DealFolders({
   files,
   packages = [],
   checklists = [],
+  dropboxCounts = {},
   canUpload,
   canDelete,
 }: {
@@ -69,6 +71,13 @@ export function DealFolders({
   files: FolderFile[];
   packages?: FolderPackage[];
   checklists?: PhotoChecklist[];
+  /**
+   * How many files sit in each write-only folder. The files themselves are
+   * NOT in `files` and must not be: a letter slot that shipped its contents to
+   * the browser and merely declined to draw them would be a curtain, not a
+   * lock. A count is all this side is told. See src/lib/contractor-invoice.ts.
+   */
+  dropboxCounts?: Record<string, number>;
   canUpload: boolean;
   canDelete: boolean;
 }) {
@@ -110,6 +119,7 @@ export function DealFolders({
           folder={open}
           files={byFolder.get(open.key) ?? []}
           packages={pkgByFolder.get(open.key) ?? []}
+          submitted={dropboxCounts[open.key] ?? 0}
           folders={folders}
           leadId={leadId}
           projectId={projectId}
@@ -127,9 +137,14 @@ export function DealFolders({
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {folders.map((f) => {
           // A tile counts the packages routed to it as well as its files, so
-          // the badge matches what you actually find when you open it.
+          // the badge matches what you actually find when you open it. A letter
+          // slot holds no files on this side, so it is told its own total —
+          // "has the contractor billed yet" is a fair question to answer on the
+          // job even where "what did he charge" is not.
           const count =
-            (byFolder.get(f.key)?.length ?? 0) + (pkgByFolder.get(f.key)?.length ?? 0);
+            f.special === "dropbox"
+              ? dropboxCounts[f.key] ?? 0
+              : (byFolder.get(f.key)?.length ?? 0) + (pkgByFolder.get(f.key)?.length ?? 0);
           const Icon = f.icon;
           return (
             <button
@@ -169,6 +184,7 @@ function OpenFolder({
   folder,
   files,
   packages,
+  submitted,
   folders,
   leadId,
   projectId,
@@ -180,6 +196,7 @@ function OpenFolder({
   folder: DealFolder;
   files: FolderFile[];
   packages: FolderPackage[];
+  submitted: number;
   folders: DealFolder[];
   leadId: string;
   projectId?: string | null;
@@ -214,6 +231,13 @@ function OpenFolder({
           checklist={checklists.find((c) => c.kind === GROUP_KIND[folder.key as PhotoGroup]) ?? null}
           canUpload={canUpload}
           canDelete={canDelete}
+        />
+      ) : folder.special === "dropbox" ? (
+        <InvoiceDropBox
+          leadId={leadId}
+          projectId={projectId}
+          submitted={submitted}
+          canUpload={canUpload}
         />
       ) : folder.special === "calls" ? (
         <DealCallRecordings

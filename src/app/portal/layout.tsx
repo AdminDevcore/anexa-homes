@@ -34,8 +34,11 @@ export default async function PortalLayout({
   // New invited users complete onboarding before entering the portal.
   if (await needsOnboarding(user.userId)) redirect("/onboarding");
 
-  const allowedHrefs = PORTAL_NAV.filter((item) =>
-    can(user, "read", item.resource)
+  const allowedHrefs = PORTAL_NAV.filter(
+    (item) =>
+      can(user, "read", item.resource) &&
+      // `roles`, where an item has one, narrows further — it never widens.
+      (!item.roles || item.roles.includes(user.role))
   ).map((item) => item.href);
 
   const branding = await currentBranding();

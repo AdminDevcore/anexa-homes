@@ -54,6 +54,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { CONTRACTOR_INVOICE_CATEGORY } from "./contractor-invoice";
 
 export type DealFolder = {
   key: string;
@@ -62,10 +63,15 @@ export type DealFolder = {
   icon: LucideIcon;
   /**
    * Opens an existing specialised UI instead of the generic file list:
-   * "photos" → the slot-by-slot checklist with Compile PDF,
-   * "calls"  → the one-recording-per-slot QC call uploader.
+   * "photos"  → the slot-by-slot checklist with Compile PDF,
+   * "calls"   → the one-recording-per-slot QC call uploader,
+   * "dropbox" → a letter slot: files go IN and are never listed here again.
+   *
+   * All three are excluded from the "Move to…" and "Upload a file" destination
+   * pickers, because all three own their own uploader. For "dropbox" that
+   * exclusion is also a security property — see src/lib/contractor-invoice.ts.
    */
-  special?: "photos" | "calls";
+  special?: "photos" | "calls" | "dropbox";
   /**
    * Where e-signature packages land when their template names no folder, and
    * the fallback for a key this vertical does not recognise. Exactly one folder
@@ -118,7 +124,7 @@ export const SOLAR_FOLDERS: DealFolder[] = [
   { key: "interconnection", label: "Interconnection", hint: "Utility application and approval", icon: Plug },
   { key: "install_photos", label: "Installation Photos", hint: "Progress and completion", icon: Hammer, special: "photos" },
   { key: "certificate_acceptance", label: "Certificate of Acceptance", hint: "Signed off that the system was installed as sold", icon: BadgeCheck },
-  { key: "contractor_invoice", label: "Contractor Invoice", hint: "What the installing contractor billed for the job", icon: ReceiptText },
+  { key: CONTRACTOR_INVOICE_CATEGORY, label: "Contractor Invoice", hint: "Drop the contractor's bill here — it is read in Contractor Pay, not on the job", icon: ReceiptText, special: "dropbox" },
   { key: "attestation_payment", label: "Attestation of Customer Payment", hint: "Signed attestation that the amount due was paid", icon: HandCoins },
   { key: "lien_waiver_progress", label: "Conditional Progress Lien Waiver", hint: "Waiver released against a progress payment", icon: FileCheck },
   { key: "lien_waiver_final", label: "Conditional Waiver & Release (Final Payment)", hint: "Waiver released against the final payment", icon: ScrollText },
@@ -165,6 +171,42 @@ export function visibleFiles<T extends { id: string }>(
   );
   return signed.size === 0 ? files : files.filter((f) => !signed.has(f.id));
 }
+
+/**
+ * The folder keys on this deal that are write-only letter slots.
+ *
+ * The caller is expected to strip these files BEFORE handing the grid its
+ * `files` array — not to hide them in the component. A file the browser was
+ * sent is a file the browser has, and "the list doesn't render it" is a
+ * different claim from "nobody on this deal can read it". See
+ * src/lib/contractor-invoice.ts.
+ */
+export function dropboxKeys(vertical: string | null | undefined): Set<string> {
+  return new Set(
+    foldersFor(vertical)
+      .filter((f) => f.special === "dropbox")
+      .map((f) => f.key),
+  );
+}
+
+/**
+ * Every write-only key in the product, both verticals at once — the set a page
+ * must strip by, which is NOT the same question as `dropboxKeys`.
+ *
+ * The two differ in exactly one case, and it is a live one. Roofing has no
+ * Contractor Invoice folder (it files contractor billing under "Invoices &
+ * Payments"), but the installer's job page offers the drop box on every job,
+ * roofing included. Strip a roofing deal by its OWN folder set and the invoice
+ * is not recognised, so it falls into "Other" and is listed on the deal as a
+ * link — pointing at a route that then refuses it. A confidential document
+ * advertised by name, one 403 away from everyone on the job.
+ *
+ * So: `dropboxKeys` decides what this vertical's GRID draws; this decides what
+ * may reach the browser at all, and the answer never depends on the vertical.
+ */
+export const ALL_DROPBOX_KEYS: ReadonlySet<string> = new Set(
+  [...ROOFING_FOLDERS, ...SOLAR_FOLDERS].filter((f) => f.special === "dropbox").map((f) => f.key),
+);
 
 /** Folders a signed document can be filed into. */
 export function packageDestinations(vertical: string | null | undefined): DealFolder[] {

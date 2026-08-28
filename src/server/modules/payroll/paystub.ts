@@ -31,6 +31,14 @@ export async function getPayStubData(companyId: string, runId: string, userId: s
               rule: { select: { type: true, percent: true } },
             },
           },
+          // The other kind of line a run can hold. Without it a contractor's
+          // stub printed "-" where the job should be, on the one document in
+          // this whole flow that he actually receives.
+          contractorPay: {
+            select: {
+              project: { select: { projectNumber: true, lead: { select: { firstName: true, lastName: true } } } },
+            },
+          },
         },
       },
     },
@@ -81,11 +89,19 @@ async function loadLogo(doc: PDFDocument): Promise<PDFImage | null> {
 }
 
 function basisFor(it: NonNullable<PayStubData>["items"][number]): string {
+  // A contractor line has no rule and no pool — the basis IS the invoice he
+  // sent, so say that rather than printing the "-" that means "unknown".
+  if (it.contractorPayId) return "Submitted invoice";
   const c = it.commission;
   const base = c?.baseAmount ?? 0;
   if (c?.rule?.type === "flat") return "Flat amount";
   if (base > 0) return `${Math.round((it.amount / base) * 100)}% of ${formatCents(base)}`;
   return "-";
+}
+
+/** The job a line was earned on, whichever kind of line it is. */
+function jobFor(it: NonNullable<PayStubData>["items"][number]) {
+  return it.commission?.project ?? it.contractorPay?.project ?? null;
 }
 
 function drawStub(doc: PDFDocument, font: PDFFont, bold: PDFFont, logo: PDFImage | null, data: NonNullable<PayStubData>) {
@@ -140,8 +156,9 @@ function drawStub(doc: PDFDocument, font: PDFFont, bold: PDFFont, logo: PDFImage
   items.forEach((it, i) => {
     const rowH = 28;
     if (i % 2 === 1) page.drawRectangle({ x: M, y: y - rowH, width: CW, height: rowH, color: FAINT });
-    const proj = it.commission?.project.projectNumber ?? "-";
-    const cust = it.commission?.project.lead ? `${it.commission.project.lead.firstName} ${it.commission.project.lead.lastName}`.trim() : "";
+    const job = jobFor(it);
+    const proj = job?.projectNumber ?? "-";
+    const cust = job?.lead ? `${job.lead.firstName} ${job.lead.lastName}`.trim() : "";
     let desc = it.label ?? "";
     if (proj !== "-" && desc.endsWith(` - ${proj}`)) desc = desc.slice(0, -(` - ${proj}`).length);
     const cy = y - 12;
@@ -216,7 +233,7 @@ function drawStub(doc: PDFDocument, font: PDFFont, bold: PDFFont, logo: PDFImage
   // Footer
   page.drawLine({ start: { x: M, y: 60 }, end: { x: W - M, y: 60 }, thickness: 0.5, color: LINE });
   text(
-    `Confidential  ·  Summary of commissions/earnings for the period; no taxes or withholdings are deducted by the platform.  ·  Generated ${formatDate(new Date())}.`,
+    `Confidential  ·  Summary of earnings for the period; no taxes or withholdings are deducted by the platform.  ·  Generated ${formatDate(new Date())}.`,
     M, 49, 7.5, font, GRAY
   );
 }

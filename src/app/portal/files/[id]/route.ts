@@ -2,6 +2,8 @@ import type { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { requireUser } from "@/server/auth/session";
 import { prisma } from "@/server/db/client";
+import { can } from "@/server/rbac/guards";
+import { isContractorInvoice } from "@/lib/contractor-invoice";
 import { listScope } from "@/server/rbac/policies";
 import { stampVertical } from "@/server/vertical/visibility";
 import { getObject } from "@/server/storage";
@@ -44,6 +46,27 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const isOwner = file.uploadedById === user.userId;
     const isAdmin = user.role === "super_admin" || user.role === "admin";
     if (!isOwner && !isAdmin) return new NextResponse("Forbidden", { status: 403 });
+  }
+
+  /* ── A CONTRACTOR'S INVOICE IS NOT JOB PAPERWORK ───────────────────────
+   * Read by the ContractorInvoice permission alone — super_admin and
+   * accounting — for everybody, in every workspace, admins and the person who
+   * uploaded it included.
+   *
+   * It is checked HERE, above every other branch, because every other branch
+   * would let it through. The deal-scope branch below is the whole problem:
+   * a file on a deal is authorised by "can you open this deal", so the rep
+   * whose commission this cost reduces, their manager, and every admin would
+   * all be able to open the subcontractor's bill. `scope = "private"` is not
+   * the lever either — it admits the uploader and all admins, which is the
+   * opposite of the rule here.
+   *
+   * The deal is only the envelope's address. See src/lib/contractor-invoice.ts.
+   */
+  if (isContractorInvoice(file.category)) {
+    if (!can(user, "read", "ContractorInvoice")) {
+      return new NextResponse("Forbidden", { status: 403 });
+    }
   }
 
   // WORKSPACE, with no parent deal to inherit from (knowledge-base material).

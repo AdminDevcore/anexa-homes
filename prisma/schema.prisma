@@ -340,6 +340,7 @@ model Company {
   commissionRules          CommissionRule[]
   commissionOverrides      CommissionOverride[]
   commissions              Commission[]
+  contractorPays           ContractorPay[]
   payrollRuns              PayrollRun[]
   invoices                 Invoice[]
   activityLogs             ActivityLog[]
@@ -543,6 +544,7 @@ model User {
   filesUploaded   FileAsset[]
   dailyReports    DailyReport[]
   commissions     Commission[]         @relation("CommissionUser")
+  contractorPays  ContractorPay[]      @relation("ContractorPayContractor")
   overridesEarned CommissionOverride[] @relation("OverrideBeneficiary")
   overridesOnMe   CommissionOverride[] @relation("OverrideSource")
   payrollItems    PayrollItem[]
@@ -1066,6 +1068,7 @@ model Project {
   documentPackages DocumentPackage[]
   invoices         Invoice[]
   commissions      Commission[]
+  contractorPays   ContractorPay[]
   activityLogs     ActivityLog[]
   costs            ProjectCost[]
 
@@ -1435,6 +1438,8 @@ model FileAsset {
   createdAt           DateTime           @default(now())
 
   signedPackages DocumentPackage[] @relation("PackageSignedFile")
+  // A contractor invoice grows a pay line once the funding desk generates one.
+  contractorPay  ContractorPay?
 
   @@index([companyId, projectId])
   @@index([companyId, leadId])
@@ -1793,6 +1798,72 @@ model Commission {
   @@map("commissions")
 }
 
+/// What a subcontractor billed for a job, and what we are actually paying him.
+///
+/// The commission table's opposite number, and deliberately NOT a row in it. A
+/// Commission is money owed to someone who SOLD the job; this is money owed to
+/// whoever BUILT it, and the two differ in every way that matters downstream:
+///
+///   - who may see it. Commissions are read through `Commission:read`, which
+///     reps and managers hold. A subcontractor's price is read through
+///     `ContractorInvoice` — super_admin and accounting only — because it is a
+///     cost of goods, not an earning. Filing these as commissions would have
+///     published it on the Commissions tab.
+///   - what it does to a job's books. A paid commission posts to a
+///     job-cost-EXCLUDED category on purpose, so paying the rep does not make
+///     the job look unprofitable. A subcontractor's labour bill is the textbook
+///     job cost and posts INCLUDED. Same table would have meant same treatment,
+///     and the Job Profitability report would have been wrong in both directions.
+///   - where the number comes from. A commission is COMPUTED from a rule and a
+///     pool. This is TYPED, off a PDF a human is reading, because nothing in the
+///     product can read an invoice. `amount` therefore starts at zero and cannot
+///     be approved there — see approveContractorPayAction.
+///
+/// One line per invoice (`invoiceId` is unique), so "generate" is idempotent and
+/// a contractor who bills twice on one job gets paid twice.
+model ContractorPay {
+  id        String    @id @default(uuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Tagged, never filtered on read — same treatment as Commission, so the
+  /// books stay consolidated while the P&L can still break out by department.
+  vertical  Vertical?
+
+  /// The invoice being paid. Cascade: the bill IS the record, so deleting it
+  /// takes the pay line with it rather than leaving a payable for a document
+  /// nobody can produce.
+  invoiceId String    @unique
+  invoice   FileAsset @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  /// The job, where there is one. Resolved from the invoice at generation and
+  /// stored so the ledger can tag the expense to the deal.
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  /// The contractor: whoever uploaded the invoice. Not a field anyone types —
+  /// it is his login, which is what makes it un-fakeable.
+  userId String
+  user   User   @relation("ContractorPayContractor", fields: [userId], references: [id])
+
+  /// Cents. Zero until someone reads the PDF and types what it says.
+  amount Int     @default(0)
+  label  String?
+
+  status     CommissionStatus @default(pending)
+  notes      String?
+  approvedAt DateTime?
+  paidAt     DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  payrollItems PayrollItem[]
+
+  @@index([companyId, status])
+  @@index([companyId, userId, status])
+  @@index([projectId])
+  @@map("contractor_pays")
+}
+
 // Person-to-person override: `beneficiary` earns a % of contract (or a flat
 // amount) on every deal whose assigned rep is `source`. E.g. a manager earning
 // 3% on a rep's deals, or a senior rep earning $500/deal off a junior rep.
@@ -1849,22 +1920,29 @@ model PayrollRun {
 }
 
 model PayrollItem {
-  id           String      @id @default(uuid())
-  payrollRunId String
-  payrollRun   PayrollRun  @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  userId       String
-  user         User        @relation(fields: [userId], references: [id])
-  commissionId String?
+  id              String         @id @default(uuid())
+  payrollRunId    String
+  payrollRun      PayrollRun     @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User           @relation(fields: [userId], references: [id])
+  commissionId    String?
   // Cascade: deleting a commission removes its payroll line so run totals can never
   // count a commission that no longer exists (no stale snapshot, no dangling ref).
-  commission   Commission? @relation(fields: [commissionId], references: [id], onDelete: Cascade)
-  label        String
-  amount       Int         @default(0) // cents
-  paid         Boolean     @default(false)
-  notes        String?
-  createdAt    DateTime    @default(now())
+  commission      Commission?    @relation(fields: [commissionId], references: [id], onDelete: Cascade)
+  // The OTHER thing a run pays out. Exactly one of these two is set on any line:
+  // a payroll run is "everyone we owe money to this period", and the crews who
+  // did the work are owed as surely as the reps who sold it. Same cascade rule,
+  // for the same reason — a deleted pay line must not survive as a run total.
+  contractorPayId String?
+  contractorPay   ContractorPay? @relation(fields: [contractorPayId], references: [id], onDelete: Cascade)
+  label           String
+  amount          Int            @default(0) // cents
+  paid            Boolean        @default(false)
+  notes           String?
+  createdAt       DateTime       @default(now())
 
   @@index([payrollRunId])
+  @@index([contractorPayId])
   @@map("payroll_items")
 }
 

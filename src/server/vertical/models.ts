@@ -89,6 +89,10 @@ export const SCOPED_OPTIONAL_MODELS = ["Task"] as const;
 export const TAGGED_MODELS = [
   "Transaction",
   "Commission",
+  // Money owed to the crew, tagged for the same reason money owed to the rep
+  // is: the departmental P&L must be able to tell a solar install's labour from
+  // a roofing one, while the consolidated books stay whole.
+  "ContractorPay",
   "Invoice",
   "ProjectCost",
   // Deliberately NOT given a TAGGED_PROVENANCE entry: activity rows are written

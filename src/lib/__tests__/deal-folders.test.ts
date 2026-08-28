@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALL_DROPBOX_KEYS,
   FALLBACK_FOLDER_KEY,
   ROOFING_FOLDERS,
   SOLAR_FOLDERS,
+  dropboxKeys,
   folderKeyFor,
   folderLabel,
   foldersFor,
@@ -10,6 +12,7 @@ import {
   packagesByFolder,
   visibleFiles,
 } from "../deal-folders";
+import { CONTRACTOR_INVOICE_CATEGORY } from "../contractor-invoice";
 
 describe("foldersFor", () => {
   it("gives solar its own set and everything else the roofing set", () => {
@@ -128,9 +131,48 @@ describe("solar key compatibility", () => {
   // folder. Solar keeps the contractor's invoice on its own so it is not mixed
   // in with anything else, which is why the two verticals use different keys.
   it("files the contractor's invoice in its own folder", () => {
-    const folder = SOLAR_FOLDERS.find((f) => f.key === "contractor_invoice");
+    const folder = SOLAR_FOLDERS.find((f) => f.key === CONTRACTOR_INVOICE_CATEGORY);
     expect(folder).toBeDefined();
-    expect(folder?.special).toBeUndefined();
+  });
+
+  // A LETTER SLOT, not a file list. Files go in and are never listed, opened or
+  // moved from the job again — the bill is read in Contractor Pay, by the two
+  // roles that hold the ContractorInvoice permission. See
+  // src/lib/contractor-invoice.ts for why a deal is the wrong permission for it.
+  it("makes the contractor's invoice folder write-only", () => {
+    expect(SOLAR_FOLDERS.find((f) => f.key === CONTRACTOR_INVOICE_CATEGORY)?.special).toBe("dropbox");
+    expect(dropboxKeys("solar")).toEqual(new Set([CONTRACTOR_INVOICE_CATEGORY]));
+  });
+
+  // Roofing has no such folder — contractor billing goes in "Invoices &
+  // Payments" there — so nothing about roofing's grid changes.
+  it("leaves roofing with no write-only folder", () => {
+    expect(dropboxKeys("roofing")).toEqual(new Set());
+    expect(dropboxKeys(null)).toEqual(new Set());
+  });
+
+  /* But a roofing DEAL must still withhold one.
+   *
+   * The installer's job page offers the drop box on every job, roofing
+   * included, so a roofing deal can hold an invoice whose key its own grid does
+   * not recognise — and an unrecognised key falls into "Other", which would
+   * list the document by name. Stripping is therefore asked of the
+   * both-verticals set; only the GRID is asked of this vertical's.
+   */
+  it("withholds an invoice from a roofing deal even though roofing has no such folder", () => {
+    expect(ALL_DROPBOX_KEYS.has(CONTRACTOR_INVOICE_CATEGORY)).toBe(true);
+    expect(dropboxKeys("roofing").has(CONTRACTOR_INVOICE_CATEGORY)).toBe(false);
+    // …and "Other" is exactly where it would otherwise have gone.
+    expect(folderKeyFor("roofing", CONTRACTOR_INVOICE_CATEGORY)).toBe(FALLBACK_FOLDER_KEY);
+  });
+
+  // The two "file this somewhere" pickers both filter on `special`, so the slot
+  // drops out of them for free. That is not cosmetic: offering it as a
+  // destination would let anyone hide an ordinary document where the people
+  // working the job cannot open it to get it back — and, in the other
+  // direction, refile an invoice into a folder they CAN read.
+  it("never offers the invoice slot as a destination", () => {
+    expect(packageDestinations("solar").map((f) => f.key)).not.toContain(CONTRACTOR_INVOICE_CATEGORY);
   });
 
   it("has a folder for every document the install agreement names", () => {

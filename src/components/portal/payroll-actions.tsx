@@ -74,7 +74,7 @@ export function NewPayrollRunDialog() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Pulls all approved, unpaid commissions created in this period into the run.
+            Pulls everything approved and unpaid from this period into the run — commissions and contractor invoices alike.
           </p>
         </div>
         <DialogFooter>
@@ -132,7 +132,7 @@ export function PayrollRunActions({ id, status }: { id: string; status: string }
       )}
       {status === "paid" && <span className="text-sm text-emerald-600">Paid</span>}
 
-      {/* Unpaid runs (draft/approved) can be deleted; commissions return to the pool. */}
+      {/* Unpaid runs (draft/approved) can be deleted; their lines return to the pool. */}
       {status !== "paid" && (
         <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
           <DialogTrigger asChild>
@@ -145,7 +145,7 @@ export function PayrollRunActions({ id, status }: { id: string; status: string }
               <DialogTitle>Delete this payroll run?</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              This deletes the run and its lines. The commissions in it stay approved and return to the
+              This deletes the run and its lines. What was in it stays approved and returns to the
               unpaid pool, so you can create a corrected run. This can&rsquo;t be undone.
             </p>
             <DialogFooter>

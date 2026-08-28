@@ -1,53 +1,25 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import { requireUser } from "@/server/auth/session";
-import { can } from "@/server/rbac/guards";
-import { PageHeader } from "@/components/portal/ui";
-import { ReportsControls } from "@/components/portal/reports-client";
-import { RenderableReportView } from "@/components/portal/renderable-report";
-import { resolvePeriod, resolveScope, getScopeOptions } from "@/server/modules/reports/builders";
-import { buildContractorPayReport } from "@/server/modules/reports/contractor-pay";
 
-export const metadata = { title: "Contractor Pay" };
-
-export default async function ContractorPayPage({
+/**
+ * Contractor Pay left the Reports hub for its own sidebar item, where it sits
+ * next to the invoices the crews submit. This is the old address, kept alive
+ * because the report has been bookmarked and its PDFs mailed for months.
+ *
+ * The query string travels with it: period and scope mean the same thing on
+ * the other side, so a saved link to "this quarter, whole company" still lands
+ * on that report rather than resetting to the default month.
+ */
+export default async function LegacyContractorPayReportPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const user = await requireUser();
-  if (!can(user, "read", "Report")) redirect("/portal/dashboard");
-  if (!can(user, "read", "Commission")) redirect("/portal/reports");
-
   const sp = await searchParams;
-  const str = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
-
-  const preset = str(sp.period) || "month";
-  const from = str(sp.from);
-  const to = str(sp.to);
-  const period = resolvePeriod(preset, from, to);
-
-  const ru = { companyId: user.companyId, userId: user.userId, role: user.role };
-  const [scope, scopeOptions] = await Promise.all([resolveScope(ru, str(sp.scope)), getScopeOptions(ru)]);
-  const report = await buildContractorPayReport(ru, period, scope);
-
-  return (
-    <div className="space-y-6">
-      <Link href="/portal/reports" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> All reports
-      </Link>
-
-      <PageHeader
-        title="Contractor Pay"
-        description="Money paid and still owed to installer-crews and 1099 contractors."
-      />
-
-      <ReportsControls preset={period.preset} from={from} to={to} scope={scope.value} scopeOptions={scopeOptions} basePath="/portal/reports/contractor-pay" />
-
-      <p className="text-sm text-muted-foreground">{report.periodLabel} · {report.scopeLabel}</p>
-
-      <RenderableReportView report={report} />
-    </div>
-  );
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(sp)) {
+    const v = Array.isArray(value) ? value[0] : value;
+    if (v) params.set(key, v);
+  }
+  const qs = params.toString();
+  redirect(`/portal/contractor-pay/payouts${qs ? `?${qs}` : ""}`);
 }

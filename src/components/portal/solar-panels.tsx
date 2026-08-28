@@ -1612,9 +1612,48 @@ export function ProposalVersionList({
 }) {
   const router = useRouter();
   const [busyId, setBusyId] = React.useState<string | null>(null);
-  if (versions.length === 0) return null;
 
+  /** The one version this deal sold, once that has been decided. */
   const approved = versions.find((v) => v.approvedAt);
+
+  /**
+   * File the approved copy that has none — without anybody pressing Retry.
+   *
+   * An approved version with no `approvedFileId` is a deal whose Proposal
+   * folder is empty, and there are now two ordinary ways to arrive there. The
+   * customer SIGNING approves their version and cannot render a PDF while they
+   * wait (the renderer boots a browser; the signature must not queue behind
+   * it), and a render that failed leaves the same state. Both used to sit there
+   * until an admin noticed the amber line and pressed Retry. Nobody was ever
+   * going to.
+   *
+   * So the first person who opens the deal WITH THE AUTHORITY TO APPROVE
+   * renders it. Same route, same permission, same failure path as the button —
+   * this only removes the press. Gated on `canApprove` because the route
+   * refuses anyone else, and once per mount by the ref so a render that fails
+   * costs one attempt per page rather than a loop.
+   */
+  const autoFiled = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!canApprove || !approved || approved.approvedFileId) return;
+    if (autoFiled.current === approved.id) return;
+    autoFiled.current = approved.id;
+    const id = approved.id;
+    setBusyId(id);
+    void (async () => {
+      try {
+        // Silent on failure: nobody asked for this, so it must not interrupt
+        // whatever they came to the deal to do. The row keeps saying "Copy not
+        // filed" with its Retry, which is the honest state.
+        if (!(await postFileCopy(id))) router.refresh();
+      } finally {
+        setBusyId((current) => (current === id ? null : current));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canApprove, approved?.id, approved?.approvedFileId]);
+
+  if (versions.length === 0) return null;
 
   /**
    * Render the approved copy into the deal's Proposal folder.
@@ -1742,7 +1781,14 @@ export function ProposalVersionList({
                 {v.signedAt
                   ? ` · signed by ${v.signerName ?? "the customer"} ${new Date(v.signedAt).toLocaleDateString()}`
                   : ""}
-                {isApproved && v.approvedByName ? ` · approved by ${v.approvedByName}` : ""}
+                {/* No approver name on an approved version means nobody
+                    pressed anything — the customer's signature approved it.
+                    See ApprovalActor in proposal-approval.ts. */}
+                {isApproved
+                  ? v.approvedByName
+                    ? ` · approved by ${v.approvedByName}`
+                    : " · approved on signature"
+                  : ""}
               </span>
 
               {/* The public link is offered ONLY once the proposal has actually
@@ -1778,18 +1824,23 @@ export function ProposalVersionList({
                 </a>
               )}
               {isApproved && !v.approvedFileId && (
-                <span className="inline-flex items-center gap-1 text-xs text-amber-700">
-                  <TriangleAlert className="size-3.5" /> Copy not filed
-                  {canApprove && (
-                    <button
-                      className="underline underline-offset-2 disabled:opacity-50"
-                      disabled={busy}
-                      onClick={() => refile(v)}
-                    >
-                      Retry
-                    </button>
-                  )}
-                </span>
+                busy ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" /> Filing the copy…
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+                    <TriangleAlert className="size-3.5" /> Copy not filed
+                    {canApprove && (
+                      <button
+                        className="underline underline-offset-2 disabled:opacity-50"
+                        onClick={() => refile(v)}
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </span>
+                )
               )}
 
               {canEdit && !v.sentAt && !v.supersededAt && (

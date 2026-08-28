@@ -167,12 +167,18 @@ function stampData(model: string, data: unknown, vertical: ActiveVertical): unkn
 }
 
 /**
- * Which foreign key carries a tagged row's department. All four tagged models
- * hang off a job, so the job's vertical is the row's vertical — full stop.
+ * Which foreign key carries a tagged row's department. Every tagged model hangs
+ * off a job, so the job's vertical is the row's vertical — full stop.
+ *
+ * ContractorPay's `projectId` is the one that can legitimately be NULL: an
+ * invoice can be dropped on a deal that never became a job. Provenance then
+ * falls through to the ambient workspace, which is the same treatment
+ * hand-booked office rent already gets.
  */
 const TAGGED_PROVENANCE: Record<string, string> = {
   Transaction: "projectId",
   Commission: "projectId",
+  ContractorPay: "projectId",
   Invoice: "projectId",
   ProjectCost: "projectId",
 };

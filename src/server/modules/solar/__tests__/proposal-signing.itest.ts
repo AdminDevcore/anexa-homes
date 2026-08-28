@@ -5,6 +5,8 @@ import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { acceptSolarProposal } from "@/server/modules/solar/proposal-public";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
 import { mintWitness } from "@/server/modules/solar/witness";
+import { approveProposalVersion } from "@/server/modules/solar/proposal-approval";
+import { runInVertical } from "@/server/vertical/context";
 
 /**
  * The lender's requirement, end to end.
@@ -13,9 +15,9 @@ import { mintWitness } from "@/server/modules/solar/witness";
  * lender means a document carrying a mark and a record that stands up. The
  * things proved here are the ones a screenshot cannot: that the mark is
  * PERSISTED and reachable, that the certificate reads back the whole trail,
- * that a signature cannot be forged into being witnessed, and that a stale
- * unsigned PDF does not stay in the deal's folder pretending to be the signed
- * one.
+ * that a signature cannot be forged into being witnessed, that signing makes
+ * the signed version the approved one, and that a stale unsigned PDF does not
+ * stay in the deal's folder pretending to be the signed one.
  */
 
 process.env.SOLAR_VERTICAL_ENABLED = "1";
@@ -64,6 +66,18 @@ async function sentProposal(over: { supersededAt?: Date | null } = {}) {
     select: { id: true, publicToken: true },
   });
   return { id: p.id, token: p.publicToken! };
+}
+
+/** A PDF sitting in the deal's Proposal folder, as approving one files it. */
+async function filedPdf() {
+  return db.fileAsset.create({
+    data: {
+      companyId, leadId, kind: "document", name: "Proposal.pdf",
+      storageKey: `test/${randomBytes(8).toString("hex")}.pdf`,
+      mimeType: "application/pdf", size: 10, category: "proposal",
+    },
+    select: { id: true },
+  });
 }
 
 /** A well-formed remote signature. Each test varies one thing off this. */
@@ -271,20 +285,87 @@ describe("the certificate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. The filed copy
+// 5. Approval follows the signature
+// ---------------------------------------------------------------------------
+
+/**
+ * The lender's document and the deal's record are the same document.
+ *
+ * Approval used to be a press somebody had to remember, and the press came
+ * late or never. What the customer signed is not a judgement call, so signing
+ * now makes the record itself — including over an earlier approval, which was
+ * a guess about a document nobody had signed yet.
+ */
+describe("approval follows the signature", () => {
+  it("makes the signed version the approved one", async () => {
+    const { id, token } = await sentProposal();
+
+    await acceptSolarProposal(token, GOOD);
+
+    const row = await db.solarProposal.findUniqueOrThrow({ where: { id } });
+    expect(row.approvedAt).not.toBeNull();
+    // Nobody pressed anything, so there is no user to name — the list reads a
+    // null approver as "approved on signature".
+    expect(row.approvedById).toBeNull();
+    const event = await db.solarProposalEvent.findFirst({
+      where: { proposalId: id, type: "approved" },
+    });
+    expect(event?.actorName).toBe("Dana Homeowner");
+  });
+
+  it("takes the approval off a version approved by hand, and its filed copy with it", async () => {
+    const earlier = await sentProposal();
+    const file = await filedPdf();
+    await db.solarProposal.update({
+      where: { id: earlier.id },
+      data: { approvedAt: new Date(), approvedById: repId, approvedFileId: file.id },
+    });
+
+    const { id, token } = await sentProposal();
+    await acceptSolarProposal(token, GOOD);
+
+    const signed = await db.solarProposal.findUniqueOrThrow({ where: { id } });
+    const dropped = await db.solarProposal.findUniqueOrThrow({ where: { id: earlier.id } });
+    expect(signed.approvedAt).not.toBeNull();
+    expect(dropped.approvedAt).toBeNull();
+    expect(dropped.approvedById).toBeNull();
+    // The unsigned PDF of the version nobody signed does not stay in the
+    // folder — that is the document the lender would have been handed.
+    expect(await db.fileAsset.findUnique({ where: { id: file.id } })).toBeNull();
+  });
+
+  it("leaves the approval where a person put it afterwards", async () => {
+    // The override is one-way in time. Nothing re-runs after signing, so an
+    // admin who then approves a different version by hand keeps the last word.
+    const { token } = await sentProposal();
+    await acceptSolarProposal(token, GOOD);
+    const other = await sentProposal();
+
+    await runInVertical("solar", () =>
+      approveProposalVersion(
+        { companyId, userId: repId, fullName: "Ray Rep" },
+        { id: other.id, leadId, version: 0 },
+      )
+    );
+
+    const approved = await db.solarProposal.findMany({
+      where: { companyId, leadId, approvedAt: { not: null } },
+      select: { id: true, approvedById: true },
+    });
+    expect(approved).toHaveLength(1);
+    expect(approved[0].id).toBe(other.id);
+    expect(approved[0].approvedById).toBe(repId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. The filed copy
 // ---------------------------------------------------------------------------
 
 describe("the copy filed on the deal", () => {
   it("does not stay in the folder as an unsigned PDF of a signed proposal", async () => {
     const { id, token } = await sentProposal();
-    const file = await db.fileAsset.create({
-      data: {
-        companyId, leadId, kind: "document", name: "Proposal.pdf",
-        storageKey: `test/${randomBytes(8).toString("hex")}.pdf`,
-        mimeType: "application/pdf", size: 10, category: "proposal",
-      },
-      select: { id: true },
-    });
+    const file = await filedPdf();
     await db.solarProposal.update({
       where: { id },
       data: { approvedAt: new Date(), approvedFileId: file.id },
