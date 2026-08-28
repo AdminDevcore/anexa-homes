@@ -18,7 +18,10 @@ export default async function PayrollPage() {
 
   const canManage = can(user, "update", "Payroll");
 
-  const [runs, pendingAgg, commissionAgg] = await Promise.all([
+  // "Owed" is everything not yet batched, of both kinds. Counting only
+  // commissions understated it the moment contractor invoices started being
+  // approved into the same runs.
+  const [runs, pendingAgg, commissionAgg, contractorAgg] = await Promise.all([
     prisma.payrollRun.findMany({
       where: { companyId: user.companyId },
       orderBy: { createdAt: "desc" },
@@ -32,19 +35,24 @@ export default async function PayrollPage() {
       where: { companyId: user.companyId, status: { in: ["pending", "approved"] } },
       _sum: { amount: true },
     }),
+    prisma.contractorPay.aggregate({
+      where: { companyId: user.companyId, status: { in: ["pending", "approved"] } },
+      _sum: { amount: true },
+    }),
   ]);
+  const owed = (commissionAgg._sum.amount ?? 0) + (contractorAgg._sum.amount ?? 0);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Payroll & Accounting"
-        description="Batch approved commissions into payroll runs, approve, and pay."
+        description="Batch approved commissions and contractor invoices into payroll runs, approve, and pay."
         action={canManage ? <NewPayrollRunDialog /> : undefined}
       />
 
       <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
         <StatCard label="Unpaid Payroll" value={fmt.money(pendingAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} accent />
-        <StatCard label="Commissions Owed" value={fmt.money(commissionAgg._sum.amount ?? 0, { compact: true })} icon={Wallet} />
+        <StatCard label="Owed" value={fmt.money(owed, { compact: true })} icon={Wallet} hint="Commissions + contractor invoices" />
         <StatCard label="Payroll Runs" value={runs.length} icon={Wallet} />
       </div>
 
@@ -54,7 +62,7 @@ export default async function PayrollPage() {
           title="No payroll runs yet"
           description={
             canManage
-              ? "Create a payroll run to batch approved commissions for a pay period."
+              ? "Create a payroll run to batch everyone owed for a pay period — approved commissions and approved contractor invoices."
               : "Payroll runs will appear here."
           }
         />

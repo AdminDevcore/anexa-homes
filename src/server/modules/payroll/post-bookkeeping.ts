@@ -4,17 +4,33 @@ import { putObject } from "@/server/storage";
 import { getPayStubData, buildPayStubPdf } from "./paystub";
 
 const COMMISSION_CATEGORY = "Sales Commissions";
+const CONTRACTOR_CATEGORY = "Contractor Labor";
 
-/** A dedicated, job-cost-excluded expense category for rep commission payouts
- *  (so a paid commission never double-counts against the deal's job cost). */
-async function ensureCommissionCategory(companyId: string): Promise<string> {
+/**
+ * The expense category a payroll line books to — and the two book differently.
+ *
+ * A rep's commission is job-cost-EXCLUDED on purpose: it is paid OUT OF the
+ * job's profit, so counting it as a cost of the job would make every sold deal
+ * look worse the better it was sold.
+ *
+ * A subcontractor's invoice is the opposite. It is what the job cost to build,
+ * the textbook job cost, and excluding it would report every install as pure
+ * margin. Same payroll run, same money leaving the same account, opposite
+ * treatment in the books — which is the concrete reason contractor pay is its
+ * own model and not a row in the commission table.
+ */
+async function ensureCategory(
+  companyId: string,
+  name: string,
+  excludeFromJobCost: boolean,
+): Promise<string> {
   const existing = await prisma.bookkeepingCategory.findFirst({
-    where: { companyId, name: COMMISSION_CATEGORY },
+    where: { companyId, name },
     select: { id: true },
   });
   if (existing) return existing.id;
   const created = await prisma.bookkeepingCategory.create({
-    data: { companyId, name: COMMISSION_CATEGORY, type: "expense", excludeFromJobCost: true },
+    data: { companyId, name, type: "expense", excludeFromJobCost },
   });
   return created.id;
 }
@@ -27,11 +43,13 @@ async function ensureVendor(companyId: string, name: string): Promise<void> {
 }
 
 /**
- * Post a PAID payroll run to Bookkeeping: one money-out transaction per
- * commission line — deal-tagged, rep as vendor, in the job-cost-excluded
- * "Sales Commissions" category — with the rep's pay stub PDF attached as the
- * receipt/invoice. Idempotent: a run's transactions are stamped
- * `source = "payroll:<runId>"`, so re-posting is skipped.
+ * Post a PAID payroll run to Bookkeeping: one money-out transaction per line —
+ * deal-tagged, recipient as vendor — with that person's pay stub PDF attached
+ * as the receipt. Commission lines land in the job-cost-EXCLUDED "Sales
+ * Commissions" category; contractor lines land in "Contractor Labor", which is
+ * INCLUDED, because that is what the job actually cost to build. Idempotent: a
+ * run's transactions are stamped `source = "payroll:<runId>"`, so re-posting is
+ * skipped.
  */
 export async function postRunToBookkeeping(companyId: string, runId: string, actorId: string): Promise<void> {
   const source = `payroll:${runId}`;
@@ -43,6 +61,7 @@ export async function postRunToBookkeeping(companyId: string, runId: string, act
       items: {
         include: {
           commission: { select: { projectId: true } },
+          contractorPay: { select: { projectId: true } },
           user: { select: { id: true, firstName: true, lastName: true } },
         },
       },
@@ -50,7 +69,10 @@ export async function postRunToBookkeeping(companyId: string, runId: string, act
   });
   if (!run || run.items.length === 0) return;
 
-  const categoryId = await ensureCommissionCategory(companyId);
+  // Resolved lazily: a run of nothing but commissions must not create an empty
+  // "Contractor Labor" category in the chart of accounts, and vice versa.
+  let commissionCategoryId: string | null = null;
+  let contractorCategoryId: string | null = null;
   const date = run.paidAt ?? new Date();
 
   // One pay stub per recipient, stored once and reused across that rep's lines.
@@ -73,6 +95,12 @@ export async function postRunToBookkeeping(companyId: string, runId: string, act
   for (const item of run.items) {
     const repName = `${item.user.firstName} ${item.user.lastName}`.trim();
     await ensureVendor(companyId, repName);
+    const isContractor = !!item.contractorPayId;
+    if (isContractor) {
+      contractorCategoryId ??= await ensureCategory(companyId, CONTRACTOR_CATEGORY, false);
+    } else {
+      commissionCategoryId ??= await ensureCategory(companyId, COMMISSION_CATEGORY, true);
+    }
     const txn = await prisma.transaction.create({
       data: {
         companyId,
@@ -80,8 +108,8 @@ export async function postRunToBookkeeping(companyId: string, runId: string, act
         description: item.label,
         amountCents: -item.amount,
         vendor: repName,
-        categoryId,
-        projectId: item.commission?.projectId ?? null,
+        categoryId: isContractor ? contractorCategoryId : commissionCategoryId,
+        projectId: item.commission?.projectId ?? item.contractorPay?.projectId ?? null,
         status: "categorized",
         approved: true,
         source,

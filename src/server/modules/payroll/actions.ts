@@ -223,18 +223,47 @@ export async function createPayrollRunAction(input: z.infer<typeof runSchema>) {
   const end = new Date(parsed.data.periodEnd);
   end.setHours(23, 59, 59, 999);
 
-  // Pull approved, not-yet-paid commissions in range that aren't already in a run.
-  const commissions = await prisma.commission.findMany({
-    where: {
-      companyId: user.companyId,
-      status: "approved",
-      createdAt: { gte: start, lte: end },
-      payrollItems: { none: {} },
-    },
-    include: { user: { select: { firstName: true, lastName: true } }, project: { select: { projectNumber: true } } },
-  });
+  /* One run pays EVERYONE we owe for the period.
+   *
+   * Two sources, batched by identical rules — approved, in range, not already
+   * in a run — because a payroll run is a list of payables, and the crew that
+   * built the job is owed as surely as the rep that sold it. Before this the
+   * button meant "commissions", and a contractor's invoice was approved into
+   * nothing.
+   *
+   * Contractor lines are pulled with the plain client and no vertical filter on
+   * purpose: ContractorPay is a TAGGED model, so its reads are never scoped, and
+   * payroll is a company-wide act. A run assembled inside one workspace that
+   * silently omitted the other workspace's crews would look complete and short
+   * somebody their money.
+   */
+  const [commissions, contractorPays] = await Promise.all([
+    prisma.commission.findMany({
+      where: {
+        companyId: user.companyId,
+        status: "approved",
+        createdAt: { gte: start, lte: end },
+        payrollItems: { none: {} },
+      },
+      include: { user: { select: { firstName: true, lastName: true } }, project: { select: { projectNumber: true } } },
+    }),
+    prisma.contractorPay.findMany({
+      where: {
+        companyId: user.companyId,
+        status: "approved",
+        createdAt: { gte: start, lte: end },
+        payrollItems: { none: {} },
+      },
+      include: {
+        user: { select: { firstName: true, lastName: true } },
+        project: { select: { projectNumber: true } },
+      },
+    }),
+  ]);
 
-  if (commissions.length === 0) return fail("No approved commissions found in that period.");
+  if (commissions.length + contractorPays.length === 0) {
+    return fail("No approved commissions or contractor invoices found in that period.");
+  }
 
   const run = await prisma.payrollRun.create({
     data: {
@@ -244,18 +273,31 @@ export async function createPayrollRunAction(input: z.infer<typeof runSchema>) {
       periodEnd: end,
       status: "draft",
       items: {
-        create: commissions.map((c) => ({
-          userId: c.userId,
-          commissionId: c.id,
-          label: `${c.label ?? "Commission"} — ${c.project.projectNumber}`,
-          amount: c.amount,
-        })),
+        create: [
+          ...commissions.map((c) => ({
+            userId: c.userId,
+            commissionId: c.id,
+            label: `${c.label ?? "Commission"} — ${c.project.projectNumber}`,
+            amount: c.amount,
+          })),
+          // "Contractor invoice", not the file's name. A pay stub line reading
+          // "IMG_4821.jpg" tells the person being paid nothing, and the stub is
+          // the one document in this flow the contractor actually receives.
+          ...contractorPays.map((p) => ({
+            userId: p.userId,
+            contractorPayId: p.id,
+            label: p.project?.projectNumber
+              ? `Contractor invoice — ${p.project.projectNumber}`
+              : "Contractor invoice",
+            amount: p.amount,
+          })),
+        ],
       },
     },
   });
 
   revalidatePath("/portal/payroll");
-  return { ok: true as const, runId: run.id, items: commissions.length };
+  return { ok: true as const, runId: run.id, items: commissions.length + contractorPays.length };
 }
 
 export async function approvePayrollRunAction(id: string) {
@@ -281,11 +323,19 @@ export async function markPayrollRunPaidAction(id: string) {
   if (run.status === "paid") return ok(); // already paid — nothing to do
 
   const commissionIds = run.items.map((i) => i.commissionId).filter((x): x is string => !!x);
+  // Contractor lines settle in the same transaction as the commission lines.
+  // Left out, the money would leave the building while Contractor Pay still
+  // read "approved" and the next run would batch the same invoice again.
+  const contractorPayIds = run.items.map((i) => i.contractorPayId).filter((x): x is string => !!x);
 
   await prisma.$transaction([
     prisma.payrollItem.updateMany({ where: { payrollRunId: id }, data: { paid: true } }),
     prisma.commission.updateMany({
       where: { id: { in: commissionIds } },
+      data: { status: "paid", paidAt: new Date() },
+    }),
+    prisma.contractorPay.updateMany({
+      where: { id: { in: contractorPayIds } },
       data: { status: "paid", paidAt: new Date() },
     }),
     prisma.payrollRun.update({ where: { id }, data: { status: "paid", paidAt: new Date() } }),
@@ -302,15 +352,18 @@ export async function markPayrollRunPaidAction(id: string) {
 
   revalidatePath(`/portal/payroll/${id}`);
   revalidatePath("/portal/payroll");
+  revalidatePath("/portal/contractor-pay");
   revalidatePath("/portal/bookkeeping");
   return ok();
 }
 
 /**
  * Delete a payroll run that hasn't been paid yet (draft or approved). Cascades
- * its PayrollItems; the linked commissions are NOT deleted — they stay
- * `approved` and return to the unbatched pool so a corrected run can pick them
- * up. Paid runs can never be deleted (money already disbursed).
+ * its PayrollItems; the linked commissions and contractor-pay lines are NOT
+ * deleted — they stay `approved` and return to the unbatched pool so a
+ * corrected run can pick them up. That is also what unlocks a contractor's
+ * amount for editing again. Paid runs can never be deleted (money already
+ * disbursed).
  */
 export async function deletePayrollRunAction(id: string) {
   const user = await requireUser();
@@ -324,6 +377,7 @@ export async function deletePayrollRunAction(id: string) {
 
   await prisma.payrollRun.delete({ where: { id } });
   revalidatePath("/portal/payroll");
+  revalidatePath("/portal/contractor-pay");
   return ok();
 }
 

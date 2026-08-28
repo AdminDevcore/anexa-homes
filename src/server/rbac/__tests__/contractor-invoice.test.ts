@@ -40,6 +40,16 @@ describe("ContractorInvoice permission", () => {
     expect(roleCan("accounting", "export", "ContractorInvoice")).toBe(true);
   });
 
+  // The funding desk prices these off the PDF and approves them into payroll —
+  // the same verbs it already holds on Commission. Nobody else does, which is
+  // what keeps "generate contractor pay" off every other person's screen.
+  it("lets the funding desk price and approve, and nobody else", () => {
+    for (const action of ["update", "approve"] as const) {
+      const holders = ROLES.filter((r) => roleCan(r as Role, action, "ContractorInvoice"));
+      expect([...holders].sort(), `who may ${action}`).toEqual([...ALLOWED].sort());
+    }
+  });
+
   // The per-user override mechanism still works on it, which is how one person
   // in a funding role gets access without a new role being invented for them.
   it("honours a per-user override", () => {

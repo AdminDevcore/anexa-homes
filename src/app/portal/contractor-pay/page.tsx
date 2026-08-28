@@ -1,13 +1,27 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { FileText, ImageIcon, ReceiptText, Search } from "lucide-react";
+import { DollarSign, FileText, ImageIcon, ReceiptText, Search } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { PageHeader, EmptyState } from "@/components/portal/ui";
+import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
 import { Button } from "@/components/ui/button";
 import { roleLabel } from "@/lib/roles";
+import { currentFormatters } from "@/lib/format-server";
 import { listContractorInvoices } from "@/server/modules/contractor-pay/queries";
 import { ContractorPayTabs } from "@/components/portal/contractor-pay-tabs";
+import {
+  ContractorPayAmount,
+  ContractorPayRowActions,
+  ContractorPayToolbar,
+} from "@/components/portal/contractor-pay-actions";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 export const metadata = { title: "Contractor Pay" };
 
@@ -19,44 +33,77 @@ const dateTime = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
-function fileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 /**
- * Contractor Pay → Invoices.
+ * Contractor Pay — the crews' Commissions tab.
  *
- * The ONLY place a contractor's invoice can be opened. The job it was dropped
- * on shows it was submitted and nothing more, on purpose — see
- * src/lib/contractor-invoice.ts for why a deal is the wrong permission for a
- * cost-of-goods document.
+ * Deliberately the same shape as `/portal/commissions`: totals across the top,
+ * Generate and Approve All in the header, one row per payable, and the same
+ * pending → approved → paid vocabulary, because it feeds the same payroll run.
  *
- * Gated twice, which is not redundant: this page lists file ids, and a file id
- * is a URL. The route that serves the bytes carries the same check, so a
- * guessed or copied link is refused even though it never appeared in a list.
+ * Two things it does that Commissions does not, both forced by what an invoice
+ * is. The amount is an INPUT, not a computed figure — nothing here can read a
+ * PDF, so a human types what the invoice says and may correct it right up until
+ * it is batched. And the invoice itself is openable HERE and only here: the job
+ * it was dropped on shows that it exists and nothing more. See
+ * src/lib/contractor-invoice.ts.
+ *
+ * Gated twice, which is not redundant: this page prints file ids, and a file id
+ * is a URL. The route that serves the bytes carries the same check, so a copied
+ * link is refused even though it never appeared in a list.
  */
 export default async function ContractorPayPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const fmt = await currentFormatters();
   const user = await requireUser();
   if (!can(user, "read", "ContractorInvoice")) redirect("/portal/dashboard");
 
+  const canManage = can(user, "update", "ContractorInvoice");
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const invoices = await listContractorInvoices(user.companyId, q);
+
+  const owed = invoices
+    .filter((i) => i.pay && (i.pay.status === "pending" || i.pay.status === "approved"))
+    .reduce((s, i) => s + (i.pay?.amount ?? 0), 0);
+  const paid = invoices
+    .filter((i) => i.pay?.status === "paid")
+    .reduce((s, i) => s + (i.pay?.amount ?? 0), 0);
+  const ungenerated = invoices.filter((i) => !i.pay).length;
+  const approvable = invoices.filter((i) => i.pay?.status === "pending" && i.pay.amount > 0).length;
+  const unpriced = invoices.filter((i) => i.pay?.status === "pending" && i.pay.amount === 0).length;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Contractor Pay"
-        description="Invoices submitted by the crews who did the work, and what they are owed."
+        description="Invoices submitted by the crews who did the work. Price them from the PDF, approve, and they go into the next payroll run."
+        action={
+          canManage ? (
+            <ContractorPayToolbar ungenerated={ungenerated} approvable={approvable} />
+          ) : undefined
+        }
       />
 
       <ContractorPayTabs active="invoices" showPayouts={can(user, "read", "Commission")} />
+
+      <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
+        <StatCard label="Owed" value={fmt.money(owed, { compact: true })} icon={DollarSign} accent />
+        <StatCard label="Paid" value={fmt.money(paid, { compact: true })} icon={DollarSign} />
+        <StatCard label="Invoices" value={invoices.length} icon={ReceiptText} />
+      </div>
+
+      {/* Said out loud rather than left to be noticed: an unpriced line is
+          invisible to Approve All and to payroll, so a stack of them is a stack
+          of contractors quietly not being paid. */}
+      {unpriced > 0 && canManage && (
+        <p className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-2.5 text-sm text-muted-foreground">
+          {unpriced === 1 ? "1 invoice still needs" : `${unpriced} invoices still need`} an amount
+          typed in before {unpriced === 1 ? "it" : "they"} can be approved.
+        </p>
+      )}
 
       <form method="get" className="flex max-w-md items-center gap-2">
         <div className="relative flex-1">
@@ -86,24 +133,111 @@ export default async function ContractorPayPage({
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
-          <table className="w-full min-w-[46rem] text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-3 font-medium">Job</th>
-                <th className="px-4 py-3 font-medium">Submitted by</th>
-                <th className="px-4 py-3 font-medium">Submitted</th>
-                <th className="px-4 py-3 font-medium">Invoice</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {invoices.map((inv) => (
-                <tr key={inv.id} className="align-top">
-                  <td className="px-4 py-3">
-                    {/* The job links out; the invoice does not live there, but
-                        whoever is about to pay it wants the job in front of
-                        them. Accounting reads deals company-wide, so this
-                        never lands on a 404. */}
+        <>
+          {/* Desktop: table. Mobile: cards (below). */}
+          <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Job</TableHead>
+                  <TableHead>Contractor</TableHead>
+                  <TableHead>Invoice</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Status</TableHead>
+                  {canManage && <TableHead className="text-right">Actions</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invoices.map((inv) => (
+                  <TableRow key={inv.id} className="align-top">
+                    <TableCell className="font-medium">
+                      {/* The job links out; the invoice does not live there, but
+                          whoever is about to pay it wants the job in front of
+                          them. Accounting reads deals company-wide, so this
+                          never lands on a 404. */}
+                      {inv.job.leadId ? (
+                        <Link href={`/portal/leads/${inv.job.leadId}`} className="hover:text-gold-muted hover:underline">
+                          {inv.job.customer}
+                        </Link>
+                      ) : (
+                        inv.job.customer
+                      )}
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        {[inv.job.projectNumber, inv.job.address].filter(Boolean).join(" · ") || "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {inv.uploadedBy ? (
+                        <>
+                          {inv.uploadedBy.name}
+                          <span className="block text-xs text-muted-foreground">
+                            {roleLabel(inv.uploadedBy.role)}
+                          </span>
+                        </>
+                      ) : (
+                        // uploadedBy is SetNull, so a departed contractor leaves
+                        // his invoices standing without a name rather than
+                        // taking them with him. Nobody to pay, so no pay line.
+                        <span className="text-muted-foreground">Account removed</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <a
+                        href={`/portal/files/${inv.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex min-w-0 items-center gap-2 hover:text-gold-muted"
+                      >
+                        {inv.isPdf ? (
+                          <FileText className="size-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="max-w-[16rem] truncate">{inv.name}</span>
+                      </a>
+                      <span className="block text-xs text-muted-foreground">
+                        {dateTime.format(inv.submittedAt)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {inv.pay ? (
+                        <ContractorPayAmount
+                          id={inv.pay.id}
+                          amount={inv.pay.amount}
+                          display={fmt.money(inv.pay.amount)}
+                          locked={!canManage || inv.pay.batched || inv.pay.status === "paid"}
+                        />
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
+                        {inv.pay?.status ?? "submitted"}
+                      </span>
+                    </TableCell>
+                    {canManage && (
+                      <TableCell className="text-right">
+                        <ContractorPayRowActions
+                          payId={inv.pay?.id ?? null}
+                          status={inv.pay?.status ?? null}
+                          amount={inv.pay?.amount ?? 0}
+                          batched={inv.pay?.batched ?? false}
+                        />
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Mobile: cards */}
+          <div className="space-y-2 md:hidden">
+            {invoices.map((inv) => (
+              <div key={inv.id} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
                     {inv.job.leadId ? (
                       <Link href={`/portal/leads/${inv.job.leadId}`} className="font-medium hover:text-gold-muted">
                         {inv.job.customer}
@@ -111,49 +245,56 @@ export default async function ContractorPayPage({
                     ) : (
                       <span className="font-medium">{inv.job.customer}</span>
                     )}
-                    <div className="mt-0.5 text-xs text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       {[inv.job.projectNumber, inv.job.address].filter(Boolean).join(" · ") || "—"}
                     </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {inv.uploadedBy ? (
-                      <>
-                        <div className="font-medium">{inv.uploadedBy.name}</div>
-                        <div className="mt-0.5 text-xs text-muted-foreground">
-                          {roleLabel(inv.uploadedBy.role)}
-                        </div>
-                      </>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      → {inv.uploadedBy?.name ?? "Account removed"}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right font-medium">
+                    {inv.pay ? (
+                      <ContractorPayAmount
+                        id={inv.pay.id}
+                        amount={inv.pay.amount}
+                        display={fmt.money(inv.pay.amount)}
+                        locked={!canManage || inv.pay.batched || inv.pay.status === "paid"}
+                      />
                     ) : (
-                      // The uploader relation is SetNull, so a departed
-                      // contractor leaves his invoices standing without a name
-                      // rather than taking them with him.
-                      <span className="text-muted-foreground">Account removed</span>
+                      <span className="text-muted-foreground">—</span>
                     )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-muted-foreground">
-                    {dateTime.format(inv.submittedAt)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <a
-                      href={`/portal/files/${inv.id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex min-w-0 items-center gap-2 font-medium hover:text-gold-muted"
-                    >
-                      {inv.isPdf ? (
-                        <FileText className="size-4 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="truncate">{inv.name}</span>
-                    </a>
-                    <div className="mt-0.5 text-xs text-muted-foreground">{fileSize(inv.sizeBytes)}</div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                </div>
+                <a
+                  href={`/portal/files/${inv.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 items-center gap-2 text-sm hover:text-gold-muted"
+                >
+                  <FileText className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{inv.name}</span>
+                </a>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
+                    {inv.pay?.status ?? "submitted"}
+                  </span>
+                  {canManage ? (
+                    <ContractorPayRowActions
+                      payId={inv.pay?.id ?? null}
+                      status={inv.pay?.status ?? null}
+                      amount={inv.pay?.amount ?? 0}
+                      batched={inv.pay?.batched ?? false}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {dateTime.format(inv.submittedAt)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

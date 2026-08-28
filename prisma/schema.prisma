@@ -325,6 +325,7 @@ model Company {
   commissionRules          CommissionRule[]
   commissionOverrides      CommissionOverride[]
   commissions              Commission[]
+  contractorPays           ContractorPay[]
   payrollRuns              PayrollRun[]
   invoices                 Invoice[]
   activityLogs             ActivityLog[]
@@ -526,6 +527,7 @@ model User {
   filesUploaded   FileAsset[]
   dailyReports    DailyReport[]
   commissions     Commission[]         @relation("CommissionUser")
+  contractorPays  ContractorPay[]      @relation("ContractorPayContractor")
   overridesEarned CommissionOverride[] @relation("OverrideBeneficiary")
   overridesOnMe   CommissionOverride[] @relation("OverrideSource")
   payrollItems    PayrollItem[]
@@ -1048,6 +1050,7 @@ model Project {
   documentPackages DocumentPackage[]
   invoices         Invoice[]
   commissions      Commission[]
+  contractorPays   ContractorPay[]
   activityLogs     ActivityLog[]
   costs            ProjectCost[]
 
@@ -1417,6 +1420,8 @@ model FileAsset {
   createdAt           DateTime           @default(now())
 
   signedPackages DocumentPackage[] @relation("PackageSignedFile")
+  // A contractor invoice grows a pay line once the funding desk generates one.
+  contractorPay  ContractorPay?
 
   @@index([companyId, projectId])
   @@index([companyId, leadId])
@@ -1775,6 +1780,72 @@ model Commission {
   @@map("commissions")
 }
 
+/// What a subcontractor billed for a job, and what we are actually paying him.
+///
+/// The commission table's opposite number, and deliberately NOT a row in it. A
+/// Commission is money owed to someone who SOLD the job; this is money owed to
+/// whoever BUILT it, and the two differ in every way that matters downstream:
+///
+///   - who may see it. Commissions are read through `Commission:read`, which
+///     reps and managers hold. A subcontractor's price is read through
+///     `ContractorInvoice` — super_admin and accounting only — because it is a
+///     cost of goods, not an earning. Filing these as commissions would have
+///     published it on the Commissions tab.
+///   - what it does to a job's books. A paid commission posts to a
+///     job-cost-EXCLUDED category on purpose, so paying the rep does not make
+///     the job look unprofitable. A subcontractor's labour bill is the textbook
+///     job cost and posts INCLUDED. Same table would have meant same treatment,
+///     and the Job Profitability report would have been wrong in both directions.
+///   - where the number comes from. A commission is COMPUTED from a rule and a
+///     pool. This is TYPED, off a PDF a human is reading, because nothing in the
+///     product can read an invoice. `amount` therefore starts at zero and cannot
+///     be approved there — see approveContractorPayAction.
+///
+/// One line per invoice (`invoiceId` is unique), so "generate" is idempotent and
+/// a contractor who bills twice on one job gets paid twice.
+model ContractorPay {
+  id        String    @id @default(uuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Tagged, never filtered on read — same treatment as Commission, so the
+  /// books stay consolidated while the P&L can still break out by department.
+  vertical  Vertical?
+
+  /// The invoice being paid. Cascade: the bill IS the record, so deleting it
+  /// takes the pay line with it rather than leaving a payable for a document
+  /// nobody can produce.
+  invoiceId String    @unique
+  invoice   FileAsset @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  /// The job, where there is one. Resolved from the invoice at generation and
+  /// stored so the ledger can tag the expense to the deal.
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  /// The contractor: whoever uploaded the invoice. Not a field anyone types —
+  /// it is his login, which is what makes it un-fakeable.
+  userId String
+  user   User   @relation("ContractorPayContractor", fields: [userId], references: [id])
+
+  /// Cents. Zero until someone reads the PDF and types what it says.
+  amount Int     @default(0)
+  label  String?
+
+  status     CommissionStatus @default(pending)
+  notes      String?
+  approvedAt DateTime?
+  paidAt     DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  payrollItems PayrollItem[]
+
+  @@index([companyId, status])
+  @@index([companyId, userId, status])
+  @@index([projectId])
+  @@map("contractor_pays")
+}
+
 // Person-to-person override: `beneficiary` earns a % of contract (or a flat
 // amount) on every deal whose assigned rep is `source`. E.g. a manager earning
 // 3% on a rep's deals, or a senior rep earning $500/deal off a junior rep.
@@ -1831,22 +1902,29 @@ model PayrollRun {
 }
 
 model PayrollItem {
-  id           String      @id @default(uuid())
-  payrollRunId String
-  payrollRun   PayrollRun  @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
-  userId       String
-  user         User        @relation(fields: [userId], references: [id])
-  commissionId String?
+  id              String         @id @default(uuid())
+  payrollRunId    String
+  payrollRun      PayrollRun     @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User           @relation(fields: [userId], references: [id])
+  commissionId    String?
   // Cascade: deleting a commission removes its payroll line so run totals can never
   // count a commission that no longer exists (no stale snapshot, no dangling ref).
-  commission   Commission? @relation(fields: [commissionId], references: [id], onDelete: Cascade)
-  label        String
-  amount       Int         @default(0) // cents
-  paid         Boolean     @default(false)
-  notes        String?
-  createdAt    DateTime    @default(now())
+  commission      Commission?    @relation(fields: [commissionId], references: [id], onDelete: Cascade)
+  // The OTHER thing a run pays out. Exactly one of these two is set on any line:
+  // a payroll run is "everyone we owe money to this period", and the crews who
+  // did the work are owed as surely as the reps who sold it. Same cascade rule,
+  // for the same reason — a deleted pay line must not survive as a run total.
+  contractorPayId String?
+  contractorPay   ContractorPay? @relation(fields: [contractorPayId], references: [id], onDelete: Cascade)
+  label           String
+  amount          Int            @default(0) // cents
+  paid            Boolean        @default(false)
+  notes           String?
+  createdAt       DateTime       @default(now())
 
   @@index([payrollRunId])
+  @@index([contractorPayId])
   @@map("payroll_items")
 }
 
@@ -3484,13 +3562,13 @@ model SolarFinance {
 
   // ── Cash / Loan ─────────────────────────────────────────────────────────
   /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
-  grossPpwCents      Int   @default(0)
+  grossPpwCents        Int   @default(0)
   /// Lender fee as a % of gross. Zero for cash by definition.
-  dealerFeePct       Float @default(0)
+  dealerFeePct         Float @default(0)
   /// Sum of the selected adders that sit INSIDE the partner's price, cents.
   /// See `onTopAdderTotalCents` — the two are disjoint and together they are
   /// the whole catalogue price of the extra work on this deal.
-  adderTotalCents    Int   @default(0)
+  adderTotalCents      Int   @default(0)
   /// Sum of the adders financed ON TOP of a partner's fixed or maximum $/W,
   /// cents. Zero on every deal carrying none, which is nearly all of them.
   ///
@@ -3499,11 +3577,11 @@ model SolarFinance {
   /// customer's proposal all read it, and none of them should have to sum a
   /// table to find out what the customer signs. `SolarDealAdder.financedOnTop`
   /// is the truth both are recomputed from.
-  onTopAdderTotalCents Int @default(0)
+  onTopAdderTotalCents Int   @default(0)
   /// Final contract price, cents.
-  contractPriceCents Int   @default(0)
+  contractPriceCents   Int   @default(0)
   /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
-  itcEstimateCents   Int   @default(0)
+  itcEstimateCents     Int   @default(0)
 
   // ── Lease / PPA ─────────────────────────────────────────────────────────
   /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
@@ -3634,17 +3712,14 @@ model SolarProposal {
 
   /**
    * Which version this deal actually sold — set on exactly one row per lead.
-   *
    * NOT the same question as "which is newest" or "which has not been
    * superseded", and that is the whole point. A deal accumulates ten versions
    * while a rep works a price at the table; the one that was agreed is
    * frequently not the last one generated, and until this column existed
    * nothing on the deal could say which it was.
-   *
    * INTERNAL. The customer's link and what it resolves to are untouched by
    * this — approving is a record of a decision already made, not a way to
    * publish one.
-   *
    * "Exactly one" is enforced by a PARTIAL UNIQUE INDEX on (leadId) WHERE
    * approvedAt IS NOT NULL, written by hand in the migration because Prisma's
    * schema language cannot express one. Two admins approving different
@@ -3657,7 +3732,6 @@ model SolarProposal {
   /**
    * The PDF filed into the deal's Proposal folder when this version was
    * approved.
-   *
    * Held so unapproving removes the copy it put there rather than guessing at
    * one by category, and so a render that failed is distinguishable from one
    * that never ran: approved with a null file id means "approve succeeded, the
@@ -3673,18 +3747,15 @@ model SolarProposal {
 
   /**
    * THE CUSTOMER'S SIGNATURE, and the evidence standing behind it.
-   *
    * `signedAt` on its own recorded that somebody typed a name into a box. That
    * is enough to move a deal and nothing like enough to hand a lender: Amos
    * asks for a signed proposal, and a document whose acceptance leaves no mark
    * on the paper is one nobody outside this application can verify.
-   *
    * So the signature is a MARK, held here as a PNG data URL — drawn with a
    * finger or set from the typed name — and rendered into the document's
    * execution block and onto the filed PDF. Everything beside it is the ESIGN /
    * UETA record: who signed, that they consented to sign electronically before
    * they did, when, and from where.
-   *
    * COLUMNS, NOT SNAPSHOT. The snapshot is what this customer was quoted and
    * must never move. A signature is something that happens TO that document
    * afterwards; writing it into the frozen JSON would rewrite the thing being

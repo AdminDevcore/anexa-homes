@@ -39,6 +39,9 @@ export default async function PayrollRunPage({
         include: {
           user: { select: { firstName: true, lastName: true } },
           commission: { include: { project: { select: { projectNumber: true } } } },
+          // The other kind of line a run holds. Without it a contractor's row
+          // printed "—" in the Project column on the page somebody pays from.
+          contractorPay: { select: { project: { select: { projectNumber: true } } } },
         },
       },
     },
@@ -131,7 +134,7 @@ export default async function PayrollRunPage({
                 <TableCell className="font-medium">{i.user.firstName} {i.user.lastName}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{i.label}</TableCell>
                 <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
-                  {i.commission?.project.projectNumber ?? "—"}
+                  {i.commission?.project.projectNumber ?? i.contractorPay?.project?.projectNumber ?? "—"}
                 </TableCell>
                 <TableCell className="text-right font-medium">{fmt.money(i.amount)}</TableCell>
                 <TableCell>

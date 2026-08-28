@@ -29,6 +29,19 @@ export type SubmittedInvoice = {
     projectNumber: string | null;
     vertical: string | null;
   };
+  /**
+   * The pay line, once someone has pressed Generate. Null means the invoice is
+   * submitted but not yet a payable — the state every invoice starts in, and
+   * the reason the page has a Generate button at all.
+   */
+  pay: {
+    id: string;
+    /** Cents. Zero until a human reads the PDF; a zero cannot be approved. */
+    amount: number;
+    status: string;
+    /** In a payroll run — the point past which the amount is no longer an opinion. */
+    batched: boolean;
+  } | null;
 };
 
 /**
@@ -94,6 +107,14 @@ export async function listContractorInvoices(
       mimeType: true,
       createdAt: true,
       uploadedBy: { select: { firstName: true, lastName: true, role: true } },
+      contractorPay: {
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+          _count: { select: { payrollItems: true } },
+        },
+      },
       lead: {
         select: {
           id: true,
@@ -134,6 +155,14 @@ export async function listContractorInvoices(
         projectNumber: f.lead?.project?.projectNumber ?? f.project?.projectNumber ?? null,
         vertical: lead?.vertical ?? null,
       },
+      pay: f.contractorPay
+        ? {
+            id: f.contractorPay.id,
+            amount: f.contractorPay.amount,
+            status: f.contractorPay.status,
+            batched: f.contractorPay._count.payrollItems > 0,
+          }
+        : null,
     } satisfies SubmittedInvoice;
   });
 }

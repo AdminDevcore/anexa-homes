@@ -253,11 +253,13 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Commission: ["read", "approve", "update"],
     Payroll: ALL,
     Invoice: ["create", "read", "update"],
-    // The funding desk pays these, so it opens and exports them. Delete is
-    // super-admin-only: a submitted invoice is the contractor's evidence that
-    // he billed, and the person who pays it should not be able to make it
-    // disappear.
-    ContractorInvoice: ["read", "export"],
+    // The funding desk pays these, so it opens them, prices them from the PDF
+    // and approves them into payroll — the same verbs it already holds on
+    // Commission. Delete is NOT among them, and is super-admin-only: a
+    // submitted invoice is the contractor's evidence that he billed, and the
+    // person who pays it should not be able to make it disappear. Voiding a
+    // pay line is the honest way to decline one, and that is `approve`.
+    ContractorInvoice: ["read", "export", "update", "approve"],
     Report: ["read", "export"],
     Bookkeeping: ALL,
     Knowledge: ["read"],
