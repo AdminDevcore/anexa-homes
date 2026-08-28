@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { isPayEligible, PAY_ELIGIBLE_ROLES } from "@/server/rbac/matrix";
 import { sendEmail } from "@/server/modules/notifications/delivery";
 import { inviteEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
@@ -122,7 +123,7 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
     } else if (salesRepId) {
       if (salesRepId === target.id) return fail("A canvasser can't report to themselves.");
       const rep = await prisma.user.findFirst({
-        where: { id: salesRepId, companyId: me.companyId, role: { in: ["sales_rep", "manager", "admin", "super_admin"] }, status: "active" },
+        where: { id: salesRepId, companyId: me.companyId, role: { in: PAY_ELIGIBLE_ROLES }, status: "active" },
         select: { id: true },
       });
       if (!rep) return fail("Pick a valid sales rep.");
@@ -245,10 +246,13 @@ export async function updateMemberPayAction(input: z.infer<typeof paySchema>) {
     select: { id: true, role: true },
   });
   if (!target) return fail("User not found.");
-  // Only the roles that actually earn on a deal carry pay terms. Writing them
-  // onto an installer would put a redline on somebody the engine never reads.
-  if (!["sales_rep", "manager"].includes(target.role)) {
-    return fail("Only sales reps and sales managers have a pay structure.");
+  // Only the roles that actually earn on a deal carry pay terms — the same set
+  // that may be a deal's rep. Writing them onto an installer would put a redline
+  // on somebody the engine never reads. See PAY_ELIGIBLE_ROLES for why owners
+  // and admins are in it: they sell deals too, and a rep with no terms produces
+  // no commission line at all.
+  if (!isPayEligible(target.role)) {
+    return fail("Only people who can be the rep on a deal have a pay structure.");
   }
 
   await prisma.user.update({

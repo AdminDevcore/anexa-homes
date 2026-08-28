@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, Mail, Phone, Briefcase, Calendar, Clock, Shield, Users2, ChevronRight, ShieldCheck, Lock, Landmark, FileText, MapPin, Paperclip } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { isPayEligible, PAY_ELIGIBLE_ROLES } from "@/server/rbac/matrix";
 import { getUserDetail, getAssignableReps, getAssignableManagers, ROLE_ORDER } from "@/server/modules/team/queries";
 import { getUserOnboarding } from "@/server/modules/onboarding/queries";
 import { roleLabel, assignableRolesFor } from "@/lib/roles";
@@ -59,7 +60,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
   // Overrides this member earns off other people's deals (commission-capable roles).
   // Read unfiltered by workspace on purpose: this is the person's whole override
   // sheet, and an admin standing in Roofing still needs to see the Solar rates.
-  const showOverrides = showFull && ["sales_rep", "manager"].includes(detail.role);
+  const showOverrides = showFull && isPayEligible(detail.role);
   const [overrideRows, overrideCandidates] = showOverrides
     ? await Promise.all([
         prisma.commissionOverride.findMany({
@@ -68,7 +69,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
           orderBy: [{ vertical: "asc" }, { createdAt: "asc" }],
         }),
         prisma.user.findMany({
-          where: { companyId: user.companyId, status: "active", role: { in: ["sales_rep", "manager"] }, id: { not: id } },
+          where: { companyId: user.companyId, status: "active", role: { in: PAY_ELIGIBLE_ROLES }, id: { not: id } },
           select: { id: true, firstName: true, lastName: true, role: true, verticals: true },
           orderBy: { firstName: "asc" },
         }),
@@ -83,7 +84,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
   // active workspace: an admin standing in Solar still needs this rep's roofing
   // terms. Only the roles the commission engine actually reads carry terms.
   const memberVerticals = allowedVerticals(detail.verticals);
-  const showPay = showFull && ["sales_rep", "manager"].includes(detail.role);
+  const showPay = showFull && isPayEligible(detail.role);
   const showSolarPay = showPay && memberVerticals.includes("solar");
   // The company's own pricing defaults, so the worked example is a deal this
   // company would actually write, and the names of the lenders currently on
@@ -154,12 +155,14 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
             </div>
           </div>
 
-          {/* Pay structure — both verticals, side by side. */}
+          {/* Pay structure — both verticals, side by side. `isRep` is wording
+              only: everyone but a sales manager is paid here as the rep on
+              their own deals, an owner who sells included. */}
           {showPay && (
             <MemberPayStructure
               userId={detail.id}
               roleLabel={detail.roleLabel}
-              isRep={detail.role === "sales_rep"}
+              isRep={detail.role !== "manager"}
               verticals={memberVerticals}
               canEdit={canEdit}
               current={{

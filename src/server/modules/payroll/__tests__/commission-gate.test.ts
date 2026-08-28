@@ -3,6 +3,7 @@ import {
   findGateStage,
   commissionGateLabel,
   eligibleStageIds,
+  generateOutcomeMessage,
   type EligibilityStage,
 } from "@/server/modules/payroll/gate";
 
@@ -161,5 +162,49 @@ describe("which stages can generate a commission", () => {
     const custom = stages([["a", "A"], ["b", "B"], ["c", "Closed Won"]], { won: ["c"] });
     const only = eligibleStageIds([{ vertical: "gutters", stages: custom }]);
     expect([...only]).toEqual(["c"]);
+  });
+});
+
+/**
+ * What Generate says when it produced nothing.
+ *
+ * The button used to have exactly two explanations for an empty run — "nothing
+ * has reached the gate" and "everything past it is already paid" — and it chose
+ * the second whenever a single project was eligible. A solar deal sitting at M1
+ * Funding whose rep has no $/W configured is eligible, generates no line, and
+ * was told its commissions already existed. Nothing on the page showed a
+ * commission, and there was no way to find out why.
+ */
+describe("the message on an empty Generate run", () => {
+  const gate = "M1 Funding";
+
+  it("says nothing at all when lines were actually created", () => {
+    expect(generateOutcomeMessage({ gate, created: 2, eligible: 3, withLines: 3 })).toBeUndefined();
+  });
+
+  it("says no deal has reached the gate when none has", () => {
+    expect(generateOutcomeMessage({ gate, created: 0, eligible: 0, withLines: 0 })).toContain(
+      "No deals have reached M1 Funding"
+    );
+  });
+
+  it("names the real reason when an eligible deal produced no line", () => {
+    const msg = generateOutcomeMessage({ gate, created: 0, eligible: 1, withLines: 0 })!;
+    expect(msg).toContain("1 deal");
+    expect(msg).toContain("M1 Funding");
+    expect(msg).toMatch(/pay structure/i);
+    // The old lie must not come back.
+    expect(msg).not.toMatch(/already has/i);
+  });
+
+  it("counts only the barren deals, not the ones already paid", () => {
+    const msg = generateOutcomeMessage({ gate, created: 0, eligible: 5, withLines: 3 })!;
+    expect(msg).toContain("2 deals");
+  });
+
+  it("still says nothing new when every eligible deal already carries its lines", () => {
+    expect(generateOutcomeMessage({ gate, created: 0, eligible: 4, withLines: 4 })).toContain(
+      "already has its commission lines"
+    );
   });
 });

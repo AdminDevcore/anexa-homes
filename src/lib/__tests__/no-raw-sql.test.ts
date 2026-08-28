@@ -77,6 +77,12 @@ const ALLOWED: Record<string, string> = {
   // holds. Reads a single shared column and writes nothing.
   "src/server/modules/projects/actions.ts":
     'SELECT "projectNumber" — the number is company-wide by definition',
+  // The pay-structure role suite resets its own `vertical_test` fixtures the
+  // same way, on the UNextended client: it builds a member of every role and a
+  // solar deal sold by an owner, which no single workspace's scope would let it
+  // tear down cleanly between cases.
+  "src/server/modules/team/__tests__/pay-structure-roles.itest.ts":
+    'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
   // The guard itself and its own fixtures mention the identifiers in strings.
   "src/lib/__tests__/no-raw-sql.test.ts": "this guard",
 };

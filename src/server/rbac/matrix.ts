@@ -97,6 +97,27 @@ export const STAFF_ROLES: Role[] = [
 
 export const ADMIN_ROLES: Role[] = ["super_admin", "admin"];
 
+/**
+ * Roles that can be the rep on a deal AND therefore carry a pay structure.
+ *
+ * The commission engines read pay terms off exactly one person — the deal's
+ * assigned rep (plus, on roofing, every active sales manager). Any role that can
+ * be assigned a deal must be able to hold terms, or the deal reaches its gate
+ * with nobody to pay and the engine writes no line at all: not an error, not a
+ * $0 row, silence. That is what happened to an owner-sold solar deal at M1
+ * Funding, whose $/W had no field on any page to live in.
+ *
+ * Not STAFF_ROLES: an installer or the bookkeeper can technically be picked in
+ * the rep box, and putting a redline on them would be putting a redline on
+ * somebody no engine reads.
+ */
+export const PAY_ELIGIBLE_ROLES: Role[] = ["super_admin", "admin", "manager", "sales_rep"];
+
+/** Takes a plain string too: the team page carries the role as one. */
+export function isPayEligible(role: Role | string): boolean {
+  return (PAY_ELIGIBLE_ROLES as string[]).includes(role);
+}
+
 export function isStaff(role: Role): boolean {
   return STAFF_ROLES.includes(role);
 }

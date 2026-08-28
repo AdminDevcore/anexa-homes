@@ -14,6 +14,7 @@ import { brandedEmailTemplate } from "@/server/modules/notifications/email-templ
 import { formatCents } from "@/lib/format";
 import { computeCommissionsForProject } from "./engine";
 import { getCommissionEligibleStageIds, commissionGateLabel } from "./eligibility";
+import { generateOutcomeMessage } from "./gate";
 import { getPayStubData, getRunStubList, buildPayStubPdf } from "./paystub";
 import { postRunToBookkeeping } from "./post-bookkeeping";
 
@@ -49,14 +50,24 @@ export async function generateCommissionsAction() {
     created += await computeCommissionsForProject(prisma, user.companyId, p.id);
   }
   revalidatePath("/portal/commissions");
-  // "0 generated" on its own reads as a broken button. Say WHY nothing came out:
-  // either no deal has reached the gate, or the ones that have are already paid out.
-  const message =
-    created > 0
-      ? undefined
-      : projects.length === 0
-        ? `No deals have reached ${gate} yet, so there is nothing to pay out.`
-        : `Nothing new — every deal at or past ${gate} already has its commission lines.`;
+
+  // "0 generated" on its own reads as a broken button, and "already paid out"
+  // reads as a lie when the page is empty. Which of the two it is turns on
+  // whether the eligible deals came out of the engine carrying anything at all,
+  // so count them rather than assume. See generateOutcomeMessage.
+  const withLines = projects.length
+    ? await prisma.commission.findMany({
+        where: { projectId: { in: projects.map((p) => p.id) } },
+        select: { projectId: true },
+        distinct: ["projectId"],
+      })
+    : [];
+  const message = generateOutcomeMessage({
+    gate,
+    created,
+    eligible: projects.length,
+    withLines: withLines.length,
+  });
   return { ok: true as const, created, message };
 }
 

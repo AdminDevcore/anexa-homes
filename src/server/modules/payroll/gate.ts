@@ -112,3 +112,39 @@ export function eligibleStageIds(pipelines: { vertical: string; stages: Eligibil
   }
   return eligible;
 }
+
+/**
+ * What Generate says when it produced no new lines.
+ *
+ * Kept here, pure, beside the gate itself, because the message is the only
+ * thing standing between an empty Commissions page and a user who cannot tell
+ * a working button from a broken one.
+ *
+ * The case this exists for is the third branch. A deal at or past its gate that
+ * comes back out of the engine with NO commission line has not "already been
+ * paid" — nothing could be computed for it. Almost always that is a rep with no
+ * pay structure: `resolveSolarPayTerms` returns null for a rep who has no $/W,
+ * and the engine deliberately writes nothing rather than a $0 line that reads
+ * as a worthless deal. Silence is right; silence unexplained is not.
+ */
+export function generateOutcomeMessage(input: {
+  gate: string;
+  /** Lines written by this run. */
+  created: number;
+  /** Projects at or past the gate that the run looked at. */
+  eligible: number;
+  /** How many of those carry any commission line at all, after the run. */
+  withLines: number;
+}): string | undefined {
+  const { gate, created, eligible, withLines } = input;
+  if (created > 0) return undefined;
+  if (eligible === 0) return `No deals have reached ${gate} yet, so there is nothing to pay out.`;
+
+  const barren = Math.max(0, eligible - withLines);
+  if (barren > 0) {
+    return barren === 1
+      ? `1 deal has reached ${gate} but produced no commission line. Check that its assigned rep has a pay structure on their Team profile.`
+      : `${barren} deals have reached ${gate} but produced no commission lines. Check that their assigned reps have a pay structure on their Team profiles.`;
+  }
+  return `Nothing new — every deal at or past ${gate} already has its commission lines.`;
+}
