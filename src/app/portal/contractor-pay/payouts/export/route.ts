@@ -7,7 +7,9 @@ import { reportToCsv } from "@/server/modules/reports/csv";
 
 export async function GET(req: Request) {
   const user = await requireUser();
-  if (!can(user, "export", "Report") || !can(user, "read", "Commission")) {
+  // Gated as the page it belongs to now is, not as a Reports card: the payout
+  // figures moved out of the hub with it. Accounting holds both grants.
+  if (!can(user, "export", "ContractorInvoice") || !can(user, "read", "Commission")) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 

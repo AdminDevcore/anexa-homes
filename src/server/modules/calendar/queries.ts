@@ -160,7 +160,12 @@ export async function getCalendarEvents(
       : null; // null = no restriction
   const dealHref = (leadId: string | undefined, projectId: string) => {
     if (!leadId) return `/portal/projects/${projectId}`;
-    if (openableLeadIds && !openableLeadIds.has(leadId)) return null;
+    // Not admitted to the customer record — but no longer sent nowhere. The
+    // job page holds the three things being on a visit entitles someone to:
+    // where it is, when it is, and the slot to invoice it. Before this the
+    // answer was `null` and the event had no destination at all, which is
+    // exactly the problem the moment the visit also has to be billed.
+    if (openableLeadIds && !openableLeadIds.has(leadId)) return `/portal/jobs/${projectId}`;
     return `/portal/leads/${leadId}`;
   };
 

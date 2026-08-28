@@ -47,6 +47,11 @@ export const RESOURCES = [
   "Commission",
   "Payroll",
   "Invoice",
+  // What a subcontractor billed for a job. Deliberately NOT covered by File:
+  // an invoice is filed on a deal, and everyone who can open that deal can read
+  // a file on it — including the rep whose commission it eats into. This is the
+  // permission that decides who may open one. See src/lib/contractor-invoice.ts.
+  "ContractorInvoice",
   "Report",
   "Settings",
   "Chat", // internal team chat (staff only)
@@ -121,6 +126,7 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Commission: ALL,
     Payroll: ALL,
     Invoice: ALL,
+    ContractorInvoice: ALL,
     Report: ALL,
     Settings: ALL,
     Bookkeeping: ALL,
@@ -149,6 +155,9 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Commission: ["read", "approve", "update"],
     Payroll: ["read", "approve", "update", "export"],
     Invoice: ALL,
+    // ContractorInvoice is deliberately absent, exactly as `Report` is. An
+    // admin runs the sales floor; what a subcontractor charges is a funding
+    // number, and the narrow list is the point of the drop box.
     Settings: ["read", "update"],
     Knowledge: ALL,
     Scope: ALL,
@@ -244,6 +253,11 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Commission: ["read", "approve", "update"],
     Payroll: ALL,
     Invoice: ["create", "read", "update"],
+    // The funding desk pays these, so it opens and exports them. Delete is
+    // super-admin-only: a submitted invoice is the contractor's evidence that
+    // he billed, and the person who pays it should not be able to make it
+    // disappear.
+    ContractorInvoice: ["read", "export"],
     Report: ["read", "export"],
     Bookkeeping: ALL,
     Knowledge: ["read"],

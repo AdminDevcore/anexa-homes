@@ -131,16 +131,11 @@ const STATIC_CARDS: ReportCard[] = [
     action: "read",
     resource: "Report",
   },
-  {
-    id: "contractor-pay",
-    title: "Contractor Pay",
-    description: "Money paid and still owed to installer-crews and 1099 contractors.",
-    href: "/portal/reports/contractor-pay",
-    icon: "contractorPay",
-    group: "ops_finance",
-    action: "read",
-    resource: "Commission",
-  },
+  // Contractor Pay is no longer a card here. It became its own sidebar item —
+  // /portal/contractor-pay — so the money owed to a crew sits beside the
+  // invoices that crew submitted. Its old URL redirects; the `contractorPay`
+  // icon key is kept in ReportIcon because the hub still maps icons by name and
+  // removing a value there is a wider change than removing a card.
   {
     id: "claims",
     title: "Claims & Supplement Capture",

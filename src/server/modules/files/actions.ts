@@ -10,6 +10,7 @@ import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { getMembership } from "@/server/modules/chat/queries";
 import { companyExportLabel } from "@/lib/company-exports";
+import { isContractorInvoice } from "@/lib/contractor-invoice";
 import { foldersFor } from "@/lib/deal-folders";
 import { photoGroupFor } from "@/lib/photo-groups";
 import sharp from "sharp";
@@ -229,34 +230,40 @@ export async function uploadFileAction(formData: FormData) {
 
   /* ── A checklist photo is not a loose upload ────────────────────────────
    * It was taken for one slot on the Site Survey or Installation checklist, so
-   * the slot — not the phone, and not the caller — settles three things about
-   * it. All three are decided here so that every way of taking one (the
-   * checklist on the deal, the same checklist opened inside its folder, the
-   * presentation builder) files the photo identically.
+   * the slot — not the phone, and not the caller — settles two things about
+   * it. Both are decided here so that every way of taking one (the checklist on
+   * the deal, the same checklist opened inside its folder, the presentation
+   * builder) files the photo identically. Which DEAL it lands on used to be
+   * settled here too; that now applies to every upload, just above.
    *
    *  WHICH FOLDER.  Callers used to send `category = the slot's label`, which is
    *    not a folder key in either vertical. So every photo ever shot against a
    *    checklist landed in "Other", and the Survey Photos and Installation
    *    Photos folders both read 0 while the checklist beside them was full.
    *
-   *  WHICH DEAL.  The checklist hangs off the job, so it sent `projectId` alone
-   *    — and the folder grid lists the DEAL's files. A photo with no `leadId`
-   *    was therefore in no folder at all, not even "Other". Taking it from the
-   *    project rather than the form is safe: the project's scope check above
-   *    already passed, and a project belongs to exactly one lead.
-   *
    *  ITS NAME.  "IMG_4821.jpg" says nothing about what was photographed. The
    *    slot's label does, and it is what the deal's photo report prints as the
    *    caption and what anyone opening the file sees.
    */
-  let dealLeadId = leadId;
+  /* A file uploaded against the JOB belongs to the job's DEAL.
+   *
+   * The folder grid lists the deal's files, so a file carrying only a
+   * `projectId` was in no folder at all — not even "Other". That was already
+   * known and already fixed, but only inside the checklist branch below; every
+   * other project-only uploader still produced an invisible file. Hoisting it
+   * here fixes them all, and is what lets the installer's job page — which
+   * never learns the leadId, because an installer may not read the deal — put
+   * an invoice where the office can find it. Safe for the same reason it was
+   * safe there: the project's scope check above has already passed, and a
+   * project belongs to exactly one lead.
+   */
+  const dealLeadId = leadId ?? project?.leadId ?? null;
   if (photoTemplateItemId) {
     const slot = await prisma.photoTemplateItem.findFirst({
       where: { id: photoTemplateItemId, template: { companyId: user.companyId } },
       select: { label: true, template: { select: { kind: true } } },
     });
     if (slot) {
-      dealLeadId = leadId ?? project?.leadId ?? null;
       category = photoGroupFor(
         lead?.vertical ?? project?.vertical,
         slot.template.kind as "site" | "install",
@@ -324,6 +331,7 @@ export async function moveFileAction(id: string, category: string) {
     select: {
       id: true,
       uploadedById: true,
+      category: true,
       projectId: true,
       leadId: true,
       lead: { select: { vertical: true } },
@@ -332,6 +340,24 @@ export async function moveFileAction(id: string, category: string) {
   if (!file) return { ok: false as const, error: "File not found." };
   if (!can(user, "update", "File") && file.uploadedById !== user.userId) {
     return { ok: false as const, error: "You can only move your own uploads." };
+  }
+
+  /* Neither into the letter slot, nor out of it.
+   *
+   * OUT is the one that matters: refiling an invoice into "Other" would strip
+   * the category the file route reads, and the bill would become readable by
+   * everyone who can open the deal — the drop box undone by a dropdown. IN is
+   * refused for the mirror reason: it would hide an ordinary document from the
+   * people working the job, in a folder they cannot open to get it back.
+   *
+   * Checked against the FILE'S category rather than the current folder, because
+   * that is the only thing the route consults. See src/lib/contractor-invoice.ts.
+   */
+  if (isContractorInvoice(file.category) || isContractorInvoice(category)) {
+    return {
+      ok: false as const,
+      error: "Contractor invoices stay in the Contractor Invoice folder — they're read in Contractor Pay.",
+    };
   }
 
   // The target must be a real folder for THIS deal's vertical — otherwise an
@@ -353,11 +379,21 @@ export async function deleteFileAction(id: string) {
   }
   const file = await prisma.fileAsset.findFirst({
     where: { id, companyId: user.companyId },
-    select: { id: true, uploadedById: true, projectId: true, leadId: true },
+    select: { id: true, uploadedById: true, category: true, projectId: true, leadId: true },
   });
   if (!file) return { ok: false as const, error: "File not found." };
-  // Non-managers may only delete their own uploads.
-  if (!can(user, "update", "File") && file.uploadedById !== user.userId) {
+
+  /* A submitted invoice is the contractor's evidence that he billed, so it
+   * outranks the "your own uploads" rule that would otherwise let him take it
+   * back — and outranks File:update, which every manager and admin holds. Only
+   * ContractorInvoice:delete removes one, which is super_admin alone.
+   */
+  if (isContractorInvoice(file.category)) {
+    if (!can(user, "delete", "ContractorInvoice")) {
+      return { ok: false as const, error: "A submitted contractor invoice can only be removed by a super admin." };
+    }
+  } else if (!can(user, "update", "File") && file.uploadedById !== user.userId) {
+    // Non-managers may only delete their own uploads.
     return { ok: false as const, error: "You can only delete your own uploads." };
   }
   await prisma.fileAsset.delete({ where: { id } });
