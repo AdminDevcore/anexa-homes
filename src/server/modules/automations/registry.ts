@@ -1,6 +1,7 @@
 import { compilePhotosAction } from "./actions/compile-photos";
 import { generateDocumentAction } from "./actions/generate-document";
 import { moveStageAction } from "./actions/move-stage";
+import { sendForSignatureAction } from "./actions/send-for-signature";
 import { setProjectStatusAction } from "./actions/set-project-status";
 import type { AutomationActionModule } from "./types";
 
@@ -18,6 +19,7 @@ export const ACTION_REGISTRY: Record<string, AutomationActionModule> = {
   [compilePhotosAction.type]: compilePhotosAction,
   [generateDocumentAction.type]: generateDocumentAction,
   [moveStageAction.type]: moveStageAction,
+  [sendForSignatureAction.type]: sendForSignatureAction,
   [setProjectStatusAction.type]: setProjectStatusAction,
 };
 
