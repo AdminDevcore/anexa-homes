@@ -84,8 +84,23 @@ export type TriggerPayload = {
   days?: number;
 };
 
-/** One action's outcome, stored verbatim in AutomationRun.steps. */
-export type StepResult = { type: string; ok: boolean; detail: string };
+/** One action's outcome. `follow` is stripped before it is stored. */
+export type StepResult = {
+  type: string;
+  ok: boolean;
+  detail: string;
+  /**
+   * Set by an action whose own effect is a trigger — moving a stage is the
+   * reason chaining works at all ("compile the photos, move to Inspection", and
+   * the rule waiting at Inspection then runs).
+   *
+   * The action reports it rather than calling the engine itself for two
+   * reasons: the engine imports the action registry, so an action importing the
+   * engine back would be a cycle; and only the engine knows the current depth,
+   * which is the thing that has to stop a loop.
+   */
+  follow?: { trigger: AutomationTrigger; payload: TriggerPayload };
+};
 
 /** What every action module receives. Note: no SessionUser — there isn't one. */
 export type ActionContext = {

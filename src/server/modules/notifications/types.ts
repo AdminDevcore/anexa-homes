@@ -109,6 +109,14 @@ export const EVENT_DEFS: EventDef[] = [
     defaultTitle: "Payroll approved",
     defaultBody: "A payroll run was approved.",
   },
+  {
+    value: "automation_failed",
+    label: "An automation failed",
+    condition: null,
+    tokens: ["{{customer}}", "{{status}}"],
+    defaultTitle: "Automation failed on {{customer}}",
+    defaultBody: "{{status}}",
+  },
 ];
 
 export const DYNAMIC_TARGETS = [

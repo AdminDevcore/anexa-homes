@@ -20,6 +20,7 @@ const EVENTS = [
   "lead_created", "lead_assigned", "stage_changed", "project_status_changed",
   "document_sent", "document_viewed", "document_signed", "document_completed",
   "task_assigned", "daily_report_submitted", "commission_approved", "payroll_approved",
+  "automation_failed",
 ] as const;
 
 const ruleSchema = z.object({

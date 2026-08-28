@@ -11,9 +11,10 @@ const schema = z.object({ stageId: z.string().min(1) });
  * Goes through `recordStageEntry` like every other path that moves a deal, so
  * cycle-time history has no hole where the automation did the moving.
  *
- * It deliberately does NOT re-fire the automation engine itself — the engine
- * does that after the action returns, because only the engine knows the current
- * depth and it is the thing that has to stop a loop.
+ * It deliberately does NOT re-fire the engine itself. It reports the follow-up
+ * on its StepResult and the engine re-enters, because only the engine knows the
+ * current depth — and an action importing the engine would be an import cycle,
+ * since the engine imports the action registry.
  */
 export const moveStageAction: AutomationActionModule = {
   type: "move_stage",
@@ -60,7 +61,14 @@ export const moveStageAction: AutomationActionModule = {
       },
     });
 
-    return { type: "move_stage", ok: true, detail: `Moved to ${stage.name}.` };
+    // Landing in a stage IS the stage_entered trigger, so a rule waiting there
+    // must get its turn. Reported rather than fired here — see StepResult.follow.
+    return {
+      type: "move_stage",
+      ok: true,
+      detail: `Moved to ${stage.name}.`,
+      follow: { trigger: "stage_entered", payload: { stageId: stage.id } },
+    };
   },
 };
 
