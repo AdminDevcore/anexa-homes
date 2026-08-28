@@ -146,6 +146,17 @@ describe("solar key compatibility", () => {
       expect(keys).toContain(k);
     }
   });
+
+  // The permit APPLICATION and the permit signed off at final inspection are
+  // two different documents that arrive months apart, so "Permits" holding both
+  // meant nobody could answer "has final passed?" without opening every file.
+  it("separates the signed final permit from the permit applications", () => {
+    expect(folderKeyFor("solar", "signed_final_permit")).toBe("signed_final_permit");
+    expect(folderLabel("solar", "signed_final_permit")).toBe("Signed Final Permit");
+    expect(SOLAR_FOLDERS.find((f) => f.key === "signed_final_permit")?.special).toBeUndefined();
+    // Still its own folder, not a rename of the application one.
+    expect(SOLAR_FOLDERS.map((f) => f.key)).toContain("permits");
+  });
 });
 
 // The solar install agreement's paperwork is solar's alone. A roofing deal
@@ -162,6 +173,7 @@ describe("solar paperwork stays out of roofing", () => {
     "lien_waiver_final",
     "pto",
     "solar_layout",
+    "signed_final_permit",
   ];
 
   it("gives roofing none of those folders", () => {
