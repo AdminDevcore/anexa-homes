@@ -7,7 +7,8 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
-import { getActiveVertical } from "@/server/auth/vertical";
+import { getActiveVertical, userVerticals } from "@/server/auth/vertical";
+import { VERTICAL_LABEL } from "@/lib/vertical";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
 import { SendDocumentDialog } from "@/components/esign/send-document-dialog";
@@ -29,6 +30,11 @@ export default async function DocumentsPage() {
   const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   // Isolate sent contracts + the "send to" list to the active vertical workspace.
   const vertical = await getActiveVertical(user);
+  // Where else this person could be standing. A rep whose deals are all in the
+  // other workspace needs to be told that, not left staring at an empty picker.
+  const otherWorkspaces = userVerticals(user)
+    .filter((v) => v !== vertical)
+    .map((v) => VERTICAL_LABEL[v]);
 
   const [templates, packages, leads] = await Promise.all([
     prisma.documentTemplate.findMany({
@@ -68,7 +74,14 @@ export default async function DocumentsPage() {
         title="Documents"
         description="Contracts, agreements, and e-signatures."
         action={
-          canSend && templates.length > 0 && leads.length > 0 ? (
+          /* Rendered on the permission alone. It used to also require a
+             non-empty template list AND a non-empty scoped lead list, so a rep
+             with no deals in this workspace got no button — which reads as "you
+             may not send documents" rather than "you have nothing to send yet".
+             Every sales rep in the company was in exactly that state in the
+             workspace they land in by default. The dialog explains an empty
+             list now; the page no longer hides the door. */
+          canSend ? (
             <SendDocumentDialog
               templates={templates.map((t) => ({ id: t.id, name: t.name }))}
               leads={leads.map((l) => ({
@@ -76,6 +89,9 @@ export default async function DocumentsPage() {
                 name: `${l.firstName} ${l.lastName}`,
                 email: l.email ?? "",
               }))}
+              workspace={VERTICAL_LABEL[vertical]}
+              otherWorkspaces={otherWorkspaces}
+              canManageTemplates={can(user, "update", "Document")}
             />
           ) : undefined
         }
@@ -91,8 +107,16 @@ export default async function DocumentsPage() {
         </div>
         {templates.length === 0 ? (
           <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-            No contract templates in this workspace yet. Click <strong>New template</strong> to add one, then map its
-            fields to auto-fill from each deal.
+            {/* Don't tell somebody to click a button they were not given. A rep
+                reads templates and sends them; authoring is an admin job. */}
+            {can(user, "update", "Document") ? (
+              <>
+                No contract templates in this workspace yet. Click <strong>New template</strong> to add one, then map
+                its fields to auto-fill from each deal.
+              </>
+            ) : (
+              <>No contract templates in this workspace yet. An admin adds these.</>
+            )}
           </div>
         ) : (
         <ul className="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">

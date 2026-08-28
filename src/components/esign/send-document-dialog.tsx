@@ -30,9 +30,17 @@ type Lead = { id: string; name: string; email: string };
 export function SendDocumentDialog({
   templates,
   leads,
+  workspace,
+  otherWorkspaces = [],
+  canManageTemplates = false,
 }: {
   templates: Template[];
   leads: Lead[];
+  /** Label of the active workspace, e.g. "Roofing" — named in the empty states. */
+  workspace?: string;
+  /** Labels of the workspaces this user could switch to instead. */
+  otherWorkspaces?: string[];
+  canManageTemplates?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -50,6 +58,38 @@ export function SendDocumentDialog({
   const [repEmail, setRepEmail] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [links, setLinks] = React.useState<{ name: string; url: string }[] | null>(null);
+
+  /**
+   * Why this dialog cannot be completed, or null when it can.
+   *
+   * The button that opens it is rendered on the permission alone, so an empty
+   * template or deal list has to be explained HERE. Hiding the button instead —
+   * which is what this page did — makes "you have no deals yet" look exactly
+   * like "you are not allowed to send documents", and that is how a whole sales
+   * floor came to believe e-signature was closed to them.
+   */
+  const blocked: { title: string; detail: string } | null = (() => {
+    const here = workspace ? `the ${workspace} workspace` : "this workspace";
+    const elsewhere =
+      otherWorkspaces.length > 0
+        ? ` Your deals may be in ${otherWorkspaces.join(" or ")} — switch workspace at the top of the page to send there.`
+        : "";
+    if (templates.length === 0) {
+      return {
+        title: `No contract templates in ${here} yet.`,
+        detail: canManageTemplates
+          ? "Add one with “New template” on this page, then map its fields to auto-fill from each deal."
+          : "An admin adds these from this page. Ask for the contract you need and it will appear here.",
+      };
+    }
+    if (leads.length === 0) {
+      return {
+        title: `You have no deals in ${here} yet.`,
+        detail: `Every document is sent to a deal, so there is nobody to send to right now. A deal assigned to you shows up here straight away.${elsewhere}`,
+      };
+    }
+    return null;
+  })();
 
   function onSelectLead(id: string) {
     setLeadId(id);
@@ -138,7 +178,15 @@ export function SendDocumentDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {links ? (
+        {blocked ? (
+          <div className="space-y-3">
+            <p className="text-sm font-medium">{blocked.title}</p>
+            <p className="text-sm text-muted-foreground">{blocked.detail}</p>
+            <DialogFooter>
+              <Button onClick={() => setOpen(false)}>Close</Button>
+            </DialogFooter>
+          </div>
+        ) : links ? (
           <div className="space-y-3">
             {/* In-person: sign right now on this device instead of emailing. */}
             <div className="rounded-lg border border-gold/40 bg-gold/5 p-3">
