@@ -219,12 +219,27 @@ enum NotificationEvent {
   daily_report_submitted
   commission_approved
   payroll_approved
+  automation_failed
 }
 
 enum NotificationChannel {
   in_app
   email
   sms
+}
+
+/// What can set an automation off.
+enum AutomationTrigger {
+  stage_entered
+  photo_checklist_completed
+  document_completed
+  stage_age_exceeded
+}
+
+enum AutomationRunStatus {
+  succeeded
+  failed
+  skipped
 }
 
 enum ServiceType {
@@ -330,6 +345,8 @@ model Company {
   activityLogs             ActivityLog[]
   invitations              Invitation[]
   notificationRules        NotificationRule[]
+  automationRules          AutomationRule[]
+  automationRuns           AutomationRun[]
   notifications            Notification[]
   conversations            Conversation[]
   messages                 Message[]
@@ -965,6 +982,7 @@ model Lead {
   solarMilestones    SolarMilestone[]
   solarDealAdders    SolarDealAdder[]
   feedPosts          DealFeedPost[]
+  automationRuns     AutomationRun[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -1903,6 +1921,75 @@ model NotificationRule {
 
   @@index([companyId, event, active])
   @@map("notification_rules")
+}
+
+/// One "when X happens, do Y" rule.
+///
+/// Sibling of NotificationRule, deliberately NOT a column on it: a rule that
+/// emails somebody and a rule that moves a deal through the pipeline have
+/// different blast radii and different failure semantics, and sharing a table
+/// would mean sharing a settings page.
+model AutomationRule {
+  id         String            @id @default(uuid())
+  companyId  String
+  company    Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical   Vertical          @default(roofing)
+  name       String
+  trigger    AutomationTrigger
+  /// Trigger-specific match conditions:
+  ///   stage_entered              { stageId }
+  ///   photo_checklist_completed  { kind: "site" | "install" }
+  ///   document_completed         { templateId }
+  ///   stage_age_exceeded         { stageId, days }
+  /// An empty object matches every occurrence of the trigger.
+  conditions Json              @default("{}")
+  /// ORDERED list of what to do: [{ type, ...config }]. The order IS the
+  /// contract — a run stops at the first action that fails, so "compile the
+  /// photos then move the stage" must never silently become the reverse.
+  actions    Json              @default("[]")
+  /// Run at most once per deal. Off = every time the trigger matches.
+  once       Boolean           @default(true)
+  active     Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  runs AutomationRun[]
+
+  @@index([companyId, vertical, trigger, active])
+  @@map("automation_rules")
+}
+
+/// One firing of one rule against one deal.
+///
+/// Not merely a log. It is how `once` is enforced (has this rule already
+/// succeeded here?) and it is the ONLY place a silent automation becomes
+/// visible to a human, which is why the per-action outcome is kept rather than
+/// just a pass/fail.
+///
+/// A CHILD of AutomationRule — no vertical column — exactly like LeadStageEvent
+/// is a child of Lead. It is only ever reached through a rule the isolation
+/// extension has already scoped. See server/vertical/models.ts.
+model AutomationRun {
+  id         String              @id @default(uuid())
+  companyId  String
+  company    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ruleId     String
+  rule       AutomationRule      @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  /// SetNull, not Cascade: deleting a deal must not erase the record that an
+  /// automation ran on it. Same reasoning as LeadStageEvent.stageId.
+  leadId     String?
+  lead       Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  status     AutomationRunStatus
+  /// Per-action outcome, in order: [{ type, ok, detail }].
+  steps      Json                @default("[]")
+  error      String?
+  startedAt  DateTime            @default(now())
+  finishedAt DateTime?
+
+  @@index([companyId, startedAt])
+  @@index([ruleId, leadId, status])
+  @@map("automation_runs")
 }
 
 model Notification {
@@ -3484,13 +3571,13 @@ model SolarFinance {
 
   // ── Cash / Loan ─────────────────────────────────────────────────────────
   /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
-  grossPpwCents      Int   @default(0)
+  grossPpwCents        Int   @default(0)
   /// Lender fee as a % of gross. Zero for cash by definition.
-  dealerFeePct       Float @default(0)
+  dealerFeePct         Float @default(0)
   /// Sum of the selected adders that sit INSIDE the partner's price, cents.
   /// See `onTopAdderTotalCents` — the two are disjoint and together they are
   /// the whole catalogue price of the extra work on this deal.
-  adderTotalCents    Int   @default(0)
+  adderTotalCents      Int   @default(0)
   /// Sum of the adders financed ON TOP of a partner's fixed or maximum $/W,
   /// cents. Zero on every deal carrying none, which is nearly all of them.
   ///
@@ -3499,11 +3586,11 @@ model SolarFinance {
   /// customer's proposal all read it, and none of them should have to sum a
   /// table to find out what the customer signs. `SolarDealAdder.financedOnTop`
   /// is the truth both are recomputed from.
-  onTopAdderTotalCents Int @default(0)
+  onTopAdderTotalCents Int   @default(0)
   /// Final contract price, cents.
-  contractPriceCents Int   @default(0)
+  contractPriceCents   Int   @default(0)
   /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
-  itcEstimateCents   Int   @default(0)
+  itcEstimateCents     Int   @default(0)
 
   // ── Lease / PPA ─────────────────────────────────────────────────────────
   /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
@@ -3634,17 +3721,14 @@ model SolarProposal {
 
   /**
    * Which version this deal actually sold — set on exactly one row per lead.
-   *
    * NOT the same question as "which is newest" or "which has not been
    * superseded", and that is the whole point. A deal accumulates ten versions
    * while a rep works a price at the table; the one that was agreed is
    * frequently not the last one generated, and until this column existed
    * nothing on the deal could say which it was.
-   *
    * INTERNAL. The customer's link and what it resolves to are untouched by
    * this — approving is a record of a decision already made, not a way to
    * publish one.
-   *
    * "Exactly one" is enforced by a PARTIAL UNIQUE INDEX on (leadId) WHERE
    * approvedAt IS NOT NULL, written by hand in the migration because Prisma's
    * schema language cannot express one. Two admins approving different
@@ -3657,7 +3741,6 @@ model SolarProposal {
   /**
    * The PDF filed into the deal's Proposal folder when this version was
    * approved.
-   *
    * Held so unapproving removes the copy it put there rather than guessing at
    * one by category, and so a render that failed is distinguishable from one
    * that never ran: approved with a null file id means "approve succeeded, the
@@ -3673,18 +3756,15 @@ model SolarProposal {
 
   /**
    * THE CUSTOMER'S SIGNATURE, and the evidence standing behind it.
-   *
    * `signedAt` on its own recorded that somebody typed a name into a box. That
    * is enough to move a deal and nothing like enough to hand a lender: Amos
    * asks for a signed proposal, and a document whose acceptance leaves no mark
    * on the paper is one nobody outside this application can verify.
-   *
    * So the signature is a MARK, held here as a PNG data URL — drawn with a
    * finger or set from the typed name — and rendered into the document's
    * execution block and onto the filed PDF. Everything beside it is the ESIGN /
    * UETA record: who signed, that they consented to sign electronically before
    * they did, when, and from where.
-   *
    * COLUMNS, NOT SNAPSHOT. The snapshot is what this customer was quoted and
    * must never move. A signature is something that happens TO that document
    * afterwards; writing it into the frozen JSON would rewrite the thing being
