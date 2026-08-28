@@ -148,11 +148,19 @@ notification event so the existing notification rules do the telling.
 Two hazards that have to be built in, not bolted on:
 
 **Loop protection.** `move_stage` fires `stage_entered`, which can fire another
-rule, which moves the stage again. An AsyncLocalStorage depth counter aborts
-past depth 3 with `status: skipped`, `error: "loop guard"`. Separately, a rule
-may never target the stage it triggered on — rejected in the editor and again
-in the engine, because a rule written before a stage was renamed can still be
-wrong.
+rule, which moves the stage again. `runAutomations` takes an explicit `depth`
+argument and refuses to run past depth 3, recording `status: skipped`,
+`error: "loop guard"`.
+
+Explicitly passed, NOT an AsyncLocalStorage counter, and deliberately so: `next
+dev` loads a module twice (see `next-dev-als-duplicate-module` — it is what
+makes `runInVertical` no-op on the dev server), and an ALS store that silently
+resets to zero is a loop guard that does not guard. An argument cannot be
+duplicated away.
+
+Separately, a rule may never target the stage it triggered on — rejected in the
+editor and again in the engine, because a rule written before a stage was
+renamed can still be wrong.
 
 **There is no session user.** Automations run with nobody logged in, so actions
 must call session-free core functions scoped by `companyId` + `vertical`. They
