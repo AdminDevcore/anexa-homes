@@ -152,7 +152,7 @@ const PRINT_CSS = `
      column that is four words a line and a heading three lines deep. */
   #proposal-root [data-chapter-head] h2 { font-size: 1.95rem; line-height: 1.06; }
   #proposal-root [data-chapter-head] p { font-size: 0.95rem; line-height: 1.55; margin-top: 0.9rem; }
-  #proposal-root [data-print-layout="stack"] [data-chapter-head] h2 { font-size: 2.4rem; }
+  #proposal-root [data-print-layout="stack"] [data-chapter-head] h2 { font-size: 2.1rem; }
 
   /* ── the cover ──────────────────────────────────────────────────────────
      One sheet exactly: type on the left, the photograph as a full-height plate
@@ -269,20 +269,30 @@ const PRINT_CSS = `
   #proposal-root [data-section="cost"] [data-chapter-body] { display: contents; }
   #proposal-root [data-section="cost"] [data-chapter-body] > * { grid-column: 2; }
   #proposal-root [data-section="cost"] [data-print-slot="battery"] { grid-column: 1 / -1; }
-  /* No battery programme means BatteryCredit renders nothing — and an empty
-     box carrying 'break-before: page' is a blank sheet in the middle of the
-     document, on every deal without a battery. */
-  #proposal-root [data-print-slot="battery"]:empty {
-    break-before: auto;
-    padding-top: 0;
+  /* The credit FOLLOWS the table rather than claiming a sheet of its own. It
+     used to force one, which on a deal whose table crosses a fold left the
+     table's last row alone on a page of its own with the credit overleaf —
+     three sheets to say what fits on two. It keeps itself whole instead, and
+     carries its own top inset so it stands clear whether it lands under the
+     table or at the top of the next sheet. */
+  #proposal-root [data-print-slot="battery"] {
+    break-inside: avoid;
+    padding-top: 0.32in;
   }
+  /* No battery programme means BatteryCredit renders nothing, and an empty box
+     must not leave a gap behind it. */
+  #proposal-root [data-print-slot="battery"]:empty { padding-top: 0; }
+
   #proposal-root [data-section="cost"] dl > div { padding-top: 0.7rem; padding-bottom: 0.7rem; }
   /* The price table may cross a fold. It carries 'break-inside-avoid' for the
      screen, and on a big enough deal that turns into two thirds of a dark sheet
      left empty so the whole table can start on the next one. Rows still avoid
      breaking (globals.css), so the fold lands between two of them — which is
-     what a long table on paper is supposed to do. */
+     what a long table on paper is supposed to do. The last row is held back
+     from being the one that crosses: the total of a price table, alone at the
+     top of a sheet, is the one row that must not be read on its own. */
   #proposal-root [data-section="cost"] dl { break-inside: auto; }
+  #proposal-root [data-section="cost"] dl > div:last-child { break-before: avoid; }
 
   /* ── chapter 5, the maths ───────────────────────────────────────────────
      The two futures are a COMPARISON and have to be read side by side; stacked
@@ -322,25 +332,41 @@ const PRINT_CSS = `
      Six steps down one column is nine inches of paper. Two columns is one
      sheet, with the impact figures still under them. */
   #proposal-root [data-print-slot="steps"] {
-    column-count: 2;
-    column-gap: 0.45in;
+    column-count: 3;
+    column-gap: 0.4in;
   }
   #proposal-root [data-print-slot="steps"] > li {
     break-inside: avoid;
-    padding-top: 0.3rem;
-    padding-bottom: 0.3rem;
+    padding-top: 0.15rem;
+    padding-bottom: 0.15rem;
   }
-  #proposal-root [data-print-slot="steps"] + p { margin-top: 0.75rem; }
+  /* The numbered disc is sized for a thumb on a tablet. On paper it is only a
+     number, and three rows of it were an inch of height the sheet needed. The
+     'who does it' chips are sized the same way: tap targets on a screen, a
+     caption on paper. */
+  #proposal-root [data-print-slot="steps"] > li > span {
+    width: 2.25rem;
+    height: 2.25rem;
+    font-size: 1rem;
+  }
+  #proposal-root [data-print-slot="steps"] ul { margin-top: 0.3rem; }
+  #proposal-root [data-print-slot="steps"] ul > li {
+    padding-top: 0.1rem;
+    padding-bottom: 0.1rem;
+  }
+  #proposal-root [data-print-slot="steps"] + p { margin-top: 0.4rem; }
 
   /* The four equivalences read BESIDE the sentence that introduces them rather
-     than as a band under it. Stacked they were the thirty pixels that pushed
-     this chapter onto a second sheet — and a second sheet carrying four numbers
-     is not a page, it is an accident. */
+     than as a band under it, and the home-value note runs full width below
+     both. Stacked the way the screen has them this chapter ran past the fold
+     and printed a sheet carrying one paragraph. */
   #proposal-root [data-section="timeline"] [data-print-tight] {
     display: grid;
-    grid-template-columns: 3.8in minmax(0, 1fr);
+    grid-template-columns: 4.6in minmax(0, 1fr);
     column-gap: 0.5in;
     align-items: start;
+    margin-top: 0.5rem !important;
+    padding-top: 0.5rem !important;
   }
   #proposal-root [data-section="timeline"] [data-print-tight] > h3,
   #proposal-root [data-section="timeline"] [data-print-tight] > p { grid-column: 1; }
@@ -349,7 +375,17 @@ const PRINT_CSS = `
     grid-row: 1 / span 2;
     margin-top: 0;
   }
-  #proposal-root [data-print-slot="uplift"] { grid-column: 1 / -1; }
+  #proposal-root [data-print-slot="uplift"] {
+    grid-column: 1 / -1;
+    break-inside: avoid;
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+  }
+  /* Set as the aside it is: a note about resale beside a percentage, at the
+     size the rest of the small print on this document uses. */
+  #proposal-root [data-print-slot="uplift"] p { max-width: none; }
+  #proposal-root [data-print-slot="uplift"] > div > p:first-child { font-size: 1.05rem; }
+  #proposal-root [data-print-slot="uplift"] > div > p + p { font-size: 0.875rem; line-height: 1.5; }
 
   /* ── chapter 7, the close ───────────────────────────────────────────────
      The signature block is the tallest thing on this sheet and the questions

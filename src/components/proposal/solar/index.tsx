@@ -729,7 +729,7 @@ export function SolarProposalView({
             chapter about what the household pays each month, and because a rep
             can turn that chapter off — the credit was priced into this deal
             either way and must not disappear with the table. */}
-        <div data-print-break data-print-slot="battery">
+        <div data-print-slot="battery">
           <BatteryCredit vpp={vpp} monthlyCents={option.monthlyCents} lender={f.lender} />
         </div>
 
