@@ -27,8 +27,24 @@ export async function planStarterAutomations(companyId: string): Promise<Planned
     orderBy: { isDefault: "desc" },
     include: { stages: { orderBy: { position: "asc" } } },
   });
-  const stage = (needle: string) =>
-    pipeline?.stages.find((s) => s.name.toLowerCase().includes(needle))?.id ?? null;
+  /**
+   * Match a stage by EXACT name, trying each candidate in turn.
+   *
+   * Deliberately not a substring match. Solar's pipeline carries "Install
+   * Scheduled" before "Installed", so `includes("install")` picks the stage
+   * where the crew has not turned up yet — a starter rule that generates the
+   * Certificate of Acceptance weeks early. A starter rule wired to the wrong
+   * milestone is worse than no starter rule, and an unmatched name simply
+   * drops the rule below.
+   */
+  const stage = (...candidates: string[]) => {
+    const stages = pipeline?.stages ?? [];
+    for (const want of candidates) {
+      const hit = stages.find((s) => s.name.toLowerCase() === want.toLowerCase());
+      if (hit) return hit.id;
+    }
+    return null;
+  };
 
   const checklists = await prisma.photoTemplate.findMany({
     where: { companyId },
@@ -38,8 +54,16 @@ export async function planStarterAutomations(companyId: string): Promise<Planned
 
   const planned: PlannedAutomation[] = [];
 
-  const installed = stage("install");
-  const inspection = stage("inspection");
+  const installed = stage("Installed", "Install Complete", "Installation Complete");
+  // Roofing seeds "QC Inspection"; solar's own stage is spelled
+  // "Building / Electrical Inspection". Both are named outright so each
+  // workspace actually gets the starter rule rather than silently skipping it.
+  const inspection = stage(
+    "QC Inspection",
+    "Building / Electrical Inspection",
+    "Inspection",
+    "Final Inspection"
+  );
 
   // The motivating example, and the one worth shipping switched on: the crew
   // finishes the photos, the report writes itself, the job moves.
