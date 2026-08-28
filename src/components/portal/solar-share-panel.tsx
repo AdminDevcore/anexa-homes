@@ -12,6 +12,7 @@ import {
   sendSolarProposalAction,
   setProposalComparisonAction,
 } from "@/server/modules/solar/proposal-actions";
+import { SolarInPersonSignButton } from "./solar-in-person-sign-button";
 
 /**
  * Getting the proposal to the customer, and choosing what they see when it
@@ -36,6 +37,7 @@ export function SolarSharePanel({
   publicToken,
   sentAt,
   viewedAt,
+  signedAt,
   showComparison,
   canEdit,
 }: {
@@ -48,6 +50,8 @@ export function SolarSharePanel({
   publicToken: string | null;
   sentAt: string | null;
   viewedAt: string | null;
+  /** Set once the customer has signed — there is nothing left to hand over. */
+  signedAt: string | null;
   showComparison: boolean;
   canEdit: boolean;
 }) {
@@ -174,6 +178,16 @@ export function SolarSharePanel({
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
               {copied ? "Copied" : "Copy link"}
             </Button>
+          )}
+          {/* The other half of getting a signature, and the half that closes
+              most of these deals: the homeowner is sitting right there. It
+              opens the customer's own link on this device with a witness token,
+              so the signature is recorded as taken in person. Offered whether
+              or not the proposal has been sent — a rep who built it at the
+              table has not emailed it, and making them send it to themselves
+              first would be ceremony. */}
+          {canEdit && !signedAt && (
+            <SolarInPersonSignButton proposalId={proposalId} />
           )}
           {!publicToken && (
             <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -410,5 +410,52 @@ const PRINT_CSS = `
   #proposal-root [data-colophon] > div { max-width: none; margin-bottom: 0.45in; }
   #proposal-root [data-colophon] [data-colophon-legal] { column-count: 2; column-gap: 0.6in; }
   #proposal-root [data-colophon] [data-colophon-legal] > * { break-inside: avoid; }
+
+  /* ── the certificate ────────────────────────────────────────────────────
+     Hidden on screen and revealed here — the ID selector outranks Tailwind's
+     'hidden', so nothing about it has to be arranged twice.
+
+     It is EVIDENCE, not a chapter: no rail, no min-height, no centring. It
+     starts where the proposal ends and runs as long as the trail is, which on a
+     deal that went out five times and was re-priced twice is honestly more than
+     one sheet. 'break-inside: auto' lets it fold between rows rather than
+     spilling a whole page to keep a table whole, and the header row repeats
+     across the fold so a continuation sheet is readable on its own.
+
+     Two columns of small print is right for the disclosures on the colophon and
+     wrong here: a certificate is checked line by line against another document,
+     and a reviewer should never have to work out which column continues where. */
+  #proposal-root [data-certificate] {
+    display: block;
+    break-before: page;
+    break-inside: auto;
+    /* Bottom inset as a MARGIN on the content, not padding on the section —
+       the same reason it is done that way for the chapters above. Padding
+       cannot be dropped at a fragmentation break, so a certificate whose trail
+       ends within half an inch of the fold opened another sheet to put its own
+       bottom padding on, and printed a page carrying one line of footnote. */
+    padding: 0.5in 0.6in 0;
+    background: #fff;
+  }
+  #proposal-root [data-certificate] > div { max-width: none; margin-bottom: 0.45in; }
+  /* The closing note belongs with the trail it closes. Alone at the top of a
+     sheet it reads as a page somebody forgot to delete. */
+  #proposal-root [data-certificate] > div > p:last-child { break-before: avoid; }
+  #proposal-root [data-certificate] table { break-inside: auto; }
+  #proposal-root [data-certificate] thead { display: table-header-group; }
+  #proposal-root [data-certificate] tr { break-inside: avoid; }
+  /* The groups above the trail are short and are read as units. */
+  #proposal-root [data-certificate] dl { break-inside: avoid; }
+
+  /* Set to fit ONE sheet for the ordinary document — generated, sent, opened,
+     signed. A deal shopped five times with two re-prices genuinely has more
+     history than a page holds and is allowed the second sheet; a four-event
+     trail spilling twenty pixels past the fold is not history, it is spacing. */
+  #proposal-root [data-certificate] h2 { font-size: 1.45rem; }
+  #proposal-root [data-certificate] > div > p { margin-top: 0.6rem; }
+  #proposal-root [data-certificate] [data-cert-group] { margin-top: 0.7rem; }
+  #proposal-root [data-certificate] dl > div { padding-top: 0.18rem; padding-bottom: 0.18rem; }
+  #proposal-root [data-certificate] table th,
+  #proposal-root [data-certificate] table td { padding-top: 0.28rem; padding-bottom: 0.28rem; }
 }
 `;

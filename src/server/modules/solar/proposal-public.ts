@@ -1,7 +1,12 @@
 import { prisma } from "@/server/db/client";
 import { runUnscoped, runInVertical, asActiveVertical } from "@/server/vertical/context";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import type { ProposalCertificate } from "@/lib/proposal-signature";
+import { isSignatureImage } from "@/lib/signature-image";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
+import { removeFiledCopies } from "./proposal-approval";
+import { SIGNATURE_SELECT, certificateFor } from "./proposal-signature";
+import { readWitness } from "./witness";
 
 /**
  * Statuses that make a proposal publicly readable.
@@ -38,10 +43,11 @@ export async function getPublicSolarProposal(token: string) {
       prisma.solarProposal.findUnique({
         where: { publicToken: token },
         select: {
-          id: true, leadId: true, companyId: true, version: true, status: true, signedAt: true,
+          id: true, leadId: true, companyId: true, version: true, status: true,
           sentAt: true, supersededAt: true, snapshot: true,
           showComparison: true, showPaymentOptions: true,
-          lead: { select: { vertical: true } },
+          ...SIGNATURE_SELECT,
+          lead: { select: { vertical: true, email: true } },
         },
       })
   );
@@ -81,10 +87,49 @@ export async function recordProposalView(token: string, ip: string | null) {
  * stipulations, and pushing unfunded deals into design spend is exactly what we
  * are avoiding.
  */
+export type AcceptInput = {
+  /** The name the signer typed. This is the name that goes on the document. */
+  name: string;
+  /** The mark, as a PNG data URL from the pad. */
+  signature: string;
+  /** How the mark was made. */
+  signatureType: "typed" | "drawn";
+  /**
+   * When the signer ticked the electronic-signature consent, as the browser
+   * saw it. Server-clamped — see `consentTimestamp`.
+   */
+  consentAtMs: number | null;
+  /** Minted by a rep opening an in-person session. See ./witness. */
+  witness?: string | null;
+  ip: string | null;
+  userAgent: string | null;
+};
+
+/**
+ * When the signer consented, as a timestamp this application is willing to put
+ * its name to.
+ *
+ * The browser's clock is the only thing that knows when the box was actually
+ * ticked, and the browser's clock is also the one thing in this transaction the
+ * customer can set to anything they like. So it is USED but BOUNDED: a consent
+ * that claims to be in the future, or older than the whole session could
+ * plausibly be, is discarded and the server's own time stands instead. A record
+ * saying "consented and signed in the same second" is weaker than one saying
+ * "consented two minutes earlier" and stronger than one quoting a fabricated
+ * time as fact.
+ */
+function consentTimestamp(claimedMs: number | null, now: Date): Date {
+  if (!claimedMs || !Number.isFinite(claimedMs)) return now;
+  const claimed = new Date(claimedMs);
+  if (claimed > now) return now;
+  if (now.getTime() - claimed.getTime() > 6 * 60 * 60 * 1000) return now;
+  return claimed;
+}
+
 export async function acceptSolarProposal(
   token: string,
-  meta: { name: string; ip: string | null }
-): Promise<{ ok: boolean; error?: string }> {
+  meta: AcceptInput
+): Promise<{ ok: boolean; error?: string; certificate?: ProposalCertificate }> {
   // getPublicSolarProposal already refuses anything not sent, so acceptance is
   // unreachable for a draft or an internally-generated preview.
   const proposal = await getPublicSolarProposal(token);
@@ -94,14 +139,57 @@ export async function acceptSolarProposal(
   }
   if (proposal.signedAt) return { ok: false, error: "This proposal has already been accepted." };
 
+  // Validated HERE and not only in the form. The form is a convenience; this
+  // endpoint is public and its only authorization is the share token, so
+  // everything it stores has to be checked as if it arrived by hand.
+  const name = meta.name.trim().replace(/\s+/g, " ").slice(0, 120);
+  if (name.length < 2) return { ok: false, error: "Please type your full name." };
+  if (meta.signatureType !== "typed" && meta.signatureType !== "drawn") {
+    return { ok: false, error: "That signature could not be read. Please sign again." };
+  }
+  // A raster data URL and nothing else. An SVG would be a script tag in a
+  // picture, rendered back into the rep's portal and the lender's PDF.
+  if (!isSignatureImage(meta.signature)) {
+    return { ok: false, error: "That signature could not be read. Please sign again." };
+  }
+  if (!meta.consentAtMs) {
+    return { ok: false, error: "Please agree to sign electronically before signing." };
+  }
+
+  // Only a token minted by a signed-in rep for THIS proposal makes it in
+  // person. A forged or expired one is not an error — the customer really did
+  // sign — it simply records the weaker, provable claim.
+  const hostId = readWitness(meta.witness, proposal.id);
+
+  const now = new Date();
   const vertical = asActiveVertical(proposal.lead.vertical);
   await runInVertical(vertical, async () => {
     await prisma.solarProposal.update({
       where: { id: proposal.id },
       data: {
         status: "signed",
-        signedAt: new Date(),
-        events: { create: { type: "signed", actorName: meta.name, ip: meta.ip } },
+        signedAt: now,
+        signatureData: meta.signature,
+        signatureType: meta.signatureType,
+        signerName: name,
+        // The mailbox the link went to, copied at signing time. The lead's
+        // address can be edited afterwards; what the certificate has to say is
+        // where the document was delivered when it was signed.
+        signerEmail: proposal.lead.email,
+        signedIp: meta.ip,
+        signedUserAgent: meta.userAgent?.slice(0, 500) ?? null,
+        consentAt: consentTimestamp(meta.consentAtMs, now),
+        signedVia: hostId ? "in_person" : "remote",
+        signedHostId: hostId,
+        events: {
+          create: {
+            type: "signed",
+            actorId: hostId,
+            actorName: name,
+            ip: meta.ip,
+            detail: hostId ? "in person, on a representative's device" : "remotely, from the customer's link",
+          },
+        },
       },
     });
 
@@ -130,19 +218,66 @@ export async function acceptSolarProposal(
       await recordStageEntry({ leadId: proposal.leadId, stageId: stage.id, stage });
     }
 
-    const { companyId } = await prisma.solarProposal.findUniqueOrThrow({
-      where: { id: proposal.id },
-      select: { companyId: true },
-    });
     await prisma.activityLog.create({
       data: {
-        companyId,
+        companyId: co,
         type: "system",
-        message: `${meta.name} accepted solar proposal v${proposal.version}`,
+        message: `${name} signed solar proposal v${proposal.version}${hostId ? " in person" : ""}`,
         leadId: proposal.leadId,
       },
     });
   });
 
-  return { ok: true };
+  // THE FILED COPY IS NOW OUT OF DATE, and this is the case the whole feature
+  // exists for. If this version was already approved, the PDF sitting in the
+  // deal's Proposal folder was rendered before the signature — an unsigned copy
+  // of a signed proposal, which is precisely the document the lender will not
+  // take. It is removed rather than left in place: the row then reads "Copy not
+  // filed" with its Retry beside it, and one press re-renders it WITH the
+  // signature and the certificate page. Leaving the stale file would be worse
+  // than having none, because nothing on the deal would say it was stale.
+  await staleFiledCopy(proposal.id);
+
+  /**
+   * The whole signing record, handed straight back.
+   *
+   * NOT a bare "ok" with the page left to re-fetch. A refresh here re-runs the
+   * public read — which logs a VIEW — so the certificate of a proposal signed
+   * seconds ago carried a line saying the customer opened it at the moment they
+   * signed it. Nothing opened it: the application did, to find out what it had
+   * just written. Returning the record means the document has everything it
+   * needs without asking, and the trail says only what actually happened.
+   */
+  return { ok: true, certificate: (await certificateFor(proposal.id)) ?? undefined };
+}
+
+/**
+ * Drop the pre-signature PDF from the deal's Proposal folder.
+ *
+ * Best effort and never fatal: a homeowner who has just signed must not be
+ * shown an error because a housekeeping step failed. The signature is
+ * committed by the time this runs, and the worst outcome of it failing is a
+ * stale file somebody re-files by hand.
+ */
+async function staleFiledCopy(proposalId: string): Promise<void> {
+  try {
+    const row = await runUnscoped(
+      "proposal signed: retire the copy filed before the signature existed",
+      () =>
+        prisma.solarProposal.findUnique({
+          where: { id: proposalId },
+          select: { companyId: true, approvedAt: true, approvedFileId: true },
+        })
+    );
+    if (!row?.approvedAt || !row.approvedFileId) return;
+    await runUnscoped("proposal signed: clear the stale filed copy", async () => {
+      await prisma.solarProposal.update({
+        where: { id: proposalId },
+        data: { approvedFileId: null },
+      });
+      await removeFiledCopies(row.companyId, [row.approvedFileId!]);
+    });
+  } catch {
+    /* non-fatal — see above */
+  }
 }

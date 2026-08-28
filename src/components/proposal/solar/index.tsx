@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Leaf, TreePine, Factory, Car, Check, Lock } from "lucide-react";
+import { Leaf, TreePine, Factory, Car, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SolarProposalSnapshot, ProposalPaymentOption } from "@/lib/solar-proposal";
+import type { ProposalCertificate } from "@/lib/proposal-signature";
 import {
   SOLAR_TIMELINE,
   SOLAR_FAQS,
@@ -27,6 +28,8 @@ import { Chapter, Stat, SpecList, DarkRow, EquipCard, Impact, SourceLink, Contac
 import { Cover, BillSwap } from "./cover";
 import { CumulativeCostChart } from "./chart";
 import { AcceptForm } from "./accept";
+import { ExecutionBlock } from "./signature-block";
+import { SignatureCertificate } from "./certificate";
 import { PrintStyles } from "./print";
 import { useDeckKeys } from "./deck";
 
@@ -140,6 +143,7 @@ export function SolarProposalView({
   snapshot,
   token,
   alreadySigned,
+  certificate = null,
   superseded,
   previewMode = false,
   layoutImageUrl = null,
@@ -186,6 +190,16 @@ export function SolarProposalView({
    */
   rep?: RepContext | null;
   alreadySigned: boolean;
+  /**
+   * The signature and the signing record, when the proposal has been signed.
+   *
+   * Resolved by the CALLER, because the three doors onto this document find the
+   * proposal three different ways. Null means unsigned — except on a proposal
+   * accepted before signatures were captured, where `alreadySigned` is true and
+   * this is still null, and the document says so rather than offering a
+   * signature box to somebody who has already accepted.
+   */
+  certificate?: ProposalCertificate | null;
   superseded: boolean;
   /**
    * Where to fetch the panel layout, resolved by the CALLER. Null means the
@@ -222,7 +236,24 @@ export function SolarProposalView({
     setLive({ snapshot, version: rep?.version ?? 0 });
   }
   const s = live.snapshot;
-  const [signed, setSigned] = React.useState(alreadySigned);
+  /**
+   * The signing record under the customer's eyes.
+   *
+   * Held as STATE and seeded from the server's answer, because the moment
+   * somebody signs, the block has to appear where the form was — a page reload
+   * at a kitchen table is a blank screen in the middle of a handshake. The
+   * signing action returns the whole record, so no refresh is needed and the
+   * certificate is complete the instant the mark is applied.
+   */
+  const [record, setRecord] = React.useState<ProposalCertificate | null>(certificate);
+  const [seenCert, setSeenCert] = React.useState(certificate);
+  if (seenCert !== certificate) {
+    setSeenCert(certificate);
+    setRecord(certificate);
+  }
+  const signature = record?.signature ?? null;
+  /** Signed at all — true for old acceptances that carry no mark. */
+  const signed = !!signature || alreadySigned;
 
   const options = React.useMemo(() => paymentOptions(s), [s]);
   const [optionKey, setOptionKey] = React.useState(options[0].key);
@@ -1218,20 +1249,51 @@ export function SolarProposalView({
           <div data-chapter-body className="mt-10">
           <div className="max-w-xl">
             {signed ? (
-              <div className="flex items-center gap-3 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-6 text-emerald-100">
-                <Check className="size-5 shrink-0" />
-                Accepted — thank you. Your consultant will be in touch to book the site survey.
+              <div className="space-y-4">
+                {/* The signature goes ON the document. What used to be here was
+                    a thank-you panel, which meant a signed proposal and an
+                    unsigned one printed to identical PDFs — and the lender
+                    cannot take a proposal it has no way of telling was
+                    signed. */}
+                <ExecutionBlock
+                  signature={
+                    signature ?? {
+                      // Accepted before signatures were captured. The block says
+                      // exactly that rather than inventing a mark for it.
+                      name: s.customer.name,
+                      email: null,
+                      mark: null,
+                      method: null,
+                      signedAt: new Date().toISOString(),
+                      consentAt: null,
+                      via: null,
+                      hostName: null,
+                    }
+                  }
+                />
+                <p className="text-sm text-neutral-400 print:hidden">
+                  Thank you. Your consultant will be in touch to book the site survey.
+                </p>
               </div>
             ) : superseded ? (
               <p className="text-neutral-400">
-                This version has been replaced and can no longer be accepted.
+                This version has been replaced and can no longer be signed.
               </p>
             ) : previewMode ? (
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-neutral-400 print:hidden">
-                Acceptance is disabled in preview. The customer would sign here.
+                Signing is disabled in preview. The customer would sign here.
               </div>
             ) : (
-              <AcceptForm token={token} onSigned={() => setSigned(true)} />
+              <AcceptForm
+                token={token}
+                /* The action hands back the whole signing record, so the mark
+                   AND the certificate behind it are in place the moment this
+                   returns. No refresh — a refresh re-runs the public read,
+                   which logs a view, and the certificate of a proposal signed
+                   seconds ago then carried a line claiming the customer opened
+                   it at the instant they signed. */
+                onSigned={setRecord}
+              />
             )}
           </div>
 
@@ -1360,6 +1422,11 @@ export function SolarProposalView({
           </div>
         </div>
       </footer>
+
+      {/* ── THE CERTIFICATE ────────────────────────────────────────────────
+          The sheet a lender's file reviewer looks for. Print-only, and last:
+          it is evidence about the document, not part of it. */}
+      {record && <SignatureCertificate certificate={record} />}
 
       {/* The rep's controls. Never rendered on the customer's copy — see the
           `rep` prop. */}

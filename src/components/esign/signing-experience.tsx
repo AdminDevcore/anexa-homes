@@ -14,6 +14,7 @@ import { fillTokens, type AutofillContext } from "@/server/modules/esign/autofil
 import type { Snapshot, SnapshotField } from "@/server/modules/esign/pdf";
 import { deriveInitials, mapAdoptedToFields, type AdoptedSignature } from "@/lib/esign-signature";
 import { PdfCanvas } from "./pdf-canvas";
+import { cursiveImage } from "@/lib/signature-image";
 
 type Props = {
   token: string;
@@ -295,19 +296,6 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
       )}
     </div>
   );
-}
-
-/** Render text in the signature cursive font to a PNG data URL. */
-function cursiveImage(text: string, width = 600, height = 200): string {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const c = canvas.getContext("2d")!;
-  c.fillStyle = "#0B0B0C";
-  c.font = `${Math.round(height * 0.32)}px 'Brush Script MT', cursive`;
-  c.textBaseline = "middle";
-  c.fillText(text, 20, height / 2);
-  return canvas.toDataURL("image/png");
 }
 
 function SignaturePad({

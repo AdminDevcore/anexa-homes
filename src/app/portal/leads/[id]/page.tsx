@@ -347,7 +347,7 @@ export default async function LeadDetailPage({
           orderBy: { version: "desc" },
           select: {
             id: true, version: true, status: true, publicToken: true, supersededAt: true,
-            sentAt: true, viewedAt: true, signedAt: true, createdAt: true,
+            sentAt: true, viewedAt: true, signedAt: true, signerName: true, createdAt: true,
             showComparison: true,
             approvedAt: true, approvedFileId: true, approvedById: true,
           },
@@ -1487,6 +1487,7 @@ export default async function LeadDetailPage({
                       sentAt: v.sentAt?.toISOString() ?? null,
                       viewedAt: v.viewedAt?.toISOString() ?? null,
                       signedAt: v.signedAt?.toISOString() ?? null,
+          signerName: v.signerName,
                       createdAt: v.createdAt.toISOString(),
                       showComparison: v.showComparison,
                       approvedAt: v.approvedAt?.toISOString() ?? null,

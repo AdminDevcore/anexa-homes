@@ -10,6 +10,7 @@ import type { RepContext } from "@/components/proposal/rep-bar";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { adderAmountCents, catalogueBasis } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
+import { certificateFor } from "@/server/modules/solar/proposal-signature";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 export const dynamic = "force-dynamic";
@@ -168,6 +169,10 @@ export default async function SolarProposalPreviewPage({
         // nothing for one to authorize, and it stays out of the page source.
         token=""
         alreadySigned={!!proposal.signedAt}
+        // So a rep checking their own work sees the executed document, not the
+        // signing form — and printing from here produces the same certificate
+        // the customer's copy carries.
+        certificate={await certificateFor(proposal.id)}
         superseded={!!proposal.supersededAt}
         previewMode
         layoutImageUrl={layoutImageUrl}

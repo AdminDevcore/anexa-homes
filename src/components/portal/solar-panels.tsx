@@ -1454,6 +1454,8 @@ export type ProposalVersion = {
   status: string;
   /** NULL until the proposal is sent — an unsent one has no public link. */
   publicToken: string | null;
+  /** The name the customer signed under, for the row. Null until signed. */
+  signerName: string | null;
   supersededAt: string | null;
   sentAt: string | null;
   viewedAt: string | null;
@@ -1572,6 +1574,7 @@ export function SolarProposalGate({
           publicToken={current.publicToken}
           sentAt={current.sentAt}
           viewedAt={current.viewedAt}
+          signedAt={current.signedAt}
           showComparison={current.showComparison}
           canEdit={canEdit}
         />
@@ -1736,7 +1739,9 @@ export function ProposalVersionList({
               <span className="flex-1 text-[11px] text-muted-foreground">
                 {new Date(v.createdAt).toLocaleDateString()}
                 {v.viewedAt ? " · viewed" : ""}
-                {v.signedAt ? ` · accepted ${new Date(v.signedAt).toLocaleDateString()}` : ""}
+                {v.signedAt
+                  ? ` · signed by ${v.signerName ?? "the customer"} ${new Date(v.signedAt).toLocaleDateString()}`
+                  : ""}
                 {isApproved && v.approvedByName ? ` · approved by ${v.approvedByName}` : ""}
               </span>
 

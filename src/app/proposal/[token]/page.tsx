@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { objectExists } from "@/server/storage";
 import { runUnscoped } from "@/server/vertical/context";
 import { brandingForRecord } from "@/server/branding/resolve";
+import { certificateFor } from "@/server/modules/solar/proposal-signature";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,9 @@ export default async function PublicSolarProposalPage({
       showPaymentOptions={proposal.showPaymentOptions}
       token={token}
       alreadySigned={!!proposal.signedAt}
+      // The signature and the record behind it. Null until somebody signs, and
+      // the source of the execution block the customer sees afterwards.
+      certificate={await certificateFor(proposal.id)}
       superseded={!!proposal.supersededAt}
       layoutImageUrl={layoutImageUrl}
       // The token-scoped imagery route. Passed only when the snapshot froze a

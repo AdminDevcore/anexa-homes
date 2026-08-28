@@ -3671,6 +3671,49 @@ model SolarProposal {
   /// The e-sign envelope, once sent for signature.
   documentPackageId String?
 
+  /**
+   * THE CUSTOMER'S SIGNATURE, and the evidence standing behind it.
+   *
+   * `signedAt` on its own recorded that somebody typed a name into a box. That
+   * is enough to move a deal and nothing like enough to hand a lender: Amos
+   * asks for a signed proposal, and a document whose acceptance leaves no mark
+   * on the paper is one nobody outside this application can verify.
+   *
+   * So the signature is a MARK, held here as a PNG data URL — drawn with a
+   * finger or set from the typed name — and rendered into the document's
+   * execution block and onto the filed PDF. Everything beside it is the ESIGN /
+   * UETA record: who signed, that they consented to sign electronically before
+   * they did, when, and from where.
+   *
+   * COLUMNS, NOT SNAPSHOT. The snapshot is what this customer was quoted and
+   * must never move. A signature is something that happens TO that document
+   * afterwards; writing it into the frozen JSON would rewrite the thing being
+   * signed at the moment of signing.
+   */
+  /// The mark itself: a PNG data URL. NULL on every proposal signed before
+  /// signatures were captured, which reads as "accepted, no mark on file".
+  signatureData   String?        @db.Text
+  /// How the mark was made — drawn with a finger, or set from the typed name.
+  signatureType   SignatureType?
+  /// The name the signer gave, as they typed it. Not the lead's name: the
+  /// person at the table is who signed, and they are not always the record.
+  signerName      String?
+  /// The address the proposal was delivered to, copied at signing time so the
+  /// certificate can say which mailbox the link went to.
+  signerEmail     String?
+  signedIp        String?
+  signedUserAgent String?
+  /// Explicit consent to sign electronically, captured BEFORE the signature.
+  /// ESIGN wants the agreement to transact electronically to be its own
+  /// affirmative act, not something implied by pressing the button.
+  consentAt       DateTime?
+  /// "remote" — the customer opened their own link — or "in_person", where a
+  /// rep handed over their device at the table. Both are the customer's
+  /// signature; the certificate names which, because they are different claims.
+  signedVia       String?
+  /// The rep whose device hosted an in-person signing. NULL for remote.
+  signedHostId    String?
+
   createdById String?
   sentAt      DateTime?
   viewedAt    DateTime?

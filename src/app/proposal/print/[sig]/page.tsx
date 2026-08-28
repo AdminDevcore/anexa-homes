@@ -5,6 +5,7 @@ import { prisma } from "@/server/db/client";
 import { objectExists } from "@/server/storage";
 import { runUnscoped } from "@/server/vertical/context";
 import { brandingForRecord } from "@/server/branding/resolve";
+import { certificateFor } from "@/server/modules/solar/proposal-signature";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Proposal", robots: { index: false, follow: false } };
@@ -55,6 +56,10 @@ export default async function ProposalPrintPage({
       token=""
       previewMode
       alreadySigned={!!proposal.signedAt}
+      // THE WHOLE POINT OF THE FEATURE ON THIS ROUTE. This render is what the
+      // filed PDF is, and what goes to the lender: without the certificate the
+      // file carries a signature and no way to check it.
+      certificate={await certificateFor(proposal.id)}
       // Not passed as superseded even when it is. A version approved after
       // being superseded is precisely the case this feature exists for, and
       // stamping "this is out of date" across the copy of what was sold would
