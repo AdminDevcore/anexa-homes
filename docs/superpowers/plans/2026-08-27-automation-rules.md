@@ -12,6 +12,34 @@
 
 ---
 
+## Corrections found during execution
+
+Three things the tests taught us that the tasks below predate. Where a later
+task disagrees with this section, this section wins.
+
+1. **The engine establishes the workspace, not the caller.** `AutomationRule`,
+   `Lead` and `Project` are all vertical-scoped, so an action called with no
+   ambient vertical throws `MissingVerticalContextError`. `runAutomations`
+   wraps its whole body in `runInVertical(asActiveVertical(args.vertical), …)`.
+   Consequences: the cron in Task 11 does NOT need its own wrapper, and any
+   test calling an action directly must wrap it (see
+   `__tests__/stage-actions.itest.ts`).
+
+2. **Chaining goes through `StepResult.follow`.** An action whose own effect is
+   a trigger — `move_stage` landing in a stage IS `stage_entered` — reports
+   `follow: { trigger, payload }` and the engine re-enters at `depth + 1`. The
+   action must never call the engine itself: the engine imports the registry,
+   so that would be an import cycle. `follow` is stripped before the step is
+   stored.
+
+3. **Reporting a failure is lazily imported and guarded.** The notification
+   engine reaches branding → session helpers → next-auth, a graph the cron has
+   no use for and vitest cannot resolve. `notifyFailure` uses
+   `await import(...)` inside a try/catch; the `AutomationRun` row is the
+   business record and survives the notifier being unavailable.
+
+---
+
 ## Before you start
 
 Read the spec. Then read these three files — the plan assumes you know them:
@@ -2481,8 +2509,7 @@ Copy its authorisation check (the `CRON_SECRET` bearer check) exactly. Do not in
 ```ts
 // src/app/api/cron/automations/route.ts
 import { NextResponse } from "next/server";
-import { PrismaClient, type Vertical } from "@prisma/client";
-import { runInVertical } from "@/server/vertical/context";
+import { PrismaClient } from "@prisma/client";
 import { runAutomations } from "@/server/modules/automations/engine";
 
 export const dynamic = "force-dynamic";
@@ -2537,15 +2564,15 @@ export async function GET(req: Request) {
 
       for (const s of stuck) {
         const days = Math.floor((Date.now() - s.enteredAt.getTime()) / (24 * 60 * 60 * 1000));
-        await runInVertical(rule.vertical as Vertical, async () => {
-          await runAutomations({
-            companyId: rule.companyId,
-            vertical: rule.vertical as Vertical,
-            trigger: "stage_age_exceeded",
-            leadId: s.leadId,
-            payload: { stageId: cond.stageId, days },
-            depth: 0,
-          });
+        // No runInVertical here: the engine establishes the workspace itself
+        // from the vertical passed in. See Corrections, item 1.
+        await runAutomations({
+          companyId: rule.companyId,
+          vertical: rule.vertical,
+          trigger: "stage_age_exceeded",
+          leadId: s.leadId,
+          payload: { stageId: cond.stageId, days },
+          depth: 0,
         });
         fired++;
       }
