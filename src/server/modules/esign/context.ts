@@ -10,6 +10,35 @@ import { buildAutofillContext, type AutofillContext } from "./autofill";
  * session. Moved verbatim; nothing here changed but the `export` keywords.
  */
 
+/**
+ * The company identity the autofill context needs. Selected in one place so a
+ * new Company token can never be added to the catalog and then arrive empty
+ * because one of the four query sites still asked for the name alone.
+ */
+export const COMPANY_CTX_SELECT = {
+  name: true,
+  phone: true,
+  email: true,
+  website: true,
+  address: true,
+  city: true,
+  state: true,
+  zip: true,
+  einTaxId: true,
+} as const;
+
+export type CompanyForCtx = {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  einTaxId?: string | null;
+};
+
 // Shared include so view + generate fetch every field the autofill context needs.
 export const LEAD_CTX_INCLUDE = {
   source: { select: { name: true } },
@@ -51,7 +80,7 @@ export type LeadForCtx = {
   } | null;
 };
 
-export function ctxForLead(lead: LeadForCtx, companyName: string): AutofillContext {
+export function ctxForLead(lead: LeadForCtx, company: CompanyForCtx): AutofillContext {
   const custom: Record<string, string> = {};
   const merge = (obj: unknown) => {
     if (obj && typeof obj === "object") {
@@ -81,7 +110,15 @@ export function ctxForLead(lead: LeadForCtx, companyName: string): AutofillConte
     leadSource: lead.source?.name,
     leadCreatedAt: lead.createdAt,
     leadStatus: lead.status,
-    companyName,
+    companyName: company.name,
+    companyPhone: company.phone,
+    companyEmail: company.email,
+    companyWebsite: company.website,
+    companyStreet: company.address,
+    companyCity: company.city,
+    companyState: company.state,
+    companyZip: company.zip,
+    companyEin: company.einTaxId,
     custom,
   });
 }

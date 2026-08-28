@@ -2,7 +2,12 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { getObject, putObject } from "@/server/storage";
-import { ctxForLead, LEAD_CTX_INCLUDE, type LeadForCtx } from "@/server/modules/esign/context";
+import {
+  COMPANY_CTX_SELECT,
+  ctxForLead,
+  LEAD_CTX_INCLUDE,
+  type LeadForCtx,
+} from "@/server/modules/esign/context";
 import { generateSignedPdf, type Snapshot, type SnapshotField } from "@/server/modules/esign/pdf";
 import type { ActionContext, AutomationActionModule, StepResult } from "../types";
 
@@ -48,7 +53,7 @@ export const generateDocumentAction: AutomationActionModule = {
 
     const company = await prisma.company.findUnique({
       where: { id: ctx.companyId },
-      select: { name: true },
+      select: COMPANY_CTX_SELECT,
     });
 
     const snapshot: Snapshot = {
@@ -84,7 +89,7 @@ export const generateDocumentAction: AutomationActionModule = {
     const buffer = await generateSignedPdf({
       title: template.name,
       snapshot,
-      ctx: ctxForLead(lead as unknown as LeadForCtx, company?.name ?? ""),
+      ctx: ctxForLead(lead as unknown as LeadForCtx, company ?? { name: "" }),
       values: {},
       sourcePdf,
       signers: [],

@@ -7,7 +7,18 @@ export type AutofillContext = {
   // `address` kept as an alias of property.full for backward-compatible templates.
   project: { number: string; address: string; type: string; stage: string; value: string; rep: string; pm: string };
   lead: { source: string; createdDate: string; status: string };
-  company: { name: string; phone: string };
+  company: {
+    name: string;
+    phone: string;
+    email: string;
+    website: string;
+    street: string;
+    city: string;
+    state: string;
+    zip: string;
+    full: string;
+    ein: string;
+  };
   today: string;
   custom: Record<string, string>;
 };
@@ -37,9 +48,22 @@ export function buildAutofillContext(a: {
   leadStatus?: string | null;
   companyName: string;
   companyPhone?: string | null;
+  companyEmail?: string | null;
+  companyWebsite?: string | null;
+  companyStreet?: string | null;
+  companyCity?: string | null;
+  companyState?: string | null;
+  companyZip?: string | null;
+  companyEin?: string | null;
   custom?: Record<string, string>;
 }): AutofillContext {
   const full = [a.street, [a.city, a.state, a.zip].filter(Boolean).join(", ")].filter(Boolean).join(", ");
+  const companyFull = [
+    a.companyStreet,
+    [a.companyCity, a.companyState, a.companyZip].filter(Boolean).join(", "),
+  ]
+    .filter(Boolean)
+    .join(", ");
   return {
     customer: {
       fullName: `${a.firstName} ${a.lastName}`.trim(),
@@ -64,7 +88,18 @@ export function buildAutofillContext(a: {
       createdDate: a.leadCreatedAt ? formatDate(a.leadCreatedAt) : "",
       status: a.leadStatus ? titleCase(a.leadStatus) : "",
     },
-    company: { name: a.companyName, phone: a.companyPhone ?? "" },
+    company: {
+      name: a.companyName,
+      phone: a.companyPhone ?? "",
+      email: a.companyEmail ?? "",
+      website: a.companyWebsite ?? "",
+      street: a.companyStreet ?? "",
+      city: a.companyCity ?? "",
+      state: a.companyState ?? "",
+      zip: a.companyZip ?? "",
+      full: companyFull,
+      ein: a.companyEin ?? "",
+    },
     today: formatDate(new Date()),
     custom: a.custom ?? {},
   };
@@ -119,6 +154,14 @@ export const BASE_CATALOG: CatalogEntry[] = [
   { group: "Lead", token: "{{lead.status}}", label: "Lead status", sample: "Open" },
   { group: "Company", token: "{{company.name}}", label: "Company name", sample: "Your Company" },
   { group: "Company", token: "{{company.phone}}", label: "Company phone", sample: "(866) 650-9996" },
+  { group: "Company", token: "{{company.email}}", label: "Company email", sample: "office@example.com" },
+  { group: "Company", token: "{{company.website}}", label: "Website", sample: "example.com" },
+  { group: "Company", token: "{{company.street}}", label: "Street address", sample: "500 Main Street" },
+  { group: "Company", token: "{{company.city}}", label: "City", sample: "Dallas" },
+  { group: "Company", token: "{{company.state}}", label: "State", sample: "TX" },
+  { group: "Company", token: "{{company.zip}}", label: "ZIP", sample: "75201" },
+  { group: "Company", token: "{{company.full}}", label: "Full address", sample: "500 Main Street, Dallas, TX, 75201" },
+  { group: "Company", token: "{{company.ein}}", label: "EIN / Tax ID", sample: "88-1234567" },
   { group: "Date", token: "{{today}}", label: "Today's date", sample: formatDate(new Date()) },
 ];
 

@@ -13,7 +13,7 @@ import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { generateSignerToken, sha256 } from "./tokens";
 import { appendDocumentEvent } from "./audit";
 import { buildAutofillContext, type AutofillContext } from "./autofill";
-import { ctxForLead, LEAD_CTX_INCLUDE } from "./context";
+import { COMPANY_CTX_SELECT, ctxForLead, LEAD_CTX_INCLUDE, type CompanyForCtx } from "./context";
 import {
   generateSignedPdf,
   type Snapshot,
@@ -285,7 +285,7 @@ export async function resendSignatureRequest(user: SessionUser, packageId: strin
     where: { AND: [{ id: packageId }, scope] },
     include: {
       signers: { orderBy: { order: "asc" } },
-      company: { select: { name: true } },
+      company: { select: COMPANY_CTX_SELECT },
     },
   });
   if (!pkg) throw new Error("Document not found.");
@@ -373,7 +373,7 @@ async function loadViewByToken(rawToken: string) {
     include: {
       package: {
         include: {
-          company: { select: { name: true } },
+          company: { select: COMPANY_CTX_SELECT },
           lead: { include: LEAD_CTX_INCLUDE },
           signers: { orderBy: { order: "asc" } },
         },
@@ -384,7 +384,7 @@ async function loadViewByToken(rawToken: string) {
 
   const pkg = signer.package;
   const snapshot = pkg.snapshot as unknown as Snapshot;
-  const ctx = pkg.lead ? ctxForLead(pkg.lead, pkg.company.name) : null;
+  const ctx = pkg.lead ? ctxForLead(pkg.lead, pkg.company) : null;
   const signerFields = (snapshot.fields ?? []).filter((f) => f.signerRole === signer.role);
 
   let state: SigningState = "active";
@@ -612,7 +612,7 @@ async function finalizePackage(packageId: string) {
   const pkg = await prisma.documentPackage.findUnique({
     where: { id: packageId },
     include: {
-      company: { select: { name: true } },
+      company: { select: COMPANY_CTX_SELECT },
       lead: { include: LEAD_CTX_INCLUDE },
       signers: { orderBy: { order: "asc" } },
       values: true,
@@ -622,7 +622,7 @@ async function finalizePackage(packageId: string) {
   if (!pkg || !pkg.lead) return;
 
   const snapshot = pkg.snapshot as unknown as Snapshot;
-  const ctx = ctxForLead(pkg.lead, pkg.company.name);
+  const ctx = ctxForLead(pkg.lead, pkg.company);
 
   const values: Record<string, FilledValue> = {};
   for (const v of pkg.values) {
@@ -818,7 +818,7 @@ export async function generatePackagePdf(
   const pkg = await prisma.documentPackage.findFirst({
     where: { AND: [{ id: packageId }, scope] },
     include: {
-      company: { select: { name: true } },
+      company: { select: COMPANY_CTX_SELECT },
       lead: { include: LEAD_CTX_INCLUDE },
       signers: { orderBy: { order: "asc" } },
       values: true,
@@ -828,7 +828,7 @@ export async function generatePackagePdf(
   if (!pkg || !pkg.lead) return null;
 
   const snapshot = pkg.snapshot as unknown as Snapshot;
-  const ctx = ctxForLead(pkg.lead, pkg.company.name);
+  const ctx = ctxForLead(pkg.lead, pkg.company);
   const values: Record<string, FilledValue> = {};
   for (const v of pkg.values) values[v.fieldKey] = { value: v.value ?? "", type: v.type as FilledValue["type"] };
 
@@ -857,7 +857,7 @@ export async function generatePackagePdf(
 
 // A realistic sample record so a template preview shows what an auto-filled,
 // signed document will look like.
-function sampleCtx(companyName: string): AutofillContext {
+function sampleCtx(company: CompanyForCtx): AutofillContext {
   return buildAutofillContext({
     firstName: "Nancy",
     lastName: "Moore",
@@ -877,7 +877,15 @@ function sampleCtx(companyName: string): AutofillContext {
     leadSource: "Referral",
     leadCreatedAt: new Date(),
     leadStatus: "open",
-    companyName,
+    companyName: company.name,
+    companyPhone: company.phone,
+    companyEmail: company.email,
+    companyWebsite: company.website,
+    companyStreet: company.address,
+    companyCity: company.city,
+    companyState: company.state,
+    companyZip: company.zip,
+    companyEin: company.einTaxId,
     custom: {},
   });
 }
@@ -893,7 +901,7 @@ export async function generateTemplatePreviewPdf(
 ): Promise<{ buffer: Buffer; filename: string } | null> {
   const template = await prisma.documentTemplate.findFirst({
     where: { id: templateId, companyId: user.companyId },
-    include: { fields: true, company: { select: { name: true } } },
+    include: { fields: true, company: { select: COMPANY_CTX_SELECT } },
   });
   if (!template) return null;
 
@@ -916,7 +924,7 @@ export async function generateTemplatePreviewPdf(
     })),
   };
 
-  const ctx = sampleCtx(template.company.name);
+  const ctx = sampleCtx(template.company);
   // Sample values for fields the signer would fill, so the preview isn't blank.
   const values: Record<string, FilledValue> = {};
   for (const f of template.fields) {
