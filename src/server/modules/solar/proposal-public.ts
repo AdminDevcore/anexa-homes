@@ -1,10 +1,11 @@
 import { prisma } from "@/server/db/client";
 import { runUnscoped, runInVertical, asActiveVertical } from "@/server/vertical/context";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import type { ActiveVertical } from "@/lib/vertical";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
 import { isSignatureImage } from "@/lib/signature-image";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
-import { removeFiledCopies } from "./proposal-approval";
+import { approveProposalVersion } from "./proposal-approval";
 import { SIGNATURE_SELECT, certificateFor } from "./proposal-signature";
 import { readWitness } from "./witness";
 
@@ -228,15 +229,19 @@ export async function acceptSolarProposal(
     });
   });
 
-  // THE FILED COPY IS NOW OUT OF DATE, and this is the case the whole feature
-  // exists for. If this version was already approved, the PDF sitting in the
-  // deal's Proposal folder was rendered before the signature — an unsigned copy
-  // of a signed proposal, which is precisely the document the lender will not
-  // take. It is removed rather than left in place: the row then reads "Copy not
-  // filed" with its Retry beside it, and one press re-renders it WITH the
-  // signature and the certificate page. Leaving the stale file would be worse
-  // than having none, because nothing on the deal would say it was stale.
-  await staleFiledCopy(proposal.id);
+  // THE SIGNED VERSION IS NOW THE APPROVED ONE, and this is the case the whole
+  // feature exists for. A signature is the strongest statement anybody makes
+  // about which proposal this deal sold — stronger than an admin's guess made
+  // before the customer had seen it — so it does not wait for someone to go and
+  // record it by hand. It also retires whatever PDF was in the deal's Proposal
+  // folder: if this version was already approved, that copy was rendered BEFORE
+  // the signature, and an unsigned copy of a signed proposal is precisely the
+  // document the lender will not take.
+  await approveOnSignature(
+    { id: proposal.id, companyId: proposal.companyId, leadId: proposal.leadId, version: proposal.version },
+    vertical,
+    name,
+  );
 
   /**
    * The whole signing record, handed straight back.
@@ -252,32 +257,52 @@ export async function acceptSolarProposal(
 }
 
 /**
- * Drop the pre-signature PDF from the deal's Proposal folder.
+ * The signed version becomes the version this deal sold.
  *
- * Best effort and never fatal: a homeowner who has just signed must not be
- * shown an error because a housekeeping step failed. The signature is
- * committed by the time this runs, and the worst outcome of it failing is a
- * stale file somebody re-files by hand.
+ * Approval used to be entirely by hand, and the hand was frequently late: a
+ * customer signed on Tuesday, nobody pressed Approve, and the deal's Proposal
+ * folder stayed empty or — worse — held the pre-signature draft. Signing is an
+ * unambiguous decision by the only person whose decision it is, so it now makes
+ * the record itself.
+ *
+ * IT OVERRIDES AN EARLIER APPROVAL, deliberately. An admin who approved v12
+ * yesterday was saying "this is what we sold" about a document nobody had
+ * signed yet; the customer signing v13 today answers the same question with
+ * better evidence. The override is one-way in time and not a fight: nothing
+ * re-runs afterwards, so an admin who then approves a different version by hand
+ * has the last word and keeps it.
+ *
+ * THE PDF IS NOT RENDERED HERE. The renderer boots Chromium and can take the
+ * better part of a minute; a homeowner pressing Sign must not wait behind it,
+ * and a browser failing to start must not fail their signature. Approval leaves
+ * `approvedFileId` null, which the version list already reads as "copy not
+ * filed" — and now also acts on: the next portal user with the authority to
+ * approve files it in the background. See ProposalVersionList.
+ *
+ * Best effort and never fatal, matching the housekeeping it replaces. The
+ * signature is committed by the time this runs, and the worst outcome of it
+ * failing is an approval somebody makes by hand — which is exactly where this
+ * feature started.
  */
-async function staleFiledCopy(proposalId: string): Promise<void> {
+async function approveOnSignature(
+  proposal: { id: string; companyId: string; leadId: string; version: number },
+  vertical: ActiveVertical,
+  signerName: string,
+): Promise<void> {
   try {
-    const row = await runUnscoped(
-      "proposal signed: retire the copy filed before the signature existed",
-      () =>
-        prisma.solarProposal.findUnique({
-          where: { id: proposalId },
-          select: { companyId: true, approvedAt: true, approvedFileId: true },
-        })
+    await runInVertical(vertical, () =>
+      approveProposalVersion(
+        // No user id: nobody pressed anything. See ApprovalActor.
+        { companyId: proposal.companyId, userId: null, fullName: signerName },
+        proposal,
+        "on_signature",
+      )
     );
-    if (!row?.approvedAt || !row.approvedFileId) return;
-    await runUnscoped("proposal signed: clear the stale filed copy", async () => {
-      await prisma.solarProposal.update({
-        where: { id: proposalId },
-        data: { approvedFileId: null },
-      });
-      await removeFiledCopies(row.companyId, [row.approvedFileId!]);
-    });
-  } catch {
-    /* non-fatal — see above */
+  } catch (err) {
+    // Non-fatal — see above — but not silent. This is the one step here nobody
+    // is watching: the signature is already committed and the customer is
+    // already looking at their certificate, so a failure shows up later as a
+    // deal somebody has to approve by hand, with nothing saying why.
+    console.warn(`[proposal] could not approve v${proposal.version} on signature`, err);
   }
 }

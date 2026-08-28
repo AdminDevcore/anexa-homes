@@ -20,6 +20,35 @@ export type ApprovalOutcome = {
 };
 
 /**
+ * Who is approving.
+ *
+ * `userId` is NULLABLE because the strongest approval in this system is not
+ * made by a user at all. When the customer signs, that version becomes the one
+ * the deal sold and nobody pressed anything — so there is no id to record.
+ * Inventing one (the rep who built it, the last admin who touched the deal)
+ * would put a name against a decision that person did not make. A null id is
+ * exactly what the row means by "approved on signature", and the list reads it
+ * that way.
+ */
+export type ApprovalActor = {
+  companyId: string;
+  userId: string | null;
+  /** The name on the event line: the admin who pressed it, or the signer. */
+  fullName: string;
+};
+
+/**
+ * How this approval came about.
+ *
+ * Only ever the difference between two sentences — the swap itself is
+ * identical, because a signature and an admin are making the same claim about
+ * the same deal. It is NOT a stored column: `approvedById` already separates
+ * them (see ApprovalActor), and a second field saying the same thing is a
+ * second field that can disagree with the first.
+ */
+export type ApprovalVia = "by_hand" | "on_signature";
+
+/**
  * Mark one version approved, clearing any other on the same deal.
  *
  * The swap happens in ONE transaction because the database enforces "at most
@@ -44,19 +73,31 @@ export type ApprovalOutcome = {
  *     measured at 220 traced browser files each. One route carries it now.
  */
 export async function approveProposalVersion(
-  actor: { companyId: string; userId: string; fullName: string },
+  actor: ApprovalActor,
   proposal: { id: string; leadId: string; version: number },
+  via: ApprovalVia = "by_hand",
 ): Promise<ApprovalOutcome> {
-  const previouslyFiled = await prisma.$transaction(async (tx) => {
-    const others = await tx.solarProposal.findMany({
+  const { stale, replaced } = await prisma.$transaction(async (tx) => {
+    /**
+     * Every approved version on this deal, INCLUDING the one being approved.
+     *
+     * The target is in this list because its own filed copy is about to be
+     * orphaned: `approvedFileId` is cleared below, and a file nothing points at
+     * would sit in the Proposal folder forever with no row able to say it is
+     * stale. That case is not hypothetical — it is the signing path. A version
+     * approved before the customer signed has an UNSIGNED pdf in the folder,
+     * and re-approving it on the signature is precisely when that copy has to
+     * come out.
+     */
+    const approved = await tx.solarProposal.findMany({
       where: {
         companyId: actor.companyId,
         leadId: proposal.leadId,
         approvedAt: { not: null },
-        id: { not: proposal.id },
       },
-      select: { id: true, approvedFileId: true },
+      select: { id: true, version: true, approvedFileId: true },
     });
+    const others = approved.filter((a) => a.id !== proposal.id);
 
     if (others.length > 0) {
       await tx.solarProposal.updateMany({
@@ -65,6 +106,7 @@ export async function approveProposalVersion(
       });
     }
 
+    const list = others.map((o) => `v${o.version}`).join(", ");
     await tx.solarProposal.update({
       where: { id: proposal.id },
       data: {
@@ -78,25 +120,38 @@ export async function approveProposalVersion(
             type: "approved",
             actorId: actor.userId,
             actorName: actor.fullName,
-            detail: others.length > 0 ? "replaced the previously approved version" : null,
+            detail:
+              via === "on_signature"
+                ? list
+                  ? `the customer signed this version — replaced ${list}`
+                  : "the customer signed this version"
+                : list
+                  ? "replaced the previously approved version"
+                  : null,
           },
         },
       },
     });
 
-    return others.map((o) => o.approvedFileId).filter((id): id is string => !!id);
+    return {
+      stale: approved.map((a) => a.approvedFileId).filter((id): id is string => !!id),
+      replaced: list,
+    };
   });
 
   // The superseded copy comes out of the folder only once the swap has
   // committed. Deleting first would lose the file if the transaction rolled
   // back, leaving a deal whose approved version points at nothing.
-  await removeFiledCopies(actor.companyId, previouslyFiled);
+  await removeFiledCopies(actor.companyId, stale);
 
   await prisma.activityLog.create({
     data: {
       companyId: actor.companyId,
       type: "system",
-      message: `${actor.fullName} approved solar proposal v${proposal.version} as final`,
+      message:
+        via === "on_signature"
+          ? `Solar proposal v${proposal.version} was approved automatically — ${actor.fullName} signed it${replaced ? ` (replacing ${replaced})` : ""}`
+          : `${actor.fullName} approved solar proposal v${proposal.version} as final`,
       leadId: proposal.leadId,
       actorId: actor.userId,
     },
@@ -107,7 +162,7 @@ export async function approveProposalVersion(
 
 /** Take the approval off a version, and its copy out of the folder. */
 export async function unapproveProposalVersion(
-  actor: { companyId: string; userId: string; fullName: string },
+  actor: ApprovalActor,
   proposal: { id: string; leadId: string; version: number; approvedFileId: string | null },
 ): Promise<void> {
   await prisma.solarProposal.update({
