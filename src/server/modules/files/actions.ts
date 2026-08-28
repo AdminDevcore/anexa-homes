@@ -12,6 +12,10 @@ import { getMembership } from "@/server/modules/chat/queries";
 import { companyExportLabel } from "@/lib/company-exports";
 import { foldersFor } from "@/lib/deal-folders";
 import { photoGroupFor } from "@/lib/photo-groups";
+import { checklistJustCompleted } from "@/server/modules/automations/checklist";
+import { runAutomations } from "@/server/modules/automations/engine";
+import { getActiveVertical } from "@/server/auth/vertical";
+import { isActiveVertical } from "@/lib/vertical";
 import sharp from "sharp";
 
 const MAX_BYTES = 30 * 1024 * 1024; // 30MB (phone photos); compressed after upload
@@ -300,6 +304,28 @@ export async function uploadFileAction(formData: FormData) {
       uploadedById: user.userId,
     },
   });
+
+  // The shot that closes the last required slot is the one people want work
+  // hung off — "photos are all in, compile them and move the job on". Asked
+  // per upload rather than on a schedule so it happens while the crew is still
+  // standing on the roof.
+  if (photoTemplateItemId && dealLeadId) {
+    const kind = await checklistJustCompleted(user.companyId, dealLeadId, photoTemplateItemId);
+    if (kind) {
+      // The DEAL's workspace, not the uploader's active one: an installer may
+      // be posting to a job in a workspace they are not currently looking at,
+      // and the rule that fires must be that job's.
+      const dealVertical = lead?.vertical ?? project?.vertical;
+      await runAutomations({
+        companyId: user.companyId,
+        vertical: isActiveVertical(dealVertical) ? dealVertical : await getActiveVertical(user),
+        trigger: "photo_checklist_completed",
+        leadId: dealLeadId,
+        payload: { kind },
+        depth: 0,
+      });
+    }
+  }
 
   if (projectId) revalidatePath(`/portal/projects/${projectId}`);
   if (dealLeadId) revalidatePath(`/portal/leads/${dealLeadId}`);

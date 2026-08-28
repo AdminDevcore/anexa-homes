@@ -9,6 +9,7 @@
     { "path": "/api/cron/storm-matches", "schedule": "30 11 * * *" },
     { "path": "/api/cron/recenter-house-dots", "schedule": "*/30 * * * *" },
     { "path": "/api/cron/enrich-owners", "schedule": "0 8 * * *" },
-    { "path": "/api/cron/geo-health", "schedule": "15 12 * * *" }
+    { "path": "/api/cron/geo-health", "schedule": "15 12 * * *" },
+    { "path": "/api/cron/automations", "schedule": "0 15 * * *" }
   ]
 }

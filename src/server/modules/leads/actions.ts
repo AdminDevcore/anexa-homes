@@ -9,6 +9,8 @@ import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
+import { runAutomations } from "@/server/modules/automations/engine";
+import { getActiveVertical } from "@/server/auth/vertical";
 
 /** Ensures the lead exists AND is within the user's row-level scope. */
 async function assertLeadInScope(userCompanyId: string, scope: Prisma.LeadWhereInput, leadId: string) {
@@ -170,6 +172,18 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
     stageId: parsed.data.stageId,
   });
 
+  // Landing in a stage is the commonest thing a company wants to hang work off.
+  // Best-effort like fireEvent above: the move is the business record, the
+  // automation is a consequence of it, and a rep must never see an error here.
+  await runAutomations({
+    companyId: user.companyId,
+    vertical: await getActiveVertical(user),
+    trigger: "stage_entered",
+    leadId: parsed.data.leadId,
+    payload: { stageId: parsed.data.stageId },
+    depth: 0,
+  });
+
   revalidatePath("/portal/pipeline");
   return { ok: true as const };
 }
@@ -262,6 +276,15 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
     actorId: user.userId,
     leadId: lead.id,
     stageId: stage.id,
+  });
+
+  await runAutomations({
+    companyId: user.companyId,
+    vertical: await getActiveVertical(user),
+    trigger: "stage_entered",
+    leadId: lead.id,
+    payload: { stageId: stage.id },
+    depth: 0,
   });
 
   revalidatePath(`/portal/leads/${lead.id}`);

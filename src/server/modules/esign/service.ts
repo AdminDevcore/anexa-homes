@@ -13,7 +13,7 @@ import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { generateSignerToken, sha256 } from "./tokens";
 import { appendDocumentEvent } from "./audit";
 import { buildAutofillContext, type AutofillContext } from "./autofill";
-import { ctxForLead, LEAD_CTX_INCLUDE, type LeadForCtx } from "./context";
+import { ctxForLead, LEAD_CTX_INCLUDE } from "./context";
 import {
   generateSignedPdf,
   type Snapshot,
@@ -701,6 +701,22 @@ async function finalizePackage(packageId: string) {
   }
 
   await fireEvent({ companyId: pkg.companyId, event: "document_completed", documentId: pkg.id, leadId: pkg.leadId });
+
+  // Chain the next step off a document everyone has signed. The package
+  // carries its own workspace, which is what makes this safe here: finalize
+  // runs from a PUBLIC signing link with no session, so there is no session
+  // vertical to read.
+  if (pkg.leadId) {
+    const { runAutomations } = await import("@/server/modules/automations/engine");
+    await runAutomations({
+      companyId: pkg.companyId,
+      vertical: pkg.vertical,
+      trigger: "document_completed",
+      leadId: pkg.leadId,
+      payload: { templateId: pkg.templateId ?? undefined },
+      depth: 0,
+    });
+  }
 }
 
 export async function voidPackage(user: SessionUser, packageId: string, reason?: string) {
