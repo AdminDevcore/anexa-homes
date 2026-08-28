@@ -19,6 +19,14 @@ const PROJECT_STATUSES = [
   "cancelled",
 ];
 
+/**
+ * Never cached. Run rows are written by whatever set the automation off — a
+ * stage move on the deal page, a photo upload, the daily cron — so no
+ * revalidatePath on this route can ever cover them, and a cached page would
+ * report "nothing has run yet" over a run that had just happened.
+ */
+export const dynamic = "force-dynamic";
+
 export const metadata = { title: "Automations" };
 
 export default async function AutomationSettingsPage() {
