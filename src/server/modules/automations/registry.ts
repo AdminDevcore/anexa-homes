@@ -1,3 +1,5 @@
+import { compilePhotosAction } from "./actions/compile-photos";
+import { generateDocumentAction } from "./actions/generate-document";
 import { moveStageAction } from "./actions/move-stage";
 import { setProjectStatusAction } from "./actions/set-project-status";
 import type { AutomationActionModule } from "./types";
@@ -13,6 +15,8 @@ import type { AutomationActionModule } from "./types";
  * StepResult.follow.
  */
 export const ACTION_REGISTRY: Record<string, AutomationActionModule> = {
+  [compilePhotosAction.type]: compilePhotosAction,
+  [generateDocumentAction.type]: generateDocumentAction,
   [moveStageAction.type]: moveStageAction,
   [setProjectStatusAction.type]: setProjectStatusAction,
 };
