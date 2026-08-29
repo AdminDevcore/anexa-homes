@@ -32,6 +32,7 @@ import { ExecutionBlock } from "./signature-block";
 import { SignatureCertificate } from "./certificate";
 import { PrintStyles } from "./print";
 import { useDeckKeys } from "./deck";
+import { SolarStorageProposalView } from "./storage";
 
 /**
  * The customer-facing solar proposal.
@@ -139,21 +140,37 @@ function loanTermLabel(months: number): string {
   return `${span} · ${months} payments`;
 }
 
-export function SolarProposalView({
-  snapshot,
-  token,
-  alreadySigned,
-  certificate = null,
-  superseded,
-  previewMode = false,
-  layoutImageUrl = null,
-  showComparison = true,
-  showPaymentOptions = true,
-  siteImageBase = null,
-  rep = null,
-  accentColor,
-  chromeOffset = 0,
-}: {
+/**
+ * The customer-facing solar proposal, and the one door onto both documents.
+ *
+ * A WRAPPER rather than an early return inside the PV component: routing after
+ * that component's first hook would call hooks conditionally, which React
+ * forbids and eslint catches. Two components, each with its own unconditional
+ * hooks, and one function that picks.
+ *
+ * `systemType` absent means a document generated before v5, and every one of
+ * those was an array — so nothing already sent changes.
+ */
+export function SolarProposalView(props: SolarProposalViewProps) {
+  return props.snapshot.systemType === "storage" ? (
+    <SolarStorageProposalView
+      snapshot={props.snapshot}
+      token={props.token}
+      alreadySigned={props.alreadySigned}
+      certificate={props.certificate}
+      superseded={props.superseded}
+      previewMode={props.previewMode}
+      showPaymentOptions={props.showPaymentOptions}
+      rep={props.rep}
+      accentColor={props.accentColor}
+      chromeOffset={props.chromeOffset}
+    />
+  ) : (
+    <SolarPvProposalView {...props} />
+  );
+}
+
+type SolarProposalViewProps = {
   snapshot: SolarProposalSnapshot;
   token: string;
   /**
@@ -220,7 +237,23 @@ export function SolarProposalView({
    * portal it may be previewed inside.
    */
   chromeOffset?: number;
-}) {
+};
+
+function SolarPvProposalView({
+  snapshot,
+  token,
+  alreadySigned,
+  certificate = null,
+  superseded,
+  previewMode = false,
+  layoutImageUrl = null,
+  showComparison = true,
+  showPaymentOptions = true,
+  siteImageBase = null,
+  rep = null,
+  accentColor,
+  chromeOffset = 0,
+}: SolarProposalViewProps) {
   /**
    * The document on screen, and which version it is.
    *
