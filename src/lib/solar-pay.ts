@@ -23,7 +23,7 @@ import type { FinanceProduct, SolarRepPayMode } from "@prisma/client";
  * model and this file cannot drift from it.
  */
 
-export type SolarPayBasis = "redline" | "per_watt";
+export type SolarPayBasis = "redline" | "per_watt" | "battery_redline";
 
 /**
  * The terms one deal is paid on. Deliberately flat and serialisable: these are
@@ -37,30 +37,84 @@ export type SolarPayTerms = {
   redlineCentsPerWatt: number | null;
   /** Mills (tenths of a cent) per watt. Set only on `per_watt`. */
   millsPerWatt: number | null;
+  /** Cents of BASE price per BATTERY. Set only on `battery_redline`. */
+  redlinePerBatteryCents: number | null;
 };
 
 /** The rep's own configured terms, straight off their User row. */
 export type SolarRepConfig = {
   solarRedlineCentsPerWatt: number | null;
   solarPerWattMills: number | null;
+  solarRedlinePerBatteryCents: number | null;
 };
 
 /**
- * Which basis this deal pays on, and on what terms.
+ * What the payroll engine should do with this deal.
  *
- * Returns null when the rep has no figure for the basis that applies — which is
- * NOT the same as zero. A null means "nobody has set this rep up for this kind
- * of deal", and the caller generates no commission line at all rather than a $0
- * one that reads as a deal genuinely worth nothing. A configured 0 is a real
- * answer and produces a real (zero) line.
+ * THREE answers, and the third is the reason this stopped being a nullable
+ * return.
+ *
+ * `unconfigured` is the old `null`: nobody has set this rep up for this kind of
+ * deal, so no line is written at all. NOT zero — a $0 line reads as a deal
+ * genuinely worth nothing, and a configured 0 is a real and different answer.
+ *
+ * `refused` is new. A rule that prices per watt, meeting a deal that has none,
+ * is not a rep who is owed nothing: it is a MISCONFIGURATION, and the two must
+ * not look alike on a payroll run. Paying zero quietly is exactly how every
+ * solar commission came out at $0 when `Project.contractValue` was read instead
+ * of `SolarFinance`, and nobody noticed for weeks.
  */
-export function resolveSolarPayTerms(input: {
+export type SolarPayResolution =
+  | { kind: "terms"; terms: SolarPayTerms }
+  | { kind: "unconfigured" }
+  | { kind: "refused"; reason: string };
+
+/**
+ * Which basis this deal pays on, and on what terms.
+ */
+export function resolveSolarPay(input: {
+  /** What the deal sells. `pv` and `pv_storage` are the same answer. */
+  systemType: "pv" | "pv_storage" | "storage";
   product: FinanceProduct;
   /** The deal's lender pay mode. Null when the deal has no lender yet. */
   lenderPayMode: SolarRepPayMode | null;
   rep: SolarRepConfig;
-}): SolarPayTerms | null {
-  const { product, lenderPayMode, rep } = input;
+}): SolarPayResolution {
+  const { systemType, product, lenderPayMode, rep } = input;
+
+  if (systemType === "storage") {
+    // A lease or PPA sells electricity, so there is no system price for a
+    // redline to measure — and unlike PV there is no per-watt rate to fall back
+    // on, because there are no watts. Say so rather than paying on nothing.
+    if (product === "lease" || product === "ppa") {
+      return {
+        kind: "refused",
+        reason:
+          "A lease or PPA has no system price to measure a redline against, and a storage deal has no watts to pay a rate on.",
+      };
+    }
+    // The failure this whole type exists for.
+    if ((lenderPayMode ?? "redline") === "per_watt") {
+      return {
+        kind: "refused",
+        reason:
+          "This lender pays per watt and this deal has none. Set a per-battery redline on the rep, or move the lender off per-watt pay.",
+      };
+    }
+    if (rep.solarRedlinePerBatteryCents == null) return { kind: "unconfigured" };
+    return {
+      kind: "terms",
+      terms: {
+        basis: "battery_redline",
+        redlineCentsPerWatt: null,
+        millsPerWatt: null,
+        redlinePerBatteryCents: rep.solarRedlinePerBatteryCents,
+      },
+    };
+  }
+
+  // pv and pv_storage: the identical path, exactly as it read before storage
+  // existed. A battery on the roof changes nothing about how an array is paid.
 
   // A lease or PPA installs a real array but sells no system, so there is no
   // price for a redline to be measured against. Per-watt regardless of what the
@@ -76,11 +130,27 @@ export function resolveSolarPayTerms(input: {
         : "redline";
 
   if (basis === "per_watt") {
-    if (rep.solarPerWattMills == null) return null;
-    return { basis, redlineCentsPerWatt: null, millsPerWatt: rep.solarPerWattMills };
+    if (rep.solarPerWattMills == null) return { kind: "unconfigured" };
+    return {
+      kind: "terms",
+      terms: {
+        basis,
+        redlineCentsPerWatt: null,
+        millsPerWatt: rep.solarPerWattMills,
+        redlinePerBatteryCents: null,
+      },
+    };
   }
-  if (rep.solarRedlineCentsPerWatt == null) return null;
-  return { basis, redlineCentsPerWatt: rep.solarRedlineCentsPerWatt, millsPerWatt: null };
+  if (rep.solarRedlineCentsPerWatt == null) return { kind: "unconfigured" };
+  return {
+    kind: "terms",
+    terms: {
+      basis,
+      redlineCentsPerWatt: rep.solarRedlineCentsPerWatt,
+      millsPerWatt: null,
+      redlinePerBatteryCents: null,
+    },
+  };
 }
 
 export type SolarPayResult = {
@@ -108,10 +178,31 @@ export type SolarPayResult = {
  */
 export function solarRepPayCents(
   terms: SolarPayTerms,
-  deal: { systemWatts: number; basePriceCents: number }
+  deal: { systemWatts: number; basePriceCents: number; batteryQty?: number }
 ): SolarPayResult {
   const watts = Math.max(0, Math.round(deal.systemWatts));
   const basePpwCents = watts > 0 ? deal.basePriceCents / watts : 0;
+
+  if (terms.basis === "battery_redline") {
+    const qty = Math.max(0, Math.round(deal.batteryQty ?? 0));
+    const redline = terms.redlinePerBatteryCents ?? 0;
+    // GUARDED ON THE COUNT, not merely clamped at zero.
+    //
+    // Without the guard, a deal with no batteries pays
+    // `max(0, basePriceCents − redline × 0)` — the ENTIRE base price. That is
+    // the shape of this bug on the per-watt basis too, and it is worse than the
+    // silent zero this basis exists to prevent: a rep would be paid the whole
+    // system.
+    const amountCents = qty > 0 ? Math.max(0, deal.basePriceCents - redline * qty) : 0;
+    return {
+      amountCents,
+      basisCents: qty > 0 ? Math.max(0, deal.basePriceCents) : 0,
+      // There are no watts, so there is no per-watt figure to report. Zero here
+      // is the honest answer rather than a division that did not happen.
+      basePpwCents: 0,
+      overageCentsPerWatt: 0,
+    };
+  }
 
   if (terms.basis === "per_watt") {
     // Mills are tenths of a cent, so the rate divides by 10 — not 1000. A $0.40/W
@@ -154,6 +245,9 @@ export function centsPerWattLabel(cents: number): string {
  * the size, so a number can be checked without opening the deal.
  */
 export function solarPayLabel(terms: SolarPayTerms, watts: number, result: SolarPayResult): string {
+  if (terms.basis === "battery_redline") {
+    return `Solar battery redline (${usd(terms.redlinePerBatteryCents ?? 0)}/battery)`;
+  }
   const size = `${watts.toLocaleString("en-US")} W`;
   if (terms.basis === "per_watt") {
     return `Solar per-watt (${millsPerWattLabel(terms.millsPerWatt ?? 0)} · ${size})`;
@@ -164,6 +258,10 @@ export function solarPayLabel(terms: SolarPayTerms, watts: number, result: Solar
 
 /** The one-line explanation under the worked example on the team page. */
 export function solarPayExplanation(terms: SolarPayTerms, result: SolarPayResult): string {
+  if (terms.basis === "battery_redline")
+    return `Keeps everything above ${usd(terms.redlinePerBatteryCents ?? 0)} a battery — ${usd(
+      result.amountCents
+    )} to the rep.`;
   if (terms.basis === "per_watt") return `Flat rate, whatever the deal prices at.`;
   return `Nets ${centsPerWattLabel(Math.round(result.basePpwCents))} against a ${centsPerWattLabel(
     terms.redlineCentsPerWatt ?? 0

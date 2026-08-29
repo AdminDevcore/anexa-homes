@@ -1,7 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import type { Db } from "@/server/db/types";
-import { priceStoredPurchase } from "@/lib/solar-money";
-import { resolveSolarPayTerms, solarRepPayCents, solarPayLabel, type SolarPayTerms } from "@/lib/solar-pay";
+import { priceStoredPurchase, priceStorageStored } from "@/lib/solar-money";
+import {
+  resolveSolarPay,
+  solarRepPayCents,
+  solarPayLabel,
+  type SolarPayTerms,
+  type SolarPayResolution,
+} from "@/lib/solar-pay";
 import { VERTICAL_LABEL } from "@/lib/vertical";
 
 /**
@@ -30,6 +36,7 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
       select: {
         product: true, grossPpwCents: true, dealerFeePct: true,
         adderTotalCents: true, onTopAdderTotalCents: true, contractPriceCents: true,
+        stickerPricePerBatteryCents: true,
       },
     }),
     db.solarDesign.findUnique({
@@ -39,12 +46,31 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
       // figure pays on money that never arrives.
       select: {
         systemSizeKwDc: true,
-        lender: { select: { repPayMode: true, maxFinalPpwCents: true, finalPpwMode: true } },
+        systemType: true,
+        batteryQty: true,
+        lender: {
+          select: {
+            repPayMode: true,
+            maxFinalPpwCents: true,
+            finalPpwMode: true,
+            maxFinalPricePerBatteryCents: true,
+            finalBatteryPriceMode: true,
+          },
+        },
       },
     }),
   ]);
   if (!finance || !design) return null;
-  if (!(design.systemSizeKwDc > 0)) return null; // no array drawn: nothing to pay on
+
+  // A storage deal has no array and never will. Asking it for one is how a
+  // whole category of deal silently stops generating commissions -- so the two
+  // kinds ask the row the question that applies to them.
+  const isStorage = design.systemType === "storage";
+  if (isStorage) {
+    if (!(design.batteryQty > 0)) return null; // no batteries: nothing to pay on
+  } else if (!(design.systemSizeKwDc > 0)) {
+    return null; // no array drawn: nothing to pay on
+  }
 
   // Cash and loan are priced per watt; lease and PPA sell electricity and have
   // no system price at all, so their base is zero and only a per-watt basis can
@@ -55,8 +81,31 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
   // the bank funds — Amos at $5.50/W and a 65% fee leaves $1.93/W however
   // confidently $3.00 was entered — so paying a redline overage or an override
   // percentage on the uncapped figure pays out of money nobody is ever sent.
+  // Kept as an inline comparison in both branches below rather than hoisted to
+  // a boolean: a boolean does not narrow `finance.product`, and the cast that
+  // would paper over that is a cast that survives the day a fifth product is
+  // added.
+  // Storage prices per battery, held to the partner's per-battery ceiling for
+  // exactly the reason the array is held to its per-watt one: the stored
+  // sticker is only as capped as the lender was on the day it was saved, and
+  // paying a redline overage on an uncapped figure pays out of money nobody is
+  // ever sent.
+  const storagePurchase =
+    isStorage && (finance.product === "cash" || finance.product === "loan")
+      ? priceStorageStored({
+          product: finance.product,
+          batteryQty: design.batteryQty,
+          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+          dealerFeePct: finance.dealerFeePct,
+          adderTotalCents: finance.adderTotalCents,
+          onTopAdderTotalCents: finance.onTopAdderTotalCents,
+          maxFinalPricePerBatteryCents: design.lender?.maxFinalPricePerBatteryCents ?? null,
+          finalBatteryPriceMode: design.lender?.finalBatteryPriceMode,
+        }).breakdown
+      : null;
+
   const purchase =
-    finance.product === "cash" || finance.product === "loan"
+    !isStorage && (finance.product === "cash" || finance.product === "loan")
       ? priceStoredPurchase({
           product: finance.product,
           systemSizeKwDc: design.systemSizeKwDc,
@@ -69,11 +118,17 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
         }).breakdown
       : null;
 
+  const priced = purchase ?? storagePurchase;
+
   return {
     product: finance.product,
+    systemType: design.systemType,
     lenderPayMode: design.lender?.repPayMode ?? null,
-    systemWatts: purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000),
-    basePriceCents: purchase?.basePriceCents ?? 0,
+    // Zero on a storage deal, and zero is the truth there rather than a
+    // conversion that did not happen.
+    systemWatts: isStorage ? 0 : (purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
+    batteryQty: design.batteryQty,
+    basePriceCents: priced?.basePriceCents ?? 0,
     /**
      * What the customer signs. The basis every override is a percentage of.
      *
@@ -82,7 +137,7 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
      * inside the dealer fee carries a figure several thousand dollars light. An
      * override is a percentage of what the customer actually signs.
      */
-    contractPriceCents: purchase?.contractPriceCents ?? finance.contractPriceCents,
+    contractPriceCents: priced?.contractPriceCents ?? finance.contractPriceCents,
   };
 }
 
@@ -90,27 +145,52 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
 function snapshotFrom(row: {
   solarBasis: string | null;
   solarRedlineCentsPerWatt: number | null;
+  solarRedlinePerBatteryCents: number | null;
   solarMillsPerWatt: number | null;
 }): SolarPayTerms | null {
-  if (row.solarBasis !== "redline" && row.solarBasis !== "per_watt") return null;
+  if (
+    row.solarBasis !== "redline" &&
+    row.solarBasis !== "per_watt" &&
+    row.solarBasis !== "battery_redline"
+  ) {
+    return null;
+  }
   return {
     basis: row.solarBasis,
     redlineCentsPerWatt: row.solarRedlineCentsPerWatt,
     millsPerWatt: row.solarMillsPerWatt,
+    redlinePerBatteryCents: row.solarRedlinePerBatteryCents,
   };
 }
 
 /**
- * Computes and persists commissions for one solar project.
+ * A rule that could not price the deal in front of it.
  *
- * Returns the number of commission records created.
+ * Returned rather than logged-and-forgotten because "no commission line" has
+ * two very different causes: a rep who is genuinely owed nothing, and a lender
+ * paying per watt on a deal that has none. The first is correct and silent; the
+ * second is a misconfiguration that will keep paying nobody until somebody is
+ * told. `Project.contractValue = 0` zeroed every solar commission for weeks on
+ * exactly that ambiguity.
+ */
+export type SolarPayRefusal = { projectId: string; userId: string; reason: string };
+
+export type SolarCommissionResult = {
+  /** How many commission records were created. */
+  created: number;
+  /** Rules that could not price this deal. Empty on a healthy run. */
+  refusals: SolarPayRefusal[];
+};
+
+/**
+ * Computes and persists commissions for one solar project.
  */
 export async function computeSolarCommissionsForProject(
   db: Db,
   companyId: string,
   project: { id: string; leadId: string | null; assignedRepId: string | null; repName: string }
-): Promise<number> {
-  if (!project.leadId) return 0;
+): Promise<SolarCommissionResult> {
+  if (!project.leadId) return { created: 0, refusals: [] };
   // Null when the deal has no design or no priced finance yet. Deliberately not
   // an early return: a FLAT override does not need a price, and refusing to pay
   // one because a design row is missing would be another silent zero.
@@ -119,13 +199,22 @@ export async function computeSolarCommissionsForProject(
   let created = 0;
   const repId = project.assignedRepId;
 
+  // Rules that cannot price the deal in front of them. Surfaced to the caller
+  // rather than swallowed: a misconfiguration and a rep who is genuinely owed
+  // nothing must not look alike on a payroll run.
+  const refusals: SolarPayRefusal[] = [];
+
   // ---- The rep's own line ------------------------------------------------
-  // Only on a deal that is actually designed and priced. Both bases are per
-  // installed watt, and there is no honest number to pay before there are any.
+  // Only on a deal that is actually designed and priced. There is no honest
+  // number to pay before there is an array, or a battery.
   if (repId && deal) {
     const rep = await db.user.findFirst({
       where: { id: repId, companyId },
-      select: { solarRedlineCentsPerWatt: true, solarPerWattMills: true },
+      select: {
+        solarRedlineCentsPerWatt: true,
+        solarPerWattMills: true,
+        solarRedlinePerBatteryCents: true,
+      },
     });
 
     // Anything the rep carries on this deal that ISN'T a solar line is stale —
@@ -150,20 +239,38 @@ export async function computeSolarCommissionsForProject(
         status: { in: ["pending", "approved"] },
         label: { startsWith: "Solar " },
       },
-      select: { id: true, solarBasis: true, solarRedlineCentsPerWatt: true, solarMillsPerWatt: true },
+      select: {
+        id: true,
+        solarBasis: true,
+        solarRedlineCentsPerWatt: true,
+        solarRedlinePerBatteryCents: true,
+        solarMillsPerWatt: true,
+      },
     });
 
     // LOCKED terms: an existing line keeps the redline it was sold against, so
     // raising a rep's redline never re-prices a deal already in the pipeline.
     // Only watts and price refresh — a design that grows before install should
     // move the number, exactly as job costs move a roofing pool.
-    const terms =
-      (existing && snapshotFrom(existing)) ??
-      (rep
-        ? resolveSolarPayTerms({ product: deal.product, lenderPayMode: deal.lenderPayMode, rep })
-        : null);
+    const snapshot = existing && snapshotFrom(existing);
+    const resolution: SolarPayResolution = snapshot
+      ? { kind: "terms", terms: snapshot }
+      : rep
+        ? resolveSolarPay({
+            systemType: deal.systemType,
+            product: deal.product,
+            lenderPayMode: deal.lenderPayMode,
+            rep,
+          })
+        : { kind: "unconfigured" };
 
-    if (terms) {
+    if (resolution.kind === "refused") {
+      // NOT a zero line, and not silence either. The rule is wrong for this
+      // deal and somebody has to change one of them; payroll shows it as
+      // unpayable and names the reason.
+      refusals.push({ projectId: project.id, userId: repId, reason: resolution.reason });
+    } else if (resolution.kind === "terms") {
+      const terms = resolution.terms;
       const pay = solarRepPayCents(terms, deal);
       const data = {
         // Stamped explicitly rather than left to the isolation extension. A
@@ -177,6 +284,7 @@ export async function computeSolarCommissionsForProject(
         amount: pay.amountCents,
         solarBasis: terms.basis,
         solarRedlineCentsPerWatt: terms.redlineCentsPerWatt,
+        solarRedlinePerBatteryCents: terms.redlinePerBatteryCents,
         solarMillsPerWatt: terms.millsPerWatt,
       };
       if (existing) {
@@ -233,5 +341,5 @@ export async function computeSolarCommissionsForProject(
     if (rows.length) created += (await db.commission.createMany({ data: rows })).count;
   }
 
-  return created;
+  return { created, refusals };
 }

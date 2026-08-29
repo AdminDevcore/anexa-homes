@@ -163,11 +163,11 @@ export function MemberPayStructure({
       redlinePay:
         redlineCents == null
           ? null
-          : solarRepPayCents({ basis: "redline", redlineCentsPerWatt: redlineCents, millsPerWatt: null }, deal),
+          : solarRepPayCents({ basis: "redline", redlineCentsPerWatt: redlineCents, millsPerWatt: null, redlinePerBatteryCents: null }, deal),
       perWattPay:
         perWattMills == null
           ? null
-          : solarRepPayCents({ basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: perWattMills }, deal),
+          : solarRepPayCents({ basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: perWattMills, redlinePerBatteryCents: null }, deal),
     };
   }, [redlineCents, perWattMills, solarExample.grossPpwCents, solarExample.dealerFeePct]);
 

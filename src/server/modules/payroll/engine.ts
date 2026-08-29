@@ -50,12 +50,21 @@ export async function computeCommissionsForProject(
 
   if (project.vertical === "solar") {
     const solarRep = project.lead?.assignedRep ?? null;
-    return computeSolarCommissionsForProject(db, companyId, {
+    const { created, refusals } = await computeSolarCommissionsForProject(db, companyId, {
       id: project.id,
       leadId: project.lead?.id ?? null,
       assignedRepId: solarRep?.id ?? null,
       repName: solarRep ? `${solarRep.firstName} ${solarRep.lastName}`.trim() : "",
     });
+    // A rule that cannot price the deal in front of it pays nobody, and would
+    // do so indistinguishably from a rep who is simply owed nothing. Say it out
+    // loud. See SolarPayRefusal.
+    for (const r of refusals) {
+      console.warn(
+        `[payroll] solar commission unpayable — project ${r.projectId}, rep ${r.userId}: ${r.reason}`
+      );
+    }
+    return created;
   }
 
   // Total collectible (rules/overrides may reference it). The deductible is split
