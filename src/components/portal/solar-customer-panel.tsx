@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { saveCustomerDetailsAction } from "@/server/modules/solar/energy-actions";
 import { setSolarSystemTypeAction } from "@/server/modules/solar/actions";
-import { cn } from "@/lib/utils";
 
 export type SolarSystemType = "pv" | "pv_storage" | "storage";
 
@@ -171,6 +170,11 @@ const SYSTEM_TYPES: { value: SolarSystemType; label: string; blurb: string }[] =
  * from it: which steps show, what the design step asks, which lenders appear,
  * and which of two customer documents gets generated.
  *
+ * A dropdown rather than three cards. The choice is made once, early, and
+ * almost always stays "Solar" — three tiles the width of the panel spend the
+ * top of the step arguing a question nobody is stuck on, and push the
+ * customer's own details below the fold.
+ *
  * SAVES ON CHANGE rather than behind the panel's Save button. A rep who picks
  * "Storage only" and walks to the next step must not find the roof designer
  * still sitting there — and they would, because the button below writes contact
@@ -189,10 +193,20 @@ function SystemTypePicker({
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
-  const [pending, setPending] = React.useState<SolarSystemType | null>(null);
+  // The select is driven by local state, not straight off the prop, so a
+  // cancelled confirm can put it back: a controlled <select> whose value never
+  // changes does not re-render, and the DOM node would sit on the rejected
+  // pick. Reset during render (not in an effect) when the deal itself changes.
+  const [sel, setSel] = React.useState<SolarSystemType>(value);
+  const [seen, setSeen] = React.useState<SolarSystemType>(value);
+  if (seen !== value) {
+    setSeen(value);
+    setSel(value);
+  }
 
   async function pick(next: SolarSystemType) {
     if (next === value || busy) return;
+    setSel(next);
 
     // Switching to storage throws the array away — see setSolarSystemTypeAction.
     // Losing a drawn roof to a mis-click is worth one question.
@@ -200,61 +214,53 @@ function SystemTypePicker({
       const ok = window.confirm(
         "This deal has a panel layout drawn on it. Quoting storage only will clear the array, its production and the drawing. Continue?"
       );
-      if (!ok) return;
+      if (!ok) return setSel(value);
     }
 
-    setPending(next);
     setBusy(true);
     try {
       const res = await setSolarSystemTypeAction({ leadId, systemType: next });
-      if (!res.ok) return toast.error(res.error);
+      if (!res.ok) {
+        setSel(value);
+        return toast.error(res.error);
+      }
       router.refresh();
     } catch {
+      setSel(value);
       toast.error("Could not change what this deal is quoting.");
     } finally {
       // In a finally: an action that throws must not leave the picker frozen.
       setBusy(false);
-      setPending(null);
     }
   }
 
   return (
-    <section className="space-y-2 rounded-xl border border-border bg-muted/30 p-4">
-      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        What are we quoting?
-      </h4>
-      {/* A real radiogroup, so the three read as one choice to a screen reader
-          and to a test rather than as three unrelated toggles. */}
-      <div role="radiogroup" aria-label="What are we quoting?" className="flex flex-wrap gap-2">
-        {SYSTEM_TYPES.map((t) => {
-          const active = value === t.value;
-          return (
-            <button
-              key={t.value}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              disabled={!canEdit || busy}
-              onClick={() => pick(t.value)}
-              className={cn(
-                "flex-1 basis-48 rounded-lg border p-3 text-left transition",
-                active
-                  ? "border-primary bg-primary/10 ring-1 ring-primary"
-                  : "border-border bg-card hover:border-primary/50",
-                (!canEdit || busy) && "cursor-not-allowed opacity-70"
-              )}
-            >
-              <span className="flex items-center gap-2 text-sm font-medium">
-                {t.label}
-                {pending === t.value && <Loader2 className="size-3.5 animate-spin" />}
-              </span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">{t.blurb}</span>
-            </button>
-          );
-        })}
+    <section className="flex max-w-3xl flex-wrap items-end gap-x-3 gap-y-1">
+      <div className="w-full max-w-xs space-y-1">
+        <Label htmlFor="system-type" className="text-xs">
+          What are we quoting?
+        </Label>
+        <select
+          id="system-type"
+          className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm disabled:opacity-50"
+          value={sel}
+          disabled={!canEdit || busy}
+          onChange={(e) => void pick(e.target.value as SolarSystemType)}
+        >
+          {SYSTEM_TYPES.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label} — {t.blurb.replace(/\.$/, "")}
+            </option>
+          ))}
+        </select>
       </div>
-      {value === "storage" && (
-        <p className="text-xs text-muted-foreground">
+      {busy && (
+        <span className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" /> Saving…
+        </span>
+      )}
+      {sel === "storage" && (
+        <p className="w-full text-xs text-muted-foreground">
           This deal is priced per battery and its proposal argues from backup hours and bill
           savings rather than from production. There is no array to design.
         </p>

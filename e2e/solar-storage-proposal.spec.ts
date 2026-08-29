@@ -39,17 +39,11 @@ async function openSolarBuilder(page: Page): Promise<string> {
 }
 
 /**
- * The three-way question at the top of step 1.
- *
- * Matched by a PREFIX, not exactly: each option's accessible name is its label
- * followed by its one-line blurb ("Solar + Storage Panels with a battery."),
- * and an exact match finds nothing. Anchored at the start so "Solar" cannot
- * also match "Solar + Storage".
+ * The three-way question at the top of step 1 — one <select>, addressed by
+ * VALUE ("pv_storage"), not by its visible text: each option reads
+ * "Solar + Storage — Panels with a battery" and the blurb is free to change.
  */
-const quoting = (page: Page, label: string) =>
-  page
-    .getByRole("radiogroup", { name: "What are we quoting?" })
-    .getByRole("radio", { name: new RegExp("^" + label.replace(/[+]/g, "\\$&")) });
+const quoting = (page: Page) => page.getByLabel("What are we quoting?");
 
 test.describe(FLAG_ON ? "storage-only proposals" : "storage-only proposals (flag off — skipped)", () => {
   test.skip(!FLAG_ON, "Needs the solar workspace enabled.");
@@ -59,9 +53,9 @@ test.describe(FLAG_ON ? "storage-only proposals" : "storage-only proposals (flag
     await openSolarBuilder(page);
 
     // Step 1 opens with the question, above the customer's name.
-    await expect(page.getByText("What are we quoting?")).toBeVisible();
-    await quoting(page, "Storage only").click();
-    await expect(quoting(page, "Storage only")).toHaveAttribute("aria-checked", "true");
+    await expect(quoting(page)).toBeVisible();
+    await quoting(page).selectOption("storage");
+    await expect(quoting(page)).toHaveValue("storage");
 
     // Step three renames itself and REPLACES the designer. The roof is not
     // hidden — there is no roof.
@@ -105,8 +99,8 @@ test.describe(FLAG_ON ? "storage-only proposals" : "storage-only proposals (flag
     await login(page, "admin@anexahomes.com");
     await openSolarBuilder(page);
 
-    await quoting(page, "Solar + Storage").click();
-    await expect(quoting(page, "Solar + Storage")).toHaveAttribute("aria-checked", "true");
+    await quoting(page).selectOption("pv_storage");
+    await expect(quoting(page)).toHaveValue("pv_storage");
 
     // Step three is still the designer, under its own name.
     await expect(step(page, "System design")).toBeVisible({ timeout: 15000 });
@@ -122,7 +116,7 @@ test.describe(FLAG_ON ? "storage-only proposals" : "storage-only proposals (flag
     // Switching to plain Solar changes nothing about any of it — the two are
     // one code path, and only the rep's vocabulary differs.
     await step(page, "Customer").click();
-    await quoting(page, "Solar Panels only").click();
+    await quoting(page).selectOption("pv");
     await expect(step(page, "System design")).toBeVisible({ timeout: 15000 });
     await step(page, "Financing").click();
     await expect(page.getByRole("button", { name: /base price per watt/ })).toBeVisible();
