@@ -22,33 +22,48 @@ async function assertLead(companyId: string, scope: Prisma.LeadWhereInput, leadI
 }
 
 // ---------------------------------------------------------------------------
-// Payment milestones
+// The rep's commission
 // ---------------------------------------------------------------------------
 
-const milestoneSchema = z.object({
+const commissionSchema = z.object({
   leadId: z.string().min(1),
-  payee: z.enum(["rep", "financier"]),
-  sequence: z.number().int().min(1).max(6),
-  label: z.string().min(1).max(60),
   amountCents: z.number().int().min(0),
   trigger: z.string().max(120).nullable().optional(),
   expectedAt: z.string().nullable().optional(),
   paid: z.boolean().optional(),
 });
 
-/** Create or update one payment milestone (M1/M2, or a financier draw). */
-export async function upsertSolarMilestoneAction(input: z.infer<typeof milestoneSchema>) {
+/**
+ * Set what the rep is owed on this deal, and whether it has been paid.
+ *
+ * ONE FIGURE, NOT A SCHEDULE. This wrote four rows once — M1/M2 for the rep and
+ * two financier draws — because a solar deal was assumed to pay its rep in
+ * tranches as the lender funded. It does not: the rep is paid out in full, one
+ * time, so three of the four slots were a schedule nobody had a second entry
+ * for, and every deal in production had all four sitting empty.
+ *
+ * The financier's own funding is not typed here either. When the lender pays is
+ * already recorded by the pipeline stage the payroll gate reads (M1 Funding) —
+ * see `server/modules/payroll/gate.ts` — and a hand-kept copy of it on the deal
+ * could only ever disagree with the stage that actually releases the money.
+ *
+ * The row is still a `SolarMilestone` (payee `rep`, sequence 1): the storage
+ * was always general enough, it was the interface that asked for too much. The
+ * payee and sequence are decided here rather than passed in, so no caller can
+ * write a slot the deal will not show.
+ */
+export async function upsertSolarCommissionAction(input: z.infer<typeof commissionSchema>) {
   const user = await requireUser();
   if (!can(user, "update", "Lead")) return fail("Not allowed.");
-  const parsed = milestoneSchema.safeParse(input);
-  if (!parsed.success) return fail("Invalid milestone.");
+  const parsed = commissionSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid commission.");
   const d = parsed.data;
 
   const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
   if (!(await assertLead(user.companyId, scope, d.leadId))) return fail("Deal not found.");
 
   const data = {
-    label: d.label,
+    label: "Commission",
     amountCents: d.amountCents,
     trigger: d.trigger ?? null,
     expectedAt: d.expectedAt ? new Date(d.expectedAt) : null,
@@ -57,8 +72,8 @@ export async function upsertSolarMilestoneAction(input: z.infer<typeof milestone
   };
 
   await prisma.solarMilestone.upsert({
-    where: { leadId_payee_sequence: { leadId: d.leadId, payee: d.payee, sequence: d.sequence } },
-    create: { companyId: user.companyId, leadId: d.leadId, payee: d.payee, sequence: d.sequence, ...data },
+    where: { leadId_payee_sequence: { leadId: d.leadId, payee: "rep", sequence: 1 } },
+    create: { companyId: user.companyId, leadId: d.leadId, payee: "rep", sequence: 1, ...data },
     update: data,
   });
 

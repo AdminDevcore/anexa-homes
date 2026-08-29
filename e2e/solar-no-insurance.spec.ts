@@ -195,7 +195,10 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     // Two lines: where the deal is, and what is next. Twenty-five stage labels
     // on the page were a wall; they live in the header's Move dropdown now.
     await expect(bar.getByText("Permit Submitted")).toBeVisible();
-    await expect(bar.getByText(/Step \d+ of 25/)).toBeVisible();
+    // The step COUNT is not pinned: the solar pipeline gains stages as the
+    // business adds them, and a hard 25 here fails on a pipeline edit that has
+    // nothing to do with the bar.
+    await expect(bar.getByText(/Step \d+ of \d+/)).toBeVisible();
     await expect(bar.getByText(/Next:/)).toBeVisible();
     // The full list is one click away, and it is the whole pipeline.
     await page.getByTestId("deal-stage-actions").getByRole("button", { name: /Move/ }).click();
@@ -213,10 +216,11 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
       await expect(ladder.getByText(label, { exact: true })).toBeVisible();
     }
     await expect(ladder.getByText(/^Dealer fee/)).toBeVisible();
-    await expect(page.getByText("Commission milestones")).toBeVisible();
-    await expect(page.getByText("Financier payments")).toBeVisible();
-    await expect(page.getByText("M1", { exact: true })).toBeVisible();
-    await expect(page.getByText("1st payment", { exact: true })).toBeVisible();
+    // One commission line, not a four-slot schedule: the rep is paid in full,
+    // once, and the financier's own funding is the pipeline stage.
+    await expect(page.getByText("Rep commission")).toBeVisible();
+    await expect(page.getByText(/Pays on M1 funding|Due .* pays on/)).toBeVisible();
+    await expect(page.getByText("Financier payments")).toHaveCount(0);
 
     // 3 · The property hero and the lender's own terms, both on the Overview.
     await expect(page.getByRole("heading", { name: "Property" })).toBeVisible();
@@ -361,48 +365,40 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
   });
 
 
-  test("a coordinator can set and edit payment milestones", async ({ page }) => {
+  test("a coordinator can set the rep's commission, and it pays once", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await openSolarDeal(page);
-    await expect(page.getByText("Commission milestones")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Rep commission")).toBeVisible({ timeout: 15000 });
 
-    // M2 (PTO granted) is seeded unpaid with a future date — edit the amount
-    // and mark it paid.
-    await page.getByRole("button", { name: /Edit M2/ }).click();
+    // ONE slot. The M1/M2 tranches and the two financier draws that used to sit
+    // beside it described a payment plan this business does not run: the rep is
+    // paid out in full, one time, on the lender's M1 funding.
+    for (const gone of ["Commission milestones", "Financier payments", "1st payment", "2nd payment"]) {
+      await expect(page.getByText(gone, { exact: true })).toHaveCount(0);
+    }
+
+    await page.getByRole("button", { name: /Edit commission/ }).click();
     // Scope to the form: other tabs stay mounted (hidden), so a bare
     // input[type=number] selector can silently fill the wrong field.
-    const form = page.getByTestId("milestone-form");
+    const form = page.getByTestId("commission-form");
     await expect(form).toBeVisible({ timeout: 15000 });
     await form.getByLabel("Amount").fill("2500");
     await form.getByLabel("Paid").check();
     await form.getByRole("button", { name: /^Save$/ }).click();
-    await expect(page.getByText(/Milestone saved/)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Commission saved/)).toBeVisible({ timeout: 15000 });
 
     // It round-trips: the new amount and a paid stamp survive a reload.
     await page.reload();
     await expect(page.getByText("$2,500")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/paid \d/).first()).toBeVisible();
+    await expect(page.getByText(/Paid \d/).first()).toBeVisible();
 
     // Put it back so the panel reads sensibly for the next walkthrough.
-    await page.getByRole("button", { name: /Edit M2/ }).click();
-    const form2 = page.getByTestId("milestone-form");
-    await form2.getByLabel("Amount").fill("900");
+    await page.getByRole("button", { name: /Edit commission/ }).click();
+    const form2 = page.getByTestId("commission-form");
+    await form2.getByLabel("Amount").fill("3900");
     await form2.getByLabel("Paid").uncheck();
     await form2.getByRole("button", { name: /^Save$/ }).click();
-    await expect(page.getByText(/Milestone saved/)).toBeVisible({ timeout: 15000 });
-  });
-
-  test("an unset financier slot reads as not-set rather than being hidden", async ({ page }) => {
-    await login(page, "admin@anexahomes.com");
-    await openSolarDeal(page);
-    // Both slots always render, so an incomplete schedule is visible as
-    // incomplete instead of silently absent. There is no third slot: the money
-    // arrives on install complete and on PTO, and nothing pays before that.
-    await expect(page.getByText("Financier payments")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("3rd payment")).toHaveCount(0);
-    for (const label of ["1st payment", "2nd payment"]) {
-      await expect(page.getByText(label, { exact: true })).toBeVisible();
-    }
+    await expect(page.getByText(/Commission saved/)).toBeVisible({ timeout: 15000 });
   });
 
   test("the lender's figures are reported on the deal, never typed on the builder", async ({ page }) => {
@@ -488,6 +484,12 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await page.goto("/portal/leads?q=Robert");
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+    // Wait for the deal itself, not just the URL: under `next dev` the route
+    // compiles on first hit and <main> is empty for a second or two, so reading
+    // innerText straight after the navigation reads the sidebar and nothing else.
+    await expect(page.getByRole("heading", { name: "Homeowner Information" })).toBeVisible({
+      timeout: 20000,
+    });
 
     const body = (await page.locator("body").innerText()).toLowerCase();
     expect(body).toContain("deal type");

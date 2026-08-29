@@ -13,7 +13,6 @@ import {
   ClipboardCheck,
   DollarSign,
   Satellite,
-  Landmark,
   Sun,
   FolderOpen,
 } from "lucide-react";
@@ -80,7 +79,6 @@ import { DealSummaryCards, type SummaryCard } from "@/components/portal/deal-sum
 import { DealSummaryPanel } from "@/components/portal/deal-summary-panel";
 import { ClaimStatusSelect } from "@/components/portal/claim-status-select";
 import { HomeownerCard } from "@/components/portal/homeowner-card";
-import { FinancingTermsPanel } from "@/components/portal/solar/financing-terms";
 import { Card, Section } from "@/components/portal/deal-ui";
 import { DealSlides, type DealSlideDef } from "@/components/portal/deal-slides";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
@@ -633,11 +631,13 @@ export default async function LeadDetailPage({
       })
     : null;
 
-  const [solarMilestones, solarFeed] = isSolarDeal
+  // One row: the rep's commission, which pays in full on M1 funding. The table
+  // still holds whatever four-slot schedules were written before that changed,
+  // and the deal simply stops asking about them.
+  const [solarCommission, solarFeed] = isSolarDeal
     ? await Promise.all([
-        prisma.solarMilestone.findMany({
-          where: { companyId: user.companyId, leadId: lead.id },
-          orderBy: [{ payee: "asc" }, { sequence: "asc" }],
+        prisma.solarMilestone.findFirst({
+          where: { companyId: user.companyId, leadId: lead.id, payee: "rep", sequence: 1 },
         }),
         prisma.dealFeedPost.findMany({
           where: { companyId: user.companyId, leadId: lead.id },
@@ -646,7 +646,7 @@ export default async function LeadDetailPage({
           include: { author: { select: { firstName: true, lastName: true } } },
         }),
       ])
-    : [[], []];
+    : [null, []];
 
   // The pricing breakdown is DERIVED from the design + finance rows — no new
   // figures are entered anywhere, so it can never disagree with the proposal.
@@ -1170,25 +1170,27 @@ export default async function LeadDetailPage({
                 { id: "activity", label: "Activity" },
               ]}
             >
-              <div data-deal-slide="system" className="space-y-6">
+              {/* The lender's terms are INSIDE this panel now, as its second
+                  column, rather than a section ruled off underneath it. Stacked,
+                  the slide ran close to two screens and the credit decision sat
+                  below every price derived from it. */}
+              <div data-deal-slide="system">
                 <SolarSystemMoneyPanel
                   leadId={lead.id}
                   canEdit={can(user, "update", "Lead")}
                   money={solarMoney}
-                  milestones={solarMilestones.map((m) => ({
-                  id: m.id, payee: m.payee, sequence: m.sequence, label: m.label,
-                  amountCents: m.amountCents, trigger: m.trigger,
-                  expectedAt: m.expectedAt?.toISOString() ?? null,
-                  paidAt: m.paidAt?.toISOString() ?? null,
-                }))}
+                  financing={financingTerms}
+                  commission={
+                    solarCommission
+                      ? {
+                          amountCents: solarCommission.amountCents,
+                          trigger: solarCommission.trigger,
+                          expectedAt: solarCommission.expectedAt?.toISOString() ?? null,
+                          paidAt: solarCommission.paidAt?.toISOString() ?? null,
+                        }
+                      : null
+                  }
                 />
-                {financingTerms && (
-                  <div className="border-t border-border pt-5">
-                    <Section icon={Landmark} label="Financing & lender" tone="solar">
-                      <FinancingTermsPanel terms={financingTerms} />
-                    </Section>
-                  </div>
-                )}
               </div>
 
             <div data-deal-slide="ops">
@@ -1559,9 +1561,8 @@ export default async function LeadDetailPage({
                 Supplement, Deductible and "company-provided lead?", unlocking
                 at the "Depreciation Requested" stage. A solar deal has no
                 supplement, no deductible and no depreciation — it is paid by a
-                financier against milestones, which is what the System &
-                financing slide already shows as Commission milestones and
-                Financier payments.
+                financier, and what the rep makes on it is the one figure the
+                System & financing slide already shows as Rep commission.
 
                 Roofing keeps both, in its own Deal Financials slide. This
                 section only ever rendered on solar (`showFinancials &&

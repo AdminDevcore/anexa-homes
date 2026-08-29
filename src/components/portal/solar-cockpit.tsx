@@ -3,15 +3,18 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Check, Pencil, Send } from "lucide-react";
-import type { MilestonePayee } from "@prisma/client";
+import { Loader2, Check, DollarSign, Pencil, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   postDealFeedAction,
-  upsertSolarMilestoneAction,
+  upsertSolarCommissionAction,
 } from "@/server/modules/solar/cockpit-actions";
+import {
+  FinancingTermsPanel,
+  type FinancingTerms,
+} from "@/components/portal/solar/financing-terms";
 
 const usd = (c: number) =>
   (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -25,16 +28,16 @@ const usdc = (c: number) =>
 // 1 · System & money
 // ---------------------------------------------------------------------------
 
-export type MilestoneLite = {
-  id: string;
-  payee: MilestonePayee;
-  sequence: number;
-  label: string;
+/** What the rep is owed on this deal. One row, because it pays once. */
+export type CommissionLite = {
   amountCents: number;
   trigger: string | null;
   expectedAt: string | null;
   paidAt: string | null;
 };
+
+/** What the commission pays on, unless somebody types something else. */
+const DEFAULT_TRIGGER = "M1 funding";
 
 export type SystemMoney = {
   sizeKwDc: number;
@@ -65,248 +68,253 @@ export type SystemMoney = {
   lenderName: string | null;
 };
 
+/**
+ * The money on a solar deal: what is being sold, at what price, financed by
+ * whom, and what the rep makes on it.
+ *
+ * TWO COLUMNS, NOT ONE STACK. This ran four blocks deep — stat tiles, a spec
+ * list, the price ladder, two payment schedules — and then the page added the
+ * lender's terms underneath, so the slide was close to two screens tall and
+ * the lender's decision (what a coordinator opens it for) sat well below the
+ * price (what a rep opens it for). Neither half is long on its own; side by
+ * side the whole thing lands in one view.
+ */
 export function SolarSystemMoneyPanel({
   leadId,
   money,
-  milestones,
+  financing,
+  commission,
   canEdit,
 }: {
   leadId: string;
   money: SystemMoney | null;
-  milestones: MilestoneLite[];
+  /** The lender's own terms. Rendered here rather than as a section below. */
+  financing: FinancingTerms | null;
+  commission: CommissionLite | null;
   canEdit: boolean;
 }) {
-  if (!money) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Add a system design and financing with <strong>Build Proposal</strong> and the numbers
-        appear here.
-      </p>
-    );
-  }
-  const rep = milestones.filter((m) => m.payee === "rep").sort((a, b) => a.sequence - b.sequence);
-  const fin = milestones.filter((m) => m.payee === "financier").sort((a, b) => a.sequence - b.sequence);
-
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Metric label="System size" value={`${money.sizeKwDc.toFixed(2)} kW`} />
-        <Metric label="Year-1 production" value={`${money.year1ProductionKwh.toLocaleString()} kWh`} />
-        <Metric label="Offset" value={`${Math.round(money.offsetPct)}%`} />
-        <Metric label="System cost" value={usd(money.contractPriceCents)} />
-      </div>
-
-      <dl className="divide-y divide-border text-sm">
-        {money.moduleLabel && <SpecRow k="Modules" v={`${money.moduleQty} × ${money.moduleLabel}`} />}
-        {money.inverterLabel && <SpecRow k="Inverter" v={money.inverterLabel} />}
-        {money.batteryLabel && <SpecRow k="Battery" v={money.batteryLabel} />}
-        {money.product && <SpecRow k="Financing" v={money.product.toUpperCase()} />}
-      </dl>
-
-      {/*
-        The price ladder, rung by rung. Every figure derives from what is
-        already stored on the design and finance rows — nothing new is entered
-        here.
-
-        BASE + ADDERS = GROSS is what the company keeps; the dealer fee grosses
-        that up to the FINAL price the customer signs. The fee is a percentage
-        OF THE FINAL, which is why gross → final divides rather than multiplies:
-        a 30% programme on a $100,000 system leaves $70,000.
-      */}
-      <div>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Pricing breakdown
+      {/* Hairline grid rather than four floating tiles: gap-px over a
+          border-coloured backdrop draws one strip on any number of rows, so
+          the wrapped 2×2 on a phone reads as the same object as the 1×4. */}
+      {money && (
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
+          <Metric label="System size" value={`${money.sizeKwDc.toFixed(2)} kW`} />
+          <Metric
+            label="Year-1 production"
+            value={`${money.year1ProductionKwh.toLocaleString()} kWh`}
+          />
+          <Metric label="Offset" value={`${Math.round(money.offsetPct)}%`} />
+          <Metric label="System cost" value={usd(money.contractPriceCents)} accent />
         </div>
-        <dl data-testid="pricing-breakdown" className="divide-y divide-border text-sm">
-          <SpecRow k="Base price" v={`${usdc(money.basePpwCents)}/W`} />
-          <SpecRow
-            k="Adders"
-            v={`${usdc(money.adderPpwCents)}/W${money.adderTotalCents > 0 ? ` · ${usd(money.adderTotalCents)}` : ""}`}
-          />
-          <SpecRow
-            k="Gross price"
-            v={`${usdc(money.grossPpwCents)}/W · ${usd(money.grossPriceCents)}`}
-          />
-          <SpecRow
-            k={money.dealerFeePct > 0 ? `Dealer fee · ${money.dealerFeePct}%` : "Dealer fee"}
-            v={money.dealerFeeCents > 0 ? `${usdc(money.dealerFeePpwCents)}/W · ${usd(money.dealerFeeCents)}` : "None"}
-          />
-          <div className="flex items-center justify-between gap-4 py-2 font-semibold">
-            <dt>Final price</dt>
-            <dd className="tabular-nums">
-              {usdc(money.finalPpwCents)}/W · {usd(money.contractPriceCents)}
-            </dd>
-          </div>
-        </dl>
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut. The dealer
-          fee is a share of the final price, so the adders carry it too.
-        </p>
-        {/* A LADDER THE PARTNER SET HAS TO SAY SO. Once the partner's figure
-            decides the price, the base is solved backwards out of it — a rep
-            who typed $3.00/W in the builder reads $1.93/W here. Unexplained
-            that looks like the page has lost the price; named, it is the
-            partner's own rate doing exactly what it was set to do.
+      )}
 
-            A FLAT partner is not "held" at anything, it simply sells at one
-            number, and a notice that says "held" invites a rep to go looking
-            for the price it was held down FROM. */}
-        {money.cappedByLender && money.maxFinalPpwCents != null && (
-          <p className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-500">
-            {money.finalPpwMode === "flat" ? (
-              <>
-                {money.lenderName ?? "This lender"} sells at a flat{" "}
-                {usdc(money.maxFinalPpwCents)}/W, fee and adders included — the base above is
-                what is left of it, not a price typed on this deal.
-              </>
-            ) : (
-              <>
-                Held at {money.lenderName ?? "this lender"}&rsquo;s ceiling of{" "}
-                {usdc(money.maxFinalPpwCents)}/W, fee and adders included. The base above is
-                what survives it — not the price typed on the deal.
-              </>
-            )}
-          </p>
-        )}
-      </div>
+      <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
+        <div className="space-y-5">
+          {money ? (
+            <>
+              <Block label="System">
+                <dl className="divide-y divide-border text-sm">
+                  {money.moduleLabel && (
+                    <SpecRow k="Modules" v={`${money.moduleQty} × ${money.moduleLabel}`} />
+                  )}
+                  {money.inverterLabel && <SpecRow k="Inverter" v={money.inverterLabel} />}
+                  {money.batteryLabel && <SpecRow k="Battery" v={money.batteryLabel} />}
+                </dl>
+              </Block>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <MilestoneList
-          leadId={leadId}
-          payee="rep"
-          title="Commission milestones"
-          rows={rep}
-          canEdit={canEdit}
-          defaultLabels={["M1", "M2"]}
-          defaultTriggers={["Install complete", "PTO granted"]}
-        />
-        <MilestoneList
-          leadId={leadId}
-          payee="financier"
-          title="Financier payments"
-          rows={fin}
-          canEdit={canEdit}
-          defaultLabels={["1st payment", "2nd payment"]}
-          defaultTriggers={["Install complete", "PTO granted"]}
-        />
+              {/*
+                The price ladder, rung by rung. Every figure derives from what
+                is already stored on the design and finance rows — nothing new
+                is entered here.
+
+                BASE + ADDERS = GROSS is what the company keeps; the dealer fee
+                grosses that up to the FINAL price the customer signs. The fee
+                is a percentage OF THE FINAL, which is why gross → final divides
+                rather than multiplies: a 30% programme on a $100,000 system
+                leaves $70,000.
+              */}
+              <Block label="Pricing breakdown">
+                <dl data-testid="pricing-breakdown" className="divide-y divide-border text-sm">
+                  <SpecRow k="Base price" v={`${usdc(money.basePpwCents)}/W`} />
+                  <SpecRow
+                    k="Adders"
+                    v={`${usdc(money.adderPpwCents)}/W${money.adderTotalCents > 0 ? ` · ${usd(money.adderTotalCents)}` : ""}`}
+                  />
+                  <SpecRow
+                    k="Gross price"
+                    v={`${usdc(money.grossPpwCents)}/W · ${usd(money.grossPriceCents)}`}
+                  />
+                  <SpecRow
+                    k={money.dealerFeePct > 0 ? `Dealer fee · ${money.dealerFeePct}%` : "Dealer fee"}
+                    v={
+                      money.dealerFeeCents > 0
+                        ? `${usdc(money.dealerFeePpwCents)}/W · ${usd(money.dealerFeeCents)}`
+                        : "None"
+                    }
+                  />
+                  <div className="flex items-center justify-between gap-4 py-1.5 font-semibold">
+                    <dt>Final price</dt>
+                    <dd className="tabular-nums text-solar">
+                      {usdc(money.finalPpwCents)}/W · {usd(money.contractPriceCents)}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                  Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut. The
+                  dealer fee is a share of the final price, so the adders carry it too.
+                </p>
+                {/* A LADDER THE PARTNER SET HAS TO SAY SO. Once the partner's
+                    figure decides the price, the base is solved backwards out of
+                    it — a rep who typed $3.00/W in the builder reads $1.93/W
+                    here. Unexplained that looks like the page has lost the
+                    price; named, it is the partner's own rate doing exactly what
+                    it was set to do.
+
+                    A FLAT partner is not "held" at anything, it simply sells at
+                    one number, and a notice that says "held" invites a rep to go
+                    looking for the price it was held down FROM. */}
+                {money.cappedByLender && money.maxFinalPpwCents != null && (
+                  <p className="mt-1 text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-500">
+                    {money.finalPpwMode === "flat" ? (
+                      <>
+                        {money.lenderName ?? "This lender"} sells at a flat{" "}
+                        {usdc(money.maxFinalPpwCents)}/W, fee and adders included — the base above
+                        is what is left of it, not a price typed on this deal.
+                      </>
+                    ) : (
+                      <>
+                        Held at {money.lenderName ?? "this lender"}&rsquo;s ceiling of{" "}
+                        {usdc(money.maxFinalPpwCents)}/W, fee and adders included. The base above
+                        is what survives it — not the price typed on the deal.
+                      </>
+                    )}
+                  </p>
+                )}
+              </Block>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Add a system design and financing with <strong>Build Proposal</strong> and the
+              numbers appear here.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-5">
+          {financing && (
+            <Block label="Financing & lender">
+              <FinancingTermsPanel terms={financing} />
+            </Block>
+          )}
+          <Block label="Rep commission">
+            <RepCommission leadId={leadId} row={commission} canEdit={canEdit} />
+          </Block>
+        </div>
       </div>
     </div>
+  );
+}
+
+/** A titled run of rows. Small caps, no rule — the rows carry the structure. */
+function Block({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </h3>
+      {children}
+    </section>
   );
 }
 
 /**
- * The payment schedule, editable in place.
+ * What the rep makes on this deal.
  *
- * Two fixed slots per payee — one per event we actually get paid on: install
- * complete, then PTO granted. There used to be a third, opening on contract
- * signing (NTP approval for the financier), but no money ever arrives then, so
- * the slot only ever sat empty and made a fully-entered schedule look
- * unfinished. The slot count follows `defaultLabels`, so the two stay in step.
+ * ONE FIGURE. This was two M1/M2 tranches beside two financier draws — four
+ * slots, on the assumption that a solar rep is paid down as the lender funds.
+ * He is not: he is paid out in full, once. Three of the four were a schedule
+ * with nothing to put in it, and every deal in production had all four empty,
+ * which made a finished deal look permanently half-entered.
  *
- * A coordinator fills in the amounts and dates rather than inventing rows, and
- * an empty slot shows as "not set" instead of being hidden, so a schedule that
- * has never been entered is visibly incomplete rather than silently absent.
+ * The financier's side is not typed here at all. When the lender pays is
+ * already the pipeline stage the payroll gate reads (M1 Funding); a second,
+ * hand-kept copy of it could only ever disagree with the one that releases the
+ * money.
  */
-function MilestoneList({
-  leadId, payee, title, rows, canEdit, defaultLabels, defaultTriggers,
+function RepCommission({
+  leadId,
+  row,
+  canEdit,
 }: {
   leadId: string;
-  payee: MilestonePayee;
-  title: string;
-  rows: MilestoneLite[];
+  row: CommissionLite | null;
   canEdit: boolean;
-  defaultLabels: string[];
-  defaultTriggers: string[];
 }) {
-  const [editing, setEditing] = React.useState<number | null>(null);
-  const slots = defaultLabels.map((_, i) => i + 1);
+  const [editing, setEditing] = React.useState(false);
+
+  if (editing) {
+    return <CommissionForm leadId={leadId} existing={row} onDone={() => setEditing(false)} />;
+  }
+
+  const paid = !!row?.paidAt;
+  const trigger = row?.trigger?.trim() || DEFAULT_TRIGGER;
+  const sub = paid
+    ? `Paid ${new Date(row!.paidAt!).toLocaleDateString()}`
+    : row?.expectedAt
+      ? `Due ${new Date(row.expectedAt).toLocaleDateString()} · pays on ${trigger}`
+      : `Pays on ${trigger}`;
 
   return (
-    <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
+    <div className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5">
+      <span
+        className={cn(
+          "grid size-7 shrink-0 place-items-center rounded-full",
+          paid ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+        )}
+      >
+        {paid ? <Check className="size-3.5" /> : <DollarSign className="size-3.5" />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div
+          className={cn(
+            "text-sm font-semibold tabular-nums",
+            !row?.amountCents && "font-medium text-muted-foreground"
+          )}
+        >
+          {row?.amountCents ? usd(row.amountCents) : "Not set"}
+        </div>
+        <div className="truncate text-[11px] text-muted-foreground">{sub}</div>
       </div>
-      <ul className="divide-y divide-border rounded-lg border border-border">
-        {slots.map((seq) => {
-          const m = rows.find((r) => r.sequence === seq) ?? null;
-          if (editing === seq) {
-            return (
-              <li key={seq} className="p-2.5">
-                <MilestoneForm
-                  leadId={leadId}
-                  payee={payee}
-                  sequence={seq}
-                  existing={m}
-                  defaultLabel={defaultLabels[seq - 1]}
-                  defaultTrigger={defaultTriggers[seq - 1]}
-                  onDone={() => setEditing(null)}
-                />
-              </li>
-            );
-          }
-          return (
-            <li key={seq} className="flex items-center gap-2 p-2.5 text-sm">
-              <span
-                className={cn(
-                  "grid size-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold",
-                  m?.paidAt ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
-                )}
-              >
-                {m?.paidAt ? <Check className="size-3" /> : seq}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className={cn("font-medium", !m && "text-muted-foreground")}>
-                  {m?.label ?? defaultLabels[seq - 1]}
-                </span>
-                <span className="block truncate text-[11px] text-muted-foreground">
-                  {m?.trigger ?? defaultTriggers[seq - 1]}
-                </span>
-              </span>
-              <span className="text-right">
-                <span className="block tabular-nums">{m ? usd(m.amountCents) : "—"}</span>
-                <span className="block text-[11px] text-muted-foreground">
-                  {m?.paidAt
-                    ? `paid ${new Date(m.paidAt).toLocaleDateString()}`
-                    : m?.expectedAt
-                      ? `due ${new Date(m.expectedAt).toLocaleDateString()}`
-                      : "not set"}
-                </span>
-              </span>
-              {canEdit && (
-                <button
-                  onClick={() => setEditing(seq)}
-                  aria-label={`Edit ${m?.label ?? defaultLabels[seq - 1]}`}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-muted"
-                >
-                  <Pencil className="size-3.5" />
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {canEdit && (
+        <button
+          onClick={() => setEditing(true)}
+          aria-label="Edit commission"
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Pencil className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
 
-function MilestoneForm({
-  leadId, payee, sequence, existing, defaultLabel, defaultTrigger, onDone,
+function CommissionForm({
+  leadId,
+  existing,
+  onDone,
 }: {
   leadId: string;
-  payee: MilestonePayee;
-  sequence: number;
-  existing: MilestoneLite | null;
-  defaultLabel: string;
-  defaultTrigger: string;
+  existing: CommissionLite | null;
   onDone: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
-  const [label, setLabel] = React.useState(existing?.label ?? defaultLabel);
   const [amount, setAmount] = React.useState(
-    existing ? (existing.amountCents / 100).toString() : ""
+    existing?.amountCents ? (existing.amountCents / 100).toString() : ""
   );
-  const [trigger, setTrigger] = React.useState(existing?.trigger ?? defaultTrigger);
+  const [trigger, setTrigger] = React.useState(existing?.trigger ?? DEFAULT_TRIGGER);
   const [expected, setExpected] = React.useState(
     existing?.expectedAt ? existing.expectedAt.slice(0, 10) : ""
   );
@@ -314,34 +322,28 @@ function MilestoneForm({
 
   async function save() {
     setBusy(true);
-    const res = await upsertSolarMilestoneAction({
-      leadId,
-      payee,
-      sequence,
-      label: label.trim() || defaultLabel,
-      amountCents: Math.round(Number(amount || 0) * 100),
-      trigger: trigger.trim() || null,
-      expectedAt: expected ? new Date(expected).toISOString() : null,
-      paid,
-    });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Milestone saved");
-    onDone();
-    router.refresh();
+    // The flag is cleared in a finally: a server action that throws used to
+    // leave it latched on, and the form stayed dead until a reload.
+    try {
+      const res = await upsertSolarCommissionAction({
+        leadId,
+        amountCents: Math.round(Number(amount || 0) * 100),
+        trigger: trigger.trim() || null,
+        expectedAt: expected ? new Date(expected).toISOString() : null,
+        paid,
+      });
+      if (!res.ok) return toast.error(res.error);
+      toast.success("Commission saved");
+      onDone();
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="space-y-2" data-testid="milestone-form">
+    <div className="space-y-2.5 rounded-lg border border-border p-3" data-testid="commission-form">
       <div className="grid grid-cols-2 gap-2">
-        <label className="space-y-0.5">
-          <span className="text-[11px] text-muted-foreground">Label</span>
-          <input
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
-          />
-        </label>
         <label className="space-y-0.5">
           <span className="text-[11px] text-muted-foreground">Amount ($)</span>
           <input
@@ -353,16 +355,9 @@ function MilestoneForm({
           />
         </label>
         <label className="space-y-0.5">
-          <span className="text-[11px] text-muted-foreground">Pays when</span>
-          <input
-            value={trigger}
-            onChange={(e) => setTrigger(e.target.value)}
-            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
-          />
-        </label>
-        <label className="space-y-0.5">
           <span className="text-[11px] text-muted-foreground">Expected date</span>
           <input
+            aria-label="Expected date"
             type="date"
             value={expected}
             onChange={(e) => setExpected(e.target.value)}
@@ -370,6 +365,15 @@ function MilestoneForm({
           />
         </label>
       </div>
+      <label className="block space-y-0.5">
+        <span className="text-[11px] text-muted-foreground">Pays when</span>
+        <input
+          aria-label="Pays when"
+          value={trigger}
+          onChange={(e) => setTrigger(e.target.value)}
+          className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+        />
+      </label>
       <label className="flex items-center gap-2 text-xs">
         <input
           type="checkbox"
@@ -395,18 +399,25 @@ function MilestoneForm({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/30 p-3 text-center">
-      <div className="font-display text-lg font-semibold">{value}</div>
-      <div className="text-[11px] leading-tight text-muted-foreground">{label}</div>
+    <div className="bg-card px-3 py-2.5">
+      <div
+        className={cn(
+          "font-display text-base font-semibold tabular-nums",
+          accent && "text-solar"
+        )}
+      >
+        {value}
+      </div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
     </div>
   );
 }
 
 function SpecRow({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2">
+    <div className="flex items-center justify-between gap-4 py-1.5">
       <dt className="text-muted-foreground">{k}</dt>
       <dd className="text-right font-medium tabular-nums">{v}</dd>
     </div>
