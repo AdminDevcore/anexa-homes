@@ -50,10 +50,21 @@ export function SolarStoragePanel({
   const [batteryId, setBatteryId] = React.useState(view.batteryId);
   const [qty, setQty] = React.useState(Math.max(1, view.batteryQty));
 
-  React.useEffect(() => {
+  /**
+   * Re-seed when the server sends something new.
+   *
+   * DURING RENDER, not in an effect. An effect that calls setState runs after
+   * a paint, so the panel would flash the stale figure for one frame every time
+   * the router refreshed — and eslint rejects the pattern outright. Comparing
+   * the prop against what was last seen is React's own answer to this, and it
+   * is what the proposal document does with its snapshot.
+   */
+  const [seen, setSeen] = React.useState(view);
+  if (seen !== view) {
+    setSeen(view);
     setBatteryId(view.batteryId);
     setQty(Math.max(1, view.batteryQty));
-  }, [view.batteryId, view.batteryQty]);
+  }
 
   const battery = view.batteries.find((b) => b.id === batteryId) ?? null;
   const kwh = usableKwh(battery?.ratingW ?? null, batteryId ? qty : 0);
