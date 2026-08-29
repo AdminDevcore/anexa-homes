@@ -20,14 +20,19 @@ import {
   type SnapshotPage,
   type FilledValue,
 } from "./pdf";
-import { buildSnapshotFromTemplate } from "./build-snapshot";
+import { buildEnvelopeSnapshot, buildSnapshotFromTemplate } from "./build-snapshot";
 
 // ---------------------------------------------------------------------------
 // Send for signature (staff)
 // ---------------------------------------------------------------------------
 
 export type SendInput = {
-  templateId: string;
+  /**
+   * The templates that make up ONE envelope, in bundle order. Usually a single
+   * entry; "Send docs" passes several so the customer signs once instead of
+   * once per document.
+   */
+  templateIds: string[];
   leadId: string;
   signers: { role: "customer" | "co_customer" | "company_rep" | "witness"; name: string; email?: string; order: number }[];
 };
@@ -136,6 +141,17 @@ export async function sendForSignature(user: SessionUser, input: SendInput) {
 }
 
 /**
+ * What the deal, the documents list, and the customer's email call this
+ * envelope. One template keeps its own name; a bundle names its parts, and
+ * falls back to a count once that would be a mouthful.
+ */
+function envelopeTitle(names: string[]): string {
+  if (names.length === 1) return names[0];
+  const joined = names.join(" + ");
+  return joined.length <= 90 ? joined : `${names[0]} + ${names.length - 1} more`;
+}
+
+/**
  * Create and send a signature envelope with NO session.
  *
  * The automation engine reaches this directly. It cannot go through
@@ -155,18 +171,32 @@ export async function createSignaturePackage(args: {
 }) {
   const { companyId, actor, input } = args;
 
-  const template = await prisma.documentTemplate.findFirst({
-    where: { id: input.templateId, companyId },
+  if (input.templateIds.length === 0) throw new Error("Choose at least one document.");
+
+  const found = await prisma.documentTemplate.findMany({
+    where: { id: { in: input.templateIds }, companyId },
     include: { fields: true, documents: { orderBy: { order: "asc" } } },
   });
-  if (!template) throw new Error("Template not found.");
+  const byId = new Map(found.map((t) => [t.id, t]));
+  // Ordered by what the rep chose, not by what the database returned — the
+  // bundle prints in this order.
+  const templates = input.templateIds.map((id) => {
+    const t = byId.get(id);
+    if (!t) throw new Error("Template not found.");
+    return t;
+  });
 
-  // A document added to the bundle but never given a PDF would go out as a
+  // A document added to a template but never given a PDF would go out as a
   // blank generated page in the middle of a contract. Refuse the send and name
   // the offender instead — the template editor flags it too, but the send is
   // the last place to catch it before a customer sees it.
-  const emptyDoc = template.documents.find((d) => !d.sourcePdfKey);
-  if (emptyDoc) throw new Error(`"${emptyDoc.name}" has no PDF uploaded yet.`);
+  //
+  // All-or-nothing across the bundle, unavoidably: an envelope is one
+  // signature, so there is no half of it to deliver.
+  for (const t of templates) {
+    const emptyDoc = t.documents.find((d) => !d.sourcePdfKey);
+    if (emptyDoc) throw new Error(`"${emptyDoc.name}" in ${t.name} has no PDF uploaded yet.`);
+  }
 
   const lead = await prisma.lead.findFirst({
     where: { id: input.leadId, companyId },
@@ -174,20 +204,25 @@ export async function createSignaturePackage(args: {
   });
   if (!lead) throw new Error("Lead not found.");
 
-  const snapshot = buildSnapshotFromTemplate({
-    name: template.name,
-    pages: (template.pages as unknown as SnapshotPage[]) ?? [{ width: 612, height: 792 }],
-    body: (template.body as unknown as Snapshot["body"]) ?? [],
-    sourcePdfKey: template.sourcePdfKey ?? null,
-    documents: template.documents.map((d) => ({
-      id: d.id,
-      name: d.name,
-      order: d.order,
-      sourcePdfKey: d.sourcePdfKey,
-      pages: (d.pages as unknown as SnapshotPage[]) ?? [],
+  const snapshot = buildEnvelopeSnapshot(
+    templates.map((template) => ({
+      templateId: template.id,
+      name: template.name,
+      pages: (template.pages as unknown as SnapshotPage[]) ?? [{ width: 612, height: 792 }],
+      body: (template.body as unknown as Snapshot["body"]) ?? [],
+      sourcePdfKey: template.sourcePdfKey ?? null,
+      documents: template.documents.map((d) => ({
+        id: d.id,
+        name: d.name,
+        order: d.order,
+        sourcePdfKey: d.sourcePdfKey,
+        pages: (d.pages as unknown as SnapshotPage[]) ?? [],
+      })),
+      fields: template.fields,
     })),
-    fields: template.fields,
-  });
+  );
+
+  const primary = templates[0];
 
   const tokens: { name: string; email: string | null; raw: string }[] = [];
 
@@ -195,16 +230,23 @@ export async function createSignaturePackage(args: {
     const created = await tx.documentPackage.create({
       data: {
         companyId,
-        templateId: template.id,
+        // The relation can only hold one, so it holds the first. Which template
+        // an automation should match on lives in `snapshot.templateIds`, where
+        // all of them survive.
+        templateId: primary.id,
         leadId: lead.id,
         projectId: lead.project?.id ?? null,
-        title: template.name,
+        title: envelopeTitle(templates.map((t) => t.name)),
         status: "sent",
         snapshot: snapshot as unknown as Prisma.InputJsonValue,
         // Copied, not read live: re-pointing this template later must not
         // relocate a document that is already signed. Same reasoning as the
         // body/fields snapshot above.
-        folderKey: template.folderKey,
+        //
+        // One envelope files as one document, so the first template decides
+        // where it lands. Two destinations would need two files, which is the
+        // very thing bundling exists to avoid.
+        folderKey: primary.folderKey,
         sentAt: new Date(),
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30),
         createdById: actor?.id ?? null,
@@ -273,7 +315,7 @@ export async function createSignaturePackage(args: {
     })
   );
 
-  return { packageId: pkg.id, links };
+  return { packageId: pkg.id, title: pkg.title, links };
 }
 
 /**
@@ -708,7 +750,13 @@ async function finalizePackage(packageId: string) {
       vertical: pkg.vertical,
       trigger: "document_completed",
       leadId: pkg.leadId,
-      payload: { templateId: pkg.templateId ?? undefined },
+      payload: {
+        templateId: pkg.templateId ?? undefined,
+        // Every template in the envelope. Without this a rule keyed to the
+        // SECOND document in a bundle would never fire — the package's own
+        // templateId only ever holds the first.
+        templateIds: snapshot.templateIds ?? (pkg.templateId ? [pkg.templateId] : undefined),
+      },
       depth: 0,
     });
   }
@@ -896,6 +944,7 @@ export async function generateTemplatePreviewPdf(
   if (!template) return null;
 
   const snapshot = buildSnapshotFromTemplate({
+    templateId: template.id,
     name: template.name,
     pages: (template.pages as unknown as SnapshotPage[]) ?? [],
     body: (template.body as unknown as Snapshot["body"]) ?? [],

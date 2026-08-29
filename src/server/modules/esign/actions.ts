@@ -44,12 +44,19 @@ const sendSchema = z.object({
     .min(1),
 });
 
-export async function sendDocumentAction(input: SendInput) {
+/** One template, one envelope — the Documents page's own send dialog. */
+export type SendDocumentInput = z.infer<typeof sendSchema>;
+
+export async function sendDocumentAction(input: SendDocumentInput) {
   const user = await requireUser();
   const parsed = sendSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: "Please complete all signer fields." };
   try {
-    const result = await sendForSignature(user, parsed.data as SendInput);
+    const result = await sendForSignature(user, {
+      templateIds: [parsed.data.templateId],
+      leadId: parsed.data.leadId,
+      signers: parsed.data.signers as SendInput["signers"],
+    });
     revalidatePath("/portal/documents");
     return { ok: true as const, ...result };
   } catch (e) {
@@ -66,41 +73,41 @@ const sendManySchema = z.object({
 export type SendDocumentsInput = z.infer<typeof sendManySchema>;
 
 /**
- * Send several templates to the same deal in one go — the proposal's "Send docs".
+ * Send the checked templates to a deal as ONE envelope — the proposal's
+ * "Send docs".
  *
- * Each template becomes its own envelope, because a DocumentPackage snapshots one
- * template. The loop catches per template so a single broken document (a missing
- * source PDF, say) doesn't discard the ones that went out; the caller shows what
- * sent and what didn't rather than a single all-or-nothing error.
+ * They used to go out one envelope per template, which meant an email and a
+ * signature per document for a customer who was buying one job. Now they are
+ * concatenated into a single package: one link, one signature, one merged PDF
+ * on the deal, in the order they were checked.
+ *
+ * That makes the send all-or-nothing, where it used to report per template. It
+ * has to be: an envelope is one signature, so there is no half of it to
+ * deliver. A template that cannot go (no PDF uploaded, say) fails the send and
+ * says which one, rather than quietly sending the rest.
  */
 export async function sendDocumentsAction(input: SendDocumentsInput) {
   const user = await requireUser();
   const parsed = sendManySchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: "Choose at least one document and a signer." };
 
-  const sent: { templateId: string; title: string; packageId: string; links: { name: string; url: string }[] }[] = [];
-  const failed: { templateId: string; error: string }[] = [];
-
-  for (const templateId of parsed.data.templateIds) {
-    try {
-      const result = await sendForSignature(user, {
-        templateId,
-        leadId: parsed.data.leadId,
-        signers: parsed.data.signers as SendInput["signers"],
-      });
-      const template = await prisma.documentTemplate.findFirst({
-        where: { id: templateId, companyId: user.companyId },
-        select: { name: true },
-      });
-      sent.push({ templateId, title: template?.name ?? "Document", packageId: result.packageId, links: result.links });
-    } catch (e) {
-      failed.push({ templateId, error: e instanceof Error ? e.message : "Failed to send." });
-    }
+  try {
+    const result = await sendForSignature(user, {
+      templateIds: parsed.data.templateIds,
+      leadId: parsed.data.leadId,
+      signers: parsed.data.signers as SendInput["signers"],
+    });
+    revalidatePath("/portal/documents");
+    revalidatePath(`/portal/leads/${parsed.data.leadId}`);
+    return {
+      ok: true as const,
+      packageId: result.packageId,
+      title: result.title,
+      links: result.links,
+    };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Failed to send." };
   }
-
-  revalidatePath("/portal/documents");
-  revalidatePath(`/portal/leads/${parsed.data.leadId}`);
-  return { ok: true as const, sent, failed };
 }
 
 export async function resendDocumentAction(packageId: string) {

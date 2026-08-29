@@ -45,6 +45,9 @@ type TemplateDocumentRow = {
  * produces exactly the snapshot it always did, with a single synthesised entry.
  */
 export function buildSnapshotFromTemplate(input: {
+  /** Used as the synthetic document id when the template has no document rows,
+   *  so two single-PDF templates bundled together cannot collide on one id. */
+  templateId: string;
   name: string;
   pages: SnapshotPage[];
   body: SnapshotBody[];
@@ -70,7 +73,7 @@ export function buildSnapshotFromTemplate(input: {
     ? [...input.documents].sort((a, b) => a.order - b.order)
     : [
         {
-          id: "primary",
+          id: input.templateId,
           name: input.name || "Document",
           order: 1,
           sourcePdfKey: input.sourcePdfKey,
@@ -115,5 +118,40 @@ export function buildSnapshotFromTemplate(input: {
     sourcePdfKey: first.sourcePdfKey,
     fields: documents.flatMap((d) => d.fields),
     documents,
+  };
+}
+
+
+/**
+ * Freeze SEVERAL templates into ONE envelope.
+ *
+ * "Send docs" used to fire one envelope per checked template, so a customer got
+ * three emails and signed three times for one job. Concatenating them here
+ * means one link, one signature, and one merged PDF — the templates stay
+ * separate to author and reuse, and only the send is joined.
+ *
+ * Document ids stay unique across the bundle because they are either row ids or
+ * the template's own id, and field ids are row ids, so the flat `fields` list
+ * is still an unambiguous lookup.
+ */
+export function buildEnvelopeSnapshot(
+  templates: Parameters<typeof buildSnapshotFromTemplate>[0][],
+): Snapshot {
+  const parts = templates.map(buildSnapshotFromTemplate);
+  const documents = parts
+    .flatMap((p) => p.documents ?? [])
+    // Bundle order is the order the templates were chosen, then each template's
+    // own document order — which the parts already carry.
+    .map((d, i) => ({ ...d, order: i + 1 }));
+
+  const first = documents[0];
+  if (!first) throw new Error("An envelope needs at least one document.");
+  return {
+    pages: first.pages,
+    body: first.body,
+    sourcePdfKey: first.sourcePdfKey,
+    fields: documents.flatMap((d) => d.fields),
+    documents,
+    templateIds: templates.map((t) => t.templateId),
   };
 }

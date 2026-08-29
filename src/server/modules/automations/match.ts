@@ -24,8 +24,15 @@ export function matchesConditions(
     case "photo_checklist_completed":
       return str(c.kind) === undefined || str(c.kind) === payload.kind;
 
-    case "document_completed":
-      return str(c.templateId) === undefined || str(c.templateId) === payload.templateId;
+    case "document_completed": {
+      const want = str(c.templateId);
+      if (want === undefined) return true;
+      // One envelope can carry several templates, so a rule matches if ITS
+      // template was anywhere in the bundle — not only if it happened to be
+      // the one the package's own templateId points at.
+      const inEnvelope = payload.templateIds ?? (payload.templateId ? [payload.templateId] : []);
+      return inEnvelope.includes(want);
+    }
 
     case "stage_age_exceeded": {
       if (str(c.stageId) !== undefined && str(c.stageId) !== payload.stageId) return false;

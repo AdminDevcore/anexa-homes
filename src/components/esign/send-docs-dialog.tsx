@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Send, FileSignature, Plus, X, Copy, AlertCircle } from "lucide-react";
+import { Loader2, Send, FileSignature, Plus, X, Copy, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,13 +31,16 @@ export type SendDocsDefaults = {
   repEmail: string;
 };
 
-type SentDoc = { templateId: string; title: string; packageId: string; links: { name: string; url: string }[] };
+type SentEnvelope = { title: string; packageId: string; links: { name: string; url: string }[] };
 
 /**
  * "Send docs" from the proposal. Same e-sign engine as the Documents page, minus
  * the lead picker — the deal is already known here, so the rep only chooses WHICH
- * documents. Each checked template goes out as its own envelope with its own
- * signing link.
+ * documents.
+ *
+ * Everything checked goes out as ONE envelope: one email, one signing link, one
+ * signature, and one merged PDF filed on the deal. A customer buying one job
+ * should not have to sign three times because the office keeps three templates.
  */
 export function SendDocsDialog({
   leadId,
@@ -63,11 +66,16 @@ export function SendDocsDialog({
   const [repName, setRepName] = React.useState(defaults.repName);
   const [repEmail, setRepEmail] = React.useState(defaults.repEmail);
   const [pending, setPending] = React.useState(false);
-  const [result, setResult] = React.useState<{ sent: SentDoc[]; failed: { templateId: string; error: string }[] } | null>(
-    null,
-  );
+  const [result, setResult] = React.useState<SentEnvelope | null>(null);
 
   const byId = React.useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates]);
+
+  // CHECK order, which is what `checked` already holds. It is the only order the
+  // rep can actually control, and in one envelope order is meaningful — the
+  // agreement should print before the certificate that follows it. The picker
+  // shows it back so nobody has to guess.
+  const bundleIds = React.useMemo(() => checked.filter((id) => byId.has(id)), [checked, byId]);
+  const bundleOrder = bundleIds.map((id) => byId.get(id)!.name);
 
   function toggle(id: string) {
     setChecked((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
@@ -105,21 +113,20 @@ export function SendDocsDialog({
     }
 
     setPending(true);
-    // Keep the order the rep checked them in, not click order.
-    const templateIds = templates.filter((t) => checked.includes(t.id)).map((t) => t.id);
-    const res = await sendDocumentsAction({ leadId, templateIds, signers });
+    const res = await sendDocumentsAction({ leadId, templateIds: bundleIds, signers });
     setPending(false);
 
     if (!res.ok) {
       toast.error(res.error);
       return;
     }
-    setResult({ sent: res.sent, failed: res.failed });
-    if (res.sent.length > 0) {
-      toast.success(res.sent.length === 1 ? "Document sent for signature." : `${res.sent.length} documents sent.`);
-      router.refresh();
-    }
-    if (res.sent.length === 0) toast.error("Nothing could be sent — see the reasons listed.");
+    setResult({ title: res.title, packageId: res.packageId, links: res.links });
+    toast.success(
+      bundleIds.length === 1
+        ? "Document sent for signature."
+        : `${bundleIds.length} documents sent as one signature request.`,
+    );
+    router.refresh();
   }
 
   function reset() {
@@ -150,8 +157,8 @@ export function SendDocsDialog({
             <FileSignature className="size-5 text-[#F4631E]" /> Send documents
           </DialogTitle>
           <DialogDescription>
-            Each document you check is sent to {defaults.customerName || "the customer"} for signature with its own
-            private link.
+            Everything you check goes to {defaults.customerName || "the customer"} as one signature request — a single
+            private link covering all of it.
           </DialogDescription>
         </DialogHeader>
 
@@ -170,53 +177,38 @@ export function SendDocsDialog({
           </div>
         ) : result ? (
           <div className="space-y-4">
-            {result.sent.map((doc) => (
-              <div key={doc.packageId} data-testid="sent-doc" className="space-y-2 rounded-lg border border-border p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium">{doc.title}</span>
-                  {/* Customer standing right there? Hand them this device. */}
-                  <InPersonSignButton packageId={doc.packageId} label="Sign in person" />
-                </div>
-                {doc.links.map((l) => (
-                  <div key={l.url} className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">{l.name}</Label>
-                    <div className="flex gap-2">
-                      <Input readOnly value={l.url} className="text-xs" onFocus={(e) => e.currentTarget.select()} />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        aria-label={`Copy signing link for ${l.name}`}
-                        onClick={() => {
-                          navigator.clipboard.writeText(l.url);
-                          toast.success("Link copied");
-                        }}
-                      >
-                        <Copy className="size-4" />
-                      </Button>
-                    </div>
+            <div data-testid="sent-doc" className="space-y-2 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{result.title}</span>
+                {/* Customer standing right there? Hand them this device. */}
+                <InPersonSignButton packageId={result.packageId} label="Sign in person" />
+              </div>
+              {result.links.map((l) => (
+                <div key={l.url} className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">{l.name}</Label>
+                  <div className="flex gap-2">
+                    <Input readOnly value={l.url} className="text-xs" onFocus={(e) => e.currentTarget.select()} />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Copy signing link for ${l.name}`}
+                      onClick={() => {
+                        navigator.clipboard.writeText(l.url);
+                        toast.success("Link copied");
+                      }}
+                    >
+                      <Copy className="size-4" />
+                    </Button>
                   </div>
-                ))}
-              </div>
-            ))}
+                </div>
+              ))}
+            </div>
 
-            {result.failed.map((f) => (
-              <div
-                key={f.templateId}
-                className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm"
-              >
-                <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                <span>
-                  <strong>{byId.get(f.templateId)?.name ?? "Document"}</strong> didn&apos;t send — {f.error}
-                </span>
-              </div>
-            ))}
-
-            {result.sent.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Each signer with an email already has their link. These links are private — don&apos;t forward them.
-              </p>
-            )}
+            <p className="text-xs text-muted-foreground">
+              One link covers every document — the signer scrolls through them and signs once. Each signer with an
+              email already has theirs. These links are private; don&apos;t forward them.
+            </p>
 
             <DialogFooter>
               <Button onClick={() => setOpen(false)}>Done</Button>
@@ -239,6 +231,15 @@ export function SendDocsDialog({
                   </li>
                 ))}
               </ul>
+              {checked.length > 1 && (
+                <p className="flex items-start gap-1.5 rounded-lg bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
+                  <Layers className="mt-0.5 size-3.5 shrink-0" />
+                  <span>
+                    Sent as one signature request, in this order:{" "}
+                    <strong className="text-foreground">{bundleOrder.join(" → ")}</strong>
+                  </span>
+                </p>
+              )}
             </div>
 
             {/* Primary signer — already known, since this is that customer's deal. */}

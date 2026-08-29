@@ -24,6 +24,18 @@ describe("matchesConditions", () => {
     expect(matchesConditions("document_completed", { templateId: "t1" }, { templateId: "t2" })).toBe(false);
   });
 
+  it("matches a document rule on ANY template in a bundled envelope", () => {
+    // Several templates can share one envelope, and the package's own
+    // templateId only names the first — a rule keyed to the second must still
+    // fire, or it silently never runs.
+    const bundle = { templateId: "t1", templateIds: ["t1", "t2"] };
+    expect(matchesConditions("document_completed", { templateId: "t2" }, bundle)).toBe(true);
+    expect(matchesConditions("document_completed", { templateId: "t1" }, bundle)).toBe(true);
+    expect(matchesConditions("document_completed", { templateId: "t3" }, bundle)).toBe(false);
+    // Any-document rules still fire regardless.
+    expect(matchesConditions("document_completed", {}, bundle)).toBe(true);
+  });
+
   it("fires a stage-age rule only once the threshold is passed", () => {
     const cond = { stageId: "s1", days: 7 };
     expect(matchesConditions("stage_age_exceeded", cond, { stageId: "s1", days: 7 })).toBe(true);

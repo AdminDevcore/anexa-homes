@@ -51,6 +51,12 @@ export type Snapshot = {
    * and the top-level pages/sourcePdfKey mirror the first document.
    */
   documents?: SnapshotDocument[];
+  /**
+   * Every template that went into this envelope, in bundle order. Absent on
+   * packages sent before one envelope could span several templates; the
+   * package's own `templateId` is the whole answer for those.
+   */
+  templateIds?: string[];
 };
 
 /**

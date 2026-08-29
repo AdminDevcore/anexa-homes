@@ -56,7 +56,7 @@ export const sendForSignatureAction: AutomationActionModule = {
         companyId: ctx.companyId,
         actor: null,
         input: {
-          templateId: parsed.data.templateId,
+          templateIds: [parsed.data.templateId],
           leadId: ctx.leadId,
           signers: [{ role: target.role, name: target.name, email: target.email, order: 1 }],
         },

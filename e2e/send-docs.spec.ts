@@ -21,7 +21,7 @@ async function openProposalShareStep(page: Page, query: string) {
   return dealUrl;
 }
 
-test("Send docs: several templates go out from the proposal in one pass", async ({ page }) => {
+test("Send docs: several templates go out as ONE signature request", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   const dealUrl = await openProposalShareStep(page, "Kevin");
 
@@ -38,23 +38,30 @@ test("Send docs: several templates go out from the proposal in one pass", async 
   // The signer came prefilled from the deal.
   await expect(dialog.locator("#send-docs-name")).toHaveValue(/Kevin Taylor/);
 
+  // The rep is told what is about to happen, and in what order.
+  await expect(dialog.getByText(/Sent as one signature request, in this order/)).toBeVisible();
+
   await page.getByRole("button", { name: "Send 2 documents" }).click();
 
-  // Both envelopes come back with their own signing link.
+  // ONE envelope, ONE link — not one per template.
   const sent = dialog.getByTestId("sent-doc");
-  await expect(sent).toHaveCount(2, { timeout: 15000 });
-  await expect(sent.filter({ hasText: "Roofing Contract" })).toHaveCount(1);
-  await expect(sent.filter({ hasText: "Certificate of Completion" })).toHaveCount(1);
+  await expect(sent).toHaveCount(1, { timeout: 15000 });
+  // The confirmation runs AFTER the result renders, so asserting it is what
+  // catches a throw between the two — the panel alone would still look right.
+  await expect(page.getByText("2 documents sent as one signature request.")).toBeVisible();
+  await expect(sent).toContainText("Roofing Contract");
+  await expect(sent).toContainText("Certificate of Completion");
   const links = dialog.locator("input[readonly]");
-  await expect(links).toHaveCount(2);
-  expect(await links.first().inputValue()).toContain("/sign/");
+  await expect(links).toHaveCount(1);
+  const url = await links.first().inputValue();
+  expect(url).toContain("/sign/");
   // The rep can hand this device to a customer standing right there.
-  await expect(dialog.getByRole("button", { name: "Sign in person" }).first()).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Sign in person" })).toBeVisible();
   await page.getByRole("button", { name: /^Done$/ }).click();
 
-  // Both land in the deal's Contract folder. The deal page is heavy, so the
-  // first click can land before hydration and go nowhere — retry until the
-  // folder actually opens.
+  // One package lands in the deal's Contract folder, named for both documents.
+  // The deal page is heavy, so the first click can land before hydration and go
+  // nowhere — retry until the folder actually opens.
   await page.goto(dealUrl);
   const folders = page.getByTestId("deal-folders");
   await expect(folders).toBeVisible({ timeout: 15000 });
@@ -62,9 +69,15 @@ test("Send docs: several templates go out from the proposal in one pass", async 
     await folders.getByRole("button", { name: /^Contract/ }).click();
     await expect(page.getByRole("button", { name: "All folders" })).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 20000 });
-  await expect(page.getByRole("link", { name: /Roofing Contract/ })).toBeVisible({ timeout: 10000 });
-  await expect(page.getByRole("link", { name: /Certificate of Completion/ })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /Roofing Contract \+ Certificate of Completion/ }),
+  ).toBeVisible({ timeout: 10000 });
+
+  // And the customer signs both in one session, on that one link.
   await page.context().clearCookies();
+  await page.goto(url.replace(/^https?:\/\/[^/]+/, ""));
+  await expect(page.getByRole("heading", { name: "Roofing Contract" })).toBeVisible({ timeout: 20000 });
+  await expect(page.getByRole("heading", { name: "Certificate of Completion" })).toBeVisible();
 });
 
 test("Send docs: nothing checked means nothing to send", async ({ page }) => {

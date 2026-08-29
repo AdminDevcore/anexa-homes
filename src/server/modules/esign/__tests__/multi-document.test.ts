@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { buildSnapshotFromTemplate } from "@/server/modules/esign/build-snapshot";
+import { buildEnvelopeSnapshot, buildSnapshotFromTemplate } from "@/server/modules/esign/build-snapshot";
 import { envelopeDocuments, generateEnvelopePdf, mergePdfs } from "@/server/modules/esign/pdf";
 import { buildAutofillContext } from "@/server/modules/esign/autofill";
 
@@ -35,6 +35,7 @@ async function sourcePdf(pageCount: number) {
 describe("buildSnapshotFromTemplate", () => {
   it("keeps a template with no document rows on its single-PDF shape", () => {
     const snapshot = buildSnapshotFromTemplate({
+      templateId: "t1",
       name: "Install Agreement",
       pages: [LETTER],
       body: [],
@@ -50,6 +51,7 @@ describe("buildSnapshotFromTemplate", () => {
 
   it("splits fields across the bundle and keeps the flat list whole", () => {
     const snapshot = buildSnapshotFromTemplate({
+      templateId: "t1",
       name: "Install Agreement",
       pages: [],
       body: [],
@@ -76,6 +78,7 @@ describe("buildSnapshotFromTemplate", () => {
     // client that still had no documentId for it. Dropping it would send a
     // contract with nowhere to sign.
     const snapshot = buildSnapshotFromTemplate({
+      templateId: "t1",
       name: "Install Agreement",
       pages: [],
       body: [],
@@ -95,6 +98,7 @@ describe("buildSnapshotFromTemplate", () => {
 
   it("carries a legacy template's NULL-documentId fields onto its one document", () => {
     const snapshot = buildSnapshotFromTemplate({
+      templateId: "t1",
       name: "Install Agreement",
       pages: [],
       body: [],
@@ -125,6 +129,7 @@ describe("generateEnvelopePdf", () => {
       "b.pdf": await sourcePdf(2),
     };
     const snapshot = buildSnapshotFromTemplate({
+      templateId: "t1",
       name: "Install Agreement",
       pages: [],
       body: [],
@@ -168,6 +173,7 @@ describe("generateEnvelopePdf", () => {
 
   it("renders a single-document envelope exactly as before", async () => {
     const snapshot = buildSnapshotFromTemplate({
+      templateId: "t1",
       name: "Install Agreement",
       pages: [LETTER],
       body: [],
@@ -193,6 +199,7 @@ describe("generateEnvelopePdf", () => {
 
   it("still produces a file when a document's PDF is missing from storage", async () => {
     const snapshot = buildSnapshotFromTemplate({
+      templateId: "t1",
       name: "Install Agreement",
       pages: [],
       body: [],
@@ -223,5 +230,63 @@ describe("mergePdfs", () => {
   it("concatenates in the order given", async () => {
     const merged = await mergePdfs([await sourcePdf(2), await sourcePdf(3)]);
     expect((await PDFDocument.load(merged)).getPageCount()).toBe(5);
+  });
+});
+
+
+describe("buildEnvelopeSnapshot", () => {
+  const tpl = (id: string, name: string, docs: { id: string; name: string }[]) => ({
+    templateId: id,
+    name,
+    pages: [LETTER],
+    body: [],
+    sourcePdfKey: docs.length ? null : `${id}.pdf`,
+    documents: docs.map((d, i) => ({
+      id: d.id,
+      name: d.name,
+      order: i + 1,
+      sourcePdfKey: `${d.id}.pdf`,
+      pages: [LETTER],
+    })),
+    fields: [field({ id: `${id}-f`, documentId: docs[0]?.id ?? null })],
+  });
+
+  it("concatenates several templates into one envelope, in the order given", () => {
+    const snapshot = buildEnvelopeSnapshot([
+      tpl("t1", "Install Agreement", [{ id: "d1", name: "Agreement" }, { id: "d2", name: "Exhibit A" }]),
+      tpl("t2", "Limited Warranty", []),
+    ]);
+
+    const docs = envelopeDocuments(snapshot);
+    expect(docs.map((d) => d.name)).toEqual(["Agreement", "Exhibit A", "Limited Warranty"]);
+    // Bundle order is renumbered end to end, so the merged PDF prints in order.
+    expect(docs.map((d) => d.order)).toEqual([1, 2, 3]);
+    expect(snapshot.templateIds).toEqual(["t1", "t2"]);
+  });
+
+  it("keeps document ids unique when two single-PDF templates are bundled", () => {
+    // Both fall back to a synthesised document. Sharing one id would collide in
+    // the `?doc=` lookup and serve the wrong PDF to the signer.
+    const snapshot = buildEnvelopeSnapshot([tpl("t1", "One", []), tpl("t2", "Two", [])]);
+    const ids = envelopeDocuments(snapshot).map((d) => d.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("keeps every template's fields reachable in the flat list", () => {
+    const snapshot = buildEnvelopeSnapshot([
+      tpl("t1", "Install Agreement", [{ id: "d1", name: "Agreement" }]),
+      tpl("t2", "Limited Warranty", [{ id: "d3", name: "Warranty" }]),
+    ]);
+    expect(snapshot.fields.map((f) => f.id).sort()).toEqual(["t1-f", "t2-f"]);
+    const docs = envelopeDocuments(snapshot);
+    expect(docs[0].fields.map((f) => f.id)).toEqual(["t1-f"]);
+    expect(docs[1].fields.map((f) => f.id)).toEqual(["t2-f"]);
+  });
+
+  it("leaves a single template exactly as it was", () => {
+    const one = buildEnvelopeSnapshot([tpl("t1", "Install Agreement", [])]);
+    expect(envelopeDocuments(one)).toHaveLength(1);
+    expect(one.sourcePdfKey).toBe("t1.pdf");
+    expect(one.templateIds).toEqual(["t1"]);
   });
 });

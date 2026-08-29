@@ -81,6 +81,8 @@ export type TriggerPayload = {
   stageId?: string;
   kind?: "site" | "install";
   templateId?: string;
+  /** Every template in a bundled envelope; `templateId` is only its first. */
+  templateIds?: string[];
   days?: number;
 };
 
