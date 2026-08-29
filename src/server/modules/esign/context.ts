@@ -42,6 +42,24 @@ export type CompanyForCtx = {
 // Shared include so view + generate fetch every field the autofill context needs.
 export const LEAD_CTX_INCLUDE = {
   source: { select: { name: true } },
+  // Selected, not included: the design also carries the roof layout and 12
+  // months of readings, and a permit line on a contract is not worth shipping
+  // a drawing to read.
+  solarDesign: {
+    select: {
+      ahjName: true,
+      ahjContactName: true,
+      ahjContactInfo: true,
+      permitNumber: true,
+      installerContact: true,
+      installerTitle: true,
+      permitNotRequired: true,
+      ptoNotRequired: true,
+      interconnectionNotRequired: true,
+      otherUtilityStatus: true,
+      otherUtilityStatusDetail: true,
+    },
+  },
   assignedRep: { select: { firstName: true, lastName: true } },
   project: {
     select: {
@@ -69,6 +87,19 @@ export type LeadForCtx = {
   createdAt: Date;
   customFields: unknown;
   source: { name: string } | null;
+  solarDesign?: {
+    ahjName: string | null;
+    ahjContactName: string | null;
+    ahjContactInfo: string | null;
+    permitNumber: string | null;
+    installerContact: string | null;
+    installerTitle: string | null;
+    permitNotRequired: boolean;
+    ptoNotRequired: boolean;
+    interconnectionNotRequired: boolean;
+    otherUtilityStatus: boolean;
+    otherUtilityStatusDetail: string | null;
+  } | null;
   assignedRep: { firstName: string; lastName: string } | null;
   project: {
     projectNumber: string;
@@ -119,6 +150,7 @@ export function ctxForLead(lead: LeadForCtx, company: CompanyForCtx): AutofillCo
     companyState: company.state,
     companyZip: company.zip,
     companyEin: company.einTaxId,
+    permit: lead.solarDesign ?? null,
     custom,
   });
 }

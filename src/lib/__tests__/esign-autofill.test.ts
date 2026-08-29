@@ -58,3 +58,58 @@ describe("company autofill tokens", () => {
     expect(catalog.filter((e) => e.group === "Company").length).toBe(10);
   });
 });
+
+describe("permitting tokens", () => {
+  const permit = {
+    ahjName: "City of Dallas",
+    ahjContactName: "Dana Ruiz",
+    ahjContactInfo: "(214) 555-0100",
+    permitNumber: "PMT-2026-4471",
+    installerContact: "pm@example.com",
+    installerTitle: "Project Manager",
+    permitNotRequired: true,
+    ptoNotRequired: false,
+    interconnectionNotRequired: false,
+    otherUtilityStatus: true,
+    otherUtilityStatusDetail: "Awaiting meter swap",
+  };
+
+  it("resolves every Permitting token in the picker's catalog", () => {
+    const ctx = buildAutofillContext({ ...base, permit });
+    // Every Permitting token must carry the value set above. The two flags left
+    // false are excluded — an unticked box is *supposed* to print nothing.
+    const unticked = ["{{permit.ptoNotRequired}}", "{{permit.interconnectionNotRequired}}"];
+    for (const entry of BASE_CATALOG.filter((e) => e.group === "Permitting")) {
+      if (unticked.includes(entry.token)) continue;
+      expect(fillTokens(entry.token, ctx), entry.token).not.toBe("");
+    }
+    expect(fillTokens("{{permit.ahj}}", ctx)).toBe("City of Dallas");
+    expect(fillTokens("{{permit.number}}", ctx)).toBe("PMT-2026-4471");
+    expect(fillTokens("{{permit.otherUtilityDetail}}", ctx)).toBe("Awaiting meter swap");
+  });
+
+  it("ticks a checked box and prints nothing for an unchecked one", () => {
+    const ctx = buildAutofillContext({ ...base, permit });
+    // "Yes" is what pdf.ts stamps an X for; false must never reach the page as
+    // the word "false".
+    expect(fillTokens("{{permit.notRequired}}", ctx)).toBe("Yes");
+    expect(fillTokens("{{permit.ptoNotRequired}}", ctx)).toBe("");
+    expect(fillTokens("{{permit.interconnectionNotRequired}}", ctx)).toBe("");
+  });
+
+  it("answers the AHJ with the company contact when the job names nobody", () => {
+    const ctx = buildAutofillContext({
+      ...base,
+      companyEmail: "office@anexahomes.com",
+      permit: { ...permit, installerContact: null },
+    });
+    expect(fillTokens("{{permit.installerContact}}", ctx)).toBe("office@anexahomes.com");
+  });
+
+  it("leaves every permitting token blank on a deal with no solar design", () => {
+    const ctx = buildAutofillContext(base);
+    for (const entry of BASE_CATALOG.filter((e) => e.group === "Permitting")) {
+      expect(fillTokens(entry.token, ctx), entry.token).toBe("");
+    }
+  });
+});

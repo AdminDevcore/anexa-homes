@@ -3514,6 +3514,31 @@ model SolarDesign {
   /// setting, and that setting has since been removed too. Kept so designs that
   /// still carry a value keep showing it in System info.
   netMeteringProgram  String?
+
+  // ── Permitting & AHJ ────────────────────────────────────────────────────
+  // What the jurisdiction and the utility need from us AFTER the sale, so the
+  // permit and interconnection paperwork can be generated from the deal instead
+  // of retyped into every document. Deliberately on the design rather than the
+  // lead: this is engineering truth about the job, and it is nobody's business
+  // at intake.
+  ahjName                    String?
+  ahjContactName             String?
+  /// One line, because a jurisdiction gives you whichever it feels like — a
+  /// desk phone, an inbox, or both.
+  ahjContactInfo             String?
+  permitNumber               String?
+  /// Who the AHJ and the utility call about THIS job. Blank means the company's
+  /// own contact answers for it; see ctxForLead.
+  installerContact           String?
+  installerTitle             String?
+  /// The "not required" boxes a permit packet has to tick explicitly. False is
+  /// the honest default: silence means nobody has checked yet, not that the
+  /// jurisdiction waived anything.
+  permitNotRequired          Boolean @default(false)
+  ptoNotRequired             Boolean @default(false)
+  interconnectionNotRequired Boolean @default(false)
+  otherUtilityStatus         Boolean @default(false)
+  otherUtilityStatusDetail   String?
   /// 12 monthly kWh readings, Jan..Dec. The basis for offset — a design that
   /// does not track usage is the thing validation rejects.
   monthlyUsageKwh     Json    @default("[]")

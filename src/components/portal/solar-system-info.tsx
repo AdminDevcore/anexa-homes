@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { compassLabel, tiltDegToPitch } from "@/lib/solar-orientation";
 import { saveSolarBuildDetailsAction } from "@/server/modules/solar/actions";
@@ -79,6 +80,17 @@ export type SystemBuild = {
   hasDesign: boolean;
   utilityAccountNo: string | null;
   meterNo: string | null;
+  ahjName: string | null;
+  ahjContactName: string | null;
+  ahjContactInfo: string | null;
+  permitNumber: string | null;
+  installerContact: string | null;
+  installerTitle: string | null;
+  permitNotRequired: boolean;
+  ptoNotRequired: boolean;
+  interconnectionNotRequired: boolean;
+  otherUtilityStatus: boolean;
+  otherUtilityStatusDetail: string | null;
 };
 
 /* ── The slide's own vocabulary ────────────────────────────────────────────
@@ -262,8 +274,22 @@ export function SolarSystemInfo({
   const [form, setForm] = React.useState({
     utilityAccountNo: build.utilityAccountNo ?? "",
     meterNo: build.meterNo ?? "",
+    ahjName: build.ahjName ?? "",
+    ahjContactName: build.ahjContactName ?? "",
+    ahjContactInfo: build.ahjContactInfo ?? "",
+    permitNumber: build.permitNumber ?? "",
+    installerContact: build.installerContact ?? "",
+    installerTitle: build.installerTitle ?? "",
+    otherUtilityStatusDetail: build.otherUtilityStatusDetail ?? "",
+  });
+  const [flags, setFlags] = React.useState({
+    permitNotRequired: build.permitNotRequired,
+    ptoNotRequired: build.ptoNotRequired,
+    interconnectionNotRequired: build.interconnectionNotRequired,
+    otherUtilityStatus: build.otherUtilityStatus,
   });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const setFlag = (k: keyof typeof flags, v: boolean) => setFlags((f) => ({ ...f, [k]: v }));
 
   async function save() {
     setBusy(true);
@@ -272,9 +298,17 @@ export function SolarSystemInfo({
         leadId,
         utilityAccountNo: form.utilityAccountNo.trim() || null,
         meterNo: form.meterNo.trim() || null,
+        ahjName: form.ahjName.trim() || null,
+        ahjContactName: form.ahjContactName.trim() || null,
+        ahjContactInfo: form.ahjContactInfo.trim() || null,
+        permitNumber: form.permitNumber.trim() || null,
+        installerContact: form.installerContact.trim() || null,
+        installerTitle: form.installerTitle.trim() || null,
+        otherUtilityStatusDetail: form.otherUtilityStatusDetail.trim() || null,
+        ...flags,
       });
       if (!res.ok) return toast.error(res.error ?? "Something went wrong.");
-      toast.success("Interconnection saved");
+      toast.success("Permitting & interconnection saved");
       router.refresh();
     } finally {
       // In a `finally`, so a thrown action leaves the form usable instead of
@@ -574,11 +608,14 @@ export function SolarSystemInfo({
         </div>
       )}
 
-      {/* ── Interconnection ───────────────────────────────────────────────
+      {/* ── Interconnection & permitting ──────────────────────────────────
           The only thing on this slide that writes, so it is the only thing
-          styled as a form. */}
+          styled as a form. Everything here is post-sale ops truth: the utility's
+          numbers for the house, and what the jurisdiction needs from us. It is
+          NOT lead intake — a rep opening a new deal has none of it, and asking
+          for it there would be asking the wrong person at the wrong time. */}
       <Panel
-        title="Interconnection"
+        title="Interconnection & permitting"
         icon={PlugZap}
         action={
           build.hasDesign ? (
@@ -602,9 +639,10 @@ export function SolarSystemInfo({
         ) : (
           <>
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              The utility&rsquo;s own numbers for this house, recorded when the job is built. The
-              equipment and the lender are not set here — they are what the customer was quoted, so
-              they change on the proposal.
+              The utility&rsquo;s and the jurisdiction&rsquo;s own numbers for this house, recorded
+              when the job is built — and read straight into permit and PTO documents, so nothing
+              here has to be retyped into a form. The equipment and the lender are not set here:
+              they are what the customer was quoted, so they change on the proposal.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
@@ -631,6 +669,136 @@ export function SolarSystemInfo({
               </div>
             </div>
 
+            <div className="mt-5 border-t border-border pt-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Permitting &amp; AHJ
+              </h4>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="solar-ahj-name" className="text-xs">AHJ</Label>
+                  <Input
+                    id="solar-ahj-name"
+                    value={form.ahjName}
+                    disabled={!canEdit}
+                    placeholder="City / county issuing the permit"
+                    className="bg-card"
+                    onChange={(e) => set("ahjName", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="solar-permit-no" className="text-xs">Permit #</Label>
+                  <Input
+                    id="solar-permit-no"
+                    value={form.permitNumber}
+                    disabled={!canEdit}
+                    placeholder="Once the permit is pulled"
+                    className="bg-card"
+                    onChange={(e) => set("permitNumber", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="solar-ahj-contact" className="text-xs">AHJ contact name</Label>
+                  <Input
+                    id="solar-ahj-contact"
+                    value={form.ahjContactName}
+                    disabled={!canEdit}
+                    placeholder="Optional"
+                    className="bg-card"
+                    onChange={(e) => set("ahjContactName", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="solar-ahj-contact-info" className="text-xs">
+                    AHJ contact phone / email
+                  </Label>
+                  <Input
+                    id="solar-ahj-contact-info"
+                    value={form.ahjContactInfo}
+                    disabled={!canEdit}
+                    placeholder="Optional"
+                    className="bg-card"
+                    onChange={(e) => set("ahjContactInfo", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="solar-installer-contact" className="text-xs">
+                    Installer contact for AHJ &amp; PTO
+                  </Label>
+                  <Input
+                    id="solar-installer-contact"
+                    value={form.installerContact}
+                    disabled={!canEdit}
+                    placeholder="Blank = the company's own contact"
+                    className="bg-card"
+                    onChange={(e) => set("installerContact", e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="solar-installer-title" className="text-xs">Installer title</Label>
+                  <Input
+                    id="solar-installer-title"
+                    value={form.installerTitle}
+                    disabled={!canEdit}
+                    placeholder="e.g. Project Manager"
+                    className="bg-card"
+                    onChange={(e) => set("installerTitle", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* The waivers a permit packet has to state OUT LOUD. Unticked
+                  means nobody has checked yet, which is why none of them is
+                  worded as a positive ("permit required") that a blank form
+                  would assert on its own. */}
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    ["permitNotRequired", "Permit not required"],
+                    ["ptoNotRequired", "PTO not required"],
+                    ["interconnectionNotRequired", "Interconnection not required"],
+                    ["otherUtilityStatus", "Other utility status"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label
+                    key={key}
+                    // Explicitly associated rather than relying on the wrapping
+                    // label: the box is a `button[role=checkbox]`, and an
+                    // implicit association there is a coin toss for anything
+                    // reading the page by its accessible name.
+                    htmlFor={`solar-flag-${key}`}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs",
+                      canEdit ? "cursor-pointer" : "opacity-70"
+                    )}
+                  >
+                    <Checkbox
+                      id={`solar-flag-${key}`}
+                      checked={flags[key]}
+                      disabled={!canEdit}
+                      onCheckedChange={(v) => setFlag(key, v === true)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+
+              {flags.otherUtilityStatus && (
+                <div className="mt-3 space-y-1">
+                  <Label htmlFor="solar-other-utility-detail" className="text-xs">
+                    Other utility status — detail
+                  </Label>
+                  <Input
+                    id="solar-other-utility-detail"
+                    value={form.otherUtilityStatusDetail}
+                    disabled={!canEdit}
+                    placeholder="What the utility actually said"
+                    className="bg-card"
+                    onChange={(e) => set("otherUtilityStatusDetail", e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
             {canEdit && (
               <Button
                 size="sm"
@@ -639,7 +807,7 @@ export function SolarSystemInfo({
                 className="mt-3 bg-solar text-solar-foreground hover:bg-solar/90"
               >
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <PlugZap className="size-4" />}
-                Save interconnection
+                Save permitting & interconnection
               </Button>
             )}
           </>

@@ -401,18 +401,32 @@ export default async function LeadDetailPage({
   const approverName = await approverNames(user.companyId, solarProposals);
 
   /**
-   * The interconnection half of the System info slide.
+   * The interconnection and permitting half of the System info slide.
    *
-   * Two fields, and deliberately only two. The equipment and the lender used to
-   * be dropdowns here as well, narrowed to the chosen lender's approved-vendor
-   * list — a second owner for fields the proposal had already frozen. They are
-   * reported from the last proposal now and changed in the builder; see
-   * `saveSolarBuildDetailsAction`.
+   * Everything here is recorded AFTER the sale, by whoever is walking the job
+   * through the utility and the jurisdiction — which is why none of it is asked
+   * for at lead intake, and why it lives on the design rather than on the lead.
+   *
+   * The equipment and the lender used to be dropdowns here as well, narrowed to
+   * the chosen lender's approved-vendor list — a second owner for fields the
+   * proposal had already frozen. They are reported from the last proposal now
+   * and changed in the builder; see `saveSolarBuildDetailsAction`.
    */
   const solarBuild = {
     hasDesign: !!solarDesign,
     utilityAccountNo: solarDesign?.utilityAccountNo ?? null,
     meterNo: solarDesign?.meterNo ?? null,
+    ahjName: solarDesign?.ahjName ?? null,
+    ahjContactName: solarDesign?.ahjContactName ?? null,
+    ahjContactInfo: solarDesign?.ahjContactInfo ?? null,
+    permitNumber: solarDesign?.permitNumber ?? null,
+    installerContact: solarDesign?.installerContact ?? null,
+    installerTitle: solarDesign?.installerTitle ?? null,
+    permitNotRequired: solarDesign?.permitNotRequired ?? false,
+    ptoNotRequired: solarDesign?.ptoNotRequired ?? false,
+    interconnectionNotRequired: solarDesign?.interconnectionNotRequired ?? false,
+    otherUtilityStatus: solarDesign?.otherUtilityStatus ?? false,
+    otherUtilityStatusDetail: solarDesign?.otherUtilityStatusDetail ?? null,
   };
 
   /**

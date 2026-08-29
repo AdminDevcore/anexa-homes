@@ -173,6 +173,19 @@ const buildDetailsSchema = z.object({
   leadId: z.string().min(1),
   utilityAccountNo: z.string().max(60).nullable(),
   meterNo: z.string().max(60).nullable(),
+  // Permitting & AHJ — the same shape of fact as the two above: recorded once
+  // the job is real, and read straight into the permit packet.
+  ahjName: z.string().max(120).nullable(),
+  ahjContactName: z.string().max(120).nullable(),
+  ahjContactInfo: z.string().max(160).nullable(),
+  permitNumber: z.string().max(60).nullable(),
+  installerContact: z.string().max(160).nullable(),
+  installerTitle: z.string().max(80).nullable(),
+  permitNotRequired: z.boolean(),
+  ptoNotRequired: z.boolean(),
+  interconnectionNotRequired: z.boolean(),
+  otherUtilityStatus: z.boolean(),
+  otherUtilityStatusDetail: z.string().max(200).nullable(),
 });
 
 /**
@@ -202,7 +215,21 @@ export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDet
 
   await prisma.solarDesign.update({
     where: { leadId: d.leadId },
-    data: { utilityAccountNo: d.utilityAccountNo, meterNo: d.meterNo },
+    data: {
+      utilityAccountNo: d.utilityAccountNo,
+      meterNo: d.meterNo,
+      ahjName: d.ahjName,
+      ahjContactName: d.ahjContactName,
+      ahjContactInfo: d.ahjContactInfo,
+      permitNumber: d.permitNumber,
+      installerContact: d.installerContact,
+      installerTitle: d.installerTitle,
+      permitNotRequired: d.permitNotRequired,
+      ptoNotRequired: d.ptoNotRequired,
+      interconnectionNotRequired: d.interconnectionNotRequired,
+      otherUtilityStatus: d.otherUtilityStatus,
+      otherUtilityStatusDetail: d.otherUtilityStatusDetail,
+    },
   });
 
   revalidatePath(`/portal/leads/${d.leadId}`);

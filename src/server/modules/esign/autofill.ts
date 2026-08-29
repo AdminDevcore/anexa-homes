@@ -20,8 +20,32 @@ export type AutofillContext = {
     ein: string;
   };
   today: string;
+  /**
+   * Permitting & AHJ, off the solar design. Booleans resolve to "Yes" or the
+   * empty string: "Yes" ticks a checkbox field (pdf.ts reads yes/true/x/1) and
+   * still reads correctly if the template puts it in a text field instead,
+   * while an unticked box prints nothing rather than the word "false".
+   */
+  permit: {
+    ahj: string;
+    ahjContactName: string;
+    ahjContact: string;
+    number: string;
+    installerContact: string;
+    installerTitle: string;
+    notRequired: string;
+    ptoNotRequired: string;
+    interconnectionNotRequired: string;
+    otherUtilityStatus: string;
+    otherUtilityDetail: string;
+  };
   custom: Record<string, string>;
 };
+
+/** A ticked box, or nothing at all. See AutofillContext.permit. */
+function tick(v: boolean | null | undefined): string {
+  return v ? "Yes" : "";
+}
 
 function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -55,6 +79,19 @@ export function buildAutofillContext(a: {
   companyState?: string | null;
   companyZip?: string | null;
   companyEin?: string | null;
+  permit?: {
+    ahjName?: string | null;
+    ahjContactName?: string | null;
+    ahjContactInfo?: string | null;
+    permitNumber?: string | null;
+    installerContact?: string | null;
+    installerTitle?: string | null;
+    permitNotRequired?: boolean;
+    ptoNotRequired?: boolean;
+    interconnectionNotRequired?: boolean;
+    otherUtilityStatus?: boolean;
+    otherUtilityStatusDetail?: string | null;
+  } | null;
   custom?: Record<string, string>;
 }): AutofillContext {
   const full = [a.street, [a.city, a.state, a.zip].filter(Boolean).join(", ")].filter(Boolean).join(", ");
@@ -101,6 +138,22 @@ export function buildAutofillContext(a: {
       ein: a.companyEin ?? "",
     },
     today: formatDate(new Date()),
+    permit: {
+      ahj: a.permit?.ahjName ?? "",
+      ahjContactName: a.permit?.ahjContactName ?? "",
+      ahjContact: a.permit?.ahjContactInfo ?? "",
+      number: a.permit?.permitNumber ?? "",
+      // Falls back to the company's own contact: the installer answering an AHJ
+      // is the company unless this particular job names someone else, and a
+      // blank line on a permit form is what gets it sent back.
+      installerContact: a.permit?.installerContact || a.companyEmail || a.companyPhone || "",
+      installerTitle: a.permit?.installerTitle ?? "",
+      notRequired: tick(a.permit?.permitNotRequired),
+      ptoNotRequired: tick(a.permit?.ptoNotRequired),
+      interconnectionNotRequired: tick(a.permit?.interconnectionNotRequired),
+      otherUtilityStatus: tick(a.permit?.otherUtilityStatus),
+      otherUtilityDetail: a.permit?.otherUtilityStatusDetail ?? "",
+    },
     custom: a.custom ?? {},
   };
 }
@@ -162,6 +215,17 @@ export const BASE_CATALOG: CatalogEntry[] = [
   { group: "Company", token: "{{company.zip}}", label: "ZIP", sample: "75201" },
   { group: "Company", token: "{{company.full}}", label: "Full address", sample: "500 Main Street, Dallas, TX, 75201" },
   { group: "Company", token: "{{company.ein}}", label: "EIN / Tax ID", sample: "88-1234567" },
+  { group: "Permitting", token: "{{permit.ahj}}", label: "AHJ", sample: "City of Dallas" },
+  { group: "Permitting", token: "{{permit.ahjContactName}}", label: "AHJ contact name", sample: "Dana Ruiz" },
+  { group: "Permitting", token: "{{permit.ahjContact}}", label: "AHJ contact phone / email", sample: "(214) 555-0100" },
+  { group: "Permitting", token: "{{permit.number}}", label: "Permit #", sample: "PMT-2026-4471" },
+  { group: "Permitting", token: "{{permit.installerContact}}", label: "Installer contact for AHJ & PTO", sample: "office@example.com" },
+  { group: "Permitting", token: "{{permit.installerTitle}}", label: "Installer title", sample: "Project Manager" },
+  { group: "Permitting", token: "{{permit.notRequired}}", label: "Permit not required", sample: "Yes" },
+  { group: "Permitting", token: "{{permit.ptoNotRequired}}", label: "PTO not required", sample: "Yes" },
+  { group: "Permitting", token: "{{permit.interconnectionNotRequired}}", label: "Interconnection not required", sample: "Yes" },
+  { group: "Permitting", token: "{{permit.otherUtilityStatus}}", label: "Other utility status", sample: "Yes" },
+  { group: "Permitting", token: "{{permit.otherUtilityDetail}}", label: "Other utility status — detail", sample: "Awaiting meter swap" },
   { group: "Date", token: "{{today}}", label: "Today's date", sample: formatDate(new Date()) },
 ];
 
