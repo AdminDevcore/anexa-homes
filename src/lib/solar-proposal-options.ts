@@ -2,7 +2,13 @@ import type { FinanceProduct } from "@prisma/client";
 import { financeRowForProduct } from "./solar-finance-row";
 import { lenderProductLabel } from "./solar-lender-product";
 import type { ProposalAlternative, ProposalFinanceInput } from "./solar-proposal";
-import type { SolarAssumptions, FinalPpwMode } from "./solar-money";
+import {
+  basePpwFromSticker,
+  grossPpwFromNet,
+  capStickerToFinalUnit,
+  type SolarAssumptions,
+  type FinalPpwMode,
+} from "./solar-money";
 
 /**
  * Turning a company's rate sheet into the menu a homeowner can actually choose
@@ -38,6 +44,15 @@ export type CatalogueProgramme = {
   paydownPct: number | null;
   paydownMonths: number | null;
   rank: number;
+  /**
+   * Whether this programme funds a job with NO ARRAY on it.
+   *
+   * Most lenders' paper is written against production and will not take a
+   * battery on its own. Offering one of those on a storage menu is not an
+   * option, it is a decline three weeks later — the same rule the builder's own
+   * programme picker already applies when the design says storage.
+   */
+  financesStorageOnly?: boolean;
   lender: {
     id: string;
     name: string;
@@ -54,6 +69,9 @@ export type CatalogueProgramme = {
     maxFinalPpwCents: number | null;
     /** Ceiling, or this partner's flat price. See SolarFinalPpwMode. */
     finalPpwMode: FinalPpwMode;
+    /** The same rule, counted in batteries, for a job with no array. */
+    maxFinalPricePerBatteryCents?: number | null;
+    finalBatteryPriceMode?: FinalPpwMode;
   };
 };
 
@@ -91,6 +109,23 @@ export type AlternativesInput = {
   approvedLenderIds: string[] | null;
   design: { systemSizeKwDc: number };
   /**
+   * What the deal sells, and therefore what the menu is priced by the unit of.
+   * Absent means `pv`, which is what every caller written before storage is.
+   */
+  systemType?: "pv" | "pv_storage" | "storage";
+  /**
+   * STORAGE ONLY. The quoted deal's own per-battery sticker, and how many
+   * batteries it is a price for.
+   *
+   * There is no company-wide "target net per battery" the way there is per
+   * watt, so every alternative here is derived from what THIS deal was priced
+   * at: take the quoted programme's fee back out to reach the base, then gross
+   * that base up by the fee of whichever programme is being offered. It is the
+   * same second branch `cashPpwCents` already falls back to, arrived at from
+   * the same end.
+   */
+  storage?: { batteryQty: number; stickerPricePerBatteryCents: number } | null;
+  /**
    * The extra work, at CATALOGUE price. Grossed up per option by its own fee —
    * except the lines flagged `financedOnTop`, which every option adds at their
    * own price on top of whatever it is quoting.
@@ -114,6 +149,30 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
 
   const out: ProposalAlternative[] = [];
 
+  /**
+   * Which unit this menu counts, decided once.
+   *
+   * `storage` is only honoured when the deal actually carries a per-battery
+   * price. A storage deal with none of that recorded would otherwise have every
+   * alternative derived from zero — which is the same $0 menu the per-watt
+   * ladder was already producing, arrived at more slowly.
+   */
+  const storage =
+    input.systemType === "storage" &&
+    input.storage != null &&
+    input.storage.batteryQty > 0 &&
+    input.storage.stickerPricePerBatteryCents > 0
+      ? input.storage
+      : null;
+
+  /**
+   * What the company keeps per battery, out of the sticker THIS deal quoted.
+   * The base every alternative below is re-grossed from.
+   */
+  const baseBatteryCents = storage
+    ? basePpwFromSticker(storage.stickerPricePerBatteryCents, input.quoted.dealerFeePct)
+    : 0;
+
   // ── Cash, first among the alternatives ────────────────────────────────────
   // The one option every household understands, and the one a financed quote
   // never shows. Priced at what the company actually needs to keep — NOT at the
@@ -127,7 +186,10 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
       lender: null,
       finance: purchaseFinance({
         product: "cash",
-        grossPpwCents: cashPpwCents(input),
+        grossPpwCents: storage ? 0 : cashPpwCents(input),
+        // Cash has no lender, so the base IS the sticker — there is no cut for
+        // it to be grossed up over.
+        stickerPricePerBatteryCents: storage ? baseBatteryCents : undefined,
         dealerFeePct: 0,
         adders: input.adders,
         adderTotalCents: input.adderTotalCents,
@@ -140,6 +202,10 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
   const eligible = input.programmes
     .filter((p) => p.id !== input.quoted.lenderProductId)
     .filter((p) => lenderIsApproved(p.lender.id, input.approvedLenderIds))
+    // On a job with no array, only paper written to fund one. The same line the
+    // builder's programme picker draws — a menu that offered the rest would be
+    // offering a household a decline.
+    .filter((p) => !storage || (p.product === "loan" && p.financesStorageOnly === true))
     .sort(
       (a, b) =>
         a.lender.rank - b.lender.rank ||
@@ -184,6 +250,28 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
       }
     );
 
+    /**
+     * The same programme's price, counted in batteries.
+     *
+     * `financeRowForProduct` above still resolves everything that is not money
+     * — the APR, the term, the fee this partner charges — because those rules
+     * are the partner's and do not change with the unit. Only the price is
+     * rebuilt here, from the base this deal keeps, grossed up by THIS
+     * programme's fee and then held to whatever this partner will fund a
+     * battery for.
+     */
+    const storageSticker = storage
+      ? capStickerToFinalUnit({
+          stickerPerUnitCents:
+            grossPpwFromNet(baseBatteryCents, row.dealerFeePct) ?? baseBatteryCents,
+          maxFinalPerUnitCents: p.lender.maxFinalPricePerBatteryCents ?? null,
+          mode: p.lender.finalBatteryPriceMode,
+          units: storage.batteryQty,
+          dealerFeePct: row.dealerFeePct,
+          adderTotalCents: input.adderTotalCents,
+        }).stickerPerUnitCents
+      : null;
+
     out.push({
       key: `${p.product}:${p.id}`,
       label: `${p.lender.name} · ${lenderProductLabel(p)}`,
@@ -201,7 +289,12 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
           : null,
       finance: {
         product: row.product,
-        grossPpwCents: row.grossPpwCents,
+        // Zeroed on storage: the per-watt figure is a rate on watts this job
+        // does not have, and a renderer handed one prints it.
+        grossPpwCents: storageSticker == null ? row.grossPpwCents : 0,
+        ...(storageSticker == null
+          ? {}
+          : { stickerPricePerBatteryCents: storageSticker }),
         dealerFeePct: row.dealerFeePct,
         adderTotalCents: row.adderTotalCents,
         onTopAdderTotalCents: row.onTopAdderTotalCents,
@@ -255,6 +348,8 @@ function lenderIsApproved(lenderId: string, approved: string[] | null): boolean 
 function purchaseFinance(a: {
   product: "cash";
   grossPpwCents: number;
+  /** Storage only. Absent on a deal with an array — see `ProposalFinanceInput`. */
+  stickerPricePerBatteryCents?: number;
   dealerFeePct: number;
   adders: { label: string; amountCents: number; financedOnTop?: boolean }[];
   adderTotalCents: number;
@@ -263,6 +358,9 @@ function purchaseFinance(a: {
   return {
     product: a.product,
     grossPpwCents: a.grossPpwCents,
+    ...(a.stickerPricePerBatteryCents == null
+      ? {}
+      : { stickerPricePerBatteryCents: a.stickerPricePerBatteryCents }),
     dealerFeePct: a.dealerFeePct,
     adderTotalCents: a.adderTotalCents,
     onTopAdderTotalCents: a.onTopAdderTotalCents,

@@ -326,16 +326,41 @@ export function SolarStorageProposalView({
         title="Your investment"
       >
         {quoted && (
+          /**
+           * A breakdown that ADDS UP, because a homeowner reads it with a
+           * calculator.
+           *
+           * The system alone, then the extra work, then whatever somebody else
+           * is paying, then the line at the bottom. This used to lead with the
+           * contract price and subtract the rebates BENEATH it — and the
+           * contract is already net of them, so the rebate came off twice on
+           * screen and the figure the customer signs appeared nowhere.
+           */
           <SpecList
             items={[
               [
-                "System price",
-                usd(quoted.financing.contractPriceCents ?? 0),
+                st && st.batteryQty > 1 ? `System price · ${st.batteryQty} batteries` : "System price",
+                usd(quoted.financing.basePriceCents ?? quoted.financing.contractPriceCents ?? 0),
               ],
+              ...(quoted.financing.adderTotalCents
+                ? ([["Additional work", usd(quoted.financing.adderTotalCents)]] as [
+                    string,
+                    React.ReactNode,
+                  ][])
+                : []),
               ...(st?.rebates.length
                 ? st.rebates.map(
                     (r) => [`${r.name}${r.qty > 1 ? ` × ${r.qty}` : ""}`, `−${usd(r.totalCents)}`] as [string, React.ReactNode]
                   )
+                : []),
+              // Only where something sits between the two. On a plain battery
+              // deal the system price IS the total, and printing the same
+              // figure twice under two names reads as two charges.
+              ...(quoted.financing.adderTotalCents || st?.rebates.length
+                ? ([["Your total", usd(quoted.financing.contractPriceCents ?? 0)]] as [
+                    string,
+                    React.ReactNode,
+                  ][])
                 : []),
               ...(quoted.monthlyCents != null
                 ? ([["Monthly payment", usd(quoted.monthlyCents)]] as [string, React.ReactNode][])
@@ -344,15 +369,21 @@ export function SolarStorageProposalView({
           />
         )}
 
-        {showPaymentOptions && options.length > 1 && (
-          <div className="mt-10">
-            <PaymentMenu
-              options={options}
-              selectedKey={selectedKey}
-              onSelect={setSelectedKey}
-              showMenu={showPaymentOptions}
-            />
-          </div>
+        {/*
+          Always rendered, exactly as on the solar document, and for the reason
+          the note in `PaymentMenu` gives: the card is not only a picker. It
+          carries the figure the household actually owes and — the line that
+          cannot be dropped — the utility bill that does NOT go away. A storage
+          deal with one way to pay still owes both, and the menu itself decides
+          whether a picker or a plain label goes at the front of it.
+        */}
+        {quoted && (
+          <PaymentMenu
+            options={options}
+            selectedKey={quoted.key}
+            onSelect={setSelectedKey}
+            showMenu={showPaymentOptions}
+          />
         )}
       </Chapter>
 

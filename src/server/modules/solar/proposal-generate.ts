@@ -15,11 +15,16 @@ import { proposalAlternatives, type CatalogueProgramme } from "@/lib/solar-propo
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { canGenerate, type ValidationIssue } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
-import { capStickerToFinalPpw, pricePurchase } from "@/lib/solar-money";
+import {
+  capStickerToFinalPpw,
+  capStickerToFinalUnit,
+  pricePurchase,
+  priceStoragePurchase,
+} from "@/lib/solar-money";
 import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
-import { listBackupProfiles, listDealRebates } from "./storage";
+import { listBackupProfiles, listDealRebates, dealRebateTotalCents } from "./storage";
 import { usableKwh, backupTable, touSavings } from "@/lib/solar-storage";
 import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
 
@@ -208,6 +213,9 @@ export async function generateProposalVersion(
           where: { companyId: user.companyId, id: design.lenderId },
           select: {
             id: true, name: true, applyUrl: true, logoUpdatedAt: true,
+            // The same rule counted in batteries, for a job with no array.
+            maxFinalPricePerBatteryCents: true,
+            finalBatteryPriceMode: true,
             // The partner's ceiling, needed HERE and not only on the payment
             // menu below — see the re-cap immediately after this.
             maxFinalPpwCents: true,
@@ -238,6 +246,15 @@ export async function generateProposalVersion(
    * document is made, and written back so the deal screen agrees with the
    * paper a household is holding.
    */
+  const isStorage = design.systemType === "storage";
+
+  /**
+   * Somebody else's money, off this contract. Read once, because it is priced
+   * into the contract AND printed as its own line on the customer's document —
+   * two readings of the same rows is two chances for them to disagree.
+   */
+  const rebateTotalCents = isStorage ? await dealRebateTotalCents(user.companyId, leadId) : 0;
+
   const capped = capStickerToFinalPpw({
     stickerPpwCents: finance.grossPpwCents,
     maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
@@ -265,6 +282,55 @@ export async function generateProposalVersion(
         contractPriceCents: finance.contractPriceCents,
       },
     });
+  }
+
+  /**
+   * The same last look, counted in batteries.
+   *
+   * Everything the note above says holds here word for word — the ceiling is
+   * the partner's, it binds the DOCUMENT rather than the saved deal, and a flat
+   * partner's figure overrides in both directions. Only the unit differs, and
+   * the block above cannot do this one: it divides by installed watts, of which
+   * a storage job has none, so it stands down and changes nothing.
+   */
+  if (isStorage && (finance.product === "cash" || finance.product === "loan")) {
+    const storageCap = capStickerToFinalUnit({
+      stickerPerUnitCents: finance.stickerPricePerBatteryCents,
+      maxFinalPerUnitCents: dealLender?.maxFinalPricePerBatteryCents ?? null,
+      mode: dealLender?.finalBatteryPriceMode,
+      units: design.batteryQty,
+      dealerFeePct: finance.dealerFeePct,
+      adderTotalCents: finance.adderTotalCents,
+    });
+
+    const priced = priceStoragePurchase({
+      product: finance.product,
+      batteryQty: design.batteryQty,
+      stickerPricePerBatteryCents: storageCap.stickerPerUnitCents,
+      dealerFeePct: finance.dealerFeePct,
+      adderTotalCents: finance.adderTotalCents,
+      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      rebateTotalCents,
+    });
+
+    // Written back for the same reason the per-watt block writes back: the deal
+    // screen and the paper a household is holding have to agree. Only when
+    // something actually moved — an unconditional write would touch every row
+    // on every generation for nothing.
+    if (
+      storageCap.stickerPerUnitCents !== finance.stickerPricePerBatteryCents ||
+      priced.contractPriceCents !== finance.contractPriceCents
+    ) {
+      finance.stickerPricePerBatteryCents = storageCap.stickerPerUnitCents;
+      finance.contractPriceCents = priced.contractPriceCents;
+      await prisma.solarFinance.update({
+        where: { leadId },
+        data: {
+          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+          contractPriceCents: finance.contractPriceCents,
+        },
+      });
+    }
   }
 
   // The catalogue row this deal was quoted from — its payment factors, and the
@@ -320,9 +386,16 @@ export async function generateProposalVersion(
       factorWithPaydownMicros: true, factorWithoutPaydownMicros: true,
       paydownPct: true, paydownMonths: true,
       rank: true,
+      // Whether this paper funds a job with no array on it. Selected because
+      // the menu is frozen: a storage document that offered a programme which
+      // will not take a battery on its own is a decline nobody can correct.
+      financesStorageOnly: true,
       lender: {
         select: {
           id: true, name: true, rank: true, applyUrl: true, logoUpdatedAt: true,
+          // The partner's rule, counted in batteries.
+          maxFinalPricePerBatteryCents: true,
+          finalBatteryPriceMode: true,
           // The partner's price rule for the final price per watt. Selected
           // here because the menu is PRICED at generation and frozen; a rule
           // missing from this select quotes a household a number the lender
@@ -464,11 +537,20 @@ export async function generateProposalVersion(
           logoUrl: lenderLogoUrl(p.lender.id, p.lender.logoUpdatedAt),
           maxFinalPpwCents: p.lender.maxFinalPpwCents,
           finalPpwMode: p.lender.finalPpwMode,
+          maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
+          finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
         },
       })
     ),
     approvedLenderIds,
     design: { systemSizeKwDc: design.systemSizeKwDc },
+    systemType: design.systemType,
+    storage: isStorage
+      ? {
+          batteryQty: design.batteryQty,
+          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+        }
+      : null,
     adders: adderLines.map((l) => ({
       label: l.label,
       amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
@@ -585,6 +667,9 @@ export async function generateProposalVersion(
     finance: {
       product: finance.product,
       grossPpwCents: finance.grossPpwCents,
+      // The unit a storage deal is actually priced by. Without it the document
+      // prices the whole system at zero installed watts — see the field's note.
+      stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,

@@ -4,6 +4,8 @@ import { resolveUtilityRateMills } from "./solar-energy";
 import {
   apportionCents,
   pricePurchase,
+  priceStoragePurchase,
+  purchaseFromUnits,
   priceThirdParty,
   productionInYear,
   loanPaymentCents,
@@ -910,6 +912,16 @@ export const ESTIMATE_DISCLAIMER =
 export type ProposalFinanceInput = {
   product: FinanceProduct;
   grossPpwCents: number;
+  /**
+   * STORAGE ONLY. What ONE battery stickers at, the partner's fee already
+   * inside it — exactly what `grossPpwCents` is on a deal with an array.
+   *
+   * A storage job has no installed watts, so the per-watt figure beside this
+   * one is zero and multiplying by it prices the whole document at nothing.
+   * That was the defect: the deal screen quoted $18,000 and the customer's
+   * document said $0, because only the deal screen knew the unit was a battery.
+   */
+  stickerPricePerBatteryCents?: number;
   dealerFeePct: number;
   /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
@@ -965,7 +977,26 @@ export type ProposalAlternative = {
  * adders, or not to be.
  */
 function priceOption(args: {
-  design: { systemSizeKwDc: number; year1ProductionKwh: number; annualUsageKwh: number };
+  design: {
+    systemSizeKwDc: number;
+    year1ProductionKwh: number;
+    annualUsageKwh: number;
+    /** How many batteries. The UNIT a storage deal is priced by. */
+    batteryQty: number;
+  };
+  /**
+   * What this deal sells, and therefore which ladder prices it. Solar counts
+   * installed watts; storage counts batteries. Same arithmetic, same file — see
+   * `priceUnits` — but a storage deal run through the per-watt one multiplies
+   * every figure by zero watts and quotes the household nothing.
+   */
+  systemType: "pv" | "pv_storage" | "storage";
+  /**
+   * Somebody else's money, already off the contract. Passed to EVERY option for
+   * the same reason the VPP credits are: the rebate belongs to the equipment,
+   * not to the way it is paid for.
+   */
+  rebateTotalCents: number;
   finance: ProposalFinanceInput;
   lender: string | null;
   lenderLogoUrl: string | null;
@@ -988,17 +1019,33 @@ function priceOption(args: {
 } {
   const { design, finance, assumptions: a } = args;
   const isPurchase = finance.product === "cash" || finance.product === "loan";
+  const isStorage = args.systemType === "storage";
 
-  const purchase = isPurchase
-    ? pricePurchase({
-        product: finance.product as "cash" | "loan",
-        systemSizeKwDc: design.systemSizeKwDc,
-        stickerPpwCents: finance.grossPpwCents,
-        dealerFeePct: finance.dealerFeePct,
-        adderTotalCents: finance.adderTotalCents,
-        onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
-      })
-    : undefined;
+  const purchase = !isPurchase
+    ? undefined
+    : isStorage
+      ? // Same ladder, counted in batteries. `purchaseFromUnits` renames the
+        // answer so everything downstream — the savings model, the menu, the
+        // customer's own breakdown — reads it exactly as it reads a PV one.
+        purchaseFromUnits(
+          priceStoragePurchase({
+            product: finance.product as "cash" | "loan",
+            batteryQty: design.batteryQty,
+            stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents ?? 0,
+            dealerFeePct: finance.dealerFeePct,
+            adderTotalCents: finance.adderTotalCents,
+            onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
+            rebateTotalCents: args.rebateTotalCents,
+          })
+        )
+      : pricePurchase({
+          product: finance.product as "cash" | "loan",
+          systemSizeKwDc: design.systemSizeKwDc,
+          stickerPpwCents: finance.grossPpwCents,
+          dealerFeePct: finance.dealerFeePct,
+          adderTotalCents: finance.adderTotalCents,
+          onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
+        });
 
   const thirdParty = !isPurchase
     ? priceThirdParty(
@@ -1088,7 +1135,9 @@ function priceOption(args: {
   const financing: SnapshotFinancing = {
     product: finance.product,
     contractPriceCents: purchase?.contractPriceCents ?? null,
-    grossPpwCents: purchase ? finance.grossPpwCents : null,
+    // Null on storage rather than the row's zero: there are no installed watts
+    // for a rate to be per, and a renderer handed 0 prints "$0.00/W".
+    grossPpwCents: purchase && !isStorage ? finance.grossPpwCents : null,
     // The system AT STICKER — the dealer fee included — because these three
     // rows are read as arithmetic by a homeowner: system price, plus extra
     // work, equals total. Quoting the pre-fee figure here would leave the
@@ -1153,7 +1202,7 @@ function priceOption(args: {
           };
         })()
       : {}),
-    finalPpwCents: purchase ? Math.round(purchase.finalPpwCents) : null,
+    finalPpwCents: purchase && !isStorage ? Math.round(purchase.finalPpwCents) : null,
     // Lease/PPA carry no APR. Gating here as well as at the write means a
     // stale value left on the row by a product switch can never reach a
     // customer as a fabricated lender term.
@@ -1310,12 +1359,22 @@ export function buildProposalSnapshot(args: {
   // derived, so by the time we get here it is a real number.
   const currentRateMillsPerKwh = resolveUtilityRateMills(design) ?? 0;
 
+  const systemType = args.systemType ?? "pv";
+
   const shared = {
     design: {
       systemSizeKwDc: design.systemSizeKwDc,
       year1ProductionKwh: design.year1ProductionKwh,
       annualUsageKwh: design.annualUsageKwh,
+      // Read off the storage block rather than taken as a second argument: it
+      // is the same count the backup table was built from, and two ways to say
+      // how many batteries are on this job is one way for them to disagree.
+      batteryQty: args.storage?.batteryQty ?? 0,
     },
+    systemType,
+    // Likewise the rebates: the lines the customer reads on the cost chapter
+    // are the lines the contract was priced from, summed once, here.
+    rebateTotalCents: (args.storage?.rebates ?? []).reduce((n, r) => n + r.totalCents, 0),
     assumptions: a,
     currentRateMillsPerKwh,
     vppCredits,
@@ -1391,8 +1450,6 @@ export function buildProposalSnapshot(args: {
     monthlyUsage && monthlyProduction
       ? { productionKwh: monthlyProduction, usageKwh: monthlyUsage }
       : null;
-
-  const systemType = args.systemType ?? "pv";
 
   return {
     schemaVersion: 5,

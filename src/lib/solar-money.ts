@@ -998,6 +998,41 @@ export function priceStorageStored(
 }
 
 /**
+ * A storage breakdown, named the way every per-watt caller already reads one.
+ *
+ * The proposal pipeline is written in `PurchaseBreakdown`: the savings model,
+ * the option menu and the customer's own cost chapter all read its field names.
+ * A battery deal climbs the identical ladder over a different unit, so it is
+ * renamed once here rather than branched at each of the dozen places that read
+ * the answer — a second shape is how one of them ends up reading the pre-fee
+ * figure while its neighbour reads the contract.
+ *
+ * THE PER-WATT RATES COME BACK ZERO, deliberately, rather than carrying the
+ * per-battery figure under a `Ppw` name. There are no installed watts on this
+ * job for a rate to be per, and a $/W derived from a battery count is a number
+ * somebody would eventually quote out loud.
+ */
+export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
+  return {
+    systemWatts: 0,
+    basePriceCents: u.basePriceCents,
+    basePpwCents: 0,
+    adderTotalCents: u.adderTotalCents,
+    onTopAdderTotalCents: u.onTopAdderTotalCents,
+    rebateTotalCents: u.rebateTotalCents,
+    grossPriceCents: u.grossPriceCents,
+    grossPpwCents: 0,
+    dealerFeeCents: u.dealerFeeCents,
+    contractPriceCents: u.contractPriceCents,
+    finalPpwCents: 0,
+    baseStickerCents: u.baseStickerCents,
+    adderStickerCents: u.adderStickerCents,
+    rebateStickerCents: u.rebateStickerCents,
+    marginCents: u.marginCents,
+  };
+}
+
+/**
  * A lease product prices per kW-DC per month; `priceThirdParty` takes a fixed
  * monthly. This is the one line between them, kept here so the conversion is
  * not re-derived at each call site.
