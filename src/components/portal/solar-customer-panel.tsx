@@ -223,7 +223,9 @@ function SystemTypePicker({
       <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         What are we quoting?
       </h4>
-      <div className="flex flex-wrap gap-2">
+      {/* A real radiogroup, so the three read as one choice to a screen reader
+          and to a test rather than as three unrelated toggles. */}
+      <div role="radiogroup" aria-label="What are we quoting?" className="flex flex-wrap gap-2">
         {SYSTEM_TYPES.map((t) => {
           const active = value === t.value;
           return (
