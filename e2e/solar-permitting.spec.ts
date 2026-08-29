@@ -113,3 +113,63 @@ test.describe(FLAG_ON ? "permitting on the deal" : "permitting on the deal (flag
     );
   });
 });
+
+test.describe(
+  FLAG_ON ? "the company's own project fields" : "the company's own project fields (flag off — skipped)",
+  () => {
+    test.skip(!FLAG_ON, "Needs the solar workspace enabled.");
+
+    /**
+     * Settings has offered "Project Fields" since custom fields existed, and
+     * nothing in the app ever rendered one — so a company could define a field,
+     * map it into a document template, and never be able to fill it. This is
+     * that round trip: define it in Settings, fill it on the deal, read it back.
+     */
+    test("a project field defined in settings is filled on the deal", async ({ page }) => {
+      await login(page, "admin@anexahomes.com");
+      await page.getByRole("button", { name: "Switch workspace" }).click();
+      await page.getByRole("menuitem", { name: "Solar" }).click();
+      await page.waitForURL(/\/portal\/dashboard/, { timeout: 15000 });
+
+      // Unique per run: the key is a slug of the label, and a second field with
+      // the same slug is refused.
+      const label = `Permit Packet Notes ${Date.now()}`;
+
+      await page.goto("/portal/settings/fields");
+      const projectColumn = page
+        .locator("div")
+        .filter({ has: page.getByRole("heading", { name: "Project Fields" }) })
+        .last();
+      await projectColumn.getByRole("button", { name: "Add" }).click();
+      await expect(page.getByRole("heading", { name: "New project field" })).toBeVisible();
+      // By placeholder: the dialog's <Label> is not associated with its input.
+      await page.getByPlaceholder("e.g. Gate Code").fill(label);
+      await page.getByRole("button", { name: "Add field" }).click();
+      await expect(page.getByText(label)).toBeVisible({ timeout: 15000 });
+
+      // Already in the Solar workspace — switching again would not navigate.
+      await page.goto("/portal/leads?q=Marcus");
+      await page.locator('table a[href^="/portal/leads/"]').first().click();
+      await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
+      const leadId = page.url().split("/").pop()!;
+      await ensureDesign(page, leadId);
+      await page.goto(`/portal/leads/${leadId}`);
+      await page.getByRole("tab", { name: "System info" }).click();
+      await expect(page.getByRole("heading", { name: "Project fields" })).toBeVisible({
+        timeout: 15000,
+      });
+
+      await page.getByLabel(label).fill("Left with the city on the 12th");
+      await page
+        .getByRole("button", { name: /Save project fields|Create job & save project fields/ })
+        .click();
+      await expect(page.getByText("Project fields saved")).toBeVisible({ timeout: 15000 });
+
+      await page.goto(`/portal/leads/${leadId}`);
+      await page.getByRole("tab", { name: "System info" }).click();
+      await expect(page.getByLabel(label)).toHaveValue("Left with the city on the 12th");
+      // The job exists now, so the button stops offering to create one.
+      await expect(page.getByRole("button", { name: "Save project fields" })).toBeVisible();
+    });
+  }
+);

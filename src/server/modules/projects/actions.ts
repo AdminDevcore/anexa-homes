@@ -345,6 +345,78 @@ export async function unassignInstallerAction(assigneeId: string) {
  * from the lead if missing. This is what "Start production" calls — the deal
  * stays the single record; the project just holds crew/QC/daily/photos.
  */
+// --------------------------- Project custom fields --------------------------
+
+const projectFieldsSchema = z.object({
+  leadId: z.string().min(1),
+  values: z.record(z.string(), z.string()),
+});
+
+/**
+ * The company's own PROJECT fields, typed on the deal.
+ *
+ * Settings has offered a "Project Fields" column since custom fields existed,
+ * and nothing in the app had ever written a value into one — every definition
+ * made there was a field you could invent, map into a document template, and
+ * then never fill. They are edited on the deal's System info slide, next to the
+ * rest of what is true about the job.
+ *
+ * Only DEFINED keys are stored, so a renamed or deleted field cannot leave an
+ * orphan value behind that a template still fills from. An empty box deletes
+ * its key rather than storing "", because a stored blank answers "is this set?"
+ * with yes and then prints nothing.
+ */
+export async function saveProjectCustomFieldsAction(input: z.infer<typeof projectFieldsSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  const parsed = projectFieldsSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid project fields.");
+  const d = parsed.data;
+
+  const leadScope = listScope(user, "Lead") as Prisma.LeadWhereInput;
+  const lead = await prisma.lead.findFirst({
+    where: { AND: [{ id: d.leadId }, leadScope] },
+    select: { id: true, project: { select: { id: true, customFields: true } } },
+  });
+  if (!lead) return fail("Deal not found.");
+
+  // The values hang off the JOB, so a deal that has none yet gets one — the
+  // same idempotent path the install date uses, permission checks and project
+  // numbering included. The button says so before it is pressed.
+  let project = lead.project;
+  if (!project) {
+    const made = await ensureProjectForLeadAction(d.leadId);
+    if (!made.ok) return fail(made.error);
+    project = await prisma.project.findUnique({
+      where: { id: made.projectId },
+      select: { id: true, customFields: true },
+    });
+    if (!project) return fail("The job could not be created.");
+  }
+
+  const defs = await prisma.customFieldDef.findMany({
+    where: { companyId: user.companyId, entity: "project" },
+    select: { key: true },
+  });
+  const defined = new Set(defs.map((f) => f.key));
+
+  const next: Record<string, string> = { ...((project.customFields as Record<string, string>) ?? {}) };
+  for (const [key, value] of Object.entries(d.values)) {
+    if (!defined.has(key)) continue;
+    const trimmed = value.trim();
+    if (trimmed) next[key] = trimmed;
+    else delete next[key];
+  }
+
+  await prisma.project.update({
+    where: { id: project.id },
+    data: { customFields: next as Prisma.InputJsonValue },
+  });
+
+  revalidatePath(`/portal/leads/${d.leadId}`);
+  return ok();
+}
+
 export async function ensureProjectForLeadAction(
   leadId: string
 ): Promise<{ ok: true; projectId: string } | { ok: false; error: string }> {

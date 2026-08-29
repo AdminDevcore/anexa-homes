@@ -396,6 +396,23 @@ export default async function LeadDetailPage({
       ])
     : [null, null, [], [], null, []];
 
+  /**
+   * The company's own PROJECT fields, and what this job has in them.
+   *
+   * Settings has always let a company define these; until now nothing rendered
+   * them, so every definition was a field that could be mapped into a document
+   * template and never filled. They live on the System info slide with the rest
+   * of what is true about the job.
+   */
+  const projectFieldDefs = isSolarDeal
+    ? await prisma.customFieldDef.findMany({
+        where: { companyId: user.companyId, entity: "project" },
+        orderBy: { position: "asc" },
+        select: { key: true, label: true, type: true, options: true, required: true },
+      })
+    : [];
+  const projectFieldValues = ((lead.project?.customFields as Record<string, string>) ?? {});
+
   // Who approved the final proposal, for the badge on the version list. One row
   // at most — the database allows a single approved version per deal.
   const approverName = await approverNames(user.companyId, solarProposals);
@@ -1273,6 +1290,15 @@ export default async function LeadDetailPage({
                   source={solarSpecsSource}
                   build={solarBuild}
                   canEdit={can(user, "update", "Lead")}
+                  projectFields={projectFieldDefs.map((f) => ({
+                    key: f.key,
+                    label: f.label,
+                    type: f.type,
+                    options: (f.options as string[]) ?? [],
+                    required: f.required,
+                  }))}
+                  projectValues={projectFieldValues}
+                  hasProject={!!lead.project}
                 />
               </div>
 

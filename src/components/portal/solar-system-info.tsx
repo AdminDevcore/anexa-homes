@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   ArrowUpRight,
   BatteryCharging,
+  ClipboardList,
   Compass,
   Cpu,
   Home,
@@ -23,9 +24,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { compassLabel, tiltDegToPitch } from "@/lib/solar-orientation";
 import { saveSolarBuildDetailsAction } from "@/server/modules/solar/actions";
+import { saveProjectCustomFieldsAction } from "@/server/modules/projects/actions";
 
 /** One array as the layout designer drew it, flattened for display. */
 export type SystemArray = {
@@ -74,6 +84,15 @@ export type SystemSpecs = {
   setbackNotes: string | null;
   structuralNotes: string | null;
   electricalNotes: string | null;
+};
+
+/** One of the company's own PROJECT fields, as defined in Settings. */
+export type ProjectFieldDef = {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "number" | "date" | "select" | "checkbox";
+  options: string[];
+  required: boolean;
 };
 
 export type SystemBuild = {
@@ -262,12 +281,18 @@ export function SolarSystemInfo({
   source,
   build,
   canEdit,
+  projectFields,
+  projectValues,
+  hasProject,
 }: {
   leadId: string;
   specs: SystemSpecs | null;
   source: SpecSource;
   build: SystemBuild;
   canEdit: boolean;
+  projectFields: ProjectFieldDef[];
+  projectValues: Record<string, string>;
+  hasProject: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -290,6 +315,25 @@ export function SolarSystemInfo({
   });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const setFlag = (k: keyof typeof flags, v: boolean) => setFlags((f) => ({ ...f, [k]: v }));
+
+  // The company's own project fields keep their own state and their own save:
+  // they are defined in Settings and can be anything, so they have no business
+  // being able to fail a save of the utility's numbers.
+  const [custom, setCustom] = React.useState<Record<string, string>>(projectValues);
+  const [savingCustom, setSavingCustom] = React.useState(false);
+  const setCustomValue = (key: string, v: string) => setCustom((c) => ({ ...c, [key]: v }));
+
+  async function saveProjectFields() {
+    setSavingCustom(true);
+    try {
+      const res = await saveProjectCustomFieldsAction({ leadId, values: custom });
+      if (!res.ok) return toast.error(res.error ?? "Something went wrong.");
+      toast.success("Project fields saved");
+      router.refresh();
+    } finally {
+      setSavingCustom(false);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -809,6 +853,130 @@ export function SolarSystemInfo({
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <PlugZap className="size-4" />}
                 Save permitting & interconnection
               </Button>
+            )}
+          </>
+        )}
+      </Panel>
+
+      {/* ── Project fields ────────────────────────────────────────────────
+          Whatever this company decided a job needs recorded, defined in
+          Settings → Custom Fields. Rendered here rather than on the lead form
+          because they describe the JOB — the same reason permitting is here. */}
+      <Panel
+        title="Project fields"
+        icon={ClipboardList}
+        action={
+          canEdit ? (
+            <Link
+              href="/portal/settings/fields"
+              className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+            >
+              Manage fields
+            </Link>
+          ) : undefined
+        }
+      >
+        {projectFields.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No project fields defined yet. Add them in{" "}
+            <Link href="/portal/settings/fields" className="underline underline-offset-2">
+              Settings → Custom Fields
+            </Link>{" "}
+            and they appear here on every job — and in the picker when you map a document template.
+          </p>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {projectFields.map((f) => {
+                const id = `project-field-${f.key}`;
+                const value = custom[f.key] ?? "";
+                return (
+                  <div key={f.key} className={cn("space-y-1", f.type === "textarea" && "sm:col-span-2")}>
+                    <Label htmlFor={id} className="text-xs">
+                      {f.label}
+                      {f.required && <span className="ml-0.5 text-destructive">*</span>}
+                    </Label>
+                    {f.type === "textarea" ? (
+                      <Textarea
+                        id={id}
+                        value={value}
+                        disabled={!canEdit}
+                        className="bg-card"
+                        onChange={(e) => setCustomValue(f.key, e.target.value)}
+                      />
+                    ) : f.type === "select" ? (
+                      <Select
+                        value={value}
+                        disabled={!canEdit}
+                        onValueChange={(v) => setCustomValue(f.key, v)}
+                      >
+                        <SelectTrigger id={id} className="w-full bg-card">
+                          <SelectValue placeholder="Select…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {f.options.map((o) => (
+                            <SelectItem key={o} value={o}>
+                              {o}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : f.type === "checkbox" ? (
+                      // Stored as the same "Yes"/"" a permitting flag uses, so a
+                      // template can drop it on a checkbox OR a text field and
+                      // get something sensible either way.
+                      <label
+                        htmlFor={id}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs",
+                          canEdit ? "cursor-pointer" : "opacity-70"
+                        )}
+                      >
+                        <Checkbox
+                          id={id}
+                          checked={value === "Yes"}
+                          disabled={!canEdit}
+                          onCheckedChange={(v) => setCustomValue(f.key, v === true ? "Yes" : "")}
+                        />
+                        {f.label}
+                      </label>
+                    ) : (
+                      <Input
+                        id={id}
+                        type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                        value={value}
+                        disabled={!canEdit}
+                        className="bg-card"
+                        onChange={(e) => setCustomValue(f.key, e.target.value)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {canEdit && (
+              <>
+                {!hasProject && (
+                  <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                    This deal has no job record yet — saving creates one, at status{" "}
+                    <span className="font-medium">Not started</span>.
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  disabled={savingCustom}
+                  onClick={saveProjectFields}
+                  className="mt-3 bg-solar text-solar-foreground hover:bg-solar/90"
+                >
+                  {savingCustom ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ClipboardList className="size-4" />
+                  )}
+                  {hasProject ? "Save project fields" : "Create job & save project fields"}
+                </Button>
+              </>
             )}
           </>
         )}
