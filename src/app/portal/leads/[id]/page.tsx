@@ -51,6 +51,11 @@ import { lenderLogoUrl } from "@/lib/lender-mark";
 import { financingCard } from "@/lib/solar-deal-header";
 import { formatSolarDealValue, solarDealValue } from "@/lib/solar-deal-value";
 import {
+  resolveReportedSystem,
+  systemDrift,
+  type DesignSystem,
+} from "@/lib/solar-system-of-record";
+import {
   SolarSystemMoneyPanel,
   SolarActivityFeed,
 } from "@/components/portal/solar-cockpit";
@@ -499,6 +504,97 @@ export default async function LeadDetailPage({
    */
   const latestSnapshot = (latestProposal?.snapshot ?? null) as SolarProposalSnapshot | null;
 
+  /**
+   * WHICH SYSTEM THIS DEAL IS — resolved ONCE, for every card that reports it.
+   *
+   * This page used to answer that question twice. The System info slide and the
+   * Deal Value card read the frozen proposal; the System & financing tiles read
+   * the live design. Both rules were defensible on their own and together they
+   * put two different systems on one screen: a deal signed at 25 panels / 11.00
+   * kW / $60,500 showed 24 panels / 10.56 kW / $58,080 one tab away, with
+   * nothing saying the two figures answered different questions. That is not a
+   * rounding disagreement — it is the page reporting a system nobody sold.
+   *
+   * So every REPORTING surface now reads `reportedSystem`, and the rule lives
+   * in one tested module rather than in two inline derivations that drifted
+   * apart. See src/lib/solar-system-of-record.ts.
+   *
+   * The builder is deliberately not a caller, and neither is the property map:
+   * those show the drawing as it stands, which is the point of them, and both
+   * already say so on screen.
+   */
+  const designLenderRow = solarDesign?.lenderId
+    ? (solarLenders.find((l) => l.id === solarDesign.lenderId) ?? null)
+    : null;
+
+  /**
+   * What the deal would sign for at TODAY'S design, priced exactly the way the
+   * builder prices it. Hoisted out of the money card because two things need
+   * it now: that card's price ladder, and the drift report below.
+   */
+  const workingPrice =
+    solarDesign && solarFinance && (solarFinance.product === "cash" || solarFinance.product === "loan")
+      ? priceStoredPurchase({
+          product: solarFinance.product,
+          systemSizeKwDc: solarDesign.systemSizeKwDc,
+          stickerPpwCents: solarFinance.grossPpwCents,
+          dealerFeePct: solarFinance.dealerFeePct,
+          adderTotalCents: solarFinance.adderTotalCents,
+          onTopAdderTotalCents: solarFinance.onTopAdderTotalCents,
+          maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
+          finalPpwMode: designLenderRow?.finalPpwMode,
+        })
+      : null;
+
+  const equipLabel = (e: { manufacturer: string | null; model: string } | null | undefined) =>
+    e ? `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` : null;
+
+  const designSystem: DesignSystem | null = solarDesign
+    ? {
+        sizeKwDc: solarDesign.systemSizeKwDc,
+        moduleQty: solarDesign.moduleQty,
+        moduleRatingW: solarDesign.module?.ratingW ?? null,
+        year1ProductionKwh: solarDesign.year1ProductionKwh,
+        offsetPct: solarDesign.offsetPct,
+        annualUsageKwh: solarDesign.annualUsageKwh,
+        moduleLabel: equipLabel(solarDesign.module),
+        inverterLabel: equipLabel(solarDesign.inverter),
+        batteryLabel: equipLabel(solarDesign.battery),
+        batteryQty: solarDesign.batteryQty,
+        product: solarFinance?.product ?? null,
+        contractPriceCents:
+          workingPrice?.breakdown.contractPriceCents ?? solarFinance?.contractPriceCents ?? null,
+        monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+        rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
+      }
+    : null;
+
+  const reportedSystem = isSolarDeal
+    ? resolveReportedSystem({
+        proposal:
+          latestProposal && latestSnapshot
+            ? {
+                version: latestProposal.version,
+                status: latestProposal.status,
+                at: (latestProposal.sentAt ?? latestProposal.createdAt).toISOString(),
+                snapshot: latestSnapshot,
+              }
+            : null,
+        design: designSystem,
+      })
+    : null;
+
+  /**
+   * What has moved on the design since that proposal was frozen.
+   *
+   * Empty on a deal nobody has redrawn, which is most of them. When it is not
+   * empty the cards SAY SO rather than quietly picking a side: a signed deal
+   * whose drawing has changed is an operational fact somebody needs to act on
+   * — either the proposal is reissued or the design is put back — and the one
+   * outcome worse than showing two numbers is showing one and hiding the other.
+   */
+  const systemDriftRows = systemDrift(reportedSystem, designSystem);
+
   const solarSpecsSource: SpecSource = latestProposal
     ? {
         kind: "proposal",
@@ -512,7 +608,7 @@ export default async function LeadDetailPage({
       };
 
   const solarSpecs: SystemSpecs | null = (() => {
-    if (!isSolarDeal || (!solarDesign && !latestSnapshot)) return null;
+    if (!isSolarDeal || !reportedSystem) return null;
 
     // Empty blocks are dropped: an array with no panels is a leftover of
     // drawing, not a bank anybody is going to install.
@@ -531,8 +627,29 @@ export default async function LeadDetailPage({
       structuralNotes: solarDesign?.structuralNotes ?? null,
       electricalNotes: solarDesign?.electricalNotes ?? null,
     };
-    const name = (e: { manufacturer: string | null; model: string } | null | undefined) =>
-      e ? `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` : null;
+    /**
+     * THE SIX FIGURES BOTH SLIDES SAY OUT LOUD, from the one resolver.
+     *
+     * Written once and spread into either branch below rather than derived
+     * here: this slide and the System & financing slide print the same six
+     * numbers, and the only way they can be guaranteed to agree is for them to
+     * BE the same numbers. Everything after the spread is the half a snapshot
+     * or a design carries and the other does not.
+     */
+    const reported = {
+      module: reportedSystem.moduleLabel,
+      moduleQty: reportedSystem.moduleQty,
+      moduleRatingW: reportedSystem.moduleRatingW,
+      inverter: reportedSystem.inverterLabel,
+      battery: reportedSystem.batteryLabel,
+      batteryQty: reportedSystem.batteryQty,
+      sizeKwDc: reportedSystem.sizeKwDc,
+      year1Kwh: reportedSystem.year1ProductionKwh,
+      offsetPct: reportedSystem.offsetPct,
+      annualUsageKwh: reportedSystem.annualUsageKwh,
+      arrays,
+      ...notes,
+    };
 
     if (latestSnapshot) {
       const { system, financing } = latestSnapshot;
@@ -545,33 +662,19 @@ export default async function LeadDetailPage({
         | SolarProposalSnapshot["assumptions"]
         | undefined;
       return {
-        // v1 snapshots have only the labels; v2 and later carry the catalogue
-        // rows. Both render, because the whole point of a frozen document is
-        // that it keeps working after the shape around it moved on.
-        module: name(system.module) ?? system.moduleLabel,
-        moduleQty: system.module?.qty ?? system.moduleQty,
-        moduleRatingW: system.module?.ratingW ?? null,
-        inverter: name(system.inverter) ?? system.inverterLabel,
-        battery: name(system.battery) ?? system.batteryLabel,
-        batteryQty: system.battery?.qty ?? (system.batteryLabel ? 1 : 0),
+        ...reported,
         lender: financing.lender,
         lenderLogoUrl: financing.lenderLogoUrl ?? null,
-        sizeKwDc: system.sizeKwDc,
         // Never frozen on a proposal — a customer is quoted DC — so the row
         // shows DC alone rather than borrowing today's AC figure.
         sizeKwAc: 0,
-        year1Kwh: system.year1ProductionKwh,
-        offsetPct: system.offsetPct,
         mountType: system.mountType ?? "roof",
         tsrfPct: system.tsrfPct,
         yieldSource: assumptions?.yieldBasis?.source ?? null,
         yieldStation: assumptions?.yieldBasis?.station ?? null,
-        annualUsageKwh: energy?.annualUsageKwh ?? null,
         rateMills: assumptions?.currentRateMillsPerKwh ?? null,
         ratePlan: energy?.ratePlan ?? null,
         netMeteringProgram: system.netMeteringProgram,
-        arrays,
-        ...notes,
       };
     }
 
@@ -580,30 +683,19 @@ export default async function LeadDetailPage({
       ? (solarLenders.find((l) => l.id === design.lenderId) ?? null)
       : null;
     return {
-      module: name(design.module),
-      moduleQty: design.moduleQty,
-      moduleRatingW: design.module?.ratingW ?? null,
-      inverter: name(design.inverter),
-      battery: name(design.battery),
-      batteryQty: design.batteryQty,
+      ...reported,
       lender: designLender?.name ?? null,
       lenderLogoUrl: designLender
         ? lenderLogoUrl(designLender.id, designLender.logoUpdatedAt)
         : null,
-      sizeKwDc: design.systemSizeKwDc,
       sizeKwAc: design.systemSizeKwAc,
-      year1Kwh: design.year1ProductionKwh,
-      offsetPct: design.offsetPct,
       mountType: design.mountType,
       tsrfPct: design.tsrfPct,
       yieldSource: design.yieldSource,
       yieldStation: design.yieldStation,
-      annualUsageKwh: design.annualUsageKwh,
       rateMills: design.utilityRateMills,
       ratePlan: design.ratePlan,
       netMeteringProgram: design.netMeteringProgram,
-      arrays,
-      ...notes,
     };
   })();
 
@@ -648,8 +740,15 @@ export default async function LeadDetailPage({
       ])
     : [null, []];
 
-  // The pricing breakdown is DERIVED from the design + finance rows — no new
-  // figures are entered anywhere, so it can never disagree with the proposal.
+  /**
+   * The pricing ladder is DERIVED from the design + finance rows, and unlike
+   * the figures above it it is not read off the proposal — because it is not on
+   * the proposal. A homeowner's document quotes one price; the base, the adders
+   * and the dealer fee behind it are the company's own arithmetic and are never
+   * frozen into a snapshot, so there is nothing to freeze this against. It
+   * therefore prices TODAY'S design, and says so whenever that has moved away
+   * from the version being reported.
+   */
   /**
    * What the extra work comes to when there is no priced breakdown to read it
    * off — a lease, a PPA, or a deal nobody has chosen a product for. The two
@@ -659,43 +758,55 @@ export default async function LeadDetailPage({
     f ? f.adderTotalCents + f.onTopAdderTotalCents : 0;
 
   const solarMoney = (() => {
-    if (!isSolarDeal || !solarDesign) return null;
-    const watts = Math.round(solarDesign.systemSizeKwDc * 1000);
+    if (!isSolarDeal || !reportedSystem) return null;
+    const watts = Math.round((solarDesign?.systemSizeKwDc ?? 0) * 1000);
     const fin = solarFinance;
-    /**
-     * The partner this deal is financed through, and what it will fund.
-     *
-     * Read off the LENDER, never the programme row — the ceiling belongs to the
-     * bank, not to one of its rate-sheet lines. Without it this page priced the
-     * stored sticker raw and printed $8.57/W on a partner that funds a flat
-     * $5.50, while the builder two clicks away showed $5.50 for the same deal.
-     */
-    const dealLender = solarDesign.lenderId
-      ? (solarLenders.find((l) => l.id === solarDesign.lenderId) ?? null)
-      : null;
-    const priced = fin && (fin.product === "cash" || fin.product === "loan")
-      ? priceStoredPurchase({
-          product: fin.product,
-          systemSizeKwDc: solarDesign.systemSizeKwDc,
-          stickerPpwCents: fin.grossPpwCents,
-          dealerFeePct: fin.dealerFeePct,
-          adderTotalCents: fin.adderTotalCents,
-          onTopAdderTotalCents: fin.onTopAdderTotalCents,
-          maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
-          finalPpwMode: dealLender?.finalPpwMode,
-        })
-      : null;
+    // The partner this deal is financed through, and what it will fund. Read
+    // off the LENDER, never the programme row — the ceiling belongs to the
+    // bank, not to one of its rate-sheet lines. Hoisted above with the working
+    // price, which is the only thing that needed it.
+    const dealLender = designLenderRow;
+    const priced = workingPrice;
     const breakdown = priced?.breakdown ?? null;
     return {
-      sizeKwDc: solarDesign.systemSizeKwDc,
-      year1ProductionKwh: solarDesign.year1ProductionKwh,
-      offsetPct: solarDesign.offsetPct,
-      moduleLabel: solarDesign.module
-        ? `${solarDesign.module.manufacturer ? `${solarDesign.module.manufacturer} ` : ""}${solarDesign.module.model}`
-        : null,
-      moduleQty: solarDesign.moduleQty,
-      inverterLabel: solarDesign.inverter?.model ?? null,
-      batteryLabel: solarDesign.battery?.model ?? null,
+      /**
+       * WHAT THIS DEAL IS, for the four tiles and the equipment rows.
+       *
+       * The same object the System info slide reports and the same one the
+       * Deal Value card prices off, so the three cannot disagree. It is the
+       * signed proposal wherever there is one — see `reportedSystem`.
+       */
+      reported: {
+        // THE SAME TWO STRINGS the System info slide puts in its badge, not a
+        // second rendering of the same idea: one place decides how a version is
+        // named, so the two slides cannot label the same document differently.
+        sourceKind: solarSpecsSource.kind,
+        sourceLabel: solarSpecsSource.label,
+        sizeKwDc: reportedSystem.sizeKwDc,
+        year1ProductionKwh: reportedSystem.year1ProductionKwh,
+        offsetPct: reportedSystem.offsetPct,
+        moduleLabel: reportedSystem.moduleLabel,
+        moduleQty: reportedSystem.moduleQty,
+        inverterLabel: reportedSystem.inverterLabel,
+        batteryLabel: reportedSystem.batteryLabel,
+        batteryQty: reportedSystem.batteryQty,
+        /**
+         * Priced through the same function as the Deal Value card, so a lease
+         * reads "$215/mo" and a PPA "$0.145/kWh" instead of the "$0" that a
+         * tile hard-wired to a contract price printed on both.
+         */
+        priceLabel: formatSolarDealValue(
+          solarDealValue({
+            product: reportedSystem.product,
+            contractPriceCents: reportedSystem.contractPriceCents,
+            monthlyPaymentCents: reportedSystem.monthlyPaymentCents,
+            rateMillsPerKwh: reportedSystem.rateMillsPerKwh,
+          }),
+          fmt.money
+        ),
+      },
+      /** Empty unless the drawing has moved since that version was frozen. */
+      drift: systemDriftRows,
       product: fin?.product ?? null,
       systemWatts: watts,
       // The ladder, rung by rung, all of it derived: base and adders are what

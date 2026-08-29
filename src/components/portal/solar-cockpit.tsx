@@ -15,6 +15,7 @@ import {
   FinancingTermsPanel,
   type FinancingTerms,
 } from "@/components/portal/solar/financing-terms";
+import type { SystemDriftRow } from "@/lib/solar-system-of-record";
 
 const usd = (c: number) =>
   (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -40,13 +41,37 @@ export type CommissionLite = {
 const DEFAULT_TRIGGER = "M1 funding";
 
 export type SystemMoney = {
-  sizeKwDc: number;
-  year1ProductionKwh: number;
-  offsetPct: number;
-  moduleLabel: string | null;
-  moduleQty: number;
-  inverterLabel: string | null;
-  batteryLabel: string | null;
+  /**
+   * WHAT THIS DEAL IS — the signed proposal wherever there is one.
+   *
+   * These four figures and the equipment under them used to be read straight
+   * off the live SolarDesign while the System info slide read them off the
+   * frozen proposal, so one deal showed two systems on two tabs of the same
+   * page: 24 panels / 10.56 kW / $58,080 here against 25 / 11.00 / $60,500
+   * there. Both now come from `resolveReportedSystem`, which is the only way
+   * two cards can be guaranteed to agree — by being the same numbers.
+   */
+  reported: {
+    sourceKind: "proposal" | "design";
+    /** "Version 13 · signed · Aug 27, 2026", from the server's own formatter. */
+    sourceLabel: string;
+    sizeKwDc: number;
+    year1ProductionKwh: number;
+    offsetPct: number;
+    moduleLabel: string | null;
+    moduleQty: number;
+    inverterLabel: string | null;
+    batteryLabel: string | null;
+    batteryQty: number;
+    /** Already money-formatted: a lease reads "/mo", a PPA "/kWh". */
+    priceLabel: string;
+  };
+  /**
+   * What has moved on the drawing since that version was frozen. Empty on a
+   * deal nobody has redrawn — which is the normal case, and the case in which
+   * none of this shows.
+   */
+  drift: SystemDriftRow[];
   product: string | null;
   systemWatts: number;
   basePpwCents: number;
@@ -95,32 +120,75 @@ export function SolarSystemMoneyPanel({
 }) {
   return (
     <div className="space-y-5">
-      {/* Hairline grid rather than four floating tiles: gap-px over a
-          border-coloured backdrop draws one strip on any number of rows, so
-          the wrapped 2×2 on a phone reads as the same object as the 1×4. */}
       {money && (
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
-          <Metric label="System size" value={`${money.sizeKwDc.toFixed(2)} kW`} />
-          <Metric
-            label="Year-1 production"
-            value={`${money.year1ProductionKwh.toLocaleString()} kWh`}
-          />
-          <Metric label="Offset" value={`${Math.round(money.offsetPct)}%`} />
-          <Metric label="System cost" value={usd(money.contractPriceCents)} accent />
-        </div>
+        <>
+          {/* Provenance first, in the same words and the same colours the
+              System info slide uses. Four numbers with no document named
+              against them is exactly how this page came to show two systems
+              and look like neither was wrong. */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                money.reported.sourceKind === "proposal"
+                  ? "border-solar/40 bg-solar/10 text-solar"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              )}
+            >
+              {money.reported.sourceKind === "proposal" ? "As proposed" : "Working design"}
+            </span>
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {money.reported.sourceLabel}
+            </span>
+          </div>
+
+          {/* Hairline grid rather than four floating tiles: gap-px over a
+              border-coloured backdrop draws one strip on any number of rows, so
+              the wrapped 2×2 on a phone reads as the same object as the 1×4. */}
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
+            <Metric label="System size" value={`${money.reported.sizeKwDc.toFixed(2)} kW`} />
+            <Metric
+              label="Year-1 production"
+              value={`${money.reported.year1ProductionKwh.toLocaleString()} kWh`}
+            />
+            <Metric label="Offset" value={`${Math.round(money.reported.offsetPct)}%`} />
+            <Metric label="System cost" value={money.reported.priceLabel} accent />
+          </div>
+
+          <DriftNotice rows={money.drift} />
+        </>
       )}
 
       <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
         <div className="space-y-5">
           {money ? (
             <>
+              {/* The equipment as REPORTED, so this list and the System info
+                  slide's cannot name different hardware. A battery taken off
+                  the drawing after signing does not vanish from the deal — the
+                  customer signed for it, and the drift notice above says it
+                  moved. */}
               <Block label="System">
                 <dl className="divide-y divide-border text-sm">
-                  {money.moduleLabel && (
-                    <SpecRow k="Modules" v={`${money.moduleQty} × ${money.moduleLabel}`} />
+                  {money.reported.moduleLabel && (
+                    <SpecRow
+                      k="Modules"
+                      v={`${money.reported.moduleQty} × ${money.reported.moduleLabel}`}
+                    />
                   )}
-                  {money.inverterLabel && <SpecRow k="Inverter" v={money.inverterLabel} />}
-                  {money.batteryLabel && <SpecRow k="Battery" v={money.batteryLabel} />}
+                  {money.reported.inverterLabel && (
+                    <SpecRow k="Inverter" v={money.reported.inverterLabel} />
+                  )}
+                  {money.reported.batteryLabel && (
+                    <SpecRow
+                      k="Battery"
+                      v={
+                        money.reported.batteryQty > 1
+                          ? `${money.reported.batteryQty} × ${money.reported.batteryLabel}`
+                          : money.reported.batteryLabel
+                      }
+                    />
+                  )}
                 </dl>
               </Block>
 
@@ -165,6 +233,18 @@ export function SolarSystemMoneyPanel({
                   Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut. The
                   dealer fee is a share of the final price, so the adders carry it too.
                 </p>
+                {/* WHICH SYSTEM THIS LADDER PRICED. The rungs are the company's
+                    own arithmetic and were never frozen into the customer's
+                    document, so they can only ever price the current drawing.
+                    Silent, that puts a second contract total on the same card as
+                    the one above it — which is the whole defect this notice
+                    exists to close. */}
+                {money.drift.length > 0 && (
+                  <p className="mt-1 text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-500">
+                    Priced on the current drawing ({(money.systemWatts / 1000).toFixed(2)} kW),
+                    not on the version above. Rebuild the proposal to quote this price.
+                  </p>
+                )}
                 {/* A LADDER THE PARTNER SET HAS TO SAY SO. Once the partner's
                     figure decides the price, the base is solved backwards out of
                     it — a rep who typed $3.00/W in the builder reads $1.93/W
@@ -395,6 +475,66 @@ function CommissionForm({
           Cancel
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** One drift figure, in the unit it is read in. */
+function driftValue(row: SystemDriftRow, n: number) {
+  switch (row.unit) {
+    case "kw":
+      return `${n.toFixed(2)} kW`;
+    case "kwh":
+      return `${Math.round(n).toLocaleString()} kWh`;
+    case "pct":
+      return `${Math.round(n)}%`;
+    case "cents":
+      return usd(n);
+    case "count":
+      return `${n}`;
+  }
+}
+
+/**
+ * THE DRAWING HAS MOVED SINCE THE VERSION ABOVE, and by how much.
+ *
+ * Shown only when the two really differ, which on a deal nobody has reopened
+ * is never. It exists because the fix for this page reporting two systems was
+ * to report ONE — and a card that silently drops the other number is a worse
+ * bug than the one it replaced: a rep who redraws a roof would see nothing
+ * change anywhere and conclude the builder had not saved.
+ *
+ * So the frozen figure leads, the working one follows it, and the sentence
+ * says which is which. It is not styled as an error: a design moving after a
+ * signature is a normal thing that happens on a normal deal, and it needs
+ * somebody to decide between reissuing the proposal and putting the drawing
+ * back — not a red banner implying the page is broken.
+ */
+function DriftNotice({ rows }: { rows: SystemDriftRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+      <p className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+        The drawing has changed since this version
+      </p>
+      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+        These figures are what the customer was quoted. The roof as it is drawn today differs —
+        rebuild the proposal to sell the new one, or put the drawing back.
+      </p>
+      <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5">
+        {rows.map((r) => (
+          <div key={r.key} className="text-[11px]">
+            <dt className="uppercase tracking-wider text-muted-foreground">{r.label}</dt>
+            <dd className="tabular-nums">
+              <span className="font-semibold">{driftValue(r, r.proposed)}</span>
+              <span className="mx-1 text-muted-foreground">&rarr;</span>
+              <span className="text-amber-700 dark:text-amber-400">
+                {driftValue(r, r.working)}
+              </span>
+            </dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
