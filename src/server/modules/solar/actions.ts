@@ -377,6 +377,12 @@ const providerTermsSchema = z.object({
   buyback: z.boolean(),
   /** Mills per exported kWh. 95 = $0.095. Null when the rate varies or is unknown. */
   buybackRateMills: z.number().int().min(0).max(2_000).nullable(),
+  /**
+   * Time-of-use, mills per kWh. Both or neither — see the pair check below.
+   */
+  touPeakRateMills: z.number().int().min(0).max(2_000).nullable(),
+  touOffPeakRateMills: z.number().int().min(0).max(2_000).nullable(),
+  touPeakWindow: z.string().max(60).nullable(),
   vpp: z.boolean(),
   vppProgramme: z.string().max(120).nullable(),
   vppUpfrontCents: z.number().int().min(0).max(100_000_00).nullable(),
@@ -403,6 +409,25 @@ export async function saveSolarProviderTermsAction(
   const parsed = providerTermsSchema.safeParse(input);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid provider terms.");
   const d = parsed.data;
+
+  /**
+   * A half-filled TOU pair is rejected, not stored.
+   *
+   * Savings are the SPREAD between the two, so one rate alone computes nothing
+   * and `touSavings` returns null — the proposal quietly drops the line with
+   * nothing on any screen saying why. Better to refuse the save while somebody
+   * is looking at the box they left empty.
+   */
+  if ((d.touPeakRateMills == null) !== (d.touOffPeakRateMills == null)) {
+    return fail("Enter both the peak and the off-peak rate, or neither.");
+  }
+  if (
+    d.touPeakRateMills != null &&
+    d.touOffPeakRateMills != null &&
+    d.touPeakRateMills <= d.touOffPeakRateMills
+  ) {
+    return fail("The peak rate has to be above the off-peak rate.");
+  }
 
   const row = await prisma.solarProvider.findFirst({
     where: { id, companyId: user.companyId },
@@ -440,6 +465,9 @@ export async function saveSolarProviderTermsAction(
       // somebody has just said does NOT buy back is the same class of bug as an
       // APR stranded on a lease: it is invisible until the day it is read.
       buybackRateMills: d.buyback ? d.buybackRateMills : null,
+      touPeakRateMills: d.touPeakRateMills,
+      touOffPeakRateMills: d.touOffPeakRateMills,
+      touPeakWindow: d.touPeakWindow?.trim() || null,
       vpp: d.vpp,
       vppProgramme: d.vpp ? (d.vppProgramme?.trim() || null) : null,
       vppUpfrontCents: d.vpp ? d.vppUpfrontCents : null,
@@ -1017,6 +1045,15 @@ const lenderSchema = z.object({
    * arrangement, not a contradiction to reject.
    */
   minBasePpwCents: z.number().int().min(50).max(2000).nullable().optional(),
+  /**
+   * The same ceiling and floor over BATTERIES, for a deal with no watts.
+   *
+   * A separate range, not a shared one: $500-$100,000 a battery against
+   * $0.50-$20.00 a watt. One rule covering both would validate nothing.
+   */
+  maxFinalPricePerBatteryCents: z.number().int().min(500_00).max(100_000_00).nullable().optional(),
+  minBasePricePerBatteryCents: z.number().int().min(500_00).max(100_000_00).nullable().optional(),
+  finalBatteryPriceMode: z.enum(["cap", "flat"]).optional(),
 });
 
 /**

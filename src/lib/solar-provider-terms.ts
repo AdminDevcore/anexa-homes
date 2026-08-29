@@ -44,6 +44,21 @@ export type ProviderTerms = {
   buyback: boolean;
   /** Mills per exported kWh. 95 = $0.095/kWh. */
   buybackRateMills: number | null;
+  /**
+   * The provider's time-of-use rates, mills per kWh, and the window in words.
+   *
+   * THE ONE THING HERE THAT DOES REACH A HOMEOWNER'S DOCUMENT — the note at the
+   * top of this file holds for everything else. A storage proposal's savings
+   * figure is the spread between these two, so unlike the buyback rate beside
+   * them these are arithmetic, not a record of a phone call.
+   *
+   * Both or neither. Null means this provider has no TOU plan on file and the
+   * savings line is OMITTED rather than derived from the blended rate.
+   */
+  touPeakRateMills: number | null;
+  touOffPeakRateMills: number | null;
+  /** "4pm – 8pm". A sentence on a proposal; nothing parses it. */
+  touPeakWindow: string | null;
   vpp: boolean;
   vppProgramme: string | null;
   vppUpfrontCents: number | null;

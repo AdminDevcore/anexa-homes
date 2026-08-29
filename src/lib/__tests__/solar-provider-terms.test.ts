@@ -18,6 +18,9 @@ const ways = (...p: FinanceProduct[]) => p;
 const blank: ProviderTerms = {
   buyback: false,
   buybackRateMills: null,
+  touPeakRateMills: null,
+  touOffPeakRateMills: null,
+  touPeakWindow: null,
   vpp: false,
   vppProgramme: null,
   vppUpfrontCents: null,

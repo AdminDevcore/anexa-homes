@@ -66,6 +66,9 @@ export type LenderRow = {
    * before its cut. Null — nearly every lender — means no floor.
    */
   minBasePpwCents: number | null;
+  minBasePricePerBatteryCents: number | null;
+  maxFinalPricePerBatteryCents: number | null;
+  finalBatteryPriceMode: "cap" | "flat";
   /** The partner's own mark, when one has been uploaded or fetched. */
   logoUrl: string | null;
   /** How many catalogue items this lender approves. */
@@ -85,6 +88,7 @@ export type LenderProduct = {
   termMonths: number | null;
   dealerFeePct: number | null;
   leaseRateCentsPerKwMonth: number | null;
+  financesStorageOnly: boolean;
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
@@ -460,6 +464,9 @@ function ProductForm({
     paydownPct: str(existing?.paydownPct),
     paydownMonths: str(existing?.paydownMonths),
   });
+  const [financesStorageOnly, setFinancesStorageOnly] = React.useState(
+    existing?.financesStorageOnly ?? false
+  );
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   async function save() {
@@ -479,6 +486,7 @@ function ProductForm({
       factorWithoutPaydown: floatOrNull(form.factorWithoutPaydown),
       paydownPct: floatOrNull(form.paydownPct),
       paydownMonths: intOrNull(form.paydownMonths),
+      financesStorageOnly,
     });
     setBusy(false);
     // The action names the missing field, so the message is worth showing.
@@ -569,6 +577,31 @@ function ProductForm({
         </div>
       )}
 
+      {/* Storage-only eligibility. Off by default and per PRODUCT rather than
+          per lender: a bank with one storage programme and three PV-only ones
+          would otherwise read as funding batteries on all four, and the rep
+          finds out at submission.
+
+          Loans only. Cash has no lender paper to be eligible or not — a
+          customer writing a cheque for a battery needs nobody's approval. */}
+      {kind === "loan" && (
+        <label className="flex items-start gap-2 rounded-lg border border-border/70 bg-muted/30 p-2.5 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4"
+            checked={financesStorageOnly}
+            onChange={(e) => setFinancesStorageOnly(e.target.checked)}
+          />
+          <span>
+            Funds storage-only deals
+            <span className="block text-[11px] text-muted-foreground">
+              Tick only if this paper funds a battery with no array on the roof. Storage deals are
+              offered nothing else.
+            </span>
+          </span>
+        </label>
+      )}
+
       <div className="flex gap-2">
         <Button size="sm" onClick={save} disabled={busy}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : null}
@@ -620,6 +653,26 @@ function ppwToCents(s: string): number | null | "invalid" {
 }
 
 const ppwToDollars = (cents: number | null) => (cents == null ? "" : (cents / 100).toFixed(2));
+
+/**
+ * A price per BATTERY, typed in whole dollars.
+ *
+ * Separate from `ppwToCents` because the ranges are three orders of magnitude
+ * apart: $0.50–$20.00 a watt against $500–$100,000 a battery. One function
+ * covering both would have to accept a range so wide it validates nothing, and
+ * a $9.00 typo where $9,000 was meant would sail through it.
+ */
+function batteryPriceToCents(s: string): number | null | "invalid" {
+  const t = s.trim().replace(/^\$/, "").replace(/,/g, "");
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return "invalid";
+  const cents = Math.round(n * 100);
+  return cents >= 500_00 && cents <= 100_000_00 ? cents : "invalid";
+}
+
+const batteryPriceToDollars = (cents: number | null) =>
+  cents == null ? "" : String(Math.round(cents / 100));
 
 function TextField({
   label,
@@ -818,6 +871,9 @@ function LenderCard({
     maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
     finalPpwMode: lender.finalPpwMode,
     minBasePpw: ppwToDollars(lender.minBasePpwCents),
+    maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
+    finalBatteryPriceMode: lender.finalBatteryPriceMode,
+    minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
   });
   const resetDraft = () =>
     setDraft({
@@ -830,6 +886,9 @@ function LenderCard({
       maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
       finalPpwMode: lender.finalPpwMode,
       minBasePpw: ppwToDollars(lender.minBasePpwCents),
+      maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
+      finalBatteryPriceMode: lender.finalBatteryPriceMode,
+      minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
     });
 
   type ActionResult = { ok: boolean; error?: string; message?: string };
@@ -862,6 +921,15 @@ function LenderCard({
       return toast.error("Min base $/W has to be a price between $0.50 and $20.00, or blank for no floor.");
     }
 
+    const maxFinalPricePerBatteryCents = batteryPriceToCents(draft.maxFinalBattery);
+    if (maxFinalPricePerBatteryCents === "invalid") {
+      return toast.error("Max final $/battery has to be between $500 and $100,000, or blank for no cap.");
+    }
+    const minBasePricePerBatteryCents = batteryPriceToCents(draft.minBaseBattery);
+    if (minBasePricePerBatteryCents === "invalid") {
+      return toast.error("Min base $/battery has to be between $500 and $100,000, or blank for no floor.");
+    }
+
     const res = await act(
       () =>
         upsertSolarLenderAction(lender.id, {
@@ -874,6 +942,9 @@ function LenderCard({
           maxFinalPpwCents,
           finalPpwMode: draft.finalPpwMode,
           minBasePpwCents,
+          maxFinalPricePerBatteryCents,
+          finalBatteryPriceMode: draft.finalBatteryPriceMode,
+          minBasePricePerBatteryCents,
         }),
       "Saved"
     );
@@ -970,6 +1041,50 @@ function LenderCard({
               {draft.finalPpwMode === "flat"
                 ? "On FLAT, this is the price — the base you type on a deal and any extra work never move it, they only change what you keep."
                 : "On MAXIMUM, the contract is held at or under this figure — so extra work comes out of what you keep, not out of the customer's price."}
+            </p>
+          </div>
+
+          {/* The same two rules, on a deal with no watts.
+              A storage job has no array for a $/W figure to be per, so the pair
+              above cannot reach it — they would divide by zero and wave every
+              price through. These are the same ceiling and the same floor,
+              measured per battery. Grouped and labelled so nobody sets one
+              believing it guards a solar deal. */}
+          <div className="space-y-2 rounded-lg border border-border/70 bg-muted/30 p-2.5">
+            <p className="text-xs font-medium">Storage-only deals</p>
+            <p className="text-[11px] text-muted-foreground">
+              A battery job has no watts, so the two figures above do not apply to it. These do.
+              Leave both blank if this lender does not fund storage on its own.
+            </p>
+            <TextField
+              label="Final $/battery — what this partner charges a homeowner"
+              value={draft.maxFinalBattery}
+              placeholder="blank — prices the normal way"
+              onChange={(v) => setDraft((d) => ({ ...d, maxFinalBattery: v }))}
+            />
+            {draft.maxFinalBattery.trim() !== "" && (
+              <Select
+                value={draft.finalBatteryPriceMode}
+                onValueChange={(v) =>
+                  setDraft((d) => ({ ...d, finalBatteryPriceMode: v as LenderRow["finalBatteryPriceMode"] }))
+                }
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cap">Maximum — a cheaper deal quotes cheaper</SelectItem>
+                  <SelectItem value="flat">Flat price — every battery is this figure</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            <TextField
+              label="Min base $/battery — the least these deals may leave you"
+              value={draft.minBaseBattery}
+              placeholder="blank — no floor"
+              onChange={(v) => setDraft((d) => ({ ...d, minBaseBattery: v }))}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Measured before the dealer fee, on what survives it — the same rule as the $/W floor
+              above. A deal under this cannot be quoted or generated.
             </p>
           </div>
 

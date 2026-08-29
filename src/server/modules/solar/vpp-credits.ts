@@ -55,6 +55,7 @@ export async function resolveVppCredits(args: {
     select: {
       name: true,
       buyback: true, buybackRateMills: true,
+      touPeakRateMills: true, touOffPeakRateMills: true, touPeakWindow: true,
       vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
       vppFinanceProducts: true,
       notes: true,

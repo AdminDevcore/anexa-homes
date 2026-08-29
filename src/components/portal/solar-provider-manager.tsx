@@ -328,6 +328,58 @@ function ProviderItem({
             )}
           </div>
 
+          {/* Time-of-use. The only figures on this form that reach a
+              homeowner's document: a storage proposal's savings are the spread
+              between them. Both or neither — the action refuses one alone
+              rather than letting the savings line vanish unexplained. */}
+          <div className="space-y-2 border-t border-border pt-3">
+            <p className="text-sm font-medium">Time-of-use rates</p>
+            <p className="text-xs text-muted-foreground">
+              Used to work out what a battery saves by charging off-peak and discharging at peak.
+              Leave blank if this provider has no time-of-use plan — the proposal then omits the
+              saving rather than guessing at one.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <div className="w-36 space-y-1">
+                <Label htmlFor={`tou-peak-${row.id}`} className="text-xs">
+                  Peak ($/kWh)
+                </Label>
+                <Input
+                  id={`tou-peak-${row.id}`}
+                  type="number"
+                  step="0.001"
+                  value={draft.touPeak}
+                  placeholder="0.240"
+                  onChange={(e) => setDraft((d) => ({ ...d, touPeak: e.target.value }))}
+                />
+              </div>
+              <div className="w-36 space-y-1">
+                <Label htmlFor={`tou-off-${row.id}`} className="text-xs">
+                  Off-peak ($/kWh)
+                </Label>
+                <Input
+                  id={`tou-off-${row.id}`}
+                  type="number"
+                  step="0.001"
+                  value={draft.touOffPeak}
+                  placeholder="0.090"
+                  onChange={(e) => setDraft((d) => ({ ...d, touOffPeak: e.target.value }))}
+                />
+              </div>
+              <div className="w-40 space-y-1">
+                <Label htmlFor={`tou-window-${row.id}`} className="text-xs">
+                  Peak window
+                </Label>
+                <Input
+                  id={`tou-window-${row.id}`}
+                  value={draft.touWindow}
+                  placeholder="4pm – 8pm"
+                  onChange={(e) => setDraft((d) => ({ ...d, touWindow: e.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -494,6 +546,9 @@ function ProviderItem({
 type TermsDraft = {
   buyback: boolean;
   buybackRate: string;
+  touPeak: string;
+  touOffPeak: string;
+  touWindow: string;
   vpp: boolean;
   vppProgramme: string;
   vppUpfront: string;
@@ -508,6 +563,9 @@ function seedTerms(r: ProviderRow): TermsDraft {
   return {
     buyback: r.buyback,
     buybackRate: r.buybackRateMills == null ? "" : (r.buybackRateMills / 1000).toFixed(3),
+    touPeak: r.touPeakRateMills == null ? "" : (r.touPeakRateMills / 1000).toFixed(3),
+    touOffPeak: r.touOffPeakRateMills == null ? "" : (r.touOffPeakRateMills / 1000).toFixed(3),
+    touWindow: r.touPeakWindow ?? "",
     vpp: r.vpp,
     vppProgramme: r.vppProgramme ?? "",
     vppUpfront: r.vppUpfrontCents == null ? "" : String(Math.round(r.vppUpfrontCents / 100)),
@@ -548,6 +606,9 @@ function termsFromDraft(d: TermsDraft): ProviderTermsInput {
   return {
     buyback: d.buyback,
     buybackRateMills: num(d.buybackRate, 1000),
+    touPeakRateMills: num(d.touPeak, 1000),
+    touOffPeakRateMills: num(d.touOffPeak, 1000),
+    touPeakWindow: d.touWindow.trim() || null,
     vpp: d.vpp,
     vppProgramme: d.vppProgramme.trim() || null,
     vppUpfrontCents: num(d.vppUpfront, 100),

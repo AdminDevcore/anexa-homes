@@ -38,6 +38,7 @@ export default async function SolarProvidersPage() {
       id: true, name: true, active: true, position: true, kind: true,
       // What the office has confirmed each provider does for a solar customer.
       buyback: true, buybackRateMills: true,
+      touPeakRateMills: true, touOffPeakRateMills: true, touPeakWindow: true,
       vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
       vppFinanceProducts: true,
       notes: true,

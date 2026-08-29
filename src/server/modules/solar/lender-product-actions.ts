@@ -50,6 +50,8 @@ const productSchema = z
     paydownMonths: z.number().int().min(1).max(120).nullable().optional(),
 
     leaseRateCentsPerKwMonth: z.number().int().min(1).max(100_000).nullable().optional(),
+    /** Whether this paper funds a battery with no array. Off unless reviewed. */
+    financesStorageOnly: z.boolean().optional(),
     rateMillsPerKwh: z.number().int().min(1).max(10_000).nullable().optional(),
 
     escalatorPct: z.number().min(0).max(20).nullable().optional(),
@@ -152,6 +154,9 @@ export async function upsertSolarLenderProductAction(
     termMonths: d.product === "loan" ? (d.termMonths ?? null) : null,
     dealerFeePct: d.product === "loan" ? (d.dealerFeePct ?? null) : null,
     leaseRateCentsPerKwMonth: d.product === "lease" ? (d.leaseRateCentsPerKwMonth ?? null) : null,
+    // Loans only. A lease or PPA sells electricity and a battery generates
+    // none; cash has no lender paper for eligibility to be a question about.
+    financesStorageOnly: d.product === "loan" ? (d.financesStorageOnly ?? false) : false,
     rateMillsPerKwh: d.product === "ppa" ? (d.rateMillsPerKwh ?? null) : null,
     escalatorPct: d.product === "loan" ? null : (d.escalatorPct ?? null),
     termYears: d.product === "loan" ? null : (d.termYears ?? null),
