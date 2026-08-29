@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Loader2, TriangleAlert, CircleAlert, Sun, ImageUp, Trash2, BadgeCheck, ExternalLink, Maximize2,
+  ChevronDown,
 } from "lucide-react";
 import type { FinanceProduct, MountType } from "@prisma/client";
 import { cn } from "@/lib/utils";
@@ -1737,6 +1738,13 @@ export function ProposalVersionList({
   const approved = versions.find((v) => v.approvedAt);
 
   /**
+   * A deal that has been re-priced a dozen times has a dozen versions, and the
+   * list is read for at most two of them: the one being quoted now and the one
+   * that sold. The rest are history, so they start folded away.
+   */
+  const [expanded, setExpanded] = React.useState(false);
+
+  /**
    * File the approved copy that has none — without anybody pressing Retry.
    *
    * An approved version with no `approvedFileId` is a deal whose Proposal
@@ -1772,6 +1780,22 @@ export function ProposalVersionList({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canApprove, approved?.id, approved?.approvedFileId]);
+
+  // Folded, the list keeps the newest few — plus the approved version wherever
+  // it fell, because "which one did we sell" is the whole reason to open this.
+  const COLLAPSED = 3;
+  // Folding one row away is not worth a control, so the fold only appears when
+  // it actually buys something.
+  const foldable = versions.length > COLLAPSED + 1;
+  const shown = React.useMemo(() => {
+    if (expanded || !foldable) return versions;
+    const head = versions.slice(0, COLLAPSED);
+    // Appended, not sorted in: versions are newest-first and anything below the
+    // cut is older than everything above it, so the order still holds.
+    if (approved && !head.some((v) => v.id === approved.id)) head.push(approved);
+    return head;
+  }, [versions, expanded, foldable, approved]);
+  const hidden = versions.length - shown.length;
 
   if (versions.length === 0) return null;
 
@@ -1854,11 +1878,24 @@ export function ProposalVersionList({
 
   return (
     <div className="space-y-2">
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Versions
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Versions
+          <span className="ml-1.5 font-normal normal-case tracking-normal">({versions.length})</span>
+        </div>
+        {foldable && (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            {expanded ? "Show fewer" : `Show all ${versions.length}`}
+            <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+          </button>
+        )}
       </div>
       <ul className="divide-y divide-border rounded-lg border border-border">
-        {versions.map((v) => {
+        {shown.map((v) => {
           const isApproved = !!v.approvedAt;
           const busy = busyId === v.id;
           return (
@@ -1993,6 +2030,18 @@ export function ProposalVersionList({
             </li>
           );
         })}
+        {hidden > 0 && (
+          <li className="p-0">
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="flex w-full items-center justify-center gap-1 p-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            >
+              <ChevronDown className="size-3.5" />
+              {hidden} older {hidden === 1 ? "version" : "versions"}
+            </button>
+          </li>
+        )}
       </ul>
     </div>
   );
