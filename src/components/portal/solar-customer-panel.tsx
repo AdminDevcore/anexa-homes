@@ -8,6 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { saveCustomerDetailsAction } from "@/server/modules/solar/energy-actions";
+import { setSolarSystemTypeAction } from "@/server/modules/solar/actions";
+import { cn } from "@/lib/utils";
+
+export type SolarSystemType = "pv" | "pv_storage" | "storage";
 
 export type SolarCustomerView = {
   firstName: string;
@@ -36,12 +40,14 @@ export function SolarCustomerPanel({
   customer,
   hasLayout,
   canEdit,
+  systemType,
 }: {
   leadId: string;
   customer: SolarCustomerView;
   /** A drawn array is positioned against the OLD address if this one changes. */
   hasLayout: boolean;
   canEdit: boolean;
+  systemType: SolarSystemType;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -80,6 +86,13 @@ export function SolarCustomerPanel({
 
   return (
     <div className="space-y-5">
+      <SystemTypePicker
+        leadId={leadId}
+        value={systemType}
+        canEdit={canEdit}
+        hasLayout={hasLayout}
+      />
+
       <section className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Who we are talking to
@@ -147,6 +160,107 @@ export function SolarCustomerPanel({
 }
 
 /** Module scope on purpose — react-hooks/static-components is an error here. */
+const SYSTEM_TYPES: { value: SolarSystemType; label: string; blurb: string }[] = [
+  { value: "pv", label: "Solar", blurb: "Panels only." },
+  { value: "pv_storage", label: "Solar + Storage", blurb: "Panels with a battery." },
+  { value: "storage", label: "Storage only", blurb: "A battery, no panels." },
+];
+
+/**
+ * The first question on the first step, because everything downstream reshapes
+ * from it: which steps show, what the design step asks, which lenders appear,
+ * and which of two customer documents gets generated.
+ *
+ * SAVES ON CHANGE rather than behind the panel's Save button. A rep who picks
+ * "Storage only" and walks to the next step must not find the roof designer
+ * still sitting there — and they would, because the button below writes contact
+ * fields on a different action entirely.
+ */
+function SystemTypePicker({
+  leadId,
+  value,
+  canEdit,
+  hasLayout,
+}: {
+  leadId: string;
+  value: SolarSystemType;
+  canEdit: boolean;
+  hasLayout: boolean;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [pending, setPending] = React.useState<SolarSystemType | null>(null);
+
+  async function pick(next: SolarSystemType) {
+    if (next === value || busy) return;
+
+    // Switching to storage throws the array away — see setSolarSystemTypeAction.
+    // Losing a drawn roof to a mis-click is worth one question.
+    if (next === "storage" && hasLayout) {
+      const ok = window.confirm(
+        "This deal has a panel layout drawn on it. Quoting storage only will clear the array, its production and the drawing. Continue?"
+      );
+      if (!ok) return;
+    }
+
+    setPending(next);
+    setBusy(true);
+    try {
+      const res = await setSolarSystemTypeAction({ leadId, systemType: next });
+      if (!res.ok) return toast.error(res.error);
+      router.refresh();
+    } catch {
+      toast.error("Could not change what this deal is quoting.");
+    } finally {
+      // In a finally: an action that throws must not leave the picker frozen.
+      setBusy(false);
+      setPending(null);
+    }
+  }
+
+  return (
+    <section className="space-y-2 rounded-xl border border-border bg-muted/30 p-4">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        What are we quoting?
+      </h4>
+      <div className="flex flex-wrap gap-2">
+        {SYSTEM_TYPES.map((t) => {
+          const active = value === t.value;
+          return (
+            <button
+              key={t.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={!canEdit || busy}
+              onClick={() => pick(t.value)}
+              className={cn(
+                "flex-1 basis-48 rounded-lg border p-3 text-left transition",
+                active
+                  ? "border-primary bg-primary/10 ring-1 ring-primary"
+                  : "border-border bg-card hover:border-primary/50",
+                (!canEdit || busy) && "cursor-not-allowed opacity-70"
+              )}
+            >
+              <span className="flex items-center gap-2 text-sm font-medium">
+                {t.label}
+                {pending === t.value && <Loader2 className="size-3.5 animate-spin" />}
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">{t.blurb}</span>
+            </button>
+          );
+        })}
+      </div>
+      {value === "storage" && (
+        <p className="text-xs text-muted-foreground">
+          This deal is priced per battery and its proposal argues from backup hours and bill
+          savings rather than from production. There is no array to design.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function TextField({
   id, label, value, onChange, disabled, type = "text", hint, list, placeholder,
 }: {

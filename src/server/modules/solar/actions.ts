@@ -1220,3 +1220,67 @@ export async function submitCreditApplicationAction(input: z.infer<typeof credit
   return ok();
 }
 
+
+// ---------------------------------------------------------------------------
+// What the deal is selling
+// ---------------------------------------------------------------------------
+
+const systemTypeSchema = z.object({
+  leadId: z.string().min(1),
+  systemType: z.enum(["pv", "pv_storage", "storage"]),
+});
+
+/**
+ * Set what this deal sells.
+ *
+ * SWITCHING TO STORAGE CLEARS THE ARRAY. A rep who designed 10 kW and then
+ * learned the customer only wants the battery leaves a production figure, an
+ * offset and a drawn layout on the row — and nothing downstream knows not to
+ * trust them. `proposal-generate` copies what it finds, so a storage document
+ * would quietly inherit the kilowatt-hours of an array nobody is installing.
+ * This is the one place that can be sure, so it clears them here.
+ *
+ * Switching AWAY from storage clears nothing. The roof was never drawn, so
+ * there is nothing stale to remove, and the battery stays because a
+ * solar-plus-storage deal wants it.
+ */
+export async function setSolarSystemTypeAction(input: unknown) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  const parsed = systemTypeSchema.safeParse(input);
+  if (!parsed.success) return fail("Pick solar, solar + storage, or storage only.");
+  const { leadId, systemType } = parsed.data;
+
+  const design = await prisma.solarDesign.findFirst({
+    where: { leadId, companyId: user.companyId },
+    select: { id: true, systemType: true },
+  });
+  if (!design) return fail("This deal has no design yet.");
+  if (design.systemType === systemType) return ok();
+
+  await prisma.solarDesign.update({
+    where: { id: design.id },
+    data: {
+      systemType,
+      ...(systemType === "storage"
+        ? {
+            systemSizeKwDc: 0,
+            systemSizeKwAc: 0,
+            year1ProductionKwh: 0,
+            offsetPct: 0,
+            moduleQty: 0,
+            layoutBlocks: [],
+            layoutSetbacks: [],
+            roofPlanes: [],
+            yieldSource: null,
+            yieldStation: null,
+            yieldArrays: 0,
+          }
+        : {}),
+    },
+  });
+
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  revalidatePath(`/portal/leads/${leadId}`);
+  return ok();
+}

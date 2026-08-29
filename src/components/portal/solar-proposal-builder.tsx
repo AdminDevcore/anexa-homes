@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import {
-  ArrowLeft, ArrowRight, Hammer, Landmark, Maximize2, Sun, User, Zap,
+  ArrowLeft, ArrowRight, BatteryCharging, Hammer, Landmark, Maximize2, Sun, User, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LayoutBlock } from "@/lib/solar-layout";
@@ -21,7 +21,7 @@ import {
 } from "@/components/portal/solar-panels";
 import type { AdderOption, DealAdderLine } from "@/components/portal/solar-adders-panel";
 import { effectiveUsageKwh } from "@/lib/solar-energy";
-import { SolarCustomerPanel, type SolarCustomerView } from "@/components/portal/solar-customer-panel";
+import { SolarCustomerPanel, type SolarCustomerView, type SolarSystemType } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
 import type { ProviderOption } from "@/server/modules/solar/providers";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
@@ -37,44 +37,56 @@ type Step = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const STEPS: Step[] = [
-  {
-    id: "customer",
-    label: "Customer",
-    title: "Customer",
-    blurb: "Check we are quoting the right person at the right house before anything else.",
-    icon: User,
-  },
-  {
-    id: "energy",
-    label: "Energy",
-    title: "Energy",
-    blurb:
-      "What the house uses and what they pay for it — from their usage, or from their bill and rate.",
-    icon: Zap,
-  },
-  {
-    id: "design",
-    label: "System design",
-    title: "System design",
-    blurb: "The array on the roof, and the size and output that follow from it.",
-    icon: Hammer,
-  },
-  {
-    id: "financing",
-    label: "Financing",
-    title: "Price & financing",
-    blurb:
-      "What we charge for this system, and every way the customer could pay for it. Both travel with the quote they sign.",
-    icon: Landmark,
-  },
-  {
-    id: "generate",
-    label: "Review & send",
-    title: "Review & send",
-    icon: Sun,
-  },
-];
+/**
+ * The five steps, in the words THIS deal needs.
+ *
+ * A function rather than a constant because step three is a different job on a
+ * storage deal: there is no roof to draw, so calling it "System design" and
+ * showing a designer is a screen that lies about what it does.
+ */
+const stepsFor = (systemType: SolarSystemType): Step[] => {
+  const isStorage = systemType === "storage";
+  return [
+    {
+      id: "customer",
+      label: "Customer",
+      title: "Customer",
+      blurb: "Check we are quoting the right person at the right house before anything else.",
+      icon: User,
+    },
+    {
+      id: "energy",
+      label: "Energy",
+      title: "Energy",
+      blurb:
+        "What the house uses and what they pay for it — from their usage, or from their bill and rate.",
+      icon: Zap,
+    },
+    {
+      id: "design",
+      label: isStorage ? "Storage" : "System design",
+      title: isStorage ? "Storage" : "System design",
+      blurb: isStorage
+        ? "Which battery, and how many. There is no array on this deal."
+        : "The array on the roof, and the size and output that follow from it.",
+      icon: isStorage ? BatteryCharging : Hammer,
+    },
+    {
+      id: "financing",
+      label: "Financing",
+      title: "Price & financing",
+      blurb:
+        "What we charge for this system, and every way the customer could pay for it. Both travel with the quote they sign.",
+      icon: Landmark,
+    },
+    {
+      id: "generate",
+      label: "Review & send",
+      title: "Review & send",
+      icon: Sun,
+    },
+  ];
+};
 
 /**
  * The five things that make a solar proposal, in the order they happen.
@@ -117,8 +129,11 @@ export function SolarProposalBuilder({
   retailers,
   vppDeal,
   hasLayout,
+  systemType,
 }: {
   leadId: string;
+  /** What this deal sells. Reshapes the steps and every panel under them. */
+  systemType: SolarSystemType;
   /**
    * Which step to open on. The readiness report links straight to the screen
    * that fixes each finding, so "Open financing" has to land ON financing
@@ -181,11 +196,14 @@ export function SolarProposalBuilder({
   hasLayout: boolean;
 }) {
   const [step, setStep] = React.useState<StepId>(initialStep);
+  // Rebuilt when the deal changes what it sells: step three's name and blurb
+  // are different on a battery.
+  const STEPS = React.useMemo(() => stepsFor(systemType), [systemType]);
   const index = STEPS.findIndex((s) => s.id === step);
 
   return (
     <div className="space-y-5">
-      <StepRail active={step} onSelect={setStep} />
+      <StepRail steps={STEPS} active={step} onSelect={setStep} />
 
       {/* WHAT is being quoted, on every step that spends it. A rep pricing a
           system needs the size and the offset on screen; the two steps that
@@ -215,6 +233,7 @@ export function SolarProposalBuilder({
             <SolarCustomerPanel
               leadId={leadId}
               customer={customer}
+              systemType={systemType}
               hasLayout={hasLayout}
               canEdit={canEditDeal}
             />
@@ -298,13 +317,21 @@ export function SolarProposalBuilder({
  * to change the bill mid-quote goes back to Energy and returns, and gating a
  * step behind the one before it would only invent a wall the data does not have.
  */
-function StepRail({ active, onSelect }: { active: StepId; onSelect: (id: StepId) => void }) {
-  const activeIndex = STEPS.findIndex((s) => s.id === active);
+function StepRail({
+  steps,
+  active,
+  onSelect,
+}: {
+  steps: Step[];
+  active: StepId;
+  onSelect: (id: StepId) => void;
+}) {
+  const activeIndex = steps.findIndex((s) => s.id === active);
 
   return (
     <nav aria-label="Proposal steps" className="-mx-1 overflow-x-auto px-1 pb-1">
       <ol className="flex min-w-max items-center gap-1">
-        {STEPS.map((s, i) => {
+        {steps.map((s, i) => {
           const current = s.id === active;
           const behind = i < activeIndex;
           return (

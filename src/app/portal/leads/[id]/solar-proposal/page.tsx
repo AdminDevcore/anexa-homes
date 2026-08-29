@@ -245,6 +245,7 @@ export default async function SolarProposalBuilderPage({
 
       <SolarProposalBuilder
         leadId={lead.id}
+        systemType={design?.systemType ?? "pv_storage"}
         initialStep={
           step === "energy" || step === "design" || step === "financing" || step === "generate"
             ? step
