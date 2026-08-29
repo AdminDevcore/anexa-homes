@@ -78,7 +78,8 @@ export type SettingsSectionKey =
   | "solar_lenders"
   | "solar_providers"
   | "solar_equipment"
-  | "solar_storage";
+  | "solar_storage"
+  | "solar_pay";
 
 export type SettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
@@ -318,6 +319,24 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     href: "/portal/settings/solar-equipment",
     group: "solar",
     keywords: ["panels", "modules", "inverter", "battery", "adders"],
+    verticals: ["solar"],
+  },
+  {
+    // Not a settings page: solar pays its reps off each person's own profile,
+    // so this card is a signpost to Team rather than a screen of its own — the
+    // same shape as Document Templates, which opens /portal/documents.
+    //
+    // Roofing names rep pay in Settings through Commission Rules; solar names it
+    // nowhere — the roster link in the header counts users, it does not say that
+    // what a rep earns is set there. The setup gap that warns "no rep can be
+    // paid on a storage deal" also had no card to appear on, so it never did.
+    icon: DollarSign,
+    key: "solar_pay",
+    title: "Rep Pay",
+    body: "Each rep's redline lives on their profile — per watt, and per battery on a storage-only job.",
+    href: "/portal/team",
+    group: "solar",
+    keywords: ["commission", "redline", "split", "payout", "pay", "battery", "storage"],
     verticals: ["solar"],
   },
   {

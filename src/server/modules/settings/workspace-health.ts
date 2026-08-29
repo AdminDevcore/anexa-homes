@@ -120,7 +120,13 @@ export const SETUP_CHECKS: Check[] = [
    * warning everybody learns to ignore. See the commission-rules note above.
    */
   {
-    key: "solar_backup_profiles",
+    // KEYED TO ITS CARD, not to what it counts. The hub finds a gap's card by
+    // key and drops any gap whose key names no card, so all three of these
+    // shipped invisible: named `solar_backup_profiles`, `solar_storage_lenders`
+    // and `solar_storage_redline`, they were filtered out of the grid AND out
+    // of the "N settings have never been set up" count — a warning about silent
+    // failure, failing silently. The key is the card; the label says what it is.
+    key: "solar_storage",
     label: "Backup load profiles",
     href: "/portal/settings/solar-storage",
     hint: "A storage proposal cannot say how long the battery lasts, so readiness blocks it from generating at all.",
@@ -130,7 +136,7 @@ export const SETUP_CHECKS: Check[] = [
       prisma.solarBackupProfile.count({ where: { companyId, isActive: true } }),
   },
   {
-    key: "solar_storage_lenders",
+    key: "solar_lenders",
     label: "Lenders that fund storage",
     href: "/portal/settings/solar-lenders",
     hint: "No loan product is marked as funding a battery with no array, so a storage-only deal is offered no financing at all.",
@@ -142,8 +148,10 @@ export const SETUP_CHECKS: Check[] = [
       }),
   },
   {
-    key: "solar_storage_redline",
+    key: "solar_pay",
     label: "Per-battery rep redline",
+    // Team, not a settings page: the redline is per rep, on their own profile.
+    // The Rep Pay card is the signpost to it — see settings-sections.ts.
     href: "/portal/team",
     // The specific failure, because "no commission" and "a commission of zero"
     // are the two things this whole feature was careful to keep apart.
