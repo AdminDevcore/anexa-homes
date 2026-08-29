@@ -15,7 +15,7 @@ import {
   monthlyBillFromUsage,
 } from "@/lib/solar-energy";
 import { deriveUtilityRateMills } from "@/lib/solar-money";
-import { saveSolarEnergyAction } from "@/server/modules/solar/energy-actions";
+import { saveSolarEnergyAction, saveSolarTouOverrideAction } from "@/server/modules/solar/energy-actions";
 import type { ProviderOption } from "@/server/modules/solar/providers";
 import { SolarEnergyChart } from "@/components/portal/solar-energy-chart";
 import {
@@ -35,6 +35,9 @@ export type SolarEnergyView = {
   avgMonthlyBillCents: number | null;
   utilityRateMills: number | null;
   usageBasis: string | null;
+  /** This deal's own time-of-use rates. Null = read the provider's. */
+  touPeakRateMills: number | null;
+  touOffPeakRateMills: number | null;
 } | null;
 
 type Basis = "usage" | "bill" | "rate";
@@ -66,6 +69,7 @@ export function SolarEnergyPanel({
   energy,
   utilities,
   retailers,
+  systemType,
   vppDeal,
   year1ProductionKwh,
   canEdit,
@@ -74,6 +78,8 @@ export function SolarEnergyPanel({
   energy: SolarEnergyView;
   utilities: ProviderOption[];
   retailers: ProviderOption[];
+  /** Time-of-use only matters where a battery can shift load. */
+  systemType: "pv" | "pv_storage" | "storage";
   /** The battery and financing this deal currently holds. */
   vppDeal: VppDealFacts;
   /** What the array as drawn makes in year one, for the comparison below. */
@@ -169,6 +175,19 @@ export function SolarEnergyPanel({
           </p>
         )}
       </section>
+
+      {/* Only on a storage deal. Nothing reads these columns otherwise, and a
+          control for a figure nothing uses is a question a rep has to work out
+          they can ignore. */}
+      {systemType === "storage" && (
+        <TouOverride
+          leadId={leadId}
+          canEdit={canEdit}
+          provider={retailers.find((r) => r.name === retail.selected) ?? null}
+          peakMills={energy?.touPeakRateMills ?? null}
+          offPeakMills={energy?.touOffPeakRateMills ?? null}
+        />
+      )}
 
       <section className="space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -505,5 +524,145 @@ function NumberField({
       />
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
+  );
+}
+
+/**
+ * Peak and off-peak, for this one household.
+ *
+ * The rates normally come from the electric provider — set once in Settings and
+ * right for everybody on that plan. This is the exception: the household on a
+ * plan that does not match the published one.
+ *
+ * "Use the provider's" writes NULL to both columns rather than copying the
+ * provider's figures onto the deal. A copy would freeze them, and a provider
+ * that repriced would leave every deal on it quoting last year's spread.
+ */
+function TouOverride({
+  leadId,
+  canEdit,
+  provider,
+  peakMills,
+  offPeakMills,
+}: {
+  leadId: string;
+  canEdit: boolean;
+  provider: ProviderOption | null;
+  peakMills: number | null;
+  offPeakMills: number | null;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [override, setOverride] = React.useState(peakMills != null || offPeakMills != null);
+  const [peak, setPeak] = React.useState(peakMills == null ? "" : (peakMills / 1000).toFixed(3));
+  const [off, setOff] = React.useState(offPeakMills == null ? "" : (offPeakMills / 1000).toFixed(3));
+
+  const providerHasRates =
+    provider?.touPeakRateMills != null && provider?.touOffPeakRateMills != null;
+
+  const mills = (v: string) => {
+    const t = v.trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.round(n * 1000) : null;
+  };
+
+  async function save(next: { touPeakRateMills: number | null; touOffPeakRateMills: number | null }) {
+    setBusy(true);
+    try {
+      const res = await saveSolarTouOverrideAction({ leadId, ...next });
+      if (!res.ok) return toast.error(res.error);
+      toast.success("Rates saved.");
+      router.refresh();
+    } catch {
+      toast.error("Could not save the rates.");
+    } finally {
+      // In a finally. A throw must not latch the form shut.
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Peak rates
+      </h4>
+      <p className="text-xs text-muted-foreground">
+        What a battery saves is the gap between the peak and off-peak price. Without both, the
+        proposal leaves the saving out rather than guessing at one.
+      </p>
+
+      <fieldset className="space-y-2" disabled={!canEdit || busy}>
+        <legend className="sr-only">Where the time-of-use rates come from</legend>
+
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="radio"
+            className="mt-1"
+            checked={!override}
+            onChange={() => {
+              setOverride(false);
+              void save({ touPeakRateMills: null, touOffPeakRateMills: null });
+            }}
+          />
+          <span>
+            Use {provider?.name ?? "the provider"}&rsquo;s rates
+            <span className="block text-xs text-muted-foreground">
+              {providerHasRates
+                ? `$${(provider!.touPeakRateMills! / 1000).toFixed(3)} peak / $${(
+                    provider!.touOffPeakRateMills! / 1000
+                  ).toFixed(3)} off-peak${provider!.touPeakWindow ? ` · ${provider!.touPeakWindow}` : ""}`
+                : "No time-of-use rates on file for this provider — the proposal will omit the saving."}
+            </span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2 text-sm">
+          <input type="radio" className="mt-1" checked={override} onChange={() => setOverride(true)} />
+          <span>Override for this deal</span>
+        </label>
+
+        {override && (
+          <div className="ml-6 flex flex-wrap items-end gap-3">
+            <div className="w-36">
+              <Label htmlFor="deal-tou-peak" className="text-xs">
+                Peak ($/kWh)
+              </Label>
+              <Input
+                id="deal-tou-peak"
+                type="number"
+                step="0.001"
+                value={peak}
+                placeholder="0.240"
+                onChange={(e) => setPeak(e.target.value)}
+              />
+            </div>
+            <div className="w-36">
+              <Label htmlFor="deal-tou-off" className="text-xs">
+                Off-peak ($/kWh)
+              </Label>
+              <Input
+                id="deal-tou-off"
+                type="number"
+                step="0.001"
+                value={off}
+                placeholder="0.090"
+                onChange={(e) => setOff(e.target.value)}
+              />
+            </div>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void save({ touPeakRateMills: mills(peak), touOffPeakRateMills: mills(off) })
+              }
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+              Save rates
+            </Button>
+          </div>
+        )}
+      </fieldset>
+    </section>
   );
 }

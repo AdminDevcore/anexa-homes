@@ -13,6 +13,7 @@ import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
 import { catalogueBasis, listDealAdders } from "@/server/modules/solar/adders";
+import { listBackupProfiles } from "@/server/modules/solar/storage";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
@@ -161,6 +162,31 @@ export default async function SolarProposalBuilderPage({
    * programme" tells a rep nothing they can act on, and the one that names the
    * Powerwall 2 on the design tells them exactly what to change.
    */
+  /**
+   * The batteries step three offers on a storage deal, and the load profiles
+   * its runtime table is worked out from.
+   *
+   * Same rule as the roof designer's picker: sellable rows PLUS whatever this
+   * design already names, so a retired battery on an existing deal keeps
+   * showing rather than the select falling back to "not set" and the next save
+   * stripping a choice nobody meant to touch.
+   */
+  const [storageBatteries, backupProfiles] = await Promise.all([
+    prisma.solarEquipment.findMany({
+      where: {
+        companyId: user.companyId,
+        kind: "battery",
+        OR: [
+          { isActive: true },
+          ...(design?.batteryId ? [{ id: design.batteryId }] : []),
+        ],
+      },
+      orderBy: [{ isDefault: "desc" }, { manufacturer: "asc" }, { model: "asc" }],
+      select: { id: true, manufacturer: true, model: true, ratingW: true },
+    }),
+    listBackupProfiles(user.companyId),
+  ]);
+
   const battery = design?.batteryId
     ? await prisma.solarEquipment.findFirst({
         where: { id: design.batteryId, companyId: user.companyId },
@@ -246,6 +272,16 @@ export default async function SolarProposalBuilderPage({
       <SolarProposalBuilder
         leadId={lead.id}
         systemType={design?.systemType ?? "pv_storage"}
+        storage={{
+          batteryId: design?.batteryId ?? null,
+          batteryQty: design?.batteryQty ?? 0,
+          batteries: storageBatteries.map((b) => ({
+            id: b.id,
+            label: solarEquipmentLabel(b),
+            ratingW: b.ratingW,
+          })),
+          profiles: backupProfiles,
+        }}
         initialStep={
           step === "energy" || step === "design" || step === "financing" || step === "generate"
             ? step
@@ -347,6 +383,8 @@ export default async function SolarProposalBuilderPage({
             avgMonthlyBillCents: design.avgMonthlyBillCents,
             utilityRateMills: design.utilityRateMills,
             usageBasis: design.usageBasis,
+            touPeakRateMills: design.touPeakRateMills,
+            touOffPeakRateMills: design.touOffPeakRateMills,
           }
         }
         utilities={utilities}

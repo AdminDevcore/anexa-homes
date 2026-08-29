@@ -187,3 +187,59 @@ export async function saveCustomerDetailsAction(input: z.infer<typeof customerSc
   revalidatePath(`/portal/leads/${d.leadId}`);
   return { ok: true as const, addressMoved: moved };
 }
+
+// ---------------------------------------------------------------------------
+// Time-of-use, for THIS deal
+// ---------------------------------------------------------------------------
+
+const touSchema = z.object({
+  leadId: z.string().min(1),
+  /** Both, or both null. Mills per kWh. */
+  touPeakRateMills: z.number().int().min(0).max(2_000).nullable(),
+  touOffPeakRateMills: z.number().int().min(0).max(2_000).nullable(),
+});
+
+/**
+ * Override this deal's peak / off-peak rates.
+ *
+ * NULL means "read the provider's", which is where they normally come from —
+ * this exists for the household on a plan that does not match the published
+ * one. Storing a copy of the provider's rates instead would freeze them: a
+ * provider that repriced would leave every deal quoting last year's spread.
+ *
+ * Both or neither, and peak above off-peak. Savings ARE the spread, so one rate
+ * alone computes nothing and `touSavings` returns null — the proposal would
+ * drop the line with no screen saying why. Rejected here while somebody is
+ * still looking at the box they left empty.
+ */
+export async function saveSolarTouOverrideAction(input: unknown) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return { ok: false as const, error: "Not allowed." };
+  const parsed = touSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: "Invalid rates." };
+  const { leadId, touPeakRateMills, touOffPeakRateMills } = parsed.data;
+
+  if ((touPeakRateMills == null) !== (touOffPeakRateMills == null)) {
+    return { ok: false as const, error: "Enter both the peak and the off-peak rate, or neither." };
+  }
+  if (
+    touPeakRateMills != null &&
+    touOffPeakRateMills != null &&
+    touPeakRateMills <= touOffPeakRateMills
+  ) {
+    return { ok: false as const, error: "The peak rate has to be above the off-peak rate." };
+  }
+
+  const design = await prisma.solarDesign.findFirst({
+    where: { leadId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!design) return { ok: false as const, error: "This deal has no design yet." };
+
+  await prisma.solarDesign.update({
+    where: { id: design.id },
+    data: { touPeakRateMills, touOffPeakRateMills },
+  });
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  return { ok: true as const };
+}

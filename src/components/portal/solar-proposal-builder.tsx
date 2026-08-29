@@ -23,6 +23,7 @@ import type { AdderOption, DealAdderLine } from "@/components/portal/solar-adder
 import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { SolarCustomerPanel, type SolarCustomerView, type SolarSystemType } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
+import { SolarStoragePanel, type SolarStorageView } from "@/components/portal/solar-storage-panel";
 import type { ProviderOption } from "@/server/modules/solar/providers";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
 
@@ -130,10 +131,13 @@ export function SolarProposalBuilder({
   vppDeal,
   hasLayout,
   systemType,
+  storage,
 }: {
   leadId: string;
   /** What this deal sells. Reshapes the steps and every panel under them. */
   systemType: SolarSystemType;
+  /** Step three's inputs on a storage deal. Ignored on every other kind. */
+  storage: SolarStorageView;
   /**
    * Which step to open on. The readiness report links straight to the screen
    * that fixes each finding, so "Open financing" has to land ON financing
@@ -242,6 +246,7 @@ export function SolarProposalBuilder({
             <SolarEnergyPanel
               leadId={leadId}
               energy={energy}
+              systemType={systemType}
               utilities={utilities}
               retailers={retailers}
               vppDeal={vppDeal}
@@ -249,7 +254,12 @@ export function SolarProposalBuilder({
               canEdit={canEditDeal}
             />
           )}
-          {s.id === "design" && (
+          {/* Step three is a different job on a battery: there is no roof to
+              draw, so the designer is not merely hidden, it is replaced. */}
+          {s.id === "design" && systemType === "storage" && (
+            <SolarStoragePanel leadId={leadId} view={storage} canEdit={canEditDeal} />
+          )}
+          {s.id === "design" && systemType !== "storage" && (
             <SolarDesignPanel
               leadId={leadId}
               design={design}
