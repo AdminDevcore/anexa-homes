@@ -14,6 +14,8 @@ import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { resolveAdderTotal } from "./adders";
+import { dealRebateTotalCents } from "./storage";
+import { priceStorageStored } from "@/lib/solar-money";
 
 const fail = (error: string) => ({ ok: false as const, error });
 const ok = () => ({ ok: true as const });
@@ -522,6 +524,9 @@ export async function setSolarProviderActiveAction(id: string, active: boolean) 
 const financeSchema = z.object({
   leadId: z.string().min(1),
   product: z.enum(["cash", "loan", "lease", "ppa"]),
+  /** The storage sticker, per battery. Its own column: one field holding both
+   *  would be read back as $/W by every screen that prices a saved deal. */
+  stickerPricePerBatteryCents: z.number().int().min(0).max(100_000_00).optional(),
   grossPpwCents: z.number().int().min(0).optional(),
   dealerFeePct: z.number().min(0).max(100).optional(),
   /// NOT accepted from the caller any more. The adder total is the deal's own,
@@ -565,8 +570,19 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 
   const design = await prisma.solarDesign.findUnique({
     where: { leadId: f.leadId },
-    select: { systemSizeKwDc: true, lenderId: true },
+    select: {
+      systemSizeKwDc: true,
+      lenderId: true,
+      systemType: true,
+      batteryQty: true,
+      // The partner's per-battery rule, read off the LENDER rather than the
+      // programme row — the same place the $/W ceiling is read from.
+      lender: {
+        select: { maxFinalPricePerBatteryCents: true, finalBatteryPriceMode: true },
+      },
+    },
   });
+  const lenderBand = design?.lender ?? null;
 
   // The quoted product's terms are READ HERE, from the row, and never taken
   // from the request. A rate sheet a caller can post arbitrary terms against is
@@ -591,19 +607,55 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 
   // Every product-specific column is gated on the product — see
   // financeRowForProduct for why "most of them" was a customer-facing defect.
-  const data = financeRowForProduct({ ...f, ...adders }, {
+  const rowData = financeRowForProduct({ ...f, ...adders }, {
     systemSizeKwDc: design?.systemSizeKwDc ?? 0,
     assumptions,
     lenderProduct: toLenderProductTerms(lenderProduct),
     targetNetPpwCents: assumptions.targetNetPpwCents,
   });
 
+  /**
+   * The storage sticker, and the contract that follows from it.
+   *
+   * `financeRowForProduct` prices per watt — the company default, the target
+   * net, the partner's $/W ceiling. On a deal with no array every one of those
+   * multiplies by zero, so a storage deal is priced here instead, through the
+   * same ladder over batteries.
+   */
+  const isStorage = design?.systemType === "storage";
+  const storageSticker = isStorage ? (f.stickerPricePerBatteryCents ?? 0) : 0;
+  const storagePrice =
+    isStorage && (f.product === "cash" || f.product === "loan") && storageSticker > 0
+      ? priceStorageStored({
+          product: f.product,
+          batteryQty: design?.batteryQty ?? 0,
+          stickerPricePerBatteryCents: storageSticker,
+          dealerFeePct: f.product === "cash" ? 0 : (rowData.dealerFeePct ?? 0),
+          adderTotalCents: adders.adderTotalCents,
+          onTopAdderTotalCents: adders.onTopAdderTotalCents,
+          rebateTotalCents: await dealRebateTotalCents(user.companyId, f.leadId),
+          maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
+          finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
+        })
+      : null;
+
+  const data = {
+    ...rowData,
+    // Zeroed on a PV deal rather than left stale: a deal switched from storage
+    // back to solar must not keep a price per battery nothing reads.
+    stickerPricePerBatteryCents: isStorage ? storageSticker : 0,
+    // The $/W sticker is meaningless on storage and would be read as one.
+    ...(isStorage ? { grossPpwCents: 0 } : {}),
+    ...(storagePrice ? { contractPriceCents: storagePrice.breakdown.contractPriceCents } : {}),
+  };
+
   const saved = await prisma.solarFinance.upsert({
     where: { leadId: f.leadId },
     create: { companyId: user.companyId, leadId: f.leadId, ...data },
     update: data,
     select: {
-      product: true, grossPpwCents: true, dealerFeePct: true, adderTotalCents: true,
+      product: true, grossPpwCents: true, stickerPricePerBatteryCents: true,
+      dealerFeePct: true, adderTotalCents: true,
       onTopAdderTotalCents: true,
       contractPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
       monthlyPaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,

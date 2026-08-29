@@ -8,8 +8,10 @@ import {
   bandPpwCents,
   basePpwFromSticker,
   capStickerToFinalPpw,
+  capStickerToFinalUnit,
   grossPpwFromNet,
   pricePurchase,
+  priceStoragePurchase,
 } from "@/lib/solar-money";
 
 /**
@@ -681,6 +683,204 @@ function Rung({
           {total == null ? "—" : `$${Math.round(total / 100).toLocaleString()}`}
         </span>
       </dd>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Storage
+// ---------------------------------------------------------------------------
+
+/**
+ * The same price card on a deal with no watts.
+ *
+ * A SEPARATE component rather than a unit parameter on the card above. That one
+ * is seven hundred lines of per-watt reasoning — the cap solve, the band, the
+ * "you are off default" note, the footer that reads `$3.39/W · $33,850` — and
+ * every one of them says "watt" for a reason a battery does not share. Threading
+ * a unit through it would leave one component whose every sentence had to be
+ * true of both, which is how a card ends up saying nothing about either.
+ *
+ * The LADDER is shared, and that is the part that matters: both cards read
+ * `priceUnits` through their own entry point, so the two cannot disagree about
+ * what a dealer fee does.
+ */
+export function StoragePriceCard({
+  batteryQty,
+  basePerBatteryCents,
+  quotedFeePct,
+  quotedMaxFinalPerBatteryCents,
+  quotedFinalBatteryPriceMode,
+  quotedMinBasePerBatteryCents,
+  quotedLabel,
+  adderTotalCents,
+  onTopAdderTotalCents = 0,
+  rebateTotalCents = 0,
+  canEdit,
+  onChange,
+}: {
+  batteryQty: number;
+  /** What the rep prices ONE battery at, before any lender's cut. Null = empty. */
+  basePerBatteryCents: number | null;
+  quotedFeePct: number | null;
+  quotedMaxFinalPerBatteryCents: number | null;
+  quotedFinalBatteryPriceMode: "cap" | "flat";
+  quotedMinBasePerBatteryCents: number | null;
+  quotedLabel: string | null;
+  adderTotalCents: number;
+  onTopAdderTotalCents?: number;
+  rebateTotalCents?: number;
+  canEdit: boolean;
+  onChange: (cents: number | null) => void;
+}) {
+  const fee = quotedFeePct ?? 0;
+  const sticker = basePerBatteryCents == null ? null : grossPpwFromNet(basePerBatteryCents, fee);
+
+  const cap =
+    sticker == null
+      ? null
+      : capStickerToFinalUnit({
+          stickerPerUnitCents: sticker,
+          maxFinalPerUnitCents: quotedMaxFinalPerBatteryCents,
+          mode: quotedFinalBatteryPriceMode,
+          units: batteryQty,
+          dealerFeePct: fee,
+          adderTotalCents,
+        });
+
+  const breakdown =
+    sticker == null || !(batteryQty > 0)
+      ? null
+      : priceStoragePurchase({
+          product: fee > 0 ? "loan" : "cash",
+          batteryQty,
+          stickerPricePerBatteryCents: cap?.stickerPerUnitCents ?? sticker,
+          dealerFeePct: fee,
+          adderTotalCents,
+          onTopAdderTotalCents,
+          rebateTotalCents,
+        });
+
+  // Measured on what SURVIVES the partner's rule, not on what was typed. Under
+  // a flat partner the base a rep entered is not the base anybody is getting.
+  const keptPerBattery =
+    cap == null ? null : basePpwFromSticker(cap.stickerPerUnitCents, fee);
+  const underFloor =
+    keptPerBattery != null &&
+    quotedMinBasePerBatteryCents != null &&
+    quotedMinBasePerBatteryCents > 0 &&
+    keptPerBattery < quotedMinBasePerBatteryCents;
+
+  return (
+    <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            What we charge
+          </h4>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Priced per battery. {batteryQty > 0
+              ? `${batteryQty} on this deal.`
+              : "Pick a battery on the Storage step first."}
+          </p>
+        </div>
+        <label className="space-y-1">
+          <span className="block text-xs text-muted-foreground">Base $ per battery</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            className="h-10 w-40 rounded-md border border-border bg-background px-2 text-right text-lg tabular-nums disabled:opacity-50"
+            disabled={!canEdit}
+            defaultValue={basePerBatteryCents == null ? "" : String(Math.round(basePerBatteryCents / 100))}
+            placeholder="13,000"
+            onBlur={(e) => {
+              const t = e.target.value.trim().replace(/[$,]/g, "");
+              if (t === "") return onChange(null);
+              const n = Number(t);
+              if (Number.isFinite(n) && n > 0) onChange(Math.round(n * 100));
+            }}
+          />
+        </label>
+      </div>
+
+      {breakdown && (
+        <dl className="space-y-1 border-t border-border pt-3 text-sm">
+          <Row
+            label={`Batteries — ${batteryQty} × ${money(
+              Math.round(breakdown.baseStickerCents / Math.max(1, batteryQty))
+            )}`}
+            value={money(breakdown.baseStickerCents)}
+          />
+          {breakdown.adderStickerCents !== 0 && (
+            <Row label="Additional work" value={money(breakdown.adderStickerCents)} />
+          )}
+          {breakdown.rebateStickerCents > 0 && (
+            <Row label="Rebate" value={`−${money(breakdown.rebateStickerCents)}`} />
+          )}
+          <Row label="What we keep" value={money(breakdown.grossPriceCents)} muted />
+          {breakdown.dealerFeeCents !== 0 && (
+            <Row
+              label={`Lender fee${quotedLabel ? ` — ${quotedLabel}` : ""}`}
+              value={money(breakdown.dealerFeeCents)}
+              muted
+            />
+          )}
+          <Row label="Customer signs" value={money(breakdown.contractPriceCents)} strong />
+        </dl>
+      )}
+
+      {cap?.capped && (
+        <p className="rounded-lg border border-blue-500/40 bg-blue-500/5 p-2.5 text-xs">
+          {quotedFinalBatteryPriceMode === "flat"
+            ? `This partner sells at a flat ${money(quotedMaxFinalPerBatteryCents ?? 0)} a battery, fee and work included — so the price above is theirs, not the one typed.`
+            : `Held down to this partner's ${money(quotedMaxFinalPerBatteryCents ?? 0)} a battery ceiling. Extra work comes out of what you keep, not out of the customer's price.`}
+        </p>
+      )}
+
+      {cap?.adderOverrun && (
+        <p className="rounded-lg border border-red-500/40 bg-red-500/5 p-2.5 text-xs">
+          The extra work alone is above this partner&rsquo;s ceiling. No battery price gets this
+          contract under it.
+        </p>
+      )}
+
+      {underFloor && (
+        <p className="rounded-lg border border-red-500/40 bg-red-500/5 p-2.5 text-xs">
+          This leaves {money(keptPerBattery ?? 0)} a battery before the lender&rsquo;s cut, under
+          the {money(quotedMinBasePerBatteryCents ?? 0)} minimum. The proposal will not generate
+          until this comes up.
+        </p>
+      )}
+    </section>
+  );
+}
+
+const money = (cents: number) =>
+  (cents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+
+function Row({
+  label,
+  value,
+  muted,
+  strong,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-baseline justify-between gap-4 ${
+        strong ? "border-t border-border pt-1.5 font-semibold" : ""
+      } ${muted ? "text-muted-foreground" : ""}`}
+    >
+      <dt>{label}</dt>
+      <dd className="tabular-nums">{value}</dd>
     </div>
   );
 }

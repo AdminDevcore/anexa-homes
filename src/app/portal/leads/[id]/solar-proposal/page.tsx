@@ -13,7 +13,7 @@ import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
 import { catalogueBasis, listDealAdders } from "@/server/modules/solar/adders";
-import { listBackupProfiles } from "@/server/modules/solar/storage";
+import { listBackupProfiles, listRebates, listDealRebates } from "@/server/modules/solar/storage";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
@@ -98,6 +98,8 @@ export default async function SolarProposalBuilderPage({
       select: {
         id: true, name: true, isActive: true, portalUrl: true, creditInstructions: true,
         logoUpdatedAt: true, maxFinalPpwCents: true, minBasePpwCents: true,
+        maxFinalPricePerBatteryCents: true, minBasePricePerBatteryCents: true,
+        finalBatteryPriceMode: true,
         finalPpwMode: true,
       },
     }),
@@ -185,6 +187,11 @@ export default async function SolarProposalBuilderPage({
       select: { id: true, manufacturer: true, model: true, ratingW: true },
     }),
     listBackupProfiles(user.companyId),
+  ]);
+
+  const [rebateCatalogue, dealRebates] = await Promise.all([
+    listRebates(user.companyId),
+    listDealRebates(user.companyId, lead.id),
   ]);
 
   const battery = design?.batteryId
@@ -282,6 +289,8 @@ export default async function SolarProposalBuilderPage({
           })),
           profiles: backupProfiles,
         }}
+        rebateCatalogue={rebateCatalogue}
+        dealRebates={dealRebates}
         initialStep={
           step === "energy" || step === "design" || step === "financing" || step === "generate"
             ? step
@@ -306,6 +315,9 @@ export default async function SolarProposalBuilderPage({
           maxFinalPpwCents: l.maxFinalPpwCents,
           finalPpwMode: l.finalPpwMode,
           minBasePpwCents: l.minBasePpwCents,
+          maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
+          minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
+          finalBatteryPriceMode: l.finalBatteryPriceMode,
         }))}
         lenderId={design?.lenderId ?? null}
         lenderProducts={lenderProducts.map((p) => ({
@@ -317,6 +329,7 @@ export default async function SolarProposalBuilderPage({
           termMonths: p.termMonths,
           dealerFeePct: p.dealerFeePct,
           leaseRateCentsPerKwMonth: p.leaseRateCentsPerKwMonth,
+          financesStorageOnly: p.financesStorageOnly,
           rateMillsPerKwh: p.rateMillsPerKwh,
           escalatorPct: p.escalatorPct,
           termYears: p.termYears,

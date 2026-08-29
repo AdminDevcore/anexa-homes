@@ -33,10 +33,12 @@ import {
   grossPpwFromNet,
   leaseMonthlyCents,
   priceStoredPurchase,
+  priceStorageStored,
   type YieldAssumptions,
   type FinalPpwMode,
 } from "@/lib/solar-money";
-import { SystemPriceCard } from "@/components/portal/solar/system-price";
+import { SystemPriceCard, StoragePriceCard } from "@/components/portal/solar/system-price";
+import { applyDealRebateAction, removeDealRebateAction } from "@/server/modules/solar/storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
 import { FinanceOffers } from "@/components/portal/solar-finance-offers";
@@ -262,6 +264,8 @@ export type SolarDesignView = {
 export type SolarFinanceView = {
   product: FinanceProduct;
   grossPpwCents: number;
+  /** The storage sticker, per battery. Zero on every PV deal. */
+  stickerPricePerBatteryCents: number;
   dealerFeePct: number;
   adderTotalCents: number;
   onTopAdderTotalCents: number;
@@ -661,6 +665,13 @@ export type LenderOption = {
    */
   maxFinalPpwCents: number | null;
   /**
+   * The same two rules over BATTERIES, for a deal with no watts. Null means no
+   * rule, which is every lender until somebody sets one.
+   */
+  maxFinalPricePerBatteryCents: number | null;
+  minBasePricePerBatteryCents: number | null;
+  finalBatteryPriceMode: "cap" | "flat";
+  /**
    * Whether that figure is a CEILING or the PRICE. A flat partner sells at one
    * number whatever the base and whatever the adders; see SolarFinalPpwMode.
    */
@@ -684,6 +695,8 @@ export type LenderProductOption = {
   termMonths: number | null;
   dealerFeePct: number | null;
   leaseRateCentsPerKwMonth: number | null;
+  /** Whether this paper funds a battery with no array. Loans only. */
+  financesStorageOnly: boolean;
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
@@ -705,6 +718,10 @@ export function SolarFinancePanel({
   defaultBasePpwCents,
   minPpwCents,
   maxPpwCents,
+  systemType,
+  batteryQty,
+  rebateCatalogue,
+  dealRebates,
   adderCatalogue,
   adderLines,
   systemSizeKwDc,
@@ -728,6 +745,17 @@ export function SolarFinancePanel({
   /** The company's guard rails. A price outside them warns; it never blocks. */
   minPpwCents: number;
   maxPpwCents: number;
+  /**
+   * What this deal sells. On `storage` every rate on this screen is per
+   * BATTERY, not per watt: there is no array for a $/W figure to be per, and
+   * pricing one through the watt path multiplies by zero.
+   */
+  systemType: "pv" | "pv_storage" | "storage";
+  batteryQty: number;
+  /** Rebates the company offers. Applies to any deal carrying a battery. */
+  rebateCatalogue: { id: string; name: string; amountCents: number; perBattery: boolean }[];
+  /** The ones on THIS deal, amounts already frozen at apply time. */
+  dealRebates: { rebateId: string; name: string; qty: number; amountCents: number; totalCents: number }[];
   /** The adders this company sells, for the rep to pick from. */
   adderCatalogue: AdderOption[];
   /** The lines already on this deal. The total is derived from them. */
@@ -762,6 +790,12 @@ export function SolarFinancePanel({
   // posts back what the row already holds rather than nulling it.
   const [form, setForm] = React.useState(() => seed(finance));
   const isPurchase = product === "cash" || product === "loan";
+  /**
+   * A deal with no array. Every rate on this screen is per battery, the
+   * lender's guardrails are the per-battery pair, and only paper flagged as
+   * funding storage is offered.
+   */
+  const isStorage = systemType === "storage";
   const isLoan = product === "loan";
   const isCash = product === "cash";
 
@@ -806,11 +840,17 @@ export function SolarFinancePanel({
    * and a cash deal (fee zero) recovers its price unchanged. A deal nobody has
    * priced yet opens on the company figure.
    */
-  const [basePpwCents, setBasePpwCents] = React.useState<number | null>(() =>
-    finance && finance.grossPpwCents > 0
-      ? Math.round(finance.grossPpwCents * (1 - (finance.dealerFeePct ?? 0) / 100))
-      : defaultBasePpwCents
-  );
+  const [basePpwCents, setBasePpwCents] = React.useState<number | null>(() => {
+    // On storage the stored sticker is in its own column, and there is no
+    // sensible company default for a price per battery — the catalogue has not
+    // been asked for one — so an unpriced storage deal opens EMPTY rather than
+    // on a $/W figure that would read as $3.50 a Powerwall.
+    const stored = systemType === "storage"
+      ? (finance?.stickerPricePerBatteryCents ?? 0)
+      : (finance?.grossPpwCents ?? 0);
+    if (stored > 0) return Math.round(stored * (1 - (finance?.dealerFeePct ?? 0) / 100));
+    return systemType === "storage" ? null : defaultBasePpwCents;
+  });
 
   /**
    * What the adders come to, derived from the lines exactly as the server
@@ -834,6 +874,18 @@ export function SolarFinancePanel({
     adderLines, finance?.adderTotalCents, finance?.onTopAdderTotalCents, systemSizeKwDc,
   ]);
   const { adderTotalCents, onTopAdderTotalCents } = adderSplit;
+
+  /**
+   * The manufacturer's money on this deal, at face.
+   *
+   * Zero on every deal with none applied, which is every deal in flight — so
+   * the arithmetic below is byte-identical to what it was before rebates
+   * existed unless somebody has deliberately put one on.
+   */
+  const rebateTotalCents = React.useMemo(
+    () => dealRebates.reduce((n, r) => n + r.totalCents, 0),
+    [dealRebates]
+  );
 
   /**
    * The fee this deal is quoted under, and the sticker the base grosses up to.
@@ -886,6 +938,10 @@ export function SolarFinancePanel({
   const offers: OfferProduct[] = React.useMemo(
     () =>
       products.flatMap((p) => {
+        // On a storage deal, only paper that funds one. Offering a homeowner a
+        // programme the lender will reject is a decline they discover after
+        // signing, and the flag is off until somebody has checked.
+        if (isStorage && p.product === "loan" && !p.financesStorageOnly) return [];
         const l = lenders.find((x) => x.id === p.lenderId);
         // The ceiling lives on the partner and is merged in here, because the
         // comparison prices a PROGRAMME and should not have to hold a second
@@ -902,7 +958,7 @@ export function SolarFinancePanel({
             ]
           : [];
       }),
-    [products, lenders]
+    [products, lenders, isStorage]
   );
 
   /**
@@ -1021,7 +1077,27 @@ export function SolarFinancePanel({
    * rather than by coincidence.
    */
   const livePrice = React.useMemo(() => {
-    if (!isPurchase || stickerPpwCents == null || !(systemSizeKwDc > 0)) return null;
+    if (!isPurchase || stickerPpwCents == null) return null;
+
+    // Same ladder, a different unit. `stickerPpwCents` holds a rate per unit
+    // either way — the state is unit-agnostic because the conversion helpers
+    // are, and one price box beats two that can disagree.
+    if (isStorage) {
+      if (!(batteryQty > 0)) return null;
+      return priceStorageStored({
+        product,
+        batteryQty,
+        stickerPricePerBatteryCents: stickerPpwCents,
+        dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
+        adderTotalCents,
+        onTopAdderTotalCents,
+        rebateTotalCents,
+        maxFinalPricePerBatteryCents: quotedLender?.maxFinalPricePerBatteryCents ?? null,
+        finalBatteryPriceMode: quotedLender?.finalBatteryPriceMode ?? "cap",
+      });
+    }
+
+    if (!(systemSizeKwDc > 0)) return null;
     return priceStoredPurchase({
       product,
       systemSizeKwDc,
@@ -1029,12 +1105,15 @@ export function SolarFinancePanel({
       dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
       adderTotalCents,
       onTopAdderTotalCents,
+      rebateTotalCents,
       maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
       finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
     });
   }, [
-    isPurchase, product, systemSizeKwDc, stickerPpwCents, feePct, adderTotalCents,
-    onTopAdderTotalCents, quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
+    isPurchase, isStorage, batteryQty, product, systemSizeKwDc, stickerPpwCents, feePct,
+    adderTotalCents, onTopAdderTotalCents, rebateTotalCents,
+    quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
+    quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
   ]);
 
   /**
@@ -1133,7 +1212,11 @@ export function SolarFinancePanel({
       // quoted, and the base is recovered from it and the fee on the way back
       // in. Sent explicitly so the server keeps this price rather than deriving
       // the company default over the top of it.
-      grossPpwCents: stickerPpwCents ?? undefined,
+      // A storage deal's rate is per BATTERY, and it has its own column: one
+      // sticker in grossPpwCents would be read back as $/W by every screen and
+      // every payroll run that prices a saved deal.
+      grossPpwCents: isStorage ? undefined : (stickerPpwCents ?? undefined),
+      stickerPricePerBatteryCents: isStorage ? (stickerPpwCents ?? undefined) : undefined,
       // Zeroed rather than left stale: pricePurchase ignores a cash deal's
       // fee, but the row should not carry one a lender never charged.
       dealerFeePct: isCash ? 0 : rawOrNull(form.dealerFeePct) ?? undefined,
@@ -1160,9 +1243,12 @@ export function SolarFinancePanel({
       setForm(seed(res.finance));
       setProduct(res.finance.product);
       setLenderProductId(res.finance.lenderProductId ?? "");
-      if (res.finance.grossPpwCents > 0) {
+      const storedSticker = isStorage
+        ? res.finance.stickerPricePerBatteryCents
+        : res.finance.grossPpwCents;
+      if (storedSticker > 0) {
         setBasePpwCents(
-          Math.round(res.finance.grossPpwCents * (1 - (res.finance.dealerFeePct ?? 0) / 100))
+          Math.round(storedSticker * (1 - (res.finance.dealerFeePct ?? 0) / 100))
         );
       }
     }
@@ -1178,6 +1264,22 @@ export function SolarFinancePanel({
           to open on a shelf of lender cards and put the price below the
           comparison — a rep scrolled past every figure derived from the price
           before reaching the price itself. */}
+      {isStorage ? (
+        <StoragePriceCard
+          batteryQty={batteryQty}
+          basePerBatteryCents={basePpwCents}
+          quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
+          quotedMaxFinalPerBatteryCents={quotedLender?.maxFinalPricePerBatteryCents ?? null}
+          quotedFinalBatteryPriceMode={quotedLender?.finalBatteryPriceMode ?? "cap"}
+          quotedMinBasePerBatteryCents={isCash ? null : (quotedLender?.minBasePricePerBatteryCents ?? null)}
+          quotedLabel={quotedLender?.name ?? null}
+          adderTotalCents={adderTotalCents}
+          onTopAdderTotalCents={onTopAdderTotalCents}
+          rebateTotalCents={rebateTotalCents}
+          canEdit={canEdit}
+          onChange={setBasePpwCents}
+        />
+      ) : (
       <SystemPriceCard
         systemSizeKwDc={systemSizeKwDc}
         basePpwCents={basePpwCents}
@@ -1206,6 +1308,7 @@ export function SolarFinancePanel({
         canEdit={canEdit}
         onChange={setBasePpwCents}
       />
+      )}
 
       {/* Adders are LINES, not a box. The old "Adders $" field could not say
           what the money was for and went stale every time the array changed —
@@ -1219,6 +1322,23 @@ export function SolarFinancePanel({
         systemWatts={Math.round(systemSizeKwDc * 1000)}
         storedTotalCents={(finance?.adderTotalCents ?? 0) + (finance?.onTopAdderTotalCents ?? 0)}
       />
+
+      {/* The manufacturer's money. Below the adders because it is the other
+          thing that moves the contract total, and above the shelf because the
+          payment on every card down there is amortising the number it leaves.
+
+          Available on ANY deal carrying a battery, not only storage-only ones:
+          a Tesla rebate is a Tesla rebate either way. Nothing is applied
+          automatically, so a deal nobody has touched prices exactly as it did
+          before rebates existed. */}
+      {batteryQty > 0 && rebateCatalogue.length > 0 && (
+        <RebatePanel
+          leadId={leadId}
+          canEdit={canEdit}
+          catalogue={rebateCatalogue}
+          applied={dealRebates}
+        />
+      )}
 
       {/* The rate sheets ARE the interface. Four abstract product types used to
           sit here instead, which put the actual offers two dropdowns deep and
@@ -1875,5 +1995,101 @@ export function ProposalVersionList({
         })}
       </ul>
     </div>
+  );
+}
+
+/**
+ * The rebates on this deal.
+ *
+ * A rebate comes off GROSS, before the lender's cut: the company is passing
+ * somebody else's money through, so the fee is then taken on the lower final
+ * and the payment amortises the smaller number. The customer's breakdown
+ * subtracts it grossed up by that same fee, which is what keeps
+ * `base + work − rebate` equal to the contract exactly.
+ *
+ * The amount is FROZEN when applied. Editing the catalogue tomorrow cannot move
+ * a price quoted today — re-applying is the only thing that refreshes it, and
+ * that takes a deliberate click.
+ */
+function RebatePanel({
+  leadId,
+  canEdit,
+  catalogue,
+  applied,
+}: {
+  leadId: string;
+  canEdit: boolean;
+  catalogue: { id: string; name: string; amountCents: number; perBattery: boolean }[];
+  applied: { rebateId: string; name: string; qty: number; amountCents: number; totalCents: number }[];
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const on = new Set(applied.map((a) => a.rebateId));
+
+  async function toggle(rebateId: string, add: boolean) {
+    setBusy(true);
+    try {
+      const res = add
+        ? await applyDealRebateAction({ leadId, rebateId })
+        : await removeDealRebateAction({ leadId, rebateId });
+      if (!res.ok) return toast.error(res.error);
+      router.refresh();
+    } catch {
+      toast.error("Could not change the rebate.");
+    } finally {
+      // In a finally: a throw must not latch the panel shut.
+      setBusy(false);
+    }
+  }
+
+  const total = applied.reduce((n, a) => n + a.totalCents, 0);
+
+  return (
+    <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+      <div>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Rebates
+        </h4>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Manufacturer or utility money passed through. Comes off before the lender&rsquo;s fee, so
+          the amount financed and the monthly payment both drop.
+        </p>
+      </div>
+
+      <ul className="divide-y divide-border">
+        {catalogue.map((r) => {
+          const line = applied.find((a) => a.rebateId === r.id);
+          return (
+            <li key={r.id} className="flex flex-wrap items-center gap-3 py-2.5">
+              <input
+                type="checkbox"
+                className="size-4"
+                checked={on.has(r.id)}
+                disabled={!canEdit || busy}
+                aria-label={`Apply ${r.name}`}
+                onChange={(e) => void toggle(r.id, e.target.checked)}
+              />
+              <span className="text-sm">{r.name}</span>
+              <span className="text-xs text-muted-foreground">
+                {line
+                  ? `${line.qty} × $${(line.amountCents / 100).toLocaleString("en-US")}`
+                  : `$${(r.amountCents / 100).toLocaleString("en-US")}${r.perBattery ? " per battery" : ""}`}
+              </span>
+              {line && (
+                <span className="ml-auto text-sm font-medium tabular-nums">
+                  −${(line.totalCents / 100).toLocaleString("en-US")}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {total > 0 && (
+        <p className="border-t border-border pt-2 text-right text-sm font-semibold tabular-nums">
+          −${(total / 100).toLocaleString("en-US")} off this deal
+        </p>
+      )}
+    </section>
   );
 }
