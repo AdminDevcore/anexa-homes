@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   Loader2, Plus, Trash2, Save, PenLine, Type, Calendar, CheckSquare,
   ChevronLeft, ChevronRight, LayoutGrid, ListChecks, Link2, AlertCircle, FileDown,
+  ArrowLeft, ArrowRight, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { saveTemplateFieldsAction } from "@/server/modules/esign/actions";
+import {
+  saveTemplateFieldsAction,
+  addTemplateDocumentAction,
+  renameTemplateDocumentAction,
+  deleteTemplateDocumentAction,
+  reorderTemplateDocumentsAction,
+} from "@/server/modules/esign/actions";
 import type { CatalogEntry } from "@/server/modules/esign/autofill";
 import { PdfCanvas } from "./pdf-canvas";
+import { TemplatePdfUploader } from "./template-pdf-uploader";
 
 type FieldType = "text" | "date" | "checkbox" | "signature" | "initials";
 type SignerRole = "customer" | "co_customer" | "company_rep" | "witness";
@@ -34,6 +42,22 @@ type BField = {
   valueToken: string;
   defaultValue: string;
   required: boolean;
+  /** The PDF in the bundle this field sits on. "" = the template's own PDF. */
+  documentId: string;
+};
+
+/**
+ * One PDF in the template's bundle. A template that has never had a second
+ * document added still gets exactly one slot here, with an empty id — that is
+ * the template's own `sourcePdfKey`, and it is what every existing template
+ * looks like.
+ */
+export type DocumentSlot = {
+  id: string;
+  name: string;
+  order: number;
+  pages: { width: number; height: number }[];
+  pdfUrl?: string;
 };
 
 const FIELD_DEFS: { type: FieldType; label: string; icon: React.ComponentType<{ className?: string }>; w: number; h: number }[] = [
@@ -53,16 +77,15 @@ export function TemplateBuilder({
   templateName,
   body,
   initialFields,
-  pages,
-  pdfUrl,
+  documents,
   catalog,
 }: {
   templateId: string;
   templateName: string;
   body: { page: number; type: string; text: string; x: number; y: number }[];
   initialFields: Omit<BField, "key">[];
-  pages: { width: number; height: number }[];
-  pdfUrl?: string;
+  /** The bundle, in order. Always at least one entry. */
+  documents: DocumentSlot[];
   catalog: CatalogEntry[];
 }) {
   const router = useRouter();
@@ -72,14 +95,33 @@ export function TemplateBuilder({
   );
   const [selected, setSelected] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
-  const [currentPage, setCurrentPage] = React.useState(1);
+  const [docPending, setDocPending] = React.useState(false);
+  // Page position is remembered PER DOCUMENT: switching tabs must not carry you
+  // to page 7 of a two-page warranty, and coming back should land where you left.
+  const [pageByDoc, setPageByDoc] = React.useState<Record<string, number>>({});
   const [view, setView] = React.useState<"editor" | "mapping">("editor");
+  const [activeDocId, setActiveDocId] = React.useState(documents[0]?.id ?? "");
+  const [renaming, setRenaming] = React.useState<string | null>(null);
+  const [renameText, setRenameText] = React.useState("");
   const drag = React.useRef<{ key: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
 
-  const pageList = pages.length > 0 ? pages : [{ width: 612, height: 792 }];
+  const multiDoc = documents.length > 1;
+  const firstDocId = documents[0]?.id ?? "";
+  // A field written before its template gained a second document has no
+  // documentId; it belongs to what is now document 1.
+  const docIdOf = React.useCallback((f: BField) => f.documentId || firstDocId, [firstDocId]);
+
+  const activeDoc = documents.find((d) => d.id === activeDocId) ?? documents[0];
+  // A freshly added document has no PDF yet, so fall back to a blank US Letter
+  // page — fields can still be placed and the upload replaces the artwork.
+  const pageList = activeDoc?.pages?.length ? activeDoc.pages : [{ width: 612, height: 792 }];
+  const pdfUrl = activeDoc?.pdfUrl;
+  const currentPage = Math.min(pageByDoc[activeDocId] ?? 1, pageList.length);
   const cur = pageList[currentPage - 1] ?? pageList[0];
   const PW = cur.width;
   const PH = cur.height;
+
+  const goToPage = (docId: string, page: number) => setPageByDoc((s) => ({ ...s, [docId]: page }));
 
   // token -> friendly label, and grouped entries for the picker.
   const labelMap = React.useMemo(
@@ -96,6 +138,9 @@ export function TemplateBuilder({
     return [...m.entries()];
   }, [catalog]);
 
+  // Counts and the canvas are per document — the mapping table stays whole, so
+  // an unmapped field on document 2 is still visible from document 1.
+  const docFields = fields.filter((f) => docIdOf(f) === activeDocId);
   const fillable = fields.filter((f) => isFillable(f.type));
   const mappedCount = fillable.filter((f) => f.valueToken).length;
   const unmappedCount = fillable.length - mappedCount;
@@ -105,7 +150,7 @@ export function TemplateBuilder({
     const key = `f${Date.now()}`;
     setFields((s) => [
       ...s,
-      { key, page: currentPage, x: 60, y: PH - 200, width: def.w, height: def.h, type, signerRole: "customer", label: def.label, valueToken: "", defaultValue: "", required: true },
+      { key, page: currentPage, x: 60, y: PH - 200, width: def.w, height: def.h, type, signerRole: "customer", label: def.label, valueToken: "", defaultValue: "", required: true, documentId: activeDocId },
     ]);
     setSelected(key);
   }
@@ -117,7 +162,8 @@ export function TemplateBuilder({
     if (selected === key) setSelected(null);
   }
   function jumpTo(f: BField) {
-    setCurrentPage(f.page);
+    setActiveDocId(docIdOf(f));
+    goToPage(docIdOf(f), f.page);
     setSelected(f.key);
     setView("editor");
   }
@@ -143,12 +189,16 @@ export function TemplateBuilder({
     drag.current = null;
   }
 
+  // "" is the legacy single-PDF slot, which the column stores as NULL. A field
+  // placed BEFORE the template was split still carries "" in state, and the
+  // canvas has been showing it on document 1 — so that is what gets written,
+  // rather than an unassigned field the envelope would have nowhere to put.
+  const payload = () =>
+    fields.map(({ key: _key, documentId, ...f }) => ({ ...f, documentId: documentId || firstDocId || null }));
+
   async function save() {
     setPending(true);
-    const res = await saveTemplateFieldsAction({
-      templateId,
-      fields: fields.map(({ key: _key, ...f }) => f),
-    });
+    const res = await saveTemplateFieldsAction({ templateId, fields: payload() });
     setPending(false);
     if (res.ok) {
       toast.success("Template saved");
@@ -162,10 +212,72 @@ export function TemplateBuilder({
   // finished, auto-filled contract will look.
   async function previewPdf() {
     setPending(true);
-    const res = await saveTemplateFieldsAction({ templateId, fields: fields.map(({ key: _key, ...f }) => f) });
+    const res = await saveTemplateFieldsAction({ templateId, fields: payload() });
     setPending(false);
     if (!res.ok) return toast.error(res.error);
     window.open(`/portal/documents/templates/${templateId}/preview`, "_blank", "noopener,noreferrer");
+  }
+
+  /**
+   * Add a PDF to the bundle.
+   *
+   * Fields are saved FIRST. The server materialises a legacy template's PDF as
+   * document 1 and adopts its NULL-documentId fields; anything unsaved on the
+   * canvas would be wiped by the refresh that follows, so it has to be on disk
+   * before that happens.
+   */
+  async function addDocument() {
+    setDocPending(true);
+    const saved = await saveTemplateFieldsAction({ templateId, fields: payload() });
+    if (!saved.ok) {
+      setDocPending(false);
+      return toast.error(saved.error);
+    }
+    const res = await addTemplateDocumentAction({ templateId });
+    setDocPending(false);
+    if (!res.ok) return toast.error(res.error);
+    setActiveDocId(res.id);
+    toast.success("Document added — upload its PDF");
+    router.refresh();
+  }
+
+  async function commitRename(docId: string) {
+    const name = renameText.trim();
+    const current = documents.find((d) => d.id === docId)?.name;
+    setRenaming(null);
+    if (!name || name === current) return;
+    const res = await renameTemplateDocumentAction({ documentId: docId, name });
+    if (!res.ok) return toast.error(res.error);
+    router.refresh();
+  }
+
+  async function removeDocument(docId: string) {
+    const doc = documents.find((d) => d.id === docId);
+    if (!confirm(`Delete "${doc?.name ?? "this document"}"? The fields placed on it are deleted too.`)) return;
+    setDocPending(true);
+    // Drop its fields locally first, so the save that follows a refresh cannot
+    // resurrect them against a document that no longer exists.
+    const kept = fields.filter((f) => docIdOf(f) !== docId);
+    const res = await deleteTemplateDocumentAction({ documentId: docId });
+    setDocPending(false);
+    if (!res.ok) return toast.error(res.error);
+    setFields(kept);
+    if (docId === activeDocId) setActiveDocId(documents.find((d) => d.id !== docId)?.id ?? "");
+    toast.success("Document deleted");
+    router.refresh();
+  }
+
+  async function moveDocument(docId: string, delta: -1 | 1) {
+    const idx = documents.findIndex((d) => d.id === docId);
+    const to = idx + delta;
+    if (idx < 0 || to < 0 || to >= documents.length) return;
+    const ids = documents.map((d) => d.id);
+    [ids[idx], ids[to]] = [ids[to], ids[idx]];
+    setDocPending(true);
+    const res = await reorderTemplateDocumentsAction({ templateId, orderedIds: ids });
+    setDocPending(false);
+    if (!res.ok) return toast.error(res.error);
+    router.refresh();
   }
 
   const sel = fields.find((f) => f.key === selected) ?? null;
@@ -174,6 +286,92 @@ export function TemplateBuilder({
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       {/* Canvas / Mapping */}
       <div>
+        {/* The bundle. One send, one signing link, one signed PDF — the tabs
+            choose which of its documents you are placing fields on. */}
+        <div className="mb-3 overflow-hidden rounded-xl border border-border bg-card">
+          <div className="flex flex-wrap items-center gap-1 border-b border-border bg-muted/30 px-2 py-2">
+            {documents.map((d, i) => {
+              const count = fields.filter((f) => docIdOf(f) === d.id).length;
+              const active = d.id === activeDocId;
+              return renaming === d.id ? (
+                <Input
+                  key={d.id}
+                  autoFocus
+                  value={renameText}
+                  onChange={(e) => setRenameText(e.target.value)}
+                  onBlur={() => commitRename(d.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                    if (e.key === "Escape") setRenaming(null);
+                  }}
+                  className="h-8 w-44"
+                />
+              ) : (
+                <button
+                  key={d.id}
+                  onClick={() => setActiveDocId(d.id)}
+                  onDoubleClick={() => {
+                    // Renaming needs a document row; the legacy slot has none.
+                    if (!d.id) return;
+                    setRenameText(d.name);
+                    setRenaming(d.id);
+                  }}
+                  title={d.id ? "Double-click to rename" : undefined}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                    active ? "bg-foreground text-background" : "hover:bg-muted"
+                  )}
+                >
+                  <span className={cn("text-[10px] tabular-nums", active ? "opacity-70" : "text-muted-foreground")}>
+                    {i + 1}
+                  </span>
+                  <span className="max-w-[180px] truncate">{d.name}</span>
+                  {!d.pages?.length && (
+                    <span className={cn("text-[10px]", active ? "opacity-70" : "text-amber-600")}>no PDF</span>
+                  )}
+                  {count > 0 && (
+                    <span className={cn("text-[10px] tabular-nums", active ? "opacity-70" : "text-muted-foreground")}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <Button variant="outline" size="sm" className="ml-1" onClick={addDocument} disabled={docPending || pending}>
+              {docPending ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} Add document
+            </Button>
+            {multiDoc && activeDoc?.id && (
+              <div className="ml-auto flex items-center gap-1">
+                <Button variant="ghost" size="icon" title="Move earlier" disabled={docPending || documents[0]?.id === activeDoc.id} onClick={() => moveDocument(activeDoc.id, -1)}>
+                  <ArrowLeft className="size-4" />
+                </Button>
+                <Button variant="ghost" size="icon" title="Move later" disabled={docPending || documents[documents.length - 1]?.id === activeDoc.id} onClick={() => moveDocument(activeDoc.id, 1)}>
+                  <ArrowRight className="size-4" />
+                </Button>
+                <Button variant="ghost" size="icon" title="Rename" disabled={docPending} onClick={() => { setRenameText(activeDoc.name); setRenaming(activeDoc.id); }}>
+                  <Pencil className="size-4" />
+                </Button>
+                <Button variant="ghost" size="icon" title="Delete document" disabled={docPending} onClick={() => removeDocument(activeDoc.id)}>
+                  <Trash2 className="size-4 text-destructive" />
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="p-3">
+            <TemplatePdfUploader
+              templateId={templateId}
+              documentId={activeDoc?.id || undefined}
+              hasPdf={!!pdfUrl}
+            />
+            {multiDoc && (
+              <p className="mt-2 px-1 text-xs text-muted-foreground">
+                These {documents.length} documents go out as <strong>one envelope</strong> — one signing link, and one
+                signed PDF filed on the deal, in the order shown above.
+              </p>
+            )}
+          </div>
+        </div>
+
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="inline-flex overflow-hidden rounded-lg border border-border">
             <button
@@ -196,11 +394,11 @@ export function TemplateBuilder({
           ))}
           {view === "editor" && pageList.length > 1 && (
             <div className="ml-auto flex items-center gap-1">
-              <Button variant="ghost" size="icon" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>
+              <Button variant="ghost" size="icon" disabled={currentPage === 1} onClick={() => goToPage(activeDocId, currentPage - 1)}>
                 <ChevronLeft className="size-4" />
               </Button>
               <span className="text-xs text-muted-foreground">Page {currentPage} / {pageList.length}</span>
-              <Button variant="ghost" size="icon" disabled={currentPage === pageList.length} onClick={() => setCurrentPage((p) => p + 1)}>
+              <Button variant="ghost" size="icon" disabled={currentPage === pageList.length} onClick={() => goToPage(activeDocId, currentPage + 1)}>
                 <ChevronRight className="size-4" />
               </Button>
             </div>
@@ -223,7 +421,13 @@ export function TemplateBuilder({
         )}
 
         {view === "mapping" ? (
-          <MappingOverview fields={fields} labelMap={labelMap} onPick={jumpTo} />
+          <MappingOverview
+            fields={fields}
+            labelMap={labelMap}
+            onPick={jumpTo}
+            docNames={multiDoc ? Object.fromEntries(documents.map((d, i) => [d.id, `${i + 1}. ${d.name}`])) : null}
+            docIdOf={docIdOf}
+          />
         ) : (
           <>
             <div
@@ -236,7 +440,7 @@ export function TemplateBuilder({
               {pdfUrl ? (
                 <PdfCanvas url={pdfUrl} page={currentPage} className="block w-full" />
               ) : (
-                body.filter((b) => (b.page ?? 1) === currentPage).map((b, i) => (
+                (activeDocId === firstDocId ? body : []).filter((b) => (b.page ?? 1) === currentPage).map((b, i) => (
                   <div
                     key={i}
                     className={cn("absolute text-black", b.type === "heading" && "font-display font-semibold")}
@@ -252,7 +456,7 @@ export function TemplateBuilder({
                 ))
               )}
 
-              {fields.filter((f) => f.page === currentPage).map((f) => {
+              {docFields.filter((f) => f.page === currentPage).map((f) => {
                 const bound = f.valueToken ? labelMap[f.valueToken] ?? f.valueToken : null;
                 return (
                   <div
@@ -406,10 +610,15 @@ function MappingOverview({
   fields,
   labelMap,
   onPick,
+  docNames,
+  docIdOf,
 }: {
   fields: BField[];
   labelMap: Record<string, string>;
   onPick: (f: BField) => void;
+  /** Null for a single-PDF template — there is nothing to disambiguate. */
+  docNames: Record<string, string> | null;
+  docIdOf: (f: BField) => string;
 }) {
   if (fields.length === 0) {
     return (
@@ -418,9 +627,13 @@ function MappingOverview({
       </div>
     );
   }
+  const cols = docNames
+    ? "grid-cols-[1fr_auto_1fr_1fr_1.4fr_auto]"
+    : "grid-cols-[auto_1fr_1fr_1.4fr_auto]";
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="grid grid-cols-[auto_1fr_1fr_1.4fr_auto] gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className={cn("grid gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", cols)}>
+        {docNames && <span>Document</span>}
         <span>Pg</span><span>Type</span><span>Signer</span><span>CRM binding</span><span>Req</span>
       </div>
       <ul className="divide-y divide-border">
@@ -432,8 +645,13 @@ function MappingOverview({
             <li key={f.key}>
               <button
                 onClick={() => onPick(f)}
-                className="grid w-full grid-cols-[auto_1fr_1fr_1.4fr_auto] items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted/50"
+                className={cn("grid w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted/50", cols)}
               >
+                {docNames && (
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">
+                    {docNames[docIdOf(f)] ?? "—"}
+                  </span>
+                )}
                 <span className="text-xs text-muted-foreground tabular-nums">{f.page}</span>
                 <span className="capitalize">{f.label || f.type}<span className="block text-[10px] text-muted-foreground">{f.type}</span></span>
                 <span className="text-xs capitalize text-muted-foreground">{f.signerRole.replace(/_/g, " ")}</span>

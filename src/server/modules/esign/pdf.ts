@@ -16,12 +16,65 @@ export type SnapshotField = {
   valueToken?: string | null;
   defaultValue?: string | null;
 };
-export type Snapshot = {
+/**
+ * One PDF inside an envelope. A template can bundle several, and they are sent,
+ * signed, and filed as a single document — so `documents` is what a signer
+ * scrolls through and what the merged, signed PDF is assembled from.
+ *
+ * Page numbers on a field are PER DOCUMENT: `page: 1` means the first page of
+ * THIS document, not of the bundle.
+ */
+export type SnapshotDocument = {
+  id: string;
+  name: string;
+  order: number;
   pages: SnapshotPage[];
   body: SnapshotBody[];
   fields: SnapshotField[];
   sourcePdfKey?: string | null;
 };
+
+export type Snapshot = {
+  pages: SnapshotPage[];
+  body: SnapshotBody[];
+  fields: SnapshotField[];
+  sourcePdfKey?: string | null;
+  /**
+   * The bundle. Absent (or empty) on every package sent before multi-document
+   * templates existed, and on any single-PDF template — the top-level
+   * pages/body/fields/sourcePdfKey are then the whole document. Read this
+   * through `envelopeDocuments()` rather than directly, so both shapes are
+   * handled in one place.
+   *
+   * When present, the top-level fields are the FLATTENED union across every
+   * document (the signer-role filter and the field-value store both key off it),
+   * and the top-level pages/sourcePdfKey mirror the first document.
+   */
+  documents?: SnapshotDocument[];
+};
+
+/**
+ * The documents in an envelope, in bundle order — always at least one.
+ *
+ * A single-PDF template has no `documents` array, so its top-level snapshot IS
+ * document 1. Collapsing both shapes here is what keeps every caller (render,
+ * signing UI, PDF serving) free of the legacy branch.
+ */
+export function envelopeDocuments(snapshot: Snapshot, fallbackName = "Document"): SnapshotDocument[] {
+  const docs = snapshot.documents ?? [];
+  if (docs.length > 0) return [...docs].sort((a, b) => a.order - b.order);
+  return [
+    {
+      id: "primary",
+      name: fallbackName,
+      order: 1,
+      pages: snapshot.pages ?? [],
+      body: snapshot.body ?? [],
+      fields: snapshot.fields ?? [],
+      sourcePdfKey: snapshot.sourcePdfKey ?? null,
+    },
+  ];
+}
 
 export type FilledValue = { value: string; type: SnapshotField["type"] };
 
@@ -144,6 +197,80 @@ export async function generateSignedPdf(args: SignedPdfArgs): Promise<Buffer> {
 
   const bytes = await doc.save();
   return Buffer.from(bytes);
+}
+
+/** Concatenate PDFs, in order, into one file. */
+export async function mergePdfs(parts: Buffer[]): Promise<Buffer> {
+  const out = await PDFDocument.create();
+  for (const part of parts) {
+    const src = await PDFDocument.load(part);
+    const pages = await out.copyPages(src, src.getPageIndices());
+    for (const page of pages) out.addPage(page);
+  }
+  return Buffer.from(await out.save());
+}
+
+/**
+ * Render a whole envelope — every document in the bundle — as one PDF.
+ *
+ * Each document is stamped on its own (its fields' page numbers are relative to
+ * it), the results are concatenated in bundle order, and ONE certificate of
+ * completion closes the file. The certificate covers the envelope, not each
+ * document, because the envelope is what the parties signed: one consent, one
+ * audit trail, one set of signers.
+ *
+ * A single-document envelope takes the same path as before — stamp, certify —
+ * so nothing about an existing template's output changes.
+ *
+ * `loadSource` is injected rather than importing storage here, which keeps this
+ * module free of I/O and testable with plain buffers.
+ */
+export async function generateEnvelopePdf(
+  args: Omit<SignedPdfArgs, "sourcePdf"> & { loadSource: (key: string) => Promise<Buffer | null> },
+): Promise<Buffer> {
+  const docs = envelopeDocuments(args.snapshot, args.title);
+
+  const load = async (key: string | null | undefined) => {
+    if (!key) return null;
+    try {
+      return await args.loadSource(key);
+    } catch {
+      return null;
+    }
+  };
+
+  if (docs.length === 1) {
+    const only = docs[0];
+    return generateSignedPdf({
+      ...args,
+      snapshot: { pages: only.pages, body: only.body, fields: only.fields, sourcePdfKey: only.sourcePdfKey },
+      sourcePdf: await load(only.sourcePdfKey),
+    });
+  }
+
+  const parts: Buffer[] = [];
+  for (const d of docs) {
+    parts.push(
+      await generateSignedPdf({
+        ...args,
+        title: `${args.title} — ${d.name}`,
+        snapshot: { pages: d.pages, body: d.body, fields: d.fields, sourcePdfKey: d.sourcePdfKey },
+        sourcePdf: await load(d.sourcePdfKey),
+        // The certificate belongs to the assembled bundle, not to each part.
+        certificate: false,
+      }),
+    );
+  }
+
+  const merged = await mergePdfs(parts);
+  if (args.certificate === false) return merged;
+
+  const doc = await PDFDocument.load(merged);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const oblique = await doc.embedFont(StandardFonts.HelveticaOblique);
+  renderCertificate(doc, { font, bold, oblique }, args as SignedPdfArgs, doc.getPageCount());
+  return Buffer.from(await doc.save());
 }
 
 // WinAnsi-safe + compact device string from a user agent.

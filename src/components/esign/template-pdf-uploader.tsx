@@ -9,9 +9,12 @@ import { uploadTemplatePdfAction } from "@/server/modules/esign/actions";
 
 export function TemplatePdfUploader({
   templateId,
+  documentId,
   hasPdf,
 }: {
   templateId: string;
+  /** Which PDF in the bundle to replace. Omitted = the template's own source. */
+  documentId?: string;
   hasPdf: boolean;
 }) {
   const router = useRouter();
@@ -24,6 +27,7 @@ export function TemplatePdfUploader({
     setPending(true);
     const fd = new FormData();
     fd.append("templateId", templateId);
+    if (documentId) fd.append("documentId", documentId);
     fd.append("file", file);
     const res = await uploadTemplatePdfAction(fd);
     setPending(false);

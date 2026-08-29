@@ -166,6 +166,9 @@ const fieldSchema = z.object({
   valueToken: z.string().optional().or(z.literal("")),
   defaultValue: z.string().optional().or(z.literal("")),
   required: z.boolean().optional(),
+  // Which PDF in the bundle the field sits on. Null/absent = the template's own
+  // PDF, which is every single-document template.
+  documentId: z.string().uuid().nullable().optional(),
 });
 
 const saveFieldsSchema = z.object({
@@ -181,15 +184,29 @@ export async function saveTemplateFieldsAction(input: z.infer<typeof saveFieldsS
 
   const template = await prisma.documentTemplate.findFirst({
     where: { id: parsed.data.templateId, companyId: user.companyId },
-    select: { id: true },
+    select: { id: true, documents: { select: { id: true }, orderBy: { order: "asc" } } },
   });
   if (!template) return { ok: false as const, error: "Template not found." };
+
+  // A documentId from another template would pass the FK and silently attach a
+  // field to a document this template does not own, so anything unrecognised
+  // falls back rather than being trusted.
+  //
+  // The fallback is DOCUMENT 1, not NULL, whenever the template has documents.
+  // The editor holds fields in state across a save, so a field placed before a
+  // template was split still carries no documentId when it is next saved —
+  // writing NULL there would drop it from the envelope entirely, sending a
+  // contract with no signature box on its first document. Document 1 is also
+  // exactly where the editor has been showing it.
+  const ownDocs = new Set(template.documents.map((d) => d.id));
+  const firstDocId = template.documents[0]?.id ?? null;
 
   await prisma.$transaction([
     prisma.documentTemplateField.deleteMany({ where: { templateId: template.id } }),
     prisma.documentTemplateField.createMany({
       data: parsed.data.fields.map((f) => ({
         templateId: template.id,
+        documentId: f.documentId && ownDocs.has(f.documentId) ? f.documentId : firstDocId,
         page: f.page,
         x: f.x,
         y: f.y,
@@ -214,6 +231,9 @@ export async function uploadTemplatePdfAction(formData: FormData) {
   requireCan(user, "update", "Document");
 
   const templateId = formData.get("templateId") as string;
+  // Present once a template holds more than one PDF: the upload replaces THAT
+  // document rather than the template's own source.
+  const documentId = (formData.get("documentId") as string | null) || null;
   const file = formData.get("file");
   if (!(file instanceof File)) return { ok: false as const, error: "No file provided." };
   if (file.type !== "application/pdf") return { ok: false as const, error: "Please upload a PDF." };
@@ -224,6 +244,14 @@ export async function uploadTemplatePdfAction(formData: FormData) {
     select: { id: true },
   });
   if (!template) return { ok: false as const, error: "Template not found." };
+
+  const target = documentId
+    ? await prisma.documentTemplateDocument.findFirst({
+        where: { id: documentId, templateId: template.id },
+        select: { id: true },
+      })
+    : null;
+  if (documentId && !target) return { ok: false as const, error: "Document not found." };
 
   const buffer = Buffer.from(await file.arrayBuffer());
   let pages: { width: number; height: number }[];
@@ -238,16 +266,176 @@ export async function uploadTemplatePdfAction(formData: FormData) {
   }
   if (pages.length === 0) return { ok: false as const, error: "PDF has no pages." };
 
-  const key = `companies/${user.companyId}/templates/${templateId}.pdf`;
+  const key = target
+    ? `companies/${user.companyId}/templates/${templateId}/${target.id}.pdf`
+    : `companies/${user.companyId}/templates/${templateId}.pdf`;
   await putObject(key, buffer);
 
-  await prisma.documentTemplate.update({
-    where: { id: templateId },
-    data: { sourcePdfKey: key, pages: pages as unknown as Prisma.InputJsonValue, body: [] },
-  });
+  if (target) {
+    await prisma.documentTemplateDocument.update({
+      where: { id: target.id },
+      data: { sourcePdfKey: key, pages: pages as unknown as Prisma.InputJsonValue },
+    });
+  } else {
+    await prisma.documentTemplate.update({
+      where: { id: templateId },
+      data: { sourcePdfKey: key, pages: pages as unknown as Prisma.InputJsonValue, body: [] },
+    });
+  }
 
   revalidatePath(`/portal/documents/templates/${templateId}`);
   return { ok: true as const, pages: pages.length };
+}
+
+// --- Documents inside a template ---
+//
+// A template is a LIST of PDFs. The rows only appear once a second document is
+// added: until then the template's own sourcePdfKey IS the document, which is
+// how every template that predates this keeps working untouched.
+
+async function ownedTemplate(companyId: string, templateId: string) {
+  return prisma.documentTemplate.findFirst({
+    where: { id: templateId, companyId },
+    select: { id: true, name: true, sourcePdfKey: true, pages: true },
+  });
+}
+
+async function ownedDocument(companyId: string, documentId: string) {
+  return prisma.documentTemplateDocument.findFirst({
+    where: { id: documentId, template: { companyId } },
+    select: { id: true, templateId: true, name: true },
+  });
+}
+
+/**
+ * Add a PDF slot to a template.
+ *
+ * The first call on a legacy template does the migration the schema cannot: it
+ * materialises the template's existing PDF as document 1 and adopts the fields
+ * already placed on it, THEN adds the empty slot. Skipping that step would
+ * leave those fields with a NULL documentId in a template that now has rows,
+ * where `buildSnapshotFromTemplate` would drop them — the contract would send
+ * with no signature boxes.
+ */
+export async function addTemplateDocumentAction(input: { templateId: string; name?: string }) {
+  const user = await requireUser();
+  if (!can(user, "update", "Document")) return { ok: false as const, error: "Not allowed." };
+
+  const template = await ownedTemplate(user.companyId, input.templateId);
+  if (!template) return { ok: false as const, error: "Template not found." };
+
+  const existing = await prisma.documentTemplateDocument.count({ where: { templateId: template.id } });
+
+  const created = await prisma.$transaction(async (tx) => {
+    let count = existing;
+    if (count === 0) {
+      const primary = await tx.documentTemplateDocument.create({
+        data: {
+          templateId: template.id,
+          order: 1,
+          name: template.name || "Document 1",
+          sourcePdfKey: template.sourcePdfKey,
+          pages: (template.pages ?? []) as Prisma.InputJsonValue,
+        },
+        select: { id: true },
+      });
+      await tx.documentTemplateField.updateMany({
+        where: { templateId: template.id, documentId: null },
+        data: { documentId: primary.id },
+      });
+      count = 1;
+    }
+    return tx.documentTemplateDocument.create({
+      data: {
+        templateId: template.id,
+        order: count + 1,
+        name: input.name?.trim() || `Document ${count + 1}`,
+        pages: [] as unknown as Prisma.InputJsonValue,
+      },
+      select: { id: true },
+    });
+  });
+
+  revalidatePath(`/portal/documents/templates/${template.id}`);
+  return { ok: true as const, id: created.id };
+}
+
+export async function renameTemplateDocumentAction(input: { documentId: string; name: string }) {
+  const user = await requireUser();
+  if (!can(user, "update", "Document")) return { ok: false as const, error: "Not allowed." };
+  const name = input.name.trim();
+  if (!name) return { ok: false as const, error: "Name is required." };
+  if (name.length > 120) return { ok: false as const, error: "Name is too long." };
+
+  const doc = await ownedDocument(user.companyId, input.documentId);
+  if (!doc) return { ok: false as const, error: "Document not found." };
+
+  await prisma.documentTemplateDocument.update({ where: { id: doc.id }, data: { name } });
+  revalidatePath(`/portal/documents/templates/${doc.templateId}`);
+  return { ok: true as const };
+}
+
+/**
+ * Remove a document from the bundle. Its fields go with it (FK cascade).
+ *
+ * Deleting down to one document does NOT collapse back to the legacy shape —
+ * the surviving row stays, keeping its own name and PDF. Nothing reads the two
+ * shapes differently, so there is no reason to rewrite history.
+ */
+export async function deleteTemplateDocumentAction(input: { documentId: string }) {
+  const user = await requireUser();
+  if (!can(user, "update", "Document")) return { ok: false as const, error: "Not allowed." };
+
+  const doc = await ownedDocument(user.companyId, input.documentId);
+  if (!doc) return { ok: false as const, error: "Document not found." };
+
+  const remaining = await prisma.documentTemplateDocument.count({ where: { templateId: doc.templateId } });
+  if (remaining <= 1) return { ok: false as const, error: "A template needs at least one document." };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.documentTemplateDocument.delete({ where: { id: doc.id } });
+    // Close the gap so `order` stays 1..n and the bundle reads in sequence.
+    const rest = await tx.documentTemplateDocument.findMany({
+      where: { templateId: doc.templateId },
+      orderBy: { order: "asc" },
+      select: { id: true },
+    });
+    for (const [i, d] of rest.entries()) {
+      await tx.documentTemplateDocument.update({ where: { id: d.id }, data: { order: i + 1 } });
+    }
+  });
+
+  revalidatePath(`/portal/documents/templates/${doc.templateId}`);
+  return { ok: true as const };
+}
+
+/** Reorder the bundle. `orderedIds` must name every document in the template. */
+export async function reorderTemplateDocumentsAction(input: { templateId: string; orderedIds: string[] }) {
+  const user = await requireUser();
+  if (!can(user, "update", "Document")) return { ok: false as const, error: "Not allowed." };
+
+  const template = await ownedTemplate(user.companyId, input.templateId);
+  if (!template) return { ok: false as const, error: "Template not found." };
+
+  const docs = await prisma.documentTemplateDocument.findMany({
+    where: { templateId: template.id },
+    select: { id: true },
+  });
+  const own = new Set(docs.map((d) => d.id));
+  // A partial or foreign list would leave documents sharing an order, and the
+  // bundle would assemble in an arbitrary sequence — so reject it outright.
+  if (input.orderedIds.length !== docs.length || input.orderedIds.some((id) => !own.has(id))) {
+    return { ok: false as const, error: "Invalid document order." };
+  }
+
+  await prisma.$transaction(
+    input.orderedIds.map((id, i) =>
+      prisma.documentTemplateDocument.update({ where: { id }, data: { order: i + 1 } }),
+    ),
+  );
+
+  revalidatePath(`/portal/documents/templates/${template.id}`);
+  return { ok: true as const };
 }
 
 const updateTemplateSchema = z.object({

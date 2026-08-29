@@ -6,7 +6,6 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
 import { TemplateBuilder } from "@/components/esign/template-builder";
-import { TemplatePdfUploader } from "@/components/esign/template-pdf-uploader";
 import { TemplateSettings } from "@/components/esign/template-settings";
 import { foldersFor, packageDestinations } from "@/lib/deal-folders";
 import { buildFieldCatalog } from "@/server/modules/esign/autofill";
@@ -24,7 +23,7 @@ export default async function TemplateEditorPage({
 
   const template = await prisma.documentTemplate.findFirst({
     where: { id, companyId: user.companyId },
-    include: { fields: true },
+    include: { fields: true, documents: { orderBy: { order: "asc" } } },
   });
   if (!template) notFound();
 
@@ -38,7 +37,32 @@ export default async function TemplateEditorPage({
 
   const body = (template.body as unknown as { page: number; type: string; text: string; x: number; y: number }[]) ?? [];
   const pages = (template.pages as unknown as { width: number; height: number }[]) ?? [];
-  const pdfUrl = template.sourcePdfKey ? `/portal/documents/templates/${template.id}/source` : undefined;
+
+  // A template is a list of PDFs. Templates that predate that carry no document
+  // rows, so the template's own PDF stands in as the single slot (empty id) —
+  // which is what keeps the editor identical for every existing template.
+  const documents =
+    template.documents.length > 0
+      ? template.documents.map((d) => ({
+          id: d.id,
+          name: d.name,
+          order: d.order,
+          pages: (d.pages as unknown as { width: number; height: number }[]) ?? [],
+          pdfUrl: d.sourcePdfKey
+            ? `/portal/documents/templates/${template.id}/source?doc=${d.id}`
+            : undefined,
+        }))
+      : [
+          {
+            id: "",
+            name: template.name,
+            order: 1,
+            pages,
+            pdfUrl: template.sourcePdfKey
+              ? `/portal/documents/templates/${template.id}/source`
+              : undefined,
+          },
+        ];
 
   return (
     <div className="space-y-6">
@@ -50,7 +74,7 @@ export default async function TemplateEditorPage({
       </Link>
       <PageHeader
         title={`Edit: ${template.name}`}
-        description="Upload your own PDF or use the built-in page, then drag fields and map auto-fill data from the CRM."
+        description="Upload one or more PDFs — they go out as a single envelope — then drag fields and map auto-fill data from the CRM."
       />
       <TemplateSettings
         templateId={template.id}
@@ -66,13 +90,11 @@ export default async function TemplateEditorPage({
           foldersFor(template.vertical).find((f) => f.hostsPackages)?.label ?? "Contract"
         }
       />
-      <TemplatePdfUploader templateId={template.id} hasPdf={!!template.sourcePdfKey} />
       <TemplateBuilder
         templateId={template.id}
         templateName={template.name}
         body={body}
-        pages={pages}
-        pdfUrl={pdfUrl}
+        documents={documents}
         catalog={catalog}
         initialFields={template.fields.map((f) => ({
           page: f.page,
@@ -86,6 +108,7 @@ export default async function TemplateEditorPage({
           valueToken: f.valueToken ?? "",
           defaultValue: f.defaultValue ?? "",
           required: f.required,
+          documentId: f.documentId ?? "",
         }))}
       />
     </div>

@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Logo } from "@/components/marketing/logo";
 import { submitSignatureByTokenAction } from "@/server/modules/esign/actions";
 import { fillTokens, type AutofillContext } from "@/server/modules/esign/autofill";
-import type { Snapshot, SnapshotField } from "@/server/modules/esign/pdf";
+import { envelopeDocuments, type Snapshot, type SnapshotField } from "@/server/modules/esign/pdf";
 import { deriveInitials, mapAdoptedToFields, type AdoptedSignature } from "@/lib/esign-signature";
 import { PdfCanvas } from "./pdf-canvas";
 import { cursiveImage } from "@/lib/signature-image";
@@ -39,7 +39,6 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
     }
     return init;
   });
-  const pdfUrl = snapshot.sourcePdfKey ? `/api/sign/${token}/pdf` : null;
   const [signatureUrl, setSignatureUrl] = React.useState<string | null>(null);
   const [sigOpen, setSigOpen] = React.useState(false);
   const [done, setDone] = React.useState(false);
@@ -60,7 +59,13 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
     );
   }
 
-  const pages = snapshot.pages?.length ? snapshot.pages : [{ width: 612, height: 792 }];
+  // A template can bundle several PDFs — an agreement and its warranty — that go
+  // out as ONE envelope. They render end to end in a single scroll under one
+  // consent and one Sign button, because one envelope is what the signer agreed
+  // to. `envelopeDocuments` also covers the single-PDF case, so there is no
+  // second layout here.
+  const documents = React.useMemo(() => envelopeDocuments(snapshot, title), [snapshot, title]);
+  const multiDoc = documents.length > 1;
   const sigFields = signerFields.filter((f) => f.type === "signature" || f.type === "initials");
   const needSignature = sigFields.some((f) => f.type === "signature");
   const needInitials = sigFields.some((f) => f.type === "initials");
@@ -138,105 +143,134 @@ export function SigningExperience({ token, title, signerName, snapshot, ctx, sig
           </p>
         </div>
 
-        {pages.map((page, pi) => {
-          const pageNum = pi + 1;
-          const bodyOnPage = (snapshot.body ?? []).filter((b) => (b.page ?? 1) === pageNum);
-          const fieldsOnPage = signerFields.filter((f) => (f.page ?? 1) === pageNum);
+        {documents.map((doc, di) => {
+          const pages = doc.pages?.length ? doc.pages : [{ width: 612, height: 792 }];
+          // Each document is served on its own — page numbers on a field are
+          // relative to the document it sits on, never to the bundle.
+          const pdfUrl = doc.sourcePdfKey
+            ? `/api/sign/${token}/pdf${multiDoc ? `?doc=${encodeURIComponent(doc.id)}` : ""}`
+            : null;
+          const docFieldIds = new Set((doc.fields ?? []).map((f) => f.id));
+          const docSignerFields = signerFields.filter((f) => docFieldIds.has(f.id));
           return (
-            <div
-              key={pi}
-              className="relative mx-auto w-full overflow-hidden rounded-lg border border-border bg-white shadow-sm"
-              style={{ aspectRatio: `${page.width} / ${page.height}` }}
-            >
-              {pdfUrl && <PdfCanvas url={pdfUrl} page={pageNum} className="block w-full" />}
-
-              {!pdfUrl && bodyOnPage.map((b, bi) => (
-                <div
-                  key={bi}
-                  className={cn(
-                    "absolute text-black",
-                    b.type === "heading" ? "font-display font-semibold" : ""
-                  )}
-                  style={{
-                    left: `${(b.x / page.width) * 100}%`,
-                    top: `${((page.height - b.y) / page.height) * 100}%`,
-                    fontSize: b.type === "heading" ? "min(2.4vw, 18px)" : "min(1.5vw, 11px)",
-                    transform: "translateY(-100%)",
-                  }}
-                >
-                  {fillTokens(b.text, ctx)}
+            <section key={doc.id} className="space-y-6">
+              {multiDoc && (
+                <div className="flex items-center gap-3 pt-2">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-full bg-gold/15 text-xs font-semibold text-gold-muted">
+                    {di + 1}
+                  </span>
+                  <h2 className="font-display text-lg font-semibold">{doc.name}</h2>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {pages.length} page{pages.length === 1 ? "" : "s"}
+                    {docSignerFields.length > 0
+                      ? ` · ${docSignerFields.length} field${docSignerFields.length === 1 ? "" : "s"} for you`
+                      : ""}
+                  </span>
+                  <span className="h-px flex-1 bg-border" />
                 </div>
-              ))}
-
-              {fieldsOnPage.map((f) => {
-                const leftPct = (f.x / page.width) * 100;
-                const topPct = ((page.height - f.y - f.height) / page.height) * 100;
-                const wPct = (f.width / page.width) * 100;
-                const hPct = (f.height / page.height) * 100;
-                const v = values[f.id] ?? "";
+              )}
+              {pages.map((page, pi) => {
+                const pageNum = pi + 1;
+                const bodyOnPage = (doc.body ?? []).filter((b) => (b.page ?? 1) === pageNum);
+                const fieldsOnPage = docSignerFields.filter((f) => (f.page ?? 1) === pageNum);
                 return (
                   <div
-                    key={f.id}
-                    className="absolute"
-                    style={{
-                      left: `${leftPct}%`,
-                      top: `${topPct}%`,
-                      width: `${wPct}%`,
-                      height: `${hPct}%`,
-                    }}
+                    key={pi}
+                    className="relative mx-auto w-full overflow-hidden rounded-lg border border-border bg-white shadow-sm"
+                    style={{ aspectRatio: `${page.width} / ${page.height}` }}
                   >
-                    {f.type === "signature" || f.type === "initials" ? (
-                      <button
-                        type="button"
-                        onClick={() => setSigOpen(true)}
+                    {pdfUrl && <PdfCanvas url={pdfUrl} page={pageNum} className="block w-full" />}
+
+                    {!pdfUrl && bodyOnPage.map((b, bi) => (
+                      <div
+                        key={bi}
                         className={cn(
-                          "flex size-full items-center justify-center rounded border-2 border-dashed text-[10px] font-medium transition-colors",
-                          v ? "border-emerald-400 bg-white" : "border-gold bg-gold/10 text-gold-muted hover:bg-gold/20"
+                          "absolute text-black",
+                          b.type === "heading" ? "font-display font-semibold" : ""
                         )}
+                        style={{
+                          left: `${(b.x / page.width) * 100}%`,
+                          top: `${((page.height - b.y) / page.height) * 100}%`,
+                          fontSize: b.type === "heading" ? "min(2.4vw, 18px)" : "min(1.5vw, 11px)",
+                          transform: "translateY(-100%)",
+                        }}
                       >
-                        {v ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={v} alt="signature" className="max-h-full max-w-full object-contain" />
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <PenLine className="size-3" /> {f.type === "initials" ? "Initials" : "Sign"}
-                          </span>
-                        )}
-                      </button>
-                    ) : f.type === "checkbox" ? (
-                      <button
-                        type="button"
-                        onClick={() => setValue(f.id, v === "true" ? "false" : "true")}
-                        className={cn(
-                          "flex size-full items-center justify-center rounded border-2",
-                          v === "true" ? "border-emerald-400 bg-emerald-50 text-emerald-600" : "border-gold bg-gold/10"
-                        )}
-                      >
-                        {v === "true" ? "✓" : ""}
-                      </button>
-                    ) : f.valueToken ? (
-                      // Auto-filled from CRM — shown read-only.
-                      <div className="flex size-full items-center rounded border-2 border-emerald-300 bg-emerald-50/60 px-1 text-[10px] text-black">
-                        {v}
+                        {fillTokens(b.text, ctx)}
                       </div>
-                    ) : (
-                      <input
-                        value={v}
-                        onChange={(e) => setValue(f.id, e.target.value)}
-                        placeholder={f.label ?? (f.type === "date" ? "Date" : "Text")}
-                        className="size-full rounded border-2 border-gold bg-gold/10 px-1 text-[10px] text-black outline-none focus:bg-white"
-                      />
+                    ))}
+
+                    {fieldsOnPage.map((f) => {
+                      const leftPct = (f.x / page.width) * 100;
+                      const topPct = ((page.height - f.y - f.height) / page.height) * 100;
+                      const wPct = (f.width / page.width) * 100;
+                      const hPct = (f.height / page.height) * 100;
+                      const v = values[f.id] ?? "";
+                      return (
+                        <div
+                          key={f.id}
+                          className="absolute"
+                          style={{
+                            left: `${leftPct}%`,
+                            top: `${topPct}%`,
+                            width: `${wPct}%`,
+                            height: `${hPct}%`,
+                          }}
+                        >
+                          {f.type === "signature" || f.type === "initials" ? (
+                            <button
+                              type="button"
+                              onClick={() => setSigOpen(true)}
+                              className={cn(
+                                "flex size-full items-center justify-center rounded border-2 border-dashed text-[10px] font-medium transition-colors",
+                                v ? "border-emerald-400 bg-white" : "border-gold bg-gold/10 text-gold-muted hover:bg-gold/20"
+                              )}
+                            >
+                              {v ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={v} alt="signature" className="max-h-full max-w-full object-contain" />
+                              ) : (
+                                <span className="flex items-center gap-1">
+                                  <PenLine className="size-3" /> {f.type === "initials" ? "Initials" : "Sign"}
+                                </span>
+                              )}
+                            </button>
+                          ) : f.type === "checkbox" ? (
+                            <button
+                              type="button"
+                              onClick={() => setValue(f.id, v === "true" ? "false" : "true")}
+                              className={cn(
+                                "flex size-full items-center justify-center rounded border-2",
+                                v === "true" ? "border-emerald-400 bg-emerald-50 text-emerald-600" : "border-gold bg-gold/10"
+                              )}
+                            >
+                              {v === "true" ? "✓" : ""}
+                            </button>
+                          ) : f.valueToken ? (
+                            // Auto-filled from CRM — shown read-only.
+                            <div className="flex size-full items-center rounded border-2 border-emerald-300 bg-emerald-50/60 px-1 text-[10px] text-black">
+                              {v}
+                            </div>
+                          ) : (
+                            <input
+                              value={v}
+                              onChange={(e) => setValue(f.id, e.target.value)}
+                              placeholder={f.label ?? (f.type === "date" ? "Date" : "Text")}
+                              className="size-full rounded border-2 border-gold bg-gold/10 px-1 text-[10px] text-black outline-none focus:bg-white"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {fieldsOnPage.length === 0 && pi === 0 && (
+                      <div className="absolute bottom-2 right-3 text-[9px] text-gray-400">
+                        Page {pageNum}
+                      </div>
                     )}
                   </div>
                 );
               })}
-
-              {fieldsOnPage.length === 0 && pi === 0 && (
-                <div className="absolute bottom-2 right-3 text-[9px] text-gray-400">
-                  Page {pageNum}
-                </div>
-              )}
-            </div>
+            </section>
           );
         })}
       </div>

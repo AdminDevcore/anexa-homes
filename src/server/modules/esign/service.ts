@@ -15,11 +15,12 @@ import { appendDocumentEvent } from "./audit";
 import { buildAutofillContext, type AutofillContext } from "./autofill";
 import { COMPANY_CTX_SELECT, ctxForLead, LEAD_CTX_INCLUDE, type CompanyForCtx } from "./context";
 import {
-  generateSignedPdf,
+  generateEnvelopePdf,
   type Snapshot,
-  type SnapshotField,
+  type SnapshotPage,
   type FilledValue,
 } from "./pdf";
+import { buildSnapshotFromTemplate } from "./build-snapshot";
 
 // ---------------------------------------------------------------------------
 // Send for signature (staff)
@@ -156,9 +157,16 @@ export async function createSignaturePackage(args: {
 
   const template = await prisma.documentTemplate.findFirst({
     where: { id: input.templateId, companyId },
-    include: { fields: true },
+    include: { fields: true, documents: { orderBy: { order: "asc" } } },
   });
   if (!template) throw new Error("Template not found.");
+
+  // A document added to the bundle but never given a PDF would go out as a
+  // blank generated page in the middle of a contract. Refuse the send and name
+  // the offender instead — the template editor flags it too, but the send is
+  // the last place to catch it before a customer sees it.
+  const emptyDoc = template.documents.find((d) => !d.sourcePdfKey);
+  if (emptyDoc) throw new Error(`"${emptyDoc.name}" has no PDF uploaded yet.`);
 
   const lead = await prisma.lead.findFirst({
     where: { id: input.leadId, companyId },
@@ -166,24 +174,20 @@ export async function createSignaturePackage(args: {
   });
   if (!lead) throw new Error("Lead not found.");
 
-  const snapshot: Snapshot = {
-    pages: (template.pages as unknown as Snapshot["pages"]) ?? [{ width: 612, height: 792 }],
+  const snapshot = buildSnapshotFromTemplate({
+    name: template.name,
+    pages: (template.pages as unknown as SnapshotPage[]) ?? [{ width: 612, height: 792 }],
     body: (template.body as unknown as Snapshot["body"]) ?? [],
     sourcePdfKey: template.sourcePdfKey ?? null,
-    fields: template.fields.map((f) => ({
-      id: f.id,
-      page: f.page,
-      x: f.x,
-      y: f.y,
-      width: f.width,
-      height: f.height,
-      type: f.type as SnapshotField["type"],
-      signerRole: f.signerRole,
-      label: f.label,
-      valueToken: f.valueToken,
-      defaultValue: f.defaultValue,
+    documents: template.documents.map((d) => ({
+      id: d.id,
+      name: d.name,
+      order: d.order,
+      sourcePdfKey: d.sourcePdfKey,
+      pages: (d.pages as unknown as SnapshotPage[]) ?? [],
     })),
-  };
+    fields: template.fields,
+  });
 
   const tokens: { name: string; email: string | null; raw: string }[] = [];
 
@@ -629,21 +633,12 @@ async function finalizePackage(packageId: string) {
     values[v.fieldKey] = { value: v.value ?? "", type: v.type as FilledValue["type"] };
   }
 
-  let sourcePdf: Buffer | null = null;
-  if (snapshot.sourcePdfKey) {
-    try {
-      sourcePdf = await getObject(snapshot.sourcePdfKey);
-    } catch {
-      sourcePdf = null;
-    }
-  }
-
-  const buffer = await generateSignedPdf({
+  const buffer = await generateEnvelopePdf({
     title: pkg.title,
     snapshot,
     ctx,
     values,
-    sourcePdf,
+    loadSource: getObject,
     documentId: pkg.id,
     completedAt: new Date(),
     signers: await toCertSigners(pkg.signers),
@@ -832,21 +827,12 @@ export async function generatePackagePdf(
   const values: Record<string, FilledValue> = {};
   for (const v of pkg.values) values[v.fieldKey] = { value: v.value ?? "", type: v.type as FilledValue["type"] };
 
-  let sourcePdf: Buffer | null = null;
-  if (snapshot.sourcePdfKey) {
-    try {
-      sourcePdf = await getObject(snapshot.sourcePdfKey);
-    } catch {
-      sourcePdf = null;
-    }
-  }
-
-  const buffer = await generateSignedPdf({
+  const buffer = await generateEnvelopePdf({
     title: pkg.title,
     snapshot,
     ctx,
     values,
-    sourcePdf,
+    loadSource: getObject,
     signers: await toCertSigners(pkg.signers),
     documentId: pkg.id,
     completedAt: pkg.completedAt,
@@ -901,28 +887,28 @@ export async function generateTemplatePreviewPdf(
 ): Promise<{ buffer: Buffer; filename: string } | null> {
   const template = await prisma.documentTemplate.findFirst({
     where: { id: templateId, companyId: user.companyId },
-    include: { fields: true, company: { select: COMPANY_CTX_SELECT } },
+    include: {
+      fields: true,
+      documents: { orderBy: { order: "asc" } },
+      company: { select: COMPANY_CTX_SELECT },
+    },
   });
   if (!template) return null;
 
-  const snapshot: Snapshot = {
-    pages: (template.pages as unknown as Snapshot["pages"]) ?? [],
+  const snapshot = buildSnapshotFromTemplate({
+    name: template.name,
+    pages: (template.pages as unknown as SnapshotPage[]) ?? [],
     body: (template.body as unknown as Snapshot["body"]) ?? [],
     sourcePdfKey: template.sourcePdfKey ?? null,
-    fields: template.fields.map((f) => ({
-      id: f.id,
-      page: f.page,
-      x: f.x,
-      y: f.y,
-      width: f.width,
-      height: f.height,
-      type: f.type as SnapshotField["type"],
-      signerRole: f.signerRole,
-      label: f.label,
-      valueToken: f.valueToken,
-      defaultValue: f.defaultValue,
+    documents: template.documents.map((d) => ({
+      id: d.id,
+      name: d.name,
+      order: d.order,
+      sourcePdfKey: d.sourcePdfKey,
+      pages: (d.pages as unknown as SnapshotPage[]) ?? [],
     })),
-  };
+    fields: template.fields,
+  });
 
   const ctx = sampleCtx(template.company);
   // Sample values for fields the signer would fill, so the preview isn't blank.
@@ -933,21 +919,12 @@ export async function generateTemplatePreviewPdf(
     else if (f.type === "date" && !f.valueToken) values[f.id] = { value: ctx.today, type: "date" };
   }
 
-  let sourcePdf: Buffer | null = null;
-  if (template.sourcePdfKey) {
-    try {
-      sourcePdf = await getObject(template.sourcePdfKey);
-    } catch {
-      sourcePdf = null;
-    }
-  }
-
-  const buffer = await generateSignedPdf({
+  const buffer = await generateEnvelopePdf({
     title: template.name,
     snapshot,
     ctx,
     values,
-    sourcePdf,
+    loadSource: getObject,
     signers: [],
     events: [],
     certificate: false, // a preview — no audit certificate page
