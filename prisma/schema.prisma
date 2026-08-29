@@ -4294,21 +4294,28 @@ model SolarRoofCache {
 }
 
 /// Who a milestone pays.
+///
+/// Only `rep` is ever written now. A solar rep is paid out in full, once, so
+/// the deal records one figure; `financier` is kept because rows created under
+/// the old four-slot schedule still carry it, and because when the LENDER funds
+/// is the pipeline stage the payroll gate reads, not a row somebody types.
 enum MilestonePayee {
-  /// M1 / M2 / M3 — the rep's commission tranches.
+  /// The rep's commission on this deal.
   rep
-  /// 1st / 2nd / 3rd — the financier's payments to us.
+  /// Historic. Nothing creates one of these any more.
   financier
 }
 
-/// A scheduled payment on a solar deal.
+/// What the rep is owed on a solar deal.
 ///
 /// NEW DATA — this was not captured before. The pricing breakdown on the deal
 /// (base PPW, adders, dealer fee, final PPW) is all derived from figures we
-/// already store, but *when the money actually arrives* was not modelled
-/// anywhere: commission tranches and financier draws both pay out against
-/// milestones (install, then PTO), and that schedule is what a rep and a
-/// controller actually want to see on the deal.
+/// already store, but what the rep MAKES on the job was not modelled anywhere.
+///
+/// ONE ROW: payee `rep`, sequence 1, written only by
+/// `upsertSolarCommissionAction`, which decides both rather than taking them
+/// from the caller. The four slots this used to hold — M1/M2 beside two
+/// financier draws — described a payment schedule the business does not run.
 model SolarMilestone {
   id        String   @id @default(uuid())
   companyId String
@@ -4319,8 +4326,7 @@ model SolarMilestone {
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   payee       MilestonePayee
-  /// 1 or 2 — M1/M2 for the rep, 1st/2nd payment for the financier. Both pay
-  /// on the same two events: install complete, then PTO granted.
+  /// Always 1. Anything higher is a row from the old M1/M2 schedule.
   sequence    Int
   label       String
   amountCents Int            @default(0)
