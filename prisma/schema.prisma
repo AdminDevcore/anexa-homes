@@ -372,6 +372,8 @@ model Company {
   solarEquipment           SolarEquipment[]
   solarProviders           SolarProvider[]
   solarDesigns             SolarDesign[]
+  solarBackupProfiles      SolarBackupProfile[]
+  solarRebates             SolarRebate[]
   solarFinance             SolarFinance[]
   creditApplications       CreditApplication[]
   solarProposals           SolarProposal[]
@@ -464,33 +466,33 @@ model CompanySettings {
 }
 
 model User {
-  id                       String     @id @default(uuid())
-  companyId                String
-  company                  Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  email                    String
-  passwordHash             String?
-  firstName                String
-  lastName                 String
-  phone                    String?
-  role                     Role       @default(sales_rep)
-  status                   UserStatus @default(active)
-  avatarUrl                String?
-  title                    String?
+  id                          String     @id @default(uuid())
+  companyId                   String
+  company                     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  email                       String
+  passwordHash                String?
+  firstName                   String
+  lastName                    String
+  phone                       String?
+  role                        Role       @default(sales_rep)
+  status                      UserStatus @default(active)
+  avatarUrl                   String?
+  title                       String?
   // Sequential employee number per company (join order). Formatted on display as
   // <recordPrefix><5-digit>, e.g. AH-00001. Lower = earlier hire = higher rank.
-  employeeNo               Int?
+  employeeNo                  Int?
   // Rep's share (%) of the profit pool on a SELF-GENERATED lead (standard split).
-  commissionSplitPct       Float?
+  commissionSplitPct          Float?
   // Company-provided-lead comp is EITHER a percentage of the pool OR a flat lead
   // fee deducted from the rep's self-gen commission. providedLeadType picks which.
-  providedLeadType         String     @default("percentage") // "percentage" | "flat"
+  providedLeadType            String     @default("percentage") // "percentage" | "flat"
   // Rep's share (%) when the COMPANY provided the lead (percentage mode).
-  providedLeadSplitPct     Float?
+  providedLeadSplitPct        Float?
   // Flat lead/marketing fee (cents) subtracted from the rep's self-gen commission (flat mode).
-  providedLeadFlatCents    Int?
+  providedLeadFlatCents       Int?
   // Rep's share (%) of the customer-paid deductible on their deals (separate from
   // the profit-pool split). null/0 = this rep doesn't get the deductible.
-  deductiblePct            Float?
+  deductiblePct               Float?
   // -- Solar pay -----------------------------------------------------------
   // Solar does not pay out of a profit pool, so none of the columns above apply
   // to it. A solar deal pays one of two ways -- see SolarRepPayMode and
@@ -504,34 +506,43 @@ model User {
   // come out of the rep, not the company. Null = this rep has no redline, and
   // redline deals pay them nothing -- the team page says so out loud rather than
   // quietly generating a $0 line nobody looks at until payroll.
-  solarRedlineCentsPerWatt Int?
+  solarRedlineCentsPerWatt    Int?
+  // The same idea on a deal with no watts: cents of BASE price per battery the
+  // rep keeps above, on a storage-only job.
+  //
+  // A REP figure, deliberately distinct from SolarLender.minBasePricePerBattery
+  // -- that is the company's margin floor and guards PRICING. Paying a rep
+  // everything above the company's own floor would leave the company holding
+  // exactly its minimum on every storage deal. Null = no line is written at
+  // all, exactly as a null redline above means.
+  solarRedlinePerBatteryCents Int?
   // Fixed rate per installed watt on a lender set to per_watt pay, and on every
   // lease/PPA (which have no system price to redline against). In MILLS --
   // tenths of a cent, 400 = $0.40/W -- because $0.405/W is a real rate and cents
   // cannot express it. Matches SolarDealAdder.millsPerWatt.
-  solarPerWattMills        Int?
+  solarPerWattMills           Int?
   // Verticals this user may open and switch between. New users start in Roofing
   // only; the super admin grants Solar explicitly. Retired values on existing
   // rows are filtered out by allowedVerticals() and can never surface.
-  verticals                Vertical[] @default([roofing]) @map("industries")
+  verticals                   Vertical[] @default([roofing]) @map("industries")
   // For canvassers: the sales rep they're assigned to. Their knocks, leads, and
   // appointments auto-assign to (and are visible by) this rep.
-  salesRepId               String?
-  salesRep                 User?      @relation("RepCanvassers", fields: [salesRepId], references: [id], onDelete: SetNull)
-  canvassers               User[]     @relation("RepCanvassers")
+  salesRepId                  String?
+  salesRep                    User?      @relation("RepCanvassers", fields: [salesRepId], references: [id], onDelete: SetNull)
+  canvassers                  User[]     @relation("RepCanvassers")
   // For sales reps: the sales manager they report to. The manager sees this rep's
   // deals, canvassing, tasks, and commissions — and nothing outside their team.
-  managerId                String?
-  manager                  User?      @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
-  reports                  User[]     @relation("ManagerReports")
-  permissions              Json       @default("{}") // per-user permission overrides
-  sessionVersion           Int        @default(1)
-  lastLoginAt              DateTime?
+  managerId                   String?
+  manager                     User?      @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  reports                     User[]     @relation("ManagerReports")
+  permissions                 Json       @default("{}") // per-user permission overrides
+  sessionVersion              Int        @default(1)
+  lastLoginAt                 DateTime?
   // Soft delete: set (with status=disabled) to remove from the roster while
   // keeping the row so historical deals keep showing the rep's name.
-  deletedAt                DateTime?
-  createdAt                DateTime   @default(now())
-  updatedAt                DateTime   @updatedAt
+  deletedAt                   DateTime?
+  createdAt                   DateTime   @default(now())
+  updatedAt                   DateTime   @updatedAt
 
   leadsAssigned   Lead[]               @relation("LeadAssignedRep")
   leadsSet        Lead[]               @relation("LeadSetter")
@@ -647,6 +658,17 @@ model SolarProvider {
   /// they buy back but the rate varies, or nobody has recorded it — which is
   /// why the flag is separate from the figure rather than derived from it.
   buybackRateMills Int?
+
+  /// Time-of-use rates, mills per kWh, and the window in words for the
+  /// document ("4pm – 8pm"). The window is NOT parsed — it is a sentence on a
+  /// customer's proposal, not a schedule anything computes against.
+  ///
+  /// Null means this provider has no TOU plan on file, and the storage proposal
+  /// OMITS the savings line rather than deriving one from the blended rate.
+  /// Both or neither.
+  touPeakRateMills    Int?
+  touOffPeakRateMills Int?
+  touPeakWindow       String?
 
   /// Does this provider run a battery / virtual-power-plant programme?
   vpp             Boolean @default(false)
@@ -978,6 +1000,7 @@ model Lead {
   estimate           Estimate?
   proposals          Proposal[]
   solarDesign        SolarDesign?
+  solarDealRebates   SolarDealRebate[]
   solarFinance       SolarFinance?
   creditApplications CreditApplication[]
   solarProposals     SolarProposal[]
@@ -1614,29 +1637,29 @@ model DocumentTemplateDocument {
 }
 
 model DocumentTemplateField {
-  id           String             @id @default(uuid())
+  id           String                    @id @default(uuid())
   templateId   String
-  template     DocumentTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template     DocumentTemplate          @relation(fields: [templateId], references: [id], onDelete: Cascade)
   /// Which document in the bundle this field sits on. NULL means the template's
   /// own PDF — the only possibility before multi-document templates, and still
   /// the case for every single-PDF template, so `page` is read against that
   /// document's pages either way.
   documentId   String?
   document     DocumentTemplateDocument? @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  page         Int                @default(1)
+  page         Int                       @default(1)
   x            Float
   y            Float
-  width        Float              @default(160)
-  height       Float              @default(40)
+  width        Float                     @default(160)
+  height       Float                     @default(40)
   type         DocumentFieldType
-  signerRole   DocumentSignerRole @default(customer)
+  signerRole   DocumentSignerRole        @default(customer)
   label        String?
-  required     Boolean            @default(true)
+  required     Boolean                   @default(true)
   // Auto-fill token, e.g. {{customer.fullName}}, {{project.address}}
   valueToken   String?
   // Fallback value used when the bound CRM field is empty for a given record.
   defaultValue String?
-  createdAt    DateTime           @default(now())
+  createdAt    DateTime                  @default(now())
 
   @@index([templateId])
   @@index([documentId])
@@ -1782,48 +1805,52 @@ model CommissionRule {
 }
 
 model Commission {
-  id                       String              @id @default(uuid())
-  companyId                String
-  company                  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id                          String              @id @default(uuid())
+  companyId                   String
+  company                     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   /// Shared-but-segmented: reads are never filtered by vertical so the books
   /// stay consolidated, but every row is tagged so the P&L, commissions and
   /// reports break out by department. Null = genuinely company-level.
-  vertical                 Vertical?
-  projectId                String
-  project                  Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  userId                   String
-  user                     User                @relation("CommissionUser", fields: [userId], references: [id])
-  ruleId                   String?
-  rule                     CommissionRule?     @relation(fields: [ruleId], references: [id])
+  vertical                    Vertical?
+  projectId                   String
+  project                     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId                      String
+  user                        User                @relation("CommissionUser", fields: [userId], references: [id])
+  ruleId                      String?
+  rule                        CommissionRule?     @relation(fields: [ruleId], references: [id])
   // Set when this line is an override (X earns off Y's deal); distinguishes it
   // from the recipient's own split line so both can coexist + recompute cleanly.
-  overrideId               String?
-  override                 CommissionOverride? @relation(fields: [overrideId], references: [id], onDelete: SetNull)
-  label                    String?
-  baseAmount               Int                 @default(0) // cents the commission was computed from
-  amount                   Int                 @default(0) // computed commission, cents
+  overrideId                  String?
+  override                    CommissionOverride? @relation(fields: [overrideId], references: [id], onDelete: SetNull)
+  label                       String?
+  baseAmount                  Int                 @default(0) // cents the commission was computed from
+  amount                      Int                 @default(0) // computed commission, cents
   // Snapshot of the split terms at generation time. Locked once created so editing
   // a rep's split never changes existing deals; re-generating only refreshes the
   // amount from current costs using THESE terms. amount = max(0, pool*splitPct% − splitFlatCents).
-  splitPct                 Float?
-  splitFlatCents           Int                 @default(0)
+  splitPct                    Float?
+  splitFlatCents              Int                 @default(0)
   // Snapshot of the SOLAR terms, for the same reason and with the same rule:
   // raising a rep's redline must never re-price a deal they already sold. Null
   // on every roofing line. Watts and price are deliberately NOT snapshotted -- a
   // design that grows between contract and install should move the number,
   // exactly as job costs move a roofing pool.
   // "redline" | "per_watt" -- which basis produced this line.
-  solarBasis               String?
+  solarBasis                  String?
   // The rep's redline at generation, cents per watt.
-  solarRedlineCentsPerWatt Int?
+  solarRedlineCentsPerWatt    Int?
+  // The rep's redline at generation on a storage deal, cents per battery. Held
+  // for the same reason as the two beside it: raising a rep's redline must
+  // never re-price a deal they already sold.
+  solarRedlinePerBatteryCents Int?
   // The rep's fixed rate at generation, mills per watt.
-  solarMillsPerWatt        Int?
-  status                   CommissionStatus    @default(pending)
-  notes                    String?
-  approvedAt               DateTime?
-  paidAt                   DateTime?
-  createdAt                DateTime            @default(now())
-  updatedAt                DateTime            @updatedAt
+  solarMillsPerWatt           Int?
+  status                      CommissionStatus    @default(pending)
+  notes                       String?
+  approvedAt                  DateTime?
+  paidAt                      DateTime?
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
 
   payrollItems PayrollItem[]
 
@@ -3127,6 +3154,19 @@ model SolarSettings {
   /// battery for another model keeps whatever quantity a rep deliberately set.
   defaultBatteryQty Int @default(2)
 
+  // ── Storage assumptions ─────────────────────────────────────────────────
+  /// What share of a day's kWh falls inside the peak window, %.
+  ///
+  /// MODELLED, not measured, and the softest number in a storage quote — which
+  /// is why it is a company decision listed on the customer's document rather
+  /// than a constant buried in code. The same discipline as every assumption
+  /// above it.
+  touPeakSharePct        Float @default(30)
+  /// How many times a day the battery is cycled.
+  touCyclesPerDay        Float @default(1)
+  /// What survives a charge/discharge round trip, %.
+  touRoundTripEfficiency Float @default(90)
+
   // ── Validation bounds ───────────────────────────────────────────────────
   // A rep must not be able to generate a physically impossible proposal.
   // These are the guard rails; see src/lib/solar-validation.ts.
@@ -3151,6 +3191,19 @@ enum SolarRepPayMode {
   redline
   /// The rep earns their fixed $/W rate whatever the deal prices at.
   per_watt
+}
+
+/// What a deal is SELLING.
+///
+/// `pv` and `pv_storage` take the IDENTICAL code path everywhere. The
+/// distinction is the rep's vocabulary and the thing the storage-only filters
+/// test against; only `storage` branches. Written down because a three-value
+/// enum where two values are meant to behave alike is exactly the shape that
+/// drifts apart later, one `if` at a time.
+enum SolarSystemType {
+  pv
+  pv_storage
+  storage
 }
 
 /// How a partner's stated price per watt behaves.
@@ -3241,6 +3294,12 @@ model SolarLender {
   /// Null -- the default, and every lender until somebody sets one -- means no
   /// floor, and no deal that generates today stops generating.
   minBasePpwCents Int?
+
+  /// The storage twins of the three fields above. Null means no rule — the
+  /// default, and every lender until somebody sets one.
+  minBasePricePerBatteryCents  Int?
+  maxFinalPricePerBatteryCents Int?
+  finalBatteryPriceMode        SolarFinalPpwMode @default(cap)
 
   /// Where YOUR team runs credit for this partner — the dealer portal login.
   /// Rep-facing only: it never reaches a customer-facing document.
@@ -3338,6 +3397,12 @@ model SolarLenderProduct {
   /// Price per kW-DC per month, cents. Multiplied by system size to get the
   /// fixed monthly that priceThirdParty already consumes.
   leaseRateCentsPerKwMonth Int?
+
+  /// Whether this paper funds a battery with no array on the roof. FALSE by
+  /// default: an unreviewed product does not offer to fund something it may
+  /// not, and a rep quoting a homeowner on paper the lender will reject finds
+  /// that out at submission.
+  financesStorageOnly Boolean @default(false)
 
   // ── PPA ─────────────────────────────────────────────────────────────────
   /// Price per kWh in mills (tenths of a cent), matching SolarFinance.
@@ -3530,6 +3595,10 @@ model SolarDesign {
   leadId    String   @unique
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
+  /// What this deal sells. Backfilled from `batteryId` on every design that
+  /// existed before the question was asked: a deal sold with a battery says so.
+  systemType SolarSystemType @default(pv_storage)
+
   // ── Utility & usage ─────────────────────────────────────────────────────
   utilityProvider     String?
   /// The retailer that BILLS the customer, where that differs from the utility
@@ -3539,6 +3608,13 @@ model SolarDesign {
   /// The rate the rep was TOLD, in mills per kWh. Null means derive it from
   /// bill ÷ usage, which is what every design before this one does.
   utilityRateMills    Int?
+  /// THIS DEAL'S OWN time-of-use rates, mills per kWh, for the odd plan that
+  /// does not match the provider's published one. NULL means read the electric
+  /// provider's, which is where they normally come from. Both or neither: a
+  /// half-filled pair silently omits the savings line with nothing on screen
+  /// saying why, so the editor rejects one without the other.
+  touPeakRateMills    Int?
+  touOffPeakRateMills Int?
   /// Which method the Energy step was filled in with, so it reopens the way it
   /// was left: "usage" | "bill".
   usageBasis          String?
@@ -3577,8 +3653,8 @@ model SolarDesign {
   otherUtilityStatusDetail   String?
   /// 12 monthly kWh readings, Jan..Dec. The basis for offset — a design that
   /// does not track usage is the thing validation rejects.
-  monthlyUsageKwh     Json    @default("[]")
-  annualUsageKwh      Int?
+  monthlyUsageKwh            Json    @default("[]")
+  annualUsageKwh             Int?
   /// What the ADDERS on this deal add to that, kWh/yr. DERIVED — summed from
   /// the deal's adder lines and rewritten whenever they change, never typed.
   ///
@@ -3587,15 +3663,15 @@ model SolarDesign {
   /// house uses today, the other is what the EV charger this contract is
   /// selling them will add. Offset is worked out against the sum; the Energy
   /// step still shows, and still edits, the bill figure alone.
-  usageAdjustmentKwh  Int     @default(0)
+  usageAdjustmentKwh         Int     @default(0)
   /// Catalogue adders the rep has taken OFF this deal by hand, as an array of
   /// equipment ids. The auto-apply rule reads it and leaves them alone.
   ///
   /// Without it, removing an adder the system size puts on the deal is a dead
   /// button: the next recompute simply puts it back, and the rep's only clue
   /// is that their click did nothing.
-  autoAdderOptOut     Json    @default("[]")
-  avgMonthlyBillCents Int?
+  autoAdderOptOut            Json    @default("[]")
+  avgMonthlyBillCents        Int?
 
   // ── Site ────────────────────────────────────────────────────────────────
   mountType       MountType @default(roof)
@@ -3710,13 +3786,16 @@ model SolarFinance {
 
   // ── Cash / Loan ─────────────────────────────────────────────────────────
   /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
-  grossPpwCents        Int   @default(0)
+  grossPpwCents               Int   @default(0)
+  /// What ONE battery stickers at — the partner's fee already inside it,
+  /// exactly as `grossPpwCents` carries it above. Zero on every PV deal.
+  stickerPricePerBatteryCents Int   @default(0)
   /// Lender fee as a % of gross. Zero for cash by definition.
-  dealerFeePct         Float @default(0)
+  dealerFeePct                Float @default(0)
   /// Sum of the selected adders that sit INSIDE the partner's price, cents.
   /// See `onTopAdderTotalCents` — the two are disjoint and together they are
   /// the whole catalogue price of the extra work on this deal.
-  adderTotalCents      Int   @default(0)
+  adderTotalCents             Int   @default(0)
   /// Sum of the adders financed ON TOP of a partner's fixed or maximum $/W,
   /// cents. Zero on every deal carrying none, which is nearly all of them.
   ///
@@ -3725,11 +3804,11 @@ model SolarFinance {
   /// customer's proposal all read it, and none of them should have to sum a
   /// table to find out what the customer signs. `SolarDealAdder.financedOnTop`
   /// is the truth both are recomputed from.
-  onTopAdderTotalCents Int   @default(0)
+  onTopAdderTotalCents        Int   @default(0)
   /// Final contract price, cents.
-  contractPriceCents   Int   @default(0)
+  contractPriceCents          Int   @default(0)
   /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
-  itcEstimateCents     Int   @default(0)
+  itcEstimateCents            Int   @default(0)
 
   // ── Lease / PPA ─────────────────────────────────────────────────────────
   /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
@@ -4215,4 +4294,85 @@ model DealFeedPost {
 
   @@index([companyId, leadId, createdAt])
   @@map("deal_feed_posts")
+}
+
+/// A named load a battery might be asked to carry, so backup hours are DERIVED
+/// rather than typed.
+///
+/// Rank-ordered, and that order is load-bearing: the customer's cover headlines
+/// the first row, which saves the design a "which one do I headline" column and
+/// a second place for the same fact to be kept in sync.
+model SolarBackupProfile {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  name      String
+  /// What is being backed up, watts. Hours = usable kWh ÷ (this ÷ 1000).
+  loadWatts Int
+  rank      Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+  @@map("solar_backup_profiles")
+}
+
+/// Manufacturer or utility money the company passes through to the customer.
+///
+/// Priced once here so two reps cannot quote the same rebate at two amounts.
+/// Applies to any deal carrying a battery, storage-only or solar-plus-storage —
+/// a Tesla rebate is a Tesla rebate either way — and nothing is applied by
+/// default, so every deal in flight prices exactly as it did.
+model SolarRebate {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical    Vertical @default(solar)
+  name        String
+  amountCents Int
+  /// True when the amount is per battery rather than per job.
+  perBattery  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  rank        Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deals SolarDealRebate[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+  @@map("solar_rebates")
+}
+
+/// One rebate as applied to one deal.
+model SolarDealRebate {
+  id          String      @id @default(uuid())
+  companyId   String
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical    Vertical    @default(solar)
+  leadId      String
+  lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  rebateId    String
+  /// Restrict, not Cascade: deleting a catalogue rebate that is priced into a
+  /// live deal would silently move that deal's contract. The settings screen
+  /// refuses the delete and says how many deals hold it.
+  rebate      SolarRebate @relation(fields: [rebateId], references: [id], onDelete: Restrict)
+  qty         Int         @default(1)
+  /**
+   * The amount COPIED off the catalogue when the rebate was applied.
+   * Editing a rebate in Settings must not move a price a rep has already
+   * quoted, for the same reason the proposal snapshot freezes everything else:
+   * the number the customer was shown is the number they were shown.
+   */
+  amountCents Int
+  createdAt   DateTime    @default(now())
+
+  @@unique([leadId, rebateId])
+  @@index([companyId, leadId])
+  @@map("solar_deal_rebates")
 }
