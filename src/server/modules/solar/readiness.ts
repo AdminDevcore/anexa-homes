@@ -31,11 +31,16 @@ export async function readSolarReadiness(
         offsetPct: true, moduleQty: true, tsrfPct: true, avgMonthlyBillCents: true,
         utilityRateMills: true,
         ratePlan: true, utilityProvider: true, batteryId: true, layoutImageFileId: true,
-        lenderId: true,
+        lenderId: true, systemType: true, batteryQty: true,
         // The partner's margin floor travels with the deal it was designed for.
         // A cash deal has no lender and therefore no floor, which falls out of
         // this being null rather than needing a rule of its own.
-        lender: { select: { minBasePpwCents: true, finalPpwMode: true, maxFinalPpwCents: true } },
+        lender: {
+          select: {
+            minBasePpwCents: true, finalPpwMode: true, maxFinalPpwCents: true,
+            minBasePricePerBatteryCents: true,
+          },
+        },
         module: { select: { ratingW: true } },
       },
     }),
@@ -98,7 +103,11 @@ export async function readSolarReadiness(
   const quotedProduct = finance.lenderProductId
     ? await prisma.solarLenderProduct.findFirst({
         where: { companyId, id: finance.lenderProductId },
-        select: { factorWithPaydownMicros: true, factorWithoutPaydownMicros: true },
+        select: {
+          factorWithPaydownMicros: true,
+          factorWithoutPaydownMicros: true,
+          financesStorageOnly: true,
+        },
       })
     : null;
 
@@ -147,6 +156,14 @@ export async function readSolarReadiness(
         hasBattery: !!design.batteryId,
       },
       finance: {
+        systemType: design.systemType,
+        stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+        batteryQty: design.batteryQty,
+        minBasePricePerBatteryCents: design.lender?.minBasePricePerBatteryCents ?? null,
+        // Whether the QUOTED programme funds a storage-only job. Undefined when
+        // nothing is quoted yet, which the gate reads as "not yet a finding" —
+        // an unpriced deal already has its own.
+        financesStorageOnly: quotedProduct?.financesStorageOnly,
         product: finance.product,
         grossPpwCents: finance.grossPpwCents,
         dealerFeePct: finance.dealerFeePct,

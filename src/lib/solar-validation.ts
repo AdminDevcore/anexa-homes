@@ -89,6 +89,15 @@ export function groupIssues(issues: ValidationIssue[]): { group: IssueGroup; lab
 // ---------------------------------------------------------------------------
 
 export type DesignForValidation = {
+  /**
+   * What this deal sells. OPTIONAL and `pv` when absent, so a caller not yet
+   * updated is judged exactly as it was — the safe direction, and the same one
+   * `maxFinalPpwCents` already takes on the finance shape below.
+   */
+  systemType?: "pv" | "pv_storage" | "storage";
+  batteryQty?: number;
+  /** Whether the company has ANY active backup profile for hours to come from. */
+  hasBackupProfile?: boolean;
   systemSizeKwDc: number;
   year1ProductionKwh: number;
   annualUsageKwh: number | null;
@@ -104,6 +113,14 @@ export type DesignForValidation = {
 };
 
 export type FinanceForValidation = {
+  systemType?: "pv" | "pv_storage" | "storage";
+  /** The storage sticker, per battery. Zero on a PV deal. */
+  stickerPricePerBatteryCents?: number;
+  batteryQty?: number;
+  /** The partner's per-battery floor. Null on cash and on lenders that set none. */
+  minBasePricePerBatteryCents?: number | null;
+  /** Whether the chosen programme funds a battery with no array. */
+  financesStorageOnly?: boolean;
   product: FinanceProduct;
   /**
    * The STICKER — what the customer pays per watt, this lender's fee already
@@ -224,6 +241,42 @@ export function validateDesign(
     issues.push({ severity: "block", code, group, field, message, action: to });
   const warn = (code: string, group: IssueGroup, field: string, message: string) =>
     issues.push({ severity: "warn", code, group, field, message, action: to });
+
+  /**
+   * A storage deal is asked the questions it HAS.
+   *
+   * Not "the array gates pass trivially" — they cannot pass, because there is
+   * no array and never will be. Asked at all, they block every battery job
+   * permanently with findings nobody can clear.
+   */
+  if (d.systemType === "storage") {
+    if (!d.hasBattery) {
+      block("storage.no_battery", "equipment", "batteryId", "Pick a battery before generating a proposal.");
+    }
+    if (!(d.batteryQty && d.batteryQty > 0)) {
+      block("storage.no_qty", "equipment", "batteryQty", "Say how many batteries this deal installs.");
+    }
+    if (d.hasBackupProfile === false) {
+      issues.push({
+        severity: "block",
+        code: "storage.no_backup_profile",
+        group: "design",
+        field: "backupProfile",
+        message:
+          "No backup load profiles, so the proposal cannot say how long this battery lasts.",
+        action: { label: "Open storage settings", href: "/portal/settings/solar-storage" },
+      });
+    }
+    if (d.annualUsageKwh == null || d.annualUsageKwh <= 0) {
+      warn(
+        "storage.no_usage",
+        "design",
+        "annualUsageKwh",
+        "No usage on file, so the proposal will leave out what this battery saves on the bill."
+      );
+    }
+    return issues;
+  }
 
   if (d.systemSizeKwDc <= 0) {
     block("design.size_zero", "design", "systemSizeKwDc", "System size must be greater than zero.");
@@ -389,6 +442,49 @@ export function validateFinance(
     issues.push({ severity: "block", code, group, field, message, action: to });
   const warn = (code: string, group: IssueGroup, field: string, message: string) =>
     issues.push({ severity: "warn", code, group, field, message, action: to });
+
+  /**
+   * A storage deal's price is per battery, and so is everything guarding it.
+   * The $/W band below would divide by zero watts and wave every price through.
+   */
+  if (f.systemType === "storage") {
+    if (f.product === "cash" || f.product === "loan") {
+      const sticker = f.stickerPricePerBatteryCents ?? 0;
+      if (sticker <= 0) {
+        block(
+          "storage.no_price",
+          "pricing",
+          "stickerPricePerBatteryCents",
+          "Price the batteries before generating a proposal."
+        );
+      } else if (underBaseFloor(sticker, f.dealerFeePct, f.minBasePricePerBatteryCents)) {
+        block(
+          "storage.under_floor",
+          "pricing",
+          "stickerPricePerBatteryCents",
+          "This price leaves less per battery than this lender allows."
+        );
+      }
+      // Loans only: cash has no lender paper for eligibility to be a question
+      // about, so a cash storage deal is never blocked on one.
+      if (f.product === "loan" && f.financesStorageOnly === false) {
+        block(
+          "storage.product_not_eligible",
+          "financing",
+          "lenderProductId",
+          "This lender's paper does not fund a storage-only job."
+        );
+      }
+    } else {
+      block(
+        "storage.product_unsupported",
+        "financing",
+        "product",
+        "A lease or PPA sells electricity, and a battery on its own generates none. Quote cash or a loan."
+      );
+    }
+    return issues;
+  }
 
   if (f.product === "cash" || f.product === "loan") {
     // THE BAND IS ON THE BASE, which is not the number stored on the row.
