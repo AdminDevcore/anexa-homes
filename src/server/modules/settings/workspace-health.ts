@@ -107,6 +107,54 @@ export const SETUP_CHECKS: Check[] = [
     verticals: ["roofing"],
     count: (companyId) => prisma.commissionRule.count({ where: { companyId } }),
   },
+  /**
+   * Storage-only deals.
+   *
+   * Every one of these fails the way this module exists to catch: a `findMany`
+   * comes back empty, a price prices at nothing, a commission line is never
+   * written — and none of them raises an error. A company can ship the feature
+   * and discover months later that no rep ever managed to quote a battery.
+   *
+   * They are NOT `blocking`: a workspace that only sells panels is correctly
+   * configured with none of this, and a warning nobody can ever clear is a
+   * warning everybody learns to ignore. See the commission-rules note above.
+   */
+  {
+    key: "solar_backup_profiles",
+    label: "Backup load profiles",
+    href: "/portal/settings/solar-storage",
+    hint: "A storage proposal cannot say how long the battery lasts, so readiness blocks it from generating at all.",
+    severity: "silent",
+    verticals: ["solar"],
+    count: (companyId) =>
+      prisma.solarBackupProfile.count({ where: { companyId, isActive: true } }),
+  },
+  {
+    key: "solar_storage_lenders",
+    label: "Lenders that fund storage",
+    href: "/portal/settings/solar-lenders",
+    hint: "No loan product is marked as funding a battery with no array, so a storage-only deal is offered no financing at all.",
+    severity: "silent",
+    verticals: ["solar"],
+    count: (companyId) =>
+      prisma.solarLenderProduct.count({
+        where: { companyId, product: "loan", isActive: true, financesStorageOnly: true },
+      }),
+  },
+  {
+    key: "solar_storage_redline",
+    label: "Per-battery rep redline",
+    href: "/portal/team",
+    // The specific failure, because "no commission" and "a commission of zero"
+    // are the two things this whole feature was careful to keep apart.
+    hint: "No rep can be paid on a storage deal — no commission line is written at all, silently. Their per-watt redline does not apply to a job with no watts.",
+    severity: "silent",
+    verticals: ["solar"],
+    count: (companyId) =>
+      prisma.user.count({
+        where: { companyId, solarRedlinePerBatteryCents: { not: null } },
+      }),
+  },
   {
     key: "scope_template",
     label: "Scope of work catalog",
