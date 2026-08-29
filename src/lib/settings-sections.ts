@@ -15,8 +15,7 @@ import {
   Sun,
   PanelsTopLeft,
   Landmark,
-  Zap,
-} from "lucide-react";
+  Zap, BatteryCharging } from "lucide-react";
 import type { ActiveVertical } from "./vertical";
 
 /**
@@ -78,7 +77,8 @@ export type SettingsSectionKey =
   | "solar_settings"
   | "solar_lenders"
   | "solar_providers"
-  | "solar_equipment";
+  | "solar_equipment"
+  | "solar_storage";
 
 export type SettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
@@ -318,6 +318,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     href: "/portal/settings/solar-equipment",
     group: "solar",
     keywords: ["panels", "modules", "inverter", "battery", "adders"],
+    verticals: ["solar"],
+  },
+  {
+    icon: BatteryCharging,
+    key: "solar_storage",
+    title: "Storage",
+    body: "Backup load profiles a battery's runtime is worked out from, and the rebates that come off a price.",
+    href: "/portal/settings/solar-storage",
+    group: "solar",
+    keywords: ["battery", "backup", "powerwall", "rebate", "storage", "outage"],
     verticals: ["solar"],
   },
 ];
