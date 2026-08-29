@@ -1576,18 +1576,53 @@ model DocumentTemplate {
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
 
-  fields   DocumentTemplateField[]
-  packages DocumentPackage[]
+  fields    DocumentTemplateField[]
+  documents DocumentTemplateDocument[]
+  packages  DocumentPackage[]
 
   @@index([companyId, type])
   @@index([companyId, vertical], map: "document_templates_companyId_industry_idx")
   @@map("document_templates")
 }
 
+/// One PDF inside a contract template. A template is a LIST of these, so a
+/// single send can carry an install agreement and its warranty as one envelope
+/// with one signing link — rather than two envelopes the customer has to sign
+/// twice.
+///
+/// Templates created before this table existed have no rows here and keep using
+/// the parent's `sourcePdfKey`/`pages`. Adding a second document materialises
+/// that legacy PDF as document 1 first (see addTemplateDocumentAction), which is
+/// why every read path still tolerates an empty list.
+model DocumentTemplateDocument {
+  id           String           @id @default(uuid())
+  templateId   String
+  template     DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  /// 1-based position in the bundle. The merged, signed PDF follows this order.
+  order        Int              @default(1)
+  name         String
+  sourcePdfKey String?
+  /// Page model of THIS document: [{ width, height }] in PDF points.
+  pages        Json             @default("[]")
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  fields DocumentTemplateField[]
+
+  @@index([templateId, order])
+  @@map("document_template_documents")
+}
+
 model DocumentTemplateField {
   id           String             @id @default(uuid())
   templateId   String
   template     DocumentTemplate   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  /// Which document in the bundle this field sits on. NULL means the template's
+  /// own PDF — the only possibility before multi-document templates, and still
+  /// the case for every single-PDF template, so `page` is read against that
+  /// document's pages either way.
+  documentId   String?
+  document     DocumentTemplateDocument? @relation(fields: [documentId], references: [id], onDelete: Cascade)
   page         Int                @default(1)
   x            Float
   y            Float
@@ -1604,6 +1639,7 @@ model DocumentTemplateField {
   createdAt    DateTime           @default(now())
 
   @@index([templateId])
+  @@index([documentId])
   @@map("document_template_fields")
 }
 

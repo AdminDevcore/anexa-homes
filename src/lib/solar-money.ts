@@ -749,83 +749,125 @@ export type FinalPpwCap = {
  * the adders grossing up by the fee. Only the question "does this rule bite?"
  * differs, and on `flat` the answer is always yes.
  */
-export function capStickerToFinalPpw(input: {
-  /** What this deal would sticker at with no rule — base ÷ (1 − fee). */
-  stickerPpwCents: number;
-  /** The lender's figure, cents per watt. Null or ≤ 0 means no rule at all. */
-  maxFinalPpwCents: number | null | undefined;
-  /**
-   * Whether that figure is a ceiling or the price. Defaults to `cap`, so every
-   * caller written before flat partners existed keeps its exact behaviour.
-   */
+/** The ceiling over a countable thing. See `capStickerToFinalPpw` for the why. */
+export type UnitCap = {
+  /** The rate per unit to price with. Unchanged when the rule did not bite. */
+  stickerPerUnitCents: number;
+  capped: boolean;
+  adderOverrun: boolean;
+};
+
+/**
+ * Hold a lender's contract to its maximum price per UNIT.
+ *
+ * The body of `capStickerToFinalPpw`, with the divisor named rather than
+ * assumed. Watts are one kind of unit and batteries are another; the rule — a
+ * ceiling is on the CONTRACT, adders take their share of it first, a flat price
+ * binds in both directions — is the same rule either way, and a second copy of
+ * it is how the two ends up disagreeing about the fee.
+ */
+export function capStickerToFinalUnit(input: {
+  /** What this deal would sticker at per unit with no rule — base ÷ (1 − fee). */
+  stickerPerUnitCents: number;
+  /** The lender's figure, cents per unit. Null or ≤ 0 means no rule at all. */
+  maxFinalPerUnitCents: number | null | undefined;
+  /** Ceiling or price. Defaults to `cap`, the behaviour that predates flat partners. */
   mode?: FinalPpwMode;
-  systemSizeKwDc: number;
+  /** Installed watts, or batteries. Zero means no rule — nothing to divide by. */
+  units: number;
   dealerFeePct: number;
   /** The adders INSIDE the rule — everything not financed on top. */
   adderTotalCents: number;
-}): FinalPpwCap {
-  const uncapped: FinalPpwCap = {
-    stickerPpwCents: input.stickerPpwCents,
+}): UnitCap {
+  const uncapped: UnitCap = {
+    stickerPerUnitCents: input.stickerPerUnitCents,
     capped: false,
     adderOverrun: false,
   };
 
-  const max = input.maxFinalPpwCents;
+  const max = input.maxFinalPerUnitCents;
   if (max == null || !(max > 0)) return uncapped;
 
-  const systemWatts = Math.round(input.systemSizeKwDc * 1000);
-  if (systemWatts <= 0) return uncapped;
+  const units = Math.max(0, Math.round(input.units));
+  if (units <= 0) return uncapped;
 
-  // The same fee guard `pricePurchase` applies, so the two agree about what
-  // the adders gross up to. A fee it would stand down must not be honoured here.
+  // The same fee guard `priceUnits` applies, so the two agree about what the
+  // adders gross up to. A fee it would stand down must not be honoured here.
   const rawPct = input.dealerFeePct;
   const f = Number.isFinite(rawPct) && rawPct > 0 && rawPct < 100 ? rawPct / 100 : 0;
 
   const adderTotalCents = Math.round(input.adderTotalCents);
   const adderStickerCents = f > 0 ? Math.round(adderTotalCents / (1 - f)) : adderTotalCents;
 
-  const uncappedContract = Math.round(systemWatts * input.stickerPpwCents) + adderStickerCents;
-  const cappedContract = max * systemWatts;
+  const uncappedContract = Math.round(units * input.stickerPerUnitCents) + adderStickerCents;
+  const cappedContract = max * units;
   // A ceiling only bites downwards. A flat price is the price, so it binds a
   // deal that would have come out cheaper just as firmly as one that came out
   // dear — that is the entire difference between the two modes.
   if (input.mode !== "flat" && uncappedContract <= cappedContract) return uncapped;
 
-  // What is left for the array once the grossed-up extras have taken their
+  // What is left for the system once the grossed-up extras have taken their
   // share of the ceiling. Negative means the extras alone have blown through
   // it, and no system price — not even a free one — brings this contract under
-  // the cap. Flooring at zero keeps a negative price per watt off the screen.
+  // the cap. Flooring at zero keeps a negative rate off the screen.
   const baseStickerCents = cappedContract - adderStickerCents;
   if (baseStickerCents <= 0) {
-    return { stickerPpwCents: 0, capped: true, adderOverrun: true };
+    return { stickerPerUnitCents: 0, capped: true, adderOverrun: true };
   }
 
   /**
-   * The sticker is a whole number of cents per watt — the granularity the whole
-   * model stores prices at, `SolarFinance.grossPpwCents` being an integer — so
-   * the solved figure almost never lands exactly on the partner's number. Which
-   * way it is taken depends on what that number MEANS.
+   * The sticker is a whole number of cents per unit — the granularity the whole
+   * model stores prices at — so the solved figure almost never lands exactly on
+   * the partner's number. Which way it is taken depends on what that number
+   * MEANS.
    *
-   * A MAXIMUM rounds DOWN. Rounding up half the time quotes a partner a few
-   * cents a watt more than they fund, which on a 20 kW job is a real number and
-   * is the one outcome a ceiling exists to prevent. Under is always safe.
+   * A MAXIMUM rounds DOWN. Rounding up half the time quotes a partner more than
+   * they fund, which on a 20 kW job is a real number and is the one outcome a
+   * ceiling exists to prevent. Under is always safe.
    *
    * A FLAT price rounds to NEAREST, because there the target is not a limit to
    * stay under but a figure to land on: a partner selling at $5.50/W wants
    * $5.50/W on the paper, and floor prints $5.49 on any job carrying adders.
-   * Half a cent per watt either side of a published price is the closest a
-   * whole-cent sticker can get to it.
    */
-  const exact = baseStickerCents / systemWatts;
-  const stickerPpwCents = input.mode === "flat" ? Math.round(exact) : Math.floor(exact);
+  const exact = baseStickerCents / units;
+  const stickerPerUnitCents = input.mode === "flat" ? Math.round(exact) : Math.floor(exact);
   return {
-    stickerPpwCents,
+    stickerPerUnitCents,
     // Whether the RULE MOVED THE PRICE, which is what every caller shows a
     // human. A flat partner whose figure happens to land on the price the deal
     // already had has not overridden anybody, and saying so would put a notice
     // on a screen with nothing to explain.
-    capped: stickerPpwCents !== input.stickerPpwCents,
+    capped: stickerPerUnitCents !== input.stickerPerUnitCents,
     adderOverrun: false,
+  };
+}
+
+/**
+ * The ceiling over installed watts — the shape every PV caller already uses.
+ *
+ * A thin naming of `capStickerToFinalUnit`. The docblock above it is the
+ * canonical explanation of the rule.
+ */
+export function capStickerToFinalPpw(input: {
+  stickerPpwCents: number;
+  maxFinalPpwCents: number | null | undefined;
+  mode?: FinalPpwMode;
+  systemSizeKwDc: number;
+  dealerFeePct: number;
+  adderTotalCents: number;
+}): FinalPpwCap {
+  const r = capStickerToFinalUnit({
+    stickerPerUnitCents: input.stickerPpwCents,
+    maxFinalPerUnitCents: input.maxFinalPpwCents,
+    mode: input.mode,
+    units: Math.round(input.systemSizeKwDc * 1000),
+    dealerFeePct: input.dealerFeePct,
+    adderTotalCents: input.adderTotalCents,
+  });
+  return {
+    stickerPpwCents: r.stickerPerUnitCents,
+    capped: r.capped,
+    adderOverrun: r.adderOverrun,
   };
 }
 
@@ -874,6 +916,83 @@ export function priceStoredPurchase(input: PurchaseInput & {
   });
   return {
     breakdown: pricePurchase({ ...input, stickerPpwCents: cap.stickerPpwCents }),
+    cap,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Storage — a system sold by the battery
+//
+// A battery makes no kilowatt-hours, so there are no installed watts for a rate
+// to be per. It is still the same ladder: a rate times a countable thing, plus
+// adders, less a rebate, grossed up by the partner's fee. The unit is a
+// battery, and these two functions are the per-watt pair with that unit in
+// them.
+// ---------------------------------------------------------------------------
+
+export type StoragePriceInput = {
+  product: "cash" | "loan";
+  batteryQty: number;
+  /** What ONE battery stickers at — the partner's fee already inside it. */
+  stickerPricePerBatteryCents: number;
+  dealerFeePct: number;
+  adderTotalCents: number;
+  onTopAdderTotalCents?: number;
+  rebateTotalCents?: number;
+  equipmentCostCents?: number;
+};
+
+/** Price a storage-only deal at the sticker it is handed. */
+export function priceStoragePurchase(input: StoragePriceInput): UnitPriceBreakdown {
+  return priceUnits({
+    product: input.product,
+    units: input.batteryQty,
+    stickerPerUnitCents: input.stickerPricePerBatteryCents,
+    dealerFeePct: input.dealerFeePct,
+    adderTotalCents: input.adderTotalCents,
+    onTopAdderTotalCents: input.onTopAdderTotalCents,
+    rebateTotalCents: input.rebateTotalCents,
+    equipmentCostCents: input.equipmentCostCents,
+  });
+}
+
+/**
+ * What a SAVED storage deal prices at today, held to its partner's ceiling.
+ *
+ * The storage twin of `priceStoredPurchase`, and it exists for the same reason:
+ * a stored sticker is only as capped as the lender was on the day it was saved.
+ * Publish a ceiling afterwards — which is what happens, since nobody publishes
+ * a rate sheet before they have quoted anything on it — and every screen that
+ * reads the row back quotes a contract the partner will not fund.
+ *
+ * Nothing is stored here. A cap set in Settings still does not rewrite a saved
+ * row; it just stops two screens showing one deal at two prices.
+ */
+export function priceStorageStored(
+  input: StoragePriceInput & {
+    /** The partner's stated final price a battery. Null, or cash, means no rule. */
+    maxFinalPricePerBatteryCents: number | null | undefined;
+    /** Whether that figure is a ceiling or the price. Defaults to `cap`. */
+    finalBatteryPriceMode?: FinalPpwMode;
+  }
+): { breakdown: UnitPriceBreakdown; cap: UnitCap } {
+  const cap = capStickerToFinalUnit({
+    stickerPerUnitCents: input.stickerPricePerBatteryCents,
+    // Cash has no lender and therefore no partner rule — the same line the
+    // builder's price card and the finance-row save already draw.
+    maxFinalPerUnitCents: input.product === "cash" ? null : input.maxFinalPricePerBatteryCents,
+    mode: input.finalBatteryPriceMode,
+    units: input.batteryQty,
+    dealerFeePct: input.dealerFeePct,
+    // Only the adders the ceiling is a price FOR. The on-top ones ride above it
+    // and are added back by `priceUnits` — see `capStickerToFinalUnit`.
+    adderTotalCents: input.adderTotalCents,
+  });
+  return {
+    breakdown: priceStoragePurchase({
+      ...input,
+      stickerPricePerBatteryCents: cap.stickerPerUnitCents,
+    }),
     cap,
   };
 }
