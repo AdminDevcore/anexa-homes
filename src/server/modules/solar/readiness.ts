@@ -100,6 +100,17 @@ export async function readSolarReadiness(
    * publishes a payment factor. Both change a block into a non-issue, so
    * getting the row is worth the query.
    */
+  /**
+   * Whether the company has any load profile at all.
+   *
+   * Only meaningful on a storage deal, and cheap enough to read unconditionally
+   * rather than branch the query — a count of a tiny table against one company.
+   */
+  const backupProfileCount =
+    design.systemType === "storage"
+      ? await prisma.solarBackupProfile.count({ where: { companyId, isActive: true } })
+      : 0;
+
   const quotedProduct = finance.lenderProductId
     ? await prisma.solarLenderProduct.findFirst({
         where: { companyId, id: finance.lenderProductId },
@@ -143,6 +154,15 @@ export async function readSolarReadiness(
         city: lead.city, state: lead.state, zip: lead.zip,
       },
       design: {
+        // WITHOUT THIS the design half reads as `pv` and fires every array gate
+        // on a battery — "system size must be greater than zero", "module
+        // quantity must be at least one", "no panel layout has been drawn" — on
+        // a deal that will never have any of them. The finance half below
+        // carried it from the start; this one did not, and the two halves
+        // disagreeing about what the deal sells is the whole failure.
+        systemType: design.systemType,
+        batteryQty: design.batteryQty,
+        hasBackupProfile: backupProfileCount > 0,
         systemSizeKwDc: design.systemSizeKwDc,
         year1ProductionKwh: design.year1ProductionKwh,
         annualUsageKwh: design.annualUsageKwh,

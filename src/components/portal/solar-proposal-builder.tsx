@@ -21,6 +21,7 @@ import {
 } from "@/components/portal/solar-panels";
 import type { AdderOption, DealAdderLine } from "@/components/portal/solar-adders-panel";
 import { effectiveUsageKwh } from "@/lib/solar-energy";
+import { usableKwh, backupTable } from "@/lib/solar-storage";
 import { SolarCustomerPanel, type SolarCustomerView, type SolarSystemType } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
 import { SolarStoragePanel, type SolarStorageView } from "@/components/portal/solar-storage-panel";
@@ -220,11 +221,14 @@ export function SolarProposalBuilder({
       {(step === "financing" || step === "generate") && (
         <SystemBanner
           leadId={leadId}
+          systemType={systemType}
+          storage={storage}
           systemSizeKwDc={systemSizeKwDc}
           year1ProductionKwh={year1ProductionKwh}
           annualUsageKwh={energy?.annualUsageKwh ?? null}
           usageAdjustmentKwh={design?.usageAdjustmentKwh ?? 0}
           onOpenEnergy={() => setStep("energy")}
+          onOpenDesign={() => setStep("design")}
         />
       )}
 
@@ -418,20 +422,68 @@ function StepRail({
  */
 function SystemBanner({
   leadId,
+  systemType,
+  storage,
   systemSizeKwDc,
   year1ProductionKwh,
   annualUsageKwh,
   usageAdjustmentKwh,
   onOpenEnergy,
+  onOpenDesign,
 }: {
   leadId: string;
+  systemType: SolarSystemType;
+  storage: SolarStorageView;
   systemSizeKwDc: number;
   year1ProductionKwh: number;
   annualUsageKwh: number | null;
   /** What the deal's adders add to that — an EV charger, a pool pump. */
   usageAdjustmentKwh: number;
   onOpenEnergy: () => void;
+  onOpenDesign: () => void;
 }) {
+  /**
+   * A battery has no size in kW, no annual production and no offset.
+   *
+   * Printing "0.00 kW · 0 kWh · 0%" above a storage deal is three claims about
+   * an array, all of them false and all of them zero — the same reason the
+   * customer's document drops those chapters rather than rendering them empty.
+   * What a battery HAS is capacity and runtime, so that is what this says.
+   *
+   * "Edit the design" goes to the roof designer, a screen a storage deal has no
+   * use for; it becomes an in-place jump to the Storage step.
+   */
+  if (systemType === "storage") {
+    const kwh = usableKwh(
+      storage.batteries.find((b) => b.id === storage.batteryId)?.ratingW ?? null,
+      storage.batteryQty
+    );
+    const first = backupTable(kwh, storage.profiles)[0] ?? null;
+    return (
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border bg-card px-4 py-3">
+        <Figure label="Storage" value={kwh > 0 ? `${kwh.toFixed(1)} kWh` : "—"} muted={!(kwh > 0)} />
+        <Figure
+          label="Batteries"
+          value={storage.batteryQty > 0 ? String(storage.batteryQty) : "—"}
+          muted={!(storage.batteryQty > 0)}
+        />
+        <Figure
+          label={first ? `Backup · ${first.name.toLowerCase()}` : "Backup"}
+          value={first ? `${first.hours < 10 ? first.hours.toFixed(1) : Math.round(first.hours)} hrs` : "—"}
+          muted={!first}
+        />
+        <div className="ml-auto flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={onOpenDesign}>
+            <BatteryCharging className="size-4" /> Edit the storage
+          </Button>
+          <Button size="sm" variant="outline" onClick={onOpenEnergy}>
+            <Zap className="size-4" /> {annualUsageKwh ? "Edit usage" : "Add usage"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   // Against the usage the system actually has to cover, adders included. This
   // banner and the customer's document have to agree: a rep reading 72% here
   // while the proposal says 59% has no way to tell which one is lying.
