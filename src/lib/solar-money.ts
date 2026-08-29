@@ -239,6 +239,17 @@ export type PurchaseInput = {
    * catalogue price of the work on the deal.
    */
   onTopAdderTotalCents?: number;
+  /**
+   * The manufacturer's or utility's money on this deal, at its face value,
+   * before any dealer fee.
+   *
+   * Optional and zero by default, so every deal priced before rebates existed
+   * prices byte-identically to before. Comes off GROSS: the company is passing
+   * somebody else's money through, so it reduces what the company keeps and the
+   * lender's cut is then taken on the lower final — which is why the payment
+   * amortises the smaller number.
+   */
+  rebateTotalCents?: number;
   /** Our hard cost, for the margin basis. */
   equipmentCostCents?: number;
 };
@@ -284,9 +295,130 @@ export type PurchaseBreakdown = {
    */
   adderStickerCents: number;
 
+  /** The rebate at face — what came off gross. Zero when none is applied. */
+  rebateTotalCents: number;
+  /**
+   * The rebate as the CUSTOMER'S breakdown subtracts it — grossed up by the
+   * same fee everything else is.
+   *
+   * Subtracting it at face from a grossed-up total leaves a breakdown short of
+   * its own bottom line, in front of a homeowner with a calculator. The
+   * invariant is `baseSticker + adderSticker − rebateSticker === contract`, and
+   * that is the line they add up.
+   */
+  rebateStickerCents: number;
+
   /** Gross minus our cost. Only meaningful when cost is known. */
   marginCents: number;
 };
+
+/**
+ * The pricing ladder, over any countable thing.
+ *
+ *     BASE      what the rep prices the system at, before any lender's cut
+ *   + ADDERS    the extra work, at catalogue price, likewise before the cut
+ *   − REBATE    somebody else's money, passed through
+ *   = GROSS     what the company keeps
+ *   + FEE       the lender's cut
+ *   = FINAL     what the customer signs
+ *
+ * Solar counts installed watts. Storage counts batteries. The arithmetic is the
+ * same and lives here once, because two copies of it is how a lease's escalator
+ * ends up on a loan — and because every rule in `pricePurchase`'s docblock
+ * below is a rule about the ladder, not about watts. They all hold here
+ * verbatim: cash takes no fee, the fee is a percentage OF FINAL, the fee
+ * applies to ordinary adders and not to on-top ones, and a fee at or above 100%
+ * stands down rather than dividing by zero.
+ */
+export type UnitPriceInput = {
+  product: "cash" | "loan";
+  /** Installed watts, or batteries. Zero is legal and prices the base at nothing. */
+  units: number;
+  /** The customer-facing rate per unit — already grossed up by the dealer fee. */
+  stickerPerUnitCents: number;
+  dealerFeePct: number;
+  adderTotalCents: number;
+  onTopAdderTotalCents?: number;
+  /** See `PurchaseInput.rebateTotalCents`. */
+  rebateTotalCents?: number;
+  equipmentCostCents?: number;
+};
+
+export type UnitPriceBreakdown = {
+  units: number;
+  basePriceCents: number;
+  basePerUnitCents: number;
+  adderTotalCents: number;
+  onTopAdderTotalCents: number;
+  rebateTotalCents: number;
+  grossPriceCents: number;
+  grossPerUnitCents: number;
+  dealerFeeCents: number;
+  contractPriceCents: number;
+  finalPerUnitCents: number;
+  baseStickerCents: number;
+  adderStickerCents: number;
+  rebateStickerCents: number;
+  marginCents: number;
+};
+
+export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
+  const units = Math.max(0, Math.round(input.units));
+  const insideAdderCents = Math.round(input.adderTotalCents);
+  const onTopAdderTotalCents = Math.round(input.onTopAdderTotalCents ?? 0);
+  const adderTotalCents = insideAdderCents + onTopAdderTotalCents;
+  const rebateTotalCents = Math.max(0, Math.round(input.rebateTotalCents ?? 0));
+
+  // A fee at or above 100% has no honest gross-up — it divides by zero or goes
+  // negative. Standing the fee down beats putting an Infinity in front of a
+  // homeowner; validation rejects one long before it reaches here.
+  const rawPct = input.product === "cash" ? 0 : input.dealerFeePct;
+  const f = Number.isFinite(rawPct) && rawPct > 0 && rawPct < 100 ? rawPct / 100 : 0;
+  const up = (cents: number) => (f > 0 ? Math.round(cents / (1 - f)) : cents);
+
+  // The base at sticker. `stickerPerUnitCents` already carries the fee.
+  const baseStickerCents = units * Math.round(input.stickerPerUnitCents);
+  const basePriceCents = baseStickerCents - Math.round(baseStickerCents * f);
+
+  // The adders, grossed up by the SAME fee, so that what survives the lender's
+  // cut is the catalogue price and not 82% of it. The on-top ones are added
+  // AFTER that gross-up, at face: the partner advances them and keeps nothing
+  // of them, so there is no cut for the customer's price to have to cover.
+  const adderStickerCents = up(insideAdderCents) + onTopAdderTotalCents;
+  // The rebate grossed up by that same fee, so the customer's three lines still
+  // sum to the number at the bottom of their agreement.
+  const rebateStickerCents = up(rebateTotalCents);
+
+  const contractPriceCents = baseStickerCents + adderStickerCents - rebateStickerCents;
+  const grossPriceCents = basePriceCents + adderTotalCents - rebateTotalCents;
+
+  // Subtracted rather than recomputed as `contract × f`: gross + fee has to
+  // equal final EXACTLY, because a customer reads those three lines and adds
+  // them up. A cent of rounding drift there is a phone call.
+  const dealerFeeCents = contractPriceCents - grossPriceCents;
+
+  const marginCents =
+    input.equipmentCostCents === undefined ? 0 : grossPriceCents - input.equipmentCostCents;
+
+  const per = (cents: number) => (units > 0 ? cents / units : 0);
+  return {
+    units,
+    basePriceCents,
+    basePerUnitCents: per(basePriceCents),
+    adderTotalCents,
+    onTopAdderTotalCents,
+    rebateTotalCents,
+    grossPriceCents,
+    grossPerUnitCents: per(grossPriceCents),
+    dealerFeeCents,
+    contractPriceCents,
+    finalPerUnitCents: per(contractPriceCents),
+    baseStickerCents,
+    adderStickerCents,
+    rebateStickerCents,
+    marginCents,
+  };
+}
 
 /**
  * Price a cash or loan deal.
@@ -327,53 +459,35 @@ export type PurchaseBreakdown = {
  * being no fee for either to be inside or outside of.
  */
 export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
-  const systemWatts = Math.round(input.systemSizeKwDc * 1000);
-  const insideAdderCents = Math.round(input.adderTotalCents);
-  const onTopAdderTotalCents = Math.round(input.onTopAdderTotalCents ?? 0);
-  const adderTotalCents = insideAdderCents + onTopAdderTotalCents;
-
-  // A fee at or above 100% has no honest gross-up — it divides by zero or goes
-  // negative. Standing the fee down beats putting an Infinity in front of a
-  // homeowner; validation rejects one long before it reaches here.
-  const rawPct = input.product === "cash" ? 0 : input.dealerFeePct;
-  const f = Number.isFinite(rawPct) && rawPct > 0 && rawPct < 100 ? rawPct / 100 : 0;
-
-  // The system at sticker. `stickerPpwCents` already carries the fee.
-  const baseStickerCents = Math.round(systemWatts * input.stickerPpwCents);
-  const basePriceCents = baseStickerCents - Math.round(baseStickerCents * f);
-
-  // The adders, grossed up by the SAME fee, so that what survives the lender's
-  // cut is the catalogue price and not 82% of it. The on-top ones are added
-  // AFTER that gross-up, at face: the partner advances them and keeps nothing
-  // of them, so there is no cut for the customer's price to have to cover.
-  const insideStickerCents = f > 0 ? Math.round(insideAdderCents / (1 - f)) : insideAdderCents;
-  const adderStickerCents = insideStickerCents + onTopAdderTotalCents;
-
-  const contractPriceCents = baseStickerCents + adderStickerCents;
-  const grossPriceCents = basePriceCents + adderTotalCents;
-
-  // Subtracted rather than recomputed as `contract × f`: gross + fee has to
-  // equal final EXACTLY, because a customer reads those three lines and adds
-  // them up. A cent of rounding drift there is a phone call.
-  const dealerFeeCents = contractPriceCents - grossPriceCents;
-
-  const marginCents =
-    input.equipmentCostCents === undefined ? 0 : grossPriceCents - input.equipmentCostCents;
-
+  // Watts are one kind of unit. The ladder is `priceUnits`; this names its
+  // answers the way every PV caller already reads them, so generalising the
+  // arithmetic moved no call site.
+  const u = priceUnits({
+    product: input.product,
+    units: Math.round(input.systemSizeKwDc * 1000),
+    stickerPerUnitCents: input.stickerPpwCents,
+    dealerFeePct: input.dealerFeePct,
+    adderTotalCents: input.adderTotalCents,
+    onTopAdderTotalCents: input.onTopAdderTotalCents,
+    rebateTotalCents: input.rebateTotalCents,
+    equipmentCostCents: input.equipmentCostCents,
+  });
   return {
-    systemWatts,
-    basePriceCents,
-    basePpwCents: systemWatts > 0 ? basePriceCents / systemWatts : 0,
-    adderTotalCents,
-    onTopAdderTotalCents,
-    grossPriceCents,
-    grossPpwCents: systemWatts > 0 ? grossPriceCents / systemWatts : 0,
-    dealerFeeCents,
-    contractPriceCents,
-    finalPpwCents: systemWatts > 0 ? contractPriceCents / systemWatts : 0,
-    baseStickerCents,
-    adderStickerCents,
-    marginCents,
+    systemWatts: u.units,
+    basePriceCents: u.basePriceCents,
+    basePpwCents: u.basePerUnitCents,
+    adderTotalCents: u.adderTotalCents,
+    onTopAdderTotalCents: u.onTopAdderTotalCents,
+    rebateTotalCents: u.rebateTotalCents,
+    grossPriceCents: u.grossPriceCents,
+    grossPpwCents: u.grossPerUnitCents,
+    dealerFeeCents: u.dealerFeeCents,
+    contractPriceCents: u.contractPriceCents,
+    finalPpwCents: u.finalPerUnitCents,
+    baseStickerCents: u.baseStickerCents,
+    adderStickerCents: u.adderStickerCents,
+    rebateStickerCents: u.rebateStickerCents,
+    marginCents: u.marginCents,
   };
 }
 
