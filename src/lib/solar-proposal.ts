@@ -685,8 +685,45 @@ export type SolarProposalSnapshot = {
    * identity, representative and the utility-avoided/net-savings split.
    * v3 names the adders instead of showing one "Additional work" total.
    * v4 adds the payment menu, the site coordinate and the shape of the year.
+   * v5 adds the system type and the storage block — a battery makes no
+   * kilowatt-hours, so a document about one is argued from backup hours,
+   * programme earnings and a time-of-use spread instead of from production.
    */
-  schemaVersion: 1 | 2 | 3 | 4;
+  schemaVersion: 1 | 2 | 3 | 4 | 5;
+  /**
+   * What this deal sold.
+   *
+   * ABSENT on every document generated before v5, and absent reads as `pv`:
+   * those proposals were all arrays, and the renderer must keep drawing them
+   * exactly as it does today.
+   */
+  systemType?: "pv" | "pv_storage" | "storage";
+  /**
+   * The storage argument, frozen. Null on a PV deal and on every older document.
+   *
+   * `tou` is NULL — not zeroed — when the utility's peak rate is not on file,
+   * and the renderer omits the line. A zero beside a real backup figure reads
+   * as "this battery saves you nothing", which is a different and untrue claim
+   * from "we do not have your peak rate".
+   */
+  storage?: {
+    batteryLabel: string | null;
+    batteryQty: number;
+    usableKwh: number;
+    backup: { name: string; loadWatts: number; hours: number }[];
+    tou: {
+      peakRateMills: number;
+      offPeakRateMills: number;
+      peakWindow: string | null;
+      shiftedKwhPerDay: number;
+      annualSavingsCents: number;
+      /** The assumptions this figure came from, frozen beside it. */
+      peakSharePct: number;
+      cyclesPerDay: number;
+      roundTripEfficiencyPct: number;
+    } | null;
+    rebates: { name: string; qty: number; amountCents: number; totalCents: number }[];
+  } | null;
   generatedAt: string;
   /** Who generated it — recorded on the document, not shown to the customer. */
   generatedById: string | null;
@@ -1247,6 +1284,18 @@ export function buildProposalSnapshot(args: {
    * lender product it was quoted on — and this module prices what it is given.
    */
   vppCredits?: VppCredit[];
+  /**
+   * What this deal sells. Absent means `pv`, which is what every caller written
+   * before storage existed is quoting.
+   */
+  systemType?: "pv" | "pv_storage" | "storage";
+  /**
+   * The storage argument, already resolved by the CALLER — the backup table
+   * needs the company's profiles and the time-of-use figures need the
+   * provider's rates, and both are database questions. This module prices and
+   * freezes what it is given, exactly as it does with the VPP credits above.
+   */
+  storage?: SolarProposalSnapshot["storage"];
   now: Date;
 }): SolarProposalSnapshot {
   const { design, finance, assumptions: a } = args;
@@ -1343,8 +1392,14 @@ export function buildProposalSnapshot(args: {
       ? { productionKwh: monthlyProduction, usageKwh: monthlyUsage }
       : null;
 
+  const systemType = args.systemType ?? "pv";
+
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
+    systemType,
+    // Null on anything that is not a storage deal, so a PV document cannot
+    // inherit a block that would make it argue two ways at once.
+    storage: systemType === "storage" ? (args.storage ?? null) : null,
     generatedAt: args.now.toISOString(),
     generatedById: args.generatedById,
     reference: args.reference,

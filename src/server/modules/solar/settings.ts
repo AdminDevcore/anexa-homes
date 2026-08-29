@@ -42,7 +42,28 @@ export type SolarSettingsView = SolarAssumptions & {
   /// gets WRITTEN on a design the first time a battery lands on it, and from
   /// there the ordinary equipment figures follow.
   defaultBatteryQty: number;
+  /// What a battery is assumed to shift, and what it loses doing it.
+  ///
+  /// NOT SolarAssumptions either, because those are the array's: degradation,
+  /// yield, escalation. These reach exactly one calculation — `touSavings` —
+  /// and are frozen onto a storage snapshot beside the figure they produced.
+  ///
+  /// `touPeakSharePct` is the softest number in a storage quote: it is
+  /// modelled, not measured, which is why it is a company decision listed on
+  /// the customer's document rather than a constant nobody can see.
+  touPeakSharePct: number;
+  touCyclesPerDay: number;
+  touRoundTripEfficiency: number;
 };
+
+/// What a company that has never opened the settings page assumes about a
+/// battery. Mirrors the column defaults in the schema, for the same reason
+/// DEFAULT_BATTERY_QTY does.
+export const TOU_DEFAULTS = {
+  touPeakSharePct: 30,
+  touCyclesPerDay: 1,
+  touRoundTripEfficiency: 90,
+} as const;
 
 /// What a company that has never opened the settings page sells: two batteries,
 /// this company's standard offer. Mirrors the column default in the schema —
@@ -58,6 +79,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
       targetNetPpwCents: null,
       homeValueUpliftPct: 0,
       defaultBatteryQty: DEFAULT_BATTERY_QTY,
+      ...TOU_DEFAULTS,
     };
   }
   return {
@@ -75,5 +97,8 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     targetNetPpwCents: row.targetNetPpwCents,
     homeValueUpliftPct: row.homeValueUpliftPct,
     defaultBatteryQty: row.defaultBatteryQty,
+    touPeakSharePct: row.touPeakSharePct,
+    touCyclesPerDay: row.touCyclesPerDay,
+    touRoundTripEfficiency: row.touRoundTripEfficiency,
   };
 }

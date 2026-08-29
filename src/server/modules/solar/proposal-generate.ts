@@ -19,6 +19,8 @@ import { capStickerToFinalPpw, pricePurchase } from "@/lib/solar-money";
 import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
+import { listBackupProfiles, listDealRebates } from "./storage";
+import { usableKwh, backupTable, touSavings } from "@/lib/solar-storage";
 import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
 
 /**
@@ -367,6 +369,83 @@ export async function generateProposalVersion(
     financeProductId: finance.lenderProductId,
   });
 
+  /**
+   * The storage argument, resolved here and frozen with everything else.
+   *
+   * Only on a storage deal. Every figure is DERIVED — usable capacity from the
+   * catalogue's watt-hours, hours from the company's load profiles, the saving
+   * from the provider's peak spread — because the customer's document derives
+   * them the same way, and a rep who could type one would be typing a promise.
+   *
+   * `tou` comes back NULL when the peak rate is not on file, and the renderer
+   * omits the line. A zero beside a real backup figure reads as "this battery
+   * saves you nothing", which is a different and untrue claim.
+   */
+  const storage = await (async () => {
+    if (design.systemType !== "storage") return null;
+
+    const [profiles, rebates] = await Promise.all([
+      listBackupProfiles(user.companyId),
+      listDealRebates(user.companyId, leadId),
+    ]);
+
+    const kwh = usableKwh(design.battery?.ratingW ?? null, design.batteryQty);
+
+    // The deal's own rates first, the provider's otherwise. Null on the design
+    // means "read the provider", never "no rates".
+    const provider = design.electricProvider
+      ? await prisma.solarProvider.findFirst({
+          where: { companyId: user.companyId, name: design.electricProvider },
+          select: { touPeakRateMills: true, touOffPeakRateMills: true, touPeakWindow: true },
+        })
+      : null;
+    const peakMills = design.touPeakRateMills ?? provider?.touPeakRateMills ?? null;
+    const offPeakMills = design.touOffPeakRateMills ?? provider?.touOffPeakRateMills ?? null;
+
+    const tou = touSavings({
+      usableKwh: kwh,
+      annualUsageKwh: design.annualUsageKwh ?? 0,
+      peakRateMills: peakMills,
+      offPeakRateMills: offPeakMills,
+      peakSharePct: assumptions.touPeakSharePct,
+      cyclesPerDay: assumptions.touCyclesPerDay,
+      roundTripEfficiencyPct: assumptions.touRoundTripEfficiency,
+    });
+
+    return {
+      batteryLabel: label(design.battery),
+      batteryQty: design.batteryQty,
+      usableKwh: kwh,
+      backup: backupTable(kwh, profiles).map(({ name, loadWatts, hours }) => ({
+        name,
+        loadWatts,
+        hours,
+      })),
+      tou:
+        tou && peakMills != null && offPeakMills != null
+          ? {
+              peakRateMills: peakMills,
+              offPeakRateMills: offPeakMills,
+              peakWindow: provider?.touPeakWindow ?? null,
+              shiftedKwhPerDay: tou.shiftedKwhPerDay,
+              annualSavingsCents: tou.annualSavingsCents,
+              // Frozen beside the figure they produced. An assumption the
+              // company changes next month must not silently rewrite a number
+              // on a document somebody has already signed.
+              peakSharePct: assumptions.touPeakSharePct,
+              cyclesPerDay: assumptions.touCyclesPerDay,
+              roundTripEfficiencyPct: assumptions.touRoundTripEfficiency,
+            }
+          : null,
+      rebates: rebates.map((r) => ({
+        name: r.name,
+        qty: r.qty,
+        amountCents: r.amountCents,
+        totalCents: r.totalCents,
+      })),
+    };
+  })();
+
   const alternatives = proposalAlternatives({
     quoted: {
       product: finance.product,
@@ -553,6 +632,8 @@ export async function generateProposalVersion(
     assumptions,
     homeValueUpliftPct: assumptions.homeValueUpliftPct,
     vppCredits,
+    systemType: design.systemType,
+    storage,
     // What the design recorded about which model produced its production
     // figure. Null keeps the document listing the market average, which is what
     // it was built on.
