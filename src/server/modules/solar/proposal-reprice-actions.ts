@@ -6,7 +6,12 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getSolarSettings } from "./settings";
-import { lineFromCatalogue, resolveAdderTotal } from "./adders";
+import {
+  dealLenderId,
+  lenderAdderRules,
+  lineFromCatalogue,
+  resolveAdderTotal,
+} from "./adders";
 import { recomputeDesignFigures } from "./recompute";
 import { generateProposalVersion } from "./proposal-generate";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
@@ -211,6 +216,11 @@ export async function repriceProposalAction(
     });
     let sortOrder = last?.sortOrder ?? 0;
 
+    // What this deal's partner does with each of these, where it has said —
+    // read here for the same reason the rep's own picker reads it: whether a
+    // roof rides on top of a fixed $/W or comes out of it is the lender's rule.
+    const lenderRules = await lenderAdderRules(await dealLenderId(leadId));
+
     await prisma.$transaction([
       ...(drop.length ? [prisma.solarDealAdder.deleteMany({ where: { id: { in: drop } } })] : []),
       ...add.map((i) =>
@@ -221,7 +231,7 @@ export async function repriceProposalAction(
             // The one place that turns a catalogue row into a deal line, so a
             // re-price and a rep's own picker cannot disagree about what the
             // basis, the description or the money column should be.
-            ...lineFromCatalogue(i),
+            ...lineFromCatalogue(i, lenderRules),
             qty: 1,
             sortOrder: ++sortOrder,
           },

@@ -30,6 +30,7 @@ import {
   upsertSolarLenderAction,
   setSolarLenderActiveAction,
   deleteSolarLenderAction,
+  setLenderAdderRulesAction,
 } from "@/server/modules/solar/actions";
 import {
   uploadSolarLenderLogoAction,
@@ -69,6 +70,17 @@ export type LenderRow = {
   minBasePricePerBatteryCents: number | null;
   maxFinalPricePerBatteryCents: number | null;
   finalBatteryPriceMode: "cap" | "flat";
+  /**
+   * Whether this partner funds an array with no storage on it. `warn` is what
+   * every lender did before the column existed.
+   */
+  batteryRule: "optional" | "warn" | "required";
+  /**
+   * This partner's answer, per adder, to "on top of your $/W or out of it?".
+   * Keyed by catalogue id. An id that is ABSENT has no rule and falls back to
+   * the catalogue — which is a different thing from a rule of `false`.
+   */
+  adderRules: Record<string, boolean>;
   /** The partner's own mark, when one has been uploaded or fetched. */
   logoUrl: string | null;
   /** How many catalogue items this lender approves. */
@@ -100,6 +112,17 @@ export type LenderProduct = {
   isActive: boolean;
 };
 
+/** One adder the company sells, as a lender is asked to rule on it. */
+export type AdderRuleOption = {
+  id: string;
+  label: string;
+  description: string | null;
+  /** "$2,700", "$0.05/W" — the RULE, not a resolved amount. */
+  rateLabel: string;
+  /** What the catalogue says, and therefore what a lender with no rule does. */
+  catalogueOnTop: boolean;
+};
+
 /**
  * The lenders whose approved-vendor lists constrain what can be sold.
  *
@@ -112,12 +135,15 @@ export function SolarLenderManager({
   sellableEquipment,
   canEdit,
   targetNetPpwCents,
+  adderCatalogue,
 }: {
   lenders: LenderRow[];
   sellableEquipment: number;
   canEdit: boolean;
   /** From Solar Settings. Null = the sticker is not derived from a dealer fee. */
   targetNetPpwCents: number | null;
+  /** The sellable adders every lender is asked to rule on. */
+  adderCatalogue: AdderRuleOption[];
 }) {
   const router = useRouter();
   const [name, setName] = React.useState("");
@@ -189,7 +215,13 @@ export function SolarLenderManager({
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {live.map((l) => (
-              <LenderCard key={l.id} lender={l} sellableEquipment={sellableEquipment} canEdit={canEdit} />
+              <LenderCard
+                key={l.id}
+                lender={l}
+                sellableEquipment={sellableEquipment}
+                canEdit={canEdit}
+                adderCatalogue={adderCatalogue}
+              />
             ))}
           </div>
         )}
@@ -205,7 +237,13 @@ export function SolarLenderManager({
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {retired.map((l) => (
-              <LenderCard key={l.id} lender={l} sellableEquipment={sellableEquipment} canEdit={canEdit} />
+              <LenderCard
+                key={l.id}
+                lender={l}
+                sellableEquipment={sellableEquipment}
+                canEdit={canEdit}
+                adderCatalogue={adderCatalogue}
+              />
             ))}
           </div>
         </section>
@@ -247,8 +285,216 @@ export function SolarLenderManager({
           ))}
         </section>
       )}
+
+      {/* ── Extra work ──────────────────────────────────────────────────────
+          Full width and below the cards for the same reason the rate sheets
+          are: this is a list as long as the adder catalogue, and a third of a
+          grid row cannot hold one.
+
+          It only means anything on a partner with a $/W figure, because "on
+          top of the price" needs a price to be on top of — but it is shown for
+          every lender rather than hidden, so an admin setting a cap tomorrow
+          does not have to discover that a screen appeared. */}
+      {live.length > 0 && adderCatalogue.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="font-semibold">Extra work, lender by lender</h3>
+          <p className="text-xs text-muted-foreground">
+            On a partner with a fixed or maximum $/W, every adder comes out of that figure by
+            default: the homeowner&rsquo;s number does not move and the work is paid for out of what
+            you keep. Tick an adder here and this partner funds it{" "}
+            <span className="font-medium text-foreground">on top</span>
+            {" "}instead, at its own price — a 10&nbsp;kW job at $5.50/W is $55,000, and the same
+            job with a $7,000 roof on top is $62,000. Untick one and it goes back inside the price, even if the catalogue puts it on
+            top for everybody else.
+          </p>
+          {live.map((l) => (
+            <AdderRuleSheet key={l.id} lender={l} canEdit={canEdit} catalogue={adderCatalogue} />
+          ))}
+        </section>
+      )}
     </div>
   );
+}
+
+/**
+ * What ONE lender does with each adder: on top of its price, or out of it.
+ *
+ * Three states in the data and two on the screen, deliberately. The table
+ * distinguishes "this partner says on top", "this partner says inside" and "no
+ * rule, ask the catalogue" — but a person setting this up is answering a yes/no
+ * question about a partner they know, so the checkbox is yes/no and the third
+ * state is what it STARTS at. Where a lender has no rule the box shows the
+ * catalogue's answer and the row says so; saving turns every row into an
+ * explicit rule, which is what makes it possible to say "not for this one"
+ * about an adder the catalogue puts on top.
+ */
+function AdderRuleSheet({
+  lender,
+  canEdit,
+  catalogue,
+}: {
+  lender: LenderRow;
+  canEdit: boolean;
+  catalogue: AdderRuleOption[];
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+
+  /** The screen's answer per adder: the lender's rule, or the catalogue's. */
+  const resolved = React.useCallback(
+    () =>
+      Object.fromEntries(
+        catalogue.map((a) => [a.id, lender.adderRules[a.id] ?? a.catalogueOnTop])
+      ) as Record<string, boolean>,
+    [catalogue, lender.adderRules]
+  );
+
+  const [draft, setDraft] = React.useState<Record<string, boolean>>(resolved);
+
+  /**
+   * Re-seed when the server sends something new — DURING RENDER, not in an
+   * effect, for the reason the storage panel spells out: an effect that calls
+   * setState runs after a paint, so the list would flash the pre-save answers
+   * for a frame on every refresh.
+   *
+   * Compared on a SIGNATURE rather than on the object, because `adderRules`
+   * arrives from a server component and is a new object every render — a
+   * reference check would re-seed on refreshes that changed nothing and throw
+   * away an edit somebody was halfway through.
+   */
+  const serverKey = catalogue
+    .map((a) => `${a.id}:${(lender.adderRules[a.id] ?? a.catalogueOnTop) ? 1 : 0}`)
+    .join(",");
+  const [seen, setSeen] = React.useState(serverKey);
+  if (seen !== serverKey) {
+    setSeen(serverKey);
+    setDraft(resolved());
+  }
+
+  const dirty = catalogue.some((a) => draft[a.id] !== (lender.adderRules[a.id] ?? a.catalogueOnTop));
+  const onTop = catalogue.filter((a) => draft[a.id]);
+  /** Rows this lender has never ruled on, so the screen can say whose answer it is showing. */
+  const unruled = catalogue.filter((a) => lender.adderRules[a.id] === undefined);
+
+  const priced = lender.maxFinalPpwCents != null || lender.maxFinalPricePerBatteryCents != null;
+
+  async function save() {
+    setBusy(true);
+    const res = await setLenderAdderRulesAction(
+      lender.id,
+      catalogue.map((a) => ({ equipmentId: a.id, financedOnTop: !!draft[a.id] }))
+    );
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error, { duration: 9000 });
+    toast.success(
+      res.count === 0
+        ? `Every adder comes out of ${lender.name}'s price.`
+        : `${res.count} ${res.count === 1 ? "adder rides" : "adders ride"} on top of ${lender.name}'s price.`
+    );
+    router.refresh();
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="sm" />
+        <h4 className="font-medium">{lender.name}</h4>
+        <span className="text-xs text-muted-foreground">
+          {onTop.length === 0
+            ? "everything inside the price"
+            : `${onTop.length} on top${
+                lender.maxFinalPpwCents != null
+                  ? ` of $${ppwToDollars(lender.maxFinalPpwCents)}/W`
+                  : ""
+              }`}
+        </span>
+      </div>
+
+      {!priced && (
+        <p className="rounded-lg bg-muted/50 p-2 text-[11px] text-muted-foreground">
+          This partner has no fixed or maximum price, so its adders are quoted the ordinary way and
+          nothing here changes a deal. Set one above and these start applying.
+        </p>
+      )}
+
+      <ul className="divide-y divide-border/60 rounded-lg border border-border/70">
+        {catalogue.map((a) => {
+          const checked = !!draft[a.id];
+          const inherited = lender.adderRules[a.id] === undefined;
+          return (
+            <li key={a.id}>
+              <label
+                className={cn(
+                  "flex cursor-pointer items-start gap-3 px-3 py-2 text-sm",
+                  canEdit ? "hover:bg-muted/40" : "cursor-default"
+                )}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 shrink-0 accent-primary"
+                  checked={checked}
+                  disabled={!canEdit || busy}
+                  onChange={(e) => setDraft((d) => ({ ...d, [a.id]: e.target.checked }))}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{a.label}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {a.rateLabel}
+                    {" · "}
+                    {checked
+                      ? "added to the loan on top, at this price"
+                      : "comes out of this partner's price"}
+                    {inherited && " · from the catalogue, not set here yet"}
+                  </span>
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={save} disabled={busy || !dirty}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Save
+          </Button>
+          {dirty && (
+            <Button size="sm" variant="ghost" onClick={() => setDraft(resolved())} disabled={busy}>
+              <X className="size-4" /> Cancel
+            </Button>
+          )}
+          {!dirty && unruled.length > 0 && (
+            <span className="text-[11px] text-muted-foreground">
+              {unruled.length} of these{" "}
+              {unruled.length === 1 ? "is showing the catalogue's" : "are showing the catalogue's"}{" "}
+              answer. Save to make them this partner&rsquo;s own.
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* The one thing that is NOT true of this screen, said before somebody
+          assumes otherwise: the flag is copied onto a deal when the adder is
+          picked, so this moves the next quote and not the last one. */}
+      <p className="text-[11px] text-muted-foreground">
+        Applies to work added from now on. A deal already carrying an adder keeps what it was
+        quoted at until somebody sets its lender again on the Financing step, which re-reads these.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * How many adders this lender funds on top of its own price.
+ *
+ * Counted the way the deal will resolve it — the lender's rule where it has
+ * one, the catalogue's answer where it has not — rather than by counting rows
+ * in the override table. A partner that has never been opened still puts the
+ * roof on top if the catalogue says so, and a summary that read 0 there would
+ * be describing a screen rather than a price.
+ */
+function adderOnTopCount(lender: LenderRow, catalogue: AdderRuleOption[]): number {
+  return catalogue.filter((a) => lender.adderRules[a.id] ?? a.catalogueOnTop).length;
 }
 
 /** One lender's terms, grouped by the product they price. */
@@ -831,10 +1077,13 @@ function LenderCard({
   lender,
   sellableEquipment,
   canEdit,
+  adderCatalogue,
 }: {
   lender: LenderRow;
   sellableEquipment: number;
   canEdit: boolean;
+  /** Only for the summary line — the rules themselves are set below the cards. */
+  adderCatalogue: AdderRuleOption[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -874,6 +1123,7 @@ function LenderCard({
     maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
     finalBatteryPriceMode: lender.finalBatteryPriceMode,
     minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
+    batteryRule: lender.batteryRule,
   });
   const resetDraft = () =>
     setDraft({
@@ -889,6 +1139,7 @@ function LenderCard({
       maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
       finalBatteryPriceMode: lender.finalBatteryPriceMode,
       minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
+      batteryRule: lender.batteryRule,
     });
 
   type ActionResult = { ok: boolean; error?: string; message?: string };
@@ -945,6 +1196,7 @@ function LenderCard({
           maxFinalPricePerBatteryCents,
           finalBatteryPriceMode: draft.finalBatteryPriceMode,
           minBasePricePerBatteryCents,
+          batteryRule: draft.batteryRule,
         }),
       "Saved"
     );
@@ -1085,6 +1337,35 @@ function LenderCard({
             <p className="text-[11px] text-muted-foreground">
               Measured before the dealer fee, on what survives it — the same rule as the $/W floor
               above. A deal under this cannot be quoted or generated.
+            </p>
+          </div>
+
+          {/* WHETHER THIS PARTNER WILL FUND AN ARRAY WITH NO BATTERY.
+              The app used to hold one opinion about this for every lender —
+              a note on every batteryless design, unswitchable — which is
+              neither true of the partners that do not care nor binding on the
+              ones that will decline the file. */}
+          <div className="space-y-1 rounded-lg border border-border/70 bg-muted/30 p-2.5">
+            <Label className="text-xs">A system with no battery on it</Label>
+            <Select
+              value={draft.batteryRule}
+              onValueChange={(v) =>
+                setDraft((d) => ({ ...d, batteryRule: v as LenderRow["batteryRule"] }))
+              }
+            >
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="optional">Fine — say nothing</SelectItem>
+                <SelectItem value="warn">Flag it, but let the proposal out</SelectItem>
+                <SelectItem value="required">Battery required — block the proposal</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              {draft.batteryRule === "required"
+                ? "A grid-tied design on this partner cannot be generated at all. Use this for paper that will not fund PV without storage — better a rep finds out here than at submission."
+                : draft.batteryRule === "optional"
+                  ? "Nothing is said and nothing is stopped. The proposal still tells the homeowner a grid-tied system shuts off in an outage."
+                  : "The readiness report flags it and the rep can carry on. This is what every lender did before this setting existed."}
             </p>
           </div>
 
@@ -1238,6 +1519,32 @@ function LenderCard({
                   <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] text-gold-muted">
                     ${ppwToDollars(lender.minBasePpwCents)}/W
                   </span>
+                </dd>
+              </div>
+            )}
+            {/* Only where a price exists for work to sit on top OF. On an
+                uncapped partner every adder is quoted the ordinary way and the
+                count would be a number about nothing. */}
+            {lender.maxFinalPpwCents != null && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Adders on top</dt>
+                <dd className="font-medium tabular-nums">
+                  {adderOnTopCount(lender, adderCatalogue)}
+                  <span className="text-muted-foreground"> / {adderCatalogue.length}</span>
+                </dd>
+              </div>
+            )}
+            {lender.batteryRule !== "warn" && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">No battery</dt>
+                <dd className="font-medium">
+                  {lender.batteryRule === "required" ? (
+                    <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[11px] text-gold-muted">
+                      Blocked
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Allowed, no note</span>
+                  )}
                 </dd>
               </div>
             )}

@@ -9,6 +9,7 @@ import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarLenderManager } from "@/components/portal/solar-lender-manager";
 import { lenderLogoUrl } from "@/lib/lender-mark";
+import { adderRateLabel, catalogueBasis } from "@/lib/solar-adders";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,10 @@ export default async function SolarLendersPage() {
       finalPpwMode: true,
       minBasePricePerBatteryCents: true, maxFinalPricePerBatteryCents: true,
       finalBatteryPriceMode: true,
+      batteryRule: true,
+      /// What this partner does with each adder, where it has overruled the
+      /// catalogue. Absent ids fall back to the catalogue's own answer.
+      adderRules: { select: { equipmentId: true, financedOnTop: true } },
       _count: { select: { approvals: true, designs: true } },
       products: {
         orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
@@ -43,6 +48,19 @@ export default async function SolarLendersPage() {
   });
 
   const settings = await getSolarSettings(user.companyId);
+
+  // The extra work the company sells, so each lender can say which of it rides
+  // on top of its own $/W. Sellable rows only — a retired adder is not being
+  // quoted, so a rule about it is a rule about nothing.
+  const adders = await prisma.solarEquipment.findMany({
+    where: { companyId: user.companyId, kind: "adder", isActive: true },
+    orderBy: [{ rank: "asc" }, { model: "asc" }],
+    select: {
+      id: true, manufacturer: true, model: true, description: true,
+      adderBasis: true, priceCents: true, priceMillsPerWatt: true,
+      financedOnTop: true,
+    },
+  });
 
   // How much of the catalogue each lender covers. A lender approving nothing is
   // a lender whose deals will show empty equipment lists, which is worth seeing
@@ -70,6 +88,17 @@ export default async function SolarLendersPage() {
         canEdit={can(user, "update", "Settings")}
         sellableEquipment={sellable}
         targetNetPpwCents={settings.targetNetPpwCents}
+        adderCatalogue={adders.map((a) => ({
+          id: a.id,
+          label: [a.manufacturer, a.model].filter(Boolean).join(" ") || a.model,
+          description: a.description,
+          rateLabel: adderRateLabel({
+            basis: catalogueBasis(a),
+            flatCents: a.priceCents,
+            millsPerWatt: a.priceMillsPerWatt,
+          }),
+          catalogueOnTop: a.financedOnTop,
+        }))}
         lenders={lenders.map((l) => ({
           id: l.id,
           name: l.name,
@@ -86,6 +115,10 @@ export default async function SolarLendersPage() {
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
+          batteryRule: l.batteryRule,
+          adderRules: Object.fromEntries(
+            l.adderRules.map((r) => [r.equipmentId, r.financedOnTop])
+          ),
           logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
           approvedCount: l._count.approvals,
           dealCount: l._count.designs,

@@ -12,7 +12,12 @@ import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
-import { catalogueBasis, listDealAdders } from "@/server/modules/solar/adders";
+import {
+  catalogueBasis,
+  financedOnTopFor,
+  lenderAdderRules,
+  listDealAdders,
+} from "@/server/modules/solar/adders";
 import { listBackupProfiles, listRebates, listDealRebates } from "@/server/modules/solar/storage";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
@@ -154,6 +159,12 @@ export default async function SolarProposalBuilderPage({
     }),
     listDealAdders(user.companyId, lead.id),
   ]);
+
+  // What THIS deal's partner does with each of those, where it has said. The
+  // picker shows "financed on top of a fixed price" before a rep commits to a
+  // line, and showing the catalogue's answer on a lender that overrules it
+  // would advertise a price the line will not be created at.
+  const lenderAdderRuleMap = await lenderAdderRules(design?.lenderId ?? null);
 
   /**
    * The three facts a provider's VPP programme is judged against.
@@ -356,7 +367,7 @@ export default async function SolarProposalBuilderPage({
           priceMillsPerWatt: a.priceMillsPerWatt,
           isVeryCommon: a.isVeryCommon,
           consumptionAdjustable: a.consumptionAdjustable,
-          financedOnTop: a.financedOnTop,
+          financedOnTop: financedOnTopFor(lenderAdderRuleMap, a.id, a.financedOnTop),
         }))}
         adderLines={adderLines}
         systemSizeKwDc={design?.systemSizeKwDc ?? 0}

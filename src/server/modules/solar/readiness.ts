@@ -39,6 +39,8 @@ export async function readSolarReadiness(
           select: {
             minBasePpwCents: true, finalPpwMode: true, maxFinalPpwCents: true,
             minBasePricePerBatteryCents: true,
+            // Whether this partner funds an array with no storage on it.
+            batteryRule: true,
           },
         },
         module: { select: { ratingW: true } },
@@ -174,6 +176,9 @@ export async function readSolarReadiness(
         utilityProvider: design.utilityProvider,
         hasLayoutImage: !!design.layoutImageFileId,
         hasBattery: !!design.batteryId,
+        // Null on a cash deal, which the validator reads as `warn` — the one
+        // opinion this file held for everybody before lenders could state one.
+        batteryRule: design.lender?.batteryRule ?? null,
       },
       finance: {
         systemType: design.systemType,

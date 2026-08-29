@@ -6,7 +6,14 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { ADDER_BASES } from "@/lib/solar-adders";
-import { lineFromCatalogue, parseOptOut, recomputeAdderTotal } from "./adders";
+import {
+  dealLenderId,
+  financedOnTopFor,
+  lenderAdderRules,
+  lineFromCatalogue,
+  parseOptOut,
+  recomputeAdderTotal,
+} from "./adders";
 
 /**
  * Putting extra work on a solar deal, one line at a time.
@@ -132,6 +139,10 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
   // off the row rather than taken from the request for the same reason the
   // price of a quoted programme is: a flag a caller can post is a flag anybody
   // can post, and this one moves what the customer signs.
+  //
+  // And the answer is the LENDER'S first: the catalogue's tick is the company's
+  // general practice, the lender's rule is what this partner's paper actually
+  // does with the work, and only the second one is a fact about the contract.
   let financedOnTop = parsed.data.financedOnTop ?? false;
   if (equipmentId) {
     const item = await prisma.solarEquipment.findFirst({
@@ -139,7 +150,8 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
       select: { id: true, financedOnTop: true },
     });
     if (!item) return fail("That adder is not in the catalogue.");
-    financedOnTop = item.financedOnTop;
+    const rules = await lenderAdderRules(await dealLenderId(leadId));
+    financedOnTop = financedOnTopFor(rules, item.id, item.financedOnTop);
   }
 
   const last = await prisma.solarDealAdder.findFirst({
@@ -339,6 +351,9 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
   });
   let sortOrder = last?.sortOrder ?? 0;
 
+  // What this deal's partner does with each of these, where it has said.
+  const lenderRules = await lenderAdderRules(await dealLenderId(leadId));
+
   // One transaction, so a deal is never left holding half a rep's selection.
   await prisma.$transaction([
     ...(drop.length ? [prisma.solarDealAdder.deleteMany({ where: { id: { in: drop } } })] : []),
@@ -347,7 +362,7 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
         data: {
           companyId: g.user.companyId,
           leadId,
-          ...lineFromCatalogue(i),
+          ...lineFromCatalogue(i, lenderRules),
           qty: 1,
           sortOrder: ++sortOrder,
         },

@@ -13,7 +13,7 @@ import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
-import { resolveAdderTotal } from "./adders";
+import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
 import { dealRebateTotalCents } from "./storage";
 import { priceStorageStored } from "@/lib/solar-money";
 
@@ -259,6 +259,13 @@ const dealLenderSchema = z.object({
  * First's money on an Amos deal. Equipment is deliberately left alone — an item
  * that has fallen off the new lender's list is a decision for whoever reissues
  * the proposal, not something to blank out from under an order.
+ *
+ * It also RE-STAMPS the adders. Whether a roof rides on top of the partner's
+ * $/W or comes out of it is the partner's rule, and moving the deal to a
+ * partner that answers differently has to move the lines with it — see
+ * `restampAddersForLender`. This is the one place that is allowed to: the flag
+ * is copied at pick time precisely so a Settings edit cannot re-price a quote,
+ * and the exception is a change made on this deal, about this deal.
  */
 export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderSchema>) {
   const user = await requireUser();
@@ -313,9 +320,15 @@ export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderS
     }
   }
 
+  // The extra work re-reads the new partner's rules, and the cached totals are
+  // rebuilt from the lines so the contract price moves with them. Forced,
+  // because this IS a deliberate edit to the adders — see recomputeAdderTotal.
+  const restamped = await restampAddersForLender(user.companyId, leadId, lenderId);
+  if (restamped > 0) await recomputeAdderTotal(user.companyId, leadId, { force: true });
+
   revalidatePath(`/portal/leads/${leadId}`);
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
-  return { ok: true as const, clearedProduct };
+  return { ok: true as const, clearedProduct, restampedAdders: restamped };
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,6 +1119,13 @@ const lenderSchema = z.object({
   maxFinalPricePerBatteryCents: z.number().int().min(500_00).max(100_000_00).nullable().optional(),
   minBasePricePerBatteryCents: z.number().int().min(500_00).max(100_000_00).nullable().optional(),
   finalBatteryPriceMode: z.enum(["cap", "flat"]).optional(),
+  /**
+   * Whether this partner funds an array with no storage — see
+   * SolarLenderBatteryRule. `required` BLOCKS generation on a batteryless
+   * design; `warn` flags it and lets it through, which is what every lender did
+   * before this existed; `optional` says nothing at all.
+   */
+  batteryRule: z.enum(["optional", "warn", "required"]).optional(),
 });
 
 /**
@@ -1147,6 +1167,7 @@ export async function upsertSolarLenderAction(id: string | null, input: z.infer<
     await prisma.solarLender.create({ data: { companyId: user.companyId, ...d } });
   }
   revalidatePath("/portal/settings/solar-equipment");
+  revalidatePath("/portal/settings/solar-lenders");
   return ok();
 }
 
@@ -1231,6 +1252,66 @@ export async function setEquipmentLendersAction(equipmentId: string, lenderIds: 
   ]);
   revalidatePath("/portal/settings/solar-equipment");
   return { ok: true as const, count: valid.length };
+}
+
+/**
+ * Set which adders THIS lender funds on top of its own $/W, and which come out
+ * of it.
+ *
+ * The whole set at once, the same way an approved-vendor list is written: the
+ * screen sends the checkboxes as they now stand and the table is made to match.
+ * A diff would have to describe three states — ticked, unticked, and never
+ * asked about — over a wire, and getting that wrong silently moves money.
+ *
+ * BOTH ANSWERS ARE STORED. A row saying `false` is not the same as no row: no
+ * row means "no opinion, use the catalogue", and `false` means "this partner
+ * keeps it inside the price even though the catalogue puts it on top". The
+ * second is the exact case a second flat-rate partner creates, and a table of
+ * only the ticked ones cannot say it.
+ *
+ * Deals already quoted are NOT re-priced. `SolarDealAdder.financedOnTop` is
+ * copied at pick time so that a Settings change can never move a number a
+ * homeowner has already been shown; the new rules apply to lines added from
+ * here on, and to every line on a deal whose lender is set again.
+ */
+export async function setLenderAdderRulesAction(
+  lenderId: string,
+  rules: { equipmentId: string; financedOnTop: boolean }[]
+) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+
+  const lender = await prisma.solarLender.findFirst({
+    where: { companyId: user.companyId, id: lenderId },
+    select: { id: true },
+  });
+  if (!lender) return fail("Not found.");
+
+  // Adders only, and only this company's. A module id here would attach a
+  // pricing rule to something that can never be an adder line, and an id from
+  // another tenant would attach one to somebody else's catalogue.
+  const ids = [...new Set(rules.map((r) => r.equipmentId))];
+  const valid = new Set(
+    (
+      await prisma.solarEquipment.findMany({
+        where: { companyId: user.companyId, id: { in: ids }, kind: "adder" },
+        select: { id: true },
+      })
+    ).map((e) => e.id)
+  );
+
+  const data = rules
+    .filter((r) => valid.has(r.equipmentId))
+    .map((r) => ({ lenderId, equipmentId: r.equipmentId, financedOnTop: r.financedOnTop }));
+
+  await prisma.$transaction([
+    prisma.solarLenderAdderRule.deleteMany({ where: { lenderId } }),
+    ...(data.length
+      ? [prisma.solarLenderAdderRule.createMany({ data, skipDuplicates: true })]
+      : []),
+  ]);
+  revalidatePath("/portal/settings/solar-lenders");
+  return { ok: true as const, count: data.filter((d) => d.financedOnTop).length };
 }
 
 // ---------------------------------------------------------------------------

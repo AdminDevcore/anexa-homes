@@ -98,18 +98,143 @@ async function autoApplyRules(companyId: string) {
   });
 }
 
+/**
+ * Which adders THIS lender puts on top of its own price.
+ *
+ * The catalogue's `financedOnTop` is the fallback, not the answer. It says what
+ * the company does with a piece of work in general; the lender says what this
+ * partner does with it, and only the second one is a fact about the paper the
+ * customer signs. Amos funds a roof above its flat $5.50/W; the next capped
+ * partner may well roll the same roof into the same ceiling, and the catalogue
+ * has one tick to lend both of them.
+ *
+ * Absent from the map means NO RULE, which is different from a rule of false —
+ * "no opinion, use the catalogue" against "this partner keeps it inside the
+ * price even though the catalogue says otherwise". Both are real answers and
+ * the second one is the whole reason the table stores `false` rows.
+ *
+ * A cash deal, or one whose lender has not been chosen yet, has no lender to
+ * ask: the map comes back empty and every adder answers to the catalogue,
+ * exactly as it did before this existed.
+ */
+export async function lenderAdderRules(
+  lenderId: string | null | undefined
+): Promise<Map<string, boolean>> {
+  if (!lenderId) return new Map();
+  const rows = await prisma.solarLenderAdderRule.findMany({
+    where: { lenderId },
+    select: { equipmentId: true, financedOnTop: true },
+  });
+  return new Map(rows.map((r) => [r.equipmentId, r.financedOnTop]));
+}
+
+/** The lender rule if this partner stated one, otherwise the catalogue's. */
+export function financedOnTopFor(
+  rules: Map<string, boolean>,
+  equipmentId: string | null | undefined,
+  catalogueDefault: boolean
+): boolean {
+  if (!equipmentId) return catalogueDefault;
+  return rules.get(equipmentId) ?? catalogueDefault;
+}
+
+/** The lender a deal is designed for, or null. */
+export async function dealLenderId(leadId: string): Promise<string | null> {
+  const d = await prisma.solarDesign.findUnique({
+    where: { leadId },
+    select: { lenderId: true },
+  });
+  return d?.lenderId ?? null;
+}
+
+/**
+ * Re-stamp every catalogue-linked adder line against the deal's CURRENT lender.
+ *
+ * `SolarDealAdder.financedOnTop` is copied at pick time and deliberately does
+ * not move when Settings changes — a catalogue edit must never re-price a quote
+ * somebody has already been shown. Changing the LENDER is not a settings edit
+ * though: it is a decision about this one deal, taken on this one deal, and it
+ * is the moment the partner's own rules start applying. Leaving the lines alone
+ * through it is how a deal moved onto Amos ends up with its roof still buried
+ * inside a ceiling Amos would have funded on top.
+ *
+ * Hand-typed lines are left exactly where they are. They have no catalogue row
+ * for a lender to hold an opinion about, and the rep who ticked the box on one
+ * is the only person who can have meant it.
+ *
+ * Returns how many lines actually moved, so a caller can say so rather than
+ * leaving a rep to notice a number that changed by itself.
+ */
+export async function restampAddersForLender(
+  companyId: string,
+  leadId: string,
+  lenderId: string | null
+): Promise<number> {
+  const lines = await prisma.solarDealAdder.findMany({
+    where: { companyId, leadId, equipmentId: { not: null } },
+    select: { id: true, equipmentId: true, financedOnTop: true },
+  });
+  if (lines.length === 0) return 0;
+
+  const ids = [...new Set(lines.map((l) => l.equipmentId!))];
+  const [rules, catalogue] = await Promise.all([
+    lenderAdderRules(lenderId),
+    prisma.solarEquipment.findMany({
+      where: { companyId, id: { in: ids } },
+      select: { id: true, financedOnTop: true },
+    }),
+  ]);
+  const fallback = new Map(catalogue.map((c) => [c.id, c.financedOnTop]));
+
+  const moved = lines.filter((l) => {
+    // A line whose catalogue row has been deleted has no fallback to fall back
+    // to. Its own stored flag is the only record of what it was sold as, so it
+    // is left holding it rather than being reset to false by an absent row.
+    if (!fallback.has(l.equipmentId!)) return false;
+    return (
+      financedOnTopFor(rules, l.equipmentId, fallback.get(l.equipmentId!)!) !==
+      l.financedOnTop
+    );
+  });
+  if (moved.length === 0) return 0;
+
+  await prisma.$transaction(
+    moved.map((l) =>
+      prisma.solarDealAdder.update({
+        where: { id: l.id },
+        data: {
+          financedOnTop: financedOnTopFor(
+            rules,
+            l.equipmentId,
+            fallback.get(l.equipmentId!)!
+          ),
+        },
+      })
+    )
+  );
+  return moved.length;
+}
+
 /** How a catalogue row reads as a deal line. One place, so the two agree. */
-export function lineFromCatalogue(item: {
-  id: string;
-  manufacturer: string | null;
-  model: string;
-  description: string | null;
-  adderBasis: string | null;
-  priceCents: number;
-  priceMillsPerWatt: number | null;
-  showOnProposal: boolean;
-  financedOnTop: boolean;
-}) {
+export function lineFromCatalogue(
+  item: {
+    id: string;
+    manufacturer: string | null;
+    model: string;
+    description: string | null;
+    adderBasis: string | null;
+    priceCents: number;
+    priceMillsPerWatt: number | null;
+    showOnProposal: boolean;
+    financedOnTop: boolean;
+  },
+  /**
+   * This deal's lender's own rules, when the caller has them. Omitted, the
+   * catalogue answers for itself — which is right for a cash deal and for any
+   * caller with no lender in hand.
+   */
+  rules: Map<string, boolean> = new Map()
+) {
   const basis = catalogueBasis(item);
   return {
     equipmentId: item.id,
@@ -124,7 +249,8 @@ export function lineFromCatalogue(item: {
     // COPIED like the price, and for the same reason: this decides what the
     // customer's contract comes to, and re-reading it through the catalogue
     // would let a settings tick move the total on a quote already shown.
-    financedOnTop: item.financedOnTop,
+    // Resolved against the LENDER first — see `financedOnTopFor`.
+    financedOnTop: financedOnTopFor(rules, item.id, item.financedOnTop),
   };
 }
 
@@ -159,11 +285,14 @@ export async function applyAutoAdders(
   const [design, rules] = await Promise.all([
     prisma.solarDesign.findUnique({
       where: { leadId },
-      select: { systemSizeKwDc: true, autoAdderOptOut: true },
+      // The lender comes along because it decides whether an adder the SIZE
+      // rule just added rides on top of this partner's price or inside it.
+      select: { systemSizeKwDc: true, autoAdderOptOut: true, lenderId: true },
     }),
     autoApplyRules(companyId),
   ]);
   if (!design || rules.length === 0) return { added: [], removed: [] };
+  const lenderRules = await lenderAdderRules(design.lenderId);
 
   const optedOut = new Set(parseOptOut(design.autoAdderOptOut));
   const existing = await prisma.solarDealAdder.findMany({
@@ -199,7 +328,7 @@ export async function applyAutoAdders(
         data: {
           companyId,
           leadId,
-          ...lineFromCatalogue(r),
+          ...lineFromCatalogue(r, lenderRules),
           qty: 1,
           autoApplied: true,
           sortOrder: ++sortOrder,

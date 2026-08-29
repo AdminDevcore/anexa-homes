@@ -109,8 +109,24 @@ export type DesignForValidation = {
   utilityRateMills?: number | null;
   hasLayoutImage?: boolean;
   hasBattery?: boolean;
+  /**
+   * What this deal's LENDER does about an array with no storage on it.
+   *
+   * A rule about the partner, not about the company: some paper will not fund
+   * grid-tied PV at all and some does not care, and the app used to hold one
+   * opinion for both. Rides on the design shape for the same reason the
+   * partner's margin floor rides on the finance shape — it belongs to the
+   * lender this one deal was designed for.
+   *
+   * Optional, and `warn` when absent: a cash deal has no lender to ask, and a
+   * caller that has not been updated is judged exactly as it was before.
+   */
+  batteryRule?: LenderBatteryRule | null;
   utilityProvider?: string | null;
 };
+
+/** See `SolarLenderBatteryRule`. Restated here so the lib does not import Prisma. */
+export type LenderBatteryRule = "optional" | "warn" | "required";
 
 export type FinanceForValidation = {
   systemType?: "pv" | "pv_storage" | "storage";
@@ -420,8 +436,33 @@ export function validateDesign(
       "No panel layout has been drawn. The module count, and therefore the price, comes from it."
     );
   }
+  /**
+   * Storage on a PV job is the LENDER'S call.
+   *
+   * Three answers, and the default is the one that was hardcoded here before
+   * the column existed, so nothing about an existing deal changes: `warn` says
+   * it and lets it through, `optional` says nothing at all, `required` stops
+   * the proposal. A partner that will not write a loan without a battery is not
+   * a partner a rep should find out about at submission, with a signed quote
+   * already in the homeowner's inbox.
+   *
+   * The code is deliberately the SAME on the warning and the block. It names
+   * the finding, not its severity, and a rep switching a deal between two
+   * lenders should see one issue change its mind rather than two issues take
+   * turns.
+   */
   if (d.hasBattery === false) {
-    warn("equipment.no_battery", "equipment", "batteryId", "No battery on this design. Fine for a grid-tied system — the proposal will say the system shuts off in an outage.");
+    const rule: LenderBatteryRule = d.batteryRule ?? "warn";
+    if (rule === "required") {
+      block(
+        "equipment.no_battery",
+        "equipment",
+        "batteryId",
+        "This lender will not fund a system without a battery. Add storage to the design, or move the deal to a lender that finances grid-tied."
+      );
+    } else if (rule === "warn") {
+      warn("equipment.no_battery", "equipment", "batteryId", "No battery on this design. Fine for a grid-tied system — the proposal will say the system shuts off in an outage.");
+    }
   }
 
   return issues;
