@@ -67,32 +67,14 @@ export function ChapterPay({
       }
       rail={
         <div className="space-y-5">
-          {/* THE SCENARIO THIS COPY IS WRITTEN IN, and never optional once the
-              switch exists. The control itself is in the nav bar — it changes
-              every sheet, so it belongs on the chrome that follows the reader
-              down all of them rather than in this one column — and the nav does
-              not print. This does, and it carries the figure the reader is NOT
-              being shown, because a document that prints only the number that
-              flatters the deal is the thing the switch was added to stop. */}
-          {credits?.on && (
-            <p className="break-inside-avoid rounded-xl border border-amber-500/40 bg-amber-50 p-3.5 text-[0.8rem] leading-relaxed text-amber-900">
-              <strong className="font-semibold">Read this one twice:</strong> these figures assume
-              your credits are claimed and applied to the loan.
-              {credits.offMonthlyCents != null && (
-                <>
-                  {" "}
-                  Until they are, the payment is{" "}
-                  <strong className="font-semibold tabular-nums">
-                    {usd(credits.offMonthlyCents, 2)}
-                  </strong>{" "}
-                  a month — and if they are never claimed, it stays there for the rest of the term.
-                </>
-              )}{" "}
-              Whether you receive the federal credit, and how much, depends on your own tax
-              situation.
-            </p>
-          )}
-
+          {/* THE UNCLAIMED-CREDIT WARNING USED TO LIVE HERE, and does not any
+              more. On these programmes the credit is claimed and applied as a
+              matter of course once the contract is signed, so a red-boxed
+              "unless it never happens" beside the payment was warning the
+              household about a branch of the deal that does not occur — and it
+              was the third time the same sentence appeared on the sheet. What
+              scenario the figures are written in is still stated, quietly,
+              under the number itself: see `CreditBasis` below. */}
           {/* The paydown warning. It is the single most consequential sentence
               on this sheet, and it sits beside the two figures it is about. */}
           {f.loanPaydownCents != null && (
