@@ -2,10 +2,11 @@ import crypto from "node:crypto";
 import { prisma } from "@/server/db/client";
 import { runUnscoped } from "@/server/vertical/context";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
-import type {
-  ProposalAuditEvent,
-  ProposalCertificate,
-  ProposalSignature,
+import {
+  publicAuditDetail,
+  type ProposalAuditEvent,
+  type ProposalCertificate,
+  type ProposalSignature,
 } from "@/lib/proposal-signature";
 
 /**
@@ -143,12 +144,24 @@ export async function certificateFor(proposalId: string): Promise<ProposalCertif
   if (!signature) return null;
 
   const snapshot = proposal.snapshot as unknown as SolarProposalSnapshot;
+  /**
+   * REDACTED HERE, at the one place a certificate is built.
+   *
+   * These details are written for us and read by the customer: the trail is
+   * printed on the sheet bound into the homeowner's own PDF. `publicAuditDetail`
+   * drops the segments that name a figure — chiefly the lender adjustment
+   * ladder on `generated`, which quoted the household's price against the
+   * lender's contract value and so told the customer what was carried above
+   * their price. Stripped on the server, before the record crosses into a
+   * client document or a Server Action's reply, so the number is not merely
+   * unrendered but absent.
+   */
   const events: ProposalAuditEvent[] = proposal.events.map((e) => ({
     type: e.type,
     at: e.createdAt.toISOString(),
     actor: e.actorName,
     ip: e.ip,
-    detail: e.detail,
+    detail: publicAuditDetail(e.detail),
   }));
 
   return {

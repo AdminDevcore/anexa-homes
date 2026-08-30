@@ -83,3 +83,33 @@ export const AUDIT_LABELS: Record<string, string> = {
 export function auditLabel(type: string): string {
   return AUDIT_LABELS[type] ?? type.replace(/_/g, " ");
 }
+
+/**
+ * One line of the trail as the CUSTOMER'S copy is allowed to print it.
+ *
+ * WHY THIS EXISTS. The certificate is bound into the proposal PDF the
+ * homeowner downloads, so every word of the audit trail is customer-facing —
+ * but the details themselves are written for us. The `generated` line records
+ * WHICH LENDER SETTING was applied to the document: the partner programme, the
+ * lender's contract value and the household's own obligation, so that a change
+ * made in Settings a fortnight later can be read against the documents
+ * generated either side of it. Printed verbatim, that line told the homeowner
+ * the size of the adjustment carried above their price — a figure that appears
+ * nowhere on the document they signed, and whose whole point is that the
+ * customer is quoted their price whole.
+ *
+ * The rule is the general one rather than a patch for that one sentence: a
+ * segment of an audit detail that names an amount is an internal note and does
+ * not go on the customer's sheet. The document above the certificate is where
+ * money is quoted, and it is the only place money is quoted. What survives is
+ * the part that describes the EVENT — the version, the product, whether the
+ * live link moved — which is what a trail is for.
+ *
+ * Applied where the certificate is assembled, on the server, so a redacted
+ * detail is never sent to the browser in the first place.
+ */
+export function publicAuditDetail(detail: string | null): string | null {
+  if (!detail) return null;
+  const kept = detail.split(" · ").filter((segment) => !segment.includes("$"));
+  return kept.length > 0 ? kept.join(" · ") : null;
+}
