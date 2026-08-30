@@ -89,3 +89,23 @@ const YEAR_WORDS: Record<number, string> = {
 };
 
 export const yearsInWords = (n: number) => YEAR_WORDS[n] ?? String(n);
+
+/**
+ * A loan's term, in the units a person would say it in.
+ *
+ * "360 payments" is the number on the contract and "30 years" is the number
+ * somebody understands, so the document prints both. Lived in the solar view
+ * until the chapters were split; it is here because three sheets and the back
+ * matter all state a term and none of them may state it differently.
+ */
+export const loanTermLabel = (months: number) => {
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  const span =
+    rest === 0
+      ? `${years} year${years === 1 ? "" : "s"}`
+      : years === 0
+        ? `${rest} month${rest === 1 ? "" : "s"}`
+        : `${years} yr ${rest} mo`;
+  return `${span} · ${months} payments`;
+};

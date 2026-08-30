@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { CoverPitch } from "@/lib/solar-proposal-pitch";
 import { usd, kwh, pctWhole } from "../format";
+import { GlassCard } from "./primitives";
 
 /**
  * "An 8.00 kW", "A 6.40 kW" — the article follows how the number is SPOKEN,
@@ -93,16 +94,13 @@ export function Cover({
         )}
       />
 
-      {/* ── the card ─────────────────────────────────────────────────────── */}
-      <div
-        data-cover-card
-        className={cn(
-          "relative w-full max-w-[30rem] rounded-2xl px-6 py-7 sm:px-8 sm:py-9",
-          "bg-white/75 backdrop-blur-xl",
-          "ring-1 ring-white/55 shadow-[0_28px_70px_-28px_rgba(2,6,23,0.65)]",
-          "[print-color-adjust:exact] [-webkit-print-color-adjust:exact]",
-        )}
-      >
+      {/* ── the card ─────────────────────────────────────────────────────
+          The SAME component every plate in the document uses. The cover is the
+          sheet nobody is allowed to redesign, and the cheapest way to keep the
+          eight chapters behind it looking like they belong to it is to make
+          them literally the same object. Nothing about how this renders
+          changed when it was extracted — see GlassCard. */}
+      <GlassCard data-cover-card className="relative w-full max-w-[30rem]">
         <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--proposal-accent)]">
           Your solar proposal
         </p>
@@ -146,7 +144,7 @@ export function Cover({
           </Meta>
           {s.representative && <Meta k="Your consultant">{s.representative.name}</Meta>}
         </dl>
-      </div>
+      </GlassCard>
     </section>
   );
 }

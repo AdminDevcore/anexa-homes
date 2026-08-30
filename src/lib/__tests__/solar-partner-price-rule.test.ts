@@ -100,6 +100,12 @@ const ALLOWED_ADDER_SPLIT: Record<string, string> = {
   // extra work, at sticker, with a roof financed on top already inside it —
   // `purchase.adderStickerCents`. There is no second half left to read.
   "src/components/proposal/solar/index.tsx": "renders the snapshot's combined sticker figure",
+  // The cost chapter, split out of index.tsx on 2026-08-30. Same argument word
+  // for word: it renders the frozen snapshot, where `adderTotalCents` is
+  // already `purchase.adderStickerCents` — the whole of the extra work at
+  // sticker, a roof financed on top included. It prices nothing.
+  "src/components/proposal/solar/chapters/cost.tsx":
+    "renders the snapshot's combined sticker figure",
   // The funder's submission summary, and the same argument word for word: every
   // figure on it is read off the frozen snapshot, where `adderTotalCents` is
   // already `purchase.adderStickerCents` — the whole of the extra work at

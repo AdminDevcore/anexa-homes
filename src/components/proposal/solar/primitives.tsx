@@ -20,35 +20,46 @@ import { cn } from "@/lib/utils";
 export type ChapterTone = "paper" | "dark";
 
 /**
- * How a chapter arranges itself on PAPER.
+ * WHY THE CHAPTER GRID IS A CONTAINER QUERY AND NOT A BREAKPOINT.
  *
- * `rail` is the default and the reason the printed document is landscape: the
- * chapter mark, the title and the lede move into a narrow left column and the
- * content takes the rest of the sheet. On screen that furniture stacks above
- * the content and costs two inches of height, which on an 8.5in-tall sheet is
- * the difference between a composed page and a page with a hole in it.
+ * This document is laid out twice by the same CSS: once in a browser window and
+ * once inside an 11in × 8.5in page box. A `lg:` utility resolves against the
+ * VIEWPORT, and print.tsx carries a comment recording what that cost — an
+ * 11in-wide sheet was observed laying out under the same breakpoint the 8.5in
+ * one did, so the cover's two-column composition never fired on paper and had
+ * to be spelled out again in print CSS. That is how this document ended up
+ * designed twice.
  *
- * `stack` keeps the screen arrangement for the two chapters whose content is a
- * DRAWING — the roof and the twenty-five-year chart. Those want the full 10in
- * of paper more than they want the title beside them.
+ * A container query resolves against the element's own inline size, which on
+ * paper is the page box less the sheet inset — about 941px — and in a browser
+ * is whatever the window gives it. One rule, one composition, both media. That
+ * is the whole reason ~380 lines of print overrides could be deleted.
+ *
+ * 52rem (832px) is comfortably under the 941px a landscape sheet offers and
+ * comfortably over a tablet in portrait, which is where the rail stops being
+ * readable and the head should stack above the body.
  */
-export type ChapterPrintLayout = "rail" | "stack";
+const RAIL = "@[52rem]:grid-cols-[minmax(0,17rem)_minmax(0,1fr)] @[52rem]:gap-x-12 @[52rem]:items-start";
 
 /**
- * One chapter of the document.
+ * One chapter of the document, composed for a LANDSCAPE sheet.
+ *
+ * The chapter mark, the title and the lede sit in a narrow rail and the content
+ * takes the rest of the width. This was previously a print-only rearrangement:
+ * on screen the furniture stacked above the content and cost two inches of
+ * height, and print.tsx rebuilt it into a rail with a grid the component knew
+ * nothing about. Now the rail IS the chapter, on both media, and the head and
+ * body attributes below are real grid children rather than hooks for a
+ * stylesheet to find.
  *
  * A chapter is a SNAP TARGET: on a wide screen the deck settles it under the
  * nav so a rep advancing with an arrow key lands on a composed screen rather
  * than halfway between two. `scroll-margin-top` is what keeps the heading clear
  * of the sticky chrome — without it a jump link parks the title behind the nav.
  *
- * `min-h` rather than a fixed height, because chapters 4 and 5 are genuinely
+ * `min-h` rather than a fixed height, because the money chapter is genuinely
  * taller than a viewport and clipping a payment table to make the deck tidy
  * would hide the terms somebody is being asked to sign.
- *
- * The three `data-chapter-*` attributes carry NO screen styling. They exist so
- * the print sheet can rearrange the chapter into a rail without this component
- * having to know what paper looks like — see ./print.
  */
 export function Chapter({
   id,
@@ -58,8 +69,16 @@ export function Chapter({
   title,
   lede,
   tone = "paper",
-  wide = false,
-  printLayout = "rail",
+  /**
+   * Give the content the whole width and put the head above it.
+   *
+   * For a chapter whose body is one wide DRAWING — a chart that wants ten
+   * inches more than it wants a title beside it. Everything else takes the
+   * rail, which is the default because most chapters are an argument with a
+   * figure next to it.
+   */
+  full = false,
+  rail,
   children,
 }: {
   id: string;
@@ -70,9 +89,21 @@ export function Chapter({
   title: string;
   lede?: React.ReactNode;
   tone?: ChapterTone;
-  wide?: boolean;
-  /** How this chapter lays itself out on paper. See ChapterPrintLayout. */
-  printLayout?: ChapterPrintLayout;
+  full?: boolean;
+  /**
+   * What else belongs in the LEFT COLUMN, under the lede.
+   *
+   * Added after the first printed proof of the rebuild, which showed the thing
+   * the old print stylesheet had also been fighting: a rail carrying four lines
+   * of title and then five inches of nothing, beside a body that had overflowed
+   * onto a second sheet. Both problems are the same problem, and the fix is to
+   * let a chapter put its quiet content — a disclosure, a caveat, a list of
+   * alternatives — in the space that was already there.
+   *
+   * For prose and small print. A figure or a table belongs in the body: the
+   * rail is 17rem, and a table set in it wraps every row.
+   */
+  rail?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const dark = tone === "dark";
@@ -85,9 +116,8 @@ export function Chapter({
       // every one of them without parsing a computed colour. Tailwind emits
       // oklch(), and a test that greps for rgb() passes by finding nothing.
       data-dark-ground={dark ? "" : undefined}
-      data-print-layout={printLayout}
       className={cn(
-        "relative scroll-mt-[var(--proposal-chrome-h)] overflow-hidden px-6 sm:px-10",
+        "@container relative scroll-mt-[var(--proposal-chrome-h)] overflow-hidden px-6 sm:px-10",
         "flex min-h-[calc(100svh-var(--proposal-chrome-h))] flex-col justify-center",
         "py-20 sm:py-24",
         "print:min-h-0 print:break-before-page print:py-8",
@@ -100,13 +130,19 @@ export function Chapter({
     >
       <div
         data-chapter-inner
-        className={cn("relative mx-auto w-full", wide ? "max-w-5xl" : "max-w-3xl")}
+        className={cn("relative mx-auto grid w-full max-w-6xl gap-y-8", !full && RAIL)}
       >
         <div data-chapter-head>
           <ChapterMark index={index} total={total} eyebrow={eyebrow} dark={dark} />
           <h2
             className={cn(
-              "mt-5 font-display text-[clamp(2.1rem,4.6vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.022em] text-balance",
+              "mt-5 font-display font-semibold leading-[1.02] tracking-[-0.022em] text-balance",
+              // Smaller in the rail than it was stacked: a 17rem column holds
+              // about four words a line, and the old clamp put a three-line
+              // heading in it.
+              full
+                ? "text-[clamp(2.1rem,4.6vw,3.4rem)]"
+                : "text-[clamp(2rem,3.4vw,2.9rem)]",
               dark ? "text-white" : "text-neutral-950",
             )}
           >
@@ -115,19 +151,215 @@ export function Chapter({
           {lede && (
             <p
               className={cn(
-                "mt-5 max-w-[46ch] text-lg leading-relaxed",
+                "mt-4 max-w-[46ch] leading-relaxed",
+                full ? "text-lg" : "text-[0.98rem]",
                 dark ? "text-neutral-300" : "text-neutral-600",
               )}
             >
               {lede}
             </p>
           )}
+          {rail && <div className="mt-8 hidden @[52rem]:block">{rail}</div>}
         </div>
-        <div data-chapter-body className="mt-10">
+        <div data-chapter-body className={cn(full && "mt-2")}>
           {children}
+          {/* Narrow enough that there is no rail to put it in: the same content
+              follows the body instead of disappearing. */}
+          {rail && <div className="mt-10 @[52rem]:hidden">{rail}</div>}
         </div>
       </div>
     </section>
+  );
+}
+
+/* ── plates ────────────────────────────────────────────────────────────── */
+
+/**
+ * A chapter whose PICTURE is the page.
+ *
+ * The cover's grammar, extended: something runs the full bleed of the sheet —
+ * a photograph, this customer's own roof, a chart — the type sits on it in a
+ * half-transparent white card, and the figures run along the foot.
+ *
+ * It exists because the document alternates. Chapters that own a visual are
+ * plates and chapters that own numbers are paper, and the alternation is what
+ * stops two tables ever sitting next to each other. A run of label→value rows
+ * is what this document used to be from end to end.
+ *
+ * THE BACKGROUND IS A PROP, not a URL. Two of the three plates are not
+ * photographs at all — one is the array drawn on satellite imagery by a client
+ * component that owns its own zoom, one is an SVG — and a component that took
+ * a src could render neither.
+ */
+export function Plate({
+  id,
+  index,
+  total,
+  eyebrow,
+  title,
+  lede,
+  background,
+  card,
+  figures,
+  caption,
+  /**
+   * How hard to darken the picture.
+   *
+   * `full` is the gradient a photograph needs to carry white type top and
+   * bottom. `soft` is for a background that is already dark and mostly empty —
+   * a chart on near-black — where the same wash would flatten the drawing it
+   * exists to make readable.
+   */
+  veil = "full",
+  children,
+}: {
+  id: string;
+  index: number;
+  total: number;
+  eyebrow: string;
+  title: React.ReactNode;
+  lede?: React.ReactNode;
+  /** Rendered edge to edge behind everything. Absolutely positioned by us. */
+  background: React.ReactNode;
+  /** The glass card, top right. */
+  card?: React.ReactNode;
+  /** Three or four figures along the foot. See FigureRow. */
+  figures?: React.ReactNode;
+  /** One line under the figures — provenance, not argument. */
+  caption?: React.ReactNode;
+  veil?: "full" | "soft";
+  children?: React.ReactNode;
+}) {
+  return (
+    <section
+      data-section={id}
+      data-chapter
+      data-reveal
+      data-dark-ground
+      data-plate
+      className={cn(
+        "@container relative flex scroll-mt-[var(--proposal-chrome-h)] flex-col overflow-hidden",
+        "min-h-[calc(100svh-var(--proposal-chrome-h))] bg-neutral-950 text-white",
+        "px-6 py-14 sm:px-10 sm:py-16",
+        "print:min-h-0 print:break-before-page",
+        "[print-color-adjust:exact] [-webkit-print-color-adjust:exact]",
+      )}
+    >
+      <div aria-hidden className="absolute inset-0">
+        {background}
+      </div>
+      <div
+        aria-hidden
+        className={cn(
+          "absolute inset-0 [print-color-adjust:exact] [-webkit-print-color-adjust:exact]",
+          veil === "full"
+            ? "bg-[linear-gradient(180deg,rgba(8,10,12,0.78)_0%,rgba(8,10,12,0.22)_44%,rgba(8,10,12,0.92)_100%)]"
+            : "bg-[linear-gradient(180deg,rgba(8,10,12,0.72)_0%,rgba(8,10,12,0.35)_50%,rgba(8,10,12,0.78)_100%)]",
+        )}
+      />
+
+      {/* ── the head, and the card beside it ───────────────────────────── */}
+      <div className="relative mx-auto grid w-full max-w-6xl gap-y-8 @[52rem]:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] @[52rem]:gap-x-10">
+        <div data-chapter-head>
+          <ChapterMark index={index} total={total} eyebrow={eyebrow} dark />
+          <h2 className="mt-5 font-display text-[clamp(2.1rem,4.2vw,3.4rem)] font-semibold leading-[1.02] tracking-[-0.025em] text-balance text-white">
+            {title}
+          </h2>
+          {lede && (
+            <p className="mt-4 max-w-[42ch] leading-relaxed text-neutral-200">{lede}</p>
+          )}
+        </div>
+        {card && <div className="@[52rem]:justify-self-end @[52rem]:w-full">{card}</div>}
+      </div>
+
+      {children && (
+        <div className="relative mx-auto mt-8 w-full max-w-6xl">{children}</div>
+      )}
+
+      {/* ── the figures, along the foot ────────────────────────────────── */}
+      {(figures || caption) && (
+        <div className="relative mx-auto mt-auto w-full max-w-6xl pt-10">
+          {figures}
+          {caption && (
+            <p className="mt-6 max-w-[74ch] text-[11px] leading-relaxed text-neutral-400 @[52rem]:max-w-[58%]">
+              {caption}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The half-transparent white panel the type sits on.
+ *
+ * ONE component, shared by the cover and every plate, which is the point of
+ * extracting it: the cover is the sheet nobody is allowed to redesign, and the
+ * cheapest way to keep eight chapters looking like they belong to it is to make
+ * them literally the same object.
+ *
+ * `data-glass-card` is what print.tsx dials the translucency up on. Chrome does
+ * not render backdrop-filter when printing, so a 75%-white panel prints as flat
+ * 75% white over an undiffused photograph and the type lands on roof shingles.
+ */
+export function GlassCard({
+  className,
+  children,
+  ...rest
+}: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-glass-card
+      className={cn(
+        "rounded-2xl bg-white/75 px-6 py-7 text-neutral-900 backdrop-blur-xl sm:px-8 sm:py-9",
+        "ring-1 ring-white/55 shadow-[0_28px_70px_-28px_rgba(2,6,23,0.65)]",
+        "[print-color-adjust:exact] [-webkit-print-color-adjust:exact]",
+        className,
+      )}
+      {...rest}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Three or four figures across the foot of a plate.
+ *
+ * Replaces four near-identical stat grids that were spelled differently in
+ * every chapter that had one. A figure with no value is DROPPED by the caller
+ * rather than rendered as an em dash: this row is the largest type on the
+ * sheet after the title, and a blank slot in it reads as a document that did
+ * not finish loading.
+ */
+export function FigureRow({ items }: { items: { k: string; v: React.ReactNode; note?: string; accent?: boolean }[] }) {
+  const shown = items.filter((i) => i.v != null && i.v !== "");
+  if (shown.length === 0) return null;
+  return (
+    <dl
+      className={cn(
+        "grid gap-x-8 gap-y-6",
+        shown.length >= 4 ? "grid-cols-2 @[40rem]:grid-cols-4" : "grid-cols-1 @[40rem]:grid-cols-3",
+      )}
+    >
+      {shown.map((i, idx) => (
+        <div key={i.k} data-stagger style={{ ["--i" as string]: idx } as React.CSSProperties}>
+          <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
+            {i.k}
+          </dt>
+          <dd
+            className={cn(
+              "mt-1.5 font-display text-[clamp(1.7rem,3vw,2.4rem)] font-semibold leading-none tabular-nums tracking-[-0.025em]",
+              i.accent ? "text-[var(--proposal-accent)]" : "text-white",
+            )}
+          >
+            {i.v}
+          </dd>
+          {i.note && <p className="mt-1.5 text-sm text-neutral-400">{i.note}</p>}
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -160,7 +392,10 @@ function ChapterMark({
       />
       <span
         className={cn(
-          "text-[11px] font-medium tabular-nums tracking-[0.16em]",
+          // shrink-0 and nowrap: in a 17rem rail a long eyebrow ("What we are
+          // installing") pushed the count onto a second line and broke it in
+          // half — "02 /" over "06".
+          "shrink-0 whitespace-nowrap text-[11px] font-medium tabular-nums tracking-[0.16em]",
           dark ? "text-neutral-500" : "text-neutral-400",
         )}
       >
@@ -235,8 +470,21 @@ export function Stat({
   );
 }
 
-/** A quiet label→value list. Rows with no value never render. */
-export function SpecList({ items }: { items: [string, React.ReactNode][] }) {
+/**
+ * A quiet label→value list. Rows with no value never render.
+ *
+ * `dense` is for a sheet that is carrying a drawn figure as well — the payment
+ * chapter runs a display-size number, a list of terms and the battery ladder on
+ * one page, and eight pixels a row is the difference between that composing and
+ * spilling onto a sheet of its own.
+ */
+export function SpecList({
+  items,
+  dense = false,
+}: {
+  items: [string, React.ReactNode][];
+  dense?: boolean;
+}) {
   const rows = items.filter(([, v]) => v);
   if (rows.length === 0) return null;
   return (
@@ -246,7 +494,10 @@ export function SpecList({ items }: { items: [string, React.ReactNode][] }) {
           key={k}
           data-stagger
           style={{ ["--i" as string]: idx } as React.CSSProperties}
-          className="flex items-baseline justify-between gap-6 py-3.5"
+          className={cn(
+            "flex items-baseline justify-between gap-6",
+            dense ? "py-2" : "py-3.5",
+          )}
         >
           <dt className="text-sm text-neutral-500">{k}</dt>
           <dd className="text-right font-medium tabular-nums text-neutral-900">{v}</dd>
@@ -330,7 +581,10 @@ export function EquipCard({
             src={e.photoUrl}
             alt={name ? `${name} — ${label.toLowerCase()}` : label}
             className="size-full object-contain p-2"
-            loading="lazy"
+            /* NOT lazy — see LenderMark. An image below the fold is never
+               decoded before page.pdf() writes the sheet, so a lazy product
+               shot prints as an empty tile. */
+            loading="eager"
             decoding="async"
           />
         </span>

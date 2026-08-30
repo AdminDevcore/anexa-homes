@@ -274,10 +274,19 @@ describe("the document quotes the contract the household signs", () => {
      * visible in the file. The submission summary is deliberately not in scope:
      * that page is for the funder, who needs all three figures.
      */
-    const doc = readFileSync(
-      join(SRC, "components", "proposal", "solar", "index.tsx"),
-      "utf8"
-    );
+    /*
+     * THE WHOLE CUSTOMER-FACING DOCUMENT, not one file. It was index.tsx alone
+     * until the 2026-08-30 rebuild split the chapters out; reading only the
+     * view after that would have checked the one file the rows are no longer
+     * in, and passed by finding nothing.
+     */
+    const solarDir = join(SRC, "components", "proposal", "solar");
+    const doc = [
+      readFileSync(join(solarDir, "index.tsx"), "utf8"),
+      ...readdirSync(join(solarDir, "chapters"))
+        .filter((f) => /\.tsx?$/.test(f))
+        .map((f) => readFileSync(join(solarDir, "chapters", f), "utf8")),
+    ].join("\n");
     expect(doc).not.toContain("adjustment.adjustmentCents");
     expect(doc).not.toContain("adjustment.customerObligationCents");
     // The contract value it IS allowed to state: the sentence saying which

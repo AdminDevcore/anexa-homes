@@ -50,7 +50,17 @@ export function LenderMark({
         {/* eslint-disable-next-line @next/next/no-img-element -- served from a
             route, not the image pipeline, and rendered on the public proposal
             where next/image's optimiser is not in play. */}
-        <img src={logoUrl} alt="" className="size-full object-contain" loading="lazy" decoding="async" />
+        <img
+          src={logoUrl}
+          alt=""
+          className="size-full object-contain"
+          /* NOT lazy. This mark renders on a document that gets printed to PDF,
+             and a lazily-loaded image below the fold is never decoded before
+             the page is written — the lender's logo came out as an empty white
+             tile on every printed proposal. It is a few KB. */
+          loading="eager"
+          decoding="async"
+        />
       </span>
     );
   }

@@ -130,18 +130,67 @@ test.describe(FLAG_ON ? "solar proposal in print" : "solar proposal in print (fl
       })),
     );
 
-    expect(chapters.map((c) => c.id)).toEqual([
-      "cover",
-      "today",
-      "system",
-      "cost",
-      "savings",
-      "timeline",
-      "accept",
-    ]);
+    /*
+      The order is fixed; the MEMBERSHIP is not. Three chapters are conditional
+      on what the snapshot actually carries — `year` needs twelve months of
+      measured usage, `savings` can be switched off by the rep, and neither is
+      a defect when it is absent. So this asserts the sequence is a subsequence
+      of the document's designed order rather than pinning a list that a
+      perfectly good proposal would fail.
+    */
+    const ORDER = ["cover", "today", "system", "year", "cost", "pay", "savings", "timeline", "accept"];
+    const ids = chapters.map((c) => c.id);
+    expect(ids[0]).toBe("cover");
+    expect(ids).toEqual(ORDER.filter((id) => ids.includes(id)));
+    // The chapters that are never optional.
+    expect(ids).toEqual(expect.arrayContaining(["cover", "today", "system", "cost", "pay", "timeline", "accept"]));
 
     // The cover owns the first sheet; everything after it starts a new one.
     expect(chapters.slice(1).every((c) => c.breakBefore === "page")).toBe(true);
+  });
+
+  /*
+    THE DIRECT TEST FOR THE DEFECT THE 2026-08-30 REBUILD EXISTED TO FIX.
+
+    Six chapters used to print as nine sheets, and four of those sheets carried
+    no chapter mark at all — they were continuations that read as leftovers. A
+    sheet without a mark is the signature of a chapter that overflowed, so this
+    asserts the two things that together make that impossible: every chapter
+    carries its own mark, and no chapter is taller than the sheet it is drawn
+    on.
+  */
+  test("no chapter overflows its sheet, and every chapter is marked", async ({ page }) => {
+    await login(page, "admin@anexahomes.com");
+    await documentOrSkip(page);
+    await page.emulateMedia({ media: "print" });
+    // The page box, at CSS pixels: 8.5in tall at 96dpi.
+    await page.setViewportSize({ width: 1056, height: 816 });
+
+    const sheets = await page.evaluate(() => {
+      const SHEET = 816;
+      return Array.from(document.querySelectorAll<HTMLElement>("#proposal-root [data-chapter]")).map(
+        (el) => ({
+          id: el.getAttribute("data-section"),
+          over: Math.round(el.getBoundingClientRect().height - SHEET),
+          // The cover is the one chapter with no numbered mark — it is the
+          // cover, and numbering it "00 / 08" would be furniture.
+          marked:
+            el.getAttribute("data-section") === "cover" ||
+            !!el.querySelector("[data-chapter-head]"),
+        }),
+      );
+    });
+
+    const unmarked = sheets.filter((s) => !s.marked).map((s) => s.id);
+    expect(unmarked, `these sheets carry no chapter mark: ${unmarked.join(", ")}`).toEqual([]);
+
+    // A few pixels of rounding is not an orphan sheet; a chapter that genuinely
+    // runs long is. 8px of tolerance, then it is a defect.
+    const spilling = sheets.filter((s) => s.over > 8).map((s) => `${s.id} (+${s.over}px)`);
+    expect(
+      spilling,
+      `these chapters run past their sheet and will print a continuation with no mark on it: ${spilling.join(", ")}`,
+    ).toEqual([]);
   });
 
   test("the sheet is landscape, and nothing else in the app is", async ({ page }) => {
@@ -233,22 +282,38 @@ test.describe(FLAG_ON ? "solar proposal in print" : "solar proposal in print (fl
     }
   });
 
-  test("the FAQ prints its questions, the disclosures collapse", async ({ page }) => {
+  test("nothing in the document is hidden behind a disclosure on paper", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await documentOrSkip(page);
     await page.emulateMedia({ media: "print" });
 
-    // A <details> that hides its own summary in print would print five answers
-    // with no questions attached to them.
-    const faq = page.locator("details[data-keep-summary]").first();
-    await expect(faq).toBeAttached();
-    const faqSummary = await faq.locator("summary").evaluate((el) => getComputedStyle(el).display);
-    expect(faqSummary).not.toBe("none");
+    /*
+      This used to assert that the FAQ's <details> kept its summary and the
+      disclosures' dropped theirs. There are no <details> in the document any
+      more: the questions and the assumptions live in the back matter, open, as
+      ordinary markup — which is the same guarantee reached by removing the
+      mechanism rather than by configuring it.
 
-    const disclosure = page.locator("details:not([data-keep-summary])").first();
-    const discSummary = await disclosure
-      .locator("summary")
-      .evaluate((el) => getComputedStyle(el).display);
-    expect(discSummary).toBe("none");
+      The assertion that matters is unchanged and is now structural: no part of
+      this document may be collapsed on paper, because a collapsed element
+      prints as nothing and the things it would hide are the assumptions and
+      the disclosures.
+    */
+    const collapsed = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLDetailsElement>("#proposal-root details"))
+        .filter((el) => getComputedStyle(el).display === "none" || !el.open)
+        .map((el) => el.querySelector("summary")?.textContent?.trim() ?? "(unlabelled)"),
+    );
+    expect(
+      collapsed,
+      `these would print as nothing: ${collapsed.join(" · ")}`,
+    ).toEqual([]);
+
+    // The questions and their answers both reach the paper.
+    await expect(page.getByText("Common questions")).toBeAttached();
+    await expect(
+      page.getByText("What happens if the system makes more power than I use?"),
+    ).toBeAttached();
+    await expect(page.getByText("Assumptions used in this proposal")).toBeAttached();
   });
 });
