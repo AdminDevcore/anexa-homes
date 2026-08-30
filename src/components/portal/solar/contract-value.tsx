@@ -65,7 +65,6 @@ export function ContractValueCard({
   adjustment,
   systemSizeKwDc,
   customerFinalPpwCents,
-  customerSystemPriceCents,
   adderStickerCents,
   customerContractCents,
   monthlyCents,
@@ -88,8 +87,6 @@ export function ContractValueCard({
   systemSizeKwDc: number;
   /** The price divided by the watts, as the ladder computed it. */
   customerFinalPpwCents: number | null;
-  /** The system at sticker, the fee already in it. Adders excluded. */
-  customerSystemPriceCents: number;
   /** The extra work as the customer's own breakdown reads it. */
   adderStickerCents: number;
   /** What the system was PRICED at — the ladder's target, not the contract. */
@@ -246,6 +243,39 @@ export function ContractValueCard({
     );
   }
 
+  /**
+   * THE SYSTEM PRICE AS THE PARTNER'S PAPER WRITES IT — the contribution
+   * already inside it, never as a line of its own.
+   *
+   * WHAT THIS LOOKED LIKE UNTIL 2026-08-30, AND WHY IT IS GONE. The column
+   * used to run `System price $101,640 / Participate Tax Program +$70,000 /
+   * Contract price $171,640`: the contribution as an addition, with the
+   * partner's programme named as the thing doing the adding. It is the same
+   * arrangement the customer's cost sheet was rebuilt out of twice for the
+   * same reason — a "+$70,000" row reads as a mark-up on a system whatever
+   * sits above it, and a rep who has just read one says it out loud. The
+   * contract IS the price the partner writes; there is no moment in the sale
+   * where the two figures are added up in front of anybody.
+   *
+   * DERIVED FROM THE CONTRACT DOWNWARDS, not from the base upwards, so the
+   * rows sum to the total under a rebate too — `baseSticker + adders` is the
+   * contract only when nothing came off it (see `solar-money.ts`).
+   *
+   * The customer's own price has not gone anywhere: it is the "Priced at" row
+   * at the foot of this column and the whole ladder beside it.
+   */
+  const contractSystemPriceCents =
+    reconciliation.lenderContractValueCents - adderStickerCents;
+  /**
+   * NAMED AFTER THE PARTNER, because that is the honest account of whose price
+   * it is — this is what Amos contracts the system at, not what we quoted. A
+   * bare "System price" here would collide with the card above it, which is
+   * showing the same words against the customer's own figure.
+   */
+  const contractSystemPriceLabel = lenderName
+    ? `${lenderName} system price`
+    : "System price on the contract";
+
   return (
     <section
       aria-labelledby="contract-value-heading"
@@ -277,14 +307,22 @@ export function ContractValueCard({
           </p>
           <dl className="mt-3 space-y-1 text-sm">
             <Row k="System size" v={`${systemSizeKwDc.toFixed(2)} kW`} />
-            <Row k="System price" v={money(customerSystemPriceCents)} />
-            {adderStickerCents !== 0 && <Row k="Add-ons" v={money(adderStickerCents)} />}
-            <Row k={reconciliation.label} v={`+${money(reconciliation.adjustmentCents)}`} />
             <Row
-              k="Contract price"
-              v={money(reconciliation.lenderContractValueCents)}
-              strong
+              k={contractSystemPriceLabel}
+              v={money(contractSystemPriceCents)}
+              strong={adderStickerCents === 0}
+              rule={false}
             />
+            {adderStickerCents !== 0 && (
+              <>
+                <Row k="Add-ons" v={money(adderStickerCents)} />
+                <Row
+                  k="Contract price"
+                  v={money(reconciliation.lenderContractValueCents)}
+                  strong
+                />
+              </>
+            )}
             {/* The $/W the DOCUMENT prints, which is the contract over the
                 watts — not the rate the rep priced at. Shown because a rep
                 asked about $12.50/W by a customer needs to have seen it here
@@ -474,17 +512,26 @@ function Row({
   v,
   muted,
   strong,
+  rule,
 }: {
   k: string;
   v: string;
   muted?: boolean;
   strong?: boolean;
+  /**
+   * The rule above the row, which a total earns by default. Set false on a
+   * figure that is emphasised because it IS the price rather than because it
+   * is the sum of the rows above it — a line drawn under "System size" reads
+   * as arithmetic that never happened.
+   */
+  rule?: boolean;
 }) {
   return (
     <div
       className={cn(
         "flex items-baseline justify-between gap-4",
-        strong && "border-t border-border pt-1.5 font-semibold",
+        strong && "font-semibold",
+        (rule ?? strong) && "border-t border-border pt-1.5",
         muted && "text-muted-foreground"
       )}
     >

@@ -1421,7 +1421,6 @@ export function SolarFinancePanel({
               ? Math.round(livePrice.breakdown.finalPpwCents)
               : null
           }
-          customerSystemPriceCents={livePrice.breakdown.baseStickerCents}
           adderStickerCents={livePrice.breakdown.adderStickerCents}
           customerContractCents={livePrice.breakdown.contractPriceCents}
           monthlyCents={quote?.monthlyCents ?? null}
