@@ -5,6 +5,7 @@ import { Leaf, TreePine, Factory, Car } from "lucide-react";
 import { SOLAR_FAQS, IMPACT_SOURCES } from "@/lib/solar-proposal";
 import { Impact, SourceLink, ContactCard } from "../primitives";
 import { SavingsScrubber } from "../../savings-scrubber";
+import { CreditSwitch } from "../../credit-switch";
 import { usd, kwh, pct, loanTermLabel } from "../../format";
 import type { Doc } from "./doc";
 
@@ -27,7 +28,8 @@ import type { Doc } from "./doc";
  * how much argument is left, and this is not argument.
  */
 export function BackMatter({ doc }: { doc: Doc }) {
-  const { s, sv, f, option, vpp, vppAnnualCents, vppUpfrontCents, vppPayer } = doc;
+  const { s, sv, f, credits, vpp, vppAnnualCents, vppUpfrontCents, vppPayer } = doc;
+  const monthlyCents = doc.monthlyCents;
   const lifetimeKwh = sv.years.reduce((n, y) => n + y.productionKwh, 0);
 
   return (
@@ -52,6 +54,23 @@ export function BackMatter({ doc }: { doc: Doc }) {
             estimates, not guarantees.
           </p>
 
+          {/* THE SWITCH AGAIN, because this is the other place its answer is
+              read at length. It is the same state as the one on the payment
+              chapter — every row of the table below, the year card, the payback
+              year and the cumulative totals are the model it selects — and a
+              reader who arrives here from the table of contents has not
+              necessarily seen the payment sheet at all. */}
+          {credits && (
+            <CreditSwitch
+              className="mt-6 max-w-md"
+              tone="card"
+              on={credits.on}
+              onChange={credits.set}
+              offMonthlyCents={credits.offMonthlyCents}
+              onMonthlyCents={credits.onMonthlyCents}
+            />
+          )}
+
           {/* Some households read the table as the proof and some read it as a
               wall of numbers; the scrubber is the same model, one year at a
               time. Screen only — on paper the table IS the scrubber. */}
@@ -60,7 +79,7 @@ export function BackMatter({ doc }: { doc: Doc }) {
               years={sv.years}
               paybackYear={sv.paybackYear}
               vpp={vpp}
-              monthlyCents={option.monthlyCents}
+              monthlyCents={monthlyCents}
             />
           </div>
 
@@ -134,11 +153,11 @@ export function BackMatter({ doc }: { doc: Doc }) {
                   {`Year 1 carries the whole price of the system, ${usd(sv.years[0].solarPaymentCents)}, because it is bought outright. Every year after it shows only what the power costs.`}
                 </p>
               )}
-            {option.monthlyCents != null &&
+            {monthlyCents != null &&
               sv.years[0] != null &&
               sv.years[0].solarPaymentCents > 0 && (
                 <p>
-                  {`You pay for the system in twelve payments of ${usd(option.monthlyCents, 2)} a year${
+                  {`You pay for the system in twelve payments of ${usd(monthlyCents, 2)} a year${
                     f.loanTermMonths != null && f.loanTermMonths > 0
                       ? `, for ${loanTermLabel(f.loanTermMonths)}`
                       : ""
@@ -155,14 +174,14 @@ export function BackMatter({ doc }: { doc: Doc }) {
                 30-year loan does not, so the total above is everything the
                 household pays inside the window the table draws — not
                 everything they pay. */}
-            {option.monthlyCents != null &&
+            {monthlyCents != null &&
               f.loanTermMonths != null &&
               f.loanTermMonths > sv.years.length * 12 && (
                 <p>
                   {`Your loan runs ${loanTermLabel(f.loanTermMonths)}, which is longer than the ${sv.years.length} years shown here. The ${
                     f.loanTermMonths - sv.years.length * 12
                   } payments after the last row — about ${usd(
-                    (f.loanTermMonths - sv.years.length * 12) * option.monthlyCents,
+                    (f.loanTermMonths - sv.years.length * 12) * monthlyCents,
                   )} — are not in the totals above.`}
                 </p>
               )}

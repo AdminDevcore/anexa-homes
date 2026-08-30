@@ -4,7 +4,7 @@ import * as React from "react";
 import { Lock } from "lucide-react";
 import type { SolarProposalSnapshot, ProposalPaymentOption } from "@/lib/solar-proposal";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
-import { postSolarUtilityCents } from "@/lib/solar-proposal";
+import { postSolarUtilityCents, optionMonthlyCents, optionSavings } from "@/lib/solar-proposal";
 import { coverPitch, lifetimeFigure, monthlyToday } from "@/lib/solar-proposal-pitch";
 import { PROPOSAL_NAV_PX } from "@/lib/proposal";
 import { ProposalChrome, type ChromeNavItem } from "../proposal-chrome";
@@ -270,7 +270,25 @@ function SolarPvProposalView({
   const [optionKey, setOptionKey] = React.useState(options[0].key);
   const option = options.find((o) => o.key === optionKey) ?? options[0];
   const f = option.financing;
-  const sv = option.savings;
+
+  /**
+   * WHETHER THE HOUSEHOLD'S TAX CREDITS ARE APPLIED, for the whole document.
+   *
+   * OFF by default, and that is the honest default rather than a shy one: a
+   * credit is claimed on somebody's own return, against their own liability,
+   * and a proposal that opens on the assumption it lands has quoted a payment
+   * nobody has yet earned. The rep turns it on when the conversation reaches
+   * it, and everything moves at once.
+   *
+   * Held HERE rather than on the sheet that shows the control, because two
+   * sheets show it and both have to say the same thing. Kept across a change of
+   * payment option deliberately — an option with nothing to claim reads `false`
+   * whatever this says, and switching back restores what the reader had.
+   */
+  const [creditsOn, setCreditsOn] = React.useState(false);
+  const creditsApplied = creditsOn && option.creditsApplied != null;
+  const sv = optionSavings(option, creditsApplied);
+  const monthlyCents = optionMonthlyCents(option, creditsApplied);
 
   const isPurchase = f.product === "cash" || f.product === "loan";
   /**
@@ -328,7 +346,10 @@ function SolarPvProposalView({
   const billCents = monthlyToday(s.energy.avgMonthlyBillCents, sv);
   const pitch = coverPitch({
     billCents,
-    option,
+    // The scenario's own payment, not the option's default one: the cover leads
+    // on the monthly where it beats today's bill, and whether it does is
+    // exactly what the credit switch decides.
+    option: { ...option, monthlyCents },
     savings: sv,
     priceCents: f.contractPriceCents,
   });
@@ -355,8 +376,8 @@ function SolarPvProposalView({
    */
   const vppPayer = vpp.length === 1 ? vpp[0].programme : "your battery programme";
   const afterAllCents =
-    option.monthlyCents != null
-      ? option.monthlyCents + option.postSolarMonthlyCents
+    monthlyCents != null
+      ? monthlyCents + option.postSolarMonthlyCents
       : option.postSolarMonthlyCents;
 
   /* ── the chapters that exist for THIS document ───────────────────────────
@@ -391,6 +412,24 @@ function SolarPvProposalView({
     option,
     f,
     sv,
+    monthlyCents,
+    /**
+     * The switch, or nothing at all.
+     *
+     * Null on every option with no credits to claim — and on every document
+     * generated before both scenarios were frozen, which carries no
+     * `creditsApplied` on any option. Those render exactly as they always did:
+     * one set of figures and no control offering a second.
+     */
+    credits: option.creditsApplied
+      ? {
+          on: creditsApplied,
+          set: setCreditsOn,
+          offMonthlyCents: option.monthlyCents,
+          onMonthlyCents: option.creditsApplied.monthlyCents,
+          reliefCents: f.creditLadder?.reliefCents ?? 0,
+        }
+      : null,
     isPurchase,
     adjustment,
     ladder,

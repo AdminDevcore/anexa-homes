@@ -5,8 +5,9 @@ import { Chapter, SpecList } from "../primitives";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { PaymentMenu } from "../../payment-menu";
 import { BatteryCredit } from "../../battery-credit";
+import { CreditSwitch } from "../../credit-switch";
 import { usd, pct, perKwh, loanTermLabel } from "../../format";
-import type { ProposalPaymentOption } from "@/lib/solar-proposal";
+import { optionMonthlyCents, type ProposalPaymentOption } from "@/lib/solar-proposal";
 import type { Doc } from "./doc";
 
 const PRODUCT_LABEL: Record<string, string> = {
@@ -39,12 +40,12 @@ export function ChapterPay({
   onSelect: (key: string) => void;
   showPaymentOptions: boolean;
 }) {
-  const { s, f, option, options, vpp } = doc;
+  const { s, f, option, options, vpp, credits } = doc;
   const utility = s.energy.utilityProvider ?? "your utility";
   const offerMenu = showPaymentOptions && options.length > 1;
 
-  /** The headline figure, and what it is honestly called. */
-  const monthly = option.monthlyCents;
+  /** The headline figure, under the scenario the switch is currently on. */
+  const monthly = doc.monthlyCents;
 
   return (
     <Chapter
@@ -62,29 +63,40 @@ export function ChapterPay({
       }
       rail={
         <div className="space-y-5">
-          {/* THE TWO PAYMENTS: what is billed until the credits are applied,
-              and what it becomes afterwards. Printing only the second would be
-              the most misleading thing on the document — a household that never
-              claims the credit is billed the first one for the whole term. */}
-          {f.netMonthlyPaymentCents != null && (
-            <div className="grid grid-cols-2 gap-2 break-inside-avoid">
-              <div className="rounded-xl border border-neutral-900/12 bg-white p-3">
-                <p className="text-[9px] font-semibold uppercase leading-tight tracking-[0.14em] text-neutral-400">
-                  Until the credits
-                </p>
-                <p className="mt-1 font-display text-base font-bold tabular-nums text-neutral-950">
-                  {usd(f.loanMonthlyPaymentCents ?? 0, 2)}
-                </p>
-              </div>
-              <div className="rounded-xl border border-[color:var(--proposal-accent)]/35 bg-[color:var(--proposal-accent)]/10 p-3">
-                <p className="text-[9px] font-semibold uppercase leading-tight tracking-[0.14em] text-neutral-500">
-                  Once they are
-                </p>
-                <p className="mt-1 font-display text-base font-bold tabular-nums text-neutral-950">
-                  {usd(f.netMonthlyPaymentCents, 2)}
-                </p>
-              </div>
-            </div>
+          {/* THE TWO PAYMENTS, AS A CONTROL: what is billed while the credits
+              go unclaimed, and what it becomes once they are applied. These were
+              two static tiles until 2026-08-30 and the trouble with that was
+              never the figures — it was that nothing said which of the two the
+              rest of the document had been written in. Now the lit one IS the
+              rest of the document. Printing only the lower figure would be the
+              most misleading thing here, which is why both faces stay on the
+              page and on the paper whichever is chosen. */}
+          {credits && (
+            <CreditSwitch
+              className="break-inside-avoid"
+              on={credits.on}
+              onChange={credits.set}
+              offMonthlyCents={credits.offMonthlyCents}
+              onMonthlyCents={credits.onMonthlyCents}
+            />
+          )}
+
+          {/* WHEN THE LOWER PAYMENT ACTUALLY STARTS. The switch shows a whole
+              term at one figure or the other, which is the comparison a
+              household can hold in their head; this is the sentence that says
+              the credit has to be claimed and applied first, and that the
+              months before it are billed at the higher one. */}
+          {credits?.on && credits.offMonthlyCents != null && (
+            <p className="break-inside-avoid rounded-xl border border-amber-500/40 bg-amber-50 p-3.5 text-[0.8rem] leading-relaxed text-amber-900">
+              <strong className="font-semibold">Read this one twice:</strong> these figures assume
+              your credits are claimed and applied to the loan. Until they are, the payment is{" "}
+              <strong className="font-semibold tabular-nums">
+                {usd(credits.offMonthlyCents, 2)}
+              </strong>{" "}
+              a month — and if they are never claimed, it stays there for the rest of the term.
+              Whether you receive the federal credit, and how much, depends on your own tax
+              situation.
+            </p>
           )}
 
           {/* The paydown warning. It is the single most consequential sentence
@@ -115,7 +127,11 @@ export function ChapterPay({
 
           {options.length > 1 && showPaymentOptions && (
             <div className="break-inside-avoid">
-              <AlternativesStrip options={options} selectedKey={option.key} />
+              <AlternativesStrip
+                options={options}
+                selectedKey={option.key}
+                creditsApplied={!!credits?.on}
+              />
               <p className="mt-3 text-[0.8rem] leading-relaxed text-neutral-500">
                 Every option is priced for this system and this address. They differ in what the
                 money costs, not in what gets installed — the panels, the inverter and the
@@ -147,6 +163,14 @@ export function ChapterPay({
               <span className="ml-1 font-sans text-lg font-medium text-neutral-400">/mo</span>
             )}
           </p>
+          {/* WHICH OF THE TWO FUTURES THIS FIGURE IS. Directly under the number
+              rather than only beside the switch: a reader who scrolls to the
+              headline and no further must still know what it assumes. */}
+          {credits && (
+            <p className="mt-2 text-[0.82rem] font-medium text-neutral-500">
+              {credits.on ? "with your tax credits applied" : "before your tax credits"}
+            </p>
+          )}
         </div>
         <div>
           {/* An offset under 100% means grid power is still bought every month,
@@ -247,7 +271,7 @@ export function ChapterPay({
         <div className="mt-5">
           <BatteryCredit
             vpp={vpp}
-            monthlyCents={option.monthlyCents}
+            monthlyCents={doc.monthlyCents}
             lender={f.lender}
             /* This chapter is PAPER. The card was written for the dark cost
                sheet and printed pale grey on cream when it moved here. */
@@ -267,6 +291,7 @@ export function ChapterPay({
             selectedKey={option.key}
             onSelect={onSelect}
             showMenu={offerMenu}
+            creditsApplied={!!credits?.on}
           />
         </div>
       )}
@@ -285,9 +310,16 @@ export function ChapterPay({
 function AlternativesStrip({
   options,
   selectedKey,
+  creditsApplied,
 }: {
   options: ProposalPaymentOption[];
   selectedKey: string;
+  /**
+   * Read on EVERY row, not only the quoted one: a strip that switched the
+   * chosen option's payment and left the alternatives at their unswitched
+   * figures would be inviting a comparison between two different scenarios.
+   */
+  creditsApplied: boolean;
 }) {
   return (
     <div className="break-inside-avoid">
@@ -295,23 +327,29 @@ function AlternativesStrip({
         Every way you can pay
       </p>
       <dl className="mt-2.5 divide-y divide-neutral-900/8 border-y border-neutral-900/12">
-        {options.map((o) => (
-          <div key={o.key} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2.5">
-            <dt className="text-[0.8rem] text-neutral-600">
-              {o.label}
-              {o.key === selectedKey && (
-                <span className="ml-2 rounded-full bg-[var(--proposal-accent)]/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--proposal-accent)]">
-                  quoted
-                </span>
-              )}
-            </dt>
-            <dd className="text-right text-[0.85rem] font-medium tabular-nums text-neutral-900">
-              {o.monthlyCents != null
-                ? `${usd(o.monthlyCents, 0)}/mo`
-                : usd(o.financing.contractPriceCents ?? 0)}
-            </dd>
-          </div>
-        ))}
+        {options.map((o) => {
+          const monthly = optionMonthlyCents(o, creditsApplied);
+          return (
+            <div
+              key={o.key}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2.5"
+            >
+              <dt className="text-[0.8rem] text-neutral-600">
+                {o.label}
+                {o.key === selectedKey && (
+                  <span className="ml-2 rounded-full bg-[var(--proposal-accent)]/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--proposal-accent)]">
+                    quoted
+                  </span>
+                )}
+              </dt>
+              <dd className="text-right text-[0.85rem] font-medium tabular-nums text-neutral-900">
+                {monthly != null
+                  ? `${usd(monthly, 0)}/mo`
+                  : usd(o.financing.contractPriceCents ?? 0)}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     </div>
   );

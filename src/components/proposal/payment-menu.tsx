@@ -4,7 +4,7 @@ import * as React from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LenderMark } from "@/components/ui/lender-mark";
-import type { ProposalPaymentOption } from "@/lib/solar-proposal";
+import { optionMonthlyCents, type ProposalPaymentOption } from "@/lib/solar-proposal";
 import { usd } from "./format";
 
 /**
@@ -27,15 +27,23 @@ export function PaymentMenu({
   onSelect,
   /** Hidden entirely when the rep has turned the menu off, or there is one option. */
   showMenu,
+  /**
+   * Whether the document's tax-credit switch is on. Read for EVERY row, so the
+   * menu a household compares is priced under one scenario rather than mixing
+   * the chosen option's switched figure with the others' unswitched ones.
+   */
+  creditsApplied = false,
 }: {
   options: ProposalPaymentOption[];
   selectedKey: string;
   onSelect: (key: string) => void;
   showMenu: boolean;
+  creditsApplied?: boolean;
 }) {
   const selected = options.find((o) => o.key === selectedKey) ?? options[0];
   const f = selected.financing;
   const offerMenu = showMenu && options.length > 1;
+  const monthly = optionMonthlyCents(selected, creditsApplied);
 
   return (
     <div className="mt-8 overflow-hidden rounded-2xl bg-white text-neutral-900 shadow-xl ring-1 ring-black/5 print:shadow-none print:ring-neutral-300">
@@ -53,7 +61,12 @@ export function PaymentMenu({
         {/* ── What you picked ─────────────────────────────────────────── */}
         <div className="bg-white p-6">
           {offerMenu ? (
-            <OptionPicker options={options} selectedKey={selected.key} onSelect={onSelect} />
+            <OptionPicker
+              options={options}
+              selectedKey={selected.key}
+              onSelect={onSelect}
+              creditsApplied={creditsApplied}
+            />
           ) : (
             <>
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-400">
@@ -75,12 +88,12 @@ export function PaymentMenu({
 
         {/* ── What it costs ───────────────────────────────────────────── */}
         <div className="flex flex-col justify-center gap-3 bg-white p-6">
-          {selected.monthlyCents != null ? (
+          {monthly != null ? (
             <Line
               k={termLabel(selected)}
               v={
                 <>
-                  {usd(selected.monthlyCents, 0)}
+                  {usd(monthly, 0)}
                   <span className="text-base font-medium text-neutral-400">/mo</span>
                 </>
               }
@@ -94,7 +107,7 @@ export function PaymentMenu({
             />
           )}
 
-          {f.contractPriceCents != null && selected.monthlyCents != null && (
+          {f.contractPriceCents != null && monthly != null && (
             <Line k="Total system price" v={usd(f.contractPriceCents)} />
           )}
 
@@ -152,10 +165,12 @@ function OptionPicker({
   options,
   selectedKey,
   onSelect,
+  creditsApplied,
 }: {
   options: ProposalPaymentOption[];
   selectedKey: string;
   onSelect: (key: string) => void;
+  creditsApplied: boolean;
 }) {
   const id = React.useId();
   return (
@@ -176,7 +191,9 @@ function OptionPicker({
           {options.map((o) => (
             <option key={o.key} value={o.key}>
               {o.label}
-              {o.monthlyCents != null ? ` — ${usd(o.monthlyCents, 0)}/mo` : ""}
+              {optionMonthlyCents(o, creditsApplied) != null
+                ? ` — ${usd(optionMonthlyCents(o, creditsApplied)!, 0)}/mo`
+                : ""}
             </option>
           ))}
         </select>

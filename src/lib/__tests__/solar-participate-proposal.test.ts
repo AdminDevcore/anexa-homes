@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildProposalSnapshot, type SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { buildProposalSnapshot } from "@/lib/solar-proposal";
 import { lifetimeFigure, lifetimeNote } from "@/lib/solar-proposal-pitch";
 import { DISCLOSURE_TEMPLATE_SUGGESTION } from "@/lib/solar-contract-adjustment";
 import type { SolarAssumptions } from "@/lib/solar-money";
@@ -178,18 +178,40 @@ describe("the payment and the savings", () => {
     expect(s.financing.netMonthlyPaymentCents).toBe(13_444);
   });
 
-  it("steps the years down at the paydown month rather than pocketing a lump", () => {
+  it("models the horizon twice — the credits claimed, and never claimed", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
-    const years = s.savings.years;
+    const off = s.savings.years;
+    const on = s.options![0].creditsApplied!.savings.years;
 
-    // Twelve of the higher payment, then the lower one for the rest — which is
-    // what a household on a credit-funded loan actually pays.
-    expect(years[0].solarPaymentCents).toBe(32_889 * 12);
-    expect(years[1].solarPaymentCents).toBe(13_444 * 12);
-    expect(years[24].solarPaymentCents).toBe(13_444 * 12);
-    // And no lump: crediting the $70,000 in year one AND stepping the payment
-    // down would hand the household the same money twice.
+    // OFF is the default and the pessimistic reading: the household never
+    // claims the credit and pays the higher figure for the whole term.
+    expect(off[0].solarPaymentCents).toBe(32_889 * 12);
+    expect(off[24].solarPaymentCents).toBe(32_889 * 12);
+
+    // ON is the same deal with the credits claimed and applied to the loan.
+    expect(on[0].solarPaymentCents).toBe(13_444 * 12);
+    expect(on[24].solarPaymentCents).toBe(13_444 * 12);
+
+    // And no lump on either: crediting the $70,000 in year one AND lowering the
+    // payment would hand the household the same money twice.
     expect(s.savings.creditReliefTotalCents).toBe(0);
+    expect(s.options![0].creditsApplied!.savings.creditReliefTotalCents).toBe(0);
+  });
+
+  it("quotes the switch's two faces from the same terms", () => {
+    const s = build({ contractAdjustment: PARTICIPATE });
+    const o = s.options![0];
+    expect(o.monthlyCents).toBe(32_889);
+    expect(o.creditsApplied!.monthlyCents).toBe(13_444);
+    expect(o.creditsApplied!.monthlyCents).toBe(s.financing.netMonthlyPaymentCents);
+  });
+
+  it("offers no switch on a deal with no credits to claim", () => {
+    // Every deal without a partner programme, which is almost all of them. The
+    // document shows one set of figures and no control offering a second.
+    const s = build();
+    expect(s.financing.creditLadder).toBeUndefined();
+    expect(s.options![0].creditsApplied).toBeUndefined();
   });
 
   it("never bills the contract value as a year-one cost", () => {
@@ -228,7 +250,7 @@ describe("what the document says about ownership", () => {
 describe("what the snapshot freezes", () => {
   it("records the version of the shape and of the arithmetic", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
-    expect(s.schemaVersion).toBe(7);
+    expect(s.schemaVersion).toBe(8);
     expect(s.calculationVersion).toBe(3);
   });
 
@@ -328,13 +350,64 @@ describe("the payment menu", () => {
 
     const options = s.options ?? [];
     const quoted = options.find((o) => o.quoted)!;
-    const cash = options.find((o) => o.key === "cash")!;
     const goodleap = options.find((o) => o.key === "loan:goodleap")!;
 
     expect(quoted.financing.lenderAdjustment?.lenderContractValueCents).toBe(118_400_00);
     // A household switching option must not carry Participate's contract value
     // onto somebody else's paper.
-    expect(cash.financing.lenderAdjustment).toBeUndefined();
     expect(goodleap.financing.lenderAdjustment).toBeUndefined();
+  });
+
+  it("drops the cash row entirely on a deal quoted against a contract value", () => {
+    // The other rows are compared by their MONTHLY, which is like for like.
+    // Cash is the one row that shows a raw price, and beside a contract written
+    // at $118,400 the company's own $26,400 net price reads as a $92,000
+    // mark-up for borrowing — which is not what either figure means.
+    const s = build({
+      contractAdjustment: PARTICIPATE,
+      alternatives: [
+        {
+          key: "cash",
+          label: "Pay in full",
+          lender: null,
+          finance: {
+            product: "cash",
+            grossPpwCents: 193,
+            dealerFeePct: 0,
+            adderTotalCents: 0,
+            rateMillsPerKwh: null,
+            monthlyPaymentCents: null,
+            escalatorPct: null,
+            termYears: null,
+            aprPct: null,
+          },
+        },
+      ],
+    });
+    expect((s.options ?? []).some((o) => o.key === "cash")).toBe(false);
+  });
+
+  it("keeps the cash row on every deal without one", () => {
+    const s = build({
+      alternatives: [
+        {
+          key: "cash",
+          label: "Pay in full",
+          lender: null,
+          finance: {
+            product: "cash",
+            grossPpwCents: 193,
+            dealerFeePct: 0,
+            adderTotalCents: 0,
+            rateMillsPerKwh: null,
+            monthlyPaymentCents: null,
+            escalatorPct: null,
+            termYears: null,
+            aprPct: null,
+          },
+        },
+      ],
+    });
+    expect((s.options ?? []).some((o) => o.key === "cash")).toBe(true);
   });
 });

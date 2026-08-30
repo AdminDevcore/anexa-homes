@@ -30,7 +30,35 @@ export type Doc = {
   /** The one currently under the reader's eyes. */
   option: ProposalPaymentOption;
   f: SnapshotFinancing;
+  /**
+   * The horizon under the scenario currently on screen — see `credits`. Every
+   * sheet reads this and never `option.savings`, so one switch moves the whole
+   * document rather than the sheet that happens to hold the control.
+   */
   sv: SavingsModel;
+  /**
+   * What this option asks for each month under the same scenario. Null on cash,
+   * which has no monthly at all.
+   */
+  monthlyCents: number | null;
+  /**
+   * THE TAX-CREDIT SWITCH, or null on a deal with no credits to claim.
+   *
+   * Two readings of one deal, both frozen at generation: `on` false is the
+   * household that never claims the credit and pays the higher figure for the
+   * whole term, `on` true is the household that claims it and has it applied to
+   * the loan. Off is the default because it is the one a proposal has to be
+   * able to survive.
+   */
+  credits: {
+    on: boolean;
+    set: (on: boolean) => void;
+    /** The payment each way, for the control's own two faces. */
+    offMonthlyCents: number | null;
+    onMonthlyCents: number | null;
+    /** Everything the ladder takes off the contract, for the caption. */
+    reliefCents: number;
+  } | null;
   isPurchase: boolean;
   /** The partner's contract reconciliation, where the deal carries one. */
   adjustment: SnapshotContractAdjustment | null;

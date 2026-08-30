@@ -295,40 +295,53 @@ describe("the document quotes the contract the household signs", () => {
     expect(doc).toContain("adjustment.lenderContractValueCents");
   });
 
-  it("steps the payment down rather than pocketing the credits", () => {
+  it("lowers the payment rather than pocketing the credits in year one", () => {
     // A LOAN does not receive $70,000 in year one — it puts it against the
     // principal and re-amortises. Modelling it as a lump would land the whole
     // relief inside a 25-year window that only holds 300 of the loan's 360
     // payments, and flatter the savings chapter by roughly $11,000.
-    const s = snapshot.savings;
-    expect(s.creditReliefTotalCents).toBe(0);
+    const applied = snapshot.options![0].creditsApplied!;
+    expect(applied.savings.creditReliefTotalCents).toBe(0);
 
     const f = snapshot.financing;
     expect(f.loanMonthlyPaymentCents).toBe(32_889);
     expect(f.netMonthlyPaymentCents).toBe(13_444);
 
-    // Year one carries twelve of the higher payment; year two, twelve of the
-    // lower. That step IS the credits being applied.
+    // The relief is inside the payment, every year of it.
+    expect(applied.savings.years[0].solarPaymentCents).toBe(13_444 * 12);
+    expect(applied.savings.years[1].solarPaymentCents).toBe(13_444 * 12);
+  });
+
+  it("bills the higher payment for the whole term when the credits go unclaimed", () => {
+    // THE DEFAULT MODEL, and deliberately the pessimistic one: a household that
+    // never files for the credit pays $328.89 for all 360 months, and that is
+    // the reading the document opens on.
+    const s = snapshot.savings;
+    expect(s.creditReliefTotalCents).toBe(0);
     expect(s.years[0].solarPaymentCents).toBe(32_889 * 12);
-    expect(s.years[1].solarPaymentCents).toBe(13_444 * 12);
+    expect(s.years[29].solarPaymentCents).toBe(32_889 * 12);
   });
 
   it("runs the years out to the end of the loan, and bills every payment once", () => {
     // The horizon FOLLOWS THE TERM as of 2026-08-29. This programme is 360
     // months, so the chapter is thirty years and the solar column carries all
-    // 360 payments — twelve at the pre-credit figure, then the rest at the one
-    // the credits leave the household on.
+    // 360 payments.
     //
     // It ran to twenty-five before, which billed 300 of the 360 and called the
     // remaining five years' payments saved. The number below is larger than the
     // old one BY DESIGN: those payments were always real, the page just stopped
     // before them.
-    const s = snapshot.savings;
-    expect(s.years.length).toBe(30);
-    expect(s.solarPaidCents).toBe(32_889 * 12 + 13_444 * 348);
-    // Nothing double-billed and nothing dropped: 360 months, exactly.
-    expect(12 + 348).toBe(360);
-    // The last year still carries a payment — the whole point of extending it.
-    expect(s.years[29].solarPaymentCents).toBe(13_444 * 12);
+    //
+    // Checked on BOTH scenarios: the switch changes what a payment is, never
+    // how many there are, and a model that lost sixty of them on one side of it
+    // would quote a household a term nobody wrote.
+    for (const s of [snapshot.savings, snapshot.options![0].creditsApplied!.savings]) {
+      expect(s.years.length).toBe(30);
+      // Nothing double-billed and nothing dropped: 360 months, exactly.
+      expect(s.years.reduce((n, y) => n + y.solarPaymentCents, 0)).toBe(s.solarPaidCents);
+      expect(s.years[29].solarPaymentCents).toBeGreaterThan(0);
+    }
+    expect(snapshot.savings.solarPaidCents).toBe(32_889 * 360);
+    expect(snapshot.options![0].creditsApplied!.savings.solarPaidCents).toBe(13_444 * 360);
   });
 });
