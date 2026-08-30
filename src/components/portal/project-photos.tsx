@@ -45,9 +45,19 @@ export function ProjectPhotos({
   projectId,
   checklists,
   extraFiles = [],
+  compact = false,
 }: {
   projectId: string;
   checklists: Checklist[];
+  /**
+   * The tighter reading of the same folder: required photos as a bar rather
+   * than a sentence, and an attachment list that scrolls inside itself.
+   *
+   * Opt-in so that turning down the noise on solar's Installation slide does
+   * not silently restyle roofing's Field & Production tab or the document
+   * folders, which render this same component.
+   */
+  compact?: boolean;
   /**
    * Photos sitting in this folder that belong to no slot — bulk uploads taken
    * before the job reached production and grew a checklist. The checklist above
@@ -79,11 +89,36 @@ export function ProjectPhotos({
       </TabsList>
       {checklists.map((c) => (
         <TabsContent key={c.templateId} value={c.kind} className="space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             {c.requiredTotal > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Required photos: {c.requiredDone}/{c.requiredTotal} complete
-              </p>
+              compact ? (
+                // A count of required photos is a progress reading, and a
+                // progress reading is read faster as a bar than as a sentence.
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="h-1.5 w-28 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-[width]",
+                        c.requiredDone >= c.requiredTotal ? "bg-emerald-500" : "bg-solar"
+                      )}
+                      style={{
+                        width: `${Math.round((c.requiredDone / c.requiredTotal) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium tabular-nums text-foreground">
+                      {c.requiredDone}/{c.requiredTotal}
+                    </span>{" "}
+                    required photos
+                    {c.requiredDone >= c.requiredTotal && " — all in"}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Required photos: {c.requiredDone}/{c.requiredTotal} complete
+                </p>
+              )
             ) : (
               <span />
             )}
@@ -105,6 +140,7 @@ export function ProjectPhotos({
               folder opens on the checklist and looks unchanged. Taking the
               photos back out is half of what this folder is for. */}
           <PhotoAttachments
+            compact={compact}
             groups={[
               ...c.items.map((slot) => ({ label: slot.label, files: slot.photos })),
               ...(checklists.length === 1 && extraFiles.length > 0

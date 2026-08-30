@@ -22,7 +22,21 @@ export type AttachmentGroup = { label: string; files: AttachmentFile[] };
  * checklist photo, so "Roof from the back — showing the opposite roof plane.jpg"
  * is what lands in the downloads folder, not "IMG_4821.jpg".
  */
-export function PhotoAttachments({ groups }: { groups: AttachmentGroup[] }) {
+export function PhotoAttachments({
+  groups,
+  compact = false,
+}: {
+  groups: AttachmentGroup[];
+  /**
+   * Bounded and scrolled inside itself, rather than however tall the job is.
+   *
+   * Opt-in: this list also renders in the document folders, where it IS the
+   * page and running to its natural height is right. On the deal's Installation
+   * slide it is one block among five, and fifteen photos of a roof pushed the
+   * checklist — the thing the slide is for — off the bottom of the screen.
+   */
+  compact?: boolean;
+}) {
   const withFiles = groups.filter((g) => g.files.length > 0);
   const total = withFiles.reduce((n, g) => n + g.files.length, 0);
   if (total === 0) return null;
@@ -42,10 +56,16 @@ export function PhotoAttachments({ groups }: { groups: AttachmentGroup[] }) {
         </p>
       </div>
 
-      <ul className="divide-y divide-border/70">
+      <ul
+        className={
+          compact
+            ? "max-h-72 divide-y divide-border/70 overflow-y-auto pr-1"
+            : "divide-y divide-border/70"
+        }
+      >
         {withFiles.map((group) =>
           group.files.map((file) => (
-            <li key={file.id} className="flex items-center gap-3 py-2">
+            <li key={file.id} className={compact ? "flex items-center gap-2.5 py-1.5" : "flex items-center gap-3 py-2"}>
               <a
                 href={`/portal/files/${file.id}`}
                 target="_blank"
@@ -57,7 +77,11 @@ export function PhotoAttachments({ groups }: { groups: AttachmentGroup[] }) {
                 <img
                   src={`/portal/files/${file.id}`}
                   alt=""
-                  className="size-10 rounded-md border border-border object-cover"
+                  className={
+                    compact
+                      ? "size-9 rounded-md border border-border object-cover"
+                      : "size-10 rounded-md border border-border object-cover"
+                  }
                   loading="lazy"
                   decoding="async"
                 />

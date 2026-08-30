@@ -6,9 +6,8 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ListTodo,
-  CalendarClock,
-  CalendarCheck,
   Camera,
+  Hammer,
   Users,
   ClipboardCheck,
   DollarSign,
@@ -69,7 +68,6 @@ import { ALL_DROPBOX_KEYS } from "@/lib/deal-folders";
 import { LeadTasks } from "@/components/portal/lead-tasks";
 import { ProjectPhotos } from "@/components/portal/project-photos";
 import { StartProductionButton } from "@/components/portal/start-production-button";
-import { ProjectSchedule } from "@/components/portal/project-schedule";
 import { DealActionsPanel } from "@/components/portal/deal-actions-panel";
 import { ClaimInfoCard } from "@/components/portal/claim-info-card";
 import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
@@ -95,7 +93,7 @@ import { EstimatePanel } from "@/components/portal/estimate-panel";
 // (InstallCrew); roofing keeps the crew picker it has today rather than being
 // changed by a solar request.
 import { QcChecklistEditor, CrewAssigner } from "@/components/portal/project-workflows";
-import { VisitCrew } from "@/components/portal/install-crew";
+import { VisitCard } from "@/components/portal/visit-schedule";
 import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
 import { utcToZonedWallClock } from "@/lib/tz";
@@ -1316,57 +1314,69 @@ export default async function LeadDetailPage({
               {stageTimeline && <DealStageTimeline timeline={stageTimeline} />}
             </div>
 
-            <div data-deal-slide="install">
+            <div data-deal-slide="install" className="space-y-5">
+                {/* The job's own line, at the top of the slide it belongs to.
+                    It used to sit loose between the dates and the photos, which
+                    is where a caption goes, not the identifier everyone quotes
+                    down the phone. */}
+                {project && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                    {/* The project manager reads here, beside the job it
+                        manages, rather than as a fifth summary card. */}
+                    <span className="flex min-w-0 items-center gap-2 text-sm">
+                      <Hammer className="size-4 shrink-0 text-solar" />
+                      <span className="font-medium">Job {project.projectNumber}</span>
+                      {project.manager && (
+                        <span className="truncate text-muted-foreground">
+                          · PM {project.manager.firstName} {project.manager.lastName}
+                        </span>
+                      )}
+                    </span>
+                    {/* No production-status control. `Project.status` was a
+                        second, hand-maintained status that duplicated the
+                        pipeline — which already has In Production, QC
+                        Inspection, Paid and Cancelled as stages. The deal's
+                        stage is the only status now. */}
+                    {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} showInspection={isSolarDeal} />}
+                  </div>
+                )}
+
                 {/* The two scheduled dates lead this slide and are rendered
                     whether or not a job exists yet — picking either CREATES the
                     job. Gating them on an existing job is what previously hid
                     the install date on 13 of 16 real deals, and they are exactly
                     what you agree with a homeowner (and the AHJ) before the job
                     formally opens. Both show on the calendar alongside the
-                    appointment. Stacked rather than side by side: the
-                    inspection is read as a consequence of the install date
-                    above it. */}
-                <div className="mb-6 space-y-4">
-                  <Section icon={CalendarClock} label="Install date" tone="solar">
-                    <div className="space-y-3">
-                      <ProjectSchedule
-                        bare
-                        field="install"
-                        leadId={lead.id}
-                        projectId={project?.id ?? null}
-                        value={project?.installDate ? project.installDate.toISOString() : null}
-                        canManage={canManageProd}
-                      />
-                      <VisitCrew
-                        label="Install crew"
-                        kind="install"
-                        projectId={project?.id ?? null}
-                        team={installTeam}
-                        assignees={installCrew}
-                        canEdit={canAssignCrew}
-                      />
-                    </div>
-                  </Section>
-                  <Section icon={CalendarCheck} label="Inspection date" tone="solar">
-                    <div className="space-y-3">
-                      <ProjectSchedule
-                        bare
-                        field="inspection"
-                        leadId={lead.id}
-                        projectId={project?.id ?? null}
-                        value={project?.inspectionAt ? project.inspectionAt.toISOString() : null}
-                        canManage={canManageProd}
-                      />
-                      <VisitCrew
-                        label="Inspection crew"
-                        kind="inspection"
-                        projectId={project?.id ?? null}
-                        team={installTeam}
-                        assignees={inspectionCrew}
-                        canEdit={canAssignCrew}
-                      />
-                    </div>
-                  </Section>
+                    appointment.
+
+                    Two cards across, not two stacked sections. The pair is the
+                    same three fields twice, and stacked — each date boxed, each
+                    crew boxed inside that, each person boxed inside THAT — they
+                    ran the best part of a screen before the job itself came
+                    into view. The inspection still reads as following the
+                    install: it now says so, in the line under its date. */}
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <VisitCard
+                    kind="install"
+                    leadId={lead.id}
+                    projectId={project?.id ?? null}
+                    date={project?.installDate ? project.installDate.toISOString() : null}
+                    canManage={canManageProd}
+                    team={installTeam}
+                    assignees={installCrew}
+                    canAssign={canAssignCrew}
+                  />
+                  <VisitCard
+                    kind="inspection"
+                    leadId={lead.id}
+                    projectId={project?.id ?? null}
+                    date={project?.inspectionAt ? project.inspectionAt.toISOString() : null}
+                    installDate={project?.installDate ? project.installDate.toISOString() : null}
+                    canManage={canManageProd}
+                    team={installTeam}
+                    assignees={inspectionCrew}
+                    canAssign={canAssignCrew}
+                  />
                 </div>
 
                 {!project ? (
@@ -1376,31 +1386,15 @@ export default async function LeadDetailPage({
                     <p className="text-sm text-muted-foreground">This deal isn&rsquo;t in production yet.</p>
                   )
                 ) : (
-                  <div className="space-y-6">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      {/* The project manager reads here, beside the job it
-                          manages, rather than as a fifth summary card. */}
-                      <span className="text-sm text-muted-foreground">
-                        Job {project.projectNumber}
-                        {project.manager &&
-                          ` · PM ${project.manager.firstName} ${project.manager.lastName}`}
-                      </span>
-                      {/* No production-status control. `Project.status` was a
-                          second, hand-maintained status that duplicated the
-                          pipeline — which already has In Production, QC
-                          Inspection, Paid and Cancelled as stages. The deal's
-                          stage is the only status now. */}
-                      {editableJob && isAdmin(user.role) && <EditJobDialog job={editableJob} showInspection={isSolarDeal} />}
-                    </div>
-
+                  <>
                     <Section icon={Camera} label="Site & Install Photos" tone="solar">
-                      <ProjectPhotos projectId={project.id} checklists={photoChecklists} />
+                      <ProjectPhotos projectId={project.id} checklists={photoChecklists} compact />
                     </Section>
 
                     <Section icon={ClipboardCheck} label="QC Checklist" tone="solar">
                       <QcChecklistEditor projectId={project.id} items={qcItems} />
                     </Section>
-                  </div>
+                  </>
                 )}
             </div>
 

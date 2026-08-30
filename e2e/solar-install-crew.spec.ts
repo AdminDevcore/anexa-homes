@@ -154,12 +154,12 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
    *
    * Its column already existed and the solar calendar already read it — there
    * was simply nowhere in the app to set one, so it was permanently null. This
-   * covers the whole path: the field is under the install date on the slide it
-   * belongs to, it writes its OWN column (a shared action setting two dates is
-   * how the second one ends up in the first one's column), and both dates come
-   * out on the calendar next to the appointment.
+   * covers the whole path: the field is on the slide it belongs to, it writes
+   * its OWN column (a shared action setting two dates is how the second one
+   * ends up in the first one's column), and both dates come out on the calendar
+   * next to the appointment.
    */
-  test("the inspection date sits under the install date, and both reach the calendar", async ({ page }) => {
+  test("the inspection date reads as following the install, and both reach the calendar", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     const { name } = await newSolarDeal(page);
     await openInstall(page);
@@ -168,12 +168,6 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
     const inspection = page.getByLabel("Inspection date");
     await expect(install).toBeVisible({ timeout: 15000 });
     await expect(inspection).toBeVisible();
-
-    // Under, not beside. Read off geometry rather than DOM order, which would
-    // still pass with the two sitting side by side in a two-column grid.
-    const above = (await install.boundingBox())!;
-    const below = (await inspection.boundingBox())!;
-    expect(below.y).toBeGreaterThan(above.y + above.height - 1);
 
     // NEXT month, not this one: a day cell shows only its first three events,
     // and the seed puts its appointments around today. One month out the two
@@ -198,6 +192,11 @@ test.describe(FLAG_ON ? "solar install crew" : "solar install crew (flag off —
     await openInstall(page);
     await expect(page.getByLabel("Install date")).toHaveValue(on(10));
     await expect(page.getByLabel("Inspection date")).toHaveValue(on(20));
+
+    // The two cards sit side by side now, so the inspection says in words what
+    // being underneath used to imply — and this is the assertion that matters,
+    // because it is also what catches an inspection booked BEFORE its install.
+    await expect(page.getByText("10 days after the install")).toBeVisible();
 
     await page.goto("/portal/calendar");
     await page.getByLabel("Next month").click();

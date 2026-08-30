@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Hammer, ClipboardCheck, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { setProjectScheduleAction, setLeadScheduleDateAction } from "@/server/modules/costs/actions";
 
 const toInput = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
@@ -17,6 +18,25 @@ const FIELD_LABEL: Record<ScheduleField, string> = {
 };
 
 /**
+ * Spelt out rather than formatted through `toLocaleDateString`.
+ *
+ * This renders on the server AND on the client, and the two do not necessarily
+ * agree on a locale or a time zone — which is a hydration mismatch on a string
+ * nobody would think to blame. A lookup off the UTC parts of a `YYYY-MM-DD` is
+ * the same eleven characters in both places, always.
+ */
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Thursday, Aug 27" — the half of a date the input itself cannot show. */
+function spell(yyyymmdd: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(yyyymmdd)) return null;
+  const d = new Date(`${yyyymmdd}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${WEEKDAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+/**
  * The date input itself. MODULE SCOPE on purpose: defined inside the component
  * it is a new type on every render, which remounts the input — and with
  * `defaultValue` that silently discards a half-typed date. `react-hooks/
@@ -27,25 +47,49 @@ function DateInput({
   disabled,
   busy,
   label,
+  compact,
   onPick,
 }: {
   value: string | null;
   disabled: boolean;
   busy: boolean;
   label: string;
+  /** Sized to a date instead of stretched across the card. */
+  compact?: boolean;
   onPick: (date: string) => void;
 }) {
+  // Derived during render, never synced in an effect: the input stays
+  // uncontrolled (so a half-typed date survives a re-render) while the spelt-out
+  // day beside it follows what was actually picked, before the server round
+  // trip lands.
+  const [picked, setPicked] = React.useState<string | null>(null);
+  const shown = picked ?? toInput(value);
+  const spelt = shown ? spell(shown) : null;
+
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2.5">
       <input
         type="date"
         aria-label={label}
         defaultValue={toInput(value)}
         disabled={disabled}
-        onChange={(e) => onPick(e.target.value)}
-        className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+        onChange={(e) => {
+          setPicked(e.target.value);
+          onPick(e.target.value);
+        }}
+        className={cn(
+          "h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none",
+          "focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+          // A date is nine characters wide. Stretched across the card it reads
+          // as an empty text field somebody forgot to fill in.
+          compact ? "w-[9.5rem] shrink-0" : "flex-1"
+        )}
       />
-      {busy && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+      {busy ? (
+        <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+      ) : (
+        spelt && <span className="truncate text-sm text-muted-foreground">{spelt}</span>
+      )}
     </div>
   );
 }
@@ -111,6 +155,7 @@ export function ProjectSchedule({
       label={label}
       disabled={!canManage || busy}
       busy={busy}
+      compact={bare}
       onPick={save}
     />
   );
