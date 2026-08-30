@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   solarProposalState,
-  proposalIsLocked,
+  mayInheritLiveLink,
   SOLAR_PROPOSAL_STATE_CTA,
   type SolarProposalStateInput,
 } from "@/lib/solar-proposal-state";
@@ -94,11 +94,23 @@ describe("the card's action follows the state", () => {
   });
 });
 
-describe("an accepted proposal is frozen", () => {
-  it("locks only on acceptance", () => {
-    expect(proposalIsLocked("accepted")).toBe(true);
-    expect(proposalIsLocked("generated")).toBe(false);
-    expect(proposalIsLocked("draft")).toBe(false);
-    expect(proposalIsLocked("sent")).toBe(false);
+describe("a signature keeps the customer's link, not the whole builder", () => {
+  it("lets a live re-price carry the link off an unsigned version", () => {
+    expect(mayInheritLiveLink({ publicToken: "tok", signedAt: null })).toBe(true);
+  });
+
+  it("refuses to move the link off a version the customer signed", () => {
+    // The whole point of the rule: the address a homeowner put their name at
+    // must not start resolving to an unsigned newer draft.
+    expect(mayInheritLiveLink({ publicToken: "tok", signedAt: new Date() })).toBe(false);
+    expect(mayInheritLiveLink({ publicToken: "tok", signedAt: "2026-08-27T12:00:00Z" })).toBe(false);
+  });
+
+  it("has nothing to carry from a version that was never sent", () => {
+    expect(mayInheritLiveLink({ publicToken: null, signedAt: null })).toBe(false);
+  });
+
+  it("has nothing to carry when this is the first version", () => {
+    expect(mayInheritLiveLink(null)).toBe(false);
   });
 });

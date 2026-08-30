@@ -98,12 +98,27 @@ export const SOLAR_PROPOSAL_STATE_TONE: Record<SolarProposalState, "neutral" | "
 };
 
 /**
- * An accepted proposal is a record of what a customer agreed to. Editing the
- * inputs behind it would rewrite that record, so the builder is read-only from
- * here — see the limitation noted in the cycle report: this architecture has no
- * per-version input snapshot to fork from, so the safe move is to freeze rather
- * than to version.
+ * Whether a new version may take the previous one's customer link.
+ *
+ * The successor to `proposalIsLocked`, which froze the whole builder once a
+ * customer had accepted anything. That rule was aimed at the right thing and
+ * hit the wrong one: what a signature has to protect is the RECORD of what was
+ * agreed, and a new version does not touch it — it is its own row, with its own
+ * snapshot and its own reference. The deals that need a v14 are precisely the
+ * ones that got a signature.
+ *
+ * What a signature really does close is this one door. A live re-price hands
+ * the customer's URL to the new version so the tab open on the kitchen table
+ * keeps up; do that to a signed document and the address the homeowner put
+ * their name at silently starts resolving to an unsigned draft. So the link
+ * stays where the signature is, and the new version gets its own when it is
+ * sent.
+ *
+ * @param previous the version being superseded — null when this is the first.
  */
-export function proposalIsLocked(state: SolarProposalState): boolean {
-  return state === "accepted";
+export function mayInheritLiveLink(
+  previous: { publicToken: string | null; signedAt: Date | string | null } | null
+): boolean {
+  if (!previous?.publicToken) return false;
+  return !previous.signedAt;
 }
