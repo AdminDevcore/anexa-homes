@@ -43,31 +43,74 @@ export function DealStageTimeline({ timeline }: { timeline: Timeline }) {
   // Share of the biggest bucket. Length is the whole point of the row: a glance
   // should land on the step that ate the schedule.
   const biggest = buckets[0]?.days ?? 0;
-  // Where it is right now, for the tile that has no completion date to show.
-  const live = rows.find((r) => r.current) ?? rows[rows.length - 1];
+  const finishName = finish >= 0 ? rows[finish].stageName : null;
+
+  /*
+    TWO CLOCKS, NOT ONE.
+
+    Lead → install is the run the company is judged on end to end, but most of
+    it is the weeks before anybody signed, which operations cannot shorten. The
+    number that describes THEIR work is the one that starts at the signature —
+    on a real deal, 19 days against 7 — and reported as a single figure the two
+    are indistinguishable: a fast install behind a slow sale and a slow install
+    behind a fast sale both read "19 days".
+
+    Both are here, side by side and both accented, because neither corrects the
+    other. The signed clock simply does not appear on a deal nobody has signed;
+    zero would be a lie about a deal that is still being sold.
+
+    FOUR TILES, OR THREE — never five. The strip's hairlines are the container
+    showing through gap-px, so a column the tiles do not fill paints as a slab
+    of border colour, and 5 divides into neither 2 columns nor 3. Fifths are
+    also too narrow to hold "Contract → Install Complete" on a laptop. So the
+    two dates share one tile as a range, which is how anyone reads them anyway.
+  */
+  const tiles = [
+    <Metric
+      key="total"
+      label={done && finishName ? `Lead → ${finishName}` : "Elapsed so far"}
+      value={formatDuration(timeline.totalDays)}
+      accent
+    />,
+    ...(timeline.signedDays !== null
+      ? [
+          <Metric
+            key="signed"
+            label={done && finishName ? `Contract → ${finishName}` : "Since contract signed"}
+            value={formatDuration(timeline.signedDays)}
+            accent
+          />,
+        ]
+      : []),
+    done ? (
+      <Metric
+        key="dates"
+        label="Created → completed"
+        value={fmtRange(timeline.startedAt, timeline.completedAt!)}
+      />
+    ) : (
+      <Metric key="dates" label="Created" value={fmtDate(timeline.startedAt)} />
+    ),
+    <Metric
+      key="longest"
+      label={buckets.length ? `Longest · ${buckets[0].stageName}` : "Longest step"}
+      value={formatDuration(biggest)}
+    />,
+  ];
 
   return (
     <div className="space-y-5">
-      {/* Hairline grid rather than four floating tiles, matching the money
-          slide: gap-px over a border-coloured backdrop draws one strip on any
-          number of rows, so the wrapped 2×2 on a phone reads as the same object
-          as the 1×4. */}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-4">
-        <Metric
-          label={done ? "Start → install complete" : "Elapsed so far"}
-          value={formatDuration(timeline.totalDays)}
-          accent
-        />
-        <Metric label="Created" value={fmtDate(timeline.startedAt)} />
-        {done ? (
-          <Metric label="Completed" value={fmtDate(timeline.completedAt!)} />
-        ) : (
-          <Metric label={`In ${live.stageName}`} value={formatDuration(live.days)} />
+      {/* Hairline grid rather than floating tiles, matching the money slide:
+          gap-px over a border-coloured backdrop draws one strip on any number
+          of rows, so the wrapped 2×2 on a phone reads as the same object as the
+          1×4. */}
+      <div
+        className={cn(
+          "grid gap-px overflow-hidden rounded-xl border border-border bg-border",
+          tiles.length === 4 ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1 sm:grid-cols-3"
         )}
-        <Metric
-          label={buckets.length ? `Longest · ${buckets[0].stageName}` : "Longest step"}
-          value={formatDuration(biggest)}
-        />
+      >
+        {tiles}
       </div>
 
       <div className="grid gap-x-8 gap-y-6 lg:grid-cols-2">
@@ -245,6 +288,18 @@ function byStage(rows: TimelineRow[], finishName: string | null): Bucket[] {
   // Ties keep the order they happened in — Map preserves insertion order and
   // sort is stable, so a run of same-length stages still reads chronologically.
   return [...byName.values()].sort((a, b) => b.days - a.days);
+}
+
+/** "Aug 9 → Aug 28, 2026" — the year said once unless the run crossed one. */
+function fmtRange(from: string, to: string): string {
+  const a = new Date(from);
+  const sameYear = a.getFullYear() === new Date(to).getFullYear();
+  const left = a.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+  return `${left} → ${fmtDate(to)}`;
 }
 
 function fmtDate(iso: string): string {

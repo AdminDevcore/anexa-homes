@@ -4,13 +4,21 @@ import {
   daysBetween,
   formatDuration,
   isCompletionStage,
+  isSaleStage,
   type StageEventRow,
 } from "../stage-history";
 
 const NOW = new Date("2026-01-20T00:00:00.000Z");
 
 function ev(name: string, entered: string, exited: string | null, position = 0): StageEventRow {
-  return { id: `${name}-${entered}`, stageId: name, stageName: name, position, enteredAt: entered, exitedAt: exited };
+  return {
+    id: `${name}-${entered}`,
+    stageId: name,
+    stageName: name,
+    position,
+    enteredAt: entered,
+    exitedAt: exited,
+  };
 }
 
 describe("isCompletionStage", () => {
@@ -19,14 +27,51 @@ describe("isCompletionStage", () => {
   });
 
   it("matches the install-completion stages", () => {
-    for (const n of ["Install Complete", "Installed", "install completed", "Installation Complete"]) {
+    for (const n of [
+      "Install Complete",
+      "Installed",
+      "install completed",
+      "Installation Complete",
+    ]) {
       expect(isCompletionStage({ name: n })).toBe(true);
     }
   });
 
   it("does NOT match stages that merely start with install", () => {
-    for (const n of ["Install Scheduled", "Install Ready", "Install In Progress / MPU", "Install Closed", "Install"]) {
+    for (const n of [
+      "Install Scheduled",
+      "Install Ready",
+      "Install In Progress / MPU",
+      "Install Closed",
+      "Install",
+    ]) {
       expect(isCompletionStage({ name: n })).toBe(false);
+    }
+  });
+});
+
+describe("isSaleStage", () => {
+  it("matches however a board writes the signature", () => {
+    for (const n of [
+      "Contract Signed",
+      "Contract Signed / Hold",
+      "contract signed",
+      "Signed",
+      "Sold",
+    ]) {
+      expect(isSaleStage({ name: n })).toBe(true);
+    }
+  });
+
+  it("does NOT match the stages either side of it", () => {
+    for (const n of [
+      "Contract Sent",
+      "Hold",
+      "Front check received",
+      "Install Complete",
+      "Unsigned",
+    ]) {
+      expect(isSaleStage({ name: n })).toBe(false);
     }
   });
 });
@@ -137,6 +182,60 @@ describe("buildTimeline", () => {
     expect(t.rows).toEqual([]);
     expect(t.slowest).toBeNull();
     expect(t.totalDays).toBe(19);
+  });
+
+  it("runs a second clock from the signature to the finish", () => {
+    // The office is judged on the half of the run it can shorten. 10 days from
+    // the lead, of which only 6 are after the homeowner signed.
+    const t = buildTimeline(
+      [
+        ev("New Appointment", "2026-01-01T00:00:00.000Z", "2026-01-05T00:00:00.000Z"),
+        ev("Contract Signed / Hold", "2026-01-05T00:00:00.000Z", "2026-01-08T00:00:00.000Z"),
+        ev("Install Scheduled", "2026-01-08T00:00:00.000Z", "2026-01-11T00:00:00.000Z"),
+        ev("Install Complete", "2026-01-11T00:00:00.000Z", null),
+      ],
+      { createdAt: "2026-01-01T00:00:00.000Z", now: NOW }
+    );
+    expect(t.totalDays).toBe(10);
+    expect(t.signedAt).toBe("2026-01-05T00:00:00.000Z");
+    expect(t.signedDays).toBe(6);
+  });
+
+  it("dates the signature from the FIRST time it was signed", () => {
+    // Put back on hold and re-signed. The contract existed from January 5.
+    const t = buildTimeline(
+      [
+        ev("Contract Signed", "2026-01-05T00:00:00.000Z", "2026-01-06T00:00:00.000Z"),
+        ev("NTP Action Required", "2026-01-06T00:00:00.000Z", "2026-01-09T00:00:00.000Z"),
+        ev("Contract Signed", "2026-01-09T00:00:00.000Z", "2026-01-11T00:00:00.000Z"),
+        ev("Installed", "2026-01-11T00:00:00.000Z", null),
+      ],
+      { createdAt: "2026-01-01T00:00:00.000Z", now: NOW }
+    );
+    expect(t.signedAt).toBe("2026-01-05T00:00:00.000Z");
+    expect(t.signedDays).toBe(6);
+  });
+
+  it("keeps the signed clock running on a deal that has not finished", () => {
+    const t = buildTimeline(
+      [
+        ev("New Appointment", "2026-01-01T00:00:00.000Z", "2026-01-10T00:00:00.000Z"),
+        ev("Contract Signed", "2026-01-10T00:00:00.000Z", null),
+      ],
+      { createdAt: "2026-01-01T00:00:00.000Z", now: NOW }
+    );
+    expect(t.completedAt).toBeNull();
+    expect(t.signedDays).toBe(10);
+  });
+
+  it("reports no signed clock at all on a deal nobody has signed", () => {
+    // Null, not zero: zero would read as "signed and installed the same day".
+    const t = buildTimeline([ev("New Appointment", "2026-01-01T00:00:00.000Z", null)], {
+      createdAt: "2026-01-01T00:00:00.000Z",
+      now: NOW,
+    });
+    expect(t.signedAt).toBeNull();
+    expect(t.signedDays).toBeNull();
   });
 
   it("never reports negative time from a clock skew", () => {

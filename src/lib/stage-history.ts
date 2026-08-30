@@ -37,6 +37,23 @@ export type Timeline = {
   completedAt: string | null;
   /** Creation → completion, or creation → now while still running. */
   totalDays: number;
+  /**
+   * When the homeowner first signed, if this pipeline records such a stage.
+   *
+   * The FIRST signature. A deal put back on hold and re-signed did not take
+   * until the second time to get a contract.
+   */
+  signedAt: string | null;
+  /**
+   * Signature → completion, or signature → now while still running. Null on a
+   * deal that has not signed, which is not the same as zero.
+   *
+   * The second clock the office runs on. Creation → install answers "how long
+   * does a lead take"; this one answers "how long do we make a customer wait
+   * after they have signed", and it is the only half of the run the operations
+   * team can actually shorten — the weeks before a signature belong to sales.
+   */
+  signedDays: number | null;
   /** The longest single stage, for the "where does time go" callout. */
   slowest: TimelineRow | null;
 };
@@ -65,6 +82,23 @@ export function isCompletionStage(stage: { name: string; isWon?: boolean }): boo
   if (stage.isWon) return true;
   const n = stage.name.trim().toLowerCase();
   return /^install(ed|ation)?(\s*(complete|completed|done))?$/.test(n) && n !== "install";
+}
+
+/**
+ * Is this the stage that means "the customer signed"?
+ *
+ * Read off the name, for the same reason the completion test is: it has to
+ * fill in with no configuration, across pipelines that name the moment
+ * differently. Every pipeline this company runs marks it with the words
+ * themselves — "Contract Signed", "Contract Signed / Hold" — and the bare
+ * "Signed" and "Sold" are the two other ways a board usually writes it.
+ *
+ * A hold or an action-required stage that FOLLOWS the signature is not it: the
+ * test is the phrase, not any stage that mentions a contract.
+ */
+export function isSaleStage(stage: { name: string }): boolean {
+  const n = stage.name.trim().toLowerCase();
+  return n.includes("contract signed") || n === "signed" || n === "sold";
 }
 
 /** Same test, from a stored event row (which carries no isWon flag). */
@@ -110,11 +144,20 @@ export function buildTimeline(
     ? rows.reduce((max, r) => (r.days > max.days ? r : max), rows[0])
     : null;
 
+  // Off the STORED events, not off `rows`: row zero's enteredAt is pulled back
+  // to the day the deal was created so no time evaporates from the total, and
+  // on a backfilled deal whose first logged move is the signature that would
+  // date the contract to the day the lead came in.
+  const signedAt = sorted.find((e) => isSaleStage({ name: e.stageName }))?.enteredAt ?? null;
+  const endsAt = completedAt ?? now.toISOString();
+
   return {
     rows,
     startedAt,
     completedAt,
-    totalDays: daysBetween(startedAt, completedAt ?? now.toISOString()),
+    totalDays: daysBetween(startedAt, endsAt),
+    signedAt,
+    signedDays: signedAt ? daysBetween(signedAt, endsAt) : null,
     slowest,
   };
 }
