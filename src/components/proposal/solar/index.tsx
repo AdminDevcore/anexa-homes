@@ -582,12 +582,25 @@ function SolarPvProposalView({
               ["Size", `${s.system.sizeKwDc.toFixed(2)} kW-DC`],
               ["Year-one production", kwh(s.system.year1ProductionKwh)],
               ["Energy offset", `${pctWhole(s.system.offsetPct)} of your usage`],
+              /* Panels, inverter and battery are named on the EQUIPMENT cards
+                 further down this same chapter, with the product shot and the
+                 manufacturer's datasheet beside them. Stated here as well they
+                 were the same sentence twice on one screen — and the weaker
+                 copy of the two.
+
+                 Each row survives ONLY as a per-item fallback: a snapshot
+                 frozen before the cards existed carries the label but no
+                 equipment row to build a card from, and dropping the row
+                 outright would leave those documents naming no hardware at
+                 all. */
               [
                 "Panels",
-                s.system.moduleLabel ? `${s.system.moduleQty} × ${s.system.moduleLabel}` : null,
+                !s.system.module && s.system.moduleLabel
+                  ? `${s.system.moduleQty} × ${s.system.moduleLabel}`
+                  : null,
               ],
-              ["Inverter", s.system.inverterLabel],
-              ["Battery", s.system.batteryLabel],
+              ["Inverter", s.system.inverter ? null : s.system.inverterLabel],
+              ["Battery", s.system.battery ? null : s.system.batteryLabel],
               ["Mounting", s.system.mountType === "ground" ? "Ground mount" : "Roof mount"],
               ["Solar resource (TSRF)", s.system.tsrfPct != null ? pct(s.system.tsrfPct) : null],
               ["Utility", s.system.utilityProvider],

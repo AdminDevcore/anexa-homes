@@ -224,7 +224,10 @@ export function SolarStorageProposalView({
             note={st && st.batteryQty > 1 ? `${st.batteryQty} units` : undefined}
             size="lg"
           />
-          {st?.batteryLabel && <Stat k="Battery" v={st.batteryLabel} />}
+          {/* Named on the Battery card below, so it is stated here only when
+              there is no card — a snapshot frozen before the cards existed
+              carries the label and no equipment row. */}
+          {!s.system.battery && st?.batteryLabel && <Stat k="Battery" v={st.batteryLabel} />}
         </div>
 
         {/* The MODULE card is deliberately absent. There are no panels on this
