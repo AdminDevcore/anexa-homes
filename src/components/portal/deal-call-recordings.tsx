@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Loader2, Trash2, Upload, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CALL_GROUPS, CALL_GROUP_KEYS, type CallGroup } from "@/lib/call-groups";
+import { DOWNLOAD_BUTTON_CLASS, FileDownloadLink } from "./file-download";
 import { uploadFileAction, deleteFileAction } from "@/server/modules/files/actions";
 
 export type CallRecording = { id: string; name: string; group: CallGroup };
@@ -113,12 +114,23 @@ function CallSlot({
           <p className="truncate text-xs text-muted-foreground" title={recording.name}>
             {recording.name}
           </p>
-          {canUpload && (
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-              Replace
-            </Button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* The player streams it; this saves it — a QC call that has to go
+                to a lender or a carrier leaves as a file, not as a tab. */}
+            <FileDownloadLink
+              id={recording.id}
+              name={recording.name}
+              filename={recording.name}
+              label="Download"
+              className={DOWNLOAD_BUTTON_CLASS}
+            />
+            {canUpload && (
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()}>
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                Replace
+              </Button>
+            )}
+          </div>
         </div>
       ) : canUpload ? (
         <Button size="sm" variant="outline" disabled={busy} onClick={() => inputRef.current?.click()}>

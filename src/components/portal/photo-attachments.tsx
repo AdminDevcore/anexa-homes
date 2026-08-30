@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Download, Paperclip } from "lucide-react";
+import { Paperclip } from "lucide-react";
+import { DOWNLOAD_BUTTON_CLASS, FileDownloadLink } from "./file-download";
 
 export type AttachmentFile = { id: string; name: string };
 export type AttachmentGroup = { label: string; files: AttachmentFile[] };
@@ -69,17 +70,13 @@ export function PhotoAttachments({ groups }: { groups: AttachmentGroup[] }) {
                     matters. */}
                 <p className="truncate text-[11px] leading-tight text-muted-foreground">{group.label}</p>
               </div>
-              <a
-                href={`/portal/files/${file.id}?download=1`}
-                download={file.name}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
-                // Every row says "Download"; the accessible name has to say
-                // which photo this one takes.
-                aria-label={`Download ${file.name}`}
-              >
-                <Download className="size-3.5" />
-                Download
-              </a>
+              <FileDownloadLink
+                id={file.id}
+                name={file.name}
+                filename={file.name}
+                label="Download"
+                className={DOWNLOAD_BUTTON_CLASS}
+              />
             </li>
           ))
         )}
@@ -88,17 +85,10 @@ export function PhotoAttachments({ groups }: { groups: AttachmentGroup[] }) {
   );
 }
 
-/** The small hover-revealed Download on a photo thumbnail. */
+/**
+ * The small Download on a photo thumbnail. Kept as its own name because the
+ * checklist grids reach for it by that name; it is the shared control underneath.
+ */
 export function PhotoDownloadButton({ id, name, className }: { id: string; name: string; className?: string }) {
-  return (
-    <a
-      href={`/portal/files/${id}?download=1`}
-      download={name}
-      className={className}
-      aria-label={`Download ${name}`}
-      title={`Download ${name}`}
-    >
-      <Download className="size-3.5" />
-    </a>
-  );
+  return <FileDownloadLink id={id} name={name} filename={name} className={className} />;
 }

@@ -22,6 +22,11 @@ import type { PhotoChecklist } from "@/server/modules/photos/queries";
 import { uploadFileAction, deleteFileAction, moveFileAction } from "@/server/modules/files/actions";
 import { PhotoGroupBody, type GroupPhoto } from "./deal-photos";
 import { DealCallRecordings, type CallRecording } from "./deal-call-recordings";
+import {
+  DOWNLOAD_BUTTON_CLASS,
+  DOWNLOAD_OVERLAY_CLASS,
+  FileDownloadLink,
+} from "./file-download";
 import { InvoiceDropBox } from "./invoice-drop-box";
 
 export type FolderFile = {
@@ -347,19 +352,38 @@ function GenericFolder({
       {packages.length > 0 && (
         <ul className="space-y-2">
           {packages.map((d) => (
-            <li key={d.id}>
+            /* The row is no longer one big link, because a completed package
+               carries a signed PDF you should be able to take from here — and
+               an anchor cannot live inside an anchor. So the title is the link
+               and the Download sits beside it. */
+            <li
+              key={d.id}
+              className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm transition-colors hover:border-gold/40"
+            >
               <Link
                 href={`/portal/documents/${d.id}`}
-                className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm hover:border-gold/40"
+                className="flex min-w-0 flex-1 items-center gap-2 hover:text-gold-muted"
               >
-                <span className="flex min-w-0 items-center gap-2">
-                  <FileSignature className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate font-medium">{d.title}</span>
-                </span>
-                <span className="shrink-0 text-xs capitalize text-muted-foreground">
+                <FileSignature className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate font-medium">{d.title}</span>
+              </Link>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-xs capitalize text-muted-foreground">
                   {d.status.replace(/_/g, " ")}
                 </span>
-              </Link>
+                {/* Only once it exists: an envelope still out for signature has
+                    no countersigned PDF to hand anyone. No `filename` — the
+                    package's display title is not the stored file's name, so
+                    the route's own name is the truthful one. */}
+                {d.signedFileId && (
+                  <FileDownloadLink
+                    id={d.signedFileId}
+                    name={`${d.title} (signed)`}
+                    label="Download"
+                    className={DOWNLOAD_BUTTON_CLASS}
+                  />
+                )}
+              </div>
             </li>
           ))}
         </ul>
@@ -378,6 +402,12 @@ function GenericFolder({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/portal/files/${f.id}`} alt={f.name} className="size-full object-cover" loading="lazy" decoding="async" />
                 </a>
+                <FileDownloadLink
+                  id={f.id}
+                  name={f.name}
+                  filename={f.name}
+                  className={DOWNLOAD_OVERLAY_CLASS}
+                />
                 {canDelete && (
                   <button
                     onClick={() => remove(f.id)}
@@ -410,6 +440,15 @@ function GenericFolder({
                 <span className="truncate">{f.name}</span>
               </a>
               <div className="flex shrink-0 items-center gap-2">
+                {/* Beside every document, not only the photos: the point of
+                    this folder is handing the file to someone else. */}
+                <FileDownloadLink
+                  id={f.id}
+                  name={f.name}
+                  filename={f.name}
+                  label="Download"
+                  className={DOWNLOAD_BUTTON_CLASS}
+                />
                 {canDelete && <MoveControl file={f} folders={folders} currentKey={folderKey} />}
                 {canDelete && (
                   <button onClick={() => remove(f.id)} aria-label={`Delete ${f.name}`}>

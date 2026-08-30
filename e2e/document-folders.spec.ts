@@ -1,6 +1,14 @@
+import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
 
 const PASSWORD = "Passw0rd!";
+
+async function makePdf(): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  doc.addPage([612, 792]).drawText("Declarations page", { x: 56, y: 720, size: 16 });
+  return Buffer.from(await doc.save());
+}
 
 async function login(page: Page, email: string) {
   await page.context().clearCookies();
@@ -76,6 +84,55 @@ test("folders: upload lands in the folder you opened, and can be moved out", asy
 
   await page.getByRole("button", { name: "All folders" }).click();
   await expect(page.getByRole("button", { name: /^Materials\s*[1-9]/ })).toBeVisible({ timeout: 10000 });
+});
+
+/**
+ * Taking a file back out is the other half of a folder's job. Every row has to
+ * offer it directly: "open it in a tab, then save it from the viewer" is not a
+ * download, and it is the wrong shape entirely for a PDF someone is collecting
+ * for a lender.
+ */
+test("folders: every file offers a download without opening it first", async ({ page }) => {
+  await login(page, "manager@anexahomes.com");
+  await openDeal(page);
+
+  const folders = page.getByTestId("deal-folders");
+
+  // A document row — the case that had no download at all.
+  await page.getByRole("button", { name: /^Insurance Documents/ }).click();
+  await expect(page.getByRole("button", { name: "All folders" })).toBeVisible({ timeout: 10000 });
+  await folders.locator('input[type="file"]').first().setInputFiles({
+    name: "declarations-page.pdf",
+    mimeType: "application/pdf",
+    buffer: await makePdf(),
+  });
+
+  const link = folders.getByRole("link", { name: "Download declarations-page.pdf" }).first();
+  await expect(link).toBeVisible({ timeout: 15000 });
+  const href = await link.getAttribute("href");
+  expect(href).toMatch(/\/portal\/files\/[^?]+\?download=1$/);
+
+  // It has to actually be a download: the browser saves it, under its own name.
+  const res = await page.request.get(href!);
+  expect(res.status()).toBe(200);
+  const disposition = res.headers()["content-disposition"];
+  expect(disposition).toContain("attachment");
+  expect(disposition).toContain("declarations-page.pdf");
+
+  // And a photo filed into a plain folder gets the same offer, as the overlay
+  // on its thumbnail — the folder grid renders those two shapes separately, so
+  // one of them having the button proves nothing about the other.
+  await page.getByRole("button", { name: "All folders" }).click();
+  await page.getByRole("button", { name: /^Materials/ }).click();
+  await expect(page.getByRole("button", { name: "All folders" })).toBeVisible({ timeout: 10000 });
+  await folders.locator('input[type="file"]').first().setInputFiles({
+    name: "shingle-colour.png",
+    mimeType: "image/png",
+    buffer: readFileSync("public/anexa-mark.png"),
+  });
+  await expect(
+    folders.getByRole("link", { name: "Download shingle-colour.png" }).first()
+  ).toBeVisible({ timeout: 15000 });
 });
 
 /**
