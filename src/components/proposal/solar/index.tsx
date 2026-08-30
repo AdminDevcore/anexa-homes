@@ -230,6 +230,20 @@ type SolarProposalViewProps = {
    * portal it may be previewed inside.
    */
   chromeOffset?: number;
+  /**
+   * WHICH WAY THE TAX-CREDIT SWITCH STARTS.
+   *
+   * Off for every reader, which is the honest default and the one the document
+   * has always printed — see `creditsOn` below. Passed true by exactly one
+   * caller: the print route rendering the credits-applied copy of a signed
+   * proposal. That copy has to exist as paper and paper has no switch, so the
+   * scenario has to be chosen before the render rather than clicked during it.
+   *
+   * It seeds the state; it does not pin it. A reader who is handed a document
+   * opened this way can still throw the switch, because it is the same control
+   * either way round.
+   */
+  creditsApplied?: boolean;
 };
 
 function SolarPvProposalView({
@@ -246,6 +260,7 @@ function SolarPvProposalView({
   rep = null,
   accentColor,
   chromeOffset = 0,
+  creditsApplied: initialCreditsApplied = false,
 }: SolarProposalViewProps) {
   /**
    * The document on screen, and which version it is.
@@ -300,7 +315,7 @@ function SolarPvProposalView({
    * payment option deliberately — an option with nothing to claim reads `false`
    * whatever this says, and switching back restores what the reader had.
    */
-  const [creditsOn, setCreditsOn] = React.useState(false);
+  const [creditsOn, setCreditsOn] = React.useState(initialCreditsApplied);
   const creditsApplied = creditsOn && option.creditsApplied != null;
   const sv = optionSavings(option, creditsApplied);
   const monthlyCents = optionMonthlyCents(option, creditsApplied);

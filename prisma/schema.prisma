@@ -4173,6 +4173,22 @@ model SolarProposal {
    */
   approvedFileId String?
 
+  /**
+   * THE SECOND FILED COPY — the same signed document read the other way.
+   * A credit-earning proposal has two honest readings of one deal, and the
+   * switch on the customer's page is what picks between them. Both are what was
+   * sold: the household signs once, and the file has to carry the deal with the
+   * credits applied AND the deal at par, because whether the credits are ever
+   * claimed is a fact about somebody's tax return that the day of signing
+   * cannot settle. `approvedFileId` is the credits-applied copy and this is the
+   * one at par; a deal with no credits to claim has only the first, and this
+   * stays null.
+   * Its own column for the same reason the first has one: unapproving must
+   * remove exactly the copies approval put in the folder, and finding them by
+   * category would sweep up a PDF a rep dropped in by hand.
+   */
+  approvedParFileId String?
+
   /// Set when a newer version replaces this one.
   supersededAt      DateTime?
   /// The e-sign envelope, once sent for signature.

@@ -258,7 +258,14 @@ export async function setProposalApprovalAction(proposalId: string, approved: bo
 
   const p = await prisma.solarProposal.findFirst({
     where: { companyId: user.companyId, id: proposalId },
-    select: { id: true, leadId: true, version: true, approvedAt: true, approvedFileId: true },
+    select: {
+      id: true,
+      leadId: true,
+      version: true,
+      approvedAt: true,
+      approvedFileId: true,
+      approvedParFileId: true,
+    },
   });
   if (!p) return fail("Proposal not found.");
 

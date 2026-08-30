@@ -39,7 +39,7 @@ import {
   type SystemSpecs,
   type SpecSource,
 } from "@/components/portal/solar-system-info";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { hasCreditSwitch, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 import {
   blockPanelCount,
   panelCorners,
@@ -366,7 +366,7 @@ export default async function LeadDetailPage({
             id: true, version: true, status: true, publicToken: true, supersededAt: true,
             sentAt: true, viewedAt: true, signedAt: true, signerName: true, createdAt: true,
             showComparison: true,
-            approvedAt: true, approvedFileId: true, approvedById: true,
+            approvedAt: true, approvedFileId: true, approvedParFileId: true, approvedById: true,
             // Only so a SIGNED version can offer the funder's submission
             // summary. Read from the frozen document rather than from the
             // deal's current lender: changing lenders afterwards must not make
@@ -1668,10 +1668,18 @@ export default async function LeadDetailPage({
                       approvedAt: v.approvedAt?.toISOString() ?? null,
                       approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
                       approvedFileId: v.approvedFileId,
+                      approvedParFileId: v.approvedParFileId,
                       hasContractAdjustment:
                         !!v.signedAt &&
                         !!(v.snapshot as { financing?: { lenderAdjustment?: unknown } } | null)
                           ?.financing?.lenderAdjustment,
+                      // Whether this document has two readings to file — the
+                      // option it opens on carries a credits-applied scenario,
+                      // and it is not the battery-only deck, which has no
+                      // switch and reads its deal one way. Off the SNAPSHOT for
+                      // the same reason the line above is: the row is about a
+                      // document that already exists. Mirrors `copiesFor`.
+                      hasCreditSwitch: hasCreditSwitch(v.snapshot),
                     }))}
                   />
                 </Card>

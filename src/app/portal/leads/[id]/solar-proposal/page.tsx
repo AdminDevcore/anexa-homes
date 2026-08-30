@@ -12,6 +12,7 @@ import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { cachedYieldsByAngles } from "@/server/modules/solar/pvwatts";
 import { parseLayoutBlocks } from "@/lib/solar-layout";
+import { hasCreditSwitch } from "@/lib/solar-proposal";
 import { listSolarProviders } from "@/server/modules/solar/providers";
 import {
   catalogueBasis,
@@ -138,7 +139,7 @@ export default async function SolarProposalBuilderPage({
         id: true, version: true, status: true, publicToken: true, supersededAt: true,
         sentAt: true, viewedAt: true, signedAt: true, signerName: true, createdAt: true,
         showComparison: true,
-        approvedAt: true, approvedFileId: true, approvedById: true,
+        approvedAt: true, approvedFileId: true, approvedParFileId: true, approvedById: true,
       },
     }),
   ]);
@@ -154,19 +155,30 @@ export default async function SolarProposalBuilderPage({
    * would answer a different question: a lender changed after signature would
    * make the link appear against a document generated for somebody else.
    */
+  const snapshotFacts = await prisma.solarProposal.findMany({
+    where: { companyId: user.companyId, leadId: lead.id },
+    select: { id: true, signedAt: true, snapshot: true },
+  });
   const signedWithAdjustment = new Set(
-    (
-      await prisma.solarProposal.findMany({
-        where: { companyId: user.companyId, leadId: lead.id, signedAt: { not: null } },
-        select: { id: true, snapshot: true },
-      })
-    )
+    snapshotFacts
       .filter((p) => {
+        if (!p.signedAt) return false;
         const financing = (p.snapshot as { financing?: { lenderAdjustment?: unknown } } | null)
           ?.financing;
         return !!financing?.lenderAdjustment;
       })
       .map((p) => p.id)
+  );
+  /**
+   * Which versions have two readings to file — the option the document opens on
+   * carries a credits-applied scenario beside the one at par.
+   *
+   * Off the SNAPSHOT, like the set above: the row is about a document that
+   * already exists, and re-pricing the deal tomorrow must not change how many
+   * copies a version generated today is supposed to have.
+   */
+  const withCreditSwitch = new Set(
+    snapshotFacts.filter((p) => hasCreditSwitch(p.snapshot)).map((p) => p.id)
   );
 
   // Who approved the final version, for the badge on the version list. One row
@@ -503,7 +515,9 @@ export default async function SolarProposalBuilderPage({
           approvedAt: v.approvedAt?.toISOString() ?? null,
           approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
           approvedFileId: v.approvedFileId,
+          approvedParFileId: v.approvedParFileId,
           hasContractAdjustment: signedWithAdjustment.has(v.id),
+          hasCreditSwitch: withCreditSwitch.has(v.id),
         }))}
       />
     </div>

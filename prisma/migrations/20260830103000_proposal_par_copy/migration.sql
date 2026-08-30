@@ -1,0 +1,11 @@
+-- THE SECOND FILED COPY of an approved solar proposal.
+--
+-- One signature, two documents. A proposal that earns federal credits has two
+-- honest readings of the same deal — with the credits applied, and at par — and
+-- the switch on the customer's page is what picks between them. Both are what
+-- was sold, so both are filed: `approvedFileId` holds the credits-applied copy
+-- and this holds the one at par.
+--
+-- Additive and nullable. Every existing row keeps exactly the copy it has, and
+-- a deal with nothing to claim never fills this in.
+ALTER TABLE "solar_proposals" ADD COLUMN "approvedParFileId" TEXT;

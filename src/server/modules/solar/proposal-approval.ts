@@ -95,14 +95,19 @@ export async function approveProposalVersion(
         leadId: proposal.leadId,
         approvedAt: { not: null },
       },
-      select: { id: true, version: true, approvedFileId: true },
+      select: { id: true, version: true, approvedFileId: true, approvedParFileId: true },
     });
     const others = approved.filter((a) => a.id !== proposal.id);
 
     if (others.length > 0) {
       await tx.solarProposal.updateMany({
         where: { id: { in: others.map((o) => o.id) } },
-        data: { approvedAt: null, approvedById: null, approvedFileId: null },
+        data: {
+          approvedAt: null,
+          approvedById: null,
+          approvedFileId: null,
+          approvedParFileId: null,
+        },
       });
     }
 
@@ -114,7 +119,11 @@ export async function approveProposalVersion(
         approvedById: actor.userId,
         // Cleared, not carried. A version re-approved after being unapproved
         // must not inherit a file id whose row was deleted the first time.
+        // BOTH copies — a signed proposal that earns credits files the deal at
+        // par alongside it, and half a pair left pointing at a deleted row is
+        // the same bug wearing a second column.
         approvedFileId: null,
+        approvedParFileId: null,
         events: {
           create: {
             type: "approved",
@@ -134,7 +143,9 @@ export async function approveProposalVersion(
     });
 
     return {
-      stale: approved.map((a) => a.approvedFileId).filter((id): id is string => !!id),
+      stale: approved
+        .flatMap((a) => [a.approvedFileId, a.approvedParFileId])
+        .filter((id): id is string => !!id),
       replaced: list,
     };
   });
@@ -163,7 +174,13 @@ export async function approveProposalVersion(
 /** Take the approval off a version, and its copy out of the folder. */
 export async function unapproveProposalVersion(
   actor: ApprovalActor,
-  proposal: { id: string; leadId: string; version: number; approvedFileId: string | null },
+  proposal: {
+    id: string;
+    leadId: string;
+    version: number;
+    approvedFileId: string | null;
+    approvedParFileId?: string | null;
+  },
 ): Promise<void> {
   await prisma.solarProposal.update({
     where: { id: proposal.id },
@@ -171,6 +188,7 @@ export async function unapproveProposalVersion(
       approvedAt: null,
       approvedById: null,
       approvedFileId: null,
+      approvedParFileId: null,
       events: {
         create: {
           type: "unapproved",
@@ -181,7 +199,10 @@ export async function unapproveProposalVersion(
     },
   });
 
-  await removeFiledCopies(actor.companyId, [proposal.approvedFileId].filter((id): id is string => !!id));
+  await removeFiledCopies(
+    actor.companyId,
+    [proposal.approvedFileId, proposal.approvedParFileId].filter((id): id is string => !!id),
+  );
 
   await prisma.activityLog.create({
     data: {

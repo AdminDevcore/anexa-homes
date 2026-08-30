@@ -18,7 +18,17 @@ import { setSolarCreditClaimsAction } from "@/server/modules/solar/actions";
 
 /**
  * The two prices on a deal whose partner runs a programme contribution, side by
- * side, said in the rep's own vocabulary.
+ * side, said in the rep's own vocabulary — and, on every other purchase deal,
+ * the federal credits that deal claims.
+ *
+ * ONE COMPONENT, TWO SHAPES, and the second one is the 2026-08-30 addition. The
+ * tax-credit switch on the customer's document used to exist only where there
+ * was a programme to reconcile; it now reaches every purchase deal, which means
+ * every purchase deal makes a claim about a household's tax return. The three
+ * tick-boxes that decide what that claim is were behind the programme card, so
+ * on an ordinary deal they were invisible AND ticked — a document quoting fifty
+ * percent to a household that earns thirty, with nothing on the rep's screen
+ * saying so. Same control, same live ladder, on both.
  *
  * WHY A SEPARATE CARD RATHER THAN TWO MORE ROWS ON THE PRICE CARD ABOVE.
  *
@@ -67,7 +77,13 @@ export function ContractValueCard({
 }: {
   leadId: string;
   lenderName: string | null;
-  /** The partner's programme, as configured. Null renders nothing at all. */
+  /**
+   * The partner's programme, as configured.
+   *
+   * Null — a partner with no programme, one switched off, one whose start date
+   * has not arrived, or one configured halfway — falls through to the credits
+   * card, which every purchase deal gets. It used to render nothing at all.
+   */
   adjustment: LenderContractAdjustment | null;
   systemSizeKwDc: number;
   /** The price divided by the watts, as the ladder computed it. */
@@ -128,20 +144,107 @@ export function ContractValueCard({
     });
   };
 
-  const ladder = reconciliation
-    ? buildCreditLadder({
-        contractValueCents: reconciliation.lenderContractValueCents,
-        quotedPriceCents: reconciliation.customerObligationCents,
-        rates: creditRates,
-        claims,
-      })
-    : null;
+  /**
+   * The ladder as the customer's own page will draw it — for BOTH shapes.
+   *
+   * On a programme deal the contract is above the price and the remainder gets
+   * handed back. On an ordinary deal the two are the same figure and the
+   * credits simply come off it; `buildCreditLadder` drops the incentive row on
+   * its own rather than printing a zero. Same call, same arithmetic, so a rep
+   * is never shown a ladder the document then draws differently.
+   */
+  const ladder = buildCreditLadder({
+    contractValueCents: reconciliation
+      ? reconciliation.lenderContractValueCents
+      : customerContractCents,
+    quotedPriceCents: reconciliation
+      ? reconciliation.customerObligationCents
+      : customerContractCents,
+    rates: creditRates,
+    claims,
+  });
 
-  // Nothing to say. A partner with no programme, one switched off, one whose
-  // start date has not arrived, or one configured halfway — the last of which
-  // the readiness report is meanwhile blocking generation over, with a message
-  // that names the missing field.
-  if (!reconciliation) return null;
+  const fieldset = (
+    <CreditClaimsFieldset
+      claims={claims}
+      creditRates={creditRates}
+      canEdit={canEdit}
+      saving={saving}
+      error={error}
+      onToggle={toggle}
+      note={
+        reconciliation
+          ? "Unticking one does not change what they pay — the incentive grows by the same amount. It changes what the proposal claims on their tax return."
+          : "This is what the proposal's tax-credit switch claims on their behalf. It does not change the price or the payment they were quoted."
+      }
+    />
+  );
+
+  /**
+   * NO PARTNER PROGRAMME — which is almost every deal.
+   *
+   * There is no second price to reconcile, so the two-column card below would
+   * be a heading over one column. What there IS, since the 2026-08-30 switch
+   * reached every purchase deal, is a claim this proposal makes about somebody
+   * else's tax return — and until now nothing on this screen said what it was
+   * or let the person selling the job correct it. Both bonuses default to
+   * ticked, which on the wrong address and the wrong modules is a document
+   * quoting fifty percent to a household that earns thirty.
+   */
+  if (!reconciliation) {
+    return (
+      <section
+        aria-labelledby="credit-claims-heading"
+        className="overflow-hidden rounded-xl border border-border bg-card"
+      >
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-4 py-2.5">
+          <h3
+            id="credit-claims-heading"
+            className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            Federal tax credits
+          </h3>
+          <span className="text-[11px] text-muted-foreground">
+            Percentages set in Settings → Solar
+          </span>
+        </header>
+
+        <div className="grid gap-5 p-4 lg:grid-cols-2">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">
+              What the switch shows
+            </p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              The proposal quotes the price and payment below. Its tax-credit switch shows this
+              same deal with the credits already applied — the customer is never quoted the lower
+              figure by default.
+            </p>
+            {ladder ? (
+              <dl className="mt-3 space-y-1 text-sm">
+                <Row k="Price" v={money(ladder.contractValueCents)} />
+                {ladder.credits.map((c) => (
+                  <Row
+                    key={c.key}
+                    k={`${c.label} (${c.pct}%)`}
+                    v={`−${money(c.amountCents)}`}
+                    muted
+                  />
+                ))}
+                <Row k="Net cost after credits" v={money(ladder.netCostCents)} strong />
+              </dl>
+            ) : (
+              <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                No credit is being claimed on this deal, so the proposal shows the price and the
+                payment and offers no switch at all.
+              </p>
+            )}
+          </div>
+
+          <div className="lg:border-l lg:border-border/70 lg:pl-5">{fieldset}</div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -277,50 +380,9 @@ export function ContractValueCard({
             </p>
           )}
 
-          {/* WHICH CREDITS THIS JOB EARNS. Editable, because the two bonuses
-              are conditional on the address and the equipment and only the
-              person selling it knows. Unticking one does not change what the
-              household pays — the incentive absorbs it — it changes what the
-              document CLAIMS on their behalf. */}
-          <fieldset className="mt-4 border-t border-border/70 pt-3">
-            <legend className="text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">
-              Credits this job earns
-            </legend>
-            <div className="mt-2 space-y-2">
-              {(["itc", "energyCommunity", "domesticContent"] as const).map((key) => (
-                <label
-                  key={key}
-                  className={cn(
-                    "flex cursor-pointer items-start gap-2.5 text-[12px] leading-snug",
-                    !canEdit && "cursor-default opacity-70"
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 size-3.5 shrink-0 accent-[var(--solar)]"
-                    checked={claims[key]}
-                    disabled={!canEdit || saving}
-                    onChange={() => toggle(key)}
-                  />
-                  <span className="min-w-0">
-                    <span className="font-medium text-foreground">
-                      {CREDIT_LABEL[key]} ({rateFor(creditRates, key)}%)
-                    </span>
-                    <span className="mt-0.5 block text-muted-foreground">{CREDIT_HINT[key]}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-            {error && (
-              <p role="alert" className="mt-2 text-[11px] text-destructive">
-                {error}
-              </p>
-            )}
-            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-              Unticking one does not change what they pay — the incentive grows by the same amount.
-              It changes what the proposal claims on their tax return.
-            </p>
-          </fieldset>
+          {/* WHICH CREDITS THIS JOB EARNS — the same control the ordinary-deal
+              card above shows, because it is the same question. */}
+          <div className="mt-4 border-t border-border/70 pt-3">{fieldset}</div>
 
           <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
             {reconciliation.disclosure}
@@ -328,6 +390,73 @@ export function ContractValueCard({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * WHICH CREDITS THIS JOB EARNS.
+ *
+ * Editable, because the two bonuses are conditional on the address and on the
+ * equipment and only the person selling the job knows. Shared by both shapes of
+ * the card above: on a programme deal unticking one does not change what the
+ * household pays (the incentive absorbs it), and on an ordinary deal it does
+ * not change the quoted price either — either way what moves is what the
+ * document CLAIMS on somebody's return, which is why the note is the caller's.
+ */
+function CreditClaimsFieldset({
+  claims,
+  creditRates,
+  canEdit,
+  saving,
+  error,
+  onToggle,
+  note,
+}: {
+  claims: CreditClaims;
+  creditRates: CreditRates;
+  canEdit: boolean;
+  saving: boolean;
+  error: string | null;
+  onToggle: (key: keyof CreditClaims) => void;
+  note: string;
+}) {
+  return (
+    <fieldset>
+      <legend className="text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">
+        Credits this job earns
+      </legend>
+      <div className="mt-2 space-y-2">
+        {(["itc", "energyCommunity", "domesticContent"] as const).map((key) => (
+          <label
+            key={key}
+            className={cn(
+              "flex cursor-pointer items-start gap-2.5 text-[12px] leading-snug",
+              !canEdit && "cursor-default opacity-70"
+            )}
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 size-3.5 shrink-0 accent-[var(--solar)]"
+              checked={claims[key]}
+              disabled={!canEdit || saving}
+              onChange={() => onToggle(key)}
+            />
+            <span className="min-w-0">
+              <span className="font-medium text-foreground">
+                {CREDIT_LABEL[key]} ({rateFor(creditRates, key)}%)
+              </span>
+              <span className="mt-0.5 block text-muted-foreground">{CREDIT_HINT[key]}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      {error && (
+        <p role="alert" className="mt-2 text-[11px] text-destructive">
+          {error}
+        </p>
+      )}
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{note}</p>
+    </fieldset>
   );
 }
 

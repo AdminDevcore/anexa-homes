@@ -25,18 +25,23 @@ import type { Doc } from "./doc";
 function LadderBar({
   contractCents,
   netCents,
+  netLabel,
   creditCents,
   incentiveCents,
 }: {
   contractCents: number;
   netCents: number;
+  /** What the remainder IS — an obligation on a programme deal, a net cost on
+      an ordinary one. The bar takes it from the caller rather than deciding,
+      for the same reason the table's rows do: see `programmeLadder`. */
+  netLabel: string;
   creditCents: number;
   incentiveCents: number;
 }) {
   if (contractCents <= 0) return null;
   const seg = (cents: number) => `${Math.max(0, (cents / contractCents) * 100)}%`;
   const parts = [
-    { key: "net", label: "What you pay", cents: netCents, className: "bg-white" },
+    { key: "net", label: netLabel, cents: netCents, className: "bg-white" },
     { key: "credit", label: "Tax credits", cents: creditCents, className: "bg-[var(--proposal-accent)]" },
     {
       key: "incentive",
@@ -162,6 +167,24 @@ export function ChapterCost({ doc }: { doc: Doc }) {
   const showLadder = ladder != null && (credits == null || credits.on);
 
   /**
+   * IS THE TOP OF THE LADDER A CONTRACT, OR JUST THE PRICE?
+   *
+   * On a programme deal the paper is written for more than the household was
+   * quoted, the credits are earned on that larger figure, and the last row
+   * lands back on the price at the top of this sheet — the block is the
+   * mechanism by which a $125,000 contract becomes a $55,000 obligation, and
+   * "Contract value / What you pay" is exactly what those rows are.
+   *
+   * On an ordinary deal there is no second figure. The credits are worked out
+   * on the price itself and the bottom row is not what the household hands
+   * over — it is what the system NETS to once their own return pays them back.
+   * Printing "Contract value" over their own price, and "What you pay" over a
+   * number they will never write a cheque for, would be the same block telling
+   * two different lies. Same arithmetic, same rows, honest labels.
+   */
+  const programmeLadder = adjustment != null;
+
+  /**
    * Whether the total gets a row of its own.
    *
    * Only where it says something the system-price row does not — because there
@@ -180,12 +203,17 @@ export function ChapterCost({ doc }: { doc: Doc }) {
       eyebrow="Your investment"
       title="What the system costs"
       lede={
-        showLadder ? (
+        !showLadder ? undefined : programmeLadder ? (
           <>
             Your price is at the top. Underneath it is the contract the system is financed against,
             and every credit that brings it back down to that price.
           </>
-        ) : undefined
+        ) : (
+          <>
+            Your price is at the top. Underneath it are the federal credits this system earns and
+            what it costs you once they are claimed.
+          </>
+        )
       }
       tone="dark"
       rail={
@@ -280,7 +308,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
       {showLadder && ladder && (
         <section className="mt-6 break-inside-avoid">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
-            How it is financed
+            {programmeLadder ? "How it is financed" : "What your tax credits are worth"}
           </h3>
           {/* NO PARAGRAPH HERE. The rail beside this block already carries the
               partner's own disclosure naming the programme and the contract,
@@ -290,13 +318,17 @@ export function ChapterCost({ doc }: { doc: Doc }) {
             <LadderBar
               contractCents={ladder.contractValueCents}
               netCents={ladder.netCostCents}
+              netLabel={programmeLadder ? "What you pay" : "Net cost"}
               creditCents={creditTotal}
               incentiveCents={ladder.incentiveCents}
             />
           </div>
 
           <dl className="mt-4 break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
-            <DarkRow k="Contract value" v={usd(ladder.contractValueCents)} />
+            <DarkRow
+              k={programmeLadder ? "Contract value" : "Your price"}
+              v={usd(ladder.contractValueCents)}
+            />
             {ladder.credits.map((c) => (
               <DarkRow
                 key={c.key}
@@ -317,7 +349,11 @@ export function ChapterCost({ doc }: { doc: Doc }) {
             {ladder.incentiveCents > 0 && (
               <DarkRow k={ladder.incentiveLabel} v={`−${usd(ladder.incentiveCents)}`} muted />
             )}
-            <DarkRow k="What you pay" v={usd(ladder.netCostCents)} strong />
+            <DarkRow
+              k={programmeLadder ? "What you pay" : "Your net cost after credits"}
+              v={usd(ladder.netCostCents)}
+              strong
+            />
           </dl>
 
           {/* THE CAVEAT, in the company's own words, and never optional under a

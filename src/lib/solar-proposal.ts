@@ -1521,17 +1521,51 @@ function priceOption(args: {
    * back. On every other deal this is null and the document quotes no credit at
    * all — which is what the product has always done.
    */
-  const creditLadder: CreditLadder | null =
-    purchase && reconciliation
-      ? buildCreditLadder({
-          contractValueCents: documentPriceCents,
-          quotedPriceCents: reconciliation.customerObligationCents,
-          rates: args.creditRates ?? CREDIT_RATES_DEFAULT,
-          claims: args.creditClaims,
-          incentiveLabel: args.creditIncentiveLabel,
-          disclaimer: args.creditDisclaimer,
-        })
-      : null;
+  const creditLadder: CreditLadder | null = purchase
+    ? buildCreditLadder({
+        contractValueCents: documentPriceCents,
+        // THE LADDER'S TARGET — where it has to land after the credits.
+        //
+        // On a programme deal, the household's own obligation, which is below
+        // the contract and is what the remainder gets handed back to reach. On
+        // an ordinary deal the two ARE the same figure: nothing is being handed
+        // back, the ladder is the price with the credits taken off it, and
+        // `buildCreditLadder` drops the incentive row rather than printing a
+        // zero. Passing the price to both sides is what makes that degenerate
+        // case fall out of the same arithmetic instead of a second branch.
+        quotedPriceCents: reconciliation
+          ? reconciliation.customerObligationCents
+          : documentPriceCents,
+        rates: args.creditRates ?? CREDIT_RATES_DEFAULT,
+        claims: args.creditClaims,
+        incentiveLabel: args.creditIncentiveLabel,
+        disclaimer: args.creditDisclaimer,
+      })
+    : null;
+
+  /**
+   * THE LADDER THE **DEFAULT** DOCUMENT HAS ALWAYS KNOWN ABOUT — programmes only.
+   *
+   * Everything below that shapes the switch-OFF reading of this deal reads THIS
+   * and not `creditLadder`, and the distinction is the whole reason a deal that
+   * never had a credit page can now carry a switch without a single figure
+   * moving on the copy that is printed by default.
+   *
+   * The difference between the two is not bookkeeping, it is what actually
+   * happens to the money. On a programme deal the credit is applied to the loan
+   * as a matter of course: the contract is written so the credits are earned on
+   * the larger figure, the partner applies them, and the household lands on the
+   * price they were quoted — so the default document steps the payment down at
+   * the paydown month because that is the cashflow they will really see. On an
+   * ordinary deal the credit is the household's own, claimed on their own
+   * return, and what they do with it is theirs — plenty never send a cent of it
+   * to the lender. Assuming they will, in the copy that prints by default,
+   * would be quoting a payment nobody has promised.
+   *
+   * So: ordinary deals default to the payment they were always quoted, and the
+   * switch is what says "and here is that same deal if you do apply it".
+   */
+  const programmeLadder: CreditLadder | null = reconciliation ? creditLadder : null;
   const loanFactorQuote =
     finance.product === "loan" && args.loanFactors && hasPaymentFactor(args.loanFactors)
       ? factorQuote(args.loanFactors, loanPrincipalCents)
@@ -1605,15 +1639,36 @@ function priceOption(args: {
   const loanMonthlyCents = monthlyOn(loanPrincipalCents);
 
   /**
-   * THE PAYMENT THE HOUSEHOLD ENDS UP ON, once the credits and the incentive
-   * have been applied to the principal.
+   * THE PAYMENT ONCE THE CREDITS ARE APPLIED TO THE PRINCIPAL.
    *
    * The ladder's bottom line, less anything already put down, run through the
-   * same terms. Null on every deal without a ladder — which is every deal
-   * without a contract adjustment — and on cash, which has no payment at all.
+   * SAME terms as the headline — so the two figures can never be derived two
+   * different ways. Null on cash, which has no payment for a credit to lower,
+   * and on lease and PPA, which have no ladder at all.
+   *
+   * This is the figure the switch turns ON, and it exists on every purchase
+   * deal. What follows it — `netMonthlyCents` — is the narrower thing: the
+   * payment a PROGRAMME re-amortises to on its own, which the default document
+   * has always stepped down to and which an ordinary deal still does not.
    */
-  const netMonthlyCents = creditLadder
+  const creditsAppliedMonthlyCents = creditLadder
     ? monthlyOn(creditLadder.netCostCents - (finance.downPaymentCents ?? 0))
+    : null;
+
+  /**
+   * THE PAYMENT THE HOUSEHOLD ENDS UP ON, on a deal whose PROGRAMME applies the
+   * credits to the loan as a matter of course.
+   *
+   * Identical arithmetic to the figure above and identical to it in value on
+   * every programme deal — the two differ only in WHERE they are allowed to be
+   * read. This one feeds the default document (the step-down in the years, and
+   * the funder's own summary), so it stays null on an ordinary deal for the
+   * reason `programmeLadder` exists: an ordinary household's credit is theirs
+   * to spend, and the copy that prints by default must not assume they hand it
+   * to the lender.
+   */
+  const netMonthlyCents = programmeLadder
+    ? monthlyOn(programmeLadder.netCostCents - (finance.downPaymentCents ?? 0))
     : null;
 
   /**
@@ -1702,7 +1757,13 @@ function priceOption(args: {
     // there is no payment for it to be inside — which is cash. `savingsModel`
     // suppresses it the moment the step-down above is real, so a financed deal
     // is never credited the same money twice.
-    reliefCents: creditLadder?.reliefCents ?? 0,
+    //
+    // THE PROGRAMME LADDER, not the general one. An ordinary cash buyer's
+    // credit is a cheque they may or may not receive from their own return, and
+    // crediting it into year one of the copy that prints by default would move
+    // the payback year of every cash proposal ever issued. It is exactly what
+    // the switch turns on instead.
+    reliefCents: programmeLadder?.reliefCents ?? 0,
   });
 
   /**
@@ -1714,9 +1775,10 @@ function priceOption(args: {
    * than a quote — which is why the sheet that shows it also says, in as many
    * words, what the payment is until the credits land.
    *
-   * Null wherever there is nothing to apply, and null is what removes the
-   * control entirely: a document with no ladder shows no switch rather than one
-   * that changes nothing.
+   * Null wherever there is nothing to claim — a lease, a PPA, or a company
+   * whose admin has zeroed every percentage — and null is what removes the
+   * control entirely: a document with no credits shows no switch rather than
+   * one that changes nothing.
    *
    * On a LOAN the relief is inside the lower payment, so the year-one lump is
    * zero — crediting both would hand the household the same money twice. On
@@ -1724,11 +1786,13 @@ function priceOption(args: {
    */
   const creditsAppliedSavings = creditLadder
     ? modelYears({
-        monthlyCents: netMonthlyCents ?? loanMonthlyCents,
+        monthlyCents: creditsAppliedMonthlyCents ?? loanMonthlyCents,
         afterCreditMonthlyCents: null,
         creditAppliedAfterMonths: 0,
         reliefCents:
-          finance.product === "loan" && netMonthlyCents != null ? 0 : creditLadder.reliefCents,
+          finance.product === "loan" && creditsAppliedMonthlyCents != null
+            ? 0
+            : creditLadder.reliefCents,
       })
     : null;
 
@@ -1945,7 +2009,7 @@ function priceOption(args: {
             finance.product === "cash"
               ? null
               : finance.product === "loan"
-                ? (netMonthlyCents ?? financing.loanMonthlyPaymentCents)
+                ? (creditsAppliedMonthlyCents ?? financing.loanMonthlyPaymentCents)
                 : monthlyCents,
         }
       : null,
@@ -2322,3 +2386,29 @@ const PRODUCT_NOUN: Record<FinanceProduct, string> = {
   lease: "Lease",
   ppa: "Power purchase",
 };
+
+/**
+ * DOES THIS FROZEN DOCUMENT CARRY THE TAX-CREDIT SWITCH?
+ *
+ * One definition, because three places answer it and they must agree: the
+ * document itself (which renders the control), the filing (which files a copy
+ * per reading), and the version row on the deal (which says whether both copies
+ * are there yet). Two of them disagreeing shows up as a row that reports a
+ * missing par copy forever, on a proposal that was never going to have one.
+ *
+ * Two conditions. The option the document opens on has to carry a second,
+ * credits-applied scenario — absent on a lease, a PPA, a company that quotes no
+ * credits, and every proposal generated before both scenarios were frozen. And
+ * it must not be the battery-only deck, which is a different document with no
+ * switch on it, whatever its snapshot happens to hold.
+ *
+ * Takes `unknown` on purpose: every caller is reading a Prisma `Json` column.
+ */
+export function hasCreditSwitch(snapshot: unknown): boolean {
+  const s = snapshot as
+    | { systemType?: string; options?: { creditsApplied?: unknown }[] }
+    | null
+    | undefined;
+  if (!s || s.systemType === "storage") return false;
+  return s.options?.[0]?.creditsApplied != null;
+}

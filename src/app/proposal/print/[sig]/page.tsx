@@ -31,12 +31,29 @@ export const metadata = { title: "Proposal", robots: { index: false, follow: fal
  */
 export default async function ProposalPrintPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ sig: string }>;
+  searchParams: Promise<{ credits?: string }>;
 }) {
   const { sig } = await params;
   const proposal = await proposalForPrint(sig);
   if (!proposal) notFound();
+
+  /**
+   * WHICH OF THE TWO READINGS THIS SHEET IS.
+   *
+   * The document carries a switch and paper does not, so the scenario has to be
+   * chosen before the render. Signing files BOTH copies — the deal with the
+   * credits applied and the deal at par — and this is how the second one is
+   * asked for.
+   *
+   * NOT part of the signed payload, deliberately. The signature authorises this
+   * proposal; both scenarios are frozen inside the same snapshot and the
+   * customer's own page offers a control that flips between them, so a flag
+   * choosing one discloses nothing the signature has not already granted.
+   */
+  const creditsApplied = (await searchParams).credits === "1";
 
   const layoutImageUrl = proposal.snapshot.layout
     ? await layoutUrlIfAvailable(sig, proposal.snapshot.layout.fileId, proposal.leadId)
@@ -68,6 +85,7 @@ export default async function ProposalPrintPage({
       layoutImageUrl={layoutImageUrl}
       siteImageBase={proposal.snapshot.site ? `/proposal/print/${sig}/site-image` : null}
       accentColor={branding.accentColor}
+      creditsApplied={creditsApplied}
     />
   );
 }

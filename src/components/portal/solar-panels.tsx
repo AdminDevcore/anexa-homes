@@ -1690,6 +1690,21 @@ function Notice({ tone, children }: { tone: "warn" | "info"; children: React.Rea
  * already blocked on the validation rules, so the builder inherits the guard
  * rails rather than bolting them on afterwards.
  */
+/**
+ * IS THIS APPROVED VERSION MISSING A COPY IT IS SUPPOSED TO HAVE?
+ *
+ * One copy on an ordinary document, two on one that earns federal credits — the
+ * deal with them applied, and the same signature on the deal at par. The pair
+ * is filed atomically, so a missing first half means the render failed and a
+ * missing second half means this version was approved before par copies
+ * existed. Both read the same way to a rep: the folder does not yet hold what
+ * this row says it does.
+ */
+function incompleteCopies(v: ProposalVersion): boolean {
+  if (!v.approvedFileId) return true;
+  return !!v.hasCreditSwitch && !v.approvedParFileId;
+}
+
 export type ProposalVersion = {
   id: string;
   leadId: string;
@@ -1716,6 +1731,17 @@ export type ProposalVersion = {
    * state the retry affordance reads.
    */
   approvedFileId: string | null;
+  /**
+   * The SECOND filed copy — the same signed document read at par, with none of
+   * the federal credits applied. Null on a version with nothing to claim, which
+   * files one copy, and on every version approved before both were filed.
+   */
+  approvedParFileId?: string | null;
+  /**
+   * Whether this version's document has two readings to file: the option it
+   * opens on carries a credits-applied scenario beside the one at par.
+   */
+  hasCreditSwitch?: boolean;
   /**
    * Whether the version this row is about froze a contract adjustment — a
    * partner whose paper is written for more than the household owes.
@@ -1895,7 +1921,10 @@ export function ProposalVersionList({
    */
   const autoFiled = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!canApprove || !approved || approved.approvedFileId) return;
+    // A PAIR is incomplete until both halves are there. That also self-heals
+    // the versions approved before the par copy existed: the next person to
+    // open the deal files the missing half without pressing anything.
+    if (!canApprove || !approved || !incompleteCopies(approved)) return;
     if (autoFiled.current === approved.id) return;
     autoFiled.current = approved.id;
     const id = approved.id;
@@ -1911,7 +1940,7 @@ export function ProposalVersionList({
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canApprove, approved?.id, approved?.approvedFileId]);
+  }, [canApprove, approved?.id, approved?.approvedFileId, approved?.approvedParFileId]);
 
   // Folded, the list keeps the newest few — plus the approved version wherever
   // it fell, because "which one did we sell" is the whole reason to open this.
@@ -1988,7 +2017,11 @@ export function ProposalVersionList({
           description: "Use Retry on the row to try again.",
         });
       } else {
-        toast.success(`v${v.version} approved — the PDF is in the Proposal folder`);
+        toast.success(
+          v.hasCreditSwitch
+            ? `v${v.version} approved — both PDFs are in the Proposal folder`
+            : `v${v.version} approved — the PDF is in the Proposal folder`
+        );
       }
       router.refresh();
     } finally {
@@ -2001,7 +2034,9 @@ export function ProposalVersionList({
     try {
       const fileError = await postFileCopy(v.id);
       if (fileError) return toast.error(fileError);
-      toast.success("Filed into the Proposal folder");
+      toast.success(
+        v.hasCreditSwitch ? "Both copies filed into Proposal" : "Filed into the Proposal folder"
+      );
       router.refresh();
     } finally {
       setBusyId(null);
@@ -2111,7 +2146,11 @@ export function ProposalVersionList({
                 </a>
               )}
 
-              {/* The filed copy, reachable from the row that caused it. */}
+              {/* The filed copies, reachable from the row that caused them.
+                  Two on a document that earns credits — the deal as the
+                  conversation ended, and the same signature on the deal at par
+                  — because whether the credits are ever claimed is not settled
+                  on the day anybody signs. */}
               {isApproved && v.approvedFileId && (
                 <a
                   href={`/portal/files/${v.approvedFileId}`}
@@ -2122,14 +2161,27 @@ export function ProposalVersionList({
                   PDF in Proposal
                 </a>
               )}
-              {isApproved && !v.approvedFileId && (
+              {isApproved && v.approvedParFileId && (
+                <a
+                  href={`/portal/files/${v.approvedParFileId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs underline underline-offset-2"
+                  title="The same signed proposal with no tax credits applied — the larger figure."
+                >
+                  PDF at par
+                </a>
+              )}
+              {isApproved && incompleteCopies(v) && (
                 busy ? (
                   <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                    <Loader2 className="size-3.5 animate-spin" /> Filing the copy…
+                    <Loader2 className="size-3.5 animate-spin" />{" "}
+                    {v.hasCreditSwitch ? "Filing both copies…" : "Filing the copy…"}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-xs text-amber-700">
-                    <TriangleAlert className="size-3.5" /> Copy not filed
+                    <TriangleAlert className="size-3.5" />{" "}
+                    {v.hasCreditSwitch && v.approvedFileId ? "Par copy not filed" : "Copy not filed"}
                     {canApprove && (
                       <button
                         className="underline underline-offset-2 disabled:opacity-50"

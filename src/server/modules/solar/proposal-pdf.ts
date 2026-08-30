@@ -94,12 +94,23 @@ function localChrome(): string | null {
 /**
  * Render one proposal to PDF bytes.
  *
+ * `creditsApplied` picks which of the document's two readings is on the paper:
+ * false is the deal at par — the copy this has always rendered, and the one the
+ * customer's page opens on — and true is the same deal with the federal credits
+ * already applied. A signed proposal that earns any is filed both ways, because
+ * paper cannot carry the switch that tells them apart on screen.
+ *
  * Throws on any failure, and the caller is expected to treat that as "the copy
  * was not filed" rather than "the approval failed" — see
  * setProposalApprovalAction.
  */
-export async function renderProposalPdf(proposalId: string): Promise<Buffer> {
-  const url = `${baseUrl()}/proposal/print/${mintPrintSignature(proposalId)}`;
+export async function renderProposalPdf(
+  proposalId: string,
+  opts: { creditsApplied?: boolean } = {},
+): Promise<Buffer> {
+  const url =
+    `${baseUrl()}/proposal/print/${mintPrintSignature(proposalId)}` +
+    (opts.creditsApplied ? "?credits=1" : "");
 
   let browser: Browser | null = null;
   try {

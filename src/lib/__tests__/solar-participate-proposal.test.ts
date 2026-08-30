@@ -142,7 +142,10 @@ describe("the customer's price", () => {
     const reference = build();
 
     expect(without.financing).toEqual(reference.financing);
-    expect(without.financing.creditLadder).toBeUndefined();
+    // The two figures the PROGRAMME structure owns. A deal with no partner
+    // contribution has no re-amortised payment the household is promised and
+    // no relief inside the years it prints by default — and that is still true
+    // now that such a deal carries a credit scenario for the switch to reach.
     expect(without.financing.netMonthlyPaymentCents).toBeUndefined();
     expect(without.savings.creditReliefTotalCents).toBe(0);
   });
@@ -237,10 +240,49 @@ describe("the payment and the savings", () => {
     expect(o.creditsApplied!.monthlyCents).toBe(s.financing.netMonthlyPaymentCents);
   });
 
-  it("offers no switch on a deal with no credits to claim", () => {
-    // Every deal without a partner programme, which is almost all of them. The
-    // document shows one set of figures and no control offering a second.
+  it("offers the switch on an ordinary deal, and leaves its default alone", () => {
+    /*
+      THE 2026-08-30 CHANGE. A household on a plain solar loan earns the same
+      federal credits as one on a partner programme — the credits are a fact
+      about the roof and the return, not about whose paper the deal is written
+      on — so the switch reaches every purchase deal now. What did NOT change is
+      the copy that prints when nobody throws it.
+    */
     const s = build();
+    const o = s.options![0];
+
+    // The ladder is the degenerate one: no second figure, so nothing is handed
+    // back and the credits simply come off the price.
+    const ladder = s.financing.creditLadder!;
+    expect(ladder.contractValueCents).toBe(48_400_00);
+    expect(ladder.quotedPriceCents).toBe(48_400_00);
+    expect(ladder.incentiveCents).toBe(0);
+    // 50% of $48,400 — the base credit and both bonuses, which this deal claims
+    // by default and a rep may untick on the deal.
+    expect(ladder.creditTotalCents).toBe(24_200_00);
+    expect(ladder.netCostCents).toBe(24_200_00);
+
+    // THE DEFAULT IS UNTOUCHED: the payment quoted, flat, for the whole term.
+    // $48,400 over 360 months at 0%.
+    expect(o.monthlyCents).toBe(13_444);
+    expect(s.savings.years[0].solarPaymentCents).toBe(13_444 * 12);
+    expect(s.savings.years[2].solarPaymentCents).toBe(13_444 * 12);
+    expect(s.savings.creditReliefTotalCents).toBe(0);
+
+    // And the other side of the switch is there: the same terms on what is left
+    // after the credits, from the first month.
+    expect(o.creditsApplied!.monthlyCents).toBe(6_722);
+    expect(o.creditsApplied!.savings.years[0].solarPaymentCents).toBe(6_722 * 12);
+  });
+
+  it("offers no switch where there is nothing at all to claim", () => {
+    // An admin who has zeroed every percentage is saying this company quotes no
+    // credits. The document then shows one set of figures and no control
+    // offering a second — which is also how every proposal generated before
+    // both scenarios were frozen reads.
+    const s = build({
+      creditRates: { itcPct: 0, energyCommunityPct: 0, domesticContentPct: 0 },
+    });
     expect(s.financing.creditLadder).toBeUndefined();
     expect(s.options![0].creditsApplied).toBeUndefined();
   });

@@ -42,7 +42,22 @@ let actor: { companyId: string; userId: string; fullName: string };
 
 const SNAPSHOT = { schemaVersion: 2, reference: "SP-TEST", customer: { name: "T" } };
 
-async function makeVersion(version: number, over: { supersededAt?: Date } = {}) {
+/**
+ * The same document, on a deal that earns federal credits.
+ *
+ * Only the one fact the filing reads: the option the document opens on carries
+ * a credits-applied scenario beside the one at par, which is what makes it a
+ * proposal with two honest readings and therefore two copies.
+ */
+const SNAPSHOT_WITH_CREDITS = {
+  ...SNAPSHOT,
+  options: [{ key: "quoted", monthlyCents: 35_578, creditsApplied: { monthlyCents: 17_789 } }],
+};
+
+async function makeVersion(
+  version: number,
+  over: { supersededAt?: Date; credits?: boolean } = {}
+) {
   return db.solarProposal.create({
     data: {
       companyId,
@@ -50,7 +65,7 @@ async function makeVersion(version: number, over: { supersededAt?: Date } = {}) 
       version,
       status: "generated",
       supersededAt: over.supersededAt ?? null,
-      snapshot: SNAPSHOT as never,
+      snapshot: (over.credits ? SNAPSHOT_WITH_CREDITS : SNAPSHOT) as never,
     },
     select: { id: true, leadId: true, version: true, approvedFileId: true },
   });
@@ -295,5 +310,147 @@ describe("a failed render does not block the decision", () => {
     await inSolar(() => fileApprovedCopy(actor, v1));
 
     expect(await proposalFolder()).toHaveLength(1);
+  });
+});
+
+/**
+ * ONE SIGNATURE, TWO DOCUMENTS.
+ *
+ * A household on a credit-earning deal signs the proposal, not one scenario of
+ * it, and whether they ever claim the credits is a fact about their own return
+ * that the day of signing cannot settle. So the folder carries both readings of
+ * what was sold, under the same signature.
+ */
+describe("a proposal that earns credits files both readings", () => {
+  it("files the credits-applied copy and the one at par", async () => {
+    const v1 = await makeVersion(1, { credits: true });
+    const filed = await approveAndFile(v1);
+
+    expect(filed.error).toBeNull();
+
+    const folder = await proposalFolder();
+    expect(folder.map((f) => f.name).sort()).toEqual([
+      "Proposal PAR v1 — Approval Test.pdf",
+      "Proposal v1 — Approval Test.pdf",
+    ]);
+
+    // Each copy is rendered in its own scenario — the flag is what the print
+    // route reads, and it is the only thing that differs between them.
+    expect(renderProposalPdf).toHaveBeenCalledWith(v1.id, { creditsApplied: true });
+    expect(renderProposalPdf).toHaveBeenCalledWith(v1.id, { creditsApplied: false });
+
+    const row = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+    const byName = new Map(folder.map((f) => [f.name, f.id]));
+    expect(row.approvedFileId).toBe(byName.get("Proposal v1 — Approval Test.pdf"));
+    expect(row.approvedParFileId).toBe(byName.get("Proposal PAR v1 — Approval Test.pdf"));
+    // The returned id is the one the row's "PDF in Proposal" link points at.
+    expect(filed.fileId).toBe(row.approvedFileId);
+  });
+
+  it("files one copy for a battery-only document, which has no switch", async () => {
+    // The storage deck is a different document and reads its deal one way. Its
+    // snapshot can still carry a credits-applied scenario, and filing on that
+    // alone would put two byte-identical PDFs in the folder under two names.
+    const v1 = await db.solarProposal.create({
+      data: {
+        companyId,
+        leadId,
+        version: 1,
+        status: "generated",
+        snapshot: { ...SNAPSHOT_WITH_CREDITS, systemType: "storage" } as never,
+      },
+      select: { id: true, leadId: true, version: true, approvedFileId: true },
+    });
+    await approveAndFile(v1);
+
+    const folder = await proposalFolder();
+    expect(folder.map((f) => f.name)).toEqual(["Proposal v1 — Approval Test.pdf"]);
+    const row = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+    expect(row.approvedParFileId).toBeNull();
+  });
+
+  it("still files exactly one copy where there is nothing to claim", async () => {
+    const v1 = await makeVersion(1);
+    await approveAndFile(v1);
+
+    const folder = await proposalFolder();
+    expect(folder.map((f) => f.name)).toEqual(["Proposal v1 — Approval Test.pdf"]);
+    const row = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+    expect(row.approvedParFileId).toBeNull();
+  });
+
+  it("retrying replaces the pair rather than stacking a second one", async () => {
+    const v1 = await makeVersion(1, { credits: true });
+    await approveAndFile(v1);
+    const first = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+
+    await inSolar(() => fileApprovedCopy(actor, v1));
+
+    const folder = await proposalFolder();
+    expect(folder).toHaveLength(2);
+    const row = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+    expect(row.approvedFileId).not.toBe(first.approvedFileId);
+    expect(row.approvedParFileId).not.toBe(first.approvedParFileId);
+    expect(folder.map((f) => f.id).sort()).toEqual(
+      [row.approvedFileId, row.approvedParFileId].sort()
+    );
+  });
+
+  it("files NEITHER when the second render fails", async () => {
+    // A half-filed pair is worse than an empty folder: the row would report
+    // success while the folder held one reading of a deal that has two.
+    renderProposalPdf.mockReset();
+    renderProposalPdf.mockResolvedValueOnce(Buffer.from("%PDF-1.7 first"));
+    renderProposalPdf.mockRejectedValueOnce(new Error("Could not find Chrome"));
+
+    const v1 = await makeVersion(1, { credits: true });
+    const filed = await approveAndFile(v1);
+
+    expect(filed.fileId).toBeNull();
+    expect(filed.error).toMatch(/Chrome/);
+    expect(await proposalFolder()).toHaveLength(0);
+    const row = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+    expect(row.approvedAt).not.toBeNull();
+    expect(row.approvedFileId).toBeNull();
+    expect(row.approvedParFileId).toBeNull();
+  });
+
+  it("unapproving takes both copies out of the folder", async () => {
+    const v1 = await makeVersion(1, { credits: true });
+    await approveAndFile(v1);
+    const filed = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+
+    await inSolar(() =>
+      unapproveProposalVersion(actor, {
+        ...v1,
+        approvedFileId: filed.approvedFileId,
+        approvedParFileId: filed.approvedParFileId,
+      })
+    );
+
+    const row = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+    expect(row.approvedFileId).toBeNull();
+    expect(row.approvedParFileId).toBeNull();
+    expect(await proposalFolder()).toHaveLength(0);
+  });
+
+  it("approving another version sweeps both of the old one's copies", async () => {
+    const v1 = await makeVersion(1, { credits: true });
+    const v2 = await makeVersion(2, { credits: true });
+    await approveAndFile(v1);
+    expect(await proposalFolder()).toHaveLength(2);
+
+    await approveAndFile(v2);
+
+    const folder = await proposalFolder();
+    expect(folder).toHaveLength(2);
+    const row2 = await db.solarProposal.findUniqueOrThrow({ where: { id: v2.id } });
+    expect(folder.map((f) => f.id).sort()).toEqual(
+      [row2.approvedFileId, row2.approvedParFileId].sort()
+    );
+    const row1 = await db.solarProposal.findUniqueOrThrow({ where: { id: v1.id } });
+    expect(row1.approvedAt).toBeNull();
+    expect(row1.approvedFileId).toBeNull();
+    expect(row1.approvedParFileId).toBeNull();
   });
 });
