@@ -39,6 +39,8 @@ import {
   type FinalPpwMode,
 } from "@/lib/solar-money";
 import { SystemPriceCard, StoragePriceCard } from "@/components/portal/solar/system-price";
+import { ContractValueCard } from "@/components/portal/solar/contract-value";
+import type { LenderContractAdjustment } from "@/lib/solar-contract-adjustment";
 import { applyDealRebateAction, removeDealRebateAction } from "@/server/modules/solar/storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
@@ -682,6 +684,17 @@ export type LenderOption = {
    * cut, cents. Null — nearly every lender — means no floor.
    */
   minBasePpwCents: number | null;
+  /**
+   * This partner's programme contribution, if it runs one — the only thing on a
+   * lender that makes the contract value and the customer's obligation two
+   * different numbers.
+   *
+   * READ-ONLY HERE. Nothing on the financing step writes it: it is a term of
+   * the partner's programme, set once in Settings by somebody with permission
+   * to change settings, and a rep sees the figures it produces without a
+   * control to move them. Absent on every lender that has none configured.
+   */
+  contractAdjustment: LenderContractAdjustment | null;
 };
 
 export type LenderProductOption = {
@@ -1311,6 +1324,35 @@ export function SolarFinancePanel({
       />
       )}
 
+      {/* WHEN THE CONTRACT AND THE CUSTOMER'S OBLIGATION ARE DIFFERENT
+          NUMBERS. Directly under the price, because it is about the price —
+          and only on the partners that run such a programme, which renders
+          nothing at all on every other deal. */}
+      {isPurchase && livePrice && (
+        <ContractValueCard
+          lenderName={quotedLender?.name ?? null}
+          // Only a loan carries one: cash has no lender advancing a contract
+          // for a contribution to come off, which is the same line the
+          // generated document draws.
+          adjustment={isLoan ? (quotedLender?.contractAdjustment ?? null) : null}
+          systemSizeKwDc={systemSizeKwDc}
+          // A storage job has no installed watts for a rate to be per, and its
+          // breakdown carries no such figure — narrowed on the key rather than
+          // on `isStorage`, which the type system cannot see through.
+          customerFinalPpwCents={
+            "finalPpwCents" in livePrice.breakdown
+              ? Math.round(livePrice.breakdown.finalPpwCents)
+              : null
+          }
+          customerSystemPriceCents={livePrice.breakdown.baseStickerCents}
+          adderStickerCents={livePrice.breakdown.adderStickerCents}
+          customerContractCents={livePrice.breakdown.contractPriceCents}
+          monthlyCents={quote?.monthlyCents ?? null}
+          termMonths={chosen?.termMonths ?? null}
+          aprPct={chosen?.aprPct ?? null}
+        />
+      )}
+
       {/* Adders are LINES, not a box. The old "Adders $" field could not say
           what the money was for and went stale every time the array changed —
           see SolarAddersPanel. Directly under the price because they are the
@@ -1594,6 +1636,16 @@ export type ProposalVersion = {
    * state the retry affordance reads.
    */
   approvedFileId: string | null;
+  /**
+   * Whether the version this row is about froze a contract adjustment — a
+   * partner whose paper is written for more than the household owes.
+   *
+   * Read off the SNAPSHOT rather than off the deal's current lender, because
+   * the row is about a document that already exists: changing lenders on the
+   * deal tomorrow must not make a submission summary appear against a version
+   * generated for somebody else, or disappear from one that has it.
+   */
+  hasContractAdjustment?: boolean;
 };
 
 export function SolarProposalGate({
@@ -1919,8 +1971,18 @@ export function ProposalVersionList({
                       : "bg-sky-100 text-sky-700"
                 )}
               >
-                {v.supersededAt ? "superseded" : v.status}
+                {/* SIGNED OUTRANKS SUPERSEDED. Both are true of a version the
+                    customer signed and a rep built a v14 after, and this badge
+                    used to report only the second — a signed proposal quietly
+                    losing the one word on the row that says a human agreed to
+                    it. Same reasoning as the Approved badge below. */}
+                {v.signedAt ? "signed" : v.supersededAt ? "superseded" : v.status}
               </span>
+              {v.signedAt && v.supersededAt && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  superseded
+                </span>
+              )}
 
               {/* Deliberately its own badge rather than a replacement for the
                   status one. "Approved" and "superseded" are both true of the
@@ -1998,6 +2060,23 @@ export function ProposalVersionList({
                     )}
                   </span>
                 )
+              )}
+
+              {/* THE FUNDER'S PROCESSING DOCUMENT, on the signed row it
+                  describes. Not a second proposal — see
+                  ParticipateSubmissionSummary — which is why it is worded as a
+                  summary and sits apart from "PDF in Proposal", the link to the
+                  customer's actual signed copy. */}
+              {v.signedAt && v.hasContractAdjustment && (
+                <a
+                  href={`/api/solar/proposals/${v.id}/submission`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs underline underline-offset-2"
+                  title="An internal summary for the finance partner. Not the document the customer signed."
+                >
+                  Submission summary
+                </a>
               )}
 
               {canEdit && !v.sentAt && !v.supersededAt && (

@@ -294,6 +294,28 @@ const PRINT_CSS = `
   #proposal-root [data-section="cost"] dl { break-inside: auto; }
   #proposal-root [data-section="cost"] dl > div:last-child { break-before: avoid; }
 
+  /* THE TWO SECTIONS OF THE PRICING PAGE STAY TOGETHER, AND STAY WHOLE.
+     On a deal whose partner's contract is written for more than the household
+     owes, this chapter carries two tables that only mean anything read against
+     each other: the customer's price, and the reconciliation that arrives at
+     the same figure from the contract value. Three cents of every dispute this
+     feature could cause live in a page break between them.
+
+     'break-inside: avoid' so the three-row reconciliation cannot be split
+     across a fold — the middle row of it is a large negative number, and alone
+     at the top of a sheet it reads as a price. The eyebrow above the first
+     table gets 'break-after: avoid' for the same reason a heading always does:
+     a section label on the last line of a page labels nothing.
+
+     Note this does NOT force a new sheet. The chapter is allowed to run onto a
+     second page and frequently does; what is forbidden is the reconciliation
+     landing there in pieces. */
+  #proposal-root [data-print-slot="adjustment"] {
+    break-inside: avoid;
+    padding-top: 0.28in;
+  }
+  #proposal-root [data-print-slot="pricing-heading"] { break-after: avoid; }
+
   /* ── chapter 5, the maths ───────────────────────────────────────────────
      The two futures are a COMPARISON and have to be read side by side; stacked
      they are two claims a page apart. The chart is capped by width rather than

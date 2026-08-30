@@ -41,6 +41,14 @@ export async function readSolarReadiness(
             minBasePricePerBatteryCents: true,
             // Whether this partner funds an array with no storage on it.
             batteryRule: true,
+            // The partner's programme contribution. Read HERE, at the gate, so
+            // a half-configured one is a finding a rep can act on rather than a
+            // reconciliation silently missing from the finished document.
+            contractAdjustmentEnabled: true,
+            contractAdjustmentCents: true,
+            contractAdjustmentLabel: true,
+            contractAdjustmentDisclosure: true,
+            contractAdjustmentEffectiveAt: true,
           },
         },
         module: { select: { ratingW: true } },
@@ -206,6 +214,17 @@ export async function readSolarReadiness(
         // on a flat partner the base is a residual. See `bandPpwCents`.
         finalPpwMode: design.lender?.finalPpwMode ?? null,
         maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
+        // Null on a cash deal — no lender, therefore no programme, which the
+        // validator reads as "nothing to check".
+        contractAdjustment: design.lender
+          ? {
+              enabled: design.lender.contractAdjustmentEnabled,
+              fixedCents: design.lender.contractAdjustmentCents,
+              label: design.lender.contractAdjustmentLabel,
+              disclosure: design.lender.contractAdjustmentDisclosure,
+              effectiveAt: design.lender.contractAdjustmentEffectiveAt,
+            }
+          : null,
         fromRateSheet: !!finance.lenderProductId,
         hasPaymentFactor:
           (quotedProduct?.factorWithPaydownMicros ?? 0) > 0 ||

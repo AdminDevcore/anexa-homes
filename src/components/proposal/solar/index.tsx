@@ -295,6 +295,18 @@ function SolarPvProposalView({
   const sv = option.savings;
 
   const isPurchase = f.product === "cash" || f.product === "loan";
+  /**
+   * The reconciliation between what this partner's contract is written at and
+   * what the household owes — frozen at generation, on the option the reader is
+   * currently looking at.
+   *
+   * Read off the OPTION, not off the snapshot, so switching the payment menu
+   * from a partner that runs such a programme to one that does not takes the
+   * whole section with it. Undefined on every document generated before this
+   * existed, and null on every deal whose partner runs no such programme, which
+   * is almost all of them — and either way, nothing below renders.
+   */
+  const adjustment = f.lenderAdjustment ?? null;
   const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
   const hasEquipment = !!(s.system.module || s.system.inverter || s.system.battery);
@@ -504,7 +516,7 @@ function SolarPvProposalView({
             <LifetimeBlock
               label={lifetime.label}
               value={usd(lifetime.cents)}
-              note={lifetimeNote(lifetime, s.energy.utilityProvider)}
+              note={lifetimeNote(lifetime, s.energy.utilityProvider, !!f.ownershipNote)}
               accent={lifetime.tone === "good"}
             />
           </div>
@@ -681,7 +693,30 @@ function SolarPvProposalView({
           </p>
         )}
 
-        <dl className="mt-8 break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+        {/* SECTION 1 OF TWO — and the heading appears only when there is a
+            second section for it to be distinguished FROM.
+            On every ordinary proposal this table is the only pricing on the
+            page and a heading over it would be labelling the obvious; on a
+            deal whose partner writes its contract for more than the household
+            owes, the two sections have to be told apart at a glance, because
+            the whole failure mode is a reader taking one figure for the other.
+            Which is also why this one comes first, and is the one that carries
+            every number the household is actually being asked to agree to. */}
+        {adjustment && (
+          <p
+            data-print-slot="pricing-heading"
+            className="mt-10 mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-neutral-400"
+          >
+            Your price and payment
+          </p>
+        )}
+
+        <dl
+          className={cn(
+            "break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]",
+            adjustment ? "mt-0" : "mt-8"
+          )}
+        >
           <DarkRow k="Option" v={PRODUCT_LABEL[f.product] ?? f.product} />
           {f.lender && (
             <DarkRow
@@ -731,6 +766,21 @@ function SolarPvProposalView({
           {isPurchase && f.finalPpwCents != null && f.finalPpwCents > 0 && (
             <DarkRow k="Price per watt" v={`$${(f.finalPpwCents / 100).toFixed(2)}/W`} />
           )}
+          {/* WHAT THE PAYMENT DIVIDES INTO.
+              Shown only where it says something the total above does not: on a
+              deal carrying a programme contribution, where the reader is about
+              to be shown a much larger contract value and is entitled to see
+              exactly which figure the monthly comes off; and on the rare deal
+              with money down, where the two genuinely differ. On every other
+              proposal it is the total price again under a second name, which
+              is a row that costs a reader attention and tells them nothing.
+              Absent on every document generated before this key existed, which
+              renders as no row at all. */}
+          {isPurchase &&
+            f.financedAmountCents != null &&
+            (adjustment != null || f.financedAmountCents !== f.contractPriceCents) && (
+              <DarkRow k="Amount financed" v={usd(f.financedAmountCents)} />
+            )}
 
           {/* Third-party block — a lease has a monthly, a PPA has a rate, and
               neither has a system price. Nothing crosses over. */}
@@ -787,6 +837,61 @@ function SolarPvProposalView({
             />
           )}
         </dl>
+
+        {/* SECTION 2 OF TWO — THE PARTNER'S CONTRACT, RECONCILED.
+            Directly beneath the customer's own price and inside the SAME
+            chapter, deliberately. A separate page for the contract value would
+            be a page a household could read on its own, out of the context of
+            the payment it does not affect — and the one thing this document
+            must never do is let a reader take $118,400 for what they owe. Kept
+            together, the arithmetic answers itself: the value, less the
+            contribution, is the figure already printed above.
+
+            Every word of the label and of the paragraph is the administrator's.
+            The app supplies the three numbers and the layout. */}
+        {adjustment && (
+          <div data-print-slot="adjustment" className="mt-8 break-inside-avoid">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-300">
+              {f.lender ? `${f.lender} programme breakdown` : "Programme breakdown"}
+            </h3>
+            <dl className="mt-3 divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+              <DarkRow k="Adjusted contract value" v={usd(adjustment.lenderContractValueCents)} />
+              <DarkRow k={adjustment.label} v={`−${usd(adjustment.adjustmentCents)}`} />
+              <DarkRow
+                k="Your obligation"
+                v={usd(adjustment.customerObligationCents)}
+                strong
+              />
+            </dl>
+            <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-neutral-400">
+              {adjustment.disclosure}
+            </p>
+            {/* A statement about THIS PAGE's arithmetic, not about anybody's
+                liability — which is the administrator's paragraph above to
+                make. It is here because it is the sentence that stops the two
+                sections being confused, and it is checkable by the reader
+                against the rows they have just read. */}
+            <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-neutral-500">
+              The payment, amount financed and savings shown on this proposal are all calculated
+              from the {usd(adjustment.customerObligationCents)} figure.
+            </p>
+          </div>
+        )}
+
+        {/* WHAT THE HOUSEHOLD ENDS UP OWNING, in this partner's own words.
+            Here rather than in the twenty-five-year chapter because a rep can
+            switch that chapter off, and a claim about ownership, term, transfer
+            and buyout is not something a document may lose along with a table.
+            Where it is set, the savings chapter drops its own generic sentence
+            rather than repeating this one — see lifetimeNote. */}
+        {f.ownershipNote && (
+          <div className="mt-8 max-w-[62ch] break-inside-avoid">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-300">
+              What you own
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-neutral-400">{f.ownershipNote}</p>
+          </div>
+        )}
 
         {/* WHAT THE BATTERY EARNS, next to the payment it offsets.
             Here rather than in the twenty-five-year chapter because this is the
@@ -875,7 +980,7 @@ function SolarPvProposalView({
             <LifetimeBlock
               label={lifetime.label}
               value={usd(lifetime.cents)}
-              note={lifetimeNote(lifetime, s.energy.utilityProvider)}
+              note={lifetimeNote(lifetime, s.energy.utilityProvider, !!f.ownershipNote)}
               accent={lifetime.tone === "good"}
               aside={
                 <>

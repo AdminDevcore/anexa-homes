@@ -367,6 +367,11 @@ export default async function LeadDetailPage({
             sentAt: true, viewedAt: true, signedAt: true, signerName: true, createdAt: true,
             showComparison: true,
             approvedAt: true, approvedFileId: true, approvedById: true,
+            // Only so a SIGNED version can offer the funder's submission
+            // summary. Read from the frozen document rather than from the
+            // deal's current lender: changing lenders afterwards must not make
+            // the link appear against a version generated for somebody else.
+            snapshot: true,
           },
         }),
         // A deal can be shopped to several lenders (declined by one, approved by
@@ -1660,6 +1665,10 @@ export default async function LeadDetailPage({
                       approvedAt: v.approvedAt?.toISOString() ?? null,
                       approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
                       approvedFileId: v.approvedFileId,
+                      hasContractAdjustment:
+                        !!v.signedAt &&
+                        !!(v.snapshot as { financing?: { lenderAdjustment?: unknown } } | null)
+                          ?.financing?.lenderAdjustment,
                     }))}
                   />
                 </Card>

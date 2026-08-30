@@ -21,7 +21,9 @@ import {
   pricePurchase,
   priceStoragePurchase,
 } from "@/lib/solar-money";
+import { contractReconciles, monthlyReconciles } from "@/lib/solar-contract-adjustment";
 import { solarLeadValueCents } from "@/lib/solar-deal-value";
+import { mayInheritLiveLink } from "@/lib/solar-proposal-state";
 import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
 import { listBackupProfiles, listDealRebates, dealRebateTotalCents } from "./storage";
@@ -40,6 +42,66 @@ import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
  */
 
 const fail = (error: string) => ({ ok: false as const, error });
+
+/** Money for an audit line, where whole dollars are what a person reads. */
+const usd = (cents: number) =>
+  (cents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+
+/**
+ * The first way this finished document contradicts itself, or null.
+ *
+ * Checked over EVERY option, not just the quoted one. The menu is frozen into
+ * the same file and a household can switch to any row in it, so an alternative
+ * whose payment came off the wrong number is exactly as wrong as the quoted one
+ * — it is simply one click further away from being noticed.
+ */
+function reconciliationProblem(snapshot: SolarProposalSnapshot): string | null {
+  for (const option of snapshot.options ?? []) {
+    const f = option.financing;
+    const where = option.quoted ? "This deal" : `The "${option.label}" option`;
+
+    const adjustment = f.lenderAdjustment;
+    if (adjustment) {
+      if (
+        !contractReconciles({
+          label: adjustment.label,
+          adjustmentCents: adjustment.adjustmentCents,
+          customerObligationCents: adjustment.customerObligationCents,
+          lenderContractValueCents: adjustment.lenderContractValueCents,
+          disclosure: adjustment.disclosure,
+        })
+      ) {
+        return `${where} does not reconcile: the adjusted contract value is not the customer's price plus the ${adjustment.label}.`;
+      }
+      // The obligation on the reconciliation and the price on the contract line
+      // are supposed to be the SAME number said twice. If they ever part, the
+      // document is arguing with itself about what the household owes.
+      if (adjustment.customerObligationCents !== (f.contractPriceCents ?? 0)) {
+        return `${where} shows a customer obligation that does not match its own contract price.`;
+      }
+    }
+
+    if (
+      f.financedAmountCents != null &&
+      !monthlyReconciles({
+        financedAmountCents: f.financedAmountCents,
+        aprPct: f.aprPct,
+        termMonths: f.loanTermMonths ?? null,
+        monthlyCents: f.loanMonthlyPaymentCents,
+        // The quoted figure on a paydown programme is the WITH-paydown one, so
+        // the floor has to be measured against what it is actually repaying.
+        paydownCents: f.loanPaydownCents,
+      })
+    ) {
+      return `${where} quotes a monthly payment that does not reconcile with the amount the customer is financing and the term.`;
+    }
+  }
+  return null;
+}
 
 
 type EquipRow = {
@@ -168,17 +230,26 @@ export async function generateProposalVersion(
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
   if (!design || !finance) return fail("Complete the system design and financing first.");
 
-  // An accepted proposal is the record of what the customer agreed to.
-  // Regenerating over it would rewrite that record.
-  const accepted = await prisma.solarProposal.findFirst({
-    where: { companyId: user.companyId, leadId, signedAt: { not: null } },
-    select: { version: true },
-  });
-  if (accepted) {
-    return fail(
-      `Proposal v${accepted.version} has already been accepted by the customer and cannot be replaced.`
-    );
-  }
+  // A SIGNED VERSION DOES NOT CLOSE THE DEAL TO NEW ONES.
+  //
+  // This used to refuse outright: "v13 has already been accepted and cannot be
+  // replaced." The instinct was right and the rule was wrong. What must survive
+  // is the RECORD of what the customer agreed to -- and generating does not
+  // touch it. A new version is a new row with its own snapshot, its own
+  // reference and its own link; the signed one keeps its snapshot, its
+  // signature, its certificate, its approval and its PDF, and gains only a
+  // `supersededAt` that is simply true. Nothing is rewritten.
+  //
+  // And the deals that need a v14 are exactly the ones that got a signature:
+  // the homeowner signs, then adds a battery, then the utility comes back with
+  // a smaller system. Refusing there sent reps to build a second deal for the
+  // same house.
+  //
+  // The one thing that WOULD rewrite the record is moving the customer's live
+  // link off a signed document -- the URL they signed at quietly resolving to
+  // an unsigned newer draft. That is a re-price, it is guarded where it belongs
+  // (`repriceProposalAction` refuses on a signed proposal), and it is refused
+  // again below where the token would actually move.
 
   // The gate. Identical rules to the builder's readiness check — literally the
   // same function — so a proposal can never be generated around the UI.
@@ -224,9 +295,45 @@ export async function generateProposalVersion(
             // directions, so a document generated without it would quote a
             // cheap deal under the price list its own lender publishes.
             finalPpwMode: true,
+            /**
+             * The partner's programme contribution and the wording that goes
+             * with it, read HERE and frozen with everything else.
+             *
+             * The alternative — a customer's copy that looked the figure up at
+             * render time — would let an admin editing Settings next month
+             * change the contract value printed on a document a household has
+             * already signed, which is exactly what the snapshot exists to stop.
+             */
+            contractAdjustmentEnabled: true,
+            contractAdjustmentType: true,
+            contractAdjustmentCents: true,
+            contractAdjustmentLabel: true,
+            contractAdjustmentDisclosure: true,
+            contractAdjustmentEffectiveAt: true,
+            /// What the household ends up owning, in this partner's own words.
+            ownershipDisclosure: true,
           },
         })
       : null;
+
+  /**
+   * The partner's programme, in the shape the pricing code reads.
+   *
+   * Assembled once and used three times — the reconciliation on the document,
+   * the readiness gate below, and the audit line — because three readings of
+   * the same six columns is three chances for them to disagree about whether
+   * this deal carries a contribution.
+   */
+  const dealAdjustment = dealLender
+    ? {
+        enabled: dealLender.contractAdjustmentEnabled,
+        type: dealLender.contractAdjustmentType,
+        fixedCents: dealLender.contractAdjustmentCents,
+        label: dealLender.contractAdjustmentLabel,
+        disclosure: dealLender.contractAdjustmentDisclosure,
+        effectiveAt: dealLender.contractAdjustmentEffectiveAt,
+      }
+    : null;
 
   /**
    * The deal's own price, held to the partner's ceiling one last time.
@@ -402,6 +509,16 @@ export async function generateProposalVersion(
           // does not fund, in a document nobody can correct afterwards.
           maxFinalPpwCents: true,
           finalPpwMode: true,
+          // …and the same argument for the programme contribution: the menu is
+          // frozen, so an option offered without its partner's reconciliation
+          // is a document that shows one contract value on the quoted option
+          // and none on the identical partner one row down.
+          contractAdjustmentEnabled: true,
+          contractAdjustmentCents: true,
+          contractAdjustmentLabel: true,
+          contractAdjustmentDisclosure: true,
+          contractAdjustmentEffectiveAt: true,
+          ownershipDisclosure: true,
         },
       },
     },
@@ -539,6 +656,14 @@ export async function generateProposalVersion(
           finalPpwMode: p.lender.finalPpwMode,
           maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
           finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
+          contractAdjustment: {
+            enabled: p.lender.contractAdjustmentEnabled,
+            fixedCents: p.lender.contractAdjustmentCents,
+            label: p.lender.contractAdjustmentLabel,
+            disclosure: p.lender.contractAdjustmentDisclosure,
+            effectiveAt: p.lender.contractAdjustmentEffectiveAt,
+          },
+          ownershipDisclosure: p.lender.ownershipDisclosure,
         },
       })
     ),
@@ -587,7 +712,9 @@ export async function generateProposalVersion(
   const previous = await prisma.solarProposal.findFirst({
     where: { companyId: user.companyId, leadId },
     orderBy: { version: "desc" },
-    select: { id: true, version: true, publicToken: true, status: true, sentAt: true },
+    // `signedAt` because a signed row may not give its live link up — see the
+    // note on `carried` below.
+    select: { id: true, version: true, publicToken: true, status: true, sentAt: true, signedAt: true },
   });
   const version = (previous?.version ?? 0) + 1;
 
@@ -707,6 +834,12 @@ export async function generateProposalVersion(
     lenderLogoUrl: dealLender ? lenderLogoUrl(dealLender.id, dealLender.logoUpdatedAt) : null,
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
+    lenderProductLabel: quotedProductLabel,
+    // The partner's programme, read above and reconciled inside the snapshot.
+    // Only a loan carries one: cash has no lender advancing anything, and a
+    // lease or PPA has no system price for a contribution to come off.
+    contractAdjustment: finance.product === "loan" ? dealAdjustment : null,
+    ownershipNote: finance.product === "loan" ? (dealLender?.ownershipDisclosure ?? null) : null,
     alternatives,
     // How the deal's own terms read in the menu. The catalogue row's own label
     // when it was quoted from one, so the option a homeowner picks is findable
@@ -735,6 +868,24 @@ export async function generateProposalVersion(
   });
 
   /**
+   * THE LAST GATE, over the finished document rather than over its inputs.
+   *
+   * Readiness has already refused a half-configured programme, an unpriced
+   * deal and a price outside the band — all of them checks on what went IN.
+   * This one reads what came OUT, option by option, and refuses to save a
+   * document whose own figures contradict each other.
+   *
+   * It exists because the two failures it catches are both silent. A
+   * reconciliation that does not add up prints three plausible numbers a
+   * household is invited to sum; a payment worked out from the contract value
+   * instead of the obligation prints $328.89 where $134.44 is owed. Neither
+   * looks like an error on the page, and both are on paper by the time anybody
+   * would notice.
+   */
+  const mismatch = reconciliationProblem(snapshot);
+  if (mismatch) return fail(mismatch);
+
+  /**
    * Whether the customer's live link follows the new version.
    *
    * ORDINARY GENERATION: no. A new version is a new document, it is not public
@@ -751,11 +902,18 @@ export async function generateProposalVersion(
    * offered survives; only which document that URL resolves to moves.
    */
   const carried =
-    opts.carryPublicToken && previous?.publicToken
+    // NEVER off a signed row — see `mayInheritLiveLink`. The caller that
+    // re-prices already refuses on a signed proposal; this is the same rule
+    // stated where the token actually changes hands, so no future caller can
+    // walk past it.
+    opts.carryPublicToken && mayInheritLiveLink(previous)
       ? {
-          publicToken: previous.publicToken,
-          status: previous.status === "signed" ? "generated" : previous.status,
-          sentAt: previous.sentAt,
+          publicToken: previous!.publicToken,
+          // No "signed becomes generated" special case any more: the only row
+          // whose status this could have been wrong for is a signed one, and a
+          // signed row no longer gives its link up at all.
+          status: previous!.status,
+          sentAt: previous!.sentAt,
         }
       : null;
 
@@ -763,7 +921,17 @@ export async function generateProposalVersion(
   // token up in the same breath the new one takes it — two statements leave a
   // window where a unique-constraint failure has already blanked the customer's
   // live link and put nothing in its place.
-  const [, proposal] = await prisma.$transaction([
+  /**
+   * THE NEW ROW IS THE LAST STATEMENT, NOT THE SECOND ONE.
+   *
+   * This was `const [, proposal] = …`, which is right only when there IS a
+   * previous version to supersede. On the FIRST version of a deal the array
+   * holds one statement, index 1 is undefined, and generation returned
+   * `{ ok: true, id: undefined, version: undefined }` — succeeding, writing the
+   * row, and handing its caller nothing to point at. The live re-price never
+   * saw it because a re-price always has a previous version; v1 always did.
+   */
+  const written = await prisma.$transaction([
     ...(previous
       ? [
           prisma.solarProposal.update({
@@ -805,13 +973,37 @@ export async function generateProposalVersion(
             type: "generated",
             actorId: user.userId,
             actorName: user.fullName,
-            detail: `v${version} · ${finance.product}${carried ? " · live link kept" : ""}`,
+            /**
+             * WHICH SETTING WAS APPLIED TO THIS DOCUMENT.
+             *
+             * The snapshot already holds the three figures, so the money is
+             * recoverable from the row itself. What the audit trail needs on
+             * top of that is the SENTENCE — that at this moment, this partner's
+             * programme was on and stood at this amount — so that a change made
+             * in Settings a fortnight later can be read against the documents
+             * generated either side of it without opening two blobs of JSON.
+             */
+            detail: [
+              `v${version}`,
+              finance.product,
+              snapshot.financing.lenderAdjustment
+                ? `${snapshot.financing.lenderAdjustment.label} ${usd(
+                    snapshot.financing.lenderAdjustment.adjustmentCents
+                  )} · contract ${usd(snapshot.financing.lenderAdjustment.lenderContractValueCents)} · customer ${usd(
+                    snapshot.financing.lenderAdjustment.customerObligationCents
+                  )}`
+                : null,
+              carried ? "live link kept" : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
           },
         },
       },
       select: { id: true, version: true, publicToken: true },
     }),
   ]);
+  const proposal = written[written.length - 1];
 
   /**
    * The deal's own value, stamped from the document that was just made.

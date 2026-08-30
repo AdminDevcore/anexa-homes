@@ -14,6 +14,11 @@ import {
   type PurchaseBreakdown,
   type ThirdPartyBreakdown,
 } from "./solar-money";
+import {
+  reconcileContract,
+  type ContractReconciliation,
+  type LenderContractAdjustment,
+} from "./solar-contract-adjustment";
 
 /**
  * Builds the frozen customer-facing proposal.
@@ -633,6 +638,50 @@ export type SnapshotFinancing = {
    */
   lenderLogoUrl?: string | null;
   /**
+   * The rate-sheet row this was quoted from, by name. v6 and later.
+   *
+   * Frozen because the funder's submission summary has to name the product the
+   * deal was written on, and a catalogue row can be renamed or retired long
+   * before anybody goes looking for it.
+   */
+  lenderProductLabel?: string | null;
+  /**
+   * WHAT THE CUSTOMER IS FINANCING. v6 and later.
+   *
+   * The contract price less anything put down — and, on a partner carrying a
+   * programme contribution, emphatically NOT the contract value that partner's
+   * paper is written at. It is stored rather than left to be derived because
+   * this is the one number the payment must come off, and a document that lets
+   * a renderer choose which figure to amortise is a document that will
+   * eventually amortise the wrong one.
+   *
+   * Absent on every snapshot generated before v6, which renders no such row.
+   */
+  financedAmountCents?: number | null;
+  /**
+   * THE CONTRACT VALUE, WHERE IT DIFFERS FROM WHAT THE CUSTOMER OWES.
+   * v6 and later, and null on every deal that is not on such a partner —
+   * which is all of them until an admin configures one.
+   *
+   * Three figures that must add up, frozen together with the wording that
+   * explains them. Nothing else on the document reads it: the payment, the
+   * financed amount, the savings, the payback and the price per watt are all
+   * worked out from `contractPriceCents`, which is the household's actual
+   * obligation and is not touched by any of this.
+   */
+  lenderAdjustment?: SnapshotContractAdjustment | null;
+  /**
+   * What the homeowner ends up owning, in this partner's own words. v6 and
+   * later.
+   *
+   * The closing paragraph of the savings chapter tells a household it owns the
+   * system outright and that it transfers with the house. True of a loan, false
+   * of a prepaid lease, and until this key existed the document had no way to
+   * say anything else. Null keeps the generic sentence, which is what every
+   * document already issued carries.
+   */
+  ownershipNote?: string | null;
+  /**
    * Legacy incentive fields. No credit is quoted anywhere in the product, so
    * these are always null on anything generated now; the keys stay so that
    * proposals issued while incentives existed still parse and render.
@@ -640,6 +689,27 @@ export type SnapshotFinancing = {
   itcEstimateCents: number | null;
   itcPct: number | null;
   stateIncentiveNote: string | null;
+};
+
+/**
+ * The contract reconciliation, frozen onto one option of one document.
+ *
+ * Structurally `ContractReconciliation` — same three figures, same wording —
+ * but declared here as its own type because this one is JSON in a database
+ * column that has to keep parsing for as long as the proposal exists. The
+ * computation may be refactored; this shape may not.
+ */
+export type SnapshotContractAdjustment = {
+  /** The approved customer-facing term, as it stood on the day. */
+  label: string;
+  /** The partner's contribution, cents. */
+  adjustmentCents: number;
+  /** What the household owes — the same figure as `contractPriceCents`. */
+  customerObligationCents: number;
+  /** What the partner's paper is written at. */
+  lenderContractValueCents: number;
+  /** The reconciliation paragraph, its figures already substituted in. */
+  disclosure: string;
 };
 
 /**
@@ -690,8 +760,24 @@ export type SolarProposalSnapshot = {
    * v5 adds the system type and the storage block — a battery makes no
    * kilowatt-hours, so a document about one is argued from backup hours,
    * programme earnings and a time-of-use spread instead of from production.
+   * v6 splits the contract value from the customer's obligation: the financed
+   * amount, the partner's programme contribution and its reconciliation, the
+   * lender's product name, and the partner's own ownership wording.
    */
-  schemaVersion: 1 | 2 | 3 | 4 | 5;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
+  /**
+   * Which revision of the pricing arithmetic produced these figures.
+   *
+   * SEPARATE FROM `schemaVersion`, and the distinction is load-bearing: that
+   * one says what SHAPE this JSON is, so a renderer knows which keys to expect.
+   * This one says how the numbers inside it were WORKED OUT, so a dispute about
+   * a figure on a two-year-old proposal can be settled against the rules that
+   * were in force rather than against today's. A shape can change without the
+   * maths moving, and the maths can move inside an unchanged shape.
+   *
+   * Absent on everything generated before v6, which reads as revision 1.
+   */
+  calculationVersion?: number;
   /**
    * What this deal sold.
    *
@@ -897,6 +983,21 @@ export type SolarProposalSnapshot = {
   disclaimers: { incentive?: string; estimate: string };
 };
 
+/**
+ * Which revision of the pricing arithmetic a document was built by.
+ *
+ * BUMP THIS when the maths that turns a design and a rate sheet into the
+ * figures a homeowner reads actually changes — not when a renderer moves, not
+ * when a key is added. It is stamped onto every snapshot so that an argument
+ * about a number on an old proposal can be settled against the rules that were
+ * in force when it was made.
+ *
+ * 2 — the contract value and the customer's obligation became separate figures.
+ *     Before this there was only one, so every document at revision 1 is one in
+ *     which they were necessarily equal.
+ */
+export const PRICING_CALCULATION_VERSION = 2;
+
 /** The standing non-binding-estimate wording. Shown on every proposal. */
 export const ESTIMATE_DISCLAIMER =
   "This proposal is an estimate, not a binding offer or a guarantee of financing. Production, savings and utility rates are projections based on the assumptions listed and will vary with weather, usage, equipment availability and utility rate changes. Financing is subject to credit approval and lender terms. Figures do not constitute tax advice.";
@@ -966,6 +1067,18 @@ export type ProposalAlternative = {
   lenderLogoUrl?: string | null;
   lenderApplyUrl?: string | null;
   loanFactors?: PaymentFactors | null;
+  /** The rate-sheet row's own name, frozen for the funder's paperwork. */
+  lenderProductLabel?: string | null;
+  /**
+   * This partner's programme contribution, as configured. Carried per
+   * ALTERNATIVE and not once for the document, because the menu offers several
+   * partners and only some of them run such a programme — a contribution
+   * resolved once and applied to every option would put Participate's
+   * reconciliation under a GoodLeap loan.
+   */
+  contractAdjustment?: LenderContractAdjustment | null;
+  /** This partner's ownership wording, if it publishes one. */
+  ownershipNote?: string | null;
 };
 
 /**
@@ -1002,6 +1115,16 @@ function priceOption(args: {
   lenderLogoUrl: string | null;
   lenderApplyUrl: string | null;
   loanFactors: PaymentFactors | null;
+  lenderProductLabel?: string | null;
+  /**
+   * This partner's programme contribution, as an admin configured it. Resolved
+   * into the frozen three-figure reconciliation below, or into nothing.
+   */
+  contractAdjustment?: LenderContractAdjustment | null;
+  /** This partner's ownership wording, where it publishes one. */
+  ownershipNote?: string | null;
+  /** When the document is being made — the date an effective date is read against. */
+  now?: Date;
   assumptions: SolarAssumptions;
   currentRateMillsPerKwh: number;
   /**
@@ -1069,6 +1192,29 @@ function priceOption(args: {
    */
   const loanPrincipalCents =
     (purchase?.contractPriceCents ?? 0) - (finance.downPaymentCents ?? 0);
+
+  /**
+   * THE CONTRACT VALUE, WHERE THIS PARTNER'S PAPER IS WRITTEN FOR MORE THAN THE
+   * HOUSEHOLD OWES.
+   *
+   * Resolved from `purchase.contractPriceCents` — the price already computed by
+   * the ladder above — and deliberately NOT fed back into it. Everything below
+   * this line goes on using the obligation: the principal a factor is applied
+   * to was resolved before this ran, and the savings model that follows is
+   * handed the same `purchase` breakdown it always was.
+   *
+   * Null on every deal whose partner has no such programme, which is all of
+   * them until an admin configures one, and on lease and PPA, which have no
+   * system price for a contribution to come off.
+   */
+  const reconciliation: ContractReconciliation | null = purchase
+    ? reconcileContract({
+        customerObligationCents: purchase.contractPriceCents,
+        adjustment: args.contractAdjustment,
+        lenderName: args.lender,
+        at: args.now,
+      })
+    : null;
   const loanFactorQuote =
     finance.product === "loan" && args.loanFactors && hasPaymentFactor(args.loanFactors)
       ? factorQuote(args.loanFactors, loanPrincipalCents)
@@ -1236,6 +1382,43 @@ function priceOption(args: {
     lenderLogoUrl: finance.product === "loan" ? args.lenderLogoUrl : null,
     // Loan only: a cash, lease or PPA deal has no credit to pre-qualify for.
     applyUrl: finance.product === "loan" ? args.lenderApplyUrl : null,
+    // Spread, not assigned null — the snapshot holds no undefined, and a key
+    // that is simply not there is how a pre-v6 document says "nobody recorded
+    // this", which is exactly what happened.
+    ...(finance.product === "loan" && args.lenderProductLabel
+      ? { lenderProductLabel: args.lenderProductLabel }
+      : {}),
+    /**
+     * The money the payment is actually taken from.
+     *
+     * Written for a purchase only, and set to the same principal the factor and
+     * the amortisation above were handed — one figure, resolved once. On a
+     * partner carrying a programme contribution this is the household's
+     * obligation and NOT the contract value, which is the entire point: it is
+     * the number Section 1 of the customer's document prints under "Amount
+     * financed", directly above a payment that has to divide into it.
+     */
+    ...(purchase ? { financedAmountCents: loanPrincipalCents } : {}),
+    /**
+     * The reconciliation, frozen. Read by exactly one block of the customer's
+     * document and by the funder's submission summary; by nothing that computes
+     * a payment, a saving or a rate.
+     */
+    ...(reconciliation
+      ? {
+          lenderAdjustment: {
+            label: reconciliation.label,
+            adjustmentCents: reconciliation.adjustmentCents,
+            customerObligationCents: reconciliation.customerObligationCents,
+            lenderContractValueCents: reconciliation.lenderContractValueCents,
+            disclosure: reconciliation.disclosure,
+          },
+        }
+      : {}),
+    // What the household ends up owning, in this partner's words. Absent leaves
+    // the document's own sentence standing, which is what every proposal
+    // generated before this key carries.
+    ...(args.ownershipNote?.trim() ? { ownershipNote: args.ownershipNote.trim() } : {}),
     // Always null: no incentive is quoted, so nothing to record. Kept as
     // keys rather than dropped so older snapshots stay type-compatible.
     itcEstimateCents: null,
@@ -1312,6 +1495,19 @@ export function buildProposalSnapshot(args: {
   loanFactors?: PaymentFactors | null;
   /** The lender's CUSTOMER application link. Never the dealer portal. */
   lenderApplyUrl?: string | null;
+  /** The quoted rate-sheet row's own name, for the funder's paperwork. */
+  lenderProductLabel?: string | null;
+  /**
+   * The quoted partner's programme contribution, as configured in Settings.
+   *
+   * Read at generation and reconciled here, so the three figures a household is
+   * shown are frozen with everything else on the document. Editing the figure
+   * in Settings tomorrow moves nothing already generated — the same trade every
+   * other number in this snapshot makes.
+   */
+  contractAdjustment?: LenderContractAdjustment | null;
+  /** The quoted partner's ownership wording, where it publishes one. */
+  ownershipNote?: string | null;
   /**
    * The other ways this customer may pay, already resolved and authorised by
    * the caller. Empty is the ordinary case and reads exactly as it always did.
@@ -1390,6 +1586,10 @@ export function buildProposalSnapshot(args: {
     lenderLogoUrl: args.lenderLogoUrl ?? null,
     lenderApplyUrl: args.lenderApplyUrl ?? null,
     loanFactors: args.loanFactors ?? null,
+    lenderProductLabel: args.lenderProductLabel ?? null,
+    contractAdjustment: args.contractAdjustment ?? null,
+    ownershipNote: args.ownershipNote ?? null,
+    now: args.now,
   });
 
   const lifetimeKwh = quoted.savings.years.reduce((n, y) => n + y.productionKwh, 0);
@@ -1425,6 +1625,13 @@ export function buildProposalSnapshot(args: {
       lenderLogoUrl: alt.lenderLogoUrl ?? null,
       lenderApplyUrl: alt.lenderApplyUrl ?? null,
       loanFactors: alt.loanFactors ?? null,
+      lenderProductLabel: alt.lenderProductLabel ?? null,
+      // Each option carries its OWN partner's programme, so a household
+      // switching from Participate to a GoodLeap loan in the menu sees the
+      // reconciliation disappear with the partner it belongs to.
+      contractAdjustment: alt.contractAdjustment ?? null,
+      ownershipNote: alt.ownershipNote ?? null,
+      now: args.now,
     });
     options.push({
       key: alt.key,
@@ -1452,7 +1659,8 @@ export function buildProposalSnapshot(args: {
       : null;
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
+    calculationVersion: PRICING_CALCULATION_VERSION,
     systemType,
     // Null on anything that is not a storage deal, so a PV document cannot
     // inherit a block that would make it argue two ways at once.

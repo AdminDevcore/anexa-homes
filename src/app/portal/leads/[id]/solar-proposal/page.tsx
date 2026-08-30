@@ -106,6 +106,14 @@ export default async function SolarProposalBuilderPage({
         maxFinalPricePerBatteryCents: true, minBasePricePerBatteryCents: true,
         finalBatteryPriceMode: true,
         finalPpwMode: true,
+        // The programme contribution, so the financing step can show a rep
+        // both prices before anything is generated. Read-only on that screen —
+        // it is set in Settings and no control on the deal touches it.
+        contractAdjustmentEnabled: true,
+        contractAdjustmentCents: true,
+        contractAdjustmentLabel: true,
+        contractAdjustmentDisclosure: true,
+        contractAdjustmentEffectiveAt: true,
       },
     }),
     // EVERY lender's rate sheet, not just the chosen one's: the Financing step
@@ -133,6 +141,32 @@ export default async function SolarProposalBuilderPage({
       },
     }),
   ]);
+
+  /**
+   * Which SIGNED version froze a contract adjustment, so the row can offer the
+   * funder's submission summary.
+   *
+   * Read from the snapshot, and only for signed versions. A set rather than a
+   * single row because a deal can now hold more than one: a signature no longer
+   * closes the deal to new versions, and a household that signs, adds a battery
+   * and signs again has two. The alternative, asking the deal's current lender,
+   * would answer a different question: a lender changed after signature would
+   * make the link appear against a document generated for somebody else.
+   */
+  const signedWithAdjustment = new Set(
+    (
+      await prisma.solarProposal.findMany({
+        where: { companyId: user.companyId, leadId: lead.id, signedAt: { not: null } },
+        select: { id: true, snapshot: true },
+      })
+    )
+      .filter((p) => {
+        const financing = (p.snapshot as { financing?: { lenderAdjustment?: unknown } } | null)
+          ?.financing;
+        return !!financing?.lenderAdjustment;
+      })
+      .map((p) => p.id)
+  );
 
   // Who approved the final version, for the badge on the version list. One row
   // at most — the database allows a single approved version per deal.
@@ -329,6 +363,19 @@ export default async function SolarProposalBuilderPage({
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
+          // Null when this partner runs no programme, which reads through to
+          // the card rendering nothing at all.
+          contractAdjustment: l.contractAdjustmentEnabled
+            ? {
+                enabled: true,
+                fixedCents: l.contractAdjustmentCents,
+                label: l.contractAdjustmentLabel,
+                disclosure: l.contractAdjustmentDisclosure,
+                // Serialised at the server/client boundary, like every other
+                // date this page hands over.
+                effectiveAt: l.contractAdjustmentEffectiveAt?.toISOString() ?? null,
+              }
+            : null,
         }))}
         lenderId={design?.lenderId ?? null}
         lenderProducts={lenderProducts.map((p) => ({
@@ -430,6 +477,7 @@ export default async function SolarProposalBuilderPage({
           approvedAt: v.approvedAt?.toISOString() ?? null,
           approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
           approvedFileId: v.approvedFileId,
+          hasContractAdjustment: signedWithAdjustment.has(v.id),
         }))}
       />
     </div>

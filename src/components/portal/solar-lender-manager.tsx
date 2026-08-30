@@ -16,6 +16,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { formatFactor } from "@/lib/solar-loan";
 import { basePpwFromSticker } from "@/lib/solar-money";
 import {
+  reconcileContract,
+  DISCLOSURE_TOKENS,
+  DISCLOSURE_TEMPLATE_SUGGESTION,
+} from "@/lib/solar-contract-adjustment";
+import {
   upsertSolarLenderProductAction,
   setSolarLenderProductActiveAction,
   deleteSolarLenderProductAction,
@@ -75,6 +80,23 @@ export type LenderRow = {
    * every lender did before the column existed.
    */
   batteryRule: "optional" | "warn" | "required";
+  /**
+   * THE PROGRAMME CONTRIBUTION — the one setting on this screen that makes the
+   * contract value and the customer's obligation two different numbers.
+   *
+   * Off on every lender until somebody turns it on. The label and the
+   * disclosure carry no defaults on purpose: what the money is CALLED is a
+   * legal characterisation, and the app is not entitled to pick one.
+   */
+  contractAdjustmentEnabled: boolean;
+  contractAdjustmentType: "fixed";
+  contractAdjustmentCents: number | null;
+  contractAdjustmentLabel: string | null;
+  contractAdjustmentDisclosure: string | null;
+  /** ISO date (YYYY-MM-DD), or null for "already running". */
+  contractAdjustmentEffectiveAt: string | null;
+  /** What the household ends up owning, in this partner's own words. */
+  ownershipDisclosure: string | null;
   /**
    * This partner's answer, per adder, to "on top of your $/W or out of it?".
    * Keyed by catalogue id. An id that is ABSENT has no rule and falls back to
@@ -920,6 +942,27 @@ function batteryPriceToCents(s: string): number | null | "invalid" {
 const batteryPriceToDollars = (cents: number | null) =>
   cents == null ? "" : String(Math.round(cents / 100));
 
+/**
+ * The programme contribution, typed in whole dollars.
+ *
+ * A third range, for the same reason there is already a second: this figure is
+ * $70,000 where a battery is $13,000 and a watt is $5.50, and a validator wide
+ * enough to accept all three accepts every typo as well. $1 to $5,000,000.
+ *
+ * The three-way return matters as much here as on the cap: `null` turns the
+ * contribution off, `"invalid"` is a mistake to report. Collapsing them would
+ * let a slipped keystroke quietly stop a partner's contract being adjusted at
+ * all, and the deals generated afterwards would simply look ordinary.
+ */
+function adjustmentToCents(s: string): number | null | "invalid" {
+  const t = s.trim().replace(/^\$/, "").replace(/,/g, "");
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return "invalid";
+  const cents = Math.round(n * 100);
+  return cents >= 100 && cents <= 5_000_000_00 ? cents : "invalid";
+}
+
 function TextField({
   label,
   value,
@@ -1073,6 +1116,63 @@ function LogoControl({ lender }: { lender: LenderRow }) {
   );
 }
 
+/** Whole dollars, as this screen writes money everywhere else. */
+const money = (cents: number) =>
+  (cents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+
+/** One line of the disclosure preview's three-figure reconciliation. */
+function PreviewRow({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-baseline justify-between gap-4",
+        strong && "border-t border-border pt-0.5 font-semibold"
+      )}
+    >
+      <dt className={strong ? "" : "text-muted-foreground"}>{k}</dt>
+      <dd className="tabular-nums">{v}</dd>
+    </div>
+  );
+}
+
+/**
+ * The lender edit form, seeded from the row.
+ *
+ * Every value is a STRING because these are text inputs, and a controlled input
+ * handed a null renders React's uncontrolled-component warning and then eats the
+ * first keystroke. Parsed back on save, where an empty box means "clear it".
+ */
+function draftFrom(lender: LenderRow) {
+  return {
+    name: lender.name,
+    notes: lender.notes ?? "",
+    portalUrl: lender.portalUrl ?? "",
+    applyUrl: lender.applyUrl ?? "",
+    creditInstructions: lender.creditInstructions ?? "",
+    repPayMode: lender.repPayMode,
+    maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
+    finalPpwMode: lender.finalPpwMode,
+    minBasePpw: ppwToDollars(lender.minBasePpwCents),
+    maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
+    finalBatteryPriceMode: lender.finalBatteryPriceMode,
+    minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
+    batteryRule: lender.batteryRule,
+    adjustmentEnabled: lender.contractAdjustmentEnabled,
+    adjustmentAmount:
+      lender.contractAdjustmentCents == null
+        ? ""
+        : String(Math.round(lender.contractAdjustmentCents / 100)),
+    adjustmentLabel: lender.contractAdjustmentLabel ?? "",
+    adjustmentDisclosure: lender.contractAdjustmentDisclosure ?? "",
+    adjustmentEffectiveAt: lender.contractAdjustmentEffectiveAt ?? "",
+    ownershipDisclosure: lender.ownershipDisclosure ?? "",
+  };
+}
+
 function LenderCard({
   lender,
   sellableEquipment,
@@ -1110,37 +1210,66 @@ function LenderCard({
   }, [lender.maxFinalPpwCents, lender.products]);
 
   const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState({
-    name: lender.name,
-    notes: lender.notes ?? "",
-    portalUrl: lender.portalUrl ?? "",
-    applyUrl: lender.applyUrl ?? "",
-    creditInstructions: lender.creditInstructions ?? "",
-    repPayMode: lender.repPayMode,
-    maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
-    finalPpwMode: lender.finalPpwMode,
-    minBasePpw: ppwToDollars(lender.minBasePpwCents),
-    maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
-    finalBatteryPriceMode: lender.finalBatteryPriceMode,
-    minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
-    batteryRule: lender.batteryRule,
-  });
-  const resetDraft = () =>
-    setDraft({
-      name: lender.name,
-      notes: lender.notes ?? "",
-      portalUrl: lender.portalUrl ?? "",
-      applyUrl: lender.applyUrl ?? "",
-      creditInstructions: lender.creditInstructions ?? "",
-      repPayMode: lender.repPayMode,
-      maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
-      finalPpwMode: lender.finalPpwMode,
-      minBasePpw: ppwToDollars(lender.minBasePpwCents),
-      maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
-      finalBatteryPriceMode: lender.finalBatteryPriceMode,
-      minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
-      batteryRule: lender.batteryRule,
+  // ONE definition of what the form is seeded from, used by both the initial
+  // state and Cancel. Two copies of this literal is how a field gets added to
+  // the form, saves correctly, and then silently fails to come back when
+  // somebody cancels out of it.
+  const [draft, setDraft] = React.useState(() => draftFrom(lender));
+  const resetDraft = () => setDraft(draftFrom(lender));
+
+  /**
+   * The disclosure as a homeowner will actually read it, with figures in it.
+   *
+   * THE POINT OF THE WHOLE BLOCK. An admin typing `{contractValue}` into a
+   * textarea has no way to tell what the sentence comes out as, and the
+   * sentence with the numbers in it is the thing they are approving — a
+   * template that reads fine and renders "A $70,000 reduces…" is a mistake
+   * nobody catches until it is on somebody's paper.
+   *
+   * Worked on THIS partner's own published rate where it has one, because that
+   * is what its deals actually price at. A partner that publishes none gets a
+   * round, plainly-labelled illustrative price instead: an example that is
+   * obviously an example beats one that could be mistaken for a quote.
+   */
+  const adjustmentPreview = React.useMemo(() => {
+    if (!draft.adjustmentEnabled) return null;
+    const cents = adjustmentToCents(draft.adjustmentAmount);
+    if (cents === "invalid" || cents == null) return null;
+    const label = draft.adjustmentLabel.trim();
+    const template = draft.adjustmentDisclosure.trim();
+    if (!label || !template) return null;
+
+    const EXAMPLE_KW = 8.8;
+    const priced = lender.maxFinalPpwCents != null;
+    const obligationCents = priced
+      ? Math.round(EXAMPLE_KW * 1000 * lender.maxFinalPpwCents!)
+      : 100_000_00;
+
+    const r = reconcileContract({
+      customerObligationCents: obligationCents,
+      adjustment: { enabled: true, fixedCents: cents, label, disclosure: template },
+      lenderName: draft.name.trim() || lender.name,
     });
+    if (!r) return null;
+
+    return {
+      exampleLabel: priced
+        ? `${EXAMPLE_KW.toFixed(2)} kW at $${(lender.maxFinalPpwCents! / 100).toFixed(2)}/W`
+        : "on an example $100,000 customer price",
+      contractValue: money(r.lenderContractValueCents),
+      adjustment: money(r.adjustmentCents),
+      obligation: money(r.customerObligationCents),
+      disclosure: r.disclosure,
+    };
+  }, [
+    draft.adjustmentEnabled,
+    draft.adjustmentAmount,
+    draft.adjustmentLabel,
+    draft.adjustmentDisclosure,
+    draft.name,
+    lender.name,
+    lender.maxFinalPpwCents,
+  ]);
 
   type ActionResult = { ok: boolean; error?: string; message?: string };
   const act = async (fn: () => Promise<ActionResult>, fallback: string): Promise<ActionResult> => {
@@ -1181,6 +1310,32 @@ function LenderCard({
       return toast.error("Min base $/battery has to be between $500 and $100,000, or blank for no floor.");
     }
 
+    // The contribution, in whole dollars. Caught here so the message names the
+    // box: this is the one figure on the card that writes itself onto a
+    // contract, and a silent NaN would switch the programme on with nothing
+    // behind it.
+    const contractAdjustmentCents = adjustmentToCents(draft.adjustmentAmount);
+    if (contractAdjustmentCents === "invalid") {
+      return toast.error(
+        "The contract adjustment has to be an amount between $1 and $5,000,000, or blank for none."
+      );
+    }
+    if (draft.adjustmentEnabled) {
+      if (contractAdjustmentCents == null) {
+        return toast.error("Set the adjustment amount before switching the contract adjustment on.");
+      }
+      if (!draft.adjustmentLabel.trim()) {
+        return toast.error(
+          "Give the adjustment the approved customer-facing label — exactly the words the proposal should print."
+        );
+      }
+      if (!draft.adjustmentDisclosure.trim()) {
+        return toast.error(
+          "Write the customer disclosure — the paragraph that says who is responsible for which amount."
+        );
+      }
+    }
+
     const res = await act(
       () =>
         upsertSolarLenderAction(lender.id, {
@@ -1197,6 +1352,13 @@ function LenderCard({
           finalBatteryPriceMode: draft.finalBatteryPriceMode,
           minBasePricePerBatteryCents,
           batteryRule: draft.batteryRule,
+          contractAdjustmentEnabled: draft.adjustmentEnabled,
+          contractAdjustmentType: "fixed",
+          contractAdjustmentCents,
+          contractAdjustmentLabel: draft.adjustmentLabel.trim() || null,
+          contractAdjustmentDisclosure: draft.adjustmentDisclosure.trim() || null,
+          contractAdjustmentEffectiveAt: draft.adjustmentEffectiveAt.trim() || null,
+          ownershipDisclosure: draft.ownershipDisclosure.trim() || null,
         }),
       "Saved"
     );
@@ -1396,6 +1558,176 @@ function LenderCard({
             </p>
           </div>
 
+          {/* ── THE PROGRAMME CONTRIBUTION ─────────────────────────────────
+              The only setting on this card where the contract and the
+              customer's obligation stop being the same number. Everything
+              above prices what a homeowner pays; this says what the partner's
+              paper is written at on top of it.
+
+              Its own bordered block, last, and worded as a whole sentence
+              rather than as four loose fields, because an admin filling it in
+              is making a legal characterisation of somebody else's money and
+              needs to see all of it at once. */}
+          <div className="space-y-2 rounded-lg border border-solar/40 bg-solar/5 p-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium">Contract adjustment</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  For a partner whose contract is written for MORE than the customer owes — a
+                  prepaid-lease programme where a fixed contribution comes off the contract value.
+                  Off on every other lender, and off is what changes nothing.
+                </p>
+              </div>
+              <label className="flex shrink-0 items-center gap-1.5 text-[11px]">
+                <input
+                  type="checkbox"
+                  className="size-3.5 accent-solar"
+                  checked={draft.adjustmentEnabled}
+                  onChange={(e) =>
+                    setDraft((d) => ({ ...d, adjustmentEnabled: e.target.checked }))
+                  }
+                />
+                Enabled
+              </label>
+            </div>
+
+            {draft.adjustmentEnabled && (
+              <>
+                {/* One member today. Shown as a stated fact rather than as a
+                    select with nothing to choose — a dropdown with one option
+                    is a question that wastes somebody's time. */}
+                <p className="text-[11px] text-muted-foreground">
+                  Adjustment type: <span className="font-medium text-foreground">Fixed dollar amount</span>
+                </p>
+                <TextField
+                  label="Fixed contract adjustment"
+                  value={draft.adjustmentAmount}
+                  placeholder="70000"
+                  onChange={(v) => setDraft((d) => ({ ...d, adjustmentAmount: v }))}
+                />
+                <TextField
+                  label="Customer-facing label — the approved term, printed as typed"
+                  value={draft.adjustmentLabel}
+                  placeholder="Participate Program Contribution"
+                  onChange={(v) => setDraft((d) => ({ ...d, adjustmentLabel: v }))}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Whatever is typed here is what the customer&rsquo;s proposal prints. Do not call
+                  it a discount, a rebate, an incentive or a tax credit unless that is the approved
+                  term for this programme — they are different claims about who owes what.
+                </p>
+
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor={`ld-${lender.id}-disclosure`}>
+                    Customer disclosure — the paragraph that reconciles the figures
+                  </Label>
+                  <Textarea
+                    id={`ld-${lender.id}-disclosure`}
+                    rows={4}
+                    value={draft.adjustmentDisclosure}
+                    placeholder={DISCLOSURE_TEMPLATE_SUGGESTION}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, adjustmentDisclosure: e.target.value }))
+                    }
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    The figures are substituted in at generation, so no dollar amount is typed
+                    here:{" "}
+                    {DISCLOSURE_TOKENS.map((t, i) => (
+                      <React.Fragment key={t.token}>
+                        {i > 0 && ", "}
+                        <code className="rounded bg-muted px-1 py-px">{t.token}</code> {t.means}
+                      </React.Fragment>
+                    ))}
+                    .
+                  </p>
+                  {draft.adjustmentDisclosure.trim() === "" && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={() =>
+                        setDraft((d) => ({
+                          ...d,
+                          adjustmentDisclosure: DISCLOSURE_TEMPLATE_SUGGESTION,
+                        }))
+                      }
+                    >
+                      Start from the suggested wording
+                    </Button>
+                  )}
+                </div>
+
+                {/* The preview is the point of this block. An admin typing
+                    tokens into a textarea cannot otherwise tell what a
+                    homeowner will read, and the sentence they are approving is
+                    the sentence with the numbers in it. */}
+                {adjustmentPreview && (
+                  <div className="rounded-lg border border-border bg-background p-2.5">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      What the customer reads — {adjustmentPreview.exampleLabel}
+                    </p>
+                    <dl className="mt-1.5 space-y-0.5 text-[11px]">
+                      <PreviewRow k="Adjusted contract value" v={adjustmentPreview.contractValue} />
+                      <PreviewRow
+                        k={draft.adjustmentLabel.trim() || "Programme adjustment"}
+                        v={`−${adjustmentPreview.adjustment}`}
+                      />
+                      <PreviewRow k="Customer obligation" v={adjustmentPreview.obligation} strong />
+                    </dl>
+                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                      {adjustmentPreview.disclosure}
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <Label className="text-xs" htmlFor={`ld-${lender.id}-effective`}>
+                    Effective from
+                  </Label>
+                  <Input
+                    id={`ld-${lender.id}-effective`}
+                    type="date"
+                    value={draft.adjustmentEffectiveAt}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, adjustmentEffectiveAt: e.target.value }))
+                    }
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Blank means it is already running. A future date configures the programme now
+                    and starts it then — proposals generated before it quote no adjustment at all.
+                    Nothing here is ever retroactive: a generated proposal is frozen, so changing
+                    any of this moves only versions made afterwards.
+                  </p>
+                </div>
+              </>
+            )}
+
+            {/* Kept OUTSIDE the enabled branch. A partner can publish its own
+                ownership wording without running a contribution, and the
+                sentence this replaces — "you own it outright, and it transfers
+                with the house" — is on every financed proposal whether or not
+                any money is being adjusted. */}
+            <div className="space-y-1 border-t border-border/70 pt-2">
+              <Label className="text-xs" htmlFor={`ld-${lender.id}-ownership`}>
+                What the customer ends up owning, in this partner&rsquo;s words
+              </Label>
+              <Textarea
+                id={`ld-${lender.id}-ownership`}
+                rows={3}
+                value={draft.ownershipDisclosure}
+                placeholder="Ownership, term, transfer on sale, and any buyout — as this product actually works."
+                onChange={(e) => setDraft((d) => ({ ...d, ownershipDisclosure: e.target.value }))}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Leave blank and the proposal keeps its own sentence: that the customer owns the
+                system outright, it carries its manufacturer warranties, and it transfers with the
+                house. That is true of a loan. Write something here for any product where it is
+                not.
+              </p>
+            </div>
+          </div>
+
           <div className="space-y-1">
             <Label className="text-xs" htmlFor={`ld-${lender.id}-credit`}>
               How to run credit with this partner
@@ -1531,6 +1863,26 @@ function LenderCard({
                 <dd className="font-medium tabular-nums">
                   {adderOnTopCount(lender, adderCatalogue)}
                   <span className="text-muted-foreground"> / {adderCatalogue.length}</span>
+                </dd>
+              </div>
+            )}
+            {/* The one setting on this card that makes a contract read for more
+                than the customer owes. Shown whenever it is ON, and never when
+                it is off — which is every other lender. */}
+            {lender.contractAdjustmentEnabled && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">
+                  {lender.contractAdjustmentLabel?.trim() || "Contract adjustment"}
+                </dt>
+                <dd className="font-medium tabular-nums">
+                  <span className="rounded-full bg-solar/15 px-2 py-0.5 text-[11px] text-solar">
+                    {lender.contractAdjustmentCents == null
+                      ? "amount not set"
+                      : `+${money(lender.contractAdjustmentCents)}`}
+                    {lender.contractAdjustmentEffectiveAt
+                      ? ` from ${lender.contractAdjustmentEffectiveAt}`
+                      : ""}
+                  </span>
                 </dd>
               </div>
             )}

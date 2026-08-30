@@ -60,7 +60,13 @@ export function Cover({
           </p>
 
           <h1 className="mt-6 font-display text-[clamp(2.8rem,7vw,4.9rem)] font-semibold leading-[0.95] tracking-[-0.03em] text-neutral-950 text-balance">
-            Own your power{name ? `, ${name}` : ""}.
+            {/* Same rule as the comparison's heading, and the largest type on
+                the document, so it matters most here: a prepaid lease does not
+                give the household title to the hardware, and the claim stands
+                down to one that is true of every product — see `ownershipNote`
+                on SnapshotFinancing. */}
+            {s.financing.ownershipNote ? "Power from your own roof" : "Own your power"}
+            {name ? `, ${name}` : ""}.
           </h1>
 
           <p className="mt-6 max-w-[42ch] text-lg leading-relaxed text-neutral-600">

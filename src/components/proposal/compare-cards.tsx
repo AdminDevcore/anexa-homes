@@ -62,7 +62,18 @@ export function CompareCards({
       <Card
         tone="accent"
         eyebrow="If you go ahead"
-        title="Own your own power"
+        /**
+         * THE HEADING CANNOT CLAIM OWNERSHIP THE PRODUCT DOES NOT GIVE.
+         *
+         * "Own your own power" is true of a purchase and of a loan, and false
+         * of a prepaid lease — where the partner owns the system for its term.
+         * Where that partner has published its own wording about what the
+         * household ends up with, this heading stands down to a statement that
+         * is true either way: the power is made on their roof, whoever holds
+         * title to the hardware. The full position is set out in its own words
+         * on the cost chapter — see `ownershipNote`.
+         */
+        title={f.ownershipNote ? "Power from your own roof" : "Own your own power"}
         headline={usd(sv.netSavingsCents)}
         headlineNote={`kept over ${years} years, after paying for the system itself`}
         rows={[
