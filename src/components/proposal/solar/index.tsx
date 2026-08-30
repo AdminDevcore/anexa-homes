@@ -20,7 +20,6 @@ import { SavingsScrubber } from "../savings-scrubber";
 import { BatteryCredit } from "../battery-credit";
 import { YearChart } from "../year-chart";
 import { CompareCards } from "../compare-cards";
-import { HowItWorks } from "../how-it-works";
 import { ArrayMap } from "../array-map";
 import { RepBar, type RepContext } from "../rep-bar";
 import { usd, kwh, pct, pctWhole, yearsInWords } from "../format";
@@ -664,12 +663,12 @@ function SolarPvProposalView({
           </figure>
         )}
 
-        {/* The hardware and the explainer, wrapped together because on paper
-            they SHARE a sheet — the cards read down the left and the five steps
-            beside them. The wrapper carries no screen styling. */}
-        <div data-print-break data-print-slot="hardware">
+        {/* The hardware takes a sheet of its own on paper. The wrapper carries
+            no screen styling, and it renders only when there IS hardware to
+            name — an empty one would be a blank sheet, because the break is
+            unconditional once the element exists. */}
         {hasEquipment && (
-          <>
+          <div data-print-break data-print-slot="hardware">
             <p className="mt-14 mb-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-neutral-400">
               Equipment
             </p>
@@ -682,25 +681,8 @@ function SolarPvProposalView({
               Manufacturer warranties apply to each component as published by that manufacturer.
               Your written agreement sets out the workmanship warranty in full.
             </p>
-          </>
-        )}
-
-        {/* Was a chapter of its own, between the money and the design. Somebody
-            reading this alone at ten at night will not ring anyone to ask what
-            an inverter is, and they will not sign something they do not
-            understand — but it does not deserve a full stop in the argument. */}
-        <div
-          data-print-slot="how"
-          className="mt-16 border-t border-neutral-900/12 pt-10"
-        >
-          <h3 className="font-display text-2xl font-semibold tracking-tight text-neutral-900">
-            How solar actually works
-          </h3>
-          <div className="mt-6">
-            <HowItWorks />
           </div>
-        </div>
-        </div>
+        )}
       </Chapter>
 
       {/* ── 4 · YOUR COST ─────────────────────────────────────────────────── */}

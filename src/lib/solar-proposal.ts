@@ -114,49 +114,6 @@ export const SOLAR_TIMELINE = [
 }[];
 
 /**
- * How solar works, in five steps, before any number is shown.
- *
- * The document opens on the money because that is what a homeowner asked for.
- * This sits after it, for the half of them reading it alone at ten at night who
- * have never had anyone explain what an inverter is and are not going to ask.
- *
- * Deliberately generic: it describes solar, not this system, so nothing here
- * can go stale against a design or contradict a figure elsewhere on the page.
- */
-export const SOLAR_HOW_IT_WORKS = [
-  {
-    key: "panels",
-    title: "The panels",
-    blurb:
-      "Sunlight knocks electrons loose inside each panel. That flow of electrons is electricity — no moving parts, no fuel, nothing to refill.",
-  },
-  {
-    key: "inverter",
-    title: "The inverter",
-    blurb:
-      "Panels make DC power and your house runs on AC. The inverter converts one into the other, and it is what monitors the system for faults.",
-  },
-  {
-    key: "house",
-    title: "Your house first",
-    blurb:
-      "Everything the system makes goes to your own appliances before anything else happens. You are not buying that power from anybody.",
-  },
-  {
-    key: "grid",
-    title: "The grid, both ways",
-    blurb:
-      "Make more than you use and the surplus goes out to the grid for credit. Make less — at night, in December — and you buy the difference as you always have.",
-  },
-  {
-    key: "bill",
-    title: "The bill",
-    blurb:
-      "You stay connected and you keep an account. What changes is how much of it you are paying for, which is the whole of what this document is about.",
-  },
-] as const;
-
-/**
  * Where the environmental equivalences come from.
  *
  * Cited on the page rather than kept in a comment. A homeowner reading "153

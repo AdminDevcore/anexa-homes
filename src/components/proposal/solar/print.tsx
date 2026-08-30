@@ -208,7 +208,7 @@ const PRINT_CSS = `
      a page of specs, two pages of a roof photograph stretched to fill them,
      and a page carrying three equipment cards.
 
-     The hardware and the explainer follow on a sheet of their own. */
+     The hardware follows on a sheet of its own. */
   #proposal-root [data-section="system"] [data-chapter-body] { display: contents; }
   #proposal-root [data-section="system"] [data-chapter-body] > * { grid-column: 1 / -1; }
   #proposal-root [data-section="system"] [data-chapter-head] { grid-row: 1; }
@@ -225,29 +225,10 @@ const PRINT_CSS = `
     margin-top: 0;
     align-self: start;
   }
-  /* Second sheet: the three components read down a column of their own with
-     the explainer beside them, rather than three cards adrift on one page and
-     five paragraphs adrift on the next. */
-  #proposal-root [data-print-slot="hardware"] {
-    display: grid;
-    grid-template-columns: 3in minmax(0, 1fr);
-    column-gap: 0.6in;
-    align-items: start;
-  }
-  #proposal-root [data-print-slot="hardware"] > * { grid-column: 1; }
-  #proposal-root [data-print-slot="hardware"] > div:not([data-print-slot]) {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  #proposal-root [data-print-slot="how"] {
-    grid-column: 2;
-    grid-row: 1 / span 4;
-    margin-top: 0;
-    border-top: 0;
-    padding-top: 0;
-  }
-  /* A catalogue that names no hardware leaves the explainer alone on the sheet,
-     and half a page of text with an empty column beside it is not a spread. */
-  #proposal-root [data-print-slot="hardware"]:not(:has(> p)) { display: block; }
+  /* Second sheet: the three components read across it as they do on screen.
+     It used to be a two-column spread with an explainer beside the cards; the
+     explainer is gone, and a 3in rail with nothing next to it is not a spread. */
+  #proposal-root [data-print-slot="hardware"] { display: block; }
 
   /* No drawing means no right-hand column to put one in, so the specification
      takes the sheet rather than reading down a two-and-a-half-inch rail with
