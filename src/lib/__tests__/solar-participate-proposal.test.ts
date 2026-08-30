@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildProposalSnapshot } from "@/lib/solar-proposal";
+import { buildProposalSnapshot, quotedTotalCents, quotedPpwCents } from "@/lib/solar-proposal";
 import { lifetimeFigure, lifetimeNote } from "@/lib/solar-proposal-pitch";
 import { DISCLOSURE_TEMPLATE_SUGGESTION } from "@/lib/solar-contract-adjustment";
 import type { SolarAssumptions } from "@/lib/solar-money";
@@ -106,6 +106,32 @@ describe("the customer's price", () => {
     expect(
       Math.round(s.financing.finalPpwCents! * 8_800)
     ).toBeCloseTo(s.financing.contractPriceCents!, -4);
+  });
+
+  it("hands the household's own price to every page that says 'the price'", () => {
+    /*
+      THE 2026-08-30 REVERSAL, in one assertion.
+
+      The snapshot still freezes the contract and the contract's own rate — the
+      funder's submission summary leads with both, because that is the figure
+      its file reviewer is checking. What changed is what the HOUSEHOLD's
+      document quotes: a page opening on "System price $118,400 · $13.45 per
+      watt" for somebody quoted $48,400 at $5.50 shows a number matching
+      nothing they have been told and nothing they can compare against another
+      quote. The contract keeps its own block, in full, underneath.
+    */
+    const with_ = build({ contractAdjustment: PARTICIPATE });
+    expect(quotedTotalCents(with_.financing)).toBe(48_400_00);
+    expect(quotedPpwCents(with_.financing, 8.8)).toBe(550);
+    // Still frozen, still printed, still labelled — one block lower.
+    expect(with_.financing.contractPriceCents).toBe(118_400_00);
+    expect(with_.financing.finalPpwCents).toBe(1_345);
+
+    // On a deal with no programme the two are the same figure, which is why
+    // this is one code path rather than a branch in every renderer.
+    const without = build();
+    expect(quotedTotalCents(without.financing)).toBe(without.financing.contractPriceCents);
+    expect(quotedPpwCents(without.financing, 8.8)).toBe(without.financing.finalPpwCents);
   });
 
   it("changes NOTHING on a deal whose partner runs no programme", () => {
