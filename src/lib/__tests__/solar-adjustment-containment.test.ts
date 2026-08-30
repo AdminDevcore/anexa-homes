@@ -192,6 +192,13 @@ const QUOTED_PRICE_IS_LABELLED = [
   // it, the rep's screens read it, and a frozen document that dropped it could
   // never explain itself later. The row-level guard is below.
   "financing.basePriceCents",
+  // THE CREDITS-APPLIED SCENARIO'S OWN TOTAL, and its own principal — the price
+  // sheet and the terms list read these when the switch is on, which is the
+  // only state in which the household's own price is what they owe. Both are
+  // labelled as exactly that on the page: "Total price" and "Amount financed"
+  // under a document that says, in its nav bar, that the credits are applied.
+  "creditsApplied.totalCents",
+  "creditsApplied.financedAmountCents",
 ];
 
 describe("the document quotes the contract the household signs", () => {
@@ -312,15 +319,24 @@ describe("the document quotes the contract the household signs", () => {
     expect(applied.savings.years[1].solarPaymentCents).toBe(13_444 * 12);
   });
 
-  it("steps the default model down at the paydown month, as it always has", () => {
-    // THE SWITCH DID NOT MOVE THIS. Year one carries twelve of the higher
-    // payment; year two, twelve of the lower. That step IS the credits being
-    // applied, and it is what the document opens on.
+  it("bills the FULL payment for the whole term with the credits unclaimed", () => {
+    /*
+     * THE 2026-08-30 FIX, and the reason the switch was worth having at all.
+     *
+     * This model used to carry twelve of the higher payment and then the lower
+     * one for the remaining 348 — a household that DID claim the credits and
+     * merely claimed them late. So "credits off" and "credits on" differed by
+     * one year's extra payment on a deal where the credits are worth half the
+     * contract, and the two sides of the switch were 4% apart.
+     *
+     * Off now means what it says: nobody claimed anything, the loan asks for
+     * its full payment for all 360 months, and no relief lands in any year.
+     */
     const s = snapshot.savings;
     expect(s.creditReliefTotalCents).toBe(0);
     expect(s.years[0].solarPaymentCents).toBe(32_889 * 12);
-    expect(s.years[1].solarPaymentCents).toBe(13_444 * 12);
-    expect(s.years[29].solarPaymentCents).toBe(13_444 * 12);
+    expect(s.years[1].solarPaymentCents).toBe(32_889 * 12);
+    expect(s.years[29].solarPaymentCents).toBe(32_889 * 12);
   });
 
   it("runs the years out to the end of the loan, and bills every payment once", () => {
@@ -342,9 +358,11 @@ describe("the document quotes the contract the household signs", () => {
       expect(s.years.reduce((n, y) => n + y.solarPaymentCents, 0)).toBe(s.solarPaidCents);
       expect(s.years[29].solarPaymentCents).toBeGreaterThan(0);
     }
-    expect(snapshot.savings.solarPaidCents).toBe(32_889 * 12 + 13_444 * 348);
-    // Nothing double-billed and nothing dropped: 360 months, exactly.
-    expect(12 + 348).toBe(360);
+    // Two complete readings of one deal, 360 payments each — the contract in
+    // full on one side, what the credits leave on the other. The gap between
+    // them is the whole of the credits, which is what makes the switch a
+    // choice rather than a rounding difference.
+    expect(snapshot.savings.solarPaidCents).toBe(32_889 * 360);
     expect(snapshot.options![0].creditsApplied!.savings.solarPaidCents).toBe(13_444 * 360);
   });
 });

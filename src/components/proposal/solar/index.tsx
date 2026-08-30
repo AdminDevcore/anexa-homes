@@ -342,21 +342,53 @@ function SolarPvProposalView({
    */
   const ladder = f.creditLadder ?? null;
   /**
-   * THE TOTAL THE PRICE TABLE ADDS UP TO — the household's own price.
+   * THE TOTAL THE PRICE TABLE ADDS UP TO — AND IT MOVES WITH THE SWITCH.
    *
-   * The contract on an ordinary deal, because there they are the same figure.
-   * On a deal carrying a programme contribution they are not, and this is the
-   * QUOTED price: see `quotedTotalCents` for why every customer-facing surface
-   * now says that one and the contract keeps its own block underneath.
+   * A scenario is a whole reading of the deal, not a payment with an unchanged
+   * document around it. On a programme deal these are two different prices and
+   * the sheet has to name the one this copy is written in:
+   *
+   *   OFF — the credits are never claimed, so what the household owes is the
+   *         contract they signed: $128,080, at $12.13 a watt.
+   *   ON  — they are claimed and applied, and the ladder lands the household on
+   *         the price they were quoted: $58,080, at $5.50 a watt.
+   *
+   * Leading with $58,080 in BOTH states, which is what this did until
+   * 2026-08-30, put the after-credit price on a sheet whose next page quoted a
+   * $355.78 payment on $128,080 — two figures that do not divide into each
+   * other, three pages apart, with nothing on either saying why.
+   *
+   * On an ordinary deal the contract IS the quoted price, so both states print
+   * the same total and only the credit block underneath appears — which is
+   * right: an ordinary household pays us the full price either way and claims
+   * the credit back on their own return.
+   *
+   * `option.creditsApplied.totalCents` absent — every document generated before
+   * it was frozen — falls back to the OFF figure rather than inventing one.
    */
-  const quotedTotal = quotedTotalCents(f);
+  const quotedTotal = creditsApplied
+    ? (option.creditsApplied?.totalCents ?? quotedTotalCents(f))
+    : (f.contractPriceCents ?? quotedTotalCents(f));
   /**
    * The same price per installed watt, derived from the total above so the two
-   * printed figures divide into each other. `f.finalPpwCents` is the same
-   * arithmetic done on the contract — $13.45/W on a deal quoted at $5.50 — and
-   * it belongs with the contract, not beside the price.
+   * printed figures always divide into each other — in either state.
    */
-  const quotedPpw = quotedPpwCents(f, s.system.sizeKwDc);
+  const quotedPpw =
+    quotedTotal != null && s.system.sizeKwDc > 0
+      ? Math.round(quotedTotal / (s.system.sizeKwDc * 1000) * 100) / 100
+      : quotedPpwCents(f, s.system.sizeKwDc);
+  /**
+   * WHAT THE LOAN IS CARRYING under this reading of the deal.
+   *
+   * The contract with the credits unclaimed; the balance left once they have
+   * been applied when they are. It is the principal the payment beside it was
+   * quoted on, so the terms list can be checked with a calculator — which is
+   * exactly what could not be done while this row printed $128,080 against a
+   * $161.33 payment.
+   */
+  const financedAmountCents = creditsApplied
+    ? (option.creditsApplied?.financedAmountCents ?? f.financedAmountCents ?? null)
+    : (f.financedAmountCents ?? null);
   /**
    * WHAT THE COST TABLE CALLS THE SYSTEM PRICE.
    *
@@ -378,8 +410,24 @@ function SolarPvProposalView({
    * The fallback derives it from the printed total, for a document generated
    * before the base was frozen into the snapshot.
    */
-  const systemPriceCents =
-    f.basePriceCents ?? (quotedTotal != null ? quotedTotal - (f.adderTotalCents ?? 0) : null);
+  /**
+   * WHEN THE SCENARIO MOVES THE TOTAL, THE ROWS ABOVE IT HAVE TO MOVE WITH IT.
+   *
+   * These rows are read as arithmetic — system price, plus additional work,
+   * equals the total — so a total that changed with the switch while the base
+   * stayed frozen would print $58,080 + $0 = $128,080 on a sheet a household
+   * checks with a calculator.
+   *
+   * `priceMoved` is true only where the scenario's total is not the snapshot's
+   * own quoted price: the switch-OFF reading of a programme deal, and nowhere
+   * else. Every other document keeps the frozen base exactly as it was, which
+   * is what stops this from quietly re-deriving a figure on deals the switch
+   * does not move at all.
+   */
+  const priceMoved = quotedTotal != null && quotedTotal !== quotedTotalCents(f);
+  const systemPriceCents = priceMoved
+    ? quotedTotal - (f.adderTotalCents ?? 0)
+    : (f.basePriceCents ?? (quotedTotal != null ? quotedTotal - (f.adderTotalCents ?? 0) : null));
   const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
 
@@ -480,6 +528,7 @@ function SolarPvProposalView({
     systemPriceCents,
     quotedTotalCents: quotedTotal,
     quotedPpwCents: quotedPpw,
+    financedAmountCents,
     showcased,
     lifetime,
     vpp,

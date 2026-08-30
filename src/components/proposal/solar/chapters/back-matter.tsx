@@ -5,7 +5,6 @@ import { Leaf, TreePine, Factory, Car } from "lucide-react";
 import { SOLAR_FAQS, IMPACT_SOURCES } from "@/lib/solar-proposal";
 import { Impact, SourceLink, ContactCard } from "../primitives";
 import { SavingsScrubber } from "../../savings-scrubber";
-import { CreditBasis } from "../../credit-switch";
 import { usd, kwh, pct, loanTermLabel } from "../../format";
 import type { Doc } from "./doc";
 
@@ -69,19 +68,6 @@ export function BackMatter({ doc }: { doc: Doc }) {
             estimates, not guarantees.
           </p>
 
-          {/* WHICH SCENARIO THIS TABLE IS, stated where the table is. Every row
-              below, the year card, the payback year and the cumulative totals
-              are the model the nav bar's switch selects, and a reader who
-              arrives here from the contents has not necessarily seen the
-              payment sheet — nor, on paper, the bar. Silent while the switch is
-              off: `CreditBasis` prints only the applied scenario. */}
-          {credits && (
-            <CreditBasis
-              className="mt-3 max-w-[68ch]"
-              on={credits.on}
-              otherMonthlyCents={credits.on ? credits.offMonthlyCents : credits.onMonthlyCents}
-            />
-          )}
 
           {/* Some households read the table as the proof and some read it as a
               wall of numbers; the scrubber is the same model, one year at a

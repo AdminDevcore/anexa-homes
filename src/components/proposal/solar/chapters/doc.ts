@@ -74,6 +74,12 @@ export type Doc = {
   quotedTotalCents: number | null;
   /** That price per installed watt, derived from it. Null on storage. */
   quotedPpwCents: number | null;
+  /**
+   * What the loan is carrying under the scenario on screen — the contract with
+   * the credits unclaimed, the balance left once they have been applied. The
+   * principal the payment beside it was quoted on, so the two divide.
+   */
+  financedAmountCents: number | null;
   /** Adders the company chose to explain to the customer in words. */
   showcased: NonNullable<SnapshotFinancing["adders"]>;
   lifetime: LifetimeFigure;

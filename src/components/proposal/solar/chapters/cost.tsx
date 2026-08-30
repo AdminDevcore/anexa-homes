@@ -230,11 +230,26 @@ export function ChapterCost({ doc }: { doc: Doc }) {
               </p>
               {/* A statement about THIS PAGE's arithmetic — the sentence that
                   says which figure the payment came off, checkable by the
-                  reader against the rows beside it. It said the opposite until
-                  2026-08-29, when the document moved onto the contract. */}
+                  reader against the rows beside it.
+
+                  IT FOLLOWS THE SWITCH, because since 2026-08-30 so does the
+                  payment. With the credits unclaimed the loan carries the
+                  contract; with them applied it carries what is left, and the
+                  next page's amount financed says the same number. A fixed
+                  sentence naming the contract was simply false in one of the
+                  two states. */}
               <p className="mt-2 text-[0.8rem] leading-relaxed text-neutral-500">
-                The payment and amount financed on the next page are calculated from the{" "}
-                {usd(adjustment.lenderContractValueCents)} contract.
+                {credits?.on && ladder ? (
+                  <>
+                    The payment and amount financed on the next page are calculated from the{" "}
+                    {usd(ladder.netCostCents)} left after your credits are applied.
+                  </>
+                ) : (
+                  <>
+                    The payment and amount financed on the next page are calculated from the{" "}
+                    {usd(adjustment.lenderContractValueCents)} contract.
+                  </>
+                )}
               </p>
             </div>
           )}

@@ -924,6 +924,28 @@ export type ProposalPaymentOption = {
   creditsApplied?: {
     savings: SavingsModel;
     monthlyCents: number | null;
+    /**
+     * THE PRICE THIS READING QUOTES, and what is left to finance under it.
+     *
+     * A scenario is not a payment with the rest of the document unchanged
+     * around it. "You claimed the credits" changes what the household ends up
+     * paying and what the loan is carrying, so the price sheet and the terms
+     * list have to move with the payment or the reader is handed a $161 payment
+     * beside a $128,080 amount financed and no arithmetic that joins them.
+     *
+     * On a programme deal `totalCents` is the household's own price and the two
+     * are the same figure. On an ordinary deal the price is what they pay US —
+     * unchanged, because the credit comes back on their return rather than off
+     * our invoice — while `financedAmountCents` is the balance once they have
+     * applied it to the loan. Both are frozen here rather than derived on the
+     * page, like every other figure in this snapshot.
+     *
+     * Absent on a document generated before this existed, which is what makes
+     * the renderer's fallback to the OFF figures the right reading of an older
+     * proposal rather than a guess.
+     */
+    totalCents?: number | null;
+    financedAmountCents?: number | null;
   } | null;
   /**
    * What the customer still pays the utility each month afterwards: the grid
@@ -1412,7 +1434,7 @@ function priceOption(args: {
   savings: SavingsModel;
   monthlyCents: number | null;
   /** The same option with the credits claimed. Null where there are none. */
-  creditsApplied: { savings: SavingsModel; monthlyCents: number | null } | null;
+  creditsApplied: NonNullable<ProposalPaymentOption["creditsApplied"]> | null;
   postSolarMonthlyCents: number;
 } {
   const { design, finance, assumptions: a } = args;
@@ -1544,26 +1566,13 @@ function priceOption(args: {
     : null;
 
   /**
-   * THE LADDER THE **DEFAULT** DOCUMENT HAS ALWAYS KNOWN ABOUT — programmes only.
+   * THE LADDER ON A PARTNER PROGRAMME, and null everywhere else.
    *
-   * Everything below that shapes the switch-OFF reading of this deal reads THIS
-   * and not `creditLadder`, and the distinction is the whole reason a deal that
-   * never had a credit page can now carry a switch without a single figure
-   * moving on the copy that is printed by default.
-   *
-   * The difference between the two is not bookkeeping, it is what actually
-   * happens to the money. On a programme deal the credit is applied to the loan
-   * as a matter of course: the contract is written so the credits are earned on
-   * the larger figure, the partner applies them, and the household lands on the
-   * price they were quoted — so the default document steps the payment down at
-   * the paydown month because that is the cashflow they will really see. On an
-   * ordinary deal the credit is the household's own, claimed on their own
-   * return, and what they do with it is theirs — plenty never send a cent of it
-   * to the lender. Assuming they will, in the copy that prints by default,
-   * would be quoting a payment nobody has promised.
-   *
-   * So: ordinary deals default to the payment they were always quoted, and the
-   * switch is what says "and here is that same deal if you do apply it".
+   * Nothing customer-facing reads this any more — both readings of the document
+   * come off `creditLadder` above. It survives for the FUNDER's own summary,
+   * which prints "monthly once the credits are applied" beside the contract it
+   * is submitting, and that sentence is only true where a programme applies
+   * them as a matter of course.
    */
   const programmeLadder: CreditLadder | null = reconciliation ? creditLadder : null;
   const loanFactorQuote =
@@ -1647,25 +1656,22 @@ function priceOption(args: {
    * and on lease and PPA, which have no ladder at all.
    *
    * This is the figure the switch turns ON, and it exists on every purchase
-   * deal. What follows it — `netMonthlyCents` — is the narrower thing: the
-   * payment a PROGRAMME re-amortises to on its own, which the default document
-   * has always stepped down to and which an ordinary deal still does not.
+   * deal. What follows it — `netMonthlyCents` — is the same number on a
+   * programme deal, kept apart only because the funder's summary may print it
+   * and the customer's document may not read it.
    */
   const creditsAppliedMonthlyCents = creditLadder
     ? monthlyOn(creditLadder.netCostCents - (finance.downPaymentCents ?? 0))
     : null;
 
   /**
-   * THE PAYMENT THE HOUSEHOLD ENDS UP ON, on a deal whose PROGRAMME applies the
-   * credits to the loan as a matter of course.
+   * THE SAME PAYMENT, for the FUNDER's paperwork only.
    *
    * Identical arithmetic to the figure above and identical to it in value on
-   * every programme deal — the two differ only in WHERE they are allowed to be
-   * read. This one feeds the default document (the step-down in the years, and
-   * the funder's own summary), so it stays null on an ordinary deal for the
-   * reason `programmeLadder` exists: an ordinary household's credit is theirs
-   * to spend, and the copy that prints by default must not assume they hand it
-   * to the lender.
+   * every programme deal — the two differ only in where they may be read. This
+   * one reaches `netMonthlyPaymentCents` on the snapshot, which the submission
+   * summary prints as "monthly once the credits are applied"; the customer's
+   * own document reads the scenario, never this.
    */
   const netMonthlyCents = programmeLadder
     ? monthlyOn(programmeLadder.netCostCents - (finance.downPaymentCents ?? 0))
@@ -1735,35 +1741,36 @@ function priceOption(args: {
     });
 
   /**
-   * THE DOCUMENT WITH THE SWITCH OFF, which is the document as it has always
-   * read — UNCHANGED by the switch existing.
+   * THE DOCUMENT WITH THE SWITCH OFF: the deal with NO CREDIT CLAIMED.
    *
-   * The real shape of a credit-funded loan: the full payment while the credits
-   * are outstanding, the smaller one once they have been applied to the
-   * principal and the lender has re-amortised. Nothing about this model moved
-   * when the switch was added, so a proposal generated today opens on exactly
-   * the figures, the payback year and the lifetime total it would have opened
-   * on before — which is the whole point. A feature that quietly made every
-   * default document look worse would not be a feature.
+   * The full payment, every month, for the whole term — and not a cent of
+   * relief anywhere in the thirty years. It is the household that signs the
+   * contract and never files for the credit, and it is the honest floor of this
+   * deal.
+   *
+   * IT USED TO BE A HYBRID, AND THAT WAS THE BUG (fixed 2026-08-30). The years
+   * billed the full payment for twelve months and the after-credit one for the
+   * remaining three hundred and forty-eight, which is a household that DID
+   * claim the credit and merely claimed it late. So on a $128,080 contract
+   * "credits off" totalled $60,412 against "credits on" at $58,079 — a gap of
+   * one year's extra payment, on a deal where the credits are worth $64,040 —
+   * and the payback year moved from 4 to 1 while the totals barely moved at
+   * all. Two scenarios that differ by 4% cannot be a choice a household is
+   * being asked to understand.
+   *
+   * The switch now separates the two things it says it separates: this is the
+   * deal without the credit, `creditsAppliedSavings` below is the deal with it,
+   * and each is complete. Nothing in between is modelled, because nothing in
+   * between is what either half of the switch means.
    */
   const savings = modelYears({
     monthlyCents: loanMonthlyCents,
-    afterCreditMonthlyCents: netMonthlyCents,
-    // The programme's own paydown month where its rate sheet publishes one —
-    // that is the month the lender re-amortises at — and a year otherwise,
-    // because a credit is claimed on the following return.
-    creditAppliedAfterMonths: loanFactorQuote?.paydownMonths ?? 12,
-    // The ladder's relief, offered as a year-one lump and taken only where
-    // there is no payment for it to be inside — which is cash. `savingsModel`
-    // suppresses it the moment the step-down above is real, so a financed deal
-    // is never credited the same money twice.
-    //
-    // THE PROGRAMME LADDER, not the general one. An ordinary cash buyer's
-    // credit is a cheque they may or may not receive from their own return, and
-    // crediting it into year one of the copy that prints by default would move
-    // the payback year of every cash proposal ever issued. It is exactly what
-    // the switch turns on instead.
-    reliefCents: programmeLadder?.reliefCents ?? 0,
+    // No step-down and no relief: the credit is not part of this reading of the
+    // deal at all. A document with no credits to claim reaches exactly the same
+    // model, which is why nothing here is conditional.
+    afterCreditMonthlyCents: null,
+    creditAppliedAfterMonths: 0,
+    reliefCents: 0,
   });
 
   /**
@@ -2011,6 +2018,16 @@ function priceOption(args: {
               : finance.product === "loan"
                 ? (creditsAppliedMonthlyCents ?? financing.loanMonthlyPaymentCents)
                 : monthlyCents,
+          // The price the household lands on. `quotedPriceCents` is the ladder's
+          // target: the customer's own obligation on a programme deal, and the
+          // price itself where there is no second figure to reconcile.
+          totalCents: creditLadder ? creditLadder.quotedPriceCents : null,
+          // What the loan is carrying once the credits are against it — the
+          // very principal `creditsAppliedMonthlyCents` was quoted on, so the
+          // two divide into each other on the page.
+          financedAmountCents: creditLadder
+            ? creditLadder.netCostCents - (finance.downPaymentCents ?? 0)
+            : null,
         }
       : null,
     // What still goes to the utility afterwards — grid power AND the standing

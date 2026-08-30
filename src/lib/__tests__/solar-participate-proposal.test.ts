@@ -207,15 +207,16 @@ describe("the payment and the savings", () => {
     expect(s.financing.netMonthlyPaymentCents).toBe(13_444);
   });
 
-  it("leaves the default model exactly where it was", () => {
-    // THE SWITCH ADDS A SCENARIO; IT DOES NOT MOVE THE DEFAULT. Twelve of the
-    // higher payment, then the lower one for the rest — which is what a
-    // household on a credit-funded loan actually pays, and what this document
-    // said before the switch existed.
+  it("bills the contract in full when the credits are not claimed", () => {
+    // OFF IS A COMPLETE READING OF THE DEAL, not a late one. Every year carries
+    // the full payment — the household that signs and never files — and the
+    // credits-applied model beside it carries the lower one from month one.
+    // Between 2026-08-30's two fixes this stepped down at month 12, which made
+    // the two sides of the switch differ by a single year's payment.
     const years = build({ contractAdjustment: PARTICIPATE }).savings.years;
     expect(years[0].solarPaymentCents).toBe(32_889 * 12);
-    expect(years[1].solarPaymentCents).toBe(13_444 * 12);
-    expect(years[24].solarPaymentCents).toBe(13_444 * 12);
+    expect(years[1].solarPaymentCents).toBe(32_889 * 12);
+    expect(years[24].solarPaymentCents).toBe(32_889 * 12);
   });
 
   it("models a second horizon with the credits already applied", () => {

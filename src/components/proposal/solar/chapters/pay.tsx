@@ -5,7 +5,6 @@ import { Chapter, SpecList } from "../primitives";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { PaymentMenu } from "../../payment-menu";
 import { BatteryCredit } from "../../battery-credit";
-import { CreditBasis } from "../../credit-switch";
 import { usd, pct, perKwh, loanTermLabel } from "../../format";
 import {
   optionMonthlyCents,
@@ -72,17 +71,15 @@ export function ChapterPay({
               matter of course once the contract is signed, so a red-boxed
               "unless it never happens" beside the payment was warning the
               household about a branch of the deal that does not occur — and it
-              was the third time the same sentence appeared on the sheet. What
-              scenario the figures are written in is still stated, quietly,
-              under the number itself: see `CreditBasis` below. */}
+              was the third time the same sentence appeared on the sheet. No
+              caption replaced it either — see the note beside the headline. */}
           {/* The paydown warning. It is the single most consequential sentence
               on this sheet, and it sits beside the two figures it is about. */}
           {f.loanPaydownCents != null && (
             <p className="break-inside-avoid rounded-xl border border-amber-500/40 bg-amber-50 p-3.5 text-[0.8rem] leading-relaxed text-amber-900">
               <strong className="font-semibold">Read this one twice:</strong> the lower payment
               assumes the paydown shown is applied to the loan by the month stated. If it is not,
-              the payment becomes the higher figure for the rest of the term. Whether you receive
-              the federal credit, and how much, depends on your own tax situation.
+              the payment becomes the higher figure for the rest of the term.
             </p>
           )}
 
@@ -141,18 +138,13 @@ export function ChapterPay({
               <span className="ml-1 font-sans text-lg font-medium text-neutral-400">/mo</span>
             )}
           </p>
-          {/* WHAT THIS FIGURE ASSUMES, directly under the number rather than
-              only up in the bar: a reader who scrolls to the headline and no
-              further must still know, and on paper the bar is not there at all.
-              Silent while the switch is off — see `CreditBasis`, which owns
-              that rule so no sheet can leak the credit copy on its own. */}
-          {credits && (
-            <CreditBasis
-              className="mt-2 max-w-[42ch]"
-              on={credits.on}
-              otherMonthlyCents={credits.on ? credits.offMonthlyCents : credits.onMonthlyCents}
-            />
-          )}
+          {/* NO CAPTION NAMING THE OTHER SCENARIO. It used to read "With your
+              federal tax credits applied. Until they are claimed and applied to
+              the loan, the payment is $355.78 a month." — a sentence that hands
+              a household two payments and asks them to hold both. The switch is
+              the choice: whichever way it is thrown, this sheet quotes THAT
+              deal completely — its payment, its amount financed, its thirty
+              years — and says nothing about the other one. */}
         </div>
         <div>
           {/* An offset under 100% means grid power is still bought every month,
@@ -206,11 +198,16 @@ export function ChapterPay({
                the price chapter does not: on a deal carrying a programme
                contribution, and on the rare deal with money down. Elsewhere it
                is the total price again under a second name. */
+            /* WHAT THE PAYMENT DIVIDES INTO, under the scenario on screen —
+               `doc.financedAmountCents`, never the snapshot's own field, which
+               is the contract whichever way the switch is thrown. It printed
+               $128,080 beside a $161.33 payment until 2026-08-30. */
             [
               "Amount financed",
-              f.financedAmountCents != null &&
-              (doc.adjustment != null || f.financedAmountCents !== f.contractPriceCents)
-                ? usd(f.financedAmountCents)
+              doc.financedAmountCents != null &&
+              (doc.adjustment != null ||
+                doc.financedAmountCents !== f.contractPriceCents)
+                ? usd(doc.financedAmountCents)
                 : null,
             ],
           ]}
