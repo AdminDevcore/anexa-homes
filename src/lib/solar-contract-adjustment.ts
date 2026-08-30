@@ -219,11 +219,29 @@ export const DISCLOSURE_TOKENS = [
  * fallback at generation. The difference matters: a default that fills itself in
  * is wording nobody approved, and this one only ever appears in a form where
  * somebody is looking at it.
+ *
+ * REWRITTEN 2026-08-29, twice in one day, and the second time is the one that
+ * matters. It used to read "a {adjustment} {label} reduces the customer's
+ * obligation to {customerObligation}, and the payment above is based on that
+ * obligation" — which described the arrangement backwards once the credits
+ * moved onto the contract, and named in prose the two figures the cost chapter
+ * had just stopped printing as rows. Suggesting wording that undoes the page it
+ * appears on is worse than suggesting none.
+ *
+ * It names ONE number, the contract, because that is the number on the page it
+ * sits under. {adjustment} and {customerObligation} still exist for a programme
+ * whose own agreement requires them stated; the settings preview flags it when
+ * they are used, so it is a decision rather than a habit.
+ *
+ * AND IT DOES NOT SAY WHICH FIGURE THE PAYMENT CAME OFF. The document prints
+ * that sentence itself, directly underneath, on every deal carrying a
+ * programme — a suggestion that repeated it produced two near-identical
+ * paragraphs in a row, which reads as a mistake even though both are true.
  */
 export const DISCLOSURE_TEMPLATE_SUGGESTION =
-  "The adjusted contract value is {contractValue}. A {adjustment} {label} reduces the " +
-  "customer's obligation to {customerObligation}. The customer's payment and financing " +
-  "calculations shown above are based on the {customerObligation} customer obligation.";
+  "This system is contracted at {contractValue} under the {label}. The programme affects " +
+  "how the system is financed and how the federal tax credits are calculated. It does not " +
+  "change the equipment installed or the production shown in this proposal.";
 
 /**
  * Whether a quoted monthly payment was worked out from the money the customer

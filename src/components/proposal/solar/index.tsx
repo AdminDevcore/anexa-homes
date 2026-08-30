@@ -317,6 +317,32 @@ function SolarPvProposalView({
    * way the chapter is not in `chapters` and nothing below renders.
    */
   const ladder = f.creditLadder ?? null;
+  /**
+   * WHAT THE COST TABLE CALLS THE SYSTEM PRICE.
+   *
+   * On an ordinary deal it is the array at sticker, and the rows below it read
+   * as arithmetic: system price, plus additional work, equals the total.
+   *
+   * On a deal carrying a programme contribution it is the CONTRACT, less any
+   * additional work priced into it — so the contribution sits INSIDE the system
+   * price rather than being printed as a row that adds to it. That is the whole
+   * of the 2026-08-29 evening change, and it is a presentation decision, not an
+   * arithmetic one: the snapshot still holds the base, the contribution and the
+   * reconciliation, and the funder's submission summary still prints all three.
+   * What moved is what the household reads. A page that showed them $58,080
+   * with $70,000 added underneath asked them to accept a mark-up they cannot
+   * check, when the truthful account of the same deal is one contract price
+   * that the credits then bring down — which is the next chapter's job.
+   *
+   * DERIVED FROM THE TOTAL rather than by adding the contribution to the base,
+   * so the rows are guaranteed to sum to the printed total to the cent on a
+   * deal carrying rebates, which the base price does not account for.
+   */
+  const systemPriceCents = adjustment
+    ? f.contractPriceCents != null
+      ? f.contractPriceCents - (f.adderTotalCents ?? 0)
+      : null
+    : f.basePriceCents;
   const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
   const hasEquipment = !!(s.system.module || s.system.inverter || s.system.battery);
@@ -707,13 +733,14 @@ function SolarPvProposalView({
 
         {/* SECTION 1 OF TWO — and the heading appears only when there is a
             second section for it to be distinguished FROM.
-            On every ordinary proposal this table is the only pricing on the
-            page and a heading over it would be labelling the obvious; on a
-            deal whose partner writes its contract for more than the household
-            owes, the two sections have to be told apart at a glance, because
-            the whole failure mode is a reader taking one figure for the other.
-            Which is also why this one comes first, and is the one that carries
-            every number the household is actually being asked to agree to. */}
+            On every ordinary proposal this table is the only thing on the page
+            and a heading over it would be labelling the obvious. On a deal
+            carrying a programme, the block beneath it names that programme and
+            carries its paragraph, and without a label over this one a reader
+            arriving at that heading has to decide for themselves whether the
+            paragraph is talking about the price they just read. It comes
+            first, and it carries every number the household is being asked to
+            agree to. */}
         {adjustment && (
           <p
             data-print-slot="pricing-heading"
@@ -742,9 +769,17 @@ function SolarPvProposalView({
             />
           )}
 
-          {/* Purchase block — only the figures that belong to cash/loan. */}
-          {isPurchase && f.basePriceCents != null && (
-            <DarkRow k="System price" v={usd(f.basePriceCents)} />
+          {/* Purchase block — only the figures that belong to cash/loan.
+              On a programme deal this row IS the contract price (see
+              `systemPriceCents`), and carries the emphasis the total row below
+              it would have, because on a deal with no additional work there is
+              no total row: it would repeat this figure under a second name. */}
+          {isPurchase && systemPriceCents != null && (
+            <DarkRow
+              k="System price"
+              v={usd(systemPriceCents)}
+              strong={adjustment != null && f.adderTotalCents == null}
+            />
           )}
           {/*
             The extra work, named where we have the names.
@@ -772,39 +807,47 @@ function SolarPvProposalView({
               <DarkRow k="Additional work" v={usd(f.adderTotalCents)} />
             ))}
 
-          {/* THE CONTRIBUTION, ADDED — the row that makes the three above it
-              arithmetic.
-              This chapter prints the contract the household signs, and the
-              system price above is what the array was quoted at. Without this
-              row a reader goes from "$48,400" straight to a "$118,400" total
-              with nothing on the page accounting for the difference, which is
-              the one question a document like this must never leave open. It
-              is the administrator's own label, and it reads as an addition
-              because that is what it is: obligation plus contribution IS the
-              contract value. */}
-          {isPurchase && adjustment && (
-            <DarkRow k={adjustment.label} v={`+${usd(adjustment.adjustmentCents)}`} />
-          )}
-          {isPurchase && f.contractPriceCents != null && (
-            <DarkRow
-              k={adjustment ? "Total contract price" : "Total price"}
-              v={usd(f.contractPriceCents)}
-              strong
-            />
-          )}
+          {/* THE TOTAL — and on a programme deal, only where there is
+              something between it and the system price for it to total UP.
+
+              There was a contribution row here until 2026-08-29: system price,
+              plus the programme's contribution, equals the contract. It was
+              arithmetic a reader could check, and it was the wrong thing to
+              put in front of them. The contribution is not a charge for
+              anything the household receives — it is on the paper so the
+              federal credits are earned on the larger figure, and the credits
+              hand it straight back on the next chapter. Printed as a line item
+              it reads as $70,000 added to a $58,080 system, which is the one
+              reading of this deal that is both intuitive and false.
+
+              So the contract price is quoted whole, from the payment menu at
+              the top of this page through to the ladder that brings it down.
+              With additional work on the deal the total still earns its place
+              beneath the lines that make it; without it, it would repeat the
+              system price under a second name and the row above carries the
+              emphasis instead. */}
+          {isPurchase &&
+            f.contractPriceCents != null &&
+            (adjustment == null || f.adderTotalCents != null) && (
+              <DarkRow
+                k={adjustment ? "Total contract price" : "Total price"}
+                v={usd(f.contractPriceCents)}
+                strong
+              />
+            )}
           {isPurchase && f.finalPpwCents != null && f.finalPpwCents > 0 && (
             <DarkRow k="Price per watt" v={`$${(f.finalPpwCents / 100).toFixed(2)}/W`} />
           )}
           {/* WHAT THE PAYMENT DIVIDES INTO.
-              Shown only where it says something the total above does not: on a
-              deal carrying a programme contribution, where the reader is about
-              to be shown a much larger contract value and is entitled to see
-              exactly which figure the monthly comes off; and on the rare deal
-              with money down, where the two genuinely differ. On every other
-              proposal it is the total price again under a second name, which
-              is a row that costs a reader attention and tells them nothing.
-              Absent on every document generated before this key existed, which
-              renders as no row at all. */}
+              Shown only where it says something the price above does not: on a
+              deal carrying a programme contribution, where the household is
+              entitled to see exactly which figure the monthly comes off before
+              the next chapter starts taking credits off it; and on the rare
+              deal with money down, where the two genuinely differ. On every
+              other proposal it is the total price again under a second name,
+              which is a row that costs a reader attention and tells them
+              nothing. Absent on every document generated before this key
+              existed, which renders as no row at all. */}
           {isPurchase &&
             f.financedAmountCents != null &&
             (adjustment != null || f.financedAmountCents !== f.contractPriceCents) && (
@@ -867,31 +910,29 @@ function SolarPvProposalView({
           )}
         </dl>
 
-        {/* SECTION 2 OF TWO — THE PARTNER'S CONTRACT, RECONCILED.
-            Directly beneath the customer's own price and inside the SAME
-            chapter, deliberately. A separate page for the contract value would
-            be a page a household could read on its own, out of the context of
-            the payment it does not affect — and the one thing this document
-            must never do is let a reader take $118,400 for what they owe. Kept
-            together, the arithmetic answers itself: the value, less the
-            contribution, is the figure already printed above.
+        {/* SECTION 2 OF TWO — THE PROGRAMME THIS DEAL WENT OUT ON, NAMED.
 
-            Every word of the label and of the paragraph is the administrator's.
-            The app supplies the three numbers and the layout. */}
+            It was a three-row table until 2026-08-29: contract value, less the
+            contribution, equals your obligation. Two things were wrong with it.
+
+            It printed the same $70,000 the row above it had just stopped
+            printing, so removing one and keeping the other would have changed
+            nothing a household actually sees. And it gave the page a SECOND
+            account of how $118,400 becomes $48,400 — this one by subtracting
+            the contribution — sitting a page away from the ladder that gets
+            there through the federal credits. Both are true descriptions of the
+            same money and they cannot both be the explanation; a reader with a
+            calculator finds two routes to one figure and trusts neither.
+
+            So the programme keeps its name and its paragraph, and the money is
+            explained once, on the chapter written for it. Every word here is
+            the administrator's — the app supplies the layout and, where the
+            template asks for them, the figures. */}
         {adjustment && (
           <div data-print-slot="adjustment" className="mt-8 break-inside-avoid">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-300">
-              {f.lender ? `${f.lender} programme breakdown` : "Programme breakdown"}
+              {f.lender ? `${f.lender} — ${adjustment.label}` : adjustment.label}
             </h3>
-            <dl className="mt-3 divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
-              <DarkRow k="Adjusted contract value" v={usd(adjustment.lenderContractValueCents)} />
-              <DarkRow k={adjustment.label} v={`−${usd(adjustment.adjustmentCents)}`} />
-              <DarkRow
-                k="Your obligation"
-                v={usd(adjustment.customerObligationCents)}
-                strong
-              />
-            </dl>
             <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-neutral-400">
               {adjustment.disclosure}
             </p>

@@ -184,10 +184,13 @@ const QUOTED_PRICE_IS_LABELLED = [
   "creditLadder.quotedPriceCents",
   // The reconciliation's own statement of the obligation.
   "lenderAdjustment.customerObligationCents",
-  // "System price" on the cost chapter — the array before the contribution is
-  // added to it, printed directly above the contribution row and the total. It
-  // is allowed here precisely BECAUSE those two rows follow it: the three read
-  // as arithmetic and land on the contract. See the sum asserted below.
+  // The array at sticker, before the contribution. NOT PRINTED on the
+  // customer's cost chapter since the evening of 2026-08-29 — the renderer
+  // derives its "System price" row from the contract instead, so the household
+  // reads one price rather than a smaller one with $70,000 added underneath.
+  // It stays on the snapshot because the funder's submission summary states
+  // it, the rep's screens read it, and a frozen document that dropped it could
+  // never explain itself later. The row-level guard is below.
   "financing.basePriceCents",
 ];
 
@@ -240,14 +243,47 @@ describe("the document quotes the contract the household signs", () => {
 
   it("adds up: system price, plus the contribution, is the printed total", () => {
     const f = snapshot.financing;
-    // The rows a household reads down the cost chapter. Without the middle one
-    // the page would print $48,400 above a $118,400 total and invite exactly
-    // the question nobody on the page can answer.
+    // A property of the DATA, not of the page — the cost chapter has printed
+    // one price since 2026-08-29 and no longer shows this sum. It is asserted
+    // because the renderer's "System price" is `contract − adders`, and that is
+    // only the array-plus-contribution if these three still reconcile. The day
+    // they stop, a household reads a system price that is quietly the wrong
+    // number rather than a page that visibly does not add up.
     expect(
       (f.basePriceCents ?? 0) +
         (f.adderTotalCents ?? 0) +
         snapshot.financing.lenderAdjustment!.adjustmentCents
     ).toBe(f.contractPriceCents);
+  });
+
+  it("prints neither the contribution nor the obligation on the customer's page", () => {
+    /*
+     * THE ROW THAT CAME OFF, asserted so it cannot go back on by accident.
+     *
+     * The cost chapter used to run "System price $48,400 / Participate Program
+     * Contribution +$70,000 / Total contract price $118,400", and beneath it a
+     * three-row box that took the same $70,000 off again. Both were arithmetic
+     * a reader could check and both invited the only intuitive reading of them:
+     * that $70,000 was added to the price of a system. It is not a charge — it
+     * is on the paper so the credits are earned on the larger figure, and the
+     * ladder chapter hands it straight back. So the document quotes the
+     * contract whole and explains it once, where the credits are.
+     *
+     * Checked against the SOURCE rather than a render, because the failure is a
+     * row reappearing rather than a figure coming out wrong, and a row is
+     * visible in the file. The submission summary is deliberately not in scope:
+     * that page is for the funder, who needs all three figures.
+     */
+    const doc = readFileSync(
+      join(SRC, "components", "proposal", "solar", "index.tsx"),
+      "utf8"
+    );
+    expect(doc).not.toContain("adjustment.adjustmentCents");
+    expect(doc).not.toContain("adjustment.customerObligationCents");
+    // The contract value it IS allowed to state: the sentence saying which
+    // figure the payment came off. Present, so this test fails loudly if the
+    // whole block is ever deleted rather than silently passing on nothing.
+    expect(doc).toContain("adjustment.lenderContractValueCents");
   });
 
   it("steps the payment down rather than pocketing the credits", () => {

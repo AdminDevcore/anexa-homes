@@ -145,11 +145,23 @@ describe("the disclosure", () => {
     })!;
 
     expect(r.disclosure).toContain("$118,400");
-    expect(r.disclosure).toContain("$70,000");
-    expect(r.disclosure).toContain("$48,400");
     expect(r.disclosure).toContain("Participate Program Contribution");
     // No token survives into what a homeowner reads.
     expect(r.disclosure).not.toMatch(/\{contractValue\}|\{adjustment\}|\{customerObligation\}/);
+  });
+
+  it("suggests wording that names the contract and not the contribution", () => {
+    // The cost chapter stopped printing the contribution and the obligation as
+    // rows on 2026-08-29; wording the app itself offers must not put the same
+    // breakdown back as a sentence underneath. The tokens still resolve — the
+    // test below proves it — but an admin has to reach for them.
+    const r = reconcileContract({
+      customerObligationCents: CUSTOMER_PRICE_CENTS,
+      adjustment: PARTICIPATE,
+      lenderName: "Participate",
+    })!;
+    expect(r.disclosure).not.toContain("$70,000");
+    expect(r.disclosure).not.toContain("$48,400");
   });
 
   it("prints the administrator's words and never any of its own", () => {

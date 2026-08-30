@@ -1252,14 +1252,39 @@ function LenderCard({
     });
     if (!r) return null;
 
+    // THE TWO FIGURES THE CUSTOMER'S DOCUMENT NO LONGER BREAKS OUT.
+    //
+    // Since 2026-08-29 the proposal quotes the contract value whole — one
+    // system price — and the federal credits bring it down on the following
+    // chapter. The contribution and the obligation are not rows on it any
+    // more. They are still tokens here, because the funder's own paperwork and
+    // some programmes' approved wording legitimately state them; but an admin
+    // who reaches for {adjustment} out of habit puts back, in a sentence,
+    // exactly the breakdown the page stopped printing. So it is flagged, in
+    // the preview, where they can see the sentence it produces — not blocked,
+    // because whether a programme must disclose its own contribution is a
+    // question about that programme's agreement and not ours to answer.
+    //
+    // Read off the RENDERED paragraph rather than the template, so a figure
+    // typed by hand is caught as well as one substituted in.
+    const leaks: string[] = [];
+    if (r.disclosure.includes(money(r.adjustmentCents))) {
+      leaks.push(`${money(r.adjustmentCents)} contribution`);
+    }
+    if (r.disclosure.includes(money(r.customerObligationCents))) {
+      leaks.push(`${money(r.customerObligationCents)} obligation`);
+    }
+
     return {
       exampleLabel: priced
         ? `${EXAMPLE_KW.toFixed(2)} kW at $${(lender.maxFinalPpwCents! / 100).toFixed(2)}/W`
         : "on an example $100,000 customer price",
+      heading: `${draft.name.trim() || lender.name} — ${label}`,
       contractValue: money(r.lenderContractValueCents),
       adjustment: money(r.adjustmentCents),
       obligation: money(r.customerObligationCents),
       disclosure: r.disclosure,
+      leaks,
     };
   }, [
     draft.adjustmentEnabled,
@@ -1661,23 +1686,39 @@ function LenderCard({
                 {/* The preview is the point of this block. An admin typing
                     tokens into a textarea cannot otherwise tell what a
                     homeowner will read, and the sentence they are approving is
-                    the sentence with the numbers in it. */}
+                    the sentence with the numbers in it.
+
+                    IT MIRRORS THE DOCUMENT, and the document changed on
+                    2026-08-29: it prints one system price at the contract
+                    value, then the programme's name and paragraph. It showed
+                    three rows here — contract value, less the contribution,
+                    equals the obligation — for as long as the page did. A
+                    preview of a page that no longer exists is worse than no
+                    preview, because somebody approves wording against it. */}
                 {adjustmentPreview && (
                   <div className="rounded-lg border border-border bg-background p-2.5">
                     <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                       What the customer reads — {adjustmentPreview.exampleLabel}
                     </p>
                     <dl className="mt-1.5 space-y-0.5 text-[11px]">
-                      <PreviewRow k="Adjusted contract value" v={adjustmentPreview.contractValue} />
-                      <PreviewRow
-                        k={draft.adjustmentLabel.trim() || "Programme adjustment"}
-                        v={`−${adjustmentPreview.adjustment}`}
-                      />
-                      <PreviewRow k="Customer obligation" v={adjustmentPreview.obligation} strong />
+                      <PreviewRow k="System price" v={adjustmentPreview.contractValue} strong />
                     </dl>
-                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                    <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-foreground">
+                      {adjustmentPreview.heading}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
                       {adjustmentPreview.disclosure}
                     </p>
+                    {adjustmentPreview.leaks.length > 0 && (
+                      <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-900 dark:text-amber-200">
+                        This wording states the {adjustmentPreview.leaks.join(" and the ")} in
+                        prose. The proposal itself no longer breaks the price down that way — it
+                        quotes the {adjustmentPreview.contractValue}{" "}
+                        contract whole and the federal credits bring it down on the following page.
+                        Keep these figures only if this programme&rsquo;s agreement requires them to
+                        be disclosed.
+                      </p>
+                    )}
                   </div>
                 )}
 

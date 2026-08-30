@@ -236,9 +236,20 @@ describe("what the snapshot freezes", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
     const d = s.financing.lenderAdjustment!.disclosure;
     expect(d).toContain("$118,400");
-    expect(d).toContain("$70,000");
-    expect(d).toContain("$48,400");
+    // Every token resolved. One surviving into a frozen document is a
+    // "{customerObligation}" printed at a homeowner.
     expect(d).not.toContain("{");
+  });
+
+  it("suggests wording that does not put the contribution back in prose", () => {
+    // The cost chapter stopped printing "$48,400 + $70,000 = $118,400" as rows
+    // on 2026-08-29; wording the app itself proposes must not hand a household
+    // the same breakdown in a sentence three lines below. An admin may still
+    // choose to — the tokens exist and the settings preview flags them — but
+    // not by accepting our suggestion unread.
+    const d = build({ contractAdjustment: PARTICIPATE }).financing.lenderAdjustment!.disclosure;
+    expect(d).not.toContain("$70,000");
+    expect(d).not.toContain("$48,400");
   });
 
   it("carries the lender's product name for the funder's paperwork", () => {
