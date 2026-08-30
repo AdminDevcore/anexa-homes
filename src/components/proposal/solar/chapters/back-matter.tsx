@@ -31,6 +31,21 @@ export function BackMatter({ doc }: { doc: Doc }) {
   const { s, sv, f, credits, vpp, vppAnnualCents, vppUpfrontCents, vppPayer } = doc;
   const monthlyCents = doc.monthlyCents;
   const lifetimeKwh = sv.years.reduce((n, y) => n + y.productionKwh, 0);
+  /**
+   * Whether this schedule bills year one at a different figure from the rest.
+   *
+   * Read off the years the document is actually printing, so it is true of any
+   * schedule that steps — a credit re-amortisation, a partner's published
+   * paydown month — and false the moment the switch is thrown and the lower
+   * payment runs from month one. A year with no payment at all is a loan that
+   * has finished, not a step, and the branch above already handles the deal
+   * bought outright.
+   */
+  const stepsDown =
+    sv.years[0] != null &&
+    sv.years[1] != null &&
+    sv.years[1].solarPaymentCents > 0 &&
+    sv.years[1].solarPaymentCents !== sv.years[0].solarPaymentCents;
 
   return (
     <footer
@@ -150,15 +165,35 @@ export function BackMatter({ doc }: { doc: Doc }) {
                   {`Year 1 carries the whole price of the system, ${usd(sv.years[0].solarPaymentCents)}, because it is bought outright. Every year after it shows only what the power costs.`}
                 </p>
               )}
+            {/* HOW THE PAYMENTS FALL, and it is not one figure on every
+                schedule. This said "twelve payments of $355.78 a year, for 30
+                years" under a column that charged $4,269 in year 1 and $1,936
+                in year 5 — the sentence and the table it annotates disagreed by
+                a factor of two, and the table was the one telling the truth.
+
+                A credit-funded loan re-amortises when the credits are applied,
+                so the first year is billed at one figure and the rest at
+                another. `stepsDown` reads that off the MODEL rather than off
+                the switch: a partner whose rate sheet publishes a paydown month
+                steps the same way with no credit ladder anywhere near it.
+
+                The later figure is NOT named here. With the switch off the
+                credits are not part of this copy — that is the whole rule the
+                switch enforces — and the column immediately above already
+                prints what every year costs. */}
             {monthlyCents != null &&
               sv.years[0] != null &&
               sv.years[0].solarPaymentCents > 0 && (
                 <p>
-                  {`You pay for the system in twelve payments of ${usd(monthlyCents, 2)} a year${
+                  {`You pay for the system in twelve payments of ${usd(monthlyCents, 2)}${
+                    stepsDown ? " in the first year, and less after that" : " a year"
+                  }${
                     f.loanTermMonths != null && f.loanTermMonths > 0
-                      ? `, for ${loanTermLabel(f.loanTermMonths)}`
+                      ? `, ${stepsDown ? "over" : "for"} ${loanTermLabel(f.loanTermMonths)}`
                       : ""
                   } — never the whole price in one year. ${
+                    stepsDown ? "The column above shows what each year costs. " : ""
+                  }${
                     f.loanTermMonths != null &&
                     f.loanTermMonths > 0 &&
                     f.loanTermMonths < sv.years.length * 12
