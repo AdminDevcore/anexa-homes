@@ -57,3 +57,5 @@ next-env.d.ts
 # every customer record and every uploaded document — so they must never be
 # committed, however convenient it looks.
 /.backups
+
+.superpowers/
