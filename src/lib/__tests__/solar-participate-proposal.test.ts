@@ -80,28 +80,48 @@ function build(over: Partial<Parameters<typeof buildProposalSnapshot>[0]> = {}) 
   });
 }
 
-/** Every figure on the document that is about the customer's own money. */
-function customerFacingCents(s: SolarProposalSnapshot): number[] {
-  const f = s.financing;
-  return [
-    f.contractPriceCents ?? 0,
-    f.basePriceCents ?? 0,
-    f.financedAmountCents ?? 0,
-  ];
-}
-
 describe("the customer's price", () => {
-  it("is 8,800 watts at $5.50 — $48,400 — and the contribution does not move it", () => {
+  it("quotes the $118,400 contract, and the $48,400 it was priced from stays the system price", () => {
     const without = build();
     const with_ = build({ contractAdjustment: PARTICIPATE });
 
+    // Without a programme, nothing about this deal moves.
     expect(without.financing.contractPriceCents).toBe(48_400_00);
-    expect(with_.financing.contractPriceCents).toBe(48_400_00);
-    expect(with_.financing.finalPpwCents).toBe(550);
-    expect(with_.financing.financedAmountCents).toBe(48_400_00);
+    expect(without.financing.finalPpwCents).toBe(550);
+
+    // With one, the document quotes the paper the household signs.
+    expect(with_.financing.contractPriceCents).toBe(118_400_00);
+    expect(with_.financing.financedAmountCents).toBe(118_400_00);
+    // The array is still 8,800 watts at $5.50 — that row does not move, it is
+    // the contribution beneath it that carries the deal up to the total.
+    expect(with_.financing.basePriceCents).toBe(48_400_00);
   });
 
-  it("reaches $118,400 only on the reconciliation, and only there", () => {
+  it("prints a price per watt that divides into the total above it", () => {
+    const s = build({ contractAdjustment: PARTICIPATE });
+    // $118,400 over 8,800 watts. Printing $5.50/W under a $118,400 total would
+    // be two figures that do not divide into each other — the failure this
+    // codebase has been bitten by most often.
+    expect(s.financing.finalPpwCents).toBe(1_345);
+    expect(
+      Math.round(s.financing.finalPpwCents! * 8_800)
+    ).toBeCloseTo(s.financing.contractPriceCents!, -4);
+  });
+
+  it("changes NOTHING on a deal whose partner runs no programme", () => {
+    // The reversal is confined to the structure it was written for. Two
+    // documents, one carrying a $70,000 programme and one not — and the one
+    // without it is the document it always was, figure for figure.
+    const without = build();
+    const reference = build();
+
+    expect(without.financing).toEqual(reference.financing);
+    expect(without.financing.creditLadder).toBeUndefined();
+    expect(without.financing.netMonthlyPaymentCents).toBeUndefined();
+    expect(without.savings.creditReliefTotalCents).toBe(0);
+  });
+
+  it("reconciles the contract it prints", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
     const adjustment = s.financing.lenderAdjustment!;
 
@@ -109,48 +129,74 @@ describe("the customer's price", () => {
     expect(adjustment.adjustmentCents).toBe(70_000_00);
     expect(adjustment.customerObligationCents).toBe(48_400_00);
     expect(adjustment.label).toBe("Participate Program Contribution");
+    // The printed total IS the contract value. They used to be different
+    // numbers on purpose; now they are the same number on purpose.
+    expect(s.financing.contractPriceCents).toBe(adjustment.lenderContractValueCents);
+  });
+});
 
-    // NOTHING ELSE ON THE DOCUMENT IS THAT NUMBER. This is the assertion that
-    // would fail if a future edit started deriving any customer figure from the
-    // contract value.
-    expect(customerFacingCents(s)).not.toContain(118_400_00);
+describe("what the household actually pays", () => {
+  it("takes the credits off the contract and hands back the difference", () => {
+    const l = build({ contractAdjustment: PARTICIPATE }).financing.creditLadder!;
+
+    // 30 + 10 + 10 on $118,400.
+    expect(l.credits.map((c) => c.amountCents)).toEqual([35_520_00, 11_840_00, 11_840_00]);
+    expect(l.creditTotalCents).toBe(59_200_00);
+    expect(l.afterCreditsCents).toBe(59_200_00);
+    // The remainder between that and the price the system was sold at.
+    expect(l.incentiveCents).toBe(10_800_00);
+    expect(l.netCostCents).toBe(48_400_00);
   });
 
-  it("prices identically with and without the contribution, figure for figure", () => {
-    // The strongest statement of "purely additive" available: two documents,
-    // one carrying a $70,000 programme and one not, agreeing on every single
-    // number a household is asked to pay.
-    const without = build();
-    const with_ = build({ contractAdjustment: PARTICIPATE });
-
-    expect(with_.financing.contractPriceCents).toBe(without.financing.contractPriceCents);
-    expect(with_.financing.basePriceCents).toBe(without.financing.basePriceCents);
-    expect(with_.financing.finalPpwCents).toBe(without.financing.finalPpwCents);
-    expect(with_.financing.loanMonthlyPaymentCents).toBe(without.financing.loanMonthlyPaymentCents);
-    expect(with_.savings.netSavingsCents).toBe(without.savings.netSavingsCents);
-    expect(with_.savings.solarPaidCents).toBe(without.savings.solarPaidCents);
-    expect(with_.savings.paybackYear).toBe(without.savings.paybackYear);
+  it("ends on the price the rep quoted, whichever bonuses this job earns", () => {
+    for (const claims of [
+      { itc: true, energyCommunity: true, domesticContent: true },
+      { itc: true, energyCommunity: false, domesticContent: true },
+      { itc: true, energyCommunity: false, domesticContent: false },
+      { itc: false, energyCommunity: false, domesticContent: false },
+    ]) {
+      const l = build({ contractAdjustment: PARTICIPATE, creditClaims: claims })
+        .financing.creditLadder!;
+      expect(l.netCostCents).toBe(48_400_00);
+      expect(l.creditTotalCents + l.incentiveCents).toBe(70_000_00);
+    }
   });
 });
 
 describe("the payment and the savings", () => {
-  it("amortises the $48,400 the customer owes, not the $118,400 contract", () => {
+  it("amortises the $118,400 contract the household signs for", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
-    // 4,840,000 cents over 360 months at 0%.
-    expect(s.financing.loanMonthlyPaymentCents).toBe(13_444);
+    // 11,840,000 cents over 360 months at 0%.
+    expect(s.financing.loanMonthlyPaymentCents).toBe(32_889);
     expect(s.financing.loanTermMonths).toBe(360);
     expect(s.financing.aprPct).toBe(0);
   });
 
-  it("bills the twenty-five years at that payment", () => {
+  it("quotes the payment the credits leave them on, derived the same way", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
-    const monthly = s.financing.loanMonthlyPaymentCents!;
-    const years = s.savings.years.length;
+    // $48,400 over the same 360 months at the same 0%.
+    expect(s.financing.netMonthlyPaymentCents).toBe(13_444);
+  });
 
-    // What the household pays for solar over the modelled horizon is the
-    // payment times the months, never the contract value.
-    expect(s.savings.solarPaidCents).toBe(monthly * 12 * years);
-    expect(s.savings.solarPaidCents).toBeLessThan(70_000_00);
+  it("steps the years down at the paydown month rather than pocketing a lump", () => {
+    const s = build({ contractAdjustment: PARTICIPATE });
+    const years = s.savings.years;
+
+    // Twelve of the higher payment, then the lower one for the rest — which is
+    // what a household on a credit-funded loan actually pays.
+    expect(years[0].solarPaymentCents).toBe(32_889 * 12);
+    expect(years[1].solarPaymentCents).toBe(13_444 * 12);
+    expect(years[24].solarPaymentCents).toBe(13_444 * 12);
+    // And no lump: crediting the $70,000 in year one AND stepping the payment
+    // down would hand the household the same money twice.
+    expect(s.savings.creditReliefTotalCents).toBe(0);
+  });
+
+  it("never bills the contract value as a year-one cost", () => {
+    const s = build({ contractAdjustment: PARTICIPATE });
+    for (const y of s.savings.years) {
+      expect(y.solarPaymentCents).toBeLessThan(70_000_00);
+    }
   });
 });
 
@@ -182,8 +228,8 @@ describe("what the document says about ownership", () => {
 describe("what the snapshot freezes", () => {
   it("records the version of the shape and of the arithmetic", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
-    expect(s.schemaVersion).toBe(6);
-    expect(s.calculationVersion).toBe(2);
+    expect(s.schemaVersion).toBe(7);
+    expect(s.calculationVersion).toBe(3);
   });
 
   it("keeps the disclosure with its figures already in it", () => {

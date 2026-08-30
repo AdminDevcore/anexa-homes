@@ -307,6 +307,16 @@ function SolarPvProposalView({
    * is almost all of them — and either way, nothing below renders.
    */
   const adjustment = f.lenderAdjustment ?? null;
+  /**
+   * The ladder from the contract down to what the household actually pays.
+   *
+   * Read off the OPTION for the same reason the reconciliation is: switching
+   * the payment menu from the partner that runs the programme to one that does
+   * not takes the whole chapter with it. Undefined on every document generated
+   * before this existed and null on every deal without such a partner — either
+   * way the chapter is not in `chapters` and nothing below renders.
+   */
+  const ladder = f.creditLadder ?? null;
   const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
   const hasEquipment = !!(s.system.module || s.system.inverter || s.system.battery);
@@ -361,6 +371,8 @@ function SolarPvProposalView({
     { id: "today", label: "Today" },
     { id: "system", label: "System" },
     { id: "cost", label: "Your cost" },
+    // Only on a deal that has a contract to explain. See `ladder`.
+    ...(ladder ? [{ id: "pay", label: "What you pay" }] : []),
     ...(showComparison ? [{ id: "savings", label: `${sv.years.length} years` }] : []),
     { id: "timeline", label: "Next" },
     { id: "accept", label: "Accept" },
@@ -760,8 +772,25 @@ function SolarPvProposalView({
               <DarkRow k="Additional work" v={usd(f.adderTotalCents)} />
             ))}
 
+          {/* THE CONTRIBUTION, ADDED — the row that makes the three above it
+              arithmetic.
+              This chapter prints the contract the household signs, and the
+              system price above is what the array was quoted at. Without this
+              row a reader goes from "$48,400" straight to a "$118,400" total
+              with nothing on the page accounting for the difference, which is
+              the one question a document like this must never leave open. It
+              is the administrator's own label, and it reads as an addition
+              because that is what it is: obligation plus contribution IS the
+              contract value. */}
+          {isPurchase && adjustment && (
+            <DarkRow k={adjustment.label} v={`+${usd(adjustment.adjustmentCents)}`} />
+          )}
           {isPurchase && f.contractPriceCents != null && (
-            <DarkRow k="Total price" v={usd(f.contractPriceCents)} strong />
+            <DarkRow
+              k={adjustment ? "Total contract price" : "Total price"}
+              v={usd(f.contractPriceCents)}
+              strong
+            />
           )}
           {isPurchase && f.finalPpwCents != null && f.finalPpwCents > 0 && (
             <DarkRow k="Price per watt" v={`$${(f.finalPpwCents / 100).toFixed(2)}/W`} />
@@ -868,12 +897,18 @@ function SolarPvProposalView({
             </p>
             {/* A statement about THIS PAGE's arithmetic, not about anybody's
                 liability — which is the administrator's paragraph above to
-                make. It is here because it is the sentence that stops the two
-                sections being confused, and it is checkable by the reader
-                against the rows they have just read. */}
+                make. It is here because it is the sentence that says which
+                figure the payment came off, and it is checkable by the reader
+                against the rows they have just read.
+                It said the opposite until 2026-08-29, when the document moved
+                onto the contract; leaving the old sentence standing would have
+                been the single most misleading line on the page. */}
             <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-neutral-500">
-              The payment, amount financed and savings shown on this proposal are all calculated
-              from the {usd(adjustment.customerObligationCents)} figure.
+              The payment and amount financed above are calculated from the{" "}
+              {usd(adjustment.lenderContractValueCents)} contract.
+              {ladder
+                ? ` What you actually pay after the credits and the ${ladder.incentiveLabel.toLowerCase()} is set out on the next page.`
+                : ""}
             </p>
           </div>
         )}
@@ -952,7 +987,110 @@ function SolarPvProposalView({
         )}
       </Chapter>
 
-      {/* ── 5 · OVER N YEARS ──────────────────────────────────────────────── */}
+      {/* ── 5 · WHAT YOU ACTUALLY PAY ─────────────────────────────────────
+          THE ONE PAGE THE $118,400 EXISTS FOR.
+
+          Its own chapter rather than a block on the cost page, and that is the
+          reverse of the decision made when the reconciliation shipped. The
+          reasoning then was that a separate page could be read out of context
+          of the payment — true while the document quoted the smaller figure and
+          the contract was a footnote. Now the contract IS the headline, and a
+          household that has just read a $118,400 total and a $328.89 payment
+          has exactly one question. An answer folded into the bottom of the page
+          that raised it is an answer they may not reach.
+
+          Every row here is arithmetic the reader can check against the row
+          above it, which is why the figures are frozen together in
+          `solar-credit-ladder` and asserted to subtract before the document is
+          allowed to generate. */}
+      {ladder && (
+        <Chapter
+          id="pay"
+          index={num("pay")}
+          total={total}
+          eyebrow="What you actually pay"
+          title={
+            ladder.incentiveCents > 0
+              ? `Your cost comes down to ${usd(ladder.netCostCents)}.`
+              : `After the credits, ${usd(ladder.netCostCents)}.`
+          }
+          lede={
+            <>
+              The contract is written at {usd(ladder.contractValueCents)}. Here is every credit
+              that comes off it, and what is left for you.
+            </>
+          }
+          tone="dark"
+        >
+          <dl
+            data-print-slot="ladder"
+            className="mt-8 break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]"
+          >
+            <DarkRow k="Contract price" v={usd(ladder.contractValueCents)} />
+            {ladder.credits.map((c) => (
+              <DarkRow
+                key={c.key}
+                k={`${c.label} (${pct(c.pct)})`}
+                v={`−${usd(c.amountCents)}`}
+                muted
+              />
+            ))}
+            {/* The subtotal, but only where it says something the rows do not.
+                With no credits claimed it would repeat the contract price under
+                a second name. */}
+            {ladder.credits.length > 0 && (
+              <DarkRow k="After tax credits" v={usd(ladder.afterCreditsCents)} />
+            )}
+            {/* DROPPED, not printed at zero, when the credits alone already
+                take the contract below the price this system was quoted at —
+                there is nothing to hand back, and a "$0 incentive" row reads as
+                an offer that was withheld. */}
+            {ladder.incentiveCents > 0 && (
+              <DarkRow k={ladder.incentiveLabel} v={`−${usd(ladder.incentiveCents)}`} muted />
+            )}
+            <DarkRow k="What you pay" v={usd(ladder.netCostCents)} strong />
+          </dl>
+
+          {/* THE PAYMENT, which is the figure this page is actually read for.
+              Beside the two it sits between: what is billed until the credits
+              are applied, and what it becomes afterwards. Printing only the
+              second would be the most misleading thing on the document — a
+              household that never claims the credit is billed the first one for
+              the whole term. */}
+          {f.netMonthlyPaymentCents != null && (
+            <div className="mt-8 grid gap-4 break-inside-avoid sm:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                  Until the credits are applied
+                </p>
+                <p className="mt-2 font-display text-3xl font-bold text-white">
+                  {usd(f.loanMonthlyPaymentCents ?? 0, 2)}
+                  <span className="ml-1 text-base font-medium text-neutral-400">/mo</span>
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[color:var(--proposal-accent)]/40 bg-[color:var(--proposal-accent)]/10 p-5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-neutral-300">
+                  Once they are
+                </p>
+                <p className="mt-2 font-display text-3xl font-bold text-white">
+                  {usd(f.netMonthlyPaymentCents, 2)}
+                  <span className="ml-1 text-base font-medium text-neutral-300">/mo</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* THE CAVEAT, in the company's own words, and never optional on a
+              page of tax-credit arithmetic. A credit is claimed on the reader's
+              return and depends on their liability; the rows above are what the
+              credits are WORTH, not a discount anybody has applied. */}
+          <p className="mt-6 max-w-[62ch] break-inside-avoid rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm leading-relaxed text-amber-200">
+            {ladder.disclaimer}
+          </p>
+        </Chapter>
+      )}
+
+      {/* ── 6 · OVER N YEARS ──────────────────────────────────────────────── */}
       {showComparison && (
         <Chapter
           id="savings"
@@ -1203,7 +1341,7 @@ function SolarPvProposalView({
         </Chapter>
       )}
 
-      {/* ── 6 · WHAT HAPPENS NEXT ─────────────────────────────────────────
+      {/* ── 7 · WHAT HAPPENS NEXT ─────────────────────────────────────────
           The plan, with the environmental figures folded in as a band beneath
           it. They used to be a chapter of their own — four EPA equivalences do
           not earn a full stop in the middle of a sales document, but they are
@@ -1355,7 +1493,7 @@ function SolarPvProposalView({
         </div>
       </Chapter>
 
-      {/* ── 7 · ACCEPT ────────────────────────────────────────────────────
+      {/* ── 8 · ACCEPT ────────────────────────────────────────────────────
           Signature first, questions under it. The FAQ used to be a chapter of
           its own BEFORE the close, which put ten paragraphs of reassurance
           between a decided customer and the button. */}

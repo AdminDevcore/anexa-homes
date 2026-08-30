@@ -95,21 +95,53 @@ export function ParticipateSubmissionSummary({
         />
       </Block>
 
-      {/* THE TWO PRICES, LABELLED, IN THIS ORDER.
-          The customer's obligation leads even on the funder's own paperwork,
-          because the one mistake this document could cause is somebody reading
-          the contract value as what the household pays. */}
+      {/* WHAT THE CUSTOMER SIGNED FOR — the contract, which since 2026-08-29 is
+          the figure the proposal itself quotes on every page. This block used
+          to lead with the obligation and call it "customer obligation"; that
+          label now belongs to the bottom of the credit ladder below, and
+          leaving it here would have had the funder's paperwork and the signed
+          document disagreeing about what the household agreed to. */}
       <Block title="Customer pricing">
         <Field
-          k="Customer price per watt"
+          k="Contract price per watt"
           v={f.finalPpwCents != null && f.finalPpwCents > 0 ? `$${(f.finalPpwCents / 100).toFixed(2)}/W` : "—"}
         />
-        <Field k="Customer system price" v={money(f.basePriceCents)} />
+        <Field k="System price" v={money(f.basePriceCents)} />
         <Field k="Customer-selected add-ons" v={money(f.adderTotalCents)} />
-        <Field k="Customer obligation" v={money(f.contractPriceCents)} strong />
-        <Field k="Customer-financed amount" v={money(f.financedAmountCents ?? f.contractPriceCents)} />
+        {adjustment && (
+          <Field k={adjustment.label} v={`+${money(adjustment.adjustmentCents)}`} />
+        )}
+        <Field k="Contract price" v={money(f.contractPriceCents)} strong />
+        <Field k="Amount financed" v={money(f.financedAmountCents ?? f.contractPriceCents)} />
         <Field k="Customer monthly payment" v={money(f.loanMonthlyPaymentCents, 2)} strong />
+        {f.netMonthlyPaymentCents != null && (
+          <Field
+            k="Monthly once the credits are applied"
+            v={money(f.netMonthlyPaymentCents, 2)}
+          />
+        )}
       </Block>
+
+      {/* THE LADDER, on the funder's paperwork too.
+          The signed document promises the household a figure well below the
+          contract this summary submits, and the whole of that difference is
+          credits and a company incentive. A funder reconciling the two needs
+          the same rows the customer read, not a footnote saying they exist. */}
+      {f.creditLadder && (
+        <Block title="What the customer pays">
+          <Field k="Contract price" v={money(f.creditLadder.contractValueCents)} />
+          {f.creditLadder.credits.map((c) => (
+            <Field key={c.key} k={`${c.label} (${c.pct}%)`} v={`−${money(c.amountCents)}`} />
+          ))}
+          {f.creditLadder.incentiveCents > 0 && (
+            <Field
+              k={f.creditLadder.incentiveLabel}
+              v={`−${money(f.creditLadder.incentiveCents)}`}
+            />
+          )}
+          <Field k="Net customer cost" v={money(f.creditLadder.netCostCents)} strong />
+        </Block>
+      )}
 
       {adjustment ? (
         <Block title="Contract value submitted">
@@ -118,9 +150,9 @@ export function ParticipateSubmissionSummary({
             v={money(adjustment.lenderContractValueCents)}
             strong
           />
-          <Field k={adjustment.label} v={`−${money(adjustment.adjustmentCents)}`} />
+          <Field k={adjustment.label} v={money(adjustment.adjustmentCents)} />
           <Field
-            k="Customer obligation"
+            k="System priced at"
             v={money(adjustment.customerObligationCents)}
             strong
           />
@@ -131,8 +163,8 @@ export function ParticipateSubmissionSummary({
       ) : (
         <Block title="Contract value submitted">
           <p className="col-span-2 text-sm leading-relaxed text-neutral-600">
-            This deal carries no contract adjustment. The value submitted is the customer&rsquo;s
-            obligation of {money(f.contractPriceCents)}.
+            This deal carries no contract adjustment. The value submitted is the contract price of{" "}
+            {money(f.contractPriceCents)}.
           </p>
         </Block>
       )}

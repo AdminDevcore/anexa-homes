@@ -226,15 +226,15 @@ afterAll(async () => {
 });
 
 describe("the two figures reach the document", () => {
-  it("quotes the customer $48,400 and the partner $118,400", async () => {
+  it("quotes the $118,400 contract and prices the payment on it", async () => {
     const res = await generate();
     expect(res.ok, "ok" in res && !res.ok ? res.error : "").toBe(true);
     if (!res.ok) return;
 
     const f = res.snapshot.financing;
-    expect(f.contractPriceCents).toBe(CUSTOMER_CENTS);
-    expect(f.financedAmountCents).toBe(CUSTOMER_CENTS);
-    expect(f.loanMonthlyPaymentCents).toBe(13_444);
+    expect(f.contractPriceCents).toBe(118_400_00);
+    expect(f.financedAmountCents).toBe(118_400_00);
+    expect(f.loanMonthlyPaymentCents).toBe(32_889);
     expect(f.lenderAdjustment).toEqual({
       label: LABEL,
       adjustmentCents: PARTICIPATE_CENTS,
@@ -242,6 +242,38 @@ describe("the two figures reach the document", () => {
       lenderContractValueCents: 118_400_00,
       disclosure: expect.stringContaining("$118,400"),
     });
+  });
+
+  it("brings the household back to $48,400 on the ladder, and quotes that payment too", async () => {
+    const res = await generate();
+    if (!res.ok) throw new Error(res.error);
+
+    const l = res.snapshot.financing.creditLadder;
+    expect(l).toBeTruthy();
+    // 30 + 10 + 10 of $118,400, then the difference.
+    expect(l!.creditTotalCents).toBe(59_200_00);
+    expect(l!.incentiveCents).toBe(10_800_00);
+    expect(l!.netCostCents).toBe(CUSTOMER_CENTS);
+    expect(res.snapshot.financing.netMonthlyPaymentCents).toBe(13_444);
+  });
+
+  it("drops a bonus this job does not earn, and the incentive absorbs it", async () => {
+    await db.solarFinance.update({
+      where: { leadId },
+      data: { claimEnergyCommunity: false },
+    });
+    const res = await generate();
+    if (!res.ok) throw new Error(res.error);
+
+    const l = res.snapshot.financing.creditLadder!;
+    expect(l.credits.map((c) => c.key)).toEqual(["itc", "domesticContent"]);
+    expect(l.creditTotalCents).toBe(47_360_00);
+    expect(l.incentiveCents).toBe(22_640_00);
+    // The bottom line does not move: what the household pays is the price the
+    // rep quoted, whichever bonuses the job earns.
+    expect(l.netCostCents).toBe(CUSTOMER_CENTS);
+
+    await db.solarFinance.update({ where: { leadId }, data: { claimEnergyCommunity: true } });
   });
 
   it("leaves the deal's own value at what the customer owes", async () => {
@@ -290,8 +322,10 @@ describe("changing the setting moves nothing that already exists", () => {
     expect(second.version).toBe(first.version + 1);
     expect(second.snapshot.financing.lenderAdjustment?.adjustmentCents).toBe(90_000_00);
     expect(second.snapshot.financing.lenderAdjustment?.lenderContractValueCents).toBe(138_400_00);
-    // And the customer's own price has not moved a cent.
-    expect(second.snapshot.financing.contractPriceCents).toBe(CUSTOMER_CENTS);
+    // The contract the document quotes moves with it, and the ladder still
+    // lands the household on the price the system was sold at.
+    expect(second.snapshot.financing.contractPriceCents).toBe(138_400_00);
+    expect(second.snapshot.financing.creditLadder?.netCostCents).toBe(CUSTOMER_CENTS);
 
     // The old one is superseded, not edited.
     const old = await db.solarProposal.findUniqueOrThrow({

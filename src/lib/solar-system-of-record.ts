@@ -50,7 +50,15 @@ export type DesignSystem = {
   batteryLabel: string | null;
   batteryQty: number;
   product: FinanceProduct | null;
-  /** Cash and loan only — what this would sign for at today's design. */
+  /**
+   * Cash and loan only — what this system was PRICED at, at today's design.
+   *
+   * THE PRICE, NOT THE CONTRACT, on a partner that writes its paper above it.
+   * This field is compared field-for-field against the live finance row to
+   * report drift, and the live row holds the price; reading the document's
+   * printed total here would report a $70,000 "System cost has changed" on
+   * every such deal, every time, for a design nobody had touched.
+   */
   contractPriceCents: number | null;
   monthlyPaymentCents: number | null;
   rateMillsPerKwh: number | null;
@@ -106,7 +114,10 @@ export function resolveReportedSystem({
       // honest reading of "there is a battery on this deal".
       batteryQty: system.battery?.qty ?? (system.batteryLabel ? 1 : 0),
       product: financing.product,
-      contractPriceCents: financing.contractPriceCents,
+      // The obligation where the document carries one — see the field's note.
+      // Absent on every ordinary deal, where the two are the same number.
+      contractPriceCents:
+        financing.lenderAdjustment?.customerObligationCents ?? financing.contractPriceCents,
       monthlyPaymentCents: financing.monthlyPaymentCents,
       rateMillsPerKwh: financing.rateMillsPerKwh,
     };

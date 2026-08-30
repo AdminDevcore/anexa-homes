@@ -19,6 +19,7 @@ const YEAR = (year: number, utilityYear1: number): SavingsModel["years"][number]
   meterFeeCents: 12_000,
   solarPaymentCents: 0,
   vppCreditCents: 0,
+  creditReliefCents: 0,
   solarCostCents: 72_430,
   cumulativeSavingsCents: 0,
 });
@@ -34,6 +35,7 @@ const savings = (net: number, utilityYear1 = 215_600): SavingsModel => ({
   netSavingsCents: net,
   totalSavingsCents: net,
   vppCreditTotalCents: 0,
+  creditReliefTotalCents: 0,
   paybackYear: net >= 0 ? 14 : null,
 });
 

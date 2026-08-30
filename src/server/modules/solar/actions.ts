@@ -51,6 +51,21 @@ const settingsSchema = z.object({
   maxOffsetPct: z.number().min(0).max(500),
   minPpwCents: z.number().int().min(0).max(2000),
   maxPpwCents: z.number().int().min(0).max(5000),
+  // The federal credits, for the contract-adjustment ladder. Statute, so they
+  // are typed rather than compiled in. Zero is meaningful — it means the
+  // company does not quote that bonus at all and the row is dropped from the
+  // customer's page. Capped at 100 apiece: three that sum past the contract
+  // are clamped by the ladder, but no single one above the whole price is
+  // anything other than a typo. Optional so a client that predates the fields
+  // leaves them alone.
+  creditItcPct: z.number().min(0).max(100).optional(),
+  creditEnergyCommunityPct: z.number().min(0).max(100).optional(),
+  creditDomesticContentPct: z.number().min(0).max(100).optional(),
+  // Never stored blank: what the remainder is CALLED appears on a document a
+  // household signs, and an empty label there is a negative figure with no
+  // name against it.
+  creditIncentiveLabel: z.string().trim().min(1).max(80).optional(),
+  creditDisclaimer: z.string().trim().min(1).max(1200).optional(),
 });
 
 export async function updateSolarSettingsAction(input: z.infer<typeof settingsSchema>) {
@@ -72,6 +87,54 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
     update: { ...d, ...incentives },
   });
   revalidatePath("/portal/settings/solar");
+  return ok();
+}
+
+/**
+ * Which federal credits THIS job earns.
+ *
+ * ITS OWN ACTION rather than three more fields on `saveSolarFinanceAction`,
+ * because these answers reach no pricing at all: they decide which rows appear
+ * on the customer's ladder and how the incentive — always the difference — is
+ * split between a credit line and a giveaway. Threading them through
+ * `financeRowForProduct` would put three booleans inside the one function in
+ * this codebase that is guarded against acquiring inputs that are not money.
+ *
+ * A `Lead:update` grant, the same one that prices the deal, because deciding a
+ * roof is not in an energy community is a fact about the job a rep establishes.
+ */
+const creditClaimsSchema = z.object({
+  leadId: z.string().min(1),
+  claimItc: z.boolean(),
+  claimEnergyCommunity: z.boolean(),
+  claimDomesticContent: z.boolean(),
+});
+
+export async function setSolarCreditClaimsAction(input: z.infer<typeof creditClaimsSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  const parsed = creditClaimsSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid credit selection.");
+  const { leadId, ...claims } = parsed.data;
+
+  const lead = await prisma.lead.findFirst({
+    where: { companyId: user.companyId, id: leadId },
+    select: { id: true, vertical: true },
+  });
+  if (!lead) return fail("Deal not found.");
+  if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  // updateMany rather than update: a deal whose financing has not been saved
+  // yet has no row, and the honest outcome there is "nothing to record", not a
+  // thrown P2025 that reads to a rep as a dead tick-box.
+  const { count } = await prisma.solarFinance.updateMany({
+    where: { companyId: user.companyId, leadId },
+    data: claims,
+  });
+  if (count === 0) return fail("Save the financing on this deal first.");
+
+  revalidatePath(`/portal/leads/${leadId}`);
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   return ok();
 }
 

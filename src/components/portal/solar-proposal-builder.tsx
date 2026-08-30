@@ -8,6 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { LayoutBlock } from "@/lib/solar-layout";
 import type { YieldAssumptions } from "@/lib/solar-money";
+import type { CreditClaims, CreditRates } from "@/lib/solar-credit-ladder";
 import { Button } from "@/components/ui/button";
 import {
   SolarDesignPanel,
@@ -112,6 +113,8 @@ export function SolarProposalBuilder({
   defaultBasePpwCents,
   minPpwCents,
   maxPpwCents,
+  creditRates,
+  creditClaims,
   adderCatalogue,
   adderLines,
   systemSizeKwDc,
@@ -176,6 +179,9 @@ export function SolarProposalBuilder({
   /** The company's price band. Outside it warns; it never blocks a save. */
   minPpwCents: number;
   maxPpwCents: number;
+  /** The company's federal-credit percentages — see SolarFinancePanel. */
+  creditRates: CreditRates;
+  creditClaims: CreditClaims;
   /** Every adder the company sells, for the Financing step to offer. */
   adderCatalogue: AdderOption[];
   /** The adder lines already on this deal. Their sum is the contract's. */
@@ -296,6 +302,8 @@ export function SolarProposalBuilder({
               defaultBasePpwCents={defaultBasePpwCents}
               minPpwCents={minPpwCents}
               maxPpwCents={maxPpwCents}
+              creditRates={creditRates}
+              creditClaims={creditClaims}
               adderCatalogue={adderCatalogue}
               adderLines={adderLines}
               systemSizeKwDc={systemSizeKwDc}

@@ -14,9 +14,11 @@ import type { SolarSettingsView } from "@/server/modules/solar/settings";
  * Solar assumptions. Everything a quote is built from lives here rather than in
  * code, so the numbers can move without a deploy.
  *
- * There is no incentive configuration here on purpose: this company quotes no
- * federal, state or local credit, so nothing in the product asks for one and
- * nothing prints one. Saving this form clears any legacy value still on the row.
+ * The federal credits at the bottom are the ONE exception to "no incentive is
+ * quoted anywhere". They are read on a single structure — a lender carrying a
+ * contract adjustment — and on every other deal the product still asks for no
+ * credit and prints none. Saving this form still clears the legacy incentive
+ * columns, which nothing reads.
  */
 /** Module scope on purpose — react-hooks/static-components is an error here. */
 function NumField({
@@ -56,6 +58,11 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     maxOffsetPct: String(settings.maxOffsetPct),
     minPpw: (settings.minPpwCents / 100).toFixed(2),
     maxPpw: (settings.maxPpwCents / 100).toFixed(2),
+    creditItcPct: String(settings.creditRates.itcPct),
+    creditEnergyCommunityPct: String(settings.creditRates.energyCommunityPct),
+    creditDomesticContentPct: String(settings.creditRates.domesticContentPct),
+    creditIncentiveLabel: settings.creditIncentiveLabel,
+    creditDisclaimer: settings.creditDisclaimer,
   });
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
 
@@ -86,6 +93,20 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       maxOffsetPct: Number(f.maxOffsetPct),
       minPpwCents: Math.round(Number(f.minPpw) * 100),
       maxPpwCents: Math.round(Number(f.maxPpw) * 100),
+      // Blank is zero, and zero means the bonus is not claimed at all — the
+      // row is dropped from the customer's page rather than printed as "0%".
+      creditItcPct: f.creditItcPct.trim() === "" ? 0 : Number(f.creditItcPct),
+      creditEnergyCommunityPct:
+        f.creditEnergyCommunityPct.trim() === "" ? 0 : Number(f.creditEnergyCommunityPct),
+      creditDomesticContentPct:
+        f.creditDomesticContentPct.trim() === "" ? 0 : Number(f.creditDomesticContentPct),
+      // NEVER sent blank: an empty label is a negative figure on a customer's
+      // page with no name against it, and an empty caveat is a page of credit
+      // arithmetic with nothing qualifying it. The action rejects both, so the
+      // form falls back to what is already stored rather than to a default the
+      // company did not choose.
+      creditIncentiveLabel: f.creditIncentiveLabel.trim() || settings.creditIncentiveLabel,
+      creditDisclaimer: f.creditDisclaimer.trim() || settings.creditDisclaimer,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -162,6 +183,70 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           <NumField label="Max offset %" value={f.maxOffsetPct} onChange={(v) => set("maxOffsetPct", v)} />
           <NumField label="Min $/W" value={f.minPpw} onChange={(v) => set("minPpw", v)} step="0.01" />
           <NumField label="Max $/W" value={f.maxPpw} onChange={(v) => set("maxPpw", v)} step="0.01" />
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-xl border border-border bg-card p-5">
+        <h3 className="font-semibold">Federal credits</h3>
+        <p className="text-xs text-muted-foreground">
+          Read on ONE structure: a lender carrying a contract adjustment, where the paper is
+          written above the price and the credits are earned on the larger figure. Every other deal
+          quotes no credit at all. A rep decides per job which of the two bonuses that address and
+          that equipment actually earn — these are the percentages they earn.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <NumField
+            label="Federal solar tax credit %"
+            value={f.creditItcPct}
+            onChange={(v) => set("creditItcPct", v)}
+            step="0.5"
+            hint="The base residential credit."
+          />
+          <NumField
+            label="Energy community bonus %"
+            value={f.creditEnergyCommunityPct}
+            onChange={(v) => set("creditEnergyCommunityPct", v)}
+            step="0.5"
+            hint="Qualifying census tracts only."
+          />
+          <NumField
+            label="Domestic content bonus %"
+            value={f.creditDomesticContentPct}
+            onChange={(v) => set("creditDomesticContentPct", v)}
+            step="0.5"
+            hint="Depends on module and inverter sourcing."
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="credit-incentive-label" className="text-xs">
+            What the leftover is called
+          </Label>
+          <Input
+            id="credit-incentive-label"
+            value={f.creditIncentiveLabel}
+            onChange={(e) => set("creditIncentiveLabel", e.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            After the credits come off the contract there is usually money still standing between
+            that figure and the price the system was sold at. It is handed back under this name,
+            and the AMOUNT is always the difference — nobody types it, on any deal.
+          </p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="credit-disclaimer" className="text-xs">
+            Tax caveat printed under the credits
+          </Label>
+          <textarea
+            id="credit-disclaimer"
+            rows={3}
+            className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            value={f.creditDisclaimer}
+            onChange={(e) => set("creditDisclaimer", e.target.value)}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            A credit is claimed on the customer&rsquo;s own return and depends on their liability.
+            This sentence is what says so. It cannot be left blank.
+          </p>
         </div>
       </section>
 

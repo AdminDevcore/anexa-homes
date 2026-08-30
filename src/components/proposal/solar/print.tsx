@@ -316,6 +316,26 @@ const PRINT_CSS = `
   }
   #proposal-root [data-print-slot="pricing-heading"] { break-after: avoid; }
 
+  /* ── the ladder page ────────────────────────────────────────────────────
+     The chapter that takes the contract down to what the household actually
+     pays. Its rows are arithmetic — a reader checks each one against the one
+     above it — so the table must not be split, and neither must the two
+     payment cards under it, which only mean anything as a pair.
+
+     The chapter lays out on the rail like every other, so the table sits beside
+     the title rather than under it. */
+  #proposal-root [data-section="pay"] [data-chapter-body] { display: contents; }
+  #proposal-root [data-section="pay"] [data-chapter-body] > * { grid-column: 2; }
+  #proposal-root [data-section="pay"] dl > div { padding-top: 0.7rem; padding-bottom: 0.7rem; }
+  #proposal-root [data-print-slot="ladder"] { break-inside: avoid; }
+  /* The pair of payment cards, side by side on paper as on screen — the whole
+     point of them is the step between the two figures, and stacked they read as
+     two unrelated quotes. */
+  #proposal-root [data-section="pay"] [data-print-slot="ladder"] + div {
+    break-inside: avoid;
+    grid-template-columns: 1fr 1fr;
+  }
+
   /* ── chapter 5, the maths ───────────────────────────────────────────────
      The two futures are a COMPARISON and have to be read side by side; stacked
      they are two claims a page apart. The chart is capped by width rather than

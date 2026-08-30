@@ -1,12 +1,19 @@
 import { prisma } from "@/server/db/client";
 import type { SolarAssumptions } from "@/lib/solar-money";
+import {
+  CREDIT_DISCLAIMER_DEFAULT,
+  CREDIT_INCENTIVE_LABEL_DEFAULT,
+  CREDIT_RATES_DEFAULT,
+  type CreditRates,
+} from "@/lib/solar-credit-ladder";
 
 /**
  * Solar assumptions for a company.
  *
  * Every number here is DATA, deliberately, so a quote can move without a
- * deploy. There is no incentive among them: no federal, state or local credit
- * is configurable, quoted or printed anywhere in the solar product.
+ * deploy. No incentive is among them: these are the physics and the pricing.
+ * The federal credits live below, in their own block, and are quoted on ONE
+ * structure only — see `SolarSettingsView.credit*`.
  */
 export const SOLAR_ASSUMPTION_DEFAULTS: SolarAssumptions = {
   derateFactor: 0.84,
@@ -54,7 +61,30 @@ export type SolarSettingsView = SolarAssumptions & {
   touPeakSharePct: number;
   touCyclesPerDay: number;
   touRoundTripEfficiency: number;
+  /// The federal credits, for the "what you actually pay" ladder.
+  ///
+  /// STATUTE, which is why they are data: the base credit has already stepped
+  /// down twice and both bonuses were invented in 2022. Not SolarAssumptions —
+  /// they reach no pricing calculation at all. They are quoted on exactly one
+  /// structure, a lender carrying a contract adjustment, and on every other
+  /// deal the product still quotes no incentive of any kind.
+  creditRates: CreditRates;
+  /// What the remainder between the after-credit figure and the quoted price
+  /// is CALLED. The figure itself is always derived; see solar-credit-ladder.
+  creditIncentiveLabel: string;
+  /// The tax caveat printed under the ladder. Never empty.
+  creditDisclaimer: string;
 };
+
+/// What a company that has never opened the settings page quotes: the statute
+/// as it stands. Mirrors the column defaults, for the reason DEFAULT_BATTERY_QTY
+/// gives — a company with no row and a company with an untouched one are the
+/// same company.
+export const CREDIT_DEFAULTS = {
+  creditRates: CREDIT_RATES_DEFAULT,
+  creditIncentiveLabel: CREDIT_INCENTIVE_LABEL_DEFAULT,
+  creditDisclaimer: CREDIT_DISCLAIMER_DEFAULT,
+} as const;
 
 /// What a company that has never opened the settings page assumes about a
 /// battery. Mirrors the column defaults in the schema, for the same reason
@@ -80,6 +110,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
       homeValueUpliftPct: 0,
       defaultBatteryQty: DEFAULT_BATTERY_QTY,
       ...TOU_DEFAULTS,
+      ...CREDIT_DEFAULTS,
     };
   }
   return {
@@ -100,5 +131,12 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     touPeakSharePct: row.touPeakSharePct,
     touCyclesPerDay: row.touCyclesPerDay,
     touRoundTripEfficiency: row.touRoundTripEfficiency,
+    creditRates: {
+      itcPct: row.creditItcPct,
+      energyCommunityPct: row.creditEnergyCommunityPct,
+      domesticContentPct: row.creditDomesticContentPct,
+    },
+    creditIncentiveLabel: row.creditIncentiveLabel,
+    creditDisclaimer: row.creditDisclaimer,
   };
 }

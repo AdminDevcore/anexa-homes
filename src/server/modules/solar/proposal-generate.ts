@@ -22,6 +22,7 @@ import {
   priceStoragePurchase,
 } from "@/lib/solar-money";
 import { contractReconciles, monthlyReconciles } from "@/lib/solar-contract-adjustment";
+import { ladderReconciles } from "@/lib/solar-credit-ladder";
 import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { mayInheritLiveLink } from "@/lib/solar-proposal-state";
 import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
@@ -77,11 +78,35 @@ function reconciliationProblem(snapshot: SolarProposalSnapshot): string | null {
       ) {
         return `${where} does not reconcile: the adjusted contract value is not the customer's price plus the ${adjustment.label}.`;
       }
-      // The obligation on the reconciliation and the price on the contract line
-      // are supposed to be the SAME number said twice. If they ever part, the
-      // document is arguing with itself about what the household owes.
-      if (adjustment.customerObligationCents !== (f.contractPriceCents ?? 0)) {
-        return `${where} shows a customer obligation that does not match its own contract price.`;
+      // The contract value and the price on the cost chapter are supposed to be
+      // the SAME number said twice. They used to be the obligation instead —
+      // reversed 2026-08-29 when the document moved onto the contract, because
+      // the payment is written on the paper the household signs. If they ever
+      // part, the document is arguing with itself about what was signed for.
+      if (adjustment.lenderContractValueCents !== (f.contractPriceCents ?? 0)) {
+        return `${where} shows a contract value that does not match its own printed price.`;
+      }
+    }
+
+    /**
+     * THE LADDER, checked on every option that carries one.
+     *
+     * The rows on that page are read as arithmetic by a household with a
+     * calculator — five figures that subtract to a sixth — so "they add up" is
+     * asserted rather than assumed. `ladderReconciles` also holds the property
+     * the whole feature exists for: wherever anything was handed back, the
+     * bottom line IS the price the system was quoted at.
+     */
+    const ladder = f.creditLadder;
+    if (ladder) {
+      if (!ladderReconciles(ladder)) {
+        return `${where} shows a credit breakdown whose rows do not add up to the amount it says the customer pays.`;
+      }
+      if (adjustment && ladder.contractValueCents !== adjustment.lenderContractValueCents) {
+        return `${where} works its credits out from a different contract value than the one it prints.`;
+      }
+      if (adjustment && ladder.quotedPriceCents !== adjustment.customerObligationCents) {
+        return `${where} measures its incentive against a price it does not quote anywhere.`;
       }
     }
 
@@ -839,6 +864,23 @@ export async function generateProposalVersion(
     // Only a loan carries one: cash has no lender advancing anything, and a
     // lease or PPA has no system price for a contribution to come off.
     contractAdjustment: finance.product === "loan" ? dealAdjustment : null,
+    /**
+     * The federal credits: the company's percentages and the wording, and the
+     * answers this job gave about which of them it earns.
+     *
+     * Passed unconditionally. Whether a ladder is DRAWN is decided inside the
+     * snapshot by whether that option's partner carries a contract adjustment,
+     * so a menu offering Participate alongside a GoodLeap loan puts the ladder
+     * under exactly one of them without the caller having to know which.
+     */
+    creditRates: assumptions.creditRates,
+    creditIncentiveLabel: assumptions.creditIncentiveLabel,
+    creditDisclaimer: assumptions.creditDisclaimer,
+    creditClaims: {
+      itc: finance.claimItc,
+      energyCommunity: finance.claimEnergyCommunity,
+      domesticContent: finance.claimDomesticContent,
+    },
     ownershipNote: finance.product === "loan" ? (dealLender?.ownershipDisclosure ?? null) : null,
     alternatives,
     // How the deal's own terms read in the menu. The catalogue row's own label

@@ -40,7 +40,11 @@ import {
 } from "@/lib/solar-money";
 import { SystemPriceCard, StoragePriceCard } from "@/components/portal/solar/system-price";
 import { ContractValueCard } from "@/components/portal/solar/contract-value";
-import type { LenderContractAdjustment } from "@/lib/solar-contract-adjustment";
+import {
+  reconcileContract,
+  type LenderContractAdjustment,
+} from "@/lib/solar-contract-adjustment";
+import type { CreditClaims, CreditRates } from "@/lib/solar-credit-ladder";
 import { applyDealRebateAction, removeDealRebateAction } from "@/server/modules/solar/storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
@@ -741,11 +745,17 @@ export function SolarFinancePanel({
   systemSizeKwDc,
   year1ProductionKwh,
   annualDegradationPct,
+  creditRates,
+  creditClaims,
   onOpenDesign,
 }: {
   leadId: string;
   finance: SolarFinanceView;
   canEdit: boolean;
+  /** The company's federal-credit percentages, from Settings → Solar. */
+  creditRates: CreditRates;
+  /** Which of them this job earns, as last saved on the finance row. */
+  creditClaims: CreditClaims;
   /** Every lender the company works with, retired ones included — a deal that
    *  already names one must keep showing it rather than falling back to none. */
   lenders: LenderOption[];
@@ -1137,8 +1147,34 @@ export function SolarFinancePanel({
    * price, the payment moves with it, and Save then writes the same numbers
    * because both sides compute them the same way.
    */
+  /**
+   * THE PRICE THE DOCUMENT WILL QUOTE — the partner's contract value where
+   * there is one, the priced figure where there is not.
+   *
+   * The same resolution `priceOption` makes at generation, made here so the
+   * strip in front of a rep cannot disagree with the proposal. The last time
+   * this screen priced a partner's deal by its own arithmetic instead of the
+   * server's it quoted $67,896 under a shelf of cards saying $60,500 — see
+   * `livePrice` above, which exists because of exactly that.
+   *
+   * Loan only, for the same reason the card below is: a cash deal has no
+   * partner advancing a contract for a contribution to sit on.
+   */
+  const liveAdjustment =
+    isLoan && livePrice
+      ? reconcileContract({
+          customerObligationCents: livePrice.breakdown.contractPriceCents,
+          adjustment: quotedLender?.contractAdjustment ?? null,
+          lenderName: quotedLender?.name ?? null,
+        })
+      : null;
+  const documentPriceCents =
+    liveAdjustment?.lenderContractValueCents ??
+    livePrice?.breakdown.contractPriceCents ??
+    null;
+
   const quote = React.useMemo(() => {
-    const contractNow = chosen ? (livePrice?.breakdown.contractPriceCents ?? null) : null;
+    const contractNow = chosen ? documentPriceCents : null;
 
     // The whole contract is financed. Nothing on this screen takes money off
     // the top, so the principal IS the price — see the note where the approved
@@ -1179,7 +1215,7 @@ export function SolarFinancePanel({
       fromFactor: factors != null && factorMonthlyCents(factors) != null,
       factors,
     };
-  }, [chosen, product, isLoan, systemSizeKwDc, livePrice]);
+  }, [chosen, product, isLoan, systemSizeKwDc, documentPriceCents]);
 
   /**
    * What the boxes above currently add up to. Purchase only — see solar-money.
@@ -1330,6 +1366,7 @@ export function SolarFinancePanel({
           nothing at all on every other deal. */}
       {isPurchase && livePrice && (
         <ContractValueCard
+          leadId={leadId}
           lenderName={quotedLender?.name ?? null}
           // Only a loan carries one: cash has no lender advancing a contract
           // for a contribution to come off, which is the same line the
@@ -1350,6 +1387,9 @@ export function SolarFinancePanel({
           monthlyCents={quote?.monthlyCents ?? null}
           termMonths={chosen?.termMonths ?? null}
           aprPct={chosen?.aprPct ?? null}
+          creditRates={creditRates}
+          claims={creditClaims}
+          canEdit={canEdit}
         />
       )}
 

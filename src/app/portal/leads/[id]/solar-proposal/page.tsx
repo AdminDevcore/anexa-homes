@@ -405,6 +405,15 @@ export default async function SolarProposalBuilderPage({
         defaultBasePpwCents={settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null}
         minPpwCents={settings.minPpwCents}
         maxPpwCents={settings.maxPpwCents}
+        creditRates={settings.creditRates}
+        // Which credits this job earns. A deal with no financing row yet has
+        // nothing saved, and the ordinary case — all three — is what a fresh
+        // one is created holding, so that is what an unsaved deal shows.
+        creditClaims={{
+          itc: finance?.claimItc ?? true,
+          energyCommunity: finance?.claimEnergyCommunity ?? true,
+          domesticContent: finance?.claimDomesticContent ?? true,
+        }}
         adderCatalogue={adderCatalogue.map((a) => ({
           id: a.id,
           label: [a.manufacturer, a.model].filter(Boolean).join(" ") || a.model,

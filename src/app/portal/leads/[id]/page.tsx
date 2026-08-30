@@ -875,6 +875,9 @@ export default async function LeadDetailPage({
               contractPriceCents: latestSnapshot.financing.contractPriceCents,
               monthlyPaymentCents: latestSnapshot.financing.monthlyPaymentCents,
               rateMillsPerKwh: latestSnapshot.financing.rateMillsPerKwh,
+              // The pipeline reports what the company sold, not what a
+              // programme partner's paper is written at. See solar-deal-value.
+              lenderAdjustment: latestSnapshot.financing.lenderAdjustment ?? null,
             })
           : ({ kind: "none" } as const);
         if (quoted.kind !== "none" && latestProposal) {

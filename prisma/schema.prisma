@@ -3133,6 +3133,26 @@ model SolarSettings {
   stateIncentiveNote  String?
   incentiveDisclaimer String  @default("Estimated only and not a guarantee. Tax credits depend on your individual tax situation and on rules that may change. Consult your tax advisor.")
 
+  // ── Federal credits, for the contract-adjustment ladder ─────────────────
+  /// The three percentages the "what you actually pay" page is worked out
+  /// from. STATUTE, which is why they are the company's to state rather than
+  /// constants: the base credit has already stepped down twice and the two
+  /// bonuses were invented in 2022.
+  ///
+  /// They are quoted ONLY on a deal whose lender carries a contract
+  /// adjustment — see `SolarLender.contractAdjustmentEnabled`. Nothing else in
+  /// the product quotes an incentive, and setting these does not change that.
+  creditItcPct             Float  @default(30)
+  creditEnergyCommunityPct Float  @default(10)
+  creditDomesticContentPct Float  @default(10)
+  /// What the leftover between the after-credit figure and the quoted price is
+  /// CALLED. The figure itself is always derived and can never be typed.
+  creditIncentiveLabel     String @default("Incentive for signing today")
+  /// The caveat printed under the ladder. Defaulted rather than demanded: an
+  /// unworded version of this is not a blank space, it is a page of credit
+  /// figures with nothing qualifying them.
+  creditDisclaimer         String @default("Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.")
+
   // ── Impact assumptions ──────────────────────────────────────────────────
   /// Estimated increase in home value from an OWNED system, as a % of the
   /// property's value. Data, like every other number a homeowner reads: the
@@ -3984,6 +4004,17 @@ model SolarFinance {
   contractPriceCents          Int   @default(0)
   /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
   itcEstimateCents            Int   @default(0)
+
+  /// Which federal credits this address and this equipment actually earn.
+  ///
+  /// TRUE by default because the base credit is earned on nearly every owned
+  /// system and because a deal nobody has looked at yet should quote the
+  /// ordinary case — but the two bonuses are conditional (a census tract, a
+  /// sourcing threshold) and a rep who knows this job does not qualify unticks
+  /// them. Read only where the lender carries a contract adjustment.
+  claimItc             Boolean @default(true)
+  claimEnergyCommunity Boolean @default(true)
+  claimDomesticContent Boolean @default(true)
 
   // ── Lease / PPA ─────────────────────────────────────────────────────────
   /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
