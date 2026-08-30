@@ -312,14 +312,15 @@ describe("the document quotes the contract the household signs", () => {
     expect(applied.savings.years[1].solarPaymentCents).toBe(13_444 * 12);
   });
 
-  it("bills the higher payment for the whole term when the credits go unclaimed", () => {
-    // THE DEFAULT MODEL, and deliberately the pessimistic one: a household that
-    // never files for the credit pays $328.89 for all 360 months, and that is
-    // the reading the document opens on.
+  it("steps the default model down at the paydown month, as it always has", () => {
+    // THE SWITCH DID NOT MOVE THIS. Year one carries twelve of the higher
+    // payment; year two, twelve of the lower. That step IS the credits being
+    // applied, and it is what the document opens on.
     const s = snapshot.savings;
     expect(s.creditReliefTotalCents).toBe(0);
     expect(s.years[0].solarPaymentCents).toBe(32_889 * 12);
-    expect(s.years[29].solarPaymentCents).toBe(32_889 * 12);
+    expect(s.years[1].solarPaymentCents).toBe(13_444 * 12);
+    expect(s.years[29].solarPaymentCents).toBe(13_444 * 12);
   });
 
   it("runs the years out to the end of the loan, and bills every payment once", () => {
@@ -341,7 +342,9 @@ describe("the document quotes the contract the household signs", () => {
       expect(s.years.reduce((n, y) => n + y.solarPaymentCents, 0)).toBe(s.solarPaidCents);
       expect(s.years[29].solarPaymentCents).toBeGreaterThan(0);
     }
-    expect(snapshot.savings.solarPaidCents).toBe(32_889 * 360);
+    expect(snapshot.savings.solarPaidCents).toBe(32_889 * 12 + 13_444 * 348);
+    // Nothing double-billed and nothing dropped: 360 months, exactly.
+    expect(12 + 348).toBe(360);
     expect(snapshot.options![0].creditsApplied!.savings.solarPaidCents).toBe(13_444 * 360);
   });
 });

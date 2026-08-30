@@ -6,7 +6,7 @@ import { YearChart } from "../../year-chart";
 import type { Doc } from "./doc";
 
 /**
- * 03 · MONTH BY MONTH.
+ * 06 · MONTH BY MONTH.
  *
  * The figure the document has always had the data for and never gave a page to.
  * `snapshot.monthly` holds twelve months of MEASURED usage against twelve
@@ -25,6 +25,13 @@ import type { Doc } from "./doc";
  * 84% does not cover 84% of every month — it overshoots in June and falls short
  * in January, and the credit built in summer is what pays for winter. Saying so
  * before they ask is the difference between a proposal and a sales document.
+ *
+ * IT SITS AFTER THE MONEY, not before it — moved back from 03 on 2026-08-30.
+ * The sheet before this one is the roof; the question it raises is what the
+ * roof costs, and this chapter was standing between them. It reads better here
+ * anyway: beside the maths, as the second half of the same argument about how
+ * the years actually play out, rather than as a chart a reader has to get past
+ * to reach the price.
  *
  * OMITTED ENTIRELY when `monthly` is null, which is every document generated
  * before the field existed. The chapter is not in the list, so the numbering

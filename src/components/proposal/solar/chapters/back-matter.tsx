@@ -5,7 +5,7 @@ import { Leaf, TreePine, Factory, Car } from "lucide-react";
 import { SOLAR_FAQS, IMPACT_SOURCES } from "@/lib/solar-proposal";
 import { Impact, SourceLink, ContactCard } from "../primitives";
 import { SavingsScrubber } from "../../savings-scrubber";
-import { CreditSwitch } from "../../credit-switch";
+import { CreditBasis } from "../../credit-switch";
 import { usd, kwh, pct, loanTermLabel } from "../../format";
 import type { Doc } from "./doc";
 
@@ -54,20 +54,16 @@ export function BackMatter({ doc }: { doc: Doc }) {
             estimates, not guarantees.
           </p>
 
-          {/* THE SWITCH AGAIN, because this is the other place its answer is
-              read at length. It is the same state as the one on the payment
-              chapter — every row of the table below, the year card, the payback
-              year and the cumulative totals are the model it selects — and a
-              reader who arrives here from the table of contents has not
-              necessarily seen the payment sheet at all. */}
+          {/* WHICH SCENARIO THIS TABLE IS, stated where the table is. Every row
+              below, the year card, the payback year and the cumulative totals
+              are the model the nav bar's switch selects, and a reader who
+              arrives here from the contents has not necessarily seen the
+              payment sheet — nor, on paper, the bar. */}
           {credits && (
-            <CreditSwitch
-              className="mt-6 max-w-md"
-              tone="card"
+            <CreditBasis
+              className="mt-3 max-w-[68ch]"
               on={credits.on}
-              onChange={credits.set}
-              offMonthlyCents={credits.offMonthlyCents}
-              onMonthlyCents={credits.onMonthlyCents}
+              otherMonthlyCents={credits.on ? credits.offMonthlyCents : credits.onMonthlyCents}
             />
           )}
 

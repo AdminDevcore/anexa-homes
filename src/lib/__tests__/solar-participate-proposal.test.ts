@@ -178,17 +178,22 @@ describe("the payment and the savings", () => {
     expect(s.financing.netMonthlyPaymentCents).toBe(13_444);
   });
 
-  it("models the horizon twice — the credits claimed, and never claimed", () => {
+  it("leaves the default model exactly where it was", () => {
+    // THE SWITCH ADDS A SCENARIO; IT DOES NOT MOVE THE DEFAULT. Twelve of the
+    // higher payment, then the lower one for the rest — which is what a
+    // household on a credit-funded loan actually pays, and what this document
+    // said before the switch existed.
+    const years = build({ contractAdjustment: PARTICIPATE }).savings.years;
+    expect(years[0].solarPaymentCents).toBe(32_889 * 12);
+    expect(years[1].solarPaymentCents).toBe(13_444 * 12);
+    expect(years[24].solarPaymentCents).toBe(13_444 * 12);
+  });
+
+  it("models a second horizon with the credits already applied", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
-    const off = s.savings.years;
     const on = s.options![0].creditsApplied!.savings.years;
 
-    // OFF is the default and the pessimistic reading: the household never
-    // claims the credit and pays the higher figure for the whole term.
-    expect(off[0].solarPaymentCents).toBe(32_889 * 12);
-    expect(off[24].solarPaymentCents).toBe(32_889 * 12);
-
-    // ON is the same deal with the credits claimed and applied to the loan.
+    // The lower payment from the FIRST month, not the thirteenth.
     expect(on[0].solarPaymentCents).toBe(13_444 * 12);
     expect(on[24].solarPaymentCents).toBe(13_444 * 12);
 

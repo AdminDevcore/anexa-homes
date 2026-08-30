@@ -20,10 +20,21 @@ export function ProposalChrome({
   navItems,
   offsetTop = 0,
   glassOverHero = false,
+  actions,
 }: {
   companyName: string;
   logoUrl: string | null;
   navItems: ChromeNavItem[];
+  /**
+   * A control the DOCUMENT owns, pinned beside the print button.
+   *
+   * The bar is the only thing on the page that is visible from every sheet, so
+   * a switch that changes what the whole document says belongs here rather than
+   * in the column of whichever sheet happened to hold it. Optional, and absent
+   * on every document that has no such control — which is all of them except a
+   * solar proposal carrying tax credits.
+   */
+  actions?: React.ReactNode;
   /**
    * Pixels of chrome already pinned above this bar. Zero on the customer's own
    * page, where the top of the viewport is the proposal's to take. Non-zero when
@@ -188,7 +199,8 @@ export function ProposalChrome({
         </nav>
 
         {/* actions */}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
+          {actions}
           <button
             onClick={() => window.print()}
             className={

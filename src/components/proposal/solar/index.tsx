@@ -4,10 +4,17 @@ import * as React from "react";
 import { Lock } from "lucide-react";
 import type { SolarProposalSnapshot, ProposalPaymentOption } from "@/lib/solar-proposal";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
-import { postSolarUtilityCents, optionMonthlyCents, optionSavings } from "@/lib/solar-proposal";
+import {
+  postSolarUtilityCents,
+  optionMonthlyCents,
+  optionSavings,
+  quotedTotalCents,
+  quotedPpwCents,
+} from "@/lib/solar-proposal";
 import { coverPitch, lifetimeFigure, monthlyToday } from "@/lib/solar-proposal-pitch";
 import { PROPOSAL_NAV_PX } from "@/lib/proposal";
 import { ProposalChrome, type ChromeNavItem } from "../proposal-chrome";
+import { CreditSwitch } from "../credit-switch";
 import { RepBar, type RepContext } from "../rep-bar";
 import { Cover } from "./cover";
 import { SignatureCertificate } from "./certificate";
@@ -41,10 +48,18 @@ import { BackMatter } from "./chapters/back-matter";
  * decorative: it is what stops two tables ever sitting next to each other,
  * which is what this document was from end to end.
  *
- *   00 Cover · 01 Where you are now · 02 The design · 03 Month by month
- *   04 Your investment · 05 The terms · 06 The maths · 07 The plan · 08 Accept
+ *   00 Cover · 01 Where you are now · 02 The design · 03 Your investment
+ *   04 The terms · 05 The maths · 06 Month by month · 07 The plan · 08 Accept
  *   — then back matter, which carries no chapter mark because it is evidence
  *   rather than argument.
+ *
+ * THE PRICE IS THE THIRD SHEET, and that is deliberate as of 2026-08-30. It was
+ * the fourth, behind the month-by-month shape, and a homeowner who has just
+ * been shown their roof turns the page to ask one question. Making them read a
+ * chart about December first is the document answering a question nobody asked
+ * while withholding the one they did. Month by month keeps its own sheet — it
+ * moved to 06, next to the maths, where it belongs with the rest of the
+ * argument about how the years actually play out.
  *
  * Every figure comes from the FROZEN snapshot — nothing is recomputed here, so
  * what the customer sees is exactly what was generated for them, whatever the
@@ -312,30 +327,44 @@ function SolarPvProposalView({
    */
   const ladder = f.creditLadder ?? null;
   /**
+   * THE TOTAL THE PRICE TABLE ADDS UP TO — the household's own price.
+   *
+   * The contract on an ordinary deal, because there they are the same figure.
+   * On a deal carrying a programme contribution they are not, and this is the
+   * QUOTED price: see `quotedTotalCents` for why every customer-facing surface
+   * now says that one and the contract keeps its own block underneath.
+   */
+  const quotedTotal = quotedTotalCents(f);
+  /**
+   * The same price per installed watt, derived from the total above so the two
+   * printed figures divide into each other. `f.finalPpwCents` is the same
+   * arithmetic done on the contract — $13.45/W on a deal quoted at $5.50 — and
+   * it belongs with the contract, not beside the price.
+   */
+  const quotedPpw = quotedPpwCents(f, s.system.sizeKwDc);
+  /**
    * WHAT THE COST TABLE CALLS THE SYSTEM PRICE.
    *
-   * On an ordinary deal it is the array at sticker, and the rows below it read
-   * as arithmetic: system price, plus additional work, equals the total.
+   * THE ARRAY AT STICKER, on every deal, and the rows below it read as
+   * arithmetic a homeowner can check: system price, plus additional work,
+   * equals the total. On a programme deal the total those rows add up to is the
+   * quoted price rather than the contract, and the base is exactly what the
+   * quoted price is built from — so the arithmetic holds without deriving
+   * anything.
    *
-   * On a deal carrying a programme contribution it is the CONTRACT, less any
-   * additional work priced into it — so the contribution sits INSIDE the system
-   * price rather than being printed as a row that adds to it. That is a
-   * presentation decision, not an arithmetic one: the snapshot still holds the
-   * base, the contribution and the reconciliation, and the funder's submission
-   * summary still prints all three. What moved is what the household reads. A
-   * page that showed them $58,080 with $70,000 added underneath asked them to
-   * accept a mark-up they cannot check, when the truthful account of the same
-   * deal is one contract price that the credits then bring down.
+   * It was the CONTRACT less the additional work until 2026-08-30, which is how
+   * the sheet came to open on "System price $118,400 · $13.45 per watt" for a
+   * household that had been quoted $48,400 at $5.50. That figure was arrived at
+   * honestly and every credit that brought it back down was printed under it,
+   * and it was still the wrong number to lead a price page with: it matches
+   * nothing the customer has been told and nothing they can compare against
+   * another quote.
    *
-   * DERIVED FROM THE TOTAL rather than by adding the contribution to the base,
-   * so the rows are guaranteed to sum to the printed total to the cent on a
-   * deal carrying rebates, which the base price does not account for.
+   * The fallback derives it from the printed total, for a document generated
+   * before the base was frozen into the snapshot.
    */
-  const systemPriceCents = adjustment
-    ? f.contractPriceCents != null
-      ? f.contractPriceCents - (f.adderTotalCents ?? 0)
-      : null
-    : f.basePriceCents;
+  const systemPriceCents =
+    f.basePriceCents ?? (quotedTotal != null ? quotedTotal - (f.adderTotalCents ?? 0) : null);
   const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
 
@@ -387,11 +416,11 @@ function SolarPvProposalView({
   const chapters = [
     { id: "today", label: "Today" },
     { id: "system", label: "System" },
-    // Twelve months of measured usage against simulated production, or nothing.
-    ...(s.monthly ? [{ id: "year", label: "Your year" }] : []),
     { id: "cost", label: "Cost" },
     { id: "pay", label: "Payment" },
     ...(showComparison ? [{ id: "savings", label: `${sv.years.length} years` }] : []),
+    // Twelve months of measured usage against simulated production, or nothing.
+    ...(s.monthly ? [{ id: "year", label: "Your year" }] : []),
     { id: "timeline", label: "Next" },
     { id: "accept", label: "Accept" },
   ];
@@ -434,6 +463,8 @@ function SolarPvProposalView({
     adjustment,
     ladder,
     systemPriceCents,
+    quotedTotalCents: quotedTotal,
+    quotedPpwCents: quotedPpw,
     showcased,
     lifetime,
     vpp,
@@ -482,6 +513,20 @@ function SolarPvProposalView({
         navItems={navItems}
         offsetTop={chromeOffset}
         glassOverHero={!superseded}
+        /* THE SWITCH LIVES IN THE BAR. It changes what every sheet says, so it
+           belongs on the one piece of chrome that follows the reader down all
+           of them — not in the rail of the payment sheet, where a rep had to
+           scroll back to reach it mid-sentence. */
+        actions={
+          option.creditsApplied ? (
+            <CreditSwitch
+              compact
+              on={creditsApplied}
+              onChange={setCreditsOn}
+              monthlyCents={monthlyCents}
+            />
+          ) : null
+        }
       />
 
       {superseded && (
@@ -502,20 +547,21 @@ function SolarPvProposalView({
       {/* 02 · plate — or paper, when there is no drawing to plate. */}
       <ChapterSystem doc={doc} siteImageBase={siteImageBase} layoutImageUrl={layoutImageUrl} />
 
-      {/* 03 · paper. Renders nothing when the snapshot has no monthly shape,
-          which is why it is not in `chapters` either. */}
-      {s.monthly && <ChapterYear doc={doc} />}
-
-      {/* 04 · dark. The price, and the credits that bring it down. */}
+      {/* 03 · dark. The price, and the credits that bring it down. Straight
+          after the roof, because that is the question the roof raises. */}
       <ChapterCost doc={doc} />
 
-      {/* 05 · paper. The payment and the terms. */}
+      {/* 04 · paper. The payment and the terms. */}
       <ChapterPay doc={doc} onSelect={setOptionKey} showPaymentOptions={showPaymentOptions} />
 
-      {/* 06 · plate. A rep may turn this off for a household that reads a table
+      {/* 05 · plate. A rep may turn this off for a household that reads a table
           as a wall of numbers; the lifetime figure moves up to 01 rather than
           disappearing. */}
       {showComparison && <ChapterComparison doc={doc} />}
+
+      {/* 06 · paper. Renders nothing when the snapshot has no monthly shape,
+          which is why it is not in `chapters` either. */}
+      {s.monthly && <ChapterYear doc={doc} />}
 
       {/* 07 · paper */}
       <ChapterNext doc={doc} />

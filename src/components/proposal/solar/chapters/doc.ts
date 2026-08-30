@@ -66,6 +66,14 @@ export type Doc = {
   ladder: CreditLadder | null;
   /** What the cost table calls the system price. See the view for why. */
   systemPriceCents: number | null;
+  /**
+   * THE TOTAL THE HOUSEHOLD IS QUOTED — the contract on an ordinary deal, the
+   * customer's own price on one carrying a programme contribution. The figure
+   * every customer-facing surface means when it says "the price".
+   */
+  quotedTotalCents: number | null;
+  /** That price per installed watt, derived from it. Null on storage. */
+  quotedPpwCents: number | null;
   /** Adders the company chose to explain to the customer in words. */
   showcased: NonNullable<SnapshotFinancing["adders"]>;
   lifetime: LifetimeFigure;

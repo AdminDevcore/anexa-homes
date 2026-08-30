@@ -9,7 +9,7 @@ import { usd, yearsInWords } from "../../format";
 import type { Doc } from "./doc";
 
 /**
- * 06 · THE MATHS — the chart IS the page.
+ * 05 · THE MATHS — the chart IS the page.
  *
  * This chapter used to be the document's worst offender and its best argument
  * at the same time. It carried two comparison cards, then the chart in a white

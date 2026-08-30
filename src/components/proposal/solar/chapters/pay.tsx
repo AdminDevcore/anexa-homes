@@ -5,9 +5,13 @@ import { Chapter, SpecList } from "../primitives";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { PaymentMenu } from "../../payment-menu";
 import { BatteryCredit } from "../../battery-credit";
-import { CreditSwitch } from "../../credit-switch";
+import { CreditBasis } from "../../credit-switch";
 import { usd, pct, perKwh, loanTermLabel } from "../../format";
-import { optionMonthlyCents, type ProposalPaymentOption } from "@/lib/solar-proposal";
+import {
+  optionMonthlyCents,
+  quotedTotalCents,
+  type ProposalPaymentOption,
+} from "@/lib/solar-proposal";
 import type { Doc } from "./doc";
 
 const PRODUCT_LABEL: Record<string, string> = {
@@ -18,7 +22,7 @@ const PRODUCT_LABEL: Record<string, string> = {
 };
 
 /**
- * 05 · THE TERMS — how the money works.
+ * 04 · THE TERMS — how the money works.
  *
  * Split out of the old chapter 4, which carried the price, the payment, the
  * battery credit and the additional services on one sheet that ran to two and a
@@ -63,37 +67,27 @@ export function ChapterPay({
       }
       rail={
         <div className="space-y-5">
-          {/* THE TWO PAYMENTS, AS A CONTROL: what is billed while the credits
-              go unclaimed, and what it becomes once they are applied. These were
-              two static tiles until 2026-08-30 and the trouble with that was
-              never the figures — it was that nothing said which of the two the
-              rest of the document had been written in. Now the lit one IS the
-              rest of the document. Printing only the lower figure would be the
-              most misleading thing here, which is why both faces stay on the
-              page and on the paper whichever is chosen. */}
-          {credits && (
-            <CreditSwitch
-              className="break-inside-avoid"
-              on={credits.on}
-              onChange={credits.set}
-              offMonthlyCents={credits.offMonthlyCents}
-              onMonthlyCents={credits.onMonthlyCents}
-            />
-          )}
-
-          {/* WHEN THE LOWER PAYMENT ACTUALLY STARTS. The switch shows a whole
-              term at one figure or the other, which is the comparison a
-              household can hold in their head; this is the sentence that says
-              the credit has to be claimed and applied first, and that the
-              months before it are billed at the higher one. */}
-          {credits?.on && credits.offMonthlyCents != null && (
+          {/* THE SCENARIO THIS COPY IS WRITTEN IN, and never optional once the
+              switch exists. The control itself is in the nav bar — it changes
+              every sheet, so it belongs on the chrome that follows the reader
+              down all of them rather than in this one column — and the nav does
+              not print. This does, and it carries the figure the reader is NOT
+              being shown, because a document that prints only the number that
+              flatters the deal is the thing the switch was added to stop. */}
+          {credits?.on && (
             <p className="break-inside-avoid rounded-xl border border-amber-500/40 bg-amber-50 p-3.5 text-[0.8rem] leading-relaxed text-amber-900">
               <strong className="font-semibold">Read this one twice:</strong> these figures assume
-              your credits are claimed and applied to the loan. Until they are, the payment is{" "}
-              <strong className="font-semibold tabular-nums">
-                {usd(credits.offMonthlyCents, 2)}
-              </strong>{" "}
-              a month — and if they are never claimed, it stays there for the rest of the term.
+              your credits are claimed and applied to the loan.
+              {credits.offMonthlyCents != null && (
+                <>
+                  {" "}
+                  Until they are, the payment is{" "}
+                  <strong className="font-semibold tabular-nums">
+                    {usd(credits.offMonthlyCents, 2)}
+                  </strong>{" "}
+                  a month — and if they are never claimed, it stays there for the rest of the term.
+                </>
+              )}{" "}
               Whether you receive the federal credit, and how much, depends on your own tax
               situation.
             </p>
@@ -158,18 +152,23 @@ export function ChapterPay({
               : "Due at completion"}
           </p>
           <p className="mt-2 font-display text-[clamp(2.6rem,5.6vw,3.9rem)] font-semibold leading-none tracking-[-0.035em] tabular-nums text-neutral-950">
-            {monthly != null ? usd(monthly, 0) : usd(f.contractPriceCents ?? 0)}
+            {/* On cash the headline IS the price — the household's own, the
+                same figure the cost sheet leads on. See `quotedTotalCents`. */}
+            {monthly != null ? usd(monthly, 0) : usd(quotedTotalCents(f) ?? 0)}
             {monthly != null && (
               <span className="ml-1 font-sans text-lg font-medium text-neutral-400">/mo</span>
             )}
           </p>
           {/* WHICH OF THE TWO FUTURES THIS FIGURE IS. Directly under the number
-              rather than only beside the switch: a reader who scrolls to the
-              headline and no further must still know what it assumes. */}
+              rather than only up in the bar: a reader who scrolls to the
+              headline and no further must still know what it assumes, and on
+              paper the bar is not there at all. */}
           {credits && (
-            <p className="mt-2 text-[0.82rem] font-medium text-neutral-500">
-              {credits.on ? "with your tax credits applied" : "before your tax credits"}
-            </p>
+            <CreditBasis
+              className="mt-2 max-w-[42ch]"
+              on={credits.on}
+              otherMonthlyCents={credits.on ? credits.offMonthlyCents : credits.onMonthlyCents}
+            />
           )}
         </div>
         <div>
@@ -345,7 +344,8 @@ function AlternativesStrip({
               <dd className="text-right text-[0.85rem] font-medium tabular-nums text-neutral-900">
                 {monthly != null
                   ? `${usd(monthly, 0)}/mo`
-                  : usd(o.financing.contractPriceCents ?? 0)}
+                  : /* The price, not the paper — see `quotedTotalCents`. */
+                    usd(quotedTotalCents(o.financing) ?? 0)}
               </dd>
             </div>
           );

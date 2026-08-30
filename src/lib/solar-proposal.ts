@@ -391,6 +391,29 @@ export function savingsModel(args: {
     termMonths: number | null;
     /** Paid at signing, on top of the payments. Always 0 today. */
     downPaymentCents?: number | null;
+    /**
+     * WHAT THE PAYMENT BECOMES once the credits and the incentive have been
+     * applied to the principal, cents.
+     *
+     * The real shape of a credit-funded loan, and the reason the relief is not
+     * modelled as a lump on a financed deal: the household does not pocket
+     * $70,000, they put it against the loan and the payment re-amortises. So
+     * the years bill the full payment while the credits are outstanding and
+     * the smaller one afterwards, which is the cashflow they will actually
+     * see. Null — the ordinary case — bills one payment for the whole term,
+     * exactly as this model always has.
+     */
+    afterCreditMonthlyCents?: number | null;
+    /**
+     * How many months of the higher payment come first.
+     *
+     * The rate sheet's own paydown window where the programme publishes one,
+     * because that is the month the lender re-amortises at. Otherwise twelve:
+     * a credit is claimed on the following year's return, so the first
+     * realistic month to apply it is a year out. Ignored without a step-down
+     * payment above.
+     */
+    creditAppliedAfterMonths?: number | null;
   } | null;
 }): SavingsModel {
   const a = args.assumptions;
@@ -405,15 +428,17 @@ export function savingsModel(args: {
   let paybackYear: number | null = null;
 
   /**
-   * The credits and incentive as a year-one lump.
+   * The credits and incentive as a year-one lump — CASH ONLY.
    *
-   * The CALLER decides whether there is one, and on a financed deal the answer
-   * is no: the household does not pocket $70,000, they put it against the loan
-   * and every payment is lower for it. Passing a lowered payment AND a lump
-   * would credit them the same money twice — see `priceOption`, which is the
-   * one place that choice is made.
+   * Suppressed the moment the loan above carries a step-down, because there
+   * the same money is already modelled where it actually goes: against the
+   * principal, lowering every payment after the paydown month. Counting it
+   * both ways would credit a household $70,000 twice.
    */
-  const year1ReliefCents = Math.max(0, Math.round(args.creditReliefCents ?? 0));
+  const year1ReliefCents =
+    (args.loan?.afterCreditMonthlyCents ?? 0) > 0
+      ? 0
+      : Math.max(0, Math.round(args.creditReliefCents ?? 0));
 
   const vppAnnualCents = (args.vppCredits ?? []).reduce((n, v) => n + v.annualCents, 0);
   const vppUpfrontCents = (args.vppCredits ?? []).reduce((n, v) => n + v.upfrontCents, 0);
@@ -435,6 +460,22 @@ export function savingsModel(args: {
   const loanTermMonths = loanMonthlyCents != null ? args.loan!.termMonths! : 0;
   const loanDownCents =
     loanMonthlyCents != null ? Math.max(0, args.loan?.downPaymentCents ?? 0) : 0;
+
+  /**
+   * The smaller payment, and the month it starts — both or neither.
+   *
+   * A step-down with no month to start at, or a month with nothing to step
+   * down to, is not a schedule; the honest answer there is the flat payment
+   * this model has always billed rather than a guess at the missing half.
+   */
+  const afterCreditMonthlyCents =
+    loanMonthlyCents != null && (args.loan?.afterCreditMonthlyCents ?? 0) > 0
+      ? args.loan!.afterCreditMonthlyCents!
+      : null;
+  const creditAppliedAfterMonths =
+    afterCreditMonthlyCents == null
+      ? 0
+      : Math.max(0, Math.round(args.loan?.creditAppliedAfterMonths ?? 12));
 
   for (let year = 1; year <= horizon; year++) {
     const production = productionInYear(args.year1ProductionKwh, year, a);
@@ -471,7 +512,20 @@ export function savingsModel(args: {
         // a 10-year loan stops billing in year 11 — which is the whole reason
         // the payment is spread rather than lumped.
         const monthsPaid = Math.min(12, Math.max(0, loanTermMonths - (year - 1) * 12));
-        solarPaymentCents = loanMonthlyCents * monthsPaid;
+        if (afterCreditMonthlyCents == null) {
+          solarPaymentCents = loanMonthlyCents * monthsPaid;
+        } else {
+          // How many of THIS year's payments still fall before the credits are
+          // applied. Split rather than switched at a year boundary, because a
+          // paydown month published as 18 lands halfway through year two.
+          const monthsBefore = Math.max(
+            0,
+            Math.min(monthsPaid, creditAppliedAfterMonths - (year - 1) * 12)
+          );
+          solarPaymentCents =
+            loanMonthlyCents * monthsBefore +
+            afterCreditMonthlyCents * (monthsPaid - monthsBefore);
+        }
         solarPaymentCents += year === 1 ? loanDownCents : 0;
       } else if (year === 1) {
         // Bought outright — or financed on terms this document could not
@@ -900,6 +954,53 @@ export function optionMonthlyCents(
 /** The horizon this option was modelled over, under the same scenario. */
 export function optionSavings(o: ProposalPaymentOption, creditsApplied: boolean): SavingsModel {
   return creditsApplied && o.creditsApplied ? o.creditsApplied.savings : o.savings;
+}
+
+/**
+ * THE PRICE, as opposed to what the paper is written at.
+ *
+ * On an ordinary deal these are the same figure and this returns the contract
+ * price, unchanged. On a deal carrying a programme contribution they are not:
+ * the partner's paper is written at $118,400 and the household was quoted
+ * $48,400, and which of the two a page prints is not a detail. A homeowner who
+ * reads "System price $118,400 · $13.45 per watt" has been shown a number that
+ * matches nothing they have been told and nothing they can check against
+ * another quote — the market is $3 to $6 a watt — and the credits that bring it
+ * back down are read as an apology for it rather than as the mechanism.
+ *
+ * So every customer-facing surface that says "the price" says THIS, and the
+ * contract keeps its own block, underneath, where the arithmetic that gets from
+ * one to the other is set out in full. Nothing is hidden by the change: the
+ * contract, the credits and the incentive are all still printed, and the
+ * funder's submission summary still leads with the contract, because that is
+ * the number its file reviewer is checking.
+ *
+ * `quotedPriceCents` rather than the ladder's bottom line on purpose. The two
+ * are equal whenever anything was handed back — that equality is the ladder's
+ * whole feature — but on a system large enough that the credits alone take the
+ * contract BELOW the quoted price, the net is lower than the price, and the
+ * price is still what the system is being sold for.
+ */
+export function quotedTotalCents(f: SnapshotFinancing): number | null {
+  return f.creditLadder ? f.creditLadder.quotedPriceCents : f.contractPriceCents;
+}
+
+/**
+ * What the household's own price works out at per installed watt.
+ *
+ * DERIVED FROM THE PRINTED TOTAL, exactly as `finalPpwCents` is derived from
+ * the contract, so the two figures on the page divide into each other. Reading
+ * the stored `grossPpwCents` instead would be a third number arrived at another
+ * way, and a page whose price and rate disagree is the failure this file has
+ * been bitten by most often.
+ *
+ * Null when there is nothing to divide — no price, or no watts, which is every
+ * storage document.
+ */
+export function quotedPpwCents(f: SnapshotFinancing, sizeKwDc: number): number | null {
+  const total = quotedTotalCents(f);
+  if (total == null || !(sizeKwDc > 0)) return null;
+  return Math.round(total / (sizeKwDc * 1000));
 }
 
 export type SolarProposalSnapshot = {
@@ -1518,19 +1619,23 @@ function priceOption(args: {
   /**
    * ONE SCENARIO OF THIS DEAL, over its whole horizon.
    *
-   * The years are modelled TWICE on a deal that earns credits — once with them
-   * and once without — because the document now carries a switch and a switch
-   * that moved a headline figure while the thirty-year table underneath it
-   * stayed put would be the worst version of this feature: two answers about
-   * the same deal on the same sheet, one of them silently stale.
+   * The years are modelled TWICE on a deal that earns credits, because the
+   * document carries a switch and a switch that moved a headline figure while
+   * the thirty-year table underneath it stayed put would be the worst version
+   * of this feature: two answers about the same deal on the same sheet, one of
+   * them silently stale.
    *
    * Everything that is not the money is identical between the two runs, so it
-   * is stated once here. Only the payment being billed and the year-one relief
+   * is stated once here. Only the payment schedule and the year-one relief
    * differ, and both are the caller's to name.
    */
   const modelYears = (scenario: {
-    /** What the loan bills every month for the whole term. */
+    /** What the loan bills each month before anything is applied to it. */
     monthlyCents: number | null;
+    /** What it becomes afterwards, and null for a schedule that never steps. */
+    afterCreditMonthlyCents: number | null;
+    /** How many months of the first figure come first. */
+    creditAppliedAfterMonths: number;
     /** The credits as a year-one lump. Cash only — see `savingsModel`. */
     reliefCents: number;
   }): SavingsModel =>
@@ -1568,37 +1673,60 @@ function priceOption(args: {
               monthlyPaymentCents: scenario.monthlyCents,
               termMonths: finance.loanTermMonths ?? null,
               downPaymentCents: finance.downPaymentCents ?? 0,
+              afterCreditMonthlyCents: scenario.afterCreditMonthlyCents,
+              creditAppliedAfterMonths: scenario.creditAppliedAfterMonths,
             }
           : null,
     });
 
   /**
-   * THE DOCUMENT AS IT READS WITH THE SWITCH OFF: the credits are never
-   * claimed.
+   * THE DOCUMENT WITH THE SWITCH OFF, which is the document as it has always
+   * read — UNCHANGED by the switch existing.
    *
-   * The default, and deliberately the pessimistic one. A household that does
-   * not file for the credit — or has no liability to set it against — pays the
-   * higher figure for the whole term, and that is the reading a proposal has to
-   * be able to survive. On a deal with no credits to claim it is simply the
-   * only model there is, exactly as it always was.
+   * The real shape of a credit-funded loan: the full payment while the credits
+   * are outstanding, the smaller one once they have been applied to the
+   * principal and the lender has re-amortised. Nothing about this model moved
+   * when the switch was added, so a proposal generated today opens on exactly
+   * the figures, the payback year and the lifetime total it would have opened
+   * on before — which is the whole point. A feature that quietly made every
+   * default document look worse would not be a feature.
    */
-  const savings = modelYears({ monthlyCents: loanMonthlyCents, reliefCents: 0 });
+  const savings = modelYears({
+    monthlyCents: loanMonthlyCents,
+    afterCreditMonthlyCents: netMonthlyCents,
+    // The programme's own paydown month where its rate sheet publishes one —
+    // that is the month the lender re-amortises at — and a year otherwise,
+    // because a credit is claimed on the following return.
+    creditAppliedAfterMonths: loanFactorQuote?.paydownMonths ?? 12,
+    // The ladder's relief, offered as a year-one lump and taken only where
+    // there is no payment for it to be inside — which is cash. `savingsModel`
+    // suppresses it the moment the step-down above is real, so a financed deal
+    // is never credited the same money twice.
+    reliefCents: creditLadder?.reliefCents ?? 0,
+  });
 
   /**
-   * THE SAME DEAL WITH THE SWITCH ON: the credits are claimed and applied.
+   * THE SAME DEAL WITH THE SWITCH ON: the credits are already applied.
    *
-   * Null wherever there is nothing to apply, and null is what turns the switch
-   * off — a document with no ladder shows no control at all rather than one
+   * The household has claimed them and the lender has re-amortised, so the
+   * lower payment runs from the first month rather than from the twelfth.
+   * It is the OPTIMISTIC end of the same deal, and it is a scenario rather
+   * than a quote — which is why the sheet that shows it also says, in as many
+   * words, what the payment is until the credits land.
+   *
+   * Null wherever there is nothing to apply, and null is what removes the
+   * control entirely: a document with no ladder shows no switch rather than one
    * that changes nothing.
    *
-   * On a LOAN the relief is already inside the lower payment, so the year-one
-   * lump is zero: crediting it both ways would hand the household the same
-   * money twice. On CASH there is no payment to lower, so it lands as the lump
-   * it actually is, in the year it is claimed.
+   * On a LOAN the relief is inside the lower payment, so the year-one lump is
+   * zero — crediting both would hand the household the same money twice. On
+   * CASH there is no payment to lower, so it lands as the lump it actually is.
    */
   const creditsAppliedSavings = creditLadder
     ? modelYears({
         monthlyCents: netMonthlyCents ?? loanMonthlyCents,
+        afterCreditMonthlyCents: null,
+        creditAppliedAfterMonths: 0,
         reliefCents:
           finance.product === "loan" && netMonthlyCents != null ? 0 : creditLadder.reliefCents,
       })

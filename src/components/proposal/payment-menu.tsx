@@ -4,7 +4,11 @@ import * as React from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LenderMark } from "@/components/ui/lender-mark";
-import { optionMonthlyCents, type ProposalPaymentOption } from "@/lib/solar-proposal";
+import {
+  optionMonthlyCents,
+  quotedTotalCents,
+  type ProposalPaymentOption,
+} from "@/lib/solar-proposal";
 import { usd } from "./format";
 
 /**
@@ -100,15 +104,16 @@ export function PaymentMenu({
               strong
             />
           ) : (
-            <Line
-              k="Due at completion"
-              v={usd(f.contractPriceCents ?? 0)}
-              strong
-            />
+            <Line k="Due at completion" v={usd(quotedTotalCents(f) ?? 0)} strong />
           )}
 
-          {f.contractPriceCents != null && monthly != null && (
-            <Line k="Total system price" v={usd(f.contractPriceCents)} />
+          {/* THE PRICE, not the paper. On a deal carrying a programme
+              contribution the contract is written for more than the household
+              was quoted, and a card headed "Total system price" has to say the
+              one they were quoted — the cost sheet leads on it, and the
+              contract has its own block there. See `quotedTotalCents`. */}
+          {quotedTotalCents(f) != null && monthly != null && (
+            <Line k="Total system price" v={usd(quotedTotalCents(f)!)} />
           )}
 
           {/*

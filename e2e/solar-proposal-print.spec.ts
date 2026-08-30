@@ -138,7 +138,7 @@ test.describe(FLAG_ON ? "solar proposal in print" : "solar proposal in print (fl
       of the document's designed order rather than pinning a list that a
       perfectly good proposal would fail.
     */
-    const ORDER = ["cover", "today", "system", "year", "cost", "pay", "savings", "timeline", "accept"];
+    const ORDER = ["cover", "today", "system", "cost", "pay", "savings", "year", "timeline", "accept"];
     const ids = chapters.map((c) => c.id);
     expect(ids[0]).toBe("cover");
     expect(ids).toEqual(ORDER.filter((id) => ids.includes(id)));

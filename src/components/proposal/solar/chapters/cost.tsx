@@ -48,7 +48,7 @@ function LadderBar({
 
   return (
     <div>
-      <div className="flex h-8 w-full gap-0.5 overflow-hidden rounded-[3px]">
+      <div className="flex h-7 w-full gap-0.5 overflow-hidden rounded-[3px]">
         {parts.map((p) => (
           <div
             key={p.key}
@@ -63,10 +63,19 @@ function LadderBar({
         ))}
       </div>
       {/* Direct labels, because colour is never the only thing carrying
-          identity — and because the segment widths are the argument. */}
-      <dl className="mt-4 flex flex-wrap gap-x-10 gap-y-3">
+          identity — and because the segment widths are the argument.
+
+          ON ONE LINE, at reading size. They were stacked figures in 24px
+          display type until 2026-08-30, which was the right weight when this
+          bar opened the sheet and the only other statement of the same three
+          numbers was thirty rows below it. The table now sits directly
+          underneath, so the same figures at that size were a heading for a
+          table that repeats them — and the fifty pixels they cost were the
+          difference between this chapter fitting its sheet and printing a
+          second one. */}
+      <dl className="mt-3 flex flex-wrap items-baseline gap-x-8 gap-y-2">
         {parts.map((p) => (
-          <div key={p.key}>
+          <div key={p.key} className="flex items-baseline gap-2">
             <dt className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
               <span
                 className={cn(
@@ -78,7 +87,7 @@ function LadderBar({
               />
               {p.label}
             </dt>
-            <dd className="mt-1.5 font-display text-2xl font-semibold tabular-nums text-white">
+            <dd className="font-display text-base font-semibold tabular-nums text-white">
               {usd(p.cents)}
             </dd>
           </div>
@@ -89,7 +98,7 @@ function LadderBar({
 }
 
 /**
- * 04 · YOUR INVESTMENT — what the system costs.
+ * 03 · YOUR INVESTMENT — what the system costs.
  *
  * The old chapter 4 carried the price AND the payment AND the battery credit
  * AND the additional services, ran to two and a half sheets, and printed a
@@ -97,18 +106,50 @@ function LadderBar({
  * each answer one question: this one says what the thing costs, and the next
  * says how the money works.
  *
- * WHAT THIS CHAPTER QUOTES is the CONTRACT, whole. There was a contribution
- * row here until 2026-08-29 — system price, plus the programme's contribution,
- * equals the contract — and it was arithmetic a reader could check and the
- * wrong thing to put in front of them: printed as a line item it reads as
- * $70,000 added to a $58,080 system, which is the one reading of the deal that
- * is both intuitive and false. The credits bring it back down, below, on the
- * same sheet rather than a page away.
+ * WHAT THIS CHAPTER QUOTES IS THE PRICE — the ordinary one, at the top, on
+ * every deal. System price, plus additional work, equals the total, at so many
+ * dollars a watt. A household can check every one of those four figures against
+ * the last quote they were given, and that is the point of them.
+ *
+ * On a deal carrying a programme contribution the contract is written for more
+ * than that price, and the reconciliation is a SECOND BLOCK underneath: the
+ * contract, the federal credits earned on it, the incentive that hands back the
+ * remainder, and the price above arrived at again from the other direction.
+ *
+ * THAT ORDER IS THE 2026-08-30 CHANGE and it is worth recording why, because
+ * this page has now been through three arrangements. Until 2026-08-29 it added
+ * the contribution to the system price as a line item — $70,000 added to a
+ * $58,080 system — which is arithmetic a reader can check and the one reading
+ * of the deal that is both intuitive and false. So the contribution went inside
+ * the price and the page opened on the contract instead, whole, with the
+ * credits bringing it down. That fixed the false reading and introduced a
+ * quieter one: the page now opened on "System price $118,400 · $13.45 per watt"
+ * for a household quoted $48,400 at $5.50, a figure matching nothing they had
+ * been told and nothing they could compare against another quote — the market
+ * is three to six dollars a watt — with every credit under it reading as an
+ * apology for the number above rather than as the mechanism.
+ *
+ * The price leads. The contract keeps its block, in full, and nothing is
+ * hidden: the same five figures are printed, in the same order, under a heading
+ * that says what they are. The funder's submission summary still leads with the
+ * contract, because that is the number its file reviewer is checking.
  */
 export function ChapterCost({ doc }: { doc: Doc }) {
   const { f, ladder, adjustment, isPurchase, systemPriceCents, showcased } = doc;
+  const { quotedTotalCents: totalCents, quotedPpwCents: ppwCents } = doc;
 
   const creditTotal = ladder ? ladder.credits.reduce((n, c) => n + c.amountCents, 0) : 0;
+
+  /**
+   * Whether the total gets a row of its own.
+   *
+   * Only where it says something the system-price row does not — because there
+   * is additional work between them to total UP, or because the two figures
+   * genuinely differ. Without either it is the system price again under a
+   * second name, and the row above carries the emphasis instead.
+   */
+  const showTotal =
+    totalCents != null && (f.adderTotalCents != null || systemPriceCents !== totalCents);
 
   return (
     <Chapter
@@ -116,12 +157,12 @@ export function ChapterCost({ doc }: { doc: Doc }) {
       index={doc.num("cost")}
       total={doc.total}
       eyebrow="Your investment"
-      title={ladder ? "One price, and what brings it down" : "What the system costs"}
+      title="What the system costs"
       lede={
         ladder ? (
           <>
-            The contract is written at {usd(ladder.contractValueCents)}. Here is every credit that
-            comes off it, and what is left for you.
+            Your price is at the top. Underneath it is the contract the system is financed against,
+            and every credit that brings it back down to that price.
           </>
         ) : undefined
       }
@@ -151,25 +192,10 @@ export function ChapterCost({ doc }: { doc: Doc }) {
         </div>
       }
     >
-      {ladder && (
-        <div className="mb-10">
-          <LadderBar
-            contractCents={ladder.contractValueCents}
-            netCents={ladder.netCostCents}
-            creditCents={creditTotal}
-            incentiveCents={ladder.incentiveCents}
-          />
-        </div>
-      )}
-
       {/* ── the price, checkable row by row ───────────────────────────── */}
       <dl className="break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
         {isPurchase && systemPriceCents != null && (
-          <DarkRow
-            k="System price"
-            v={usd(systemPriceCents)}
-            strong={adjustment != null && f.adderTotalCents == null}
-          />
+          <DarkRow k="System price" v={usd(systemPriceCents)} strong={!showTotal} />
         )}
 
         {/*
@@ -195,21 +221,18 @@ export function ChapterCost({ doc }: { doc: Doc }) {
             <DarkRow k="Additional work" v={usd(f.adderTotalCents)} />
           ))}
 
-        {/* THE TOTAL — only where there is something between it and the system
-            price for it to total UP. Without additional work it would repeat
-            the system price under a second name, and the row above carries the
-            emphasis instead. */}
-        {isPurchase &&
-          f.contractPriceCents != null &&
-          (adjustment == null || f.adderTotalCents != null) && (
-            <DarkRow
-              k={adjustment ? "Total contract price" : "Total price"}
-              v={usd(f.contractPriceCents)}
-              strong
-            />
-          )}
-        {isPurchase && f.finalPpwCents != null && f.finalPpwCents > 0 && (
-          <DarkRow k="Price per watt" v={`$${(f.finalPpwCents / 100).toFixed(2)}/W`} />
+        {/* THE TOTAL — the household's own, and only where it says something
+            the system-price row does not. See `showTotal`. It was labelled
+            "Total contract price" and carried the contract's own figure until
+            2026-08-30; the contract now has its own block below, where the word
+            means what it says. */}
+        {isPurchase && showTotal && <DarkRow k="Total price" v={usd(totalCents!)} strong />}
+        {/* PER WATT ON THE PRICE ABOVE, so the two figures divide into each
+            other. `f.finalPpwCents` is the same arithmetic on the contract —
+            $13.45/W on a system quoted at $5.50 — and it stays with the
+            contract, on the funder's summary. */}
+        {isPurchase && ppwCents != null && ppwCents > 0 && (
+          <DarkRow k="Price per watt" v={`$${(ppwCents / 100).toFixed(2)}/W`} />
         )}
 
         {/* Third-party block — a lease has a monthly and a PPA has a rate, and
@@ -221,13 +244,38 @@ export function ChapterCost({ doc }: { doc: Doc }) {
           <DarkRow k="Rate" v={`$${(f.rateMillsPerKwh / 1000).toFixed(3)} per kWh`} strong />
         )}
 
-        {/* ── the ladder ─────────────────────────────────────────────────
-            Every row is arithmetic the reader can check against the one above
-            it, which is why the figures are frozen together in
-            `solar-credit-ladder` and asserted to subtract before the document
-            is allowed to generate. */}
-        {ladder && (
-          <>
+      </dl>
+
+      {/* ── THE CONTRACT, AND WHAT COMES OFF IT ─────────────────────────────
+          A block of its own, under the price, on the deals that carry one.
+
+          Every row is arithmetic the reader can check against the one above it,
+          which is why the figures are frozen together in `solar-credit-ladder`
+          and asserted to subtract before the document is allowed to generate.
+          The last row lands back on the price at the top of the sheet — that
+          equality IS the ladder's feature, and putting the two within a reader's
+          eyeline of each other is the whole reason this block moved down here
+          rather than to a page of its own. */}
+      {ladder && (
+        <section className="mt-6 break-inside-avoid">
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
+            How it is financed
+          </h3>
+          {/* NO PARAGRAPH HERE. The rail beside this block already carries the
+              partner's own disclosure naming the programme and the contract,
+              and the rows below are the arithmetic. A third telling of the same
+              thing cost thirty pixels the sheet does not have. */}
+          <div className="mt-4">
+            <LadderBar
+              contractCents={ladder.contractValueCents}
+              netCents={ladder.netCostCents}
+              creditCents={creditTotal}
+              incentiveCents={ladder.incentiveCents}
+            />
+          </div>
+
+          <dl className="mt-4 break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+            <DarkRow k="Contract value" v={usd(ladder.contractValueCents)} />
             {ladder.credits.map((c) => (
               <DarkRow
                 key={c.key}
@@ -237,7 +285,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
               />
             ))}
             {/* The subtotal, but only where it says something the rows do not.
-                With no credits claimed it would repeat the contract price. */}
+                With no credits claimed it would repeat the contract value. */}
             {ladder.credits.length > 0 && (
               <DarkRow k="After tax credits" v={usd(ladder.afterCreditsCents)} />
             )}
@@ -249,21 +297,20 @@ export function ChapterCost({ doc }: { doc: Doc }) {
               <DarkRow k={ladder.incentiveLabel} v={`−${usd(ladder.incentiveCents)}`} muted />
             )}
             <DarkRow k="What you pay" v={usd(ladder.netCostCents)} strong />
-          </>
-        )}
-      </dl>
+          </dl>
 
-      {/* THE CAVEAT, in the company's own words, and never optional on a page
-          of tax-credit arithmetic. A credit is claimed on the reader's return
-          and depends on their liability; the rows above are what the credits
-          are WORTH, not a discount anybody has applied. Directly under the
-          arithmetic rather than in the rail beside it — the rail was carrying
-          the partner's disclosure as well and the two together ran the sheet
-          over by fifty pixels, which printed a page holding one paragraph. */}
-      {ladder && (
-        <p className="mt-5 break-inside-avoid rounded-xl border border-amber-400/30 bg-amber-400/10 p-3.5 text-[0.82rem] leading-relaxed text-amber-200">
-          {ladder.disclaimer}
-        </p>
+          {/* THE CAVEAT, in the company's own words, and never optional under a
+              block of tax-credit arithmetic. A credit is claimed on the reader's
+              return and depends on their liability; the rows above are what the
+              credits are WORTH, not a discount anybody has applied. Directly
+              under the arithmetic rather than in the rail beside it — the rail
+              was carrying the partner's disclosure as well and the two together
+              ran the sheet over by fifty pixels, which printed a page holding
+              one paragraph. */}
+          <p className="mt-3.5 break-inside-avoid rounded-xl border border-amber-400/30 bg-amber-400/10 p-3.5 text-[0.82rem] leading-relaxed text-amber-200">
+            {ladder.disclaimer}
+          </p>
+        </section>
       )}
 
       {/*
