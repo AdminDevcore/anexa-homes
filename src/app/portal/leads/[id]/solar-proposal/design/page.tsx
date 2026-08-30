@@ -5,8 +5,8 @@ import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
 import { parseLayoutBlocks, parseLayoutSetbacks, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
-import { yieldCacheKey } from "@/lib/solar-pvwatts";
-import { cachedPlaneYields, planeFor } from "@/server/modules/solar/pvwatts";
+import { cachedYieldsByAngles } from "@/server/modules/solar/pvwatts";
+import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { cachedRoofPlanes, groundPlanesFor } from "@/server/modules/solar/roof-planes";
 import { SolarLayoutDesigner } from "@/components/portal/solar-layout-designer";
 
@@ -63,6 +63,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
       layoutSetbacks: true,
       mountType: true,
       annualUsageKwh: true,
+      usageAdjustmentKwh: true,
       moduleId: true,
       inverterId: true,
       batteryId: true,
@@ -121,25 +122,13 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
    */
   const blocks = parseLayoutBlocks(design?.layoutBlocks);
   const arrayType = design?.mountType === "ground" ? ("ground" as const) : ("roof" as const);
-  const planes = blocks.flatMap((b) => {
-    const plane = planeFor({
-      lat: lead.lat,
-      lon: lead.lng,
-      tiltDeg: b.tiltDeg,
-      azimuthDeg: b.azimuthDeg,
-      derateFactor: settings.derateFactor,
-      arrayType,
-    });
-    return plane ? [{ plane, tiltDeg: b.tiltDeg!, azimuthDeg: b.azimuthDeg! }] : [];
+  const measuredYields = await cachedYieldsByAngles({
+    lat: lead.lat,
+    lon: lead.lng,
+    blocks,
+    derateFactor: settings.derateFactor,
+    arrayType,
   });
-  const cachedYields = planes.length
-    ? await cachedPlaneYields(planes.map((p) => p.plane))
-    : new Map<string, { kwhPerKwYear: number }>();
-  const measuredYields: Record<string, number> = {};
-  for (const { plane, tiltDeg, azimuthDeg } of planes) {
-    const hit = cachedYields.get(yieldCacheKey(plane));
-    if (hit) measuredYields[`${tiltDeg}|${azimuthDeg}`] = hit.kwhPerKwYear;
-  }
 
   /**
    * The building's own roof planes, from the CACHE ONLY — same rule as the
@@ -181,7 +170,13 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         batteryId: design?.batteryId ?? null,
         batteryQty: design?.batteryQty ?? 0,
       }}
-      annualUsageKwh={design?.annualUsageKwh ?? null}
+      // Plus whatever this deal's adders add to the household's year. Offset
+      // is divided by this everywhere else — the deal page, the save, the
+      // customer's document — so the figure a rep watches while dragging
+      // panels has to be measured against the same denominator.
+      annualUsageKwh={
+        effectiveUsageKwh(design?.annualUsageKwh, design?.usageAdjustmentKwh) || null
+      }
       initialBlocks={blocks}
       measuredYields={measuredYields}
       roofPlanes={roofPlanes}

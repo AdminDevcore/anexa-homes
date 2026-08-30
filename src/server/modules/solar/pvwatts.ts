@@ -190,6 +190,50 @@ export async function cachedPlaneYields(
   return out;
 }
 
+/**
+ * The cached yields for the planes a design is drawn on, keyed the way the
+ * BROWSER asks for them: `"<tilt>|<azimuth>"`, the raw angles off the block.
+ *
+ * Every screen that shows a live production figure needs this and needs the
+ * same one. The designer had it and the proposal builder's System design step
+ * did not, so the same roof read 14,977 kWh in the designer and 11,584 on the
+ * step behind it — one priced on the simulation, the other on the company's
+ * flat market average scaled by a clear-sky ratio. A rep has no way to tell
+ * which of two numbers on two screens is the one their customer will be quoted.
+ *
+ * Cache-only, deliberately: a page load must not spend a rate-limited request
+ * on a plane the next save will settle anyway. A miss is simply a plane the
+ * preview shows on the market average until it is saved.
+ */
+export async function cachedYieldsByAngles(args: {
+  lat: number | null;
+  lon: number | null;
+  blocks: { tiltDeg?: number | null; azimuthDeg?: number | null }[];
+  derateFactor: number;
+  arrayType: ArrayType;
+}): Promise<Record<string, number>> {
+  const planes = args.blocks.flatMap((b) => {
+    const plane = planeFor({
+      lat: args.lat,
+      lon: args.lon,
+      tiltDeg: b.tiltDeg,
+      azimuthDeg: b.azimuthDeg,
+      derateFactor: args.derateFactor,
+      arrayType: args.arrayType,
+    });
+    return plane ? [{ plane, tiltDeg: b.tiltDeg!, azimuthDeg: b.azimuthDeg! }] : [];
+  });
+  if (planes.length === 0) return {};
+
+  const cached = await cachedPlaneYields(planes.map((p) => p.plane));
+  const out: Record<string, number> = {};
+  for (const { plane, tiltDeg, azimuthDeg } of planes) {
+    const hit = cached.get(yieldCacheKey(plane));
+    if (hit) out[`${tiltDeg}|${azimuthDeg}`] = hit.kwhPerKwYear;
+  }
+  return out;
+}
+
 /** One request. Null on anything at all going wrong — see the header. */
 async function fetchPlaneYield(
   req: YieldRequest

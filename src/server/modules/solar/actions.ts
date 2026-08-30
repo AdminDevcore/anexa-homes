@@ -7,9 +7,8 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getSolarSettings } from "./settings";
 import { resolveSizingModule } from "./sizing";
-import { year1Production, offsetPct } from "@/lib/solar-money";
+import { recomputeDesignFigures } from "./recompute";
 import { canGenerate } from "@/lib/solar-validation";
-import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
@@ -164,9 +163,26 @@ const designSchema = z.object({
 /**
  * Save the design and recompute the derived numbers SERVER-SIDE.
  *
- * System size, production and offset are never taken from the client: they are
- * recomputed from the module count and the company's assumptions every time.
- * A proposal claiming a five-figure offset is a client that was trusted.
+ * System size, production and offset are never taken from the client, and — the
+ * point of this note — they are never computed HERE either. They come from
+ * `recomputeDesignFigures`, the one function that prices the arrays actually
+ * drawn on the roof against the yields NREL actually simulated for their
+ * planes.
+ *
+ * This step used to work them out itself, from the panel count and a single
+ * market-average yield: `size × kwhPerKwYear × derate`, flat, with no idea
+ * which way the roof faced or that PVWatts had already answered for it. Both
+ * models were live at once and the rep could see both — the designer quoted a
+ * 10.56 kW south roof at 14,977 kWh and 118%, and pressing Save on this step,
+ * which only ever sends the mount type, overwrote it with 12,219 kWh and 96%.
+ * The lower one is the one the proposal freezes and the customer is quoted, and
+ * nothing about the house had changed between them.
+ *
+ * A design with nothing drawn on it therefore comes out at zero rather than
+ * keeping a panel count somebody typed before the designer existed. That is the
+ * same answer every other write already gives — the layout save, the equipment
+ * pick, the reprice — and the step's own summary already reads the geometry and
+ * says when a stored count no longer matches it.
  */
 export async function saveSolarDesignAction(input: z.infer<typeof designSchema>) {
   const user = await requireUser();
@@ -182,56 +198,50 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
-  const assumptions = await getSolarSettings(user.companyId);
-
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
-    select: { moduleId: true, moduleQty: true, annualUsageKwh: true, usageAdjustmentKwh: true },
+    select: { moduleId: true },
   });
 
   // The panel is not a rep's decision any more — the approved-vendor list makes
   // it once a year, and an existing design keeps whatever it was quoted on.
-  const existingUsage = existing;
   const module_ = await resolveSizingModule(user.companyId, existing?.moduleId ?? null);
 
-  const moduleQty = d.moduleQty ?? existing?.moduleQty ?? 0;
-  const systemSizeKwDc = module_?.ratingW ? (moduleQty * module_.ratingW) / 1000 : 0;
-  // TSRF is gone. It was a shading figure typed from memory on this very form,
-  // and it multiplied straight into the customer's quoted kWh — 85 vs 100 is a
-  // 17% difference in what a homeowner is promised. System losses are the
-  // company-wide derate in Solar Settings, which one person sets from real
-  // production data instead of each rep guessing per roof.
-  const year1ProductionKwh = year1Production(systemSizeKwDc, assumptions);
-
-  // Usage belongs to the Energy step now, so this reads it rather than taking
-  // it from the client. Offset still has to be recomputed here, because it
-  // depends on the production that the module count just changed.
-  // Plus whatever this deal's adders add to the household's year — see
-  // `effectiveUsageKwh`. Every place that divides by usage divides by this one.
-  const usageKwh = effectiveUsageKwh(
-    existingUsage?.annualUsageKwh,
-    existingUsage?.usageAdjustmentKwh
-  );
-  const computedOffset = usageKwh ? offsetPct(year1ProductionKwh, usageKwh) : 0;
-
-  const { leadId, moduleQty: _q, ...rest } = d;
+  const { leadId, moduleQty, ...rest } = d;
   const data = {
     ...rest,
     moduleId: module_?.id ?? null,
-    moduleQty,
-    systemSizeKwDc,
-    year1ProductionKwh,
-    offsetPct: computedOffset,
+    // Only on the way IN. The recompute below counts the panels off the
+    // geometry and writes the count it finds, which is what every other reader
+    // of this row already trusts.
+    ...(moduleQty == null ? {} : { moduleQty }),
   };
 
+  // The row has to exist before the recompute can price it — a deal whose
+  // design has never been saved has no row at all.
   await prisma.solarDesign.upsert({
     where: { leadId },
     create: { companyId: user.companyId, leadId, ...data },
     update: data,
   });
 
+  // Mount type is a repricing input, not just a label: PVWatts simulates a
+  // fixed roof mount and an open rack differently, and a rack in a yard runs
+  // cooler. So this is recomputed after the save rather than beside it.
+  const figures = await recomputeDesignFigures(user.companyId, leadId);
+
   revalidatePath(`/portal/leads/${leadId}`);
-  return { ok: true as const, systemSizeKwDc, year1ProductionKwh, offsetPct: computedOffset };
+  // The figures just moved, and both of the other screens that show them are
+  // separate routes — the builder a rep is standing on and the designer they
+  // came from.
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal/design`);
+  return {
+    ok: true as const,
+    systemSizeKwDc: figures?.systemSizeKwDc ?? 0,
+    year1ProductionKwh: figures?.year1ProductionKwh ?? 0,
+    offsetPct: figures?.offsetPct ?? 0,
+  };
 }
 
 const buildDetailsSchema = z.object({

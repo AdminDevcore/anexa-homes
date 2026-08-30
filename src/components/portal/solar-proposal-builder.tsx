@@ -128,6 +128,7 @@ export function SolarProposalBuilder({
   moduleRatingW,
   initialBlocks,
   assumptions,
+  measuredYields,
   customer,
   energy,
   utilities,
@@ -202,6 +203,8 @@ export function SolarProposalBuilder({
   /** The company's yield and derate. The designer previews production with the
    *  same two figures the save action uses, so the two cannot disagree. */
   assumptions: YieldAssumptions;
+  /** The cached PVWatts yields for this roof's planes — see SolarDesignPanel. */
+  measuredYields: Record<string, number>;
   customer: SolarCustomerView;
   energy: SolarEnergyView;
   utilities: ProviderOption[];
@@ -266,6 +269,7 @@ export function SolarProposalBuilder({
               retailers={retailers}
               vppDeal={vppDeal}
               year1ProductionKwh={year1ProductionKwh}
+              usageAdjustmentKwh={design?.usageAdjustmentKwh ?? 0}
               canEdit={canEditDeal}
             />
           )}
@@ -285,6 +289,7 @@ export function SolarProposalBuilder({
               moduleRatingW={moduleRatingW}
               initialBlocks={initialBlocks}
               assumptions={assumptions}
+              measuredYields={measuredYields}
             />
           )}
           {s.id === "financing" && (

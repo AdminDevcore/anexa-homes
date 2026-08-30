@@ -447,6 +447,7 @@ export function SolarDesignPanel({
   moduleRatingW,
   initialBlocks,
   assumptions,
+  measuredYields,
 }: {
   leadId: string;
   design: SolarDesignView;
@@ -459,6 +460,14 @@ export function SolarDesignPanel({
   initialBlocks: LayoutBlock[];
   /** The company's yield and derate, so the live preview matches the save. */
   assumptions: YieldAssumptions;
+  /**
+   * What NREL has already said about the planes on this roof, keyed by pitch
+   * and facing — read from the cache on the server, exactly as the designer
+   * reads it. Without it this summary prices the roof on the company's flat
+   * market average while the designer, the save and the customer's document
+   * price it on the simulation, and the three disagree by a sixth.
+   */
+  measuredYields: Record<string, number>;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -474,8 +483,17 @@ export function SolarDesignPanel({
   // And sized the same way, from the same function the designer and the save
   // action call, so the summary here cannot disagree with either of them.
   const live = React.useMemo(
-    () => systemTotals(initialBlocks, { lat, moduleRatingW, assumptions }),
-    [initialBlocks, lat, moduleRatingW, assumptions]
+    () =>
+      systemTotals(initialBlocks, {
+        lat,
+        moduleRatingW,
+        assumptions,
+        planeYield: ({ tiltDeg, azimuthDeg }) =>
+          tiltDeg == null || azimuthDeg == null
+            ? null
+            : (measuredYields[`${tiltDeg}|${azimuthDeg}`] ?? null),
+      }),
+    [initialBlocks, lat, moduleRatingW, assumptions, measuredYields]
   );
   // Against the usage the system actually has to cover — the bill figure PLUS
   // whatever the adders on this deal add to it. The same rule the server

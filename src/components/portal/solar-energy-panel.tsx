@@ -72,6 +72,7 @@ export function SolarEnergyPanel({
   systemType,
   vppDeal,
   year1ProductionKwh,
+  usageAdjustmentKwh,
   canEdit,
 }: {
   leadId: string;
@@ -84,6 +85,8 @@ export function SolarEnergyPanel({
   vppDeal: VppDealFacts;
   /** What the array as drawn makes in year one, for the comparison below. */
   year1ProductionKwh: number;
+  /** What the deal's adders add to the household's year — see the chart. */
+  usageAdjustmentKwh: number;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -339,6 +342,7 @@ export function SolarEnergyPanel({
             holds, so it moves as they type. */}
         <SolarEnergyChart
           annualUsageKwh={annual}
+          usageAdjustmentKwh={usageAdjustmentKwh}
           year1ProductionKwh={year1ProductionKwh}
           className="max-w-3xl"
         />

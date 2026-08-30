@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { effectiveUsageKwh } from "@/lib/solar-energy";
 
 /**
  * What the house uses against what the roof makes.
@@ -26,14 +27,25 @@ import { cn } from "@/lib/utils";
  */
 export function SolarEnergyChart({
   annualUsageKwh,
+  usageAdjustmentKwh = 0,
   year1ProductionKwh,
   className,
 }: {
   annualUsageKwh: number | null;
+  /**
+   * What this deal's adders add to the household's year — an EV charger, a
+   * pool pump. Part of what the array has to cover, so part of what offset is
+   * measured against: every other surface divides by usage PLUS this, and a
+   * chart that divided by the bill alone would print a coverage the system was
+   * never sized for on any deal that sells a charger.
+   */
+  usageAdjustmentKwh?: number;
   year1ProductionKwh: number;
   className?: string;
 }) {
-  const usage = annualUsageKwh && annualUsageKwh > 0 ? annualUsageKwh : null;
+  const cover = effectiveUsageKwh(annualUsageKwh, usageAdjustmentKwh);
+  const usage = cover > 0 ? cover : null;
+  const added = usageAdjustmentKwh > 0 ? usageAdjustmentKwh : 0;
   const production = year1ProductionKwh > 0 ? year1ProductionKwh : null;
 
   if (!usage && !production) {
@@ -56,7 +68,7 @@ export function SolarEnergyChart({
 
       <div className="space-y-2.5">
         <Bar
-          label="The house uses"
+          label={added > 0 ? "The house uses · incl. adders" : "The house uses"}
           value={usage}
           pct={pct(usage)}
           empty="no usage recorded yet"

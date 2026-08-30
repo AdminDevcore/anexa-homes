@@ -10,6 +10,7 @@ import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
 import { resolveSizingModule } from "@/server/modules/solar/sizing";
+import { cachedYieldsByAngles } from "@/server/modules/solar/pvwatts";
 import { parseLayoutBlocks } from "@/lib/solar-layout";
 import { listSolarProviders } from "@/server/modules/solar/providers";
 import {
@@ -281,6 +282,21 @@ export default async function SolarProposalBuilderPage({
     design?.layoutImageFileId
   ));
 
+  /**
+   * The arrays on the roof, and what NREL has already said the planes they sit
+   * on make. The System design step shows a live figure off this geometry, and
+   * it has to be the SAME figure the designer shows and the save stores — so it
+   * gets the same yields, from the same cache-only read.
+   */
+  const designBlocks = parseLayoutBlocks(design?.layoutBlocks);
+  const measuredYields = await cachedYieldsByAngles({
+    lat: lead.lat,
+    lon: lead.lng,
+    blocks: designBlocks,
+    derateFactor: settings.derateFactor,
+    arrayType: design?.mountType === "ground" ? "ground" : "roof",
+  });
+
   const address = [lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
     .filter(Boolean)
     .join(" · ");
@@ -437,11 +453,12 @@ export default async function SolarProposalBuilderPage({
         canApproveProposal={can(user, "update", "Settings")}
         lat={lead.lat}
         moduleRatingW={sizingModule?.ratingW ?? null}
-        initialBlocks={parseLayoutBlocks(design?.layoutBlocks)}
+        initialBlocks={designBlocks}
         assumptions={{
           kwhPerKwYear: settings.kwhPerKwYear,
           derateFactor: settings.derateFactor,
         }}
+        measuredYields={measuredYields}
         customer={{
           firstName: lead.firstName,
           lastName: lead.lastName,
