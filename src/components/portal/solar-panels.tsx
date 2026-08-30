@@ -471,11 +471,51 @@ export function SolarDesignPanel({
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
-  const [form, setForm] = React.useState({
-    mountType: (design?.mountType ?? "roof") as MountType,
-  });
+  const [mountType, showMountType] = React.useState<MountType>(
+    (design?.mountType ?? "roof") as MountType
+  );
 
-  const setMountType = (v: MountType) => setForm({ mountType: v });
+  /**
+   * The mount type saves ITSELF, and there is no Save button on this step.
+   *
+   * There was one, and it was the last surviving control on a form whose every
+   * other figure is derived: it sent the mount type and nothing else. But
+   * pressing it also recomputed the production, so it was the one button on the
+   * screen that could change what a customer is quoted — and for a while it did,
+   * on a worse model. A control whose visible job is a dropdown must not be the
+   * thing that decides a homeowner's kWh.
+   *
+   * So the dropdown writes on change and the button is gone. Nothing on this
+   * step is now a thing a rep can forget to press.
+   *
+   * The select shows the new value immediately and rolls back if the write
+   * fails — a picker that snaps back for the length of a round trip reads as a
+   * broken control, and one that keeps a value the server rejected is a lie.
+   * `busy` is cleared in a `finally`: a throw that left it latched would freeze
+   * the picker with no way out.
+   */
+  async function setMountType(next: MountType) {
+    if (next === mountType) return;
+    const previous = mountType;
+    showMountType(next);
+    setBusy(true);
+    try {
+      const res = await saveSolarDesignAction({ leadId, mountType: next });
+      if (!res.ok) {
+        showMountType(previous);
+        return void toast.error(res.error);
+      }
+      // Worth saying out loud: this is a repricing, not a label. PVWatts
+      // simulates an open rack differently from a roof, so the kWh on the
+      // screen is about to move.
+      toast.success(
+        next === "ground" ? "Ground mount — the array is repriced." : "Roof mount — the array is repriced."
+      );
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Counted from the geometry, the same way the server counts it on save —
   // never read back off `design.moduleQty`, which is only ever a cached copy.
@@ -502,18 +542,6 @@ export function SolarDesignPanel({
   const liveOffsetPct = coverKwh > 0 ? (live.year1ProductionKwh / coverKwh) * 100 : null;
   const staleCount = (design?.moduleQty ?? 0) > 0 && drawnPanels === 0;
 
-  async function save() {
-    setBusy(true);
-    const res = await saveSolarDesignAction({
-      leadId,
-      mountType: form.mountType,
-    });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Design saved");
-    router.refresh();
-  }
-
   return (
     <div className="space-y-5">
       <section className="space-y-3">
@@ -525,8 +553,8 @@ export function SolarDesignPanel({
             <Label className="text-xs">Mount type</Label>
             <select
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-              value={form.mountType}
-              disabled={!canEdit}
+              value={mountType}
+              disabled={!canEdit || busy}
               onChange={(e) => setMountType(e.target.value as MountType)}
             >
               <option value="roof">Roof</option>
@@ -664,12 +692,6 @@ export function SolarDesignPanel({
         uploadedAt={design?.layoutImageUploadedAt ?? null}
         canEdit={canEdit}
       />
-
-      {canEdit && (
-        <Button onClick={save} disabled={busy}>
-          {busy && <Loader2 className="size-4 animate-spin" />} Save design
-        </Button>
-      )}
     </div>
   );
 }
