@@ -20,12 +20,19 @@
  * catalogue, rate sheet or company setting is read, so a proposal backfilled
  * today gets the same second model it would have been generated with.
  *
+ * A SIGNED PROPOSAL IS LEFT ALONE unless you say otherwise. The write is
+ * additive and the figures come out identical, so there is a good argument that
+ * it would be harmless — but "harmless" is a judgement about a document with
+ * somebody's signature on it, and that judgement is not a script's to make. Ask
+ * for `--include-signed` when a person has decided.
+ *
  * SKIPPED, and counted rather than silently passed over: storage documents,
  * options with no credit ladder, options already carrying the key, and any
  * option whose snapshot does not hold enough to model a year.
  *
- *   npx tsx scripts/backfill-credit-scenario.ts            # report only
- *   npx tsx scripts/backfill-credit-scenario.ts --apply    # write
+ *   npx tsx scripts/backfill-credit-scenario.ts                    # report only
+ *   npx tsx scripts/backfill-credit-scenario.ts --apply            # write
+ *   npx tsx scripts/backfill-credit-scenario.ts --apply --include-signed
  *
  * DATABASE_URL must point at the environment you mean.
  */
@@ -42,6 +49,7 @@ import { savingsModel, type SolarProposalSnapshot } from "../src/lib/solar-propo
 const prisma = new PrismaClient();
 
 const apply = process.argv.includes("--apply");
+const includeSigned = process.argv.includes("--include-signed");
 
 type Snapshot = SolarProposalSnapshot;
 type Option = NonNullable<Snapshot["options"]>[number];
@@ -98,7 +106,7 @@ function creditsAppliedFor(s: Snapshot, o: Option): Option["creditsApplied"] | n
 
 async function main() {
   const rows = await prisma.solarProposal.findMany({
-    select: { id: true, leadId: true, version: true, snapshot: true },
+    select: { id: true, leadId: true, version: true, signedAt: true, snapshot: true },
     orderBy: [{ leadId: "asc" }, { version: "asc" }],
   });
 
@@ -106,8 +114,13 @@ async function main() {
   let already = 0;
   let noLadder = 0;
   let skipped = 0;
+  let signed = 0;
 
   for (const row of rows) {
+    if (row.signedAt && !includeSigned) {
+      signed++;
+      continue;
+    }
     const s = row.snapshot as unknown as Snapshot | null;
     if (!s || !Array.isArray(s.options) || s.options.length === 0) {
       skipped++;
@@ -154,6 +167,11 @@ async function main() {
     `\n${apply ? "Wrote" : "Would write"} ${written} proposal(s). ` +
       `${already} option(s) already had one, ${noLadder} earn no credits, ${skipped} skipped.`
   );
+  if (signed > 0) {
+    console.log(
+      `${signed} signed proposal(s) left untouched. Pass --include-signed to write into them.`
+    );
+  }
   if (!apply) console.log("Dry run — pass --apply to write.");
 }
 
