@@ -94,17 +94,25 @@ export function CreditSwitch({
 }
 
 /**
- * WHICH OF THE TWO FUTURES THIS COPY IS WRITTEN IN, as type.
+ * WHAT THE SWITCH IS ASSUMING, as type — and ONLY once it is on.
  *
- * The switch does not print, so without this a printed proposal would carry a
- * payment and a thirty-year table with nothing on the page saying which
- * scenario produced them — and the two differ by more than a factor of two. It
- * states the basis, and it states the other figure too, because a document that
- * shows only the number that flatters the deal is the thing this whole feature
- * was added to stop.
+ * The switch does not print, so a document showing the credit-funded payment
+ * with nothing on the page saying so would be a payment nobody can account for
+ * — and the two figures differ by more than a factor of two. So when the switch
+ * is ON this states the basis, and states the other figure too, because a
+ * document that shows only the number that flatters the deal is the thing this
+ * whole feature was added to stop.
  *
- * On screen it sits under the headline as a quiet caption; on paper it is the
- * only account of the switch there is.
+ * WHEN IT IS OFF IT RENDERS NOTHING, as of 2026-08-30. It used to print the
+ * mirror sentence — "Before your federal tax credits. Once they are claimed and
+ * applied to the loan, it becomes $161.33 a month." — which put the credit
+ * conversation in front of a homeowner on the sheet where the rep had
+ * deliberately not started it yet. Off means the credits are not part of this
+ * copy, and a caption naming them is part of this copy. The rep throws the
+ * switch when the conversation reaches them, and every mention arrives at once.
+ *
+ * Null rather than a caller-side condition so there is ONE rule and no future
+ * call site can leak the off-state copy back onto a sheet.
  */
 export function CreditBasis({
   on,
@@ -116,14 +124,15 @@ export function CreditBasis({
   otherMonthlyCents: number | null;
   className?: string;
 }) {
+  if (!on) return null;
   return (
     <p className={cn("text-[0.82rem] leading-relaxed text-neutral-500", className)}>
       <span className="font-medium text-neutral-700">
-        {on ? "With your federal tax credits applied." : "Before your federal tax credits."}
+        With your federal tax credits applied.
       </span>{" "}
       {otherMonthlyCents != null && (
         <>
-          {on ? "Until they are claimed and applied to the loan, the payment is " : "Once they are claimed and applied to the loan, it becomes "}
+          Until they are claimed and applied to the loan, the payment is{" "}
           <strong className="font-semibold tabular-nums text-neutral-700">
             {usd(otherMonthlyCents, 2)}
           </strong>{" "}

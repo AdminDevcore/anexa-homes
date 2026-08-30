@@ -141,10 +141,11 @@ export function ChapterPay({
               <span className="ml-1 font-sans text-lg font-medium text-neutral-400">/mo</span>
             )}
           </p>
-          {/* WHICH OF THE TWO FUTURES THIS FIGURE IS. Directly under the number
-              rather than only up in the bar: a reader who scrolls to the
-              headline and no further must still know what it assumes, and on
-              paper the bar is not there at all. */}
+          {/* WHAT THIS FIGURE ASSUMES, directly under the number rather than
+              only up in the bar: a reader who scrolls to the headline and no
+              further must still know, and on paper the bar is not there at all.
+              Silent while the switch is off — see `CreditBasis`, which owns
+              that rule so no sheet can leak the credit copy on its own. */}
           {credits && (
             <CreditBasis
               className="mt-2 max-w-[42ch]"

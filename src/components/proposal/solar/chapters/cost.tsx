@@ -135,10 +135,31 @@ function LadderBar({
  * contract, because that is the number its file reviewer is checking.
  */
 export function ChapterCost({ doc }: { doc: Doc }) {
-  const { f, ladder, adjustment, isPurchase, systemPriceCents, showcased } = doc;
+  const { f, ladder, adjustment, isPurchase, systemPriceCents, showcased, credits } = doc;
   const { quotedTotalCents: totalCents, quotedPpwCents: ppwCents } = doc;
 
   const creditTotal = ladder ? ladder.credits.reduce((n, c) => n + c.amountCents, 0) : 0;
+
+  /**
+   * WHETHER THE CREDIT ARITHMETIC IS ON THIS SHEET AT ALL — the switch decides.
+   *
+   * The ladder used to print on every deal that carried one, whichever way the
+   * nav bar's switch was thrown, which made the switch a liar on the one sheet
+   * where it mattered most: a rep who had deliberately left it OFF still had a
+   * homeowner reading three federal credits and an incentive off the price
+   * page. The switch says what the WHOLE document assumes, and a block of
+   * credit arithmetic is exactly that assumption written out.
+   *
+   * OFF the sheet is the price and nothing else: system price, per watt, and
+   * the partner's own disclosure in the rail — which stays, because it names
+   * the contract the next sheet's amount financed comes off, and orphaning
+   * that figure is a worse document than showing where it comes from.
+   *
+   * `credits == null` is a document with NO switch — an option with nothing to
+   * claim, or a proposal generated before both scenarios were frozen. There is
+   * no control to obey, so those print the ladder exactly as they always did.
+   */
+  const showLadder = ladder != null && (credits == null || credits.on);
 
   /**
    * Whether the total gets a row of its own.
@@ -159,7 +180,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
       eyebrow="Your investment"
       title="What the system costs"
       lede={
-        ladder ? (
+        showLadder ? (
           <>
             Your price is at the top. Underneath it is the contract the system is financed against,
             and every credit that brings it back down to that price.
@@ -256,7 +277,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
           equality IS the ladder's feature, and putting the two within a reader's
           eyeline of each other is the whole reason this block moved down here
           rather than to a page of its own. */}
-      {ladder && (
+      {showLadder && ladder && (
         <section className="mt-6 break-inside-avoid">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
             How it is financed

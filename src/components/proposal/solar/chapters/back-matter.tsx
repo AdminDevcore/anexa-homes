@@ -58,7 +58,8 @@ export function BackMatter({ doc }: { doc: Doc }) {
               below, the year card, the payback year and the cumulative totals
               are the model the nav bar's switch selects, and a reader who
               arrives here from the contents has not necessarily seen the
-              payment sheet — nor, on paper, the bar. */}
+              payment sheet — nor, on paper, the bar. Silent while the switch is
+              off: `CreditBasis` prints only the applied scenario. */}
           {credits && (
             <CreditBasis
               className="mt-3 max-w-[68ch]"
