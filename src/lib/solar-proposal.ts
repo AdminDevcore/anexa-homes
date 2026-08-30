@@ -318,7 +318,50 @@ export type SavingsModel = {
 };
 
 /**
- * 25-year utility-vs-solar comparison.
+ * HOW MANY YEARS THE COMPARISON RUNS FOR, on one payment option.
+ *
+ * Twenty-five was a constant here until 2026-08-29, and on a thirty-year loan
+ * it was quietly wrong in both columns: the table stopped after 300 of the
+ * loan's 360 payments, so it under-counted what the household hands over AND
+ * cut five years off the utility bill they avoid. A comparison that stops while
+ * somebody is still paying is not a comparison.
+ *
+ * So a LOAN's term decides it, and only a loan's. A lease or a PPA keeps
+ * twenty-five, which is what those pages have always said, and cash has no term
+ * to follow.
+ *
+ * FLOORED AT TWENTY-FIVE, deliberately. A short loan — five years, ten — would
+ * otherwise produce a five-row page whose utility column has barely begun to
+ * compound, and it would SHORTEN documents that read at twenty-five today. The
+ * floor means this change can only ever extend a proposal, never truncate one.
+ * Those deals keep the free years after payoff that they already had; that is
+ * the pre-existing shape of the model and not something this function invented.
+ *
+ * Capped, because the horizon sizes a table and a chart, and a term typed with
+ * an extra digit should not print a hundred rows at a homeowner.
+ */
+export const SAVINGS_HORIZON_MIN_YEARS = 25;
+export const SAVINGS_HORIZON_MAX_YEARS = 40;
+
+export function savingsHorizonYears(input: {
+  product: FinanceProduct;
+  /** The loan's own term. Null on cash, on a lease and on a PPA. */
+  loanTermMonths?: number | null;
+}): number {
+  if (input.product !== "loan") return SAVINGS_HORIZON_MIN_YEARS;
+  const months = input.loanTermMonths;
+  if (months == null || !Number.isFinite(months) || months <= 0) {
+    return SAVINGS_HORIZON_MIN_YEARS;
+  }
+  // Rounded UP: 354 months is a household paying into year thirty, and a
+  // twenty-nine-year table would drop the last payments it exists to show.
+  const years = Math.ceil(months / 12);
+  return Math.min(SAVINGS_HORIZON_MAX_YEARS, Math.max(SAVINGS_HORIZON_MIN_YEARS, years));
+}
+
+/**
+ * Utility-vs-solar comparison over `years` — see `savingsHorizonYears` for how
+ * long that is and why it is not a constant.
  *
  * The utility side compounds at the configured escalation rate; the solar side
  * depends entirely on the product. This is the single most persuasive — and
@@ -417,7 +460,7 @@ export function savingsModel(args: {
   } | null;
 }): SavingsModel {
   const a = args.assumptions;
-  const horizon = args.years ?? 25;
+  const horizon = args.years ?? SAVINGS_HORIZON_MIN_YEARS;
   const rows: SavingsYear[] = [];
   let cumulative = 0;
   let utilityTotal = 0;
@@ -1533,6 +1576,14 @@ function priceOption(args: {
     escalatorPct: finance.escalatorPct,
     termYears: finance.termYears,
     assumptions: a,
+    // Long enough to carry every payment this option asks for. Per OPTION, not
+    // per document: switching the payment menu from a thirty-year programme to
+    // a twenty-five-year one re-reads the whole chapter, and each answer covers
+    // its own schedule.
+    years: savingsHorizonYears({
+      product: finance.product,
+      loanTermMonths: finance.loanTermMonths,
+    }),
     vppCredits: args.vppCredits,
     // The years bill the price the cost chapter prints — the partner's contract
     // value where there is one — and credit back what the ladder takes off it.

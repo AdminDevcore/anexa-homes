@@ -23,7 +23,7 @@ import { CompareCards } from "../compare-cards";
 import { HowItWorks } from "../how-it-works";
 import { ArrayMap } from "../array-map";
 import { RepBar, type RepContext } from "../rep-bar";
-import { usd, kwh, pct, pctWhole } from "../format";
+import { usd, kwh, pct, pctWhole, yearsInWords } from "../format";
 import { Chapter, Stat, SpecList, DarkRow, EquipCard, Impact, SourceLink, ContactCard } from "./primitives";
 import { Cover, BillSwap } from "./cover";
 import { CumulativeCostChart } from "./chart";
@@ -1138,7 +1138,15 @@ function SolarPvProposalView({
           index={num("savings")}
           total={total}
           eyebrow="The maths"
-          title={`Twenty-five years, both ways`}
+          /* THE HORIZON, NAMED — and read off the model rather than written
+             here, because since 2026-08-29 it follows the loan's term. This
+             said "Twenty-five" on a thirty-year programme whose table below it
+             already had thirty rows: a heading disagreeing with the table it
+             heads is the one error on a page like this that a reader is certain
+             to notice and unable to resolve. Everything else in the chapter —
+             the two cards, the chart, the lifetime figure — has always counted
+             `sv.years`; this was the last constant. */
+          title={`${yearsInWords(sv.years.length)} years, both ways`}
           wide
           printLayout="stack"
         >

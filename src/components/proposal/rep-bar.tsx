@@ -347,7 +347,7 @@ export function RepBar({
                   }}
                 />
                 <Toggle
-                  label="Show the 25-year comparison"
+                  label="Show the year-by-year comparison"
                   hint="Some households read the table as the proof and some read it as a wall of numbers."
                   checked={comparison}
                   onChange={async (v) => {

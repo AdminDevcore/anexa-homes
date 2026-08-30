@@ -1664,7 +1664,7 @@ export type ProposalVersion = {
   viewedAt: string | null;
   signedAt: string | null;
   createdAt: string;
-  /** Whether the customer's copy carries the 25-year comparison. */
+  /** Whether the customer's copy carries the year-by-year comparison. */
   showComparison: boolean;
   /** Set on the ONE version this deal sold. See setProposalApprovalAction. */
   approvedAt: string | null;

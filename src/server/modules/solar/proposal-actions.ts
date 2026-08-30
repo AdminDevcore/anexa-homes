@@ -281,7 +281,7 @@ export async function setProposalApprovalAction(proposalId: string, approved: bo
 }
 
 /**
- * Show or hide the 25-year comparison on the customer's copy.
+ * Show or hide the year-by-year comparison on the customer's copy.
  *
  * Does NOT reissue the proposal, on purpose. The snapshot is what this customer
  * was quoted and every figure in it stays exactly where it was; this changes

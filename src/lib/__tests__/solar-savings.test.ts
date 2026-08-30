@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { savingsModel, buildProposalSnapshot, postSolarUtilityCents } from "@/lib/solar-proposal";
+import {
+  savingsModel,
+  savingsHorizonYears,
+  buildProposalSnapshot,
+  postSolarUtilityCents,
+} from "@/lib/solar-proposal";
+import { yearsInWords } from "@/components/proposal/format";
 import {
   year1Production,
   PRODUCTION_MARGIN_FACTOR,
@@ -624,5 +630,77 @@ describe("a battery programme's money reaches the customer's savings", () => {
     expect(postSolarUtilityCents(with_.years[5])).toBe(
       postSolarUtilityCents(without.years[5])
     );
+  });
+});
+
+describe("how many years the comparison runs for", () => {
+  const base = {
+    year1ProductionKwh: 8_282,
+    annualUsageKwh: 14_000,
+    currentRateMillsPerKwh: 154,
+    assumptions: A,
+  };
+
+  it("keeps twenty-five where there is no loan term to follow", () => {
+    expect(savingsHorizonYears({ product: "cash" })).toBe(25);
+    expect(savingsHorizonYears({ product: "lease", loanTermMonths: 240 })).toBe(25);
+    expect(savingsHorizonYears({ product: "ppa", loanTermMonths: 300 })).toBe(25);
+    // A loan quoted with no term has no schedule to size the page from.
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: null })).toBe(25);
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: 0 })).toBe(25);
+  });
+
+  it("follows the loan's term, so the table covers every payment", () => {
+    // The case this was written for: 360 payments read as 300.
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: 360 })).toBe(30);
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: 300 })).toBe(25);
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: 240 })).toBe(25);
+    // Rounded UP — a part-year is a year the household is still paying in.
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: 354 })).toBe(30);
+  });
+
+  it("never shortens a proposal, and never runs away with a fat-fingered term", () => {
+    // The floor: a five-year loan keeps the twenty-five-year page it has today
+    // rather than shrinking to five rows of a barely-compounded utility bill.
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: 60 })).toBe(25);
+    expect(savingsHorizonYears({ product: "loan", loanTermMonths: 6_000 })).toBe(40);
+  });
+
+  it("bills all 360 payments of a thirty-year loan inside the horizon", () => {
+    // The defect, stated as arithmetic: at 25 years the solar column carried
+    // 300 payments of a 360-payment loan and called the remainder saved.
+    const purchase = pricePurchase({
+      product: "loan", systemSizeKwDc: 8, stickerPpwCents: 350,
+      dealerFeePct: 18, adderTotalCents: 0,
+    });
+    const loan = {
+      monthlyPaymentCents: 20_000,
+      termMonths: 360,
+      downPaymentCents: 0,
+    };
+    const short = savingsModel({ ...base, product: "loan", purchase, loan, years: 25 });
+    const full = savingsModel({
+      ...base,
+      product: "loan",
+      purchase,
+      loan,
+      years: savingsHorizonYears({ product: "loan", loanTermMonths: 360 }),
+    });
+
+    expect(full.years.length).toBe(30);
+    expect(full.solarPaidCents).toBe(20_000 * 360);
+    expect(short.solarPaidCents).toBe(20_000 * 300);
+    // Sixty payments the old page never showed.
+    expect(full.solarPaidCents - short.solarPaidCents).toBe(20_000 * 60);
+    // And five more years of the utility bill it is compared against, so the
+    // fix cuts both ways rather than only making the solar column look worse.
+    expect(full.utilityCostAvoidedCents).toBeGreaterThan(short.utilityCostAvoidedCents);
+  });
+
+  it("titles the chapter with the horizon the table actually has", () => {
+    expect(yearsInWords(25)).toBe("Twenty-five");
+    expect(yearsInWords(30)).toBe("Thirty");
+    // Outside the range a horizon can take, the numeral rather than a wrong word.
+    expect(yearsInWords(7)).toBe("7");
   });
 });

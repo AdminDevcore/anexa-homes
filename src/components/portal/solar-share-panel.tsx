@@ -224,7 +224,7 @@ export function SolarSharePanel({
           <span>
             <span className="inline-flex items-center gap-1.5 font-medium">
               <Table2 className="size-4 text-muted-foreground" />
-              The 25-year comparison
+              The year-by-year comparison
             </span>
             <span className="block text-xs text-muted-foreground">
               Utility against solar, year by year. Changing this does not reissue the proposal or

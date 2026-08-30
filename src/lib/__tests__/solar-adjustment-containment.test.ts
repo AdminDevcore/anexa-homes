@@ -304,14 +304,22 @@ describe("the document quotes the contract the household signs", () => {
     expect(s.years[1].solarPaymentCents).toBe(13_444 * 12);
   });
 
-  it("prices the twenty-five years close to the deal priced the old way", () => {
-    // The reversal moved which figure the document leads with. It must NOT have
-    // moved what the household actually pays over the horizon — that is the
-    // same deal — beyond the one real difference: a year of the larger payment
-    // before the credits land.
+  it("runs the years out to the end of the loan, and bills every payment once", () => {
+    // The horizon FOLLOWS THE TERM as of 2026-08-29. This programme is 360
+    // months, so the chapter is thirty years and the solar column carries all
+    // 360 payments — twelve at the pre-credit figure, then the rest at the one
+    // the credits leave the household on.
+    //
+    // It ran to twenty-five before, which billed 300 of the 360 and called the
+    // remaining five years' payments saved. The number below is larger than the
+    // old one BY DESIGN: those payments were always real, the page just stopped
+    // before them.
     const s = snapshot.savings;
-    const oldWay = 13_444 * 12 * 25;
-    const extraYearAtTheHigherPayment = (32_889 - 13_444) * 12;
-    expect(s.solarPaidCents).toBe(oldWay + extraYearAtTheHigherPayment);
+    expect(s.years.length).toBe(30);
+    expect(s.solarPaidCents).toBe(32_889 * 12 + 13_444 * 348);
+    // Nothing double-billed and nothing dropped: 360 months, exactly.
+    expect(12 + 348).toBe(360);
+    // The last year still carries a payment — the whole point of extending it.
+    expect(s.years[29].solarPaymentCents).toBe(13_444 * 12);
   });
 });
