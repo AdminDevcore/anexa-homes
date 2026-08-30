@@ -19,6 +19,7 @@ export function ProposalChrome({
   logoUrl,
   navItems,
   offsetTop = 0,
+  glassOverHero = false,
 }: {
   companyName: string;
   logoUrl: string | null;
@@ -31,8 +32,24 @@ export function ProposalChrome({
    * paints straight over the CRM's.
    */
   offsetTop?: number;
+  /**
+   * Opt in to frosted glass while the document's first section is under the bar.
+   *
+   * OFF by default, and it has to be: this bar is shared with the roofing
+   * proposal and the battery one, whose covers are near-black. Sixty per cent
+   * white over near-black is grey, and the inactive jump links go with it — so
+   * the translucency is granted per document, by the one whose cover is a
+   * photograph the bar is meant to sit ON rather than above.
+   *
+   * It also only lasts as long as that section does. Chapters further down are
+   * dark for the same reason, so the bar takes its solid ground back the moment
+   * the hero has passed under it.
+   */
+  glassOverHero?: boolean;
 }) {
+  const headerRef = React.useRef<HTMLElement>(null);
   const [progress, setProgress] = React.useState(0);
+  const [overHero, setOverHero] = React.useState(glassOverHero);
   const [activeId, setActiveId] = React.useState<string>(navItems[0]?.id ?? "");
 
   // Scroll progress (whole-document).
@@ -41,6 +58,18 @@ export function ProposalChrome({
       const doc = document.documentElement;
       const max = doc.scrollHeight - doc.clientHeight;
       setProgress(max > 0 ? Math.min(1, Math.max(0, doc.scrollTop / max)) : 0);
+
+      // Measured against the BAR'S OWN bottom edge rather than a scroll offset:
+      // how far down the page this bar pins depends on what else is stacked
+      // above it (the portal shell, an internal-preview notice, a superseded
+      // banner), and a hard-coded threshold would be wrong in three of the four
+      // places this document is read.
+      if (glassOverHero) {
+        const hero = document.querySelector<HTMLElement>('[data-section="cover"]');
+        const bar = headerRef.current;
+        const barBottom = bar ? bar.getBoundingClientRect().bottom : 0;
+        setOverHero(!!hero && hero.getBoundingClientRect().bottom > barBottom);
+      }
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -49,7 +78,7 @@ export function ProposalChrome({
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
     };
-  }, []);
+  }, [glassOverHero]);
 
   // Reveal-on-scroll + active-section tracking via IntersectionObserver.
   React.useEffect(() => {
@@ -96,15 +125,25 @@ export function ProposalChrome({
     document.querySelector(`[data-section="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  /** Frosted only while there is a photograph under the bar to frost. */
+  const glass = glassOverHero && overHero;
+
   return (
     <header
+      ref={headerRef}
       data-testid="proposal-chrome"
       // The z-index tracks the offset: on the customer's own page this bar
       // outranks everything, but embedded it has to stay under the portal
       // shell's header (z-30) so a menu opened from the CRM is never covered by
       // a preview of the document.
       className={
-        "sticky border-b border-neutral-200 bg-white/85 backdrop-blur-md print:hidden " +
+        "sticky border-b print:hidden " +
+        // Only the document that can actually change ground gets the crossfade,
+        // so every other caller's class list is what it was.
+        (glassOverHero ? "transition-colors duration-300 " : "") +
+        (glass
+          ? "border-white/30 bg-white/60 backdrop-blur-xl backdrop-saturate-150 "
+          : "border-neutral-200 bg-white/85 backdrop-blur-md ") +
         (offsetTop > 0 ? "z-20" : "z-50")
       }
       style={{ top: offsetTop }}
@@ -138,7 +177,9 @@ export function ProposalChrome({
                 "whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors " +
                 (activeId === it.id
                   ? "bg-neutral-900 text-white"
-                  : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900")
+                  : glass
+                    ? "text-neutral-700 hover:bg-white/70 hover:text-neutral-900"
+                    : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900")
               }
             >
               {it.label}
@@ -150,7 +191,12 @@ export function ProposalChrome({
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={() => window.print()}
-            className="hidden items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700 transition hover:bg-neutral-50 sm:inline-flex"
+            className={
+              "hidden items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium text-neutral-700 transition sm:inline-flex " +
+              (glass
+                ? "border-white/60 bg-white/40 hover:bg-white/70"
+                : "border-neutral-200 hover:bg-neutral-50")
+            }
           >
             <Printer className="size-4" /> PDF
           </button>

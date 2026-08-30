@@ -37,11 +37,25 @@ export function Cover({
   name,
   pitch,
   photoUrl = "/img/solar.jpg",
+  underChrome = false,
 }: {
   s: SolarProposalSnapshot;
   name: string;
   pitch: CoverPitch;
   photoUrl?: string;
+  /**
+   * Run the photograph up BEHIND the sticky nav instead of starting below it.
+   *
+   * The bar is frosted glass over this section (see `glassOverHero` on
+   * ProposalChrome) and glass with nothing behind it is just a white stripe —
+   * the two settings are one decision made in two files. The section takes back
+   * the height it borrows and pads its content past the bar, so the card still
+   * centres in the part of the cover anybody can see.
+   *
+   * Off when a banner is stacked between the two, which would be the thing the
+   * cover slid under.
+   */
+  underChrome?: boolean;
 }) {
   return (
     <section
@@ -49,9 +63,15 @@ export function Cover({
       data-chapter
       className={cn(
         "relative flex scroll-mt-[var(--proposal-chrome-h)] items-center overflow-hidden bg-neutral-950",
-        "min-h-[calc(100svh-var(--proposal-chrome-h))]",
-        "px-5 py-14 sm:px-10 sm:py-16 lg:px-16",
+        "px-5 pb-14 sm:px-10 sm:pb-16 lg:px-16",
         "print:min-h-[9.2in]",
+        underChrome
+          ? [
+              "-mt-[var(--proposal-nav-h)] print:mt-0",
+              "min-h-[calc(100svh-var(--proposal-chrome-h)+var(--proposal-nav-h))]",
+              "pt-[calc(var(--proposal-nav-h)+3.5rem)] sm:pt-[calc(var(--proposal-nav-h)+4rem)]",
+            ]
+          : ["min-h-[calc(100svh-var(--proposal-chrome-h))]", "pt-14 sm:pt-16"],
       )}
     >
       {/* ── the photograph, edge to edge ─────────────────────────────────── */}

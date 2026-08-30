@@ -172,6 +172,7 @@ const PRINT_CSS = `
   #proposal-root [data-section="cover"] {
     min-height: 0;
     height: 8.5in;
+    margin-top: 0;
     padding: 0.7in;
     align-items: center;
     /* The chapter rule above centres every sheet's content, which on a flex ROW

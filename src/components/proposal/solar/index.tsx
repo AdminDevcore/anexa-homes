@@ -417,6 +417,9 @@ function SolarPvProposalView({
         // Everything pinned above a chapter, so a jump link lands the chapter
         // below the chrome instead of behind it.
         ["--proposal-chrome-h" as string]: `${chromeOffset + PROPOSAL_NAV_PX}px`,
+        // The bar's own height, on its own: the cover borrows exactly this much
+        // to run up behind the glass, and gives exactly this much back.
+        ["--proposal-nav-h" as string]: `${PROPOSAL_NAV_PX}px`,
       }}
     >
       <PrintStyles />
@@ -438,6 +441,7 @@ function SolarPvProposalView({
         logoUrl={s.company.logoUrl}
         navItems={navItems}
         offsetTop={chromeOffset}
+        glassOverHero={!superseded}
       />
 
       {superseded && (
@@ -448,7 +452,7 @@ function SolarPvProposalView({
       )}
 
       {/* ── 1 · COVER ─────────────────────────────────────────────────────── */}
-      <Cover s={s} name={name} pitch={pitch} />
+      <Cover s={s} name={name} pitch={pitch} underChrome={!superseded} />
 
       {/* ── 2 · TODAY → TOMORROW ──────────────────────────────────────────
           The old document argued this twice: a "headline" chapter that repeated
