@@ -155,26 +155,44 @@ const PRINT_CSS = `
   #proposal-root [data-print-layout="stack"] [data-chapter-head] h2 { font-size: 2.1rem; }
 
   /* ── the cover ──────────────────────────────────────────────────────────
-     One sheet exactly: type on the left, the photograph as a full-height plate
-     on the right.
+     One sheet exactly: the photograph fills the whole page box and the copy
+     rides on it in a card.
 
-     The two columns are spelled out HERE rather than left to the 'lg' variant
-     the screen uses, because a print layout does not resolve its media queries
+     The inset is spelled out HERE rather than left to the 'lg' variant the
+     screen uses, because a print layout does not resolve its media queries
      against the page box: an 11in-wide sheet still lays out under the same
-     breakpoint the 8.5in one did, so 'lg:grid-cols-*' never fires and the
-     photograph fell into a second row — off the bottom of a fixed-height
-     section and straight over the chapter behind it. Anything a printed page
-     needs from a breakpoint has to be written out. */
+     breakpoint the 8.5in one did, so no 'lg:*' utility ever fires. Anything a
+     printed page needs from a breakpoint has to be written out.
+
+     THE CARD'S TRANSLUCENCY IS DIALLED UP FOR PAPER. Chrome does not render
+     backdrop-filter when printing, so a 75%-white panel prints as flat 75%
+     white over an undiffused photograph and the type lands on roof shingles.
+     0.93 keeps the picture reading through the panel without the blur doing
+     any of the work. */
   #proposal-root [data-section="cover"] {
     min-height: 0;
     height: 8.5in;
-    padding: 0;
-    grid-template-columns: 7fr 5fr;
+    padding: 0.7in;
+    align-items: center;
+    /* The chapter rule above centres every sheet's content, which on a flex ROW
+       would push the card into the middle of the photograph — away from the
+       side the scrim darkens for it. The cover takes its own alignment back. */
+    justify-content: flex-start;
   }
-  #proposal-root [data-section="cover"] > div { min-height: 0; }
-  #proposal-root [data-section="cover"] > div:first-child { padding: 0.5in 0.45in 0.5in 0.7in; }
-  #proposal-root [data-section="cover"] h1 { font-size: 3.4rem; line-height: 0.96; }
   #proposal-root [data-section="cover"] img { height: 100%; }
+  #proposal-root [data-cover-card] {
+    width: 5.35in;
+    max-width: 5.35in;
+    padding: 0.42in 0.44in;
+    background: rgba(255, 255, 255, 0.93);
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  #proposal-root [data-section="cover"] h1 { font-size: 2.6rem; line-height: 0.98; }
+  /* Prepared · Reference · Consultant are one line or they are three: the flex
+     row wraps a whole item at a time, and 2rem of gutter is enough to push the
+     consultant onto a line of its own on a card this wide. */
+  #proposal-root [data-cover-meta] { column-gap: 1.5rem; }
 
   /* ── seams ──────────────────────────────────────────────────────────────
      Where a chapter is genuinely longer than a sheet, it breaks at a place

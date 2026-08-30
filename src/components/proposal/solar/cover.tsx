@@ -21,10 +21,12 @@ export function article(kw: number): "A" | "An" {
 /**
  * The cover.
  *
- * Editorial paper rather than the full-bleed photograph it used to be: type on
- * the left at display size, the photograph demoted to a plate on the right. The
- * old cover put four stat tiles over a dark image and then repeated three of
- * them one screen later — the tiles are gone and the specs are one line.
+ * The photograph runs the full width of the sheet and the copy sits on top of
+ * it in a small, half-transparent white card. Two earlier covers are buried
+ * here: a full-bleed photo with four stat tiles burned into the dark (the tiles
+ * repeated three of their own figures one screen later), and an editorial split
+ * that demoted the photograph to a plate on the right. This keeps the picture
+ * whole and keeps the type on paper — the card IS the paper.
  *
  * What the cover PROMISES is decided by `coverPitch`, not here. See that module
  * for why a fixed "your new monthly payment" cover is a lie on a real class of
@@ -46,72 +48,84 @@ export function Cover({
       data-section="cover"
       data-chapter
       className={cn(
-        "relative grid scroll-mt-[var(--proposal-chrome-h)] items-stretch",
+        "relative flex scroll-mt-[var(--proposal-chrome-h)] items-center overflow-hidden bg-neutral-950",
         "min-h-[calc(100svh-var(--proposal-chrome-h))]",
-        "lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]",
+        "px-5 py-14 sm:px-10 sm:py-16 lg:px-16",
         "print:min-h-[9.2in]",
       )}
     >
-      {/* ── type side ───────────────────────────────────────────────────── */}
-      <div className="flex flex-col justify-center px-6 py-16 sm:px-10 sm:py-20 lg:py-24">
-        <div className="mx-auto w-full max-w-2xl lg:mx-0 lg:ml-auto lg:pr-14">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--proposal-accent)]">
-            Your solar proposal
-          </p>
+      {/* ── the photograph, edge to edge ─────────────────────────────────── */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={photoUrl}
+        alt=""
+        className="absolute inset-0 size-full object-cover [print-color-adjust:exact] [-webkit-print-color-adjust:exact]"
+      />
+      {/* A wash under the card only. A bright sky behind a 75%-white panel
+          leaves its edge nowhere to land and the card stops reading as an
+          object; this darkens the side it sits on and fades out well before
+          the far edge, so the photograph is still the photograph. */}
+      <div
+        aria-hidden
+        className={cn(
+          "absolute inset-0 bg-gradient-to-r from-neutral-950/45 via-neutral-950/15 to-transparent",
+          "[print-color-adjust:exact] [-webkit-print-color-adjust:exact]",
+        )}
+      />
 
-          <h1 className="mt-6 font-display text-[clamp(2.8rem,7vw,4.9rem)] font-semibold leading-[0.95] tracking-[-0.03em] text-neutral-950 text-balance">
-            {/* Same rule as the comparison's heading, and the largest type on
-                the document, so it matters most here: a prepaid lease does not
-                give the household title to the hardware, and the claim stands
-                down to one that is true of every product — see `ownershipNote`
-                on SnapshotFinancing. */}
-            {s.financing.ownershipNote ? "Power from your own roof" : "Own your power"}
-            {name ? `, ${name}` : ""}.
-          </h1>
+      {/* ── the card ─────────────────────────────────────────────────────── */}
+      <div
+        data-cover-card
+        className={cn(
+          "relative w-full max-w-[30rem] rounded-2xl px-6 py-7 sm:px-8 sm:py-9",
+          "bg-white/75 backdrop-blur-xl",
+          "ring-1 ring-white/55 shadow-[0_28px_70px_-28px_rgba(2,6,23,0.65)]",
+          "[print-color-adjust:exact] [-webkit-print-color-adjust:exact]",
+        )}
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[var(--proposal-accent)]">
+          Your solar proposal
+        </p>
 
-          <p className="mt-6 max-w-[42ch] text-lg leading-relaxed text-neutral-600">
-            {article(s.system.sizeKwDc)}{" "}
-            <strong className="font-semibold text-neutral-900">
-              {s.system.sizeKwDc.toFixed(2)} kW
-            </strong>{" "}
-            system for{" "}
-            <span className="text-neutral-900">{s.customer.address}</span>, sized to cover{" "}
-            <strong className="font-semibold text-neutral-900">
-              {pctWhole(s.system.offsetPct)}
-            </strong>{" "}
-            of what your home uses.
-          </p>
+        <h1 className="mt-4 font-display text-[clamp(2.1rem,4vw,3rem)] font-semibold leading-[0.97] tracking-[-0.03em] text-neutral-950 text-balance">
+          {/* Same rule as the comparison's heading, and the largest type on
+              the document, so it matters most here: a prepaid lease does not
+              give the household title to the hardware, and the claim stands
+              down to one that is true of every product — see `ownershipNote`
+              on SnapshotFinancing. */}
+          {s.financing.ownershipNote ? "Power from your own roof" : "Own your power"}
+          {name ? `, ${name}` : ""}.
+        </h1>
 
-          <div className="mt-10">
-            <Pitch pitch={pitch} s={s} />
-          </div>
+        <p className="mt-4 text-[0.95rem] leading-relaxed text-neutral-700">
+          {article(s.system.sizeKwDc)}{" "}
+          <strong className="font-semibold text-neutral-900">
+            {s.system.sizeKwDc.toFixed(2)} kW
+          </strong>{" "}
+          system for <span className="text-neutral-900">{s.customer.address}</span>, sized to cover{" "}
+          <strong className="font-semibold text-neutral-900">{pctWhole(s.system.offsetPct)}</strong>{" "}
+          of what your home uses.
+        </p>
 
-          <div className="mt-10 h-px bg-neutral-900/12" />
-
-          <dl className="mt-6 flex flex-wrap gap-x-10 gap-y-4">
-            <Meta k="Prepared">
-              {new Date(s.generatedAt).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </Meta>
-            <Meta k="Reference">
-              <span className="tabular-nums">{s.reference}</span>
-            </Meta>
-            {s.representative && <Meta k="Your consultant">{s.representative.name}</Meta>}
-          </dl>
+        <div className="mt-7">
+          <Pitch pitch={pitch} s={s} />
         </div>
-      </div>
 
-      {/* ── plate ───────────────────────────────────────────────────────── */}
-      <div className="relative min-h-[16rem] overflow-hidden bg-neutral-950 lg:min-h-0">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={photoUrl}
-          alt=""
-          className="size-full object-cover [print-color-adjust:exact] [-webkit-print-color-adjust:exact]"
-        />
+        <div className="mt-7 h-px bg-neutral-900/15" />
+
+        <dl data-cover-meta className="mt-5 flex flex-wrap gap-x-8 gap-y-3">
+          <Meta k="Prepared">
+            {new Date(s.generatedAt).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            })}
+          </Meta>
+          <Meta k="Reference">
+            <span className="tabular-nums">{s.reference}</span>
+          </Meta>
+          {s.representative && <Meta k="Your consultant">{s.representative.name}</Meta>}
+        </dl>
       </div>
     </section>
   );
@@ -120,8 +134,10 @@ export function Cover({
 function Meta({ k, children }: { k: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-400">{k}</dt>
-      <dd className="mt-1 text-sm font-medium text-neutral-900">{children}</dd>
+      {/* A shade darker than the neutral-400 this used on solid paper: the panel
+          is see-through, so every muted grey on it is sitting on a photograph. */}
+      <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500">{k}</dt>
+      <dd className="mt-1 text-[0.8rem] font-medium text-neutral-900">{children}</dd>
     </div>
   );
 }
@@ -136,7 +152,7 @@ function Pitch({ pitch, s }: { pitch: CoverPitch; s: SolarProposalSnapshot }) {
      * properly in chapter 4 where its assumptions sit beside it.
      */
     return (
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+      <dl className="grid grid-cols-3 gap-x-4 gap-y-5">
         <CoverFact k="System size" v={`${s.system.sizeKwDc.toFixed(2)} kW`} />
         <CoverFact k="Year one" v={kwh(s.system.year1ProductionKwh)} />
         <CoverFact k="Of your usage" v={pctWhole(s.system.offsetPct)} />
@@ -147,9 +163,9 @@ function Pitch({ pitch, s }: { pitch: CoverPitch; s: SolarProposalSnapshot }) {
   const { todayCents, afterCents } = pitch;
   return (
     <div>
-      <BillSwap todayCents={todayCents} afterCents={afterCents} />
+      <BillSwap todayCents={todayCents} afterCents={afterCents} compact />
       {pitch.kind === "cash-then" && pitch.priceCents != null && (
-        <p className="mt-5 text-sm leading-relaxed text-neutral-600">
+        <p className="mt-4 text-[0.82rem] leading-relaxed text-neutral-700">
           After one payment of{" "}
           <strong className="font-semibold tabular-nums text-neutral-900">
             {usd(pitch.priceCents)}
@@ -163,9 +179,9 @@ function Pitch({ pitch, s }: { pitch: CoverPitch; s: SolarProposalSnapshot }) {
 
 function CoverFact({ k, v }: { k: string; v: string }) {
   return (
-    <div className="border-t border-neutral-900/12 pt-3">
-      <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400">{k}</dt>
-      <dd className="mt-1.5 font-display text-2xl font-semibold tabular-nums tracking-[-0.02em] text-neutral-950">
+    <div className="border-t border-neutral-900/15 pt-2.5">
+      <dt className="text-[9px] font-semibold uppercase tracking-[0.14em] text-neutral-500">{k}</dt>
+      <dd className="mt-1.5 font-display text-[1.35rem] font-semibold tabular-nums tracking-[-0.02em] text-neutral-950">
         {v}
       </dd>
     </div>
@@ -213,7 +229,7 @@ export function BillSwap({
     >
       {rows.map(([label, cents, good]) => (
         <React.Fragment key={label}>
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
             {label}
           </dt>
           <div
