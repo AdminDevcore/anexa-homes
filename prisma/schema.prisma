@@ -1595,6 +1595,12 @@ model DocumentTemplate {
   // landed in before routing existed, so existing templates keep their behaviour
   // without a backfill.
   folderKey    String?
+  // Belongs to the closeout packet sent at install completion — the deal's
+  // "Send final docs to customer" button sends every template carrying this
+  // flag as ONE envelope, in `createdAt` order. Creation order is the packet
+  // order deliberately: it is stable, it needs no second column, and it needs
+  // no reordering UI for a set that is three documents long.
+  finalPacket  Boolean              @default(false)
   active       Boolean              @default(true)
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt

@@ -8,9 +8,11 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { requireCan, can } from "@/server/rbac/guards";
+import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { putObject } from "@/server/storage";
 import { packageDestinations } from "@/lib/deal-folders";
+import { finalPacketTemplates } from "./final-docs";
 import {
   sendForSignature,
   resendSignatureRequest,
@@ -105,6 +107,69 @@ export async function sendDocumentsAction(input: SendDocumentsInput) {
       title: result.title,
       links: result.links,
     };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Failed to send." };
+  }
+}
+
+/**
+ * Send the closeout packet to the homeowner — the deal's "Send final docs to
+ * customer".
+ *
+ * The packet is not chosen here and not chosen on the job: it is whichever
+ * templates carry `finalPacket`, so the person standing on a finished install
+ * taps once and the right paperwork goes. Everything goes as ONE envelope, for
+ * the same reason `sendDocumentsAction` does — a customer closing one job
+ * should sign once.
+ *
+ * The customer is the only signer. `Lead` stores `coOwnerName` but no co-owner
+ * email, so there is no second address to send to; this is the same rule the
+ * `send_for_signature` automation action follows, and the reason a rule you
+ * write in Settings and this button produce the same envelope.
+ *
+ * Authorisation is `sendForSignature`'s: `requireCan(create, Document)` plus
+ * the lead scope. The lookup below is scoped too, so a deal outside the
+ * viewer's scope is "not found" here rather than leaking a name into an error.
+ */
+export async function sendFinalDocsAction(leadId: string) {
+  const user = await requireUser();
+  if (!can(user, "create", "Document")) return { ok: false as const, error: "Not allowed." };
+
+  const lead = await prisma.lead.findFirst({
+    where: { AND: [{ id: leadId }, listScope(user, "Lead") as Prisma.LeadWhereInput] },
+    select: { id: true, firstName: true, lastName: true, email: true },
+  });
+  if (!lead) return { ok: false as const, error: "Deal not found." };
+
+  const email = lead.email?.trim();
+  // A signature request with no address is a document sent nowhere. Refused
+  // rather than sent, for the reason the automation action refuses it too.
+  if (!email) return { ok: false as const, error: "This deal has no email address on file." };
+
+  const templates = await finalPacketTemplates(user.companyId);
+  if (templates.length === 0) {
+    return {
+      ok: false as const,
+      error: "No documents are marked as final documents yet.",
+    };
+  }
+
+  try {
+    const result = await sendForSignature(user, {
+      templateIds: templates.map((t) => t.id),
+      leadId: lead.id,
+      signers: [
+        {
+          role: "customer",
+          name: `${lead.firstName} ${lead.lastName}`.trim(),
+          email,
+          order: 1,
+        },
+      ],
+    });
+    revalidatePath(`/portal/leads/${lead.id}`);
+    revalidatePath("/portal/documents");
+    return { ok: true as const, packageId: result.packageId, title: result.title };
   } catch (e) {
     return { ok: false as const, error: e instanceof Error ? e.message : "Failed to send." };
   }
@@ -450,6 +515,10 @@ const updateTemplateSchema = z.object({
   name: z.string().trim().min(1, "Name is required.").max(120),
   // "" from an unset <select> means "no destination", which is Contract.
   folderKey: z.string().optional().or(z.literal("")),
+  // Whether this document travels with the closeout packet the deal's "Send
+  // final docs to customer" sends. Optional so a caller that predates the
+  // control leaves the flag as it found it.
+  finalPacket: z.boolean().optional(),
 });
 
 /**
@@ -483,9 +552,18 @@ export async function updateTemplateAction(input: z.infer<typeof updateTemplateS
     return { ok: false as const, error: "Unknown folder." };
   }
 
+  // The packet is a solar idea: only the solar deal page sends one, and only
+  // solar's editor offers the control. Ignoring the flag on a roofing template
+  // means a stray payload cannot put roofing paperwork in a packet nothing
+  // sends.
+  const finalPacket =
+    template.vertical === "solar" && parsed.data.finalPacket !== undefined
+      ? { finalPacket: parsed.data.finalPacket }
+      : {};
+
   await prisma.documentTemplate.update({
     where: { id: template.id },
-    data: { name: parsed.data.name, folderKey },
+    data: { name: parsed.data.name, folderKey, ...finalPacket },
   });
 
   revalidatePath("/portal/documents");

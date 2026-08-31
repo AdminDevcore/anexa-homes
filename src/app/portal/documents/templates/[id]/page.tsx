@@ -9,6 +9,7 @@ import { TemplateBuilder } from "@/components/esign/template-builder";
 import { TemplateSettings } from "@/components/esign/template-settings";
 import { foldersFor, packageDestinations } from "@/lib/deal-folders";
 import { buildFieldCatalog } from "@/server/modules/esign/autofill";
+import { finalPacketTemplates } from "@/server/modules/esign/final-docs";
 
 export const metadata = { title: "Template" };
 
@@ -34,6 +35,12 @@ export default async function TemplateEditorPage({
     select: { key: true, label: true, entity: true },
   });
   const catalog = buildFieldCatalog(customDefs);
+
+  // Where this document sits in the closeout packet, so the tick box can say
+  // "2nd of 3" rather than leaving the order to be guessed. Asked only on solar,
+  // because only solar sends a packet — roofing's editor is unchanged.
+  const packet = template.vertical === "solar" ? await finalPacketTemplates(user.companyId) : [];
+  const packetPosition = packet.findIndex((t) => t.id === template.id);
 
   const body = (template.body as unknown as { page: number; type: string; text: string; x: number; y: number }[]) ?? [];
   const pages = (template.pages as unknown as { width: number; height: number }[]) ?? [];
@@ -80,6 +87,17 @@ export default async function TemplateEditorPage({
         templateId={template.id}
         initialName={template.name}
         initialFolderKey={template.folderKey}
+        finalPacket={
+          template.vertical === "solar"
+            ? {
+                checked: template.finalPacket,
+                // -1 when it is not in the packet yet; the control then
+                // describes what ticking it would do instead of a position.
+                position: packetPosition,
+                total: packet.length,
+              }
+            : null
+        }
         // The packages folder is already the default option, so it is not
         // offered a second time under its own name — two entries that do the
         // same thing only raise the question of how they differ.

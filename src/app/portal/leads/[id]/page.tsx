@@ -11,6 +11,7 @@ import {
   Users,
   ClipboardCheck,
   DollarSign,
+  FileSignature,
   Satellite,
   Sun,
   FolderOpen,
@@ -83,6 +84,9 @@ import { DealSummaryPanel } from "@/components/portal/deal-summary-panel";
 import { ClaimStatusSelect } from "@/components/portal/claim-status-select";
 import { HomeownerCard } from "@/components/portal/homeowner-card";
 import { Card, Section } from "@/components/portal/deal-ui";
+import { FinalDocsPanel } from "@/components/portal/final-docs-panel";
+import { finalPacketTemplates } from "@/server/modules/esign/final-docs";
+import { resolveFinalDocs } from "@/lib/final-docs";
 import { DealSlides, type DealSlideDef } from "@/components/portal/deal-slides";
 import { getScopeForLead, listScopeTemplate } from "@/server/modules/scope/queries";
 import { getEstimateForLead, getEstimateStarterData } from "@/server/modules/estimates/queries";
@@ -255,6 +259,23 @@ export default async function LeadDetailPage({
   // what the rep standing at the house needs to see, and the deal's Survey
   // folder now shows them there.
   const photoChecklists = await getProjectPhotoChecklists(user.companyId, project?.id ?? null);
+  // The closeout packet, and where this deal's copy of it stands. Solar only —
+  // roofing sends no packet, so it asks for nothing and renders nothing.
+  const finalDocsTemplates = isSolarDeal ? await finalPacketTemplates(user.companyId) : [];
+  // `documentPackages` arrives newest-first, which is the order resolveFinalDocs
+  // reads: the answer to "did they sign?" is always about the copy that went
+  // out last.
+  const finalDocsState = resolveFinalDocs(
+    lead.documentPackages.map((d) => ({
+      id: d.id,
+      templateId: d.templateId,
+      status: d.status,
+      signedFileId: d.signedFileId,
+      sentAt: d.sentAt ? d.sentAt.toISOString() : null,
+      completedAt: d.completedAt ? d.completedAt.toISOString() : null,
+    })),
+    finalDocsTemplates.map((t) => t.id),
+  );
   // Anyone active on the team can be put on an install. Deliberately not
   // filtered to `installer`: the office books a PM onto a tricky job and a
   // manager onto a first install, and a picker that hides them is a picker
@@ -1393,6 +1414,22 @@ export default async function LeadDetailPage({
 
                     <Section icon={ClipboardCheck} label="QC Checklist" tone="solar">
                       <QcChecklistEditor projectId={project.id} items={qcItems} />
+                    </Section>
+
+                    {/* The last thing the job does: the paperwork the homeowner
+                        signs once the system is in. It sits with the install
+                        rather than in the documents grid because the person who
+                        sends it is the person who has just finished the
+                        install — and the answer he is waiting on is whether it
+                        came back signed. */}
+                    <Section icon={FileSignature} label="Final documents" tone="solar">
+                      <FinalDocsPanel
+                        leadId={lead.id}
+                        templates={finalDocsTemplates}
+                        state={finalDocsState}
+                        customerEmail={lead.email}
+                        canSend={can(user, "create", "Document")}
+                      />
                     </Section>
                   </>
                 )}
