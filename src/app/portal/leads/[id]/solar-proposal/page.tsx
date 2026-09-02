@@ -431,8 +431,6 @@ export default async function SolarProposalBuilderPage({
         // and otherwise the plain default sticker, which on a company with no
         // target is the same figure by another name.
         defaultBasePpwCents={settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null}
-        minPpwCents={settings.minPpwCents}
-        maxPpwCents={settings.maxPpwCents}
         creditRates={settings.creditRates}
         // Which credits this job earns. A deal with no financing row yet has
         // nothing saved, and the ordinary case — all three — is what a fresh

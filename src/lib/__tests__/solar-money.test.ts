@@ -9,7 +9,6 @@ import {
   priceStoredPurchase,
   grossPpwFromNet,
   basePpwFromSticker,
-  bandPpwCents,
   underBaseFloor,
   type FinalPpwCap,
   year1Production,
@@ -37,8 +36,6 @@ const A: SolarAssumptions = {
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
-  minPpwCents: 150,
-  maxPpwCents: 800,
 };
 
 // ---------------------------------------------------------------------------
@@ -423,18 +420,22 @@ describe("a rep cannot generate a nonsense proposal", () => {
     expect(canGenerate(validateFinance(leaseWithRate, A))).toBe(false);
   });
 
-  it("bounds come from settings, so a market can widen them", () => {
-    // A $9.00/W BASE, stickered through an 18% fee. The band is judged on the
-    // base, so that is the figure to put outside it — 900 was a sticker here
-    // until the two sides were made to compare the same number.
+  it("no longer bounds the price per watt company-wide", () => {
+    // A $9.00/W BASE, stickered through an 18% fee, used to be refused by the
+    // company's Min/Max $/W band. That band went on 2026-09-02: what a deal may
+    // price at belongs to the LOAN PRODUCT, and the only margin rule left is
+    // the partner's own floor. Nothing else about this deal is wrong, so it
+    // generates.
     const f: FinanceForValidation = {
       product: "loan", grossPpwCents: grossPpwFromNet(900, 18)!, dealerFeePct: 18, contractPriceCents: 5_000_000,
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
       downPaymentCents: null, loanMonthlyPaymentCents: 27_400,
       aprPct: 6.99, loanTermMonths: 300,
     };
-    expect(canGenerate(validateFinance(f, A))).toBe(false);
-    expect(canGenerate(validateFinance(f, { ...A, maxPpwCents: 1000 }))).toBe(true);
+    expect(canGenerate(validateFinance(f, A))).toBe(true);
+    // …and the same deal on a partner demanding more margin than it leaves is
+    // still refused, by the rule that owns the question.
+    expect(canGenerate(validateFinance({ ...f, minBasePpwCents: 1000 }, A))).toBe(false);
   });
 
   it("BLOCKS a loan that is missing the figures the lender issued", () => {
@@ -487,7 +488,7 @@ describe("a rep cannot generate a nonsense proposal", () => {
       loanTermMonths: 360,
       fromRateSheet: true,
     };
-    const issues = validateFinance(amos, { ...A, minPpwCents: 150, maxPpwCents: 800 });
+    const issues = validateFinance(amos, A);
     expect(canGenerate(issues)).toBe(true);
     expect(issues.map((i) => i.code)).not.toContain("pricing.dealer_fee_implausible");
     expect(issues.map((i) => i.code)).not.toContain("financing.loan_apr_missing");
@@ -507,7 +508,7 @@ describe("a rep cannot generate a nonsense proposal", () => {
       rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
       downPaymentCents: null, loanMonthlyPaymentCents: 16_806, aprPct: 0, loanTermMonths: 360,
     };
-    const issues = validateFinance(typed, { ...A, minPpwCents: 150, maxPpwCents: 800 });
+    const issues = validateFinance(typed, A);
     expect(issues.map((i) => i.code)).toContain("pricing.dealer_fee_implausible");
     expect(canGenerate(issues)).toBe(false);
   });
@@ -1051,7 +1052,7 @@ describe("a lender's minimum price per watt floors the BASE, not the sticker", (
   });
 });
 
-describe("the company band and the lender floor, at the validation layer", () => {
+describe("the lender floor, at the validation layer", () => {
   const loan = (over: Partial<FinanceForValidation> = {}): FinanceForValidation => ({
     product: "loan", grossPpwCents: grossPpwFromNet(287, 18)!, dealerFeePct: 18,
     contractPriceCents: 3_500_000,
@@ -1062,22 +1063,17 @@ describe("the company band and the lender floor, at the validation layer", () =>
   });
   const codes = (f: FinanceForValidation) => validateFinance(f, A).map((i) => i.code);
 
-  it("judges the company band on the BASE, so a high fee no longer trips it", () => {
-    // $5.00/W base on a 45% programme stickers at $9.09/W. The band is
-    // $1.50–$8.00 and the base is comfortably inside it; the sticker is not,
-    // and comparing that one blocked a deal the builder had shown as fine.
-    const f = loan({ grossPpwCents: grossPpwFromNet(500, 45)!, dealerFeePct: 45 });
-    expect(basePpwFromSticker(f.grossPpwCents, 45)).toBe(500);
-    expect(f.grossPpwCents).toBeGreaterThan(A.maxPpwCents);
-    expect(codes(f)).not.toContain("pricing.ppw_out_of_range");
-    expect(canGenerate(validateFinance(f, A))).toBe(true);
-  });
-
-  it("still blocks a base genuinely outside the band", () => {
+  it("asks nothing company-wide about the price per watt any more", () => {
+    // A $5.00/W base on a 45% programme stickers at $9.09/W, and a $1.20 base
+    // is very cheap. Both used to be judged against one company band; neither
+    // is judged at all now, because a price is a property of the product it is
+    // sold on. The FLOOR below is the rule that survived.
+    expect(codes(loan({ grossPpwCents: grossPpwFromNet(500, 45)!, dealerFeePct: 45 })))
+      .not.toContain("pricing.ppw_out_of_range");
     expect(codes(loan({ grossPpwCents: grossPpwFromNet(120, 18)!, dealerFeePct: 18 })))
-      .toContain("pricing.ppw_out_of_range");
+      .not.toContain("pricing.ppw_out_of_range");
     expect(codes(loan({ grossPpwCents: grossPpwFromNet(900, 18)!, dealerFeePct: 18 })))
-      .toContain("pricing.ppw_out_of_range");
+      .not.toContain("pricing.ppw_out_of_range");
   });
 
   it("BLOCKS a deal leaving less than the lender's minimum", () => {
@@ -1104,136 +1100,6 @@ describe("the company band and the lender floor, at the validation layer", () =>
       downPaymentCents: null, loanMonthlyPaymentCents: null, minBasePpwCents: 300,
     };
     expect(codes(lease)).not.toContain("pricing.below_lender_floor");
-  });
-});
-
-/**
- * The company's band, on the one partner whose base nobody sets.
- *
- * THE DEFECT, in the exact numbers it shipped in: Amos sells at a flat $5.50/W
- * on a 65% fee, so the whole job leaves $1.93/W. Put $5,250 of trenching and a
- * main-panel upgrade on an 11 kW deal and $0.48/W of that goes to the extra
- * work, leaving a base of $1.45/W — under the company's $1.50 minimum, so the
- * proposal refused to generate. Nothing was mispriced. The deal carried adders,
- * and on a flat partner adders come out of the base by construction, so every
- * Amos job over about $4,700 of extra work was blocked with no box a rep could
- * change to release it.
- *
- * This is the THIRD time this band has been asked of a number whose meaning
- * moved: first the sticker instead of the base, then the base before the cap
- * bit, now the base after the adders came out of it.
- */
-describe("the company band is asked of a number the rep can actually move", () => {
-  // $5.50/W flat, 65% fee, 11 kW, $5,250 inside the partner's price.
-  const AMOS_FLAT = {
-    dealerFeePct: 65,
-    maxFinalPpwCents: 550,
-    finalPpwMode: "flat" as const,
-  };
-  // What `capStickerToFinalPpw` solves the system sticker down to, which is
-  // what lands on the finance row and is what every enforcer reads.
-  const capped = capStickerToFinalPpw({
-    stickerPpwCents: grossPpwFromNet(300, 65)!,
-    maxFinalPpwCents: 550,
-    mode: "flat",
-    systemSizeKwDc: 11,
-    dealerFeePct: 65,
-    adderTotalCents: 525_000,
-  });
-
-  it("reproduces the block: the residual base really is under the floor", () => {
-    // Not a straw man — this is the number the old rule compared.
-    expect(basePpwFromSticker(capped.stickerPpwCents, 65)).toBeLessThan(150);
-    expect(basePpwFromSticker(capped.stickerPpwCents, 65)).toBe(145);
-  });
-
-  it("measures a flat partner on the gross, which the adders cannot move", () => {
-    const band = bandPpwCents({ stickerPpwCents: capped.stickerPpwCents, ...AMOS_FLAT });
-    // $5.50 less a 65% fee. The Gross row already on the price card.
-    expect(band).toBe(193);
-    expect(band).toBeGreaterThanOrEqual(150);
-  });
-
-  it("gives the SAME answer whatever the adders are, which is the whole point", () => {
-    const at = (adderTotalCents: number) =>
-      bandPpwCents({
-        stickerPpwCents: capStickerToFinalPpw({
-          stickerPpwCents: grossPpwFromNet(300, 65)!,
-          maxFinalPpwCents: 550,
-          mode: "flat",
-          systemSizeKwDc: 11,
-          dealerFeePct: 65,
-          adderTotalCents,
-        }).stickerPpwCents,
-        ...AMOS_FLAT,
-      });
-    // A bare deal, a trenching job, and a very heavy one all leave the same
-    // $1.93 — because the customer pays $5.50/W in every one of them.
-    expect(at(0)).toBe(193);
-    expect(at(525_000)).toBe(193);
-    expect(at(1_200_000)).toBe(193);
-  });
-
-  it("still fails a flat partner whose own price leaves the company too little", () => {
-    // $2.00/W flat on a 65% fee leaves $0.70/W for the whole job. That is a
-    // real problem with the partner, and the band is right to say so.
-    const thin = capStickerToFinalPpw({
-      stickerPpwCents: grossPpwFromNet(300, 65)!,
-      maxFinalPpwCents: 200,
-      mode: "flat",
-      systemSizeKwDc: 11,
-      dealerFeePct: 65,
-      adderTotalCents: 0,
-    });
-    expect(
-      bandPpwCents({
-        stickerPpwCents: thin.stickerPpwCents,
-        dealerFeePct: 65,
-        maxFinalPpwCents: 200,
-        finalPpwMode: "flat",
-      })
-    ).toBeLessThan(150);
-  });
-
-  it("leaves every other lender exactly where it was", () => {
-    // A ceiling is not a flat price: the rep still sets the base under it, so
-    // the band goes on reading the base and an adder still costs the customer.
-    const cap = { dealerFeePct: 18, maxFinalPpwCents: 550, finalPpwMode: "cap" as const };
-    const sticker = grossPpwFromNet(287, 18)!;
-    expect(bandPpwCents({ stickerPpwCents: sticker, ...cap })).toBe(287);
-    expect(basePpwFromSticker(sticker, 18)).toBe(287);
-    // …and with no partner rule recorded at all.
-    expect(bandPpwCents({ stickerPpwCents: sticker, dealerFeePct: 18 })).toBe(287);
-    // …and flat mode with no figure behind it is not a rule either.
-    expect(
-      bandPpwCents({ stickerPpwCents: sticker, dealerFeePct: 18, finalPpwMode: "flat" })
-    ).toBe(287);
-  });
-
-  it("generation is no longer blocked on the deal that reported this", () => {
-    const f: FinanceForValidation = {
-      product: "loan",
-      grossPpwCents: capped.stickerPpwCents,
-      dealerFeePct: 65,
-      contractPriceCents: 6_054_000,
-      maxFinalPpwCents: 550,
-      finalPpwMode: "flat",
-      rateMillsPerKwh: null, monthlyPaymentCents: null, escalatorPct: null, termYears: null,
-      downPaymentCents: null, loanMonthlyPaymentCents: 16_817,
-      aprPct: 0, loanTermMonths: 360, fromRateSheet: true,
-    };
-    expect(validateFinance(f, A).map((i) => i.code)).not.toContain("pricing.ppw_out_of_range");
-  });
-
-  it("a flat partner with no figure behind it falls back to the base, never to a guess", () => {
-    expect(
-      bandPpwCents({
-        stickerPpwCents: capped.stickerPpwCents,
-        dealerFeePct: 65,
-        maxFinalPpwCents: null,
-        finalPpwMode: "flat",
-      })
-    ).toBe(basePpwFromSticker(capped.stickerPpwCents, 65));
   });
 });
 

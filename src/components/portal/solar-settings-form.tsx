@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -56,8 +57,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
     defaultBatteryQty: String(settings.defaultBatteryQty),
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
-    minPpw: (settings.minPpwCents / 100).toFixed(2),
-    maxPpw: (settings.maxPpwCents / 100).toFixed(2),
     creditItcPct: String(settings.creditRates.itcPct),
     creditEnergyCommunityPct: String(settings.creditRates.energyCommunityPct),
     creditDomesticContentPct: String(settings.creditRates.domesticContentPct),
@@ -91,8 +90,6 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
       defaultBatteryQty: f.defaultBatteryQty.trim() === "" ? 1 : Number(f.defaultBatteryQty),
       minOffsetPct: Number(f.minOffsetPct),
       maxOffsetPct: Number(f.maxOffsetPct),
-      minPpwCents: Math.round(Number(f.minPpw) * 100),
-      maxPpwCents: Math.round(Number(f.maxPpw) * 100),
       // Blank is zero, and zero means the bonus is not claimed at all — the
       // row is dropped from the customer's page rather than printed as "0%".
       creditItcPct: f.creditItcPct.trim() === "" ? 0 : Number(f.creditItcPct),
@@ -178,12 +175,26 @@ export function SolarSettingsForm({ settings }: { settings: SolarSettingsView })
           Guard rails a rep cannot quote outside of. A proposal breaching these cannot be generated
           at all — this is what stops a five-figure offset reaching a homeowner.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2">
           <NumField label="Min offset %" value={f.minOffsetPct} onChange={(v) => set("minOffsetPct", v)} />
           <NumField label="Max offset %" value={f.maxOffsetPct} onChange={(v) => set("maxOffsetPct", v)} />
-          <NumField label="Min $/W" value={f.minPpw} onChange={(v) => set("minPpw", v)} step="0.01" />
-          <NumField label="Max $/W" value={f.maxPpw} onChange={(v) => set("maxPpw", v)} step="0.01" />
         </div>
+        {/* THE MIN/MAX $/W BAND USED TO BE THE OTHER HALF OF THIS ROW.
+            Removed 2026-09-02. What a deal may price at is a property of the
+            LOAN PRODUCT, not of the whole app: one universal band was asked
+            about three different numbers as pricing grew caps, flat partners
+            and adders, and each time it silently blocked real deals — an Amos
+            job over about $4,700 of extra work could not be generated at all,
+            with no box a rep could change. The floor now lives per partner, on
+            Settings → Lenders → Pricing, beside the ceiling it has to clear. */}
+        <p className="text-xs text-muted-foreground">
+          A price-per-watt floor is set per financing partner, next to that partner&rsquo;s own
+          ceiling, on{" "}
+          <Link href="/portal/settings/solar-lenders" className="underline underline-offset-2">
+            Lenders
+          </Link>
+          . There is no company-wide $/W band.
+        </p>
       </section>
 
       <section className="space-y-3 rounded-xl border border-border bg-card p-5">

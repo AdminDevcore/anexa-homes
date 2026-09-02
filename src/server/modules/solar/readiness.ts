@@ -37,7 +37,7 @@ export async function readSolarReadiness(
         // this being null rather than needing a rule of its own.
         lender: {
           select: {
-            minBasePpwCents: true, finalPpwMode: true, maxFinalPpwCents: true,
+            minBasePpwCents: true,
             minBasePricePerBatteryCents: true,
             // Whether this partner funds an array with no storage on it.
             batteryRule: true,
@@ -210,10 +210,6 @@ export async function readSolarReadiness(
         aprPct: finance.aprPct,
         loanTermMonths: finance.loanTermMonths,
         minBasePpwCents: design.lender?.minBasePpwCents ?? null,
-        // Only so the company's band is measured on a number a rep can move —
-        // on a flat partner the base is a residual. See `bandPpwCents`.
-        finalPpwMode: design.lender?.finalPpwMode ?? null,
-        maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
         // Null on a cash deal — no lender, therefore no programme, which the
         // validator reads as "nothing to check".
         contractAdjustment: design.lender

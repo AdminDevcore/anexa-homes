@@ -26,8 +26,6 @@ const A: SolarAssumptions = {
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
-  minPpwCents: 150,
-  maxPpwCents: 800,
 };
 
 const DESIGN = {

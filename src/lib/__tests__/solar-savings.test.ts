@@ -24,8 +24,6 @@ const A: SolarAssumptions = {
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
-  minPpwCents: 150,
-  maxPpwCents: 800,
 };
 
 describe("production accounts for the roof it is actually going on", () => {

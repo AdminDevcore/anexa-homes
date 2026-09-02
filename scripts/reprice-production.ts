@@ -106,8 +106,6 @@ async function main() {
           defaultDealerFeePct: row.defaultDealerFeePct,
           minOffsetPct: row.minOffsetPct,
           maxOffsetPct: row.maxOffsetPct,
-          minPpwCents: row.minPpwCents,
-          maxPpwCents: row.maxPpwCents,
         }
       : SOLAR_ASSUMPTION_DEFAULTS;
     settingsCache.set(companyId, view);

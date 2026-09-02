@@ -5,7 +5,6 @@ import { Check, Minus, Pencil, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
-  bandPpwCents,
   basePpwFromSticker,
   capStickerToFinalPpw,
   capStickerToFinalUnit,
@@ -48,8 +47,6 @@ export function SystemPriceCard({
   systemSizeKwDc,
   basePpwCents,
   defaultPpwCents,
-  minPpwCents,
-  maxPpwCents,
   adderTotalCents,
   onTopAdderTotalCents = 0,
   quotedFeePct,
@@ -65,8 +62,6 @@ export function SystemPriceCard({
   basePpwCents: number | null;
   /** The company's figure, for the reset link and the "you are off default" note. */
   defaultPpwCents: number | null;
-  minPpwCents: number;
-  maxPpwCents: number;
   /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
   /**
@@ -267,26 +262,6 @@ export function SystemPriceCard({
   const customerFinalPpw = customerPriced?.finalPpwCents ?? null;
 
   const offDefault = defaultPpwCents != null && basePpwCents != null && basePpwCents !== defaultPpwCents;
-  /**
-   * THE SAME NUMBER THE SERVER BLOCKS ON. Twice now this note and readiness
-   * have measured the band on different figures and a rep was told to carry on
-   * and then refused at generate; `bandPpwCents` is the one definition, and on
-   * a flat partner it reads the gross rather than a base that is only what the
-   * adders left behind.
-   */
-  const bandPpw =
-    basePpwCents == null
-      ? null
-      : bandPpwCents({
-          // No usable fee to gross up by means the sticker IS the base — the
-          // same stand-down `pricePurchase` makes for the identical input.
-          stickerPpwCents:
-            customerPpw ?? grossPpwFromNet(basePpwCents, quotedFeePct ?? 0) ?? basePpwCents,
-          dealerFeePct: quotedFeePct ?? 0,
-          maxFinalPpwCents: quotedMaxFinalPpwCents,
-          finalPpwMode: quotedFinalPpwMode ?? null,
-        });
-  const outOfBand = bandPpw != null && (bandPpw < minPpwCents || bandPpw > maxPpwCents);
 
   /**
    * What this deal actually leaves the company, after the fee AND after the cap.
@@ -514,15 +489,10 @@ export function SystemPriceCard({
       </div>
 
       <footer className="space-y-2 border-t border-border/70 bg-muted/20 px-4 py-2.5">
-        {/* "Not a lock" was untrue: readiness BLOCKS on this band and always
-            has, so a rep was told to carry on and then refused at generate. */}
-        {outOfBand && (
-          <p className="text-[11px] text-amber-700 dark:text-amber-500">
-            Outside the company&rsquo;s ${(minPpwCents / 100).toFixed(2)}–$
-            {(maxPpwCents / 100).toFixed(2)}/W band. The proposal will not generate until this
-            is inside it.
-          </p>
-        )}
+        {/* THE COMPANY-WIDE $/W BAND USED TO WARN HERE.
+            Gone 2026-09-02: what a deal may price at belongs to the loan
+            product, so the only margin rule left is the partner's own floor
+            below — which is the one readiness and the re-price also ask. */}
         {belowFloor && (
           <p className="text-[11px] font-medium text-destructive">
             This leaves ${((keptBasePpwCents ?? 0) / 100).toFixed(2)}/W before the lender&rsquo;s

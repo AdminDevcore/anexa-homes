@@ -774,8 +774,6 @@ export function SolarFinancePanel({
   lenderId: initialLenderId,
   products,
   defaultBasePpwCents,
-  minPpwCents,
-  maxPpwCents,
   systemType,
   batteryQty,
   rebateCatalogue,
@@ -807,8 +805,6 @@ export function SolarFinancePanel({
   /** The company's base price per watt, which a fresh deal opens on. */
   defaultBasePpwCents: number | null;
   /** The company's guard rails. A price outside them warns; it never blocks. */
-  minPpwCents: number;
-  maxPpwCents: number;
   /**
    * What this deal sells. On `storage` every rate on this screen is per
    * BATTERY, not per watt: there is no array for a $/W figure to be per, and
@@ -1374,8 +1370,6 @@ export function SolarFinancePanel({
         systemSizeKwDc={systemSizeKwDc}
         basePpwCents={basePpwCents}
         defaultPpwCents={defaultBasePpwCents}
-        minPpwCents={minPpwCents}
-        maxPpwCents={maxPpwCents}
         adderTotalCents={adderTotalCents}
         onTopAdderTotalCents={onTopAdderTotalCents}
         quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}

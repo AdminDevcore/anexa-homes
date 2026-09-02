@@ -48,8 +48,6 @@ const settingsSchema = z.object({
   defaultBatteryQty: z.number().int().min(1).max(20).optional(),
   minOffsetPct: z.number().min(0).max(200),
   maxOffsetPct: z.number().min(0).max(500),
-  minPpwCents: z.number().int().min(0).max(2000),
-  maxPpwCents: z.number().int().min(0).max(5000),
   // The federal credits, for the contract-adjustment ladder. Statute, so they
   // are typed rather than compiled in. Zero is meaningful — it means the
   // company does not quote that bonus at all and the row is dropped from the
@@ -74,7 +72,6 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid settings.");
   const d = parsed.data;
   if (d.minOffsetPct >= d.maxOffsetPct) return fail("Minimum offset must be below the maximum.");
-  if (d.minPpwCents >= d.maxPpwCents) return fail("Minimum PPW must be below the maximum.");
 
   // No incentive is quoted anywhere in the product, so saving settings also
   // clears anything a legacy row still carries. Leaving a stale 30% sitting in
@@ -432,16 +429,23 @@ export async function saveSolarProviderAction(input: z.infer<typeof providerSche
     if (!existing) return fail("Provider not found.");
   }
 
+  // The id comes back so the screen can OPEN what was just added — adding a
+  // provider is the first step of recording its terms, not an end in itself.
+  let id: string;
   try {
     if (d.id) {
-      await prisma.solarProvider.update({
+      const row = await prisma.solarProvider.update({
         where: { id: d.id },
         data: { name, ...(d.position == null ? {} : { position: d.position }) },
+        select: { id: true },
       });
+      id = row.id;
     } else {
-      await prisma.solarProvider.create({
+      const row = await prisma.solarProvider.create({
         data: { companyId: user.companyId, kind: d.kind, name, position: d.position ?? 0 },
+        select: { id: true },
       });
+      id = row.id;
     }
   } catch {
     // The unique index is the enforcement; this is the message for it.
@@ -449,7 +453,7 @@ export async function saveSolarProviderAction(input: z.infer<typeof providerSche
   }
 
   revalidatePath("/portal/settings/solar-providers");
-  return ok();
+  return { ok: true as const, id };
 }
 
 /**
@@ -924,7 +928,9 @@ export async function upsertSolarEquipmentAction(
     );
   }
 
-  await prisma.$transaction(async (tx) => {
+  // The id comes back so the catalogue can OPEN what was just added — adding an
+  // item is the first step of filling one in, not an end in itself.
+  const savedId = await prisma.$transaction(async (tx) => {
     // Only one active default per kind. Demote first so the partial unique
     // index never sees two.
     if (d.isDefault && d.isActive !== false) {
@@ -940,13 +946,17 @@ export async function upsertSolarEquipmentAction(
       });
       if (!existing) throw new Error("Not found.");
       await tx.solarEquipment.update({ where: { id }, data: d });
-    } else {
-      await tx.solarEquipment.create({ data: { companyId: user.companyId, ...d } });
+      return id;
     }
+    const row = await tx.solarEquipment.create({
+      data: { companyId: user.companyId, ...d },
+      select: { id: true },
+    });
+    return row.id;
   });
 
   revalidatePath("/portal/settings/solar-equipment");
-  return ok();
+  return { ok: true as const, id: savedId };
 }
 
 /**

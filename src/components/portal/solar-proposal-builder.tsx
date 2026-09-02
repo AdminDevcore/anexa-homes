@@ -111,8 +111,6 @@ export function SolarProposalBuilder({
   lenderId,
   lenderProducts,
   defaultBasePpwCents,
-  minPpwCents,
-  maxPpwCents,
   creditRates,
   creditClaims,
   adderCatalogue,
@@ -178,8 +176,6 @@ export function SolarProposalBuilder({
   /** The company's base price per watt, which a deal nobody has priced opens on. */
   defaultBasePpwCents: number | null;
   /** The company's price band. Outside it warns; it never blocks a save. */
-  minPpwCents: number;
-  maxPpwCents: number;
   /** The company's federal-credit percentages — see SolarFinancePanel. */
   creditRates: CreditRates;
   creditClaims: CreditClaims;
@@ -305,8 +301,6 @@ export function SolarProposalBuilder({
               lenderId={lenderId}
               products={lenderProducts}
               defaultBasePpwCents={defaultBasePpwCents}
-              minPpwCents={minPpwCents}
-              maxPpwCents={maxPpwCents}
               creditRates={creditRates}
               creditClaims={creditClaims}
               adderCatalogue={adderCatalogue}

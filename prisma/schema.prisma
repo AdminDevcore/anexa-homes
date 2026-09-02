@@ -3198,6 +3198,20 @@ model SolarSettings {
   // These are the guard rails; see src/lib/solar-validation.ts.
   minOffsetPct Float @default(0)
   maxOffsetPct Float @default(150)
+
+  // ── RETIRED 2026-09-02: the company-wide Min/Max $/W band ───────────────
+  // Nothing reads or writes these any more. What a deal may price at is a
+  // property of the LOAN PRODUCT, not of the app: one universal band was asked
+  // about three different numbers as pricing grew caps, flat partners and
+  // adders, and each time it silently blocked real deals — an Amos job over
+  // about $4,700 of extra work could not be generated at all, with no box a
+  // rep could change. The floor lives per partner now, on
+  // SolarLender.minBasePpwCents, beside the ceiling it has to clear.
+  //
+  // The columns are kept rather than dropped: they hold every company's last
+  // stated band, which is the only record of what was being enforced before,
+  // and dropping two NOT NULL columns off a live table buys nothing back.
+  // DO NOT re-wire them. Add a per-lender rule instead.
   minPpwCents  Int   @default(150)
   maxPpwCents  Int   @default(800)
 

@@ -313,8 +313,6 @@ function thirdPartyRow(
           defaultDealerFeePct: 0,
           minOffsetPct: 0,
           maxOffsetPct: 0,
-          minPpwCents: 0,
-          maxPpwCents: 0,
         }
       )
     : null;

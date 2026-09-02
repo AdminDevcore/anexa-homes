@@ -25,8 +25,6 @@ export const SOLAR_ASSUMPTION_DEFAULTS: SolarAssumptions = {
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
-  minPpwCents: 150,
-  maxPpwCents: 800,
 };
 
 export type SolarSettingsView = SolarAssumptions & {
@@ -123,8 +121,6 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     defaultDealerFeePct: row.defaultDealerFeePct,
     minOffsetPct: row.minOffsetPct,
     maxOffsetPct: row.maxOffsetPct,
-    minPpwCents: row.minPpwCents,
-    maxPpwCents: row.maxPpwCents,
     targetNetPpwCents: row.targetNetPpwCents,
     homeValueUpliftPct: row.homeValueUpliftPct,
     defaultBatteryQty: row.defaultBatteryQty,

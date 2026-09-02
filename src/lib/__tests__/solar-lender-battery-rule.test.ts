@@ -30,8 +30,6 @@ const A: SolarAssumptions = {
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
-  minPpwCents: 150,
-  maxPpwCents: 800,
 };
 
 /** A grid-tied PV design with nothing wrong with it except the missing battery. */

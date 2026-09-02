@@ -17,7 +17,7 @@ import { generateProposalVersion } from "./proposal-generate";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { annualUsageFromBill, effectiveUsageKwh, monthlyBillFromUsage } from "@/lib/solar-energy";
-import { bandPpwCents, basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
+import { basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ValidationIssue } from "@/lib/solar-validation";
 
@@ -259,7 +259,7 @@ export async function repriceProposalAction(
     select: {
       systemSizeKwDc: true,
       lenderId: true,
-      lender: { select: { minBasePpwCents: true, finalPpwMode: true, maxFinalPpwCents: true } },
+      lender: { select: { minBasePpwCents: true } },
     },
   });
   const finance = await prisma.solarFinance.findUnique({ where: { leadId } });
@@ -331,21 +331,9 @@ export async function repriceProposalAction(
     // the deal changed and only the document refused.
     const isPurchase = row.product === "cash" || row.product === "loan";
     if (isPurchase) {
-      // TWO DIFFERENT NUMBERS ON PURPOSE. The company's band asks what the
-      // partner's price leaves for the job; the lender's floor asks what is
-      // left for the SYSTEM once the extra work is paid for. On every lender
-      // but a flat one they are the same figure — see `bandPpwCents`.
-      const bandPpw = bandPpwCents({
-        stickerPpwCents: row.grossPpwCents,
-        dealerFeePct: row.dealerFeePct,
-        maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
-        finalPpwMode: design.lender?.finalPpwMode ?? null,
-      });
-      if (bandPpw < assumptions.minPpwCents || bandPpw > assumptions.maxPpwCents) {
-        return fail(
-          `$${(bandPpw / 100).toFixed(2)}/W before the lender's cut is outside the allowed range of $${(assumptions.minPpwCents / 100).toFixed(2)}–$${(assumptions.maxPpwCents / 100).toFixed(2)}.`
-        );
-      }
+      // ONE margin rule, and it belongs to the LENDER. The company-wide Min/Max
+      // $/W band that used to be asked here as well went on 2026-09-02 — what a
+      // deal may price at is a property of the loan product, not of the app.
       const floor = design.lender?.minBasePpwCents ?? null;
       if (underBaseFloor(row.grossPpwCents, row.dealerFeePct, floor)) {
         return fail(

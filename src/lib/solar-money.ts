@@ -47,8 +47,6 @@ export type SolarAssumptions = {
   defaultDealerFeePct: number;
   minOffsetPct: number;
   maxOffsetPct: number;
-  minPpwCents: number;
-  maxPpwCents: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -604,61 +602,6 @@ export function basePpwFromSticker(stickerPpwCents: number, dealerFeePct: number
       ? dealerFeePct / 100
       : 0;
   return Math.round(stickerPpwCents * (1 - f));
-}
-
-/**
- * The $/W the COMPANY'S OWN Min/Max band is measured against.
- *
- * The band is a guard on what a rep prices a system at. That only means
- * something where the rep sets the price — and on a FLAT partner they do not.
- * Amos sells at $5.50/W whatever is typed, so `capStickerToFinalPpw` solves the
- * system sticker back down until system + adders lands on $5.50, and the base
- * that comes out the other side is not a price anybody chose: it is what is
- * left after the extra work is paid for out of a fixed number.
- *
- * Which made the band bite on the adders. Amos at 65% leaves $1.93/W for the
- * whole job; put $5,250 of trenching and a panel upgrade on an 11 kW deal and
- * $0.48/W of that goes to the extra work, leaving $1.45/W — under a $1.50
- * company minimum, so the proposal would not generate. Not because anything was
- * mispriced: because the deal carried adders at all. Every Amos job over about
- * $4,700 of extra work was blocked, permanently, with no box a rep could change
- * to release it. That is the third time this band has been asked of a number
- * whose meaning moved underneath it — see `basePpwFromSticker` for the second.
- *
- * So on a flat partner it is asked of the GROSS: base plus what the adders
- * leave, which is the partner's fixed price less the fee — $1.93/W here, the
- * figure already printed on the price card's Gross row. Stable, it cannot be
- * moved by attaching extra work, and it still fails honestly if a partner's
- * flat price genuinely leaves the company under its own floor.
- *
- * Everywhere else this is `basePpwFromSticker` exactly as before.
- *
- * WHETHER THE COMPANY IS KEEPING ENOUGH once the extra work is paid for is a
- * real question, and it already has an answer that is not this one:
- * `underBaseFloor`, per lender, deliberately unset on Amos because a floor it
- * can never clear blocks every deal on it.
- */
-export function bandPpwCents(input: {
-  /** The system sticker this deal prices at — already lowered by any partner rule. */
-  stickerPpwCents: number;
-  dealerFeePct: number;
-  /** The partner's own figure, cents per watt. Null or ≤ 0 means no rule at all. */
-  maxFinalPpwCents?: number | null;
-  /** `flat` when that figure IS the price rather than a ceiling. */
-  finalPpwMode?: FinalPpwMode | null;
-}): number {
-  const base = basePpwFromSticker(input.stickerPpwCents, input.dealerFeePct);
-  const flat = input.maxFinalPpwCents;
-  if (input.finalPpwMode !== "flat" || flat == null || !(flat > 0)) return base;
-
-  // The partner's fixed price less the fee, and nothing else in it.
-  //
-  // Deliberately NOT base-plus-what-the-adders-leave, which is the same figure
-  // and was the first way this was written: adding two separately rounded
-  // per-watt numbers drifts a cent at some adder totals, so the answer moved
-  // with the adders after all — by one cent, on a rule whose entire purpose is
-  // that they cannot move it. Read off the partner instead and it is exact.
-  return basePpwFromSticker(flat, input.dealerFeePct);
 }
 
 /**

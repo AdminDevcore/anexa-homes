@@ -28,8 +28,6 @@ const finance = (over: Partial<FinanceForValidation> = {}): FinanceForValidation
   loanMonthlyPaymentCents: null,
   aprPct: 0,
   loanTermMonths: 360,
-  maxFinalPpwCents: 550,
-  finalPpwMode: "flat",
   fromRateSheet: true,
   hasPaymentFactor: false,
   ...over,
@@ -140,20 +138,13 @@ describe("the customer's price still has to be there", () => {
     );
   });
 
-  it("blocks a price per watt outside the company's band", () => {
-    // Measured on an ordinary partner. Under a FLAT one the band reads the
-    // published rate instead — the base a rep types there is a residual, not a
-    // price — which is `bandPpwCents`'s own rule and predates this feature.
+  it("blocks a deal priced at nothing per watt, adjustment or not", () => {
+    // The company-wide $/W band that used to catch this went on 2026-09-02 —
+    // pricing belongs to the loan product. A zero price is still not a price,
+    // and the contract-value check is what says so.
     expect(
-      codes(
-        finance({
-          grossPpwCents: 0,
-          maxFinalPpwCents: null,
-          finalPpwMode: null,
-          contractAdjustment: COMPLETE,
-        })
-      )
-    ).toContain("pricing.ppw_out_of_range");
+      codes(finance({ grossPpwCents: 0, contractPriceCents: 0, contractAdjustment: COMPLETE }))
+    ).toContain("pricing.contract_price_zero");
   });
 });
 

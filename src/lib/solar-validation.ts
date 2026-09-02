@@ -1,8 +1,7 @@
 import type { FinanceProduct } from "@prisma/client";
 import {
-  bandPpwCents,
+  basePpwFromSticker,
   underBaseFloor,
-  type FinalPpwMode,
   type SolarAssumptions,
 } from "./solar-money";
 import { resolveUtilityRateMills } from "./solar-energy";
@@ -96,8 +95,8 @@ export function groupIssues(issues: ValidationIssue[]): { group: IssueGroup; lab
 export type DesignForValidation = {
   /**
    * What this deal sells. OPTIONAL and `pv` when absent, so a caller not yet
-   * updated is judged exactly as it was — the safe direction, and the same one
-   * `maxFinalPpwCents` already takes on the finance shape below.
+   * updated is judged exactly as it was — the safe direction for every optional
+   * field on these input shapes.
    */
   systemType?: "pv" | "pv_storage" | "storage";
   batteryQty?: number;
@@ -157,18 +156,6 @@ export type FinanceForValidation = {
    * because it belongs to the partner this one deal was designed for.
    */
   minBasePpwCents?: number | null;
-  /**
-   * Whether this deal's LENDER states a ceiling or a flat price, and the adders
-   * riding inside it — both only so the company's own band is measured on a
-   * number the rep can actually move. See `bandPpwCents`.
-   */
-  finalPpwMode?: FinalPpwMode | null;
-  /**
-   * The partner's own $/W figure. Optional: absent, the band falls back to the
-   * base exactly as it read before flat partners existed, which is the safe
-   * direction for a caller that has not been updated.
-   */
-  maxFinalPpwCents?: number | null;
   contractPriceCents: number;
   rateMillsPerKwh: number | null;
   monthlyPaymentCents: number | null;
@@ -597,40 +584,19 @@ export function validateFinance(
   }
 
   if (f.product === "cash" || f.product === "loan") {
-    // THE BAND IS ON THE BASE, which is not the number stored on the row.
+    // WHAT THIS DEAL LEAVES THE COMPANY, which is not the number stored on the
+    // row: `grossPpwCents` is the sticker and the fee is already inside it.
     //
-    // `grossPpwCents` is the sticker — the fee is already in it — and this
-    // compared it straight against a band the builder was meanwhile applying to
-    // the base. On a low-fee lender the two are close enough that nobody
-    // noticed; on a 65% one they are three times apart, so a $2.80/W base sat
-    // inside the band on screen, stickered at $8.00/W, and hit "outside the
-    // allowed range" at generate — with no warning ever shown while it was
-    // being typed. Same number, both sides, and the discrepancy goes away.
-    // …and on a FLAT partner it is asked of the gross instead, because the base
-    // there is a residual rather than a price. `bandPpwCents` carries the whole
-    // argument, and all three enforcers of this band call it.
-    const basePpwCents = bandPpwCents({
-      stickerPpwCents: f.grossPpwCents,
-      dealerFeePct: f.dealerFeePct,
-      maxFinalPpwCents: f.maxFinalPpwCents,
-      finalPpwMode: f.finalPpwMode,
-    });
-    if (basePpwCents < a.minPpwCents || basePpwCents > a.maxPpwCents) {
-      block(
-        "pricing.ppw_out_of_range",
-        "pricing",
-        "grossPpwCents",
-        `$${(basePpwCents / 100).toFixed(2)}/W is outside the allowed range of $${(a.minPpwCents / 100).toFixed(2)}–$${(a.maxPpwCents / 100).toFixed(2)}/W.`
-      );
-    }
-    // The partner's own floor, on top of the company's. They stack and the
-    // stricter wins by simply both being asked: Settings is the floor under
-    // everything, and a lender may demand more margin but never less.
+    // There is exactly ONE margin rule now, and it belongs to the LENDER. The
+    // company-wide Min/Max $/W band that used to sit above it was removed on
+    // 2026-09-02: pricing is a property of the loan product, not of the app,
+    // and asking one universal band about it blocked real deals three separate
+    // times as the meaning of "the base" moved underneath it.
     //
-    // Asked of the base for the same reason, and it matters most here: a capped
-    // lender lowers the sticker after the fact, so the base a rep typed is not
-    // the base anyone ends up with, and the floor has to be about the second
-    // one to protect anything at all.
+    // Asked of the base, and it matters: a capped lender lowers the sticker
+    // after the fact, so the base a rep typed is not the base anyone ends up
+    // with, and the floor has to be about the second one to protect anything.
+    const basePpwCents = basePpwFromSticker(f.grossPpwCents, f.dealerFeePct);
     if (underBaseFloor(f.grossPpwCents, f.dealerFeePct, f.minBasePpwCents)) {
       block(
         "pricing.below_lender_floor",
