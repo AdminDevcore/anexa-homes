@@ -87,15 +87,15 @@ test("Send docs: nothing checked means nothing to send", async ({ page }) => {
   await page.getByRole("button", { name: /Send docs/ }).click();
   await expect(page.getByRole("button", { name: "Send document" })).toBeDisabled();
 
-  // Adding a co-borrower keeps one signer form for every checked document.
+  // Adding a co-owner keeps one signer form for every checked document.
   const dialog = page.getByRole("dialog");
   await dialog.locator("label", { hasText: "Roofing Contract" }).click();
-  await page.getByRole("button", { name: /Add co-borrower/ }).click();
-  await page.getByPlaceholder("Co-borrower name").fill("Dana Anderson");
-  await page.getByPlaceholder("Co-borrower email").fill("dana.anderson@example.com");
+  await page.getByRole("button", { name: /Add co-owner/ }).click();
+  await page.getByPlaceholder("Co-owner name").fill("Dana Anderson");
+  await page.getByPlaceholder("Co-owner email").fill("dana.anderson@example.com");
   await page.getByRole("button", { name: "Send document" }).click();
 
-  // Two signers on the one envelope: customer + co-borrower.
+  // Two signers on the one envelope: customer + co-owner.
   await expect(dialog.locator("input[readonly]")).toHaveCount(2, { timeout: 15000 });
   await page.context().clearCookies();
 });

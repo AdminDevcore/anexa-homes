@@ -122,6 +122,8 @@ export async function createLeadAction(input: LeadInput) {
       firstName: d.firstName,
       lastName: d.lastName,
       coOwnerName: d.coOwnerName || null,
+      coOwnerEmail: d.coOwnerEmail || null,
+      coOwnerPhone: d.coOwnerPhone || null,
       preferredLanguage: d.preferredLanguage || null,
       email: d.email || null,
       phone: d.phone || null,
@@ -229,6 +231,8 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       firstName: d.firstName,
       lastName: d.lastName,
       coOwnerName: d.coOwnerName || null,
+      coOwnerEmail: d.coOwnerEmail || null,
+      coOwnerPhone: d.coOwnerPhone || null,
       preferredLanguage: d.preferredLanguage || null,
       email: d.email || null,
       phone: d.phone || null,
@@ -292,6 +296,8 @@ const leadPatch = z
     firstName: z.string().min(1).max(80),
     lastName: z.string().min(1).max(80),
     coOwnerName: z.string().max(80).or(z.literal("")),
+    coOwnerEmail: z.string().email().or(z.literal("")),
+    coOwnerPhone: z.string().max(30).or(z.literal("")),
     preferredLanguage: z.string().max(40).or(z.literal("")),
     email: z.string().email().or(z.literal("")),
     phone: z.string().max(30).or(z.literal("")),
@@ -347,6 +353,8 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
   if ("firstName" in d) data.firstName = d.firstName!;
   if ("lastName" in d) data.lastName = d.lastName!;
   if ("coOwnerName" in d) data.coOwnerName = d.coOwnerName || null;
+  if ("coOwnerEmail" in d) data.coOwnerEmail = d.coOwnerEmail || null;
+  if ("coOwnerPhone" in d) data.coOwnerPhone = d.coOwnerPhone || null;
   if ("preferredLanguage" in d) data.preferredLanguage = d.preferredLanguage || null;
   if ("email" in d) data.email = d.email || null;
   if ("phone" in d) data.phone = d.phone || null;

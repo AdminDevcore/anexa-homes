@@ -25,17 +25,34 @@ import {
 import { sendDocumentAction } from "@/server/modules/esign/actions";
 
 type Template = { id: string; name: string };
-type Lead = { id: string; name: string; email: string };
+/** A deal, with the second person on its title if it has one. */
+export type SendLead = {
+  id: string;
+  name: string;
+  email: string;
+  coOwnerName?: string;
+  coOwnerEmail?: string;
+};
+/** Who signs for the company. Null when nobody is set up yet. */
+export type CompanySignerSummary = { name: string; title: string } | null;
 
 export function SendDocumentDialog({
   templates,
   leads,
+  companySigner = null,
   workspace,
   otherWorkspaces = [],
   canManageTemplates = false,
 }: {
   templates: Template[];
-  leads: Lead[];
+  leads: SendLead[];
+  /**
+   * The company's default signer, named so the sender can see whose signature
+   * is about to go on the document. Read-only: which signer actually signs is
+   * settled by the template, and changed in Settings — not talked into being
+   * somebody else at send time.
+   */
+  companySigner?: CompanySignerSummary;
   /** Label of the active workspace, e.g. "Roofing" — named in the empty states. */
   workspace?: string;
   /** Labels of the workspaces this user could switch to instead. */
@@ -48,14 +65,12 @@ export function SendDocumentDialog({
   const [leadId, setLeadId] = React.useState("");
   const [signerName, setSignerName] = React.useState("");
   const [signerEmail, setSignerEmail] = React.useState("");
-  // Optional co-borrower (signs in parallel with the customer).
+  // The co-owner. Prefilled from the deal when it has one — the office typed
+  // them in once already, and retyping is how a spouse ends up on one document
+  // and not the next.
   const [coOpen, setCoOpen] = React.useState(false);
   const [coName, setCoName] = React.useState("");
   const [coEmail, setCoEmail] = React.useState("");
-  // Optional company rep (counter-signs after the customers).
-  const [repOpen, setRepOpen] = React.useState(false);
-  const [repName, setRepName] = React.useState("");
-  const [repEmail, setRepEmail] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [links, setLinks] = React.useState<{ name: string; url: string }[] | null>(null);
 
@@ -94,10 +109,16 @@ export function SendDocumentDialog({
   function onSelectLead(id: string) {
     setLeadId(id);
     const lead = leads.find((l) => l.id === id);
-    if (lead) {
-      setSignerName(lead.name);
-      setSignerEmail(lead.email);
-    }
+    if (!lead) return;
+    setSignerName(lead.name);
+    setSignerEmail(lead.email);
+    // Opened only when there is somebody to open it for. A co-owner with a name
+    // but no email is still shown, so the gap is visible and fillable here
+    // rather than silently dropping them from the envelope.
+    const hasCo = !!(lead.coOwnerName || lead.coOwnerEmail);
+    setCoOpen(hasCo);
+    setCoName(lead.coOwnerName ?? "");
+    setCoEmail(lead.coOwnerEmail ?? "");
   }
 
   async function send() {
@@ -106,16 +127,23 @@ export function SendDocumentDialog({
       return;
     }
     if (coOpen && !coName.trim()) {
-      toast.error("Enter the co-borrower's name, or remove them.");
+      toast.error("Enter the co-owner's name, or remove them.");
       return;
     }
-    if (repOpen && !repName.trim()) {
-      toast.error("Enter the company rep's name, or remove them.");
+    if (coOpen && coName.trim() && !coEmail.trim()) {
+      toast.error("The co-owner needs an email to be sent a link, or remove them.");
       return;
     }
 
-    // Customer + co-borrower share order 1 (either may sign first); the company
-    // rep is order 2 so they counter-sign after both customers.
+    /**
+     * Customer and co-owner share order 1 — either may sign first, and making
+     * one wait on the other only stalls the document on whoever checks email
+     * less often.
+     *
+     * The company's own signature is NOT listed here. It is applied by the send
+     * itself, from the authorised signer the template names, so a rep cannot
+     * put somebody else's name on our half of a contract.
+     */
     type Signer = {
       role: "customer" | "co_customer" | "company_rep" | "witness";
       name: string;
@@ -125,11 +153,8 @@ export function SendDocumentDialog({
     const signers: Signer[] = [
       { role: "customer", name: signerName.trim(), email: signerEmail.trim(), order: 1 },
     ];
-    if (coOpen && coName.trim()) {
+    if (coOpen && coName.trim() && coEmail.trim()) {
       signers.push({ role: "co_customer", name: coName.trim(), email: coEmail.trim(), order: 1 });
-    }
-    if (repOpen && repName.trim()) {
-      signers.push({ role: "company_rep", name: repName.trim(), email: repEmail.trim(), order: 2 });
     }
 
     setPending(true);
@@ -153,9 +178,6 @@ export function SendDocumentDialog({
     setCoOpen(false);
     setCoName("");
     setCoEmail("");
-    setRepOpen(false);
-    setRepName("");
-    setRepEmail("");
   }
 
   return (
@@ -278,11 +300,11 @@ export function SendDocumentDialog({
               </div>
             </div>
 
-            {/* Co-borrower */}
+            {/* Co-owner */}
             {coOpen ? (
               <div className="space-y-3 rounded-lg border border-border p-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Co-borrower</span>
+                  <span className="text-sm font-medium">Co-owner</span>
                   <Button
                     type="button"
                     variant="ghost"
@@ -300,7 +322,7 @@ export function SendDocumentDialog({
                   <div className="space-y-1.5">
                     <Label>Name</Label>
                     <Input
-                      placeholder="Co-borrower name"
+                      placeholder="Co-owner name"
                       value={coName}
                       onChange={(e) => setCoName(e.target.value)}
                     />
@@ -308,7 +330,7 @@ export function SendDocumentDialog({
                   <div className="space-y-1.5">
                     <Label>Email</Label>
                     <Input
-                      placeholder="Co-borrower email"
+                      placeholder="Co-owner email"
                       value={coEmail}
                       onChange={(e) => setCoEmail(e.target.value)}
                     />
@@ -317,52 +339,33 @@ export function SendDocumentDialog({
               </div>
             ) : (
               <Button type="button" variant="outline" size="sm" onClick={() => setCoOpen(true)}>
-                <Plus className="size-4" /> Add co-borrower
+                <Plus className="size-4" /> Add co-owner
               </Button>
             )}
 
-            {/* Company rep */}
-            {repOpen ? (
-              <div className="space-y-3 rounded-lg border border-border p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Company rep (counter-signs last)</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => {
-                      setRepOpen(false);
-                      setRepName("");
-                      setRepEmail("");
-                    }}
-                  >
-                    <X className="size-3.5" /> Remove
-                  </Button>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label>Name</Label>
-                    <Input
-                      placeholder="Company rep name"
-                      value={repName}
-                      onChange={(e) => setRepName(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Email</Label>
-                    <Input
-                      placeholder="Company rep email"
-                      value={repEmail}
-                      onChange={(e) => setRepEmail(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <Button type="button" variant="outline" size="sm" onClick={() => setRepOpen(true)}>
-                <Plus className="size-4" /> Add company rep
-              </Button>
-            )}
+            {/* Our half of the document. Stated, not asked for. */}
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              {companySigner ? (
+                <>
+                  <p className="text-sm">
+                    Signed for us by{" "}
+                    <span className="font-medium">{companySigner.name}</span>
+                    {companySigner.title ? ` — ${companySigner.title}` : ""}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Applied automatically on any document with a company signature block. A
+                    template can name a different signer; both are changed in Settings → Authorised
+                    signers.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Nobody is set up to sign on the company&apos;s behalf. Documents with a company
+                  signature block cannot be sent until somebody is added in Settings → Authorised
+                  signers.
+                </p>
+              )}
+            </div>
 
             <DialogFooter>
               <Button onClick={send} disabled={pending} className="bg-gold text-gold-foreground hover:bg-gold/90">

@@ -1799,6 +1799,8 @@ export default async function LeadDetailPage({
               firstName: lead.firstName,
               lastName: lead.lastName,
               coOwnerName: lead.coOwnerName,
+              coOwnerEmail: lead.coOwnerEmail,
+              coOwnerPhone: lead.coOwnerPhone,
               phone: lead.phone,
               email: lead.email,
               address: lead.address,

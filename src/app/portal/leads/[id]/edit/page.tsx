@@ -42,6 +42,8 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
           firstName: lead.firstName,
           lastName: lead.lastName,
           coOwnerName: lead.coOwnerName ?? "",
+          coOwnerEmail: lead.coOwnerEmail ?? "",
+          coOwnerPhone: lead.coOwnerPhone ?? "",
           preferredLanguage: lead.preferredLanguage ?? "",
           email: lead.email ?? "",
           phone: lead.phone ?? "",

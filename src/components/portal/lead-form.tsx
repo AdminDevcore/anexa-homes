@@ -76,6 +76,8 @@ export function LeadForm({
     firstName: initial?.firstName ?? "",
     lastName: initial?.lastName ?? "",
     coOwnerName: initial?.coOwnerName ?? "",
+    coOwnerEmail: initial?.coOwnerEmail ?? "",
+    coOwnerPhone: initial?.coOwnerPhone ?? "",
     preferredLanguage: initial?.preferredLanguage ?? "",
     email: initial?.email ?? "",
     phone: initial?.phone ?? "",
@@ -153,6 +155,8 @@ export function LeadForm({
       firstName: v.firstName,
       lastName: v.lastName,
       coOwnerName: v.coOwnerName,
+      coOwnerEmail: v.coOwnerEmail,
+      coOwnerPhone: v.coOwnerPhone,
       preferredLanguage: v.preferredLanguage,
       email: v.email,
       phone: v.phone,
@@ -199,6 +203,10 @@ export function LeadForm({
           <Field label="First name" required><Input value={v.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
           <Field label="Last name" required><Input value={v.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
           <Field label="Co-owner name (if applicable)"><Input value={v.coOwnerName} onChange={(e) => set("coOwnerName", e.target.value)} /></Field>
+          {/* The address is what lets a co-owner be sent a document to sign;
+              without one they print on the contract but can never sign it. */}
+          <Field label="Co-owner email"><Input type="email" value={v.coOwnerEmail} onChange={(e) => set("coOwnerEmail", e.target.value)} /></Field>
+          <Field label="Co-owner phone"><Input value={v.coOwnerPhone} onChange={(e) => set("coOwnerPhone", e.target.value)} /></Field>
           {/* Free text with suggestions rather than a fixed <select>: the list
               a company actually serves is theirs, not ours, and a datalist
               still lets someone type "Tagalog". */}

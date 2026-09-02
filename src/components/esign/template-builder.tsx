@@ -72,6 +72,28 @@ const FIELD_DEFS: { type: FieldType; label: string; icon: React.ComponentType<{ 
 const FILLABLE: FieldType[] = ["text", "date", "checkbox"];
 const isFillable = (t: FieldType) => FILLABLE.includes(t);
 
+/**
+ * Whether leaving this field unmapped would actually print a blank.
+ *
+ * The company's own date field would not: the send stamps the day the company
+ * signature was applied. Counting it as unmapped would warn about the one thing
+ * authorised signers exist to fix, and a warning that cannot be cleared is a
+ * warning everybody learns to ignore.
+ *
+ * Signature and initials were never counted — they are not FILLABLE — so the
+ * company's marks need no special case here.
+ */
+const needsMapping = (f: { type: FieldType; signerRole: SignerRole }) =>
+  isFillable(f.type) && !(f.signerRole === "company_rep" && f.type === "date");
+
+/** How each role reads in the mapping table. "company rep" said nothing useful. */
+const ROLE_LABEL: Record<SignerRole, string> = {
+  customer: "Customer",
+  co_customer: "Co-Owner",
+  company_rep: "Company",
+  witness: "Witness",
+};
+
 export function TemplateBuilder({
   templateId,
   templateName,
@@ -141,7 +163,7 @@ export function TemplateBuilder({
   // Counts and the canvas are per document — the mapping table stays whole, so
   // an unmapped field on document 2 is still visible from document 1.
   const docFields = fields.filter((f) => docIdOf(f) === activeDocId);
-  const fillable = fields.filter((f) => isFillable(f.type));
+  const fillable = fields.filter(needsMapping);
   const mappedCount = fillable.filter((f) => f.valueToken).length;
   const unmappedCount = fillable.length - mappedCount;
 
@@ -529,11 +551,17 @@ export function TemplateBuilder({
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="customer">Customer</SelectItem>
-                  <SelectItem value="co_customer">Co-Customer</SelectItem>
-                  <SelectItem value="company_rep">Company Rep</SelectItem>
+                  <SelectItem value="co_customer">Co-Owner</SelectItem>
+                  <SelectItem value="company_rep">Company (auto-signed)</SelectItem>
                   <SelectItem value="witness">Witness</SelectItem>
                 </SelectContent>
               </Select>
+              {sel.signerRole === "company_rep" && (
+                <p className="text-xs text-muted-foreground">
+                  Filled automatically when the document is sent, from the authorised signer in
+                  Settings. Nobody is emailed a link for this one.
+                </p>
+              )}
             </div>
 
             {isFillable(sel.type) ? (
@@ -638,9 +666,8 @@ function MappingOverview({
       </div>
       <ul className="divide-y divide-border">
         {fields.map((f) => {
-          const fillable = ["text", "date", "checkbox"].includes(f.type);
           const bound = f.valueToken ? labelMap[f.valueToken] ?? f.valueToken : null;
-          const unmapped = fillable && !bound && !f.defaultValue;
+          const unmapped = needsMapping(f) && !bound && !f.defaultValue;
           return (
             <li key={f.key}>
               <button
@@ -654,14 +681,18 @@ function MappingOverview({
                 )}
                 <span className="text-xs text-muted-foreground tabular-nums">{f.page}</span>
                 <span className="capitalize">{f.label || f.type}<span className="block text-[10px] text-muted-foreground">{f.type}</span></span>
-                <span className="text-xs capitalize text-muted-foreground">{f.signerRole.replace(/_/g, " ")}</span>
+                <span className="text-xs text-muted-foreground">{ROLE_LABEL[f.signerRole]}</span>
                 <span className="min-w-0 truncate text-xs">
                   {bound ? (
                     <span className="inline-flex items-center gap-1 text-foreground"><Link2 className="size-3 text-gold" /> {bound}</span>
                   ) : f.defaultValue ? (
                     <span className="text-muted-foreground">Default: {f.defaultValue}</span>
-                  ) : fillable ? (
+                  ) : unmapped ? (
                     <span className="inline-flex items-center gap-1 text-amber-600"><AlertCircle className="size-3" /> Unmapped</span>
+                  ) : f.signerRole === "company_rep" ? (
+                    // Not "Signer fills": nobody fills it. The company's mark
+                    // and the date it was applied are stamped at send.
+                    <span className="text-muted-foreground">Auto-signed</span>
                   ) : (
                     <span className="text-muted-foreground">Signer fills</span>
                   )}

@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import Link from "next/link";
 import { updateTemplateAction } from "@/server/modules/esign/actions";
 
 /** A folder this document can file into, already narrowed to one vertical. */
@@ -35,6 +36,11 @@ export type FinalPacketState = {
 
 /** The value the Select uses for "no destination chosen" — Radix rejects "". */
 const NO_FOLDER = "__none__";
+/** Likewise for "whoever the company's default signer is". */
+const DEFAULT_SIGNER = "__default__";
+
+/** An authorised signer, as the picker offers them. */
+export type SignerOption = { id: string; name: string; title: string; isDefault: boolean };
 
 /**
  * What this template is called and where its signed document goes.
@@ -51,6 +57,9 @@ export function TemplateSettings({
   finalPacket,
   destinations,
   fallbackLabel,
+  signers,
+  initialCompanySignerId,
+  hasCompanyFields,
 }: {
   templateId: string;
   initialName: string;
@@ -59,16 +68,23 @@ export function TemplateSettings({
   destinations: DestinationOption[];
   /** Where a document goes when no folder is chosen — Contract, in both verticals. */
   fallbackLabel: string;
+  /** Everyone authorised to sign for the company. Empty until somebody is added. */
+  signers: SignerOption[];
+  initialCompanySignerId: string | null;
+  /** True when this document actually has a company signature block to fill. */
+  hasCompanyFields: boolean;
 }) {
   const router = useRouter();
   const [name, setName] = React.useState(initialName);
   const [folderKey, setFolderKey] = React.useState(initialFolderKey ?? NO_FOLDER);
   const [inPacket, setInPacket] = React.useState(finalPacket?.checked ?? false);
+  const [signerId, setSignerId] = React.useState(initialCompanySignerId ?? DEFAULT_SIGNER);
   const [pending, setPending] = React.useState(false);
 
   const dirty =
     name !== initialName ||
     (initialFolderKey ?? NO_FOLDER) !== folderKey ||
+    (initialCompanySignerId ?? DEFAULT_SIGNER) !== signerId ||
     (finalPacket ? inPacket !== finalPacket.checked : false);
 
   async function save() {
@@ -82,6 +98,7 @@ export function TemplateSettings({
       id: templateId,
       name: trimmed,
       folderKey: folderKey === NO_FOLDER ? "" : folderKey,
+      companySignerId: signerId === DEFAULT_SIGNER ? "" : signerId,
       // Left off entirely on a vertical with no packet, so the server keeps
       // whatever the column already held.
       ...(finalPacket ? { finalPacket: inPacket } : {}),
@@ -135,6 +152,50 @@ export function TemplateSettings({
         </div>
       </div>
 
+      {/*
+        * Only offered where there is something to sign.
+        *
+        * A template with no company fields has nowhere to put a signature, so a
+        * picker on it would be a setting with no effect — and the send path
+        * would ignore it, which is the worst kind of control.
+        */}
+      {hasCompanyFields && (
+        <div className="mt-4 space-y-1.5">
+          <Label htmlFor="template-signer">Signed on our behalf by</Label>
+          {signers.length === 0 ? (
+            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+              This document has a company signature block, but nobody is set up to sign it — so it
+              cannot be sent. Add somebody in{" "}
+              <Link href="/portal/settings/signers" className="underline underline-offset-2">
+                Settings → Authorised signers
+              </Link>
+              .
+            </p>
+          ) : (
+            <>
+              <Select value={signerId} onValueChange={setSignerId}>
+                <SelectTrigger id="template-signer" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_SIGNER}>{defaultSignerLabel(signers)}</SelectItem>
+                  {signers.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                      {s.title ? ` — ${s.title}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Their name, title, licence and signature are stamped in the moment this document is
+                sent — they are not emailed a link. The certificate records who applied it.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       {finalPacket && (
         <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-background p-3">
           <Checkbox
@@ -160,6 +221,12 @@ export function TemplateSettings({
       </div>
     </div>
   );
+}
+
+/** Names the default in the option, so "Company default" is never a mystery. */
+function defaultSignerLabel(signers: SignerOption[]): string {
+  const d = signers.find((s) => s.isDefault);
+  return d ? `Company default — ${d.name}` : "Company default (nobody set)";
 }
 
 /**

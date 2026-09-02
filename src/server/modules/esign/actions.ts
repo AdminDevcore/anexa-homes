@@ -13,6 +13,7 @@ import { getActiveVertical } from "@/server/auth/vertical";
 import { putObject } from "@/server/storage";
 import { packageDestinations } from "@/lib/deal-folders";
 import { finalPacketTemplates } from "./final-docs";
+import { defaultSignersForLead, HOUSEHOLD_SIGNER_SELECT } from "./household-signers";
 import {
   sendForSignature,
   resendSignatureRequest,
@@ -122,10 +123,10 @@ export async function sendDocumentsAction(input: SendDocumentsInput) {
  * the same reason `sendDocumentsAction` does — a customer closing one job
  * should sign once.
  *
- * The customer is the only signer. `Lead` stores `coOwnerName` but no co-owner
- * email, so there is no second address to send to; this is the same rule the
- * `send_for_signature` automation action follows, and the reason a rule you
- * write in Settings and this button produce the same envelope.
+ * Who signs is `defaultSignersForLead`'s answer — the customer, plus the
+ * co-owner when the deal has one with an email. The same helper answers for the
+ * `send_for_signature` automation and both send dialogs, which is what makes a
+ * rule you write in Settings and this button produce the same envelope.
  *
  * Authorisation is `sendForSignature`'s: `requireCan(create, Document)` plus
  * the lead scope. The lookup below is scoped too, so a deal outside the
@@ -137,7 +138,7 @@ export async function sendFinalDocsAction(leadId: string) {
 
   const lead = await prisma.lead.findFirst({
     where: { AND: [{ id: leadId }, listScope(user, "Lead") as Prisma.LeadWhereInput] },
-    select: { id: true, firstName: true, lastName: true, email: true },
+    select: { id: true, ...HOUSEHOLD_SIGNER_SELECT },
   });
   if (!lead) return { ok: false as const, error: "Deal not found." };
 
@@ -158,14 +159,7 @@ export async function sendFinalDocsAction(leadId: string) {
     const result = await sendForSignature(user, {
       templateIds: templates.map((t) => t.id),
       leadId: lead.id,
-      signers: [
-        {
-          role: "customer",
-          name: `${lead.firstName} ${lead.lastName}`.trim(),
-          email,
-          order: 1,
-        },
-      ],
+      signers: defaultSignersForLead(lead),
     });
     revalidatePath(`/portal/leads/${lead.id}`);
     revalidatePath("/portal/documents");
@@ -519,6 +513,9 @@ const updateTemplateSchema = z.object({
   // final docs to customer" sends. Optional so a caller that predates the
   // control leaves the flag as it found it.
   finalPacket: z.boolean().optional(),
+  // Who signs this one for us. "" means the company default. Optional for the
+  // same reason as finalPacket.
+  companySignerId: z.string().optional().or(z.literal("")),
 });
 
 /**
@@ -561,9 +558,27 @@ export async function updateTemplateAction(input: z.infer<typeof updateTemplateS
       ? { finalPacket: parsed.data.finalPacket }
       : {};
 
+  /**
+   * The named signer must be one of this company's own, or an arbitrary id
+   * reaches the column and the send resolves a stranger — the same guard the
+   * folder gets above, for the same reason.
+   */
+  let companySigner: { companySignerId: string | null } | Record<string, never> = {};
+  if (parsed.data.companySignerId !== undefined) {
+    const id = parsed.data.companySignerId || null;
+    if (id) {
+      const exists = await prisma.companySigner.findFirst({
+        where: { id, companyId: user.companyId },
+        select: { id: true },
+      });
+      if (!exists) return { ok: false as const, error: "Unknown signer." };
+    }
+    companySigner = { companySignerId: id };
+  }
+
   await prisma.documentTemplate.update({
     where: { id: template.id },
-    data: { name: parsed.data.name, folderKey, ...finalPacket },
+    data: { name: parsed.data.name, folderKey, ...finalPacket, ...companySigner },
   });
 
   revalidatePath("/portal/documents");

@@ -73,6 +73,7 @@ export async function settingsInventory(
     customFields,
     leadSources,
     documentTemplates,
+    companySigners,
     commissionRules,
     notificationRules,
     automationRules,
@@ -96,6 +97,9 @@ export async function settingsInventory(
     prisma.customFieldDef.count({ where: { companyId } }),
     prisma.leadSource.count({ where: { companyId } }),
     prisma.documentTemplate.count({ where: { companyId } }),
+    // Company-wide, like the role matrix below: a signer is a person, not a
+    // workspace setting, so this number is the same in both workspaces.
+    prisma.companySigner.count({ where: { companyId, active: true } }),
     prisma.commissionRule.count({ where: { companyId } }),
     prisma.notificationRule.count({ where: { companyId } }),
     prisma.automationRule.count({ where: { companyId } }),
@@ -173,6 +177,7 @@ export async function settingsInventory(
     custom_fields: countLabel(customFields, "field"),
     lead_sources: countLabel(leadSources, "source"),
     document_templates: countLabel(documentTemplates, "template"),
+    company_signers: { ...countLabel(companySigners, "signer"), companyWide: true },
     commission_rules: countLabel(commissionRules, "rule"),
     notification_rules: countLabel(notificationRules, "rule"),
     automations: countLabel(automationRules, "automation"),

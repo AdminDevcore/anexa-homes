@@ -8,6 +8,7 @@ import { prisma } from "@/server/db/client";
 import { ensureProposal, getProposalForBuilder } from "@/server/modules/proposals/queries";
 import { PresentationBuilder } from "@/components/portal/presentation-builder";
 import type { SendDocsTemplate, SendDocsDefaults } from "@/components/esign/send-docs-dialog";
+import { listCompanySigners } from "@/server/modules/esign/signers";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export default async function PresentationBuilderPage({ params }: { params: Prom
   let docDefaults: SendDocsDefaults | null = null;
   if (canSendDocs) {
     const vertical = await getActiveVertical(user);
-    const [templates, lead] = await Promise.all([
+    const [templates, lead, signers] = await Promise.all([
       prisma.documentTemplate.findMany({
         where: { companyId: user.companyId, active: true, vertical },
         orderBy: { name: "asc" },
@@ -39,16 +40,29 @@ export default async function PresentationBuilderPage({ params }: { params: Prom
       }),
       prisma.lead.findUnique({
         where: { id },
-        select: { firstName: true, lastName: true, email: true, coOwnerName: true },
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
+          coOwnerName: true,
+          coOwnerEmail: true,
+        },
       }),
+      listCompanySigners(user.companyId),
     ]);
+    const defaultSigner = signers.find((s) => s.active && s.isDefault) ?? null;
     docTemplates = templates;
     docDefaults = {
       customerName: lead ? `${lead.firstName} ${lead.lastName}`.trim() : data.proposal.customerName,
       customerEmail: lead?.email ?? data.customerEmail ?? "",
       coOwnerName: lead?.coOwnerName ?? null,
-      repName: user.fullName,
-      repEmail: user.email ?? "",
+      coOwnerEmail: lead?.coOwnerEmail ?? null,
+      // Named, not typed: our half of the document is applied by the send from
+      // whichever authorised signer the template resolves. The rep sending it
+      // is recorded as who applied it, on the certificate.
+      companySigner: defaultSigner
+        ? { name: defaultSigner.name, title: defaultSigner.title }
+        : null,
     };
   }
 

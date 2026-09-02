@@ -12,6 +12,7 @@ import { VERTICAL_LABEL } from "@/lib/vertical";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { ListFilter } from "@/components/portal/list-filter";
 import { SendDocumentDialog } from "@/components/esign/send-document-dialog";
+import { listCompanySigners } from "@/server/modules/esign/signers";
 import { SignatureStatusBadge, roleLabel } from "@/components/esign/signature-status-badge";
 import { ResendButton } from "@/components/esign/resend-button";
 import { NewTemplateButton } from "@/components/portal/new-template-button";
@@ -63,10 +64,22 @@ export default async function DocumentsPage() {
           where: { AND: [leadScope, { vertical }] },
           orderBy: { createdAt: "desc" },
           take: 100,
-          select: { id: true, firstName: true, lastName: true, email: true },
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            coOwnerName: true,
+            coOwnerEmail: true,
+          },
         })
       : Promise.resolve([]),
   ]);
+
+  // Named in the dialog so a rep can see whose signature goes on our half.
+  // Company-wide, so it is read once for the page rather than per deal.
+  const signers = canSend ? await listCompanySigners(user.companyId) : [];
+  const defaultSigner = signers.find((s) => s.active && s.isDefault) ?? null;
 
   return (
     <div className="space-y-6">
@@ -88,7 +101,12 @@ export default async function DocumentsPage() {
                 id: l.id,
                 name: `${l.firstName} ${l.lastName}`,
                 email: l.email ?? "",
+                coOwnerName: l.coOwnerName ?? "",
+                coOwnerEmail: l.coOwnerEmail ?? "",
               }))}
+              companySigner={
+                defaultSigner ? { name: defaultSigner.name, title: defaultSigner.title } : null
+              }
               workspace={VERTICAL_LABEL[vertical]}
               otherWorkspaces={otherWorkspaces}
               canManageTemplates={can(user, "update", "Document")}

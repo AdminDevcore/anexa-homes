@@ -10,6 +10,7 @@ import { TemplateSettings } from "@/components/esign/template-settings";
 import { foldersFor, packageDestinations } from "@/lib/deal-folders";
 import { buildFieldCatalog } from "@/server/modules/esign/autofill";
 import { finalPacketTemplates } from "@/server/modules/esign/final-docs";
+import { listCompanySigners } from "@/server/modules/esign/signers";
 
 export const metadata = { title: "Template" };
 
@@ -34,7 +35,16 @@ export default async function TemplateEditorPage({
     orderBy: [{ entity: "asc" }, { position: "asc" }],
     select: { key: true, label: true, entity: true },
   });
-  const catalog = buildFieldCatalog(customDefs);
+  /**
+   * The signers, for the "signed on our behalf by" picker AND for the field
+   * catalogue: each signer's credential lines become mappable tokens, exactly
+   * as this company's custom fields do.
+   */
+  const signers = await listCompanySigners(user.companyId);
+  const catalog = buildFieldCatalog(
+    customDefs,
+    signers.flatMap((s) => s.credentials.map((c) => ({ key: c.key, label: c.label })))
+  );
 
   // Where this document sits in the closeout packet, so the tick box can say
   // "2nd of 3" rather than leaving the order to be guessed. Asked only on solar,
@@ -107,6 +117,14 @@ export default async function TemplateEditorPage({
         fallbackLabel={
           foldersFor(template.vertical).find((f) => f.hostsPackages)?.label ?? "Contract"
         }
+        // Retired signers are not offered, but one already chosen stays in the
+        // list — otherwise the picker would silently show "Company default"
+        // for a template that names somebody, and saving would move it.
+        signers={signers
+          .filter((s) => s.active || s.id === template.companySignerId)
+          .map((s) => ({ id: s.id, name: s.name, title: s.title, isDefault: s.isDefault }))}
+        initialCompanySignerId={template.companySignerId}
+        hasCompanyFields={template.fields.some((f) => f.signerRole === "company_rep")}
       />
       <TemplateBuilder
         templateId={template.id}

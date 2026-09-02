@@ -337,6 +337,7 @@ model Company {
   customFieldDefs          CustomFieldDef[]
   documentTemplates        DocumentTemplate[]
   documentPackages         DocumentPackage[]
+  companySigners           CompanySigner[]
   commissionRules          CommissionRule[]
   commissionOverrides      CommissionOverride[]
   commissions              Commission[]
@@ -880,7 +881,15 @@ model Lead {
   lastName          String
   // Optional co-owner / co-signer on the deal (e.g. spouse). Maps to the
   // "Co-owner" autofill token + co-homeowner slots on document templates.
+  //
+  // The email is what makes them a SIGNER rather than a name on a page: a
+  // document is sent to an address, so a co-owner without one could be printed
+  // but never asked to sign. That absence is why "Send final docs" and the
+  // send_for_signature automation both used to hard-code the customer as the
+  // only signer.
   coOwnerName       String?
+  coOwnerEmail      String?
+  coOwnerPhone      String?
   /// Preferred spoken language for calls, visits and door-knocks. Free text,
   /// deliberately not an enum: which languages a company serves is business
   /// config, and an enum would need a migration every time someone adds
@@ -1575,35 +1584,91 @@ model ActivityLog {
 // Document signer (DocuSign-style)
 // ---------------------------------------------------------------------------
 
+/// Somebody authorised to sign on the company's behalf.
+///
+/// The owner signs every contract in principle and is available for none of
+/// them in practice. Before this, "our side" of a document was two boxes typed
+/// by hand at send time and a signing link posted to a colleague — so the CRM
+/// never knew who had signed, under what title, or against which licence.
+/// Storing the person means the signature block fills itself and the audit
+/// trail can name them.
+///
+/// Company-wide, not per vertical: the same person signs a roof contract and a
+/// solar install agreement. Which signer a DOCUMENT uses is settled on the
+/// template, and templates are already per vertical, so that difference is
+/// expressed where it belongs.
+model CompanySigner {
+  id            String   @id @default(uuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name          String
+  title         String?
+  email         String?
+  phone         String?
+  licenseNumber String?
+  /// Extra labelled credential lines: [{ key, label, value }]. `key` is the
+  /// slugified label FROZEN at creation — renaming a label must not orphan a
+  /// template already mapping {{signer.cred.<key>}}.
+  credentials   Json     @default("[]")
+  /// The saved signature as a PNG data URL — the same shape
+  /// `DocumentSigner.signatureData` already holds, so the PDF stamper draws it
+  /// through its existing embedPng path with no new branch.
+  signatureData String?
+  /// A separate mark for Initials fields. Falls back to `signatureData`, so a
+  /// signer who never drew one still initials rather than leaving a blank.
+  initialsData  String?
+  /// Signs anything whose template names nobody. Exactly one per company; the
+  /// action clears the others rather than a partial index doing it, because
+  /// "make this one the default" is one intent and should be one transaction.
+  isDefault     Boolean  @default(false)
+  /// Retiring a signer deactivates rather than deletes: templates may still
+  /// point at them, and sent documents quote them.
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  templates DocumentTemplate[]
+
+  @@index([companyId, active])
+  @@map("company_signers")
+}
+
 model DocumentTemplate {
-  id           String               @id @default(uuid())
-  companyId    String
-  company      Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  name         String
-  type         DocumentTemplateType @default(custom)
+  id              String               @id @default(uuid())
+  companyId       String
+  company         Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name            String
+  type            DocumentTemplateType @default(custom)
   // Vertical workspace this contract template belongs to (each has its own set).
-  vertical     Vertical             @default(roofing) @map("industry")
-  description  String?
+  vertical        Vertical             @default(roofing) @map("industry")
+  description     String?
   // Page model: array of { width, height } in PDF points. Default = US Letter pages.
-  pages        Json                 @default("[]")
+  pages           Json                 @default("[]")
   // Body content blocks rendered to PDF: [{ page, type:'heading'|'text', text, x, y }]
-  body         Json                 @default("[]")
+  body            Json                 @default("[]")
   // Storage key of an uploaded source PDF. When set, fields are stamped onto it.
-  sourcePdfKey String?
+  sourcePdfKey    String?
   // Which deal folder this document files into once signed, as a DealFolder key
   // (src/lib/deal-folders.ts). NULL means Contract — the folder every package
   // landed in before routing existed, so existing templates keep their behaviour
   // without a backfill.
-  folderKey    String?
+  folderKey       String?
   // Belongs to the closeout packet sent at install completion — the deal's
   // "Send final docs to customer" button sends every template carrying this
   // flag as ONE envelope, in `createdAt` order. Creation order is the packet
   // order deliberately: it is stable, it needs no second column, and it needs
   // no reordering UI for a set that is three documents long.
-  finalPacket  Boolean              @default(false)
-  active       Boolean              @default(true)
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  finalPacket     Boolean              @default(false)
+  // Who signs this one for us. NULL means the company's default signer, which
+  // is what every template gets until somebody says otherwise. A live pointer
+  // rather than a frozen copy: what must not move once a document is sent is
+  // the RESOLVED signer, and that is frozen into the package's signer row,
+  // field values and events instead.
+  companySignerId String?
+  companySigner   CompanySigner?       @relation(fields: [companySignerId], references: [id], onDelete: SetNull)
+  active          Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   fields    DocumentTemplateField[]
   documents DocumentTemplateDocument[]
@@ -3212,8 +3277,8 @@ model SolarSettings {
   // stated band, which is the only record of what was being enforced before,
   // and dropping two NOT NULL columns off a live table buys nothing back.
   // DO NOT re-wire them. Add a per-lender rule instead.
-  minPpwCents  Int   @default(150)
-  maxPpwCents  Int   @default(800)
+  minPpwCents Int @default(150)
+  maxPpwCents Int @default(800)
 
   updatedAt DateTime @updatedAt
 

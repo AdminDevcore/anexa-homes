@@ -57,6 +57,41 @@ export type Snapshot = {
    * package's own `templateId` is the whole answer for those.
    */
   templateIds?: string[];
+  /**
+   * Who signed this for the company, frozen at send.
+   *
+   * Frozen for the same reason `fields` is: editing a signer in Settings — a
+   * corrected licence number, a new job title, a person leaving — must not
+   * rewrite a contract that is already executed. The `{{signer.*}}` tokens all
+   * resolve from here, never from the live row.
+   *
+   * The signature IMAGES are deliberately absent: they are written once into
+   * the field values, which is where the stamper reads them, and duplicating
+   * two data URLs into every package snapshot would cost ~80 KB a send for
+   * nothing. Absent on every package sent before authorised signers existed,
+   * and on any document with no company half.
+   */
+  companySigner?: SnapshotSigner | null;
+};
+
+/** The company's signer as a package remembers them. See Snapshot.companySigner. */
+export type SnapshotSigner = {
+  id: string;
+  name: string;
+  title: string;
+  email: string;
+  phone: string;
+  license: string;
+  credentials: { key: string; label: string; value: string }[];
+  /** ISO instant the company signature was applied. */
+  signedAt: string;
+  /**
+   * The person who triggered the send, on the signer's standing authorisation
+   * — null when an automation did. This pair is what makes an auto-applied
+   * signature defensible, and it is printed on the certificate.
+   */
+  appliedBy: string | null;
+  appliedById: string | null;
 };
 
 /**
@@ -105,6 +140,18 @@ export type SignedPdfArgs = {
     // Human-readable approximate location resolved from the signer's IP when GPS
     // was not shared (e.g. "Round Rock, TX, US (via IP)").
     locationLabel?: string | null;
+    /**
+     * The company signer's job title and licence, and who applied their
+     * signature on their standing authorisation. Set only for `company_rep` —
+     * a customer signs for themselves, so there is nobody to name.
+     *
+     * Printing the pair is what makes an auto-applied signature defensible: a
+     * certificate that reads as though the owner sat down and signed, when a
+     * colleague sent it, is the first thing a dispute takes apart.
+     */
+    title?: string | null;
+    license?: string | null;
+    appliedBy?: string | null;
   }[];
   events: { type: string; actor: string | null; ip: string | null; createdAt: Date; metadata: unknown }[];
   // When provided, fields are stamped onto this existing PDF instead of generated pages.
@@ -356,16 +403,31 @@ function renderCertificate(
     const location = s.latitude != null && s.longitude != null
       ? `${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)} (GPS${s.geoAccuracy != null ? `, +/- ${Math.round(s.geoAccuracy)} m` : ""})`
       : (s.locationLabel || "Approximate location unavailable");
-    const rows: [string, string][] = [
-      ["Email", s.email || "—"],
-      ["Status", s.status === "signed" || s.signedAt ? "Signed" : (s.status ?? "—")],
-      ["Consented", fmtTs(s.consentAt)],
-      ["Viewed", fmtTs(viewedAt)],
-      ["Signed", fmtTs(s.signedAt)],
-      ["IP address", s.ip || "Not recorded"],
-      ["Device", deviceFrom(s.userAgent)],
-      ["Location", location],
-    ];
+    /**
+     * An auto-applied company signature has no browser behind it, so Viewed,
+     * Device and Location would all print "Not recorded" — six empty rows
+     * implying a failure rather than a different mechanism. It gets its own
+     * shorter card naming the authorisation instead.
+     */
+    const rows: [string, string][] = s.appliedBy !== undefined && s.appliedBy !== null
+      ? [
+          ["Title", s.title || "—"],
+          ["Licence", s.license || "—"],
+          ["Email", s.email || "—"],
+          ["Status", "Signed"],
+          ["Signed", fmtTs(s.signedAt)],
+          ["Applied by", `${s.appliedBy} (standing authorisation)`],
+        ]
+      : [
+          ["Email", s.email || "—"],
+          ["Status", s.status === "signed" || s.signedAt ? "Signed" : (s.status ?? "—")],
+          ["Consented", fmtTs(s.consentAt)],
+          ["Viewed", fmtTs(viewedAt)],
+          ["Signed", fmtTs(s.signedAt)],
+          ["IP address", s.ip || "Not recorded"],
+          ["Device", deviceFrom(s.userAgent)],
+          ["Location", location],
+        ];
 
     // Reserve the whole card so the header band never lands across a page break.
     const cardH = 17 + 16 + rows.length * 12.5 + 6;

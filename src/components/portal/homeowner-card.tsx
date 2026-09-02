@@ -47,8 +47,14 @@ import { updateLeadPatchAction } from "@/server/modules/leads/manage";
 export type HomeownerValues = {
   firstName: string;
   lastName: string;
-  /** Co-owner / co-signer on the deal, e.g. a spouse. */
+  /**
+   * Co-owner / co-signer on the deal, e.g. a spouse. The EMAIL is what makes
+   * them a signer rather than a name on a page — without one they print on the
+   * contract but are never sent a link to sign it.
+   */
   coOwnerName: string | null;
+  coOwnerEmail: string | null;
+  coOwnerPhone: string | null;
   phone: string | null;
   email: string | null;
   address: string | null;
@@ -114,6 +120,8 @@ export function HomeownerCard({
       firstName: draft.firstName.trim(),
       lastName: draft.lastName.trim(),
       coOwnerName: s(draft.coOwnerName).trim(),
+      coOwnerEmail: s(draft.coOwnerEmail).trim(),
+      coOwnerPhone: s(draft.coOwnerPhone).trim(),
       phone: s(draft.phone).trim(),
       email: s(draft.email).trim(),
       address: s(draft.address).trim(),
@@ -185,6 +193,22 @@ export function HomeownerCard({
               placeholder="Spouse or co-signer"
             />
           </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Co-owner email">
+              <Input
+                type="email"
+                value={s(draft.coOwnerEmail)}
+                onChange={(e) => set("coOwnerEmail", e.target.value)}
+                placeholder="Needed to send them documents"
+              />
+            </Field>
+            <Field label="Co-owner phone">
+              <Input
+                value={s(draft.coOwnerPhone)}
+                onChange={(e) => set("coOwnerPhone", e.target.value)}
+              />
+            </Field>
+          </div>
           <Field label="Phone">
             <Input value={s(draft.phone)} onChange={(e) => set("phone", e.target.value)} />
           </Field>
@@ -249,7 +273,16 @@ export function HomeownerCard({
           <Row
             icon={Users}
             label="Co-owner"
-            value={values.coOwnerName}
+            // Named rather than shown on its own row: the address only matters
+            // as the reason this person can be sent something, and a second
+            // empty row for every deal without a spouse is noise.
+            value={
+              values.coOwnerName
+                ? values.coOwnerEmail
+                  ? `${values.coOwnerName} · ${values.coOwnerEmail}`
+                  : `${values.coOwnerName} · no email, cannot sign`
+                : null
+            }
             copyLabel="co-owner"
             onEdit={canEdit ? open : undefined}
           />

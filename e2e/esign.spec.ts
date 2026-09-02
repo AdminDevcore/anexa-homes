@@ -55,7 +55,7 @@ test("e-sign: staff sends, customer signs, signed PDF + audit produced", async (
   await expect(page.getByRole("link", { name: /Download/ })).toBeVisible();
 });
 
-test("e-sign: send with co-borrower shows per-signer status + resend", async ({ page }) => {
+test("e-sign: send with co-owner shows per-signer status + resend", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await page.goto("/portal/documents");
   await page.getByRole("button", { name: /Send for Signature/ }).click();
@@ -66,10 +66,11 @@ test("e-sign: send with co-borrower shows per-signer status + resend", async ({ 
   await page.locator('button:has-text("Choose a lead")').click();
   await page.getByRole("option", { name: /Johnson/ }).first().click();
 
-  // Add a co-borrower as a second signer.
-  await page.getByRole("button", { name: /Add co-borrower/ }).click();
-  await page.getByPlaceholder("Co-borrower name").fill("Jane Johnson");
-  await page.getByPlaceholder("Co-borrower email").fill("jane.johnson@example.com");
+  // Add the co-owner as a second signer. On a deal that already has one on
+  // file the section opens prefilled; this lead has none, so it is added here.
+  await page.getByRole("button", { name: /Add co-owner/ }).click();
+  await page.getByPlaceholder("Co-owner name").fill("Jane Johnson");
+  await page.getByPlaceholder("Co-owner email").fill("jane.johnson@example.com");
 
   await page.getByRole("button", { name: /^Send$/ }).click();
 

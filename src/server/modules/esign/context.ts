@@ -1,4 +1,5 @@
 import { buildAutofillContext, type AutofillContext } from "./autofill";
+import type { ResolvedSigner } from "@/lib/company-signer";
 
 /**
  * The lead shape an autofill context is built from, and the builder itself.
@@ -77,6 +78,8 @@ export type LeadForCtx = {
   firstName: string;
   lastName: string;
   coOwnerName: string | null;
+  coOwnerEmail: string | null;
+  coOwnerPhone: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
@@ -111,7 +114,18 @@ export type LeadForCtx = {
   } | null;
 };
 
-export function ctxForLead(lead: LeadForCtx, company: CompanyForCtx): AutofillContext {
+/**
+ * Who signed for us, and when. Absent on a preview or on a document with no
+ * company half — the `signer.*` tokens then resolve to blanks rather than to
+ * a name nobody has authorised.
+ */
+export type SignerForCtx = { signer: ResolvedSigner | null; signedOn?: Date | null };
+
+export function ctxForLead(
+  lead: LeadForCtx,
+  company: CompanyForCtx,
+  signing?: SignerForCtx
+): AutofillContext {
   const custom: Record<string, string> = {};
   const merge = (obj: unknown) => {
     if (obj && typeof obj === "object") {
@@ -126,6 +140,8 @@ export function ctxForLead(lead: LeadForCtx, company: CompanyForCtx): AutofillCo
     firstName: lead.firstName,
     lastName: lead.lastName,
     coOwnerName: lead.coOwnerName,
+    coOwnerEmail: lead.coOwnerEmail,
+    coOwnerPhone: lead.coOwnerPhone,
     email: lead.email,
     phone: lead.phone,
     street: lead.address,
@@ -151,6 +167,8 @@ export function ctxForLead(lead: LeadForCtx, company: CompanyForCtx): AutofillCo
     companyZip: company.zip,
     companyEin: company.einTaxId,
     permit: lead.solarDesign ?? null,
+    signer: signing?.signer ?? null,
+    signedOn: signing?.signedOn ?? null,
     custom,
   });
 }

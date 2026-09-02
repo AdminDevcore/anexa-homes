@@ -9,6 +9,8 @@ function lead(over: Partial<LeadForCtx> = {}): LeadForCtx {
     firstName: "Nancy",
     lastName: "Moore",
     coOwnerName: null,
+    coOwnerEmail: null,
+    coOwnerPhone: null,
     email: null,
     phone: null,
     address: "107 Oak Street",

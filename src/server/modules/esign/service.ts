@@ -21,6 +21,8 @@ import {
   type FilledValue,
 } from "./pdf";
 import { buildEnvelopeSnapshot, buildSnapshotFromTemplate } from "./build-snapshot";
+import { resolveSignerForTemplate, signerCtxFromSnapshot, toSnapshotSigner } from "./signers";
+import { formatDate } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Send for signature (staff)
@@ -152,6 +154,30 @@ function envelopeTitle(names: string[]): string {
 }
 
 /**
+ * What our signature puts in one company field, or null to leave it to the
+ * token mapping.
+ *
+ * Only the marks and the date are filled here. A text field is either mapped to
+ * a `{{signer.*}}` token — resolved at stamp time, from the frozen snapshot —
+ * or genuinely meant to be blank, and guessing which would put a name in a
+ * box asking for something else.
+ *
+ * The date is filled only when nothing is mapped, because pdf.ts gives the
+ * token precedence for text and date fields; writing both would leave a dead
+ * value in the row that never prints.
+ */
+function companySignatureValue(
+  field: { type: string; valueToken?: string | null },
+  signer: { signatureData: string | null; initialsData: string | null },
+  at: Date
+): string | null {
+  if (field.type === "signature") return signer.signatureData;
+  if (field.type === "initials") return signer.initialsData ?? signer.signatureData;
+  if (field.type === "date" && !field.valueToken) return formatDate(at);
+  return null;
+}
+
+/**
  * Create and send a signature envelope with NO session.
  *
  * The automation engine reaches this directly. It cannot go through
@@ -224,6 +250,47 @@ export async function createSignaturePackage(args: {
 
   const primary = templates[0];
 
+  /**
+   * Our half of the document signs itself.
+   *
+   * The signer comes from the first template in the bundle that names one, and
+   * otherwise from the company default — a bundle is one envelope with one
+   * company signature, so it can only have one signer, and the first explicit
+   * choice is the least surprising of the available answers.
+   */
+  const companyFields = snapshot.fields.filter((f) => f.signerRole === "company_rep");
+  const namedSignerId = templates.find((t) => t.companySignerId)?.companySignerId ?? null;
+  const companySigner = companyFields.length
+    ? await resolveSignerForTemplate(companyId, namedSignerId)
+    : null;
+  if (companyFields.length && !companySigner) {
+    // Refused rather than sent. A contract that arrives with an empty signature
+    // block is worse than one that does not arrive, and the fix is named.
+    throw new Error(
+      `${primary.name} has fields for whoever signs on the company's behalf, but no authorised signer is set. Add one in Settings → Authorised signers.`
+    );
+  }
+  const companySignedAt = new Date();
+  if (companySigner) {
+    snapshot.companySigner = toSnapshotSigner(companySigner, companySignedAt, actor);
+  }
+
+  /**
+   * Once a saved signer takes the company role, nobody else may hold it.
+   *
+   * A caller that still nominates a company rep — an automation rule set to
+   * "assigned rep", a client that has not reloaded — is dropped rather than
+   * honoured: two signatures in the company's name on one envelope, one of them
+   * outside the authorisation this feature records, is the failure worth being
+   * strict about.
+   *
+   * When NO company signer resolves, the template declared no company fields
+   * and nothing has changed: the caller's nomination stands exactly as before.
+   */
+  const humanSigners = companySigner
+    ? input.signers.filter((s) => s.role !== "company_rep")
+    : input.signers;
+
   const tokens: { name: string; email: string | null; raw: string }[] = [];
 
   const pkg = await prisma.$transaction(async (tx) => {
@@ -253,7 +320,7 @@ export async function createSignaturePackage(args: {
       },
     });
 
-    for (const s of input.signers) {
+    for (const s of humanSigners) {
       const { raw, hash } = generateSignerToken();
       tokens.push({ name: s.name, email: s.email || null, raw });
       await tx.documentSigner.create({
@@ -266,6 +333,80 @@ export async function createSignaturePackage(args: {
           email: s.email || null,
           status: "sent",
           tokenHash: hash,
+        },
+      });
+    }
+
+    /**
+     * The company's signature, applied here rather than collected later.
+     *
+     * The row is created ALREADY `signed`, with no email address, so the
+     * best-effort mailer below skips it and the completion check — which counts
+     * signers whose status is not "signed" — treats our half as done. A
+     * company-only document (an installer attestation has no customer signer at
+     * all) therefore reaches zero outstanding signers at creation and finalises
+     * immediately, which is the whole point: tap send, get a finished PDF.
+     *
+     * A token is still generated because the column is unique and required. It
+     * is never handed out.
+     */
+    if (companySigner) {
+      const { hash } = generateSignerToken();
+      const signerRow = await tx.documentSigner.create({
+        data: {
+          companyId,
+          packageId: created.id,
+          role: "company_rep",
+          // After every human, so the certificate reads in signing order even
+          // though ours was applied first.
+          order: Math.max(0, ...humanSigners.map((s) => s.order)) + 1,
+          name: companySigner.name,
+          // Deliberately null: they are not a recipient. An address here would
+          // email a signing link for a signature that already exists.
+          email: null,
+          status: "signed",
+          signatureType: "drawn",
+          signatureData: companySigner.signatureData,
+          consentAt: companySignedAt,
+          signedAt: companySignedAt,
+          tokenHash: hash,
+        },
+      });
+
+      for (const f of companyFields) {
+        const value = companySignatureValue(f, companySigner, companySignedAt);
+        if (value == null) continue;
+        await tx.documentFieldValue.create({
+          data: {
+            packageId: created.id,
+            signerId: signerRow.id,
+            fieldKey: f.id,
+            type: f.type,
+            page: f.page,
+            x: f.x,
+            y: f.y,
+            width: f.width,
+            height: f.height,
+            value,
+            filledAt: companySignedAt,
+          },
+        });
+      }
+
+      await appendDocumentEvent(tx, {
+        companyId,
+        packageId: created.id,
+        type: "signed",
+        signerId: signerRow.id,
+        actor: actor
+          ? `${companySigner.name} (applied by ${actor.name})`
+          : `${companySigner.name} (applied by automation)`,
+        data: {
+          onBehalfOf: companySigner.name,
+          onBehalfOfId: companySigner.id,
+          appliedBy: actor?.name ?? null,
+          appliedById: actor?.id ?? null,
+          standingAuthorisation: true,
         },
       });
     }
@@ -314,6 +455,24 @@ export async function createSignaturePackage(args: {
       }
     })
   );
+
+  /**
+   * Nothing left to sign — finish it now.
+   *
+   * A document whose only signer is us (an installer attestation, a permit
+   * form) is complete the moment it is created. `recordSignature` finalises on
+   * exactly this count when the last human signs; a package with no humans
+   * never reaches that code, so the same check runs here. Best-effort: the
+   * envelope is already sent and correct, and a failure to render the merged
+   * PDF must not undo that.
+   */
+  if (humanSigners.length === 0 && companySigner) {
+    try {
+      await finalizePackage(pkg.id);
+    } catch (err) {
+      console.error("[esign] immediate finalize failed", err);
+    }
+  }
 
   return { packageId: pkg.id, title: pkg.title, links };
 }
@@ -430,7 +589,7 @@ async function loadViewByToken(rawToken: string) {
 
   const pkg = signer.package;
   const snapshot = pkg.snapshot as unknown as Snapshot;
-  const ctx = pkg.lead ? ctxForLead(pkg.lead, pkg.company) : null;
+  const ctx = pkg.lead ? ctxForLead(pkg.lead, pkg.company, signerCtxFromSnapshot(snapshot)) : null;
   const signerFields = (snapshot.fields ?? []).filter((f) => f.signerRole === signer.role);
 
   let state: SigningState = "active";
@@ -642,15 +801,29 @@ type SignerRecordForCert = {
  * Map DB signers to the certificate payload, resolving an IP-based location
  * label when precise GPS was not captured. Passing the full field set is what
  * makes Device / Viewed / Consented / Location render instead of placeholders.
+ *
+ * The company's own signer is enriched from the FROZEN snapshot rather than the
+ * live `CompanySigner` row, so a title corrected next year does not change what
+ * an executed contract says was true when it was signed.
  */
-async function toCertSigners(signers: SignerRecordForCert[]) {
+async function toCertSigners(signers: SignerRecordForCert[], snapshot?: Snapshot | null) {
+  const frozen = snapshot?.companySigner ?? null;
   return Promise.all(
-    signers.map(async (s) => ({
-      name: s.name, email: s.email, signedAt: s.signedAt, ip: s.ip, role: s.role, status: s.status,
-      userAgent: s.userAgent, consentAt: s.consentAt, viewedAt: s.viewedAt,
-      latitude: s.latitude, longitude: s.longitude, geoAccuracy: s.geoAccuracy,
-      locationLabel: s.latitude != null && s.longitude != null ? null : await locationLabelFromIp(s.ip),
-    }))
+    signers.map(async (s) => {
+      const isCompany = s.role === "company_rep" && !!frozen;
+      return {
+        name: s.name, email: s.email, signedAt: s.signedAt, ip: s.ip, role: s.role, status: s.status,
+        userAgent: s.userAgent, consentAt: s.consentAt, viewedAt: s.viewedAt,
+        latitude: s.latitude, longitude: s.longitude, geoAccuracy: s.geoAccuracy,
+        locationLabel: s.latitude != null && s.longitude != null ? null : await locationLabelFromIp(s.ip),
+        title: isCompany ? frozen!.title : null,
+        license: isCompany ? frozen!.license : null,
+        // "Automation" rather than null when nobody clicked: null is the signal
+        // that this is an ordinary signer card, and an automated send is still
+        // an application on standing authorisation, not an absence of one.
+        appliedBy: isCompany ? frozen!.appliedBy ?? "Automation" : null,
+      };
+    })
   );
 }
 
@@ -668,7 +841,7 @@ async function finalizePackage(packageId: string) {
   if (!pkg || !pkg.lead) return;
 
   const snapshot = pkg.snapshot as unknown as Snapshot;
-  const ctx = ctxForLead(pkg.lead, pkg.company);
+  const ctx = ctxForLead(pkg.lead, pkg.company, signerCtxFromSnapshot(snapshot));
 
   const values: Record<string, FilledValue> = {};
   for (const v of pkg.values) {
@@ -683,7 +856,7 @@ async function finalizePackage(packageId: string) {
     loadSource: getObject,
     documentId: pkg.id,
     completedAt: new Date(),
-    signers: await toCertSigners(pkg.signers),
+    signers: await toCertSigners(pkg.signers, snapshot),
     events: pkg.events.map((e) => ({
       type: e.type,
       actor: e.actor,
@@ -871,7 +1044,7 @@ export async function generatePackagePdf(
   if (!pkg || !pkg.lead) return null;
 
   const snapshot = pkg.snapshot as unknown as Snapshot;
-  const ctx = ctxForLead(pkg.lead, pkg.company);
+  const ctx = ctxForLead(pkg.lead, pkg.company, signerCtxFromSnapshot(snapshot));
   const values: Record<string, FilledValue> = {};
   for (const v of pkg.values) values[v.fieldKey] = { value: v.value ?? "", type: v.type as FilledValue["type"] };
 
@@ -881,7 +1054,7 @@ export async function generatePackagePdf(
     ctx,
     values,
     loadSource: getObject,
-    signers: await toCertSigners(pkg.signers),
+    signers: await toCertSigners(pkg.signers, snapshot),
     documentId: pkg.id,
     completedAt: pkg.completedAt,
     events: pkg.events.map((e) => ({ type: e.type, actor: e.actor, ip: e.ip, createdAt: e.createdAt, metadata: e.metadata })),

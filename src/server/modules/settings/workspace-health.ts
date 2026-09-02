@@ -85,6 +85,36 @@ export const SETUP_CHECKS: Check[] = [
     count: (companyId) => prisma.documentTemplate.count({ where: { companyId } }),
   },
   {
+    key: "company_signers",
+    label: "Authorised signers",
+    href: "/portal/settings/signers",
+    // Blocking, unlike its neighbours, because this one does not fail quietly:
+    // createSignaturePackage refuses the send outright rather than posting a
+    // contract with an empty signature block. Somebody finds out by being
+    // unable to send.
+    hint: "A template here has fields for whoever signs on the company's behalf, but nobody is set up to sign them — those documents cannot be sent at all.",
+    severity: "blocking",
+    /**
+     * Only a gap where it bites.
+     *
+     * A workspace whose templates are all customer-signed needs no authorised
+     * signer, and warning it would be a warning nobody can ever clear — the
+     * same reasoning as the commission-rules note above. So: no template needs
+     * one, no gap (return 1); otherwise the answer is how many there are.
+     *
+     * The template count runs through the scoped client, so it answers for the
+     * workspace being viewed. The signer count deliberately does not — signers
+     * are company-wide, and one added from Roofing clears Solar's gap too.
+     */
+    count: async (companyId) => {
+      const needing = await prisma.documentTemplate.count({
+        where: { companyId, active: true, fields: { some: { signerRole: "company_rep" } } },
+      });
+      if (needing === 0) return 1;
+      return prisma.companySigner.count({ where: { companyId, active: true } });
+    },
+  },
+  {
     key: "lead_sources",
     label: "Lead sources",
     href: "/portal/settings/lead-sources",

@@ -15,7 +15,7 @@ import {
   Sun,
   PanelsTopLeft,
   Landmark,
-  Zap, BatteryCharging } from "lucide-react";
+  Zap, BatteryCharging, PenLine } from "lucide-react";
 import type { ActiveVertical } from "./vertical";
 
 /**
@@ -62,6 +62,7 @@ export type SettingsSectionKey =
   | "custom_fields"
   | "lead_sources"
   | "document_templates"
+  | "company_signers"
   | "commission_rules"
   | "notification_rules"
   | "automations"
@@ -142,6 +143,15 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     href: "/portal/documents",
     group: "money",
     keywords: ["contract", "agreement", "e-sign", "signature", "proposal"],
+  },
+  {
+    icon: PenLine,
+    key: "company_signers",
+    title: "Authorised Signers",
+    body: "Who signs contracts on the company's behalf, and the signature that gets applied.",
+    href: "/portal/settings/signers",
+    group: "money",
+    keywords: ["signature", "countersign", "licence", "license", "owner", "e-sign", "authorised", "authorized"],
   },
   {
     icon: DollarSign,

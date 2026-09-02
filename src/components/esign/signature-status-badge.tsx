@@ -38,12 +38,16 @@ export function SignatureStatusBadge({
 
 const ROLE_LABELS: Record<string, string> = {
   customer: "customer",
-  co_customer: "co-borrower",
-  company_rep: "company rep",
+  // "Co-owner" everywhere, matching the deal's own field. "Co-borrower" was
+  // financing vocabulary on a role that signs cash contracts too.
+  co_customer: "co-owner",
+  // Not "company rep": nobody from the company signs this by hand any more —
+  // it is the authorised signer's mark, applied at send.
+  company_rep: "signed for us",
   witness: "witness",
 };
 
-/** Human label for a signer role (e.g. "co_customer" -> "co-borrower"). */
+/** Human label for a signer role (e.g. "co_customer" -> "co-owner"). */
 export function roleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role.replace(/_/g, " ");
 }

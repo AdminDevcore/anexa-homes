@@ -173,6 +173,8 @@ export async function saveCustomerDetailsAction(input: z.infer<typeof customerSc
       firstName: d.firstName,
       lastName: d.lastName,
       coOwnerName: d.coOwnerName || null,
+      coOwnerEmail: d.coOwnerEmail || null,
+      coOwnerPhone: d.coOwnerPhone || null,
       preferredLanguage: d.preferredLanguage || null,
       email: d.email || null,
       phone: d.phone || null,

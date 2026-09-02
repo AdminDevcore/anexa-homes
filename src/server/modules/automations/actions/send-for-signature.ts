@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { createSignaturePackage } from "@/server/modules/esign/service";
+import { defaultSignersForLead, HOUSEHOLD_SIGNER_SELECT } from "@/server/modules/esign/household-signers";
 import type { ActionContext, AutomationActionModule, StepResult } from "../types";
 
 /**
@@ -8,9 +9,16 @@ import type { ActionContext, AutomationActionModule, StepResult } from "../types
  * it was written against, so the signer must be whoever holds that role on
  * whichever deal set the rule off.
  *
- * There is deliberately no co-owner option. `Lead` stores `coOwnerName` but no
- * co-owner email, so there is no address to send to — a staff member sending by
- * hand types one into the dialog, and an automation has nobody to ask.
+ * "Customer" means the household, not one person: `defaultSignersForLead` adds
+ * the co-owner whenever the deal has one with an email, so a rule written once
+ * keeps sending to both after somebody fills in a spouse. There is no separate
+ * co-owner option because there is no case for asking only the spouse.
+ *
+ * Nor is there a company option any more. A template that needs our signature
+ * carries company fields, and `createSignaturePackage` applies the authorised
+ * signer's mark itself — see Settings → Authorised signers. "Assigned rep"
+ * survives for rules written before that; where the template signs itself, the
+ * saved signer wins and the rep is dropped.
  */
 const SIGNERS = ["customer", "assigned_rep"] as const;
 
@@ -36,9 +44,7 @@ export const sendForSignatureAction: AutomationActionModule = {
     const lead = await prisma.lead.findFirst({
       where: { id: ctx.leadId, companyId: ctx.companyId },
       select: {
-        firstName: true,
-        lastName: true,
-        email: true,
+        ...HOUSEHOLD_SIGNER_SELECT,
         assignedRep: { select: { firstName: true, lastName: true, email: true } },
       },
     });
@@ -58,7 +64,10 @@ export const sendForSignatureAction: AutomationActionModule = {
         input: {
           templateIds: [parsed.data.templateId],
           leadId: ctx.leadId,
-          signers: [{ role: target.role, name: target.name, email: target.email, order: 1 }],
+          signers:
+            parsed.data.signer === "customer"
+              ? defaultSignersForLead(lead)
+              : [{ role: target.role, name: target.name, email: target.email, order: 1 }],
         },
       });
     } catch (err) {
@@ -80,6 +89,8 @@ function resolveSigner(
     assignedRep: { firstName: string; lastName: string; email: string } | null;
   }
 ): Resolved | null {
+  // Still resolved for "customer" so the guards below can name a deal with no
+  // email; the signer LIST for that case comes from defaultSignersForLead.
   if (which === "customer") {
     return { name: `${lead.firstName} ${lead.lastName}`.trim(), email: lead.email, role: "customer" };
   }

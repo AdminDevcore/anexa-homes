@@ -15,7 +15,14 @@ import { z } from "zod";
 export const leadContactFields = {
   firstName: z.string().min(1).max(80),
   lastName: z.string().min(1).max(80),
+  /**
+   * The second person on the title. The EMAIL is what makes them a signer
+   * rather than a name on a page — see defaultSignersForLead — so a co-owner
+   * captured without one still prints but is never sent to.
+   */
   coOwnerName: z.string().max(80).optional().or(z.literal("")),
+  coOwnerEmail: z.string().email().optional().or(z.literal("")),
+  coOwnerPhone: z.string().max(30).optional().or(z.literal("")),
   /**
    * Which language this household is sold and serviced in.
    *

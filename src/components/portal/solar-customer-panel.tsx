@@ -16,6 +16,8 @@ export type SolarCustomerView = {
   firstName: string;
   lastName: string;
   coOwnerName: string | null;
+  coOwnerEmail: string | null;
+  coOwnerPhone: string | null;
   preferredLanguage: string | null;
   email: string | null;
   phone: string | null;
@@ -54,6 +56,8 @@ export function SolarCustomerPanel({
     firstName: customer.firstName ?? "",
     lastName: customer.lastName ?? "",
     coOwnerName: customer.coOwnerName ?? "",
+    coOwnerEmail: customer.coOwnerEmail ?? "",
+    coOwnerPhone: customer.coOwnerPhone ?? "",
     preferredLanguage: customer.preferredLanguage ?? "",
     email: customer.email ?? "",
     phone: customer.phone ?? "",
@@ -106,6 +110,25 @@ export function SolarCustomerPanel({
             onChange={(v) => set("coOwnerName", v)}
             disabled={!canEdit}
             hint="The other person on the title or the loan, if there is one."
+          />
+          {/* Their own address, not the household's: it is what lets a
+              co-signer be sent the contract. Without one they print on the
+              document but can never sign it. */}
+          <TextField
+            id="co-signer-email"
+            label="Co-signer email"
+            type="email"
+            value={f.coOwnerEmail}
+            onChange={(v) => set("coOwnerEmail", v)}
+            disabled={!canEdit}
+            hint="Needed before they can be sent anything to sign."
+          />
+          <TextField
+            id="co-signer-phone"
+            label="Co-signer phone"
+            value={f.coOwnerPhone}
+            onChange={(v) => set("coOwnerPhone", v)}
+            disabled={!canEdit}
           />
           {/* Free text with suggestions rather than a fixed select: the list a
               company actually serves is theirs, not ours, and a datalist still
