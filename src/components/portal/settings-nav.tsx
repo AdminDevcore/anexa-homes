@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation";
 import {
   ArrowUpRight,
   ChevronLeft,
-  ChevronRight,
   LayoutGrid,
   Menu,
+  PanelLeft,
   Search,
   X,
 } from "lucide-react";
@@ -104,17 +104,29 @@ export function SettingsChrome({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const [collapsed, toggle] = useCollapsed();
 
   // The hub is the one screen the rail would only repeat.
   if (pathname === HUB) return <>{children}</>;
 
   return (
-    <div className="lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-6">
+    // FOLDED IS FOLDED: one column, and the screen gets the whole window.
+    // Folding used to leave a 3.5rem strip of unlabelled icons standing where
+    // the rail had been — twenty settings sections as twenty anonymous glyphs,
+    // which is not a menu anybody can read and not the width somebody folding
+    // the rail was asking for.
+    <div
+      className={cn(
+        collapsed ? "lg:block" : "lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-6"
+      )}
+    >
       <SettingsRail
         vertical={vertical}
         inventory={inventory}
         gapKeys={gapKeys}
         pathname={pathname}
+        collapsed={collapsed}
+        onToggle={toggle}
       />
       <div className="min-w-0">{children}</div>
     </div>
@@ -126,14 +138,16 @@ function SettingsRail({
   inventory,
   gapKeys,
   pathname,
+  collapsed,
+  onToggle,
 }: {
   vertical: ActiveVertical;
   inventory: SettingsInventory;
   gapKeys: string[];
   pathname: string;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
-  const [collapsed, toggle] = useCollapsed();
-
   return (
     <>
       {/* ── Narrow: the rail is a sheet, opened from the crumb line ─────── */}
@@ -151,28 +165,32 @@ function SettingsRail({
               inventory={inventory}
               gapKeys={gapKeys}
               pathname={pathname}
-              collapsed={false}
             />
           </SheetContent>
         </Sheet>
       </div>
 
-      {/* ── Wide: sticky beside the panel ───────────────────────────────── */}
-      <aside
-        className={cn(
-          "hidden shrink-0 lg:sticky lg:top-20 lg:block lg:self-start",
-          collapsed ? "lg:w-14" : "lg:w-[13.5rem] xl:w-[15rem]"
-        )}
-      >
-        <RailBody
-          vertical={vertical}
-          inventory={inventory}
-          gapKeys={gapKeys}
-          pathname={pathname}
-          collapsed={collapsed}
-          onToggle={toggle}
-        />
-      </aside>
+      {/* ── Wide and folded: one labelled button, on its own line ───────── */}
+      {collapsed && (
+        <div className="mb-4 hidden lg:block">
+          <Button variant="outline" size="sm" onClick={onToggle}>
+            <PanelLeft className="size-4" /> Settings menu
+          </Button>
+        </div>
+      )}
+
+      {/* ── Wide and open: sticky beside the panel ──────────────────────── */}
+      {!collapsed && (
+        <aside className="hidden shrink-0 lg:sticky lg:top-20 lg:block lg:w-[13.5rem] lg:self-start xl:w-[15rem]">
+          <RailBody
+            vertical={vertical}
+            inventory={inventory}
+            gapKeys={gapKeys}
+            pathname={pathname}
+            onToggle={onToggle}
+          />
+        </aside>
+      )}
     </>
   );
 }
@@ -182,14 +200,13 @@ function RailBody({
   inventory,
   gapKeys,
   pathname,
-  collapsed,
   onToggle,
 }: {
   vertical: ActiveVertical;
   inventory: SettingsInventory;
   gapKeys: string[];
   pathname: string;
-  collapsed: boolean;
+  /** Absent inside the narrow sheet, which folds by closing rather than by button. */
   onToggle?: () => void;
 }) {
   const groups = React.useMemo(() => visibleSettingsGroups(vertical), [vertical]);
@@ -206,20 +223,17 @@ function RailBody({
       <div className="flex items-center gap-1">
         <Link
           href={HUB}
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-sm font-medium transition-colors hover:border-border hover:bg-muted/50",
-            collapsed && "justify-center px-0"
-          )}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-sm font-medium transition-colors hover:border-border hover:bg-muted/50"
           title="All settings"
         >
           <LayoutGrid className="size-4 shrink-0 text-muted-foreground" />
-          {!collapsed && <span className="truncate">All settings</span>}
+          <span className="truncate">All settings</span>
         </Link>
-        {onToggle && !collapsed && (
+        {onToggle && (
           <button
             type="button"
             onClick={onToggle}
-            aria-label="Collapse settings menu"
+            aria-label="Hide settings menu"
             className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <ChevronLeft className="size-4" />
@@ -227,19 +241,7 @@ function RailBody({
         )}
       </div>
 
-      {onToggle && collapsed && (
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label="Expand settings menu"
-          className="grid w-full place-items-center rounded-md py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <ChevronRight className="size-4" />
-        </button>
-      )}
-
-      {!collapsed && (
-        <div className="relative">
+      <div className="relative">
           <Search
             aria-hidden
             className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -252,18 +254,17 @@ function RailBody({
             aria-label="Find a setting"
             className="h-8 pl-8 pr-8"
           />
-          {q !== "" && (
-            <button
-              type="button"
-              onClick={() => setQ("")}
-              aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
-        </div>
-      )}
+        {q !== "" && (
+          <button
+            type="button"
+            onClick={() => setQ("")}
+            aria-label="Clear search"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
+      </div>
 
       <nav
         aria-label="Settings sections"
@@ -271,11 +272,9 @@ function RailBody({
       >
         {shown.map((g) => (
           <div key={g.key} className="space-y-0.5">
-            {!collapsed && (
-              <p className="px-2.5 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80">
-                {g.label}
-              </p>
-            )}
+            <p className="px-2.5 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80">
+              {g.label}
+            </p>
             {g.sections.map((s) => (
               <RailLink
                 key={s.key}
@@ -283,13 +282,12 @@ function RailBody({
                 active={isActive(pathname, s.href)}
                 status={inventory[s.key]}
                 gap={gaps.has(s.key)}
-                collapsed={collapsed}
               />
             ))}
           </div>
         ))}
 
-        {shown.length === 0 && !collapsed && (
+        {shown.length === 0 && (
           <p className="px-2.5 py-4 text-xs text-muted-foreground">
             Nothing matches &ldquo;{q}&rdquo;.
           </p>
@@ -311,13 +309,11 @@ function RailLink({
   active,
   status,
   gap,
-  collapsed,
 }: {
   section: ResolvedSettingsSection;
   active: boolean;
   status?: { label: string; tone?: string };
   gap: boolean;
-  collapsed: boolean;
 }) {
   const away = section.href != null && !section.href.startsWith(HUB);
   const Icon = section.icon;
@@ -326,51 +322,38 @@ function RailLink({
     <Link
       href={section.href ?? HUB}
       aria-current={active ? "page" : undefined}
-      title={collapsed ? `${section.title}${status ? ` — ${status.label}` : ""}` : undefined}
       className={cn(
         "flex items-center gap-2.5 rounded-lg border px-2.5 py-1.5 transition-colors",
         active
           ? "border-gold/50 bg-gold/[0.08]"
-          : "border-transparent hover:border-border hover:bg-muted/50",
-        collapsed && "justify-center px-0 py-2"
+          : "border-transparent hover:border-border hover:bg-muted/50"
       )}
     >
-      <Icon
-        className={cn("size-4 shrink-0", active ? "text-gold" : "text-muted-foreground")}
-      />
-      {!collapsed && (
-        <>
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1">
-              <span className="truncate text-[13px] font-medium leading-tight">
-                {section.title}
-              </span>
-              {away && <ArrowUpRight className="size-3 shrink-0 text-muted-foreground/70" />}
-            </span>
-            {status && (
-              <span
-                className={cn(
-                  "block truncate text-[11px] leading-tight",
-                  status.tone === "attention"
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-muted-foreground"
-                )}
-              >
-                {status.label}
-              </span>
+      <Icon className={cn("size-4 shrink-0", active ? "text-gold" : "text-muted-foreground")} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1">
+          <span className="truncate text-[13px] font-medium leading-tight">{section.title}</span>
+          {away && <ArrowUpRight className="size-3 shrink-0 text-muted-foreground/70" />}
+        </span>
+        {status && (
+          <span
+            className={cn(
+              "block truncate text-[11px] leading-tight",
+              status.tone === "attention"
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
             )}
+          >
+            {status.label}
           </span>
-          {gap && (
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-amber-500"
-              aria-label="Never set up"
-              role="img"
-            />
-          )}
-        </>
-      )}
-      {collapsed && gap && (
-        <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+        )}
+      </span>
+      {gap && (
+        <span
+          className="size-1.5 shrink-0 rounded-full bg-amber-500"
+          aria-label="Never set up"
+          role="img"
+        />
       )}
     </Link>
   );
