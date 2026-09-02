@@ -41,21 +41,37 @@ function lenderName(tag: string) {
   return `ZZ ${tag} ${Date.now().toString(36)}`;
 }
 
+/**
+ * Add a partner, and land on its panel.
+ *
+ * The screen is a list and a panel now: adding a lender opens it, so every step
+ * after this one is scoped to `panel(page)` rather than to a card filtered by
+ * name out of a grid.
+ */
 async function addLender(page: Page, name: string) {
   await page.goto("/portal/settings/solar-lenders");
   await expect(page.getByRole("heading", { name: "Lenders", exact: true })).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: "New lender" }).click();
   await page.getByLabel("Name", { exact: true }).fill(name);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByText(name, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: "Add lender" }).click();
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 /**
- * One lender's card. Scoped, never `.first()` on the page: specs accumulate
- * lenders across runs, so a page-wide match reaches whichever partner sorts
- * first — which is how an assertion passes against the wrong lender.
+ * The open partner's panel.
+ *
+ * Only one is mounted, so this is unambiguous — which is the point of the
+ * rebuild. Specs accumulate lenders across runs, and the old grid needed a name
+ * filter over every card to keep an assertion off whichever partner happened to
+ * sort first.
  */
-function cardFor(page: Page, name: string) {
-  return page.locator("div.rounded-xl.bg-card").filter({ hasText: name });
+function panel(page: Page) {
+  return page.getByTestId("lender-panel");
+}
+
+/** Move the panel to one of its tabs. */
+async function tab(page: Page, name: string) {
+  await panel(page).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
 }
 
 /**
@@ -67,7 +83,10 @@ function cardFor(page: Page, name: string) {
  * quotable for it to be about.
  */
 async function addLoan(page: Page, name: string, apr: string, months: string, fee: string) {
-  await cardFor(page, name).last().getByRole("button", { name: "Loan", exact: true }).click();
+  // The panel is the partner, so assert whose it is before typing terms into it.
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
+  await tab(page, "Rate sheet");
+  await panel(page).getByRole("button", { name: "Loan", exact: true }).click();
   await page.getByLabel("APR %", { exact: true }).fill(apr);
   await page.getByLabel("Term (months)", { exact: true }).fill(months);
   await page.getByLabel("Dealer fee %", { exact: true }).fill(fee);
@@ -76,26 +95,16 @@ async function addLoan(page: Page, name: string, apr: string, months: string, fe
 }
 
 /**
- * The same card while it is being edited.
+ * The logo controls.
  *
- * A separate locator on purpose: in edit mode the lender's name lives in an
- * input VALUE, and `hasText` reads text content, not values — so the by-name
- * filter silently slides onto the rate-sheet card, which has the name as a
- * heading and none of these buttons. Anchoring on the file input's aria-label
- * keeps it on the one card being edited.
+ * No longer hidden behind a pencil: the mark is set on the partner's Details
+ * tab, which is where the panel already opens, so this only has to make sure
+ * the right partner is in front of us.
  */
-function editingCardFor(page: Page, name: string) {
-  return page
-    .locator("div.rounded-xl.bg-card")
-    .filter({ has: page.getByLabel(`Logo file for ${name}`) });
-}
-
-/** Open the logo controls, which live inside the card's edit panel. */
 async function openLogoControls(page: Page, name: string) {
-  await cardFor(page, name).first()
-    .getByRole("button", { name: "Edit name, links and credit instructions" })
-    .click();
-  await expect(page.getByText("Logo", { exact: true })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
+  await tab(page, "Details");
+  await expect(panel(page).getByText("Logo", { exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off — skipped)", () => {
@@ -107,10 +116,9 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
     const name = lenderName("Monogram");
     await addLender(page, name);
 
-    const card = cardFor(page, name).first();
     // "ZZ Monogram <tag>" → the first letters of the first two words.
-    await expect(card.getByText("ZM", { exact: true }).first()).toBeVisible({ timeout: 15000 });
-    await expect(card.locator('img[src*="/api/solar/lender-logo"]')).toHaveCount(0);
+    await expect(panel(page).getByText("ZM", { exact: true }).first()).toBeVisible({ timeout: 15000 });
+    await expect(panel(page).locator('img[src*="/api/solar/lender-logo"]')).toHaveCount(0);
   });
 
   test("an uploaded logo is stored, served back as a PNG, and can be removed", async ({ page }) => {
@@ -126,13 +134,10 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
       buffer: PNG_8x8,
     });
     await expect(page.getByText("Logo updated")).toBeVisible({ timeout: 15000 });
-    // Uploading leaves the edit panel open, so close it and read the card as a
-    // person would see it — a preview inside the form proves less.
-    await editingCardFor(page, name).getByRole("button", { name: "Cancel" }).click();
 
-    // The mark on the card is now an image from our own route — never a
+    // The mark on the panel is now an image from our own route — never a
     // hotlink to the bank's site, which is what would rot in a sent proposal.
-    const logo = cardFor(page, name).first().locator('img[src*="/api/solar/lender-logo"]').first();
+    const logo = panel(page).locator('img[src*="/api/solar/lender-logo"]').first();
     await expect(logo).toBeVisible({ timeout: 15000 });
     const src = await logo.getAttribute("src");
     expect(src).toContain("v="); // cache-busted on the logo's own timestamp
@@ -146,11 +151,10 @@ test.describe(FLAG_ON ? "solar lender logos" : "solar lender logos (flag off —
 
     // Removing it falls back to the monogram rather than to an empty box.
     await openLogoControls(page, name);
-    await editingCardFor(page, name).getByRole("button", { name: "Remove" }).click();
+    await panel(page).getByRole("button", { name: "Remove" }).click();
     await expect(page.getByText("Logo removed")).toBeVisible({ timeout: 15000 });
-    await editingCardFor(page, name).getByRole("button", { name: "Cancel" }).click();
-    await expect(cardFor(page, name).first().locator('img[src*="/api/solar/lender-logo"]')).toHaveCount(0);
-    await expect(cardFor(page, name).first().getByText("ZU", { exact: true }).first()).toBeVisible();
+    await expect(panel(page).locator('img[src*="/api/solar/lender-logo"]')).toHaveCount(0);
+    await expect(panel(page).getByText("ZU", { exact: true }).first()).toBeVisible();
   });
 
   test("the logo follows the lender to where the money is quoted", async ({ page }) => {

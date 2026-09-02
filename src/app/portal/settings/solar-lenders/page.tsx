@@ -21,7 +21,23 @@ export const dynamic = "force-dynamic";
  * list of who finances your deals is something an admin comes looking for
  * directly rather than by way of the panels.
  */
-export default async function SolarLendersPage() {
+export default async function SolarLendersPage({
+  searchParams,
+}: {
+  /**
+   * Which partner is open, and on which tab.
+   *
+   * Read HERE rather than in the browser. The panel keeps it in the URL so a
+   * reload comes back where you were, and a client that reads
+   * `window.location` during hydration renders something the server never
+   * did — which React reports as a hydration mismatch and repairs by throwing
+   * the server's markup away. Passing it in as a prop means the first paint is
+   * already the right partner.
+   */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
   const user = await requireUser("/portal/settings/solar-lenders");
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
   if ((await getActiveVertical(user)) !== "solar") redirect("/portal/settings");
@@ -95,6 +111,8 @@ export default async function SolarLendersPage() {
         description="Who finances your deals, which equipment each one approves, and the terms they finance on. Pick a lender on a deal and the equipment narrows to its approved-vendor list; pick one of its products and the payment is quoted from it."
       />
       <SolarLenderManager
+        initialLenderId={one(params.lender)}
+        initialTab={one(params.tab)}
         canEdit={can(user, "update", "Settings")}
         sellableEquipment={sellable}
         targetNetPpwCents={settings.targetNetPpwCents}

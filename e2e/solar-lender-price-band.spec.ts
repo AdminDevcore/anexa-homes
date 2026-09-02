@@ -40,45 +40,55 @@ function lenderName(tag: string) {
   return `ZZ ${tag} ${Date.now().toString(36)}`;
 }
 
+/**
+ * Add a partner, and land on its panel.
+ *
+ * The screen is a list and a panel now: adding a lender opens it, so every step
+ * after this one is scoped to `panel(page)` rather than to a card filtered by
+ * name out of a grid.
+ */
 async function addLender(page: Page, name: string) {
   await page.goto("/portal/settings/solar-lenders");
   await expect(page.getByRole("heading", { name: "Lenders", exact: true })).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: "New lender" }).click();
   await page.getByLabel("Name", { exact: true }).fill(name);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByText(name, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: "Add lender" }).click();
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 /**
- * One lender's card. Scoped, never `.first()` on the page: specs accumulate
- * lenders across runs, so a page-wide match reaches whichever partner sorts
- * first — which is how an assertion passes against the wrong lender.
- */
-function cardFor(page: Page, name: string) {
-  return page.locator("div.rounded-xl.bg-card").filter({ hasText: name });
-}
-
-/**
- * The card while it is being edited.
+ * The open partner's panel.
  *
- * In edit mode the name lives in an input VALUE and `hasText` reads text
- * content, so the by-name filter would slide onto the rate-sheet card below.
- * Anchoring on a field only this panel has keeps it on the right one.
+ * Only one is mounted, so this is unambiguous — which is the point of the
+ * rebuild. Specs accumulate lenders across runs, and the old grid needed a name
+ * filter over every card to keep an assertion off whichever partner happened to
+ * sort first.
  */
-function editingCard(page: Page) {
-  return page
-    .locator("div.rounded-xl.bg-card")
-    .filter({ has: page.getByLabel(/^Min base \$\/W/) });
+function panel(page: Page) {
+  return page.getByTestId("lender-panel");
 }
 
-async function openEditor(page: Page, name: string) {
-  await cardFor(page, name).first()
-    .getByRole("button", { name: "Edit name, links and credit instructions" })
-    .click();
+/** Move the panel to one of its tabs. */
+async function tab(page: Page, name: string) {
+  await panel(page).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
+}
+
+/** Both ends of the band live on the partner's Pricing tab. */
+async function openPricing(page: Page, name: string) {
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
+  await tab(page, "Pricing");
   await expect(page.getByLabel(/^Min base \$\/W/)).toBeVisible({ timeout: 15000 });
 }
 
+/** The one Save at the bottom of the panel, which commits every tab at once. */
+async function save(page: Page) {
+  await panel(page).getByRole("button", { name: "Save changes" }).click();
+}
+
 async function addLoan(page: Page, name: string, fee: string) {
-  await cardFor(page, name).last().getByRole("button", { name: "Loan", exact: true }).click();
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
+  await tab(page, "Rate sheet");
+  await panel(page).getByRole("button", { name: "Loan", exact: true }).click();
   await page.getByLabel("APR %", { exact: true }).fill("5.99");
   await page.getByLabel("Term (months)", { exact: true }).fill("240");
   await page.getByLabel("Dealer fee %", { exact: true }).fill(fee);
@@ -89,36 +99,37 @@ async function addLoan(page: Page, name: string, fee: string) {
 test.describe(FLAG_ON ? "a lender's price band" : "a lender's price band (flag off — skipped)", () => {
   test.skip(!FLAG_ON, "Needs the solar workspace enabled.");
 
-  test("a floor is saved, shown on the card, and can be taken off again", async ({ page }) => {
+  test("a floor is saved, shown on the panel, and can be taken off again", async ({ page }) => {
     await login(page, "owner@anexahomes.com");
     await toSolar(page);
     const name = lenderName("Floor");
     await addLender(page, name);
 
-    // A new lender has neither end set, and says nothing about either — a row
-    // of dashes on every uncapped partner teaches nobody anything.
-    await expect(cardFor(page, name).first().getByText("Min base $/W")).toHaveCount(0);
+    // A new lender has neither end set, and the header says nothing about
+    // either — a row of dashes on every uncapped partner teaches nobody
+    // anything.
+    await expect(panel(page).getByText(/^Floor \$/)).toHaveCount(0);
 
-    await openEditor(page, name);
+    await openPricing(page, name);
     await page.getByLabel(/^Min base \$\/W/).fill("2.75");
-    await editingCard(page).getByRole("button", { name: "Save" }).click();
-    await expect(page.getByText("Saved")).toBeVisible({ timeout: 15000 });
+    await save(page);
+    await expect(page.getByText(`${name} saved`)).toBeVisible({ timeout: 15000 });
 
-    const card = cardFor(page, name).first();
-    await expect(card.getByText("Min base $/W")).toBeVisible({ timeout: 15000 });
-    await expect(card.getByText("$2.75/W", { exact: true })).toBeVisible();
+    // The header carries it, so a floor is visible without opening Pricing.
+    await expect(panel(page).getByText("Floor $2.75/W")).toBeVisible({ timeout: 15000 });
 
     // It survives a reload — the point of a setting is that it is stored, not
-    // that the form remembers what was typed into it a moment ago.
+    // that the form remembers what was typed into it a moment ago. The panel
+    // reopens on the same partner because the URL carries which one it was.
     await page.reload();
-    await expect(cardFor(page, name).first().getByText("$2.75/W", { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(panel(page).getByText("Floor $2.75/W")).toBeVisible({ timeout: 15000 });
 
     // Blank clears it. A floor that cannot be removed is a floor nobody sets.
-    await openEditor(page, name);
+    await openPricing(page, name);
     await page.getByLabel(/^Min base \$\/W/).fill("");
-    await editingCard(page).getByRole("button", { name: "Save" }).click();
-    await expect(page.getByText("Saved")).toBeVisible({ timeout: 15000 });
-    await expect(cardFor(page, name).first().getByText("Min base $/W")).toHaveCount(0);
+    await save(page);
+    await expect(page.getByText(`${name} saved`)).toBeVisible({ timeout: 15000 });
+    await expect(panel(page).getByText(/^Floor \$/)).toHaveCount(0);
   });
 
   test("a typo is named, not swallowed", async ({ page }) => {
@@ -129,13 +140,13 @@ test.describe(FLAG_ON ? "a lender's price band" : "a lender's price band (flag o
 
     // 275 cents typed as if it were dollars. Accepted, it would set a floor of
     // $275/W and block every deal on this partner for ever.
-    await openEditor(page, name);
+    await openPricing(page, name);
     await page.getByLabel(/^Min base \$\/W/).fill("275");
-    await editingCard(page).getByRole("button", { name: "Save" }).click();
+    await save(page);
     await expect(page.getByText(/Min base \$\/W has to be a price/)).toBeVisible({ timeout: 15000 });
   });
 
-  test("the editor says what a capped partner can actually leave you", async ({ page }) => {
+  test("the pricing tab says what a capped partner can actually leave you", async ({ page }) => {
     await login(page, "owner@anexahomes.com");
     await toSolar(page);
     const name = lenderName("Capped");
@@ -145,12 +156,15 @@ test.describe(FLAG_ON ? "a lender's price band" : "a lender's price band (flag o
     // A ceiling of $5.50/W on a 65% programme leaves $1.93/W and no more,
     // whatever base a rep types — so a $3.00 floor here would block every deal
     // on this partner with nothing on screen having warned anybody.
-    await openEditor(page, name);
-    await page.getByLabel(/^Max final \$\/W/).fill("5.50");
-    await editingCard(page).getByRole("button", { name: "Save" }).click();
-    await expect(page.getByText("Saved")).toBeVisible({ timeout: 15000 });
+    await openPricing(page, name);
+    // The figure only exists once the partner is told it publishes one; the
+    // box is not there on "prices the normal way", which is every other lender.
+    await panel(page).getByRole("radio", { name: /Maximum \$\/W/ }).click();
+    await page.getByLabel(/^Final \$\/W/).fill("5.50");
+    await save(page);
+    await expect(page.getByText(`${name} saved`)).toBeVisible({ timeout: 15000 });
 
-    await openEditor(page, name);
-    await expect(editingCard(page).getByText(/leave at most \$1\.93\/W/)).toBeVisible({ timeout: 15000 });
+    await openPricing(page, name);
+    await expect(panel(page).getByText(/leave at most \$1\.93\/W/)).toBeVisible({ timeout: 15000 });
   });
 });

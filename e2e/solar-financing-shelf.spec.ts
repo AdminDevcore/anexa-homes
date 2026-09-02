@@ -39,26 +39,45 @@ function lenderName(tag: string) {
   return `ZZ ${tag} ${Date.now().toString(36)}`;
 }
 
+/**
+ * Add a partner, and land on its panel.
+ *
+ * The screen is a list and a panel now: adding a lender opens it, so every step
+ * after this one is scoped to `panel(page)` rather than to a card filtered by
+ * name out of a grid.
+ */
 async function addLender(page: Page, name: string) {
   await page.goto("/portal/settings/solar-lenders");
   await expect(page.getByRole("heading", { name: "Lenders", exact: true })).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: "New lender" }).click();
   await page.getByLabel("Name", { exact: true }).fill(name);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByText(name, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+  await page.getByRole("button", { name: "Add lender" }).click();
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 /**
- * One lender's card. Scoped, never `.first()`: specs accumulate lenders across
- * runs, so a page-wide match reaches whichever partner sorts first — which is
- * how a product lands on the wrong lender and the spec still passes.
+ * The open partner's panel.
+ *
+ * Only one is mounted, so this is unambiguous — which is the point of the
+ * rebuild. Specs accumulate lenders across runs, and the old grid needed a name
+ * filter over every card to keep an assertion off whichever partner happened to
+ * sort first.
  */
-function cardFor(page: Page, name: string) {
-  return page.locator("div.rounded-xl.bg-card").filter({ hasText: name });
+function panel(page: Page) {
+  return page.getByTestId("lender-panel");
+}
+
+/** Move the panel to one of its tabs. */
+async function tab(page: Page, name: string) {
+  await panel(page).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
 }
 
 /** Add one loan programme to a lender's rate sheet. */
 async function addLoan(page: Page, name: string, apr: string, months: string, fee: string) {
-  await cardFor(page, name).last().getByRole("button", { name: "Loan", exact: true }).click();
+  // The panel is the partner, so assert whose it is before typing terms into it.
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible({ timeout: 15000 });
+  await tab(page, "Rate sheet");
+  await panel(page).getByRole("button", { name: "Loan", exact: true }).click();
   await page.getByLabel("APR %", { exact: true }).fill(apr);
   await page.getByLabel("Term (months)", { exact: true }).fill(months);
   await page.getByLabel("Dealer fee %", { exact: true }).fill(fee);
@@ -321,7 +340,8 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     const name = lenderName("Mixed");
     await addLender(page, name);
     await addLoan(page, name, "4.49", "300", "20");
-    await cardFor(page, name).last().getByRole("button", { name: "Lease", exact: true }).click();
+    await tab(page, "Rate sheet");
+    await panel(page).getByRole("button", { name: "Lease", exact: true }).click();
     await page.getByLabel("$/kW per month", { exact: true }).fill("12.40");
     await page.getByLabel("Escalator %/yr", { exact: true }).fill("2.9");
     await page.getByLabel("Term (years)", { exact: true }).fill("25");
@@ -353,7 +373,8 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
 
     const name = lenderName("Lease terms");
     await addLender(page, name);
-    await cardFor(page, name).last().getByRole("button", { name: "Lease", exact: true }).click();
+    await tab(page, "Rate sheet");
+    await panel(page).getByRole("button", { name: "Lease", exact: true }).click();
     await page.getByLabel("$/kW per month", { exact: true }).fill("11.80");
     await page.getByLabel("Escalator %/yr", { exact: true }).fill("1.9");
     await page.getByLabel("Term (years)", { exact: true }).fill("25");

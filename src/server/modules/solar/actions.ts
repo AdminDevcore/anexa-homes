@@ -1363,6 +1363,14 @@ export async function upsertSolarLenderAction(
     }
   }
 
+  /**
+   * The row this call ended up writing. Returned so the caller can OPEN what it
+   * just created — adding a partner is the first step of setting one up, and a
+   * screen that leaves you on whoever was already selected makes you go and
+   * find it.
+   */
+  let savedId = id;
+
   if (id) {
     /**
      * The row as it stands, for the audit line. Read inside the same request
@@ -1387,6 +1395,7 @@ export async function upsertSolarLenderAction(
     if (!existing) return fail("Not found.");
     await prisma.solarLender.update({ where: { id }, data: d });
     await logLenderAdjustmentChanges(user, { id, name: d.name }, existing, d);
+    savedId = id;
   } else {
     const created = await prisma.solarLender.create({
       data: { companyId: user.companyId, ...d },
@@ -1398,10 +1407,11 @@ export async function upsertSolarLenderAction(
     if (d.contractAdjustmentEnabled) {
       await logLenderAdjustmentChanges(user, { id: created.id, name: d.name }, null, d);
     }
+    savedId = created.id;
   }
   revalidatePath("/portal/settings/solar-equipment");
   revalidatePath("/portal/settings/solar-lenders");
-  return ok();
+  return { ...ok(), id: savedId as string };
 }
 
 /**
