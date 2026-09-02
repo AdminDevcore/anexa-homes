@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Hint, Panel, StatRow, TextField } from "@/components/portal/settings-kit";
 import { setStormCoverageAction } from "@/server/modules/storm/actions";
 import { AddressAutocomplete } from "@/components/portal/address-autocomplete";
 
@@ -34,26 +34,15 @@ export function StormCoverageSettings({
   }
 
   return (
-    <div className="max-w-xl space-y-4">
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current coverage</div>
-        <div className="mt-1 text-sm">
-          {initial.isDefault ? (
-            <span>Default — <b>Dallas, TX</b> @ <b>100 mi</b> (not customized yet)</span>
-          ) : (
-            <span>
-              Center <b>{initial.centerLat?.toFixed(4)}, {initial.centerLng?.toFixed(4)}</b> · radius <b>{initial.radiusMiles} mi</b>
-            </span>
-          )}
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Storm reports are only imported and shown within this circle. Set it to the metro you canvass.
-        </p>
-      </div>
-
-      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
+      <Panel
+        title="Where storm reports are pulled from"
+        description="Reports are only imported and shown inside this circle. Set it to the metro you canvass."
+      >
         <div className="space-y-1.5">
-          <Label htmlFor="storm-center">Center (address, city, or ZIP)</Label>
+          <Label className="text-xs" htmlFor="storm-center">
+            Centre (address, city, or ZIP)
+          </Label>
           {/* "broad" because this field's label offers a city or a ZIP, and the
               default house-only restriction would suggest nothing for either. */}
           <AddressAutocomplete
@@ -65,19 +54,54 @@ export function StormCoverageSettings({
             onSelect={(parts) => setAddress(parts.formatted)}
             placeholder="e.g. Plano, TX  or  75075"
           />
-          <p className="text-xs text-muted-foreground">We geocode this to set the center point.</p>
+          <Hint>Geocoded to set the centre point.</Hint>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="storm-radius">Radius (miles)</Label>
-          <Input id="storm-radius" type="number" inputMode="numeric" min={5} max={300} value={radius} onChange={(e) => setRadius(e.target.value)} className="w-32" />
-          <p className="text-xs text-muted-foreground">5–300 mi. Larger = more data + more import time. 100 is a good metro default.</p>
-        </div>
-        <Button onClick={save} disabled={busy} className="bg-gold text-gold-foreground hover:bg-gold/90">
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Save coverage
+
+        <TextField
+          label="Radius (miles)"
+          type="number"
+          value={radius}
+          onChange={setRadius}
+          hint="5–300 miles. Larger means more data and a longer import; 100 is a good metro default."
+        />
+
+        <Button onClick={save} disabled={busy}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Save
+          coverage
         </Button>
-        <p className="text-xs text-muted-foreground">
-          New reports flow in on the next daily import; existing reports outside the new circle stay until they age out.
-        </p>
+
+        <Hint>
+          New reports flow in on the next daily import. Reports already inside the old circle stay
+          until they age out.
+        </Hint>
+      </Panel>
+
+      <div className="xl:sticky xl:top-20 xl:self-start">
+        <Panel title="Current coverage" tone="muted">
+          <dl>
+            {initial.isDefault ? (
+              <>
+                <StatRow label="Centre" value="Dallas, TX" tone="warn" />
+                <StatRow label="Radius" value="100 mi" />
+                <StatRow label="Set by" value="nobody yet" tone="warn" />
+              </>
+            ) : (
+              <>
+                <StatRow
+                  label="Centre"
+                  value={`${initial.centerLat?.toFixed(4)}, ${initial.centerLng?.toFixed(4)}`}
+                />
+                <StatRow label="Radius" value={`${initial.radiusMiles} mi`} />
+              </>
+            )}
+          </dl>
+          {initial.isDefault && (
+            <Hint className="mt-2">
+              Still the shipped default. Every storm report this workspace has is one that happened
+              to fall within 100 miles of Dallas.
+            </Hint>
+          )}
+        </Panel>
       </div>
     </div>
   );

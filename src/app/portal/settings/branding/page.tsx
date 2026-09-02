@@ -1,19 +1,23 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
-import { PageHeader } from "@/components/portal/ui";
-import { BrandingForm } from "@/components/portal/branding-form";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
+import { BrandingSettings } from "@/components/portal/branding-form";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { DEFAULT_VERTICAL, VERTICAL_LABEL } from "@/lib/vertical";
 import { applyVerticalOverrides } from "@/lib/vertical-settings";
-import { CompanyIdentityForm } from "@/components/portal/company-identity-form";
 
 export const metadata = { title: "Branding" };
 
-export default async function BrandingSettingsPage() {
+export default async function BrandingSettingsPage({
+  searchParams,
+}: {
+  /** Which tab is open. Read on the SERVER so the first paint is the right one. */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
@@ -36,48 +40,45 @@ export default async function BrandingSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader title="Branding" description="Set your logo, colors, company information, and localization settings used across the portal and documents." />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <BrandingForm
-          workspaceLabel={VERTICAL_LABEL[vertical] ?? undefined}
-          isOverride={isOverride}
-          initial={{
-            // Blank rather than the inherited value ONLY for the brand name, so
-            // the placeholder can say what it will inherit. Everything else
-            // shows the resolved value, which is what this workspace renders.
-            brandName: overrides?.brandName ?? (isOverride ? "" : company?.name ?? ""),
-            logoUrl: settings?.logoUrl ?? "",
-            faviconUrl: settings?.faviconUrl ?? "",
-            primaryColor: settings?.primaryColor ?? "#0B0B0C",
-            accentColor: settings?.accentColor ?? "#BFA15F",
-            fontFamily: settings?.fontFamily ?? "",
-            emailFromName: settings?.emailFromName ?? "",
-            recordPrefix: settings?.recordPrefix ?? "",
-            supportPhone: settings?.supportPhone ?? "",
-            supportEmail: settings?.supportEmail ?? "",
-            currencyCode: settings?.currencyCode ?? "USD",
-            locale: settings?.locale ?? "en-US",
-            customDomain: settings?.customDomain ?? "",
-            removePoweredBy: settings?.removePoweredBy ?? false,
-          }}
-        />
-        <CompanyIdentityForm
-          initial={{
-            name: company?.name ?? "",
-            phone: company?.phone ?? "",
-            email: company?.email ?? "",
-            website: company?.website ?? "",
-            address: company?.address ?? "",
-            city: company?.city ?? "",
-            state: company?.state ?? "",
-            zip: company?.zip ?? "",
-            timezone: company?.timezone ?? "America/Chicago",
-          }}
-        />
-      </div>
+      <SettingsScreenHeader
+        section="branding"
+        description="Your logo, brand colours, the company details a proposal prints, and how money and dates are formatted."
+      />
+      <BrandingSettings
+        workspaceLabel={VERTICAL_LABEL[vertical] ?? undefined}
+        isOverride={isOverride}
+        initialTab={one(params.tab)}
+        branding={{
+          // Blank rather than the inherited value ONLY for the brand name, so
+          // the placeholder can say what it will inherit. Everything else shows
+          // the resolved value, which is what this workspace renders.
+          brandName: overrides?.brandName ?? (isOverride ? "" : company?.name ?? ""),
+          logoUrl: settings?.logoUrl ?? "",
+          faviconUrl: settings?.faviconUrl ?? "",
+          primaryColor: settings?.primaryColor ?? "#0B0B0C",
+          accentColor: settings?.accentColor ?? "#BFA15F",
+          fontFamily: settings?.fontFamily ?? "",
+          emailFromName: settings?.emailFromName ?? "",
+          recordPrefix: settings?.recordPrefix ?? "",
+          supportPhone: settings?.supportPhone ?? "",
+          supportEmail: settings?.supportEmail ?? "",
+          currencyCode: settings?.currencyCode ?? "USD",
+          locale: settings?.locale ?? "en-US",
+          customDomain: settings?.customDomain ?? "",
+          removePoweredBy: settings?.removePoweredBy ?? false,
+        }}
+        identity={{
+          name: company?.name ?? "",
+          phone: company?.phone ?? "",
+          email: company?.email ?? "",
+          website: company?.website ?? "",
+          address: company?.address ?? "",
+          city: company?.city ?? "",
+          state: company?.state ?? "",
+          zip: company?.zip ?? "",
+          timezone: company?.timezone ?? "America/Chicago",
+        }}
+      />
     </div>
   );
 }

@@ -15,7 +15,7 @@ test("new appointment: required custom field is enforced, attachment uploads", a
   await page.goto("/portal/leads/new");
 
   // Custom fields section shows the seeded fields, required one marked with *
-  await expect(page.getByText("Custom Fields")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Custom Fields" })).toBeVisible();
   await expect(page.getByText("Damage Type")).toBeVisible();
 
   // Fill name but leave the required "Damage Type" empty → submit blocked

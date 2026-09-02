@@ -1,15 +1,10 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { listBackupProfiles, listRebates } from "@/server/modules/solar/storage";
-import {
-  BackupProfileManager,
-  RebateManager,
-} from "@/components/portal/solar-storage-settings";
+import { SolarStorageSettings } from "@/components/portal/solar-storage-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -38,21 +33,13 @@ export default async function SolarStorageSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" />
-        Settings
-      </Link>
 
-      <PageHeader
-        title="Storage"
+      <SettingsScreenHeader
+        section="solar_storage"
         description="What a battery is asked to carry, and whose money comes off the price."
       />
 
-      <BackupProfileManager rows={profiles} canEdit={canEdit} />
-      <RebateManager rows={rebates} canEdit={canEdit} />
+      <SolarStorageSettings profiles={profiles} rebates={rebates} canEdit={canEdit} />
     </div>
   );
 }

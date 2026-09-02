@@ -3,9 +3,15 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, GripVertical, ArrowUp, ArrowDown, Lock } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Lock } from "lucide-react";
+import {
+  Caution,
+  Hint,
+  ListEditor,
+  Panel,
+  SaveBar,
+  type ListRow,
+} from "@/components/portal/settings-kit";
 import type { ClaimStatusOption } from "@/lib/claim-status";
 
 type Item = ClaimStatusOption & { inUse: number; unlocksScope: boolean };
@@ -14,151 +20,135 @@ type SaveAction = (input: {
   items: { key?: string; label: string }[];
 }) => Promise<{ ok: boolean; error?: string }>;
 
+type Row = ListRow & { key: string; inUse: number; unlocksScope: boolean };
+
 /**
- * Editor for the company's claim-status list.
+ * The company's claim-status list.
  *
- * Deliberately NOT `ListSettingsManager`: that one edits bare labels, and here a
- * rename must carry the row's frozen key along with it. Sending labels alone
- * would re-slug on every edit and orphan every deal sitting on the old key.
+ * Deliberately not the plain label list: a rename must carry the row's FROZEN
+ * KEY along with it. Sending labels alone would re-slug on every edit and orphan
+ * every deal sitting on the old key — which is why a new row is added with no
+ * key at all and the server mints one.
  *
- * Two things are surfaced that a plain list can't show, because both are what an
+ * Two things a plain list cannot show are on each row, because both are what an
  * admin needs before hitting delete: how many live deals are on a status, and
  * whether it is one of the built-ins that unlocks the Scope of Work tab.
  */
 export function ClaimStatusSettings({ items, save }: { items: Item[]; save: SaveAction }) {
   const router = useRouter();
-  const [list, setList] = React.useState<Item[]>(items);
-  const [draft, setDraft] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
-  async function commit(next: Item[]) {
+  const seed = React.useCallback(
+    (): Row[] =>
+      items.map((i, n) => ({
+        id: i.key || `row-${n}`,
+        key: i.key,
+        label: i.label,
+        inUse: i.inUse,
+        unlocksScope: i.unlocksScope,
+        note: (
+          <span className="flex items-center gap-1.5">
+            {i.unlocksScope && (
+              <span
+                title="Reaching this status opens the Scope of Work tab. Rename it freely; deleting it removes that shortcut."
+                className="inline-flex items-center gap-1 rounded-full border border-gold/40 bg-gold/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold"
+              >
+                <Lock className="size-3" /> opens scope
+              </span>
+            )}
+            {i.inUse > 0 && <span>{i.inUse === 1 ? "1 deal" : `${i.inUse} deals`}</span>}
+          </span>
+        ),
+      })),
+    [items]
+  );
+
+  const [rows, setRows] = React.useState(seed);
+  const serverKey = JSON.stringify(items.map((i) => ({ key: i.key, label: i.label })));
+  const [seen, setSeen] = React.useState(serverKey);
+  if (seen !== serverKey) {
+    setSeen(serverKey);
+    setRows(seed());
+  }
+
+  const payload = rows
+    .filter((r) => r.label.trim() !== "")
+    // A row with no key is new: the server mints one and freezes it.
+    .map((r) => ({ ...(r.key ? { key: r.key } : {}), label: r.label.trim() }));
+  const dirty = JSON.stringify(payload) !== serverKey;
+
+  /** Statuses about to disappear that deals are still sitting on. */
+  const strandedDeals = items
+    .filter((i) => i.inUse > 0 && !rows.some((r) => r.key === i.key))
+    .reduce((n, i) => n + i.inUse, 0);
+  const losingScope = items.some((i) => i.unlocksScope && !rows.some((r) => r.key === i.key));
+
+  async function commit() {
     setBusy(true);
-    const res = await save({ items: next.map((i) => ({ key: i.key, label: i.label })) });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error ?? "Couldn't save.");
-      return false;
+    try {
+      const res = await save({ items: payload });
+      if (!res.ok) return toast.error(res.error ?? "Couldn't save.");
+      toast.success("Claim statuses saved");
+      router.refresh();
+    } catch {
+      toast.error("That did not save. Try again, or reload if it keeps failing.");
+    } finally {
+      setBusy(false);
     }
-    router.refresh();
-    return true;
-  }
-
-  async function add() {
-    const label = draft.trim();
-    if (!label) return;
-    if (list.some((i) => i.label.toLowerCase() === label.toLowerCase())) {
-      toast.error("That's already in the list.");
-      return;
-    }
-    // No key: the server mints one and freezes it. Counts start at zero.
-    const next = [...list, { key: "", label, inUse: 0, unlocksScope: false }];
-    setList(next);
-    setDraft("");
-    if (!(await commit(next))) setList(list);
-  }
-
-  async function remove(idx: number) {
-    if (list.length === 1) return toast.error("Keep at least one status.");
-    const gone = list[idx];
-    const next = list.filter((_, i) => i !== idx);
-    setList(next);
-    if (!(await commit(next))) return setList(list);
-    if (gone.inUse > 0) {
-      toast.warning(
-        `${gone.inUse} deal${gone.inUse === 1 ? "" : "s"} still on "${gone.label}" — they keep it until you change them.`
-      );
-    }
-  }
-
-  async function rename(idx: number, value: string) {
-    const label = value.trim();
-    if (!label || label === list[idx].label) return;
-    if (list.some((i, n) => n !== idx && i.label.toLowerCase() === label.toLowerCase())) {
-      toast.error("That's already in the list.");
-      setList([...list]);
-      return;
-    }
-    // Key untouched on purpose — this is a rename, not a replacement.
-    const next = list.map((i, n) => (n === idx ? { ...i, label } : i));
-    setList(next);
-    await commit(next);
-  }
-
-  async function move(idx: number, dir: -1 | 1) {
-    const j = idx + dir;
-    if (j < 0 || j >= list.length) return;
-    const next = [...list];
-    [next[idx], next[j]] = [next[j], next[idx]];
-    setList(next);
-    await commit(next);
   }
 
   return (
-    <div className="space-y-4">
-      <div className="divide-y divide-border/60 rounded-xl border border-border bg-card">
-        {list.map((item, idx) => (
-          <div key={item.key || `new-${idx}`} className="flex items-center gap-2 px-3 py-2">
-            <GripVertical className="size-4 shrink-0 text-muted-foreground/50" />
-            <input
-              defaultValue={item.label}
-              disabled={busy}
-              onBlur={(e) => rename(idx, e.target.value)}
-              aria-label={`Status ${idx + 1}`}
-              className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm hover:border-border focus:border-ring focus:outline-none"
-            />
-            {item.unlocksScope && (
-              <span
-                title="Reaching this status opens the Scope of Work tab. Rename it freely; deleting it removes that shortcut."
-                className="hidden shrink-0 items-center gap-1 rounded-full border border-gold/40 bg-gold/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold sm:inline-flex"
-              >
-                <Lock className="size-3" /> Opens scope
-              </span>
-            )}
-            {item.inUse > 0 && (
-              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {item.inUse} deal{item.inUse === 1 ? "" : "s"}
-              </span>
-            )}
-            <button
-              onClick={() => move(idx, -1)}
-              disabled={idx === 0 || busy}
-              className="text-muted-foreground hover:text-foreground disabled:opacity-30"
-              aria-label="Move up"
-            >
-              <ArrowUp className="size-4" />
-            </button>
-            <button
-              onClick={() => move(idx, 1)}
-              disabled={idx === list.length - 1 || busy}
-              className="text-muted-foreground hover:text-foreground disabled:opacity-30"
-              aria-label="Move down"
-            >
-              <ArrowDown className="size-4" />
-            </button>
-            <button
-              onClick={() => remove(idx)}
-              disabled={busy}
-              className="text-muted-foreground hover:text-destructive"
-              aria-label={`Remove ${item.label}`}
-            >
-              <Trash2 className="size-4" />
-            </button>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())}
+    <>
+      <Panel
+        title="Statuses"
+        description="What the deal Summary offers for a carrier claim, in the order a rep picks from."
+      >
+        <ListEditor
+          rows={rows}
+          onChange={(next) =>
+            setRows(
+              next.map((n) => {
+                const was = rows.find((r) => r.id === n.id);
+                return {
+                  ...n,
+                  key: was?.key ?? "",
+                  inUse: was?.inUse ?? 0,
+                  unlocksScope: was?.unlocksScope ?? false,
+                };
+              })
+            )
+          }
+          addLabel="Add status"
           placeholder="e.g. Depreciation released"
-          className="max-w-sm"
+          disabled={busy}
         />
-        <Button size="sm" variant="outline" disabled={busy || !draft.trim()} onClick={add}>
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add status
-        </Button>
-      </div>
-    </div>
+        <Hint>
+          Renaming is safe: the internal key is frozen when a status is created, so every deal
+          already on it follows the new wording.
+        </Hint>
+        {strandedDeals > 0 && (
+          <Caution>
+            {strandedDeals === 1 ? "One deal is" : `${strandedDeals} deals are`} still on a status
+            you have removed. They keep showing it until somebody picks a new one.
+          </Caution>
+        )}
+        {losingScope && (
+          <Caution>
+            You have removed a status that opens the Scope of Work tab. Deals will no longer reach
+            it by moving through the claim.
+          </Caution>
+        )}
+      </Panel>
+
+      <SaveBar
+        dirty={dirty}
+        busy={busy}
+        what="claim statuses"
+        onSave={commit}
+        onDiscard={() => setRows(seed())}
+        disabled={payload.length === 0}
+        blockedReason={payload.length === 0 ? "Keep at least one status." : undefined}
+      />
+    </>
   );
 }

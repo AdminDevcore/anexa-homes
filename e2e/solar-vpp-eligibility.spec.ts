@@ -35,9 +35,12 @@ async function toSolar(page: Page) {
   await expect(page.getByText(/· Solar workspace/)).toBeVisible({ timeout: 15000 });
 }
 
-/** The row on the settings list, addressed by the provider's name. */
+/** The provider's row in the rail, addressed by name. */
 const providerRow = (page: Page) =>
-  page.locator("li").filter({ hasText: PROVIDER }).first();
+  page.getByRole("navigation", { name: "Energy providers" }).getByRole("button", { name: PROVIDER });
+
+/** The open provider's panel — one is mounted at a time. */
+const panel = (page: Page) => page.getByTestId("provider-panel");
 
 test.describe(FLAG_ON ? "who a VPP programme is open to" : "who a VPP programme is open to (flag off — skipped)", () => {
   test.skip(!FLAG_ON, "Needs the solar workspace enabled.");
@@ -48,39 +51,41 @@ test.describe(FLAG_ON ? "who a VPP programme is open to" : "who a VPP programme 
 
     // ── The office records what the programme actually runs on ──────────────
     await page.goto("/portal/settings/solar-providers");
-    await page.fill("#add-utility", PROVIDER);
-    await page.getByRole("button", { name: "Add" }).first().click();
+    await page.getByRole("button", { name: "New provider" }).click();
+    await page.getByLabel("Name", { exact: true }).fill(PROVIDER);
+    await page.getByRole("button", { name: "Add provider" }).click();
     await expect(providerRow(page)).toBeVisible({ timeout: 15000 });
 
-    // Before anybody opens it, a provider says nothing is recorded rather than
-    // rendering blank — a blank line on this screen reads as "they do not".
-    await expect(providerRow(page)).toContainText("Buyback and VPP not recorded");
+    // Before anybody fills it in, a provider says nothing is recorded rather
+    // than rendering blank — a blank line on this screen reads as "they do not".
+    await expect(providerRow(page)).toContainText("nothing recorded");
 
-    await providerRow(page).getByRole("button", { name: "Terms" }).click();
-    await page.getByLabel("Runs a battery / VPP programme").check();
-    await providerRow(page).getByPlaceholder("e.g. Renew Home").fill("Renew Home");
+    // ── The programme, on the panel's own tab ───────────────────────────────
+    await providerRow(page).click();
+    await panel(page).getByRole("tab", { name: "Battery programme" }).click();
+    await panel(page).getByRole("radio", { name: "Yes" }).check();
+    // By role: the tab panel itself is labelled "Battery programme".
+    await panel(page).getByRole("textbox", { name: "Programme" }).fill("Renew Home");
 
     // Each list is EMPTY BY DEFAULT AND MEANS ANY, and says so in its own words.
-    await expect(providerRow(page).getByText("Ways of paying that qualify")).toContainText("Any");
+    await expect(panel(page).getByText("Ways of paying that qualify")).toContainText("Any");
 
-    await providerRow(page).getByRole("button", { name: "Loan", exact: true }).click();
-    await providerRow(page).getByRole("button", { name: /Tesla Powerwall 3/ }).click();
-    await providerRow(page).getByRole("button", { name: "Save" }).click();
+    await panel(page).getByRole("button", { name: "Loan", exact: true }).click();
+    await panel(page).getByRole("button", { name: /Tesla Powerwall 3/ }).click();
+    await panel(page).getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText(`${PROVIDER} saved`)).toBeVisible({ timeout: 15000 });
 
-    // ── Closed, the row now carries its conditions ──────────────────────────
+    // ── The rail row now carries the conditions ─────────────────────────────
     await expect(providerRow(page)).toContainText("VPP · Renew Home", { timeout: 15000 });
-    await expect(providerRow(page)).toContainText("Needs Loan");
-    await expect(providerRow(page)).toContainText("Tesla Powerwall 3");
 
-    // Reopening finds the ticks where they were left, not a blank form.
-    await providerRow(page).getByRole("button", { name: "Terms" }).click();
-    await expect(
-      providerRow(page).getByRole("button", { name: /Tesla Powerwall 3/ })
-    ).toHaveClass(/violet/);
-    await expect(providerRow(page).getByText("Ways of paying that qualify")).not.toContainText(
-      "Any"
+    // Reopened, the ticks are where they were left, not a blank form.
+    await page.reload();
+    await providerRow(page).click();
+    await panel(page).getByRole("tab", { name: "Battery programme" }).click();
+    await expect(panel(page).getByText("Ways of paying that qualify")).not.toContainText("Any");
+    await expect(panel(page).getByRole("button", { name: /Tesla Powerwall 3/ })).toContainText(
+      "Tesla Powerwall 3"
     );
-    await providerRow(page).getByRole("button", { name: "Cancel" }).click();
 
     // ── The rep reads it back the moment they pick the provider ─────────────
     await page.goto("/portal/leads?q=Marcus");

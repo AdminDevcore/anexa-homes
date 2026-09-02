@@ -84,7 +84,8 @@ export async function addPipelineStageAction(pipelineId: string, input: z.infer<
   if (!pipeline) return fail("Pipeline not found.");
 
   const nextPos = (pipeline.stages[0]?.position ?? -1) + 1;
-  await prisma.pipelineStage.create({
+  // The id comes back so the screen can OPEN the stage that was just added.
+  const row = await prisma.pipelineStage.create({
     data: {
       pipelineId,
       name: parsed.data.name,
@@ -95,9 +96,10 @@ export async function addPipelineStageAction(pipelineId: string, input: z.infer<
       isLost: parsed.data.isLost ?? false,
       ...stageSlaData(parsed.data),
     },
+    select: { id: true },
   });
   revalidatePath("/portal/settings/pipeline");
-  return ok();
+  return { ok: true as const, id: row.id };
 }
 
 export async function updatePipelineStageAction(id: string, input: z.infer<typeof stageSchema>) {
@@ -397,7 +399,8 @@ export async function createCustomFieldAction(input: z.infer<typeof fieldSchema>
   });
   if (exists) return fail("A field with a similar name already exists.");
 
-  await prisma.customFieldDef.create({
+  // The id comes back so the screen can OPEN the field that was just created.
+  const row = await prisma.customFieldDef.create({
     data: {
       companyId: user.companyId,
       entity: parsed.data.entity,
@@ -407,6 +410,53 @@ export async function createCustomFieldAction(input: z.infer<typeof fieldSchema>
       options: parsed.data.options,
       required: parsed.data.required,
       position: count,
+    },
+    select: { id: true },
+  });
+  revalidatePath("/portal/settings/fields");
+  return { ok: true as const, id: row.id };
+}
+
+const fieldEditSchema = z.object({
+  label: z.string().min(1).max(80),
+  options: z.array(z.string()).optional().default([]),
+  required: z.boolean().optional().default(false),
+});
+
+/**
+ * Rename a field, change its options, make it required — but never its KEY.
+ *
+ * The key is what every stored value hangs off: a lead's `customFields` JSON is
+ * keyed by it, and so is every `{{custom.*}}` token on a document template.
+ * Re-slugging on a rename would orphan both, silently, on every record already
+ * captured. So the label is free to change and the key is frozen at creation.
+ *
+ * The TYPE is frozen for the same reason one step further on: values already
+ * stored as text do not become numbers because a dropdown says so.
+ */
+export async function updateCustomFieldAction(
+  id: string,
+  input: z.infer<typeof fieldEditSchema>
+) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = fieldEditSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid field.");
+
+  const field = await prisma.customFieldDef.findFirst({
+    where: { id, companyId: user.companyId },
+    select: { id: true, type: true },
+  });
+  if (!field) return fail("Field not found.");
+
+  await prisma.customFieldDef.update({
+    where: { id },
+    data: {
+      label: parsed.data.label,
+      required: parsed.data.required,
+      // Only a dropdown has options. Sending them for anything else would put a
+      // list on a field nothing reads it from.
+      ...(field.type === "select" ? { options: parsed.data.options } : {}),
     },
   });
   revalidatePath("/portal/settings/fields");

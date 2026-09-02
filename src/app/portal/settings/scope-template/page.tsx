@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, DollarSign, FilePlus2 } from "lucide-react";
+import { DollarSign, FilePlus2 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { insuranceEnabled } from "@/lib/vertical-features";
 import { can } from "@/server/rbac/guards";
 import { getScopeCatalog } from "@/server/modules/scope/queries";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { Button } from "@/components/ui/button";
 import { ScopeCatalogManager } from "@/components/portal/scope-catalog-manager";
 
@@ -23,13 +23,10 @@ export default async function ScopeCatalogPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Scope of Work Catalog"
+      <SettingsScreenHeader
+        section="scope_template"
         description="The master list of insurance-restoration line items. No pricing here — cost and supplement prices live in separate versioned templates, and insurance pricing is entered inside each Project → Scope of Work."
-        action={
+        actions={
           <>
             <Button asChild variant="outline" size="sm">
               <Link href="/portal/settings/scope-cost-templates">

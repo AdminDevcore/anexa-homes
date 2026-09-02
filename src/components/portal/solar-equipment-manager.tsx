@@ -4,552 +4,524 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Star, Archive, RotateCcw, Landmark, Check, ImagePlus, X } from "lucide-react";
+import { Loader2, PanelsTopLeft, Plus, Star, Wrench } from "lucide-react";
 import type { SolarEquipmentKind } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  upsertSolarEquipmentAction,
-  deleteSolarEquipmentAction,
-  setDefaultSolarEquipmentAction,
-  setSolarEquipmentActiveAction,
-  setEquipmentLendersAction,
-} from "@/server/modules/solar/actions";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { EmptyState } from "@/components/portal/ui";
 import {
-  uploadSolarEquipmentPhotoAction,
-  removeSolarEquipmentPhotoAction,
-} from "@/server/modules/solar/equipment-photo-actions";
+  ChoiceCards,
+  Hint,
+  ItemRail,
+  RailGroup,
+  RailLayout,
+  RailNoMatch,
+  RailRow,
+} from "@/components/portal/settings-kit";
+import {
+  reorderSolarAddersAction,
+  upsertSolarEquipmentAction,
+} from "@/server/modules/solar/actions";
+import { HardwarePanel, HARDWARE_TABS, type HardwareTab } from "./solar-equipment/hardware-panel";
+import { AdderPanel, ADDER_TABS, type AdderTab } from "./solar-equipment/adder-panel";
+import {
+  KINDS,
+  catalogueRateLabel,
+  itemName,
+  money,
+  type AdderItem,
+  type Item,
+  type Lender,
+} from "./solar-equipment/types";
 
-type Item = {
-  id: string;
-  kind: SolarEquipmentKind;
-  manufacturer: string | null;
-  model: string;
-  ratingW: number | null;
-  costCents: number;
-  priceCents: number;
-  isActive: boolean;
-  isDefault: boolean;
-  avlYear: number | null;
-  lenderIds: string[];
-  /** The serving route with a cache-buster, or null when none is set. */
-  photoUrl: string | null;
-};
-
-export type Lender = { id: string; name: string; isActive: boolean; rank: number; notes: string | null };
-
-/**
- * The hardware. ADDERS ARE NOT HERE any more — they moved to
- * `SolarAdderCatalogue`, because an adder stopped being a price and became a
- * priced rule (how it is worked out, the words a homeowner reads, the system
- * size that applies it, what it does to consumption), and none of that fits a
- * grid built for a manufacturer, a model and a wattage.
- */
-const KINDS: { value: SolarEquipmentKind; label: string; ratingLabel: string }[] = [
-  { value: "module", label: "Modules", ratingLabel: "W per panel" },
-  { value: "inverter", label: "Inverters", ratingLabel: "Rated W" },
-  { value: "battery", label: "Batteries", ratingLabel: "Usable Wh" },
-];
-
-const money = (c: number) =>
-  (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-
-export function SolarEquipmentManager({ items, lenders, canEdit }: { items: Item[]; lenders: Lender[]; canEdit: boolean }) {
-  return (
-    <div className="space-y-6">
-      {lenders.length === 0 && (
-        <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
-          No lenders set up yet. Add them under{" "}
-          <Link href="/portal/settings/solar-lenders" className="underline underline-offset-2">
-            Settings &rarr; Lenders
-          </Link>{" "}
-          to tag which approved-vendor lists each item appears on.
-        </p>
-      )}
-      {KINDS.map((k) => (
-        <section key={k.value} className="space-y-3 rounded-xl border border-border bg-card p-5">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold">{k.label}</h3>
-            {canEdit && <AddForm kind={k.value} ratingLabel={k.ratingLabel} />}
-          </div>
-          {(() => {
-            const mine = items.filter((i) => i.kind === k.value);
-            const live = mine.filter((i) => i.isActive);
-            const retired = mine.filter((i) => !i.isActive);
-            return (
-              <>
-                <div className="divide-y divide-border">
-                  {mine.length === 0 && (
-                    <p className="py-2 text-sm text-muted-foreground">Nothing yet.</p>
-                  )}
-                  {mine.length > 0 && live.length === 0 && (
-                    <p className="py-2 text-sm text-muted-foreground">
-                      Nothing sellable — everything here is retired.
-                    </p>
-                  )}
-                  {live.map((i) => (
-                    <Row key={i.id} item={i} lenders={lenders} canEdit={canEdit} />
-                  ))}
-                </div>
-
-                {/* Retired items stay listed, and stay readable. They are what
-                    last year's deals point at, so hiding them would make those
-                    deals harder to explain, not tidier. */}
-                {retired.length > 0 && (
-                  <details className="mt-3 rounded-lg border border-dashed border-border">
-                    <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
-                      {retired.length} retired — still shown on the deals that already use{" "}
-                      {retired.length === 1 ? "it" : "them"}
-                    </summary>
-                    <div className="divide-y divide-border px-3 pb-2">
-                      {retired.map((i) => (
-                        <Row key={i.id} item={i} lenders={lenders} canEdit={canEdit} />
-                      ))}
-                    </div>
-                  </details>
-                )}
-              </>
-            );
-          })()}
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function Row({ item, lenders, canEdit }: { item: Item; lenders: Lender[]; canEdit: boolean }) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState(false);
-  const [editingLenders, setEditingLenders] = React.useState(false);
-  const [picked, setPicked] = React.useState<string[]>(item.lenderIds);
-
-  async function remove() {
-    setBusy(true);
-    const res = await deleteSolarEquipmentAction(item.id);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error, { duration: 9000 });
-    toast.success("Deleted");
-    router.refresh();
-  }
-
-  async function setActive(next: boolean) {
-    setBusy(true);
-    const res = await setSolarEquipmentActiveAction(item.id, next);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success(res.message ?? (next ? "Restored" : "Retired"));
-    router.refresh();
-  }
-
-  const named = lenders.filter((l) => item.lenderIds.includes(l.id));
-
-  async function saveLenders() {
-    setBusy(true);
-    const res = await setEquipmentLendersAction(item.id, picked);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    setEditingLenders(false);
-    toast.success(res.count === 0 ? "No lender approvals — this will be hidden whenever a lender is selected" : `Approved for ${res.count} lender${res.count === 1 ? "" : "s"}`);
-    router.refresh();
-  }
-
-  return (
-    <>
-    <div className={`flex flex-wrap items-center gap-2 py-2.5 text-sm ${item.isActive ? "" : "opacity-60"}`}>
-      {/* The photo the customer will see, at the size it is worth checking:
-          big enough to notice a wrong product or a screenshot with a white
-          border, small enough not to turn a catalogue into a gallery. */}
-      <PhotoCell item={item} canEdit={canEdit} />
-      <span className="min-w-[12rem] flex-1 font-medium">
-        {item.manufacturer ? `${item.manufacturer} ` : ""}
-        {item.model}
-      </span>
-      {item.avlYear != null && (
-        <span className="rounded-full border chip-info px-2 py-0.5 text-[11px] font-medium">
-          AVL {item.avlYear}
-        </span>
-      )}
-      {!item.isActive && (
-        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-          retired
-        </span>
-      )}
-      {named.map((l) => (
-        <span key={l.id} className="rounded-full border chip-violet px-2 py-0.5 text-[11px] font-medium">
-          {l.name}
-        </span>
-      ))}
-      {lenders.length > 0 && named.length === 0 && (
-        <span
-          className="rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium"
-          title="Not on any lender's approved list, so it is hidden whenever a lender is selected on a deal"
-        >
-          no lender
-        </span>
-      )}
-      {item.ratingW ? (
-        <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-          {item.ratingW}W
-        </span>
-      ) : null}
-      {item.isDefault && (
-        <span className="inline-flex items-center gap-1 rounded-full border chip-good px-2 py-0.5 text-[11px] font-medium">
-          <Star className="size-3" /> default
-        </span>
-      )}
-      <span className="tabular-nums text-muted-foreground">cost {money(item.costCents)}</span>
-      <span className="tabular-nums font-medium">{money(item.priceCents)}</span>
-      {/* One default per kind — promoting this one demotes the incumbent, so
-          the builder always has exactly one obvious starting choice. */}
-      {canEdit && item.isActive && (
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={busy}
-          title={item.isDefault ? "Stop being the default" : "Make this the default"}
-          onClick={async () => {
-            setBusy(true);
-            const res = await setDefaultSolarEquipmentAction(item.id, !item.isDefault);
-            setBusy(false);
-            if (!res.ok) return toast.error(res.error);
-            toast.success(item.isDefault ? "No longer the default" : "Set as default");
-            router.refresh();
-          }}
-        >
-          <Star className={item.isDefault ? "size-4 fill-current" : "size-4"} />
-        </Button>
-      )}
-      {canEdit && lenders.length > 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={busy}
-          title="Which lenders approve this"
-          onClick={() => { setPicked(item.lenderIds); setEditingLenders((v) => !v); }}
-        >
-          <Landmark className="size-4" />
-        </Button>
-      )}
-      {/* Retiring is the safe move and sits before delete on purpose: it stops
-          new designs picking the item while leaving every existing deal intact. */}
-      {canEdit && (
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={busy}
-          title={item.isActive ? "Retire — hide from new designs, keep it on existing deals" : "Make sellable again"}
-          onClick={() => setActive(!item.isActive)}
-        >
-          {item.isActive ? <Archive className="size-4" /> : <RotateCcw className="size-4" />}
-        </Button>
-      )}
-      {canEdit && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={remove}
-          disabled={busy}
-          title="Delete permanently — refused if any design uses it"
-        >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-        </Button>
-      )}
-    </div>
-
-    {editingLenders && (
-      <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3">
-        <p className="mb-2 text-xs font-medium">Approved by</p>
-        <div className="flex flex-wrap gap-2">
-          {lenders.map((l) => {
-            const on = picked.includes(l.id);
-            return (
-              <button
-                key={l.id}
-                type="button"
-                onClick={() => setPicked((p) => (on ? p.filter((x) => x !== l.id) : [...p, l.id]))}
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                  on ? "border-violet-300 bg-violet-100 text-violet-900" : "border-border hover:bg-muted"
-                }`}
-              >
-                {on && <Check className="size-3" />}
-                {l.name}
-                {!l.isActive && " · retired"}
-              </button>
-            );
-          })}
-        </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          A rep who selects one of these on a deal will see this item. Tick every list it appears on —
-          most equipment is approved by more than one.
-        </p>
-        <div className="mt-3 flex gap-2">
-          <Button size="sm" onClick={saveLenders} disabled={busy}>
-            {busy && <Loader2 className="size-4 animate-spin" />} Save approvals
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditingLenders(false)} disabled={busy}>
-            Cancel
-          </Button>
-        </div>
-      </div>
-    )}
-    </>
-  );
-}
+export type { Item, AdderItem, Lender } from "./solar-equipment/types";
 
 /**
- * One catalogue item's photograph, and the controls to change it.
+ * The whole solar catalogue — hardware and adders — behind one rail.
  *
- * Sits at the head of the row rather than behind a dialog, because the mistake
- * this is here to catch — the wrong product, or a screenshot with a white
- * border baked in — is only visible when the picture is on screen beside the
- * model name it claims to be.
+ * Two screens' worth of content used to sit stacked on this page: a grid of
+ * modules, inverters and batteries in dense rows of icon buttons, and an adder
+ * rate sheet below it whose rows opened a dialog. Neither could EDIT anything:
+ * a price typed wrong meant deleting the row and adding it again, which the
+ * delete refuses the moment one deal has used it.
+ *
+ * One rail, four groups, and the panel gets the window — so every field a
+ * catalogue item has is reachable, and the adder rules that quietly put money
+ * on a deal get the width of the sentence that explains them.
  */
-function PhotoCell({ item, canEdit }: { item: Item; canEdit: boolean }) {
+export function SolarEquipmentManager({
+  items,
+  adders,
+  lenders,
+  canEdit,
+  initialItemId,
+  initialTab,
+}: {
+  items: Item[];
+  adders: AdderItem[];
+  lenders: Lender[];
+  canEdit: boolean;
+  /** Read on the SERVER — see the note on the page. */
+  initialItemId?: string | null;
+  initialTab?: string | null;
+}) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
-  const input = React.useRef<HTMLInputElement>(null);
+  const [query, setQuery] = React.useState("");
 
-  async function upload(file: File) {
-    setBusy(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await uploadSolarEquipmentPhotoAction(item.id, fd);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Photo updated");
-    router.refresh();
-  }
-
-  async function clear() {
-    setBusy(true);
-    const res = await removeSolarEquipmentPhotoAction(item.id);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Photo removed");
-    router.refresh();
-  }
-
-  const tile =
-    "relative flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-white";
-
-  if (!canEdit) {
-    return item.photoUrl ? (
-      <span className={tile}>
-        {/* eslint-disable-next-line @next/next/no-img-element -- served from a
-            route, not the image pipeline. */}
-        <img src={item.photoUrl} alt="" className="size-full object-contain p-1" loading="lazy" />
-      </span>
-    ) : (
-      <span className={`${tile} text-muted-foreground/40`} aria-hidden>
-        <ImagePlus className="size-4" />
-      </span>
-    );
-  }
-
-  return (
-    <span className="flex shrink-0 items-center gap-1">
-      <input
-        ref={input}
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          // Cleared so picking the SAME file again still fires a change event —
-          // which is exactly what somebody does after re-exporting a bad crop.
-          e.target.value = "";
-          if (f) void upload(f);
-        }}
-      />
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => input.current?.click()}
-        title={item.photoUrl ? "Replace the photo shown on the proposal" : "Add a photo for the proposal"}
-        aria-label={
-          item.photoUrl
-            ? `Replace the photo for ${item.model}`
-            : `Add a photo for ${item.model}`
-        }
-        className={`${tile} transition-colors hover:border-foreground/30 disabled:opacity-50`}
-      >
-        {busy ? (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
-        ) : item.photoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.photoUrl} alt="" className="size-full object-contain p-1" loading="lazy" />
-        ) : (
-          <ImagePlus className="size-4 text-muted-foreground/50" />
-        )}
-      </button>
-      {item.photoUrl && (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={clear}
-          title="Remove the photo"
-          aria-label={`Remove the photo for ${item.model}`}
-          className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-        >
-          <X className="size-3.5" />
-        </button>
-      )}
-    </span>
+  const everything = React.useMemo(
+    () => [
+      ...items.map((i) => ({ id: i.id, kind: i.kind, active: i.isActive })),
+      ...adders.map((a) => ({ id: a.id, kind: "adder" as const, active: a.isActive })),
+    ],
+    [items, adders]
   );
-}
 
-function AddForm({ kind, ratingLabel }: { kind: SolarEquipmentKind; ratingLabel: string }) {
-  const router = useRouter();
-  const [open, setOpen] = React.useState(false);
-  const [busy, setBusy] = React.useState(false);
-  const [f, setF] = React.useState({
-    manufacturer: "",
-    model: "",
-    ratingW: "",
-    widthMm: "",
-    heightMm: "",
-    cost: "",
-    price: "",
-    avlYear: "",
-    specSheetUrl: "",
-  });
-  const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const firstLive = everything.find((e) => e.active) ?? everything[0] ?? null;
+  const [selectedId, setSelectedId] = React.useState<string | null>(
+    () => initialItemId ?? firstLive?.id ?? null
+  );
 
-  async function save() {
-    if (!f.model.trim()) return toast.error("Model is required.");
-    setBusy(true);
-    const res = await upsertSolarEquipmentAction(null, {
-      kind,
-      manufacturer: f.manufacturer || null,
-      model: f.model,
-      ratingW: f.ratingW ? Number(f.ratingW) : null,
-      widthMm: f.widthMm ? Number(f.widthMm) : null,
-      heightMm: f.heightMm ? Number(f.heightMm) : null,
-      costCents: f.cost ? Math.round(Number(f.cost) * 100) : 0,
-      priceCents: f.price ? Math.round(Number(f.price) * 100) : 0,
-      avlYear: f.avlYear.trim() === "" ? null : Number(f.avlYear),
-      specSheetUrl: f.specSheetUrl.trim() || null,
-    });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Added");
-    setF({ manufacturer: "", model: "", ratingW: "", widthMm: "", heightMm: "", cost: "", price: "", avlYear: "", specSheetUrl: "" });
-    setOpen(false);
-    router.refresh();
-  }
+  const selectedItem = items.find((i) => i.id === selectedId) ?? null;
+  const selectedAdder = adders.find((a) => a.id === selectedId) ?? null;
+  const fallback = selectedItem || selectedAdder ? null : firstLive;
+  const openItem = selectedItem ?? items.find((i) => i.id === fallback?.id) ?? null;
+  const openAdder = selectedAdder ?? adders.find((a) => a.id === fallback?.id) ?? null;
 
-  if (!open) {
-    return (
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <Plus className="size-4" /> Add
-      </Button>
-    );
-  }
+  // Tabs differ between the two kinds of panel, so the URL carries one string
+  // and each panel takes the one it recognises.
+  const [tab, setTab] = React.useState<string>(() => initialTab ?? "details");
+  const hardwareTab: HardwareTab = (HARDWARE_TABS as readonly string[]).includes(tab)
+    ? (tab as HardwareTab)
+    : "details";
+  const adderTab: AdderTab = (ADDER_TABS as readonly string[]).includes(tab)
+    ? (tab as AdderTab)
+    : "details";
+
+  const idInUrl = openItem?.id ?? openAdder?.id ?? null;
+  React.useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (idInUrl) p.set("item", idInUrl);
+    else p.delete("item");
+    p.set("tab", tab);
+    window.history.replaceState(null, "", `${window.location.pathname}?${p}`);
+  }, [idInUrl, tab]);
 
   /**
-   * A field id, scoped to this section's kind.
+   * Move one adder a place up or down the selling order.
    *
-   * All four kinds render this form on the same page, so a bare `id="model"`
-   * would appear four times — and a duplicate id is a label that points at
-   * somebody else's box. It also makes every field addressable by its name,
-   * which is what a screen reader announces and what a test asks for.
+   * Sends the WHOLE order rather than the one row's new rank — rank is a number
+   * per row, and nudging one means rewriting its neighbour too.
    */
-  const fid = (name: string) => `eq-${kind}-${name}`;
+  const liveAdders = adders.filter((a) => a.isActive);
+  async function moveAdder(id: string, delta: number) {
+    const index = liveAdders.findIndex((a) => a.id === id);
+    const target = index + delta;
+    if (index < 0 || target < 0 || target >= liveAdders.length) return;
+    const next = [...liveAdders];
+    [next[index], next[target]] = [next[target], next[index]];
+    setBusy(true);
+    try {
+      const res = await reorderSolarAddersAction(next.map((a) => a.id));
+      if (!res.ok) return toast.error(res.error);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (items.length === 0 && adders.length === 0) {
+    return (
+      <EmptyState
+        icon={PanelsTopLeft}
+        title="Nothing in the catalogue yet"
+        description="Add the modules, inverters and batteries your reps build systems from, and the extra work you sell alongside them. Until there is at least one module, the layout designer has nothing to place and a system cannot be sized."
+        action={canEdit ? <AddItemDialog onAdded={setSelectedId} /> : undefined}
+      />
+    );
+  }
+
+  const q = query.trim().toLowerCase();
+  const hit = (s: string) => q === "" || s.toLowerCase().includes(q);
+
+  const shownAdders = adders.filter((a) => hit(a.label));
+  const liveShownAdders = shownAdders.filter((a) => a.isActive);
+  const retiredHardware = items.filter((i) => !i.isActive && hit(itemName(i)));
+  const retiredAdders = shownAdders.filter((a) => !a.isActive);
+  const anyShown =
+    KINDS.some((k) => items.some((i) => i.kind === k.value && i.isActive && hit(itemName(i)))) ||
+    liveShownAdders.length > 0 ||
+    retiredHardware.length > 0 ||
+    retiredAdders.length > 0;
 
   return (
-    <div className="w-full space-y-2 rounded-lg border border-border p-3">
-      <div className="grid gap-2 sm:grid-cols-3">
-        <div className="space-y-1">
-          <Label className="text-xs" htmlFor={fid("manufacturer")}>Manufacturer</Label>
-          <Input id={fid("manufacturer")} value={f.manufacturer} onChange={(e) => set("manufacturer", e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs" htmlFor={fid("model")}>Model *</Label>
-          <Input id={fid("model")} value={f.model} onChange={(e) => set("model", e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs" htmlFor={fid("rating")}>{ratingLabel}</Label>
-          <Input id={fid("rating")} type="number" value={f.ratingW} onChange={(e) => set("ratingW", e.target.value)} />
-        </div>
-        {/* The laminate's real size. The roof designer lays panels out at true
-            scale against satellite imagery, so this is what decides how many
-            fit between a ridge and a setback — leave it blank and every roof is
-            planned with a generic 1134 x 1762 module instead of the one on the
-            approved-vendor list. Off a spec sheet in millimetres. */}
-        {kind === "module" && (
-          <>
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor={fid("width")}>Width (mm)</Label>
-              <Input
-                id={fid("width")}
-                type="number"
-                placeholder="1134"
-                value={f.widthMm}
-                onChange={(e) => set("widthMm", e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs" htmlFor={fid("length")}>Length (mm)</Label>
-              <Input
-                id={fid("length")}
-                type="number"
-                placeholder="1762"
-                value={f.heightMm}
-                onChange={(e) => set("heightMm", e.target.value)}
-              />
-            </div>
-          </>
+    <RailLayout
+      rail={
+        <ItemRail
+          label="Solar catalogue"
+          add={canEdit ? <AddItemDialog onAdded={setSelectedId} full /> : undefined}
+          query={query}
+          onQueryChange={setQuery}
+          searchPlaceholder="Find equipment or an adder"
+          showSearch={items.length + adders.length > 6}
+        >
+          {KINDS.map((k) => {
+            const mine = items.filter((i) => i.kind === k.value && i.isActive && hit(itemName(i)));
+            if (mine.length === 0) return null;
+            return (
+              <React.Fragment key={k.value}>
+                <RailGroup>
+                  {k.label} ({mine.length})
+                </RailGroup>
+                {mine.map((i) => (
+                  <HardwareRailRow
+                    key={i.id}
+                    item={i}
+                    lenders={lenders}
+                    selected={i.id === idInUrl}
+                    onSelect={() => setSelectedId(i.id)}
+                  />
+                ))}
+              </React.Fragment>
+            );
+          })}
+
+          {liveShownAdders.length > 0 && (
+            <>
+              <RailGroup>Adders ({liveShownAdders.length}) · selling order</RailGroup>
+              {liveShownAdders.map((a) => (
+                <AdderRailRow
+                  key={a.id}
+                  adder={a}
+                  selected={a.id === idInUrl}
+                  onSelect={() => setSelectedId(a.id)}
+                />
+              ))}
+            </>
+          )}
+
+          {/* Retired items stay listed, and stay readable. They are what last
+              year's deals point at, so hiding them would make those deals
+              harder to explain, not tidier. */}
+          {(retiredHardware.length > 0 || retiredAdders.length > 0) && (
+            <>
+              <RailGroup>Retired ({retiredHardware.length + retiredAdders.length})</RailGroup>
+              {retiredHardware.map((i) => (
+                <HardwareRailRow
+                  key={i.id}
+                  item={i}
+                  lenders={lenders}
+                  selected={i.id === idInUrl}
+                  onSelect={() => setSelectedId(i.id)}
+                />
+              ))}
+              {retiredAdders.map((a) => (
+                <AdderRailRow
+                  key={a.id}
+                  adder={a}
+                  selected={a.id === idInUrl}
+                  onSelect={() => setSelectedId(a.id)}
+                />
+              ))}
+            </>
+          )}
+
+          {!anyShown && <RailNoMatch query={query} />}
+        </ItemRail>
+      }
+    >
+      <div className="min-w-0 space-y-4">
+        {lenders.length === 0 && (
+          <Hint className="rounded-lg border border-dashed border-border p-3">
+            No lenders set up yet. Add them under{" "}
+            <Link href="/portal/settings/solar-lenders" className="underline underline-offset-2">
+              Lenders
+            </Link>{" "}
+            to tag which approved-vendor lists each item appears on.
+          </Hint>
         )}
-        {/* The manufacturer's datasheet, shown to the customer beside the
-            component on their proposal. A LINK to the manufacturer, not a file
-            we store: they revise these without telling anybody, and the version
-            a homeowner should read is whichever is current when they click. */}
-        <div className="space-y-1 sm:col-span-2">
-            <Label className="text-xs" htmlFor={fid("spec")}>Spec sheet URL</Label>
-            <Input
-              id={fid("spec")}
-              type="url"
-              inputMode="url"
-              placeholder="https://manufacturer.com/datasheets/model.pdf"
-              value={f.specSheetUrl}
-              onChange={(e) => set("specSheetUrl", e.target.value)}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Optional. Rendered as &ldquo;View details&rdquo; on the customer&rsquo;s proposal;
-              left blank, no link appears.
-            </p>
-        </div>
-        {/* Which approved-vendor list this belongs to. Optional: plenty of
-            items are not year-scoped, and a blank is honest about that. */}
-        <div className="space-y-1">
-          <Label className="text-xs" htmlFor={fid("avl")}>AVL year</Label>
-          <Input
-            id={fid("avl")}
-            type="number"
-            inputMode="numeric"
-            placeholder="e.g. 2026"
-            value={f.avlYear}
-            onChange={(e) => set("avlYear", e.target.value)}
+
+        {openItem && (
+          <HardwarePanel
+            // Keyed so switching items remounts the panel: a draft belongs to
+            // the item it was seeded from.
+            key={openItem.id}
+            item={openItem}
+            lenders={lenders}
+            canEdit={canEdit}
+            tab={hardwareTab}
+            onTabChange={setTab}
+            onDeleted={() => setSelectedId(null)}
           />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs" htmlFor={fid("cost")}>Cost $</Label>
-          <Input id={fid("cost")} type="number" value={f.cost} onChange={(e) => set("cost", e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs" htmlFor={fid("price")}>Price $</Label>
-          <Input id={fid("price")} type="number" value={f.price} onChange={(e) => set("price", e.target.value)} />
-        </div>
+        )}
+
+        {openAdder && (
+          <AdderPanel
+            key={openAdder.id}
+            adder={openAdder}
+            canEdit={canEdit && !busy}
+            rank={
+              openAdder.isActive ? liveAdders.findIndex((a) => a.id === openAdder.id) + 1 : null
+            }
+            of={liveAdders.length}
+            onMove={openAdder.isActive ? (d) => void moveAdder(openAdder.id, d) : null}
+            tab={adderTab}
+            onTabChange={setTab}
+            onDeleted={() => setSelectedId(null)}
+          />
+        )}
       </div>
-      <div className="flex gap-2">
-        <Button size="sm" onClick={save} disabled={busy}>
-          {busy && <Loader2 className="size-4 animate-spin" />} Save
+    </RailLayout>
+  );
+}
+
+/**
+ * One piece of hardware in the rail.
+ *
+ * The second line is what the old grid could not say at a glance: an item on
+ * nobody's approved-vendor list is hidden from every financed deal, and that
+ * was only discoverable by counting the chips on its row.
+ */
+function HardwareRailRow({
+  item,
+  lenders,
+  selected,
+  onSelect,
+}: {
+  item: Item;
+  lenders: Lender[];
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const approved = item.lenderIds.length;
+  const needsWork = item.isActive && (lenders.length > 0 ? approved === 0 : !item.priceCents);
+
+  return (
+    <RailRow
+      title={itemName(item)}
+      subtitle={
+        needsWork
+          ? lenders.length > 0 && approved === 0
+            ? "no lender approves it"
+            : "no price"
+          : [item.ratingW ? `${item.ratingW}W` : null, item.priceCents ? money(item.priceCents) : null]
+              .filter(Boolean)
+              .join(" · ")
+      }
+      mark={
+        <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-white">
+          {item.photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.photoUrl} alt="" className="size-full object-contain p-0.5" />
+          ) : (
+            <PanelsTopLeft className="size-3.5 text-muted-foreground/50" aria-hidden />
+          )}
+        </span>
+      }
+      selected={selected}
+      onSelect={onSelect}
+      needsWork={needsWork}
+      muted={!item.isActive}
+      trailing={
+        item.isDefault ? (
+          <Star className="size-3 shrink-0 fill-gold text-gold" aria-label="Default" />
+        ) : undefined
+      }
+    />
+  );
+}
+
+function AdderRailRow({
+  adder,
+  selected,
+  onSelect,
+}: {
+  adder: AdderItem;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <RailRow
+      title={adder.label}
+      subtitle={`${adder.basis === "discount" ? "" : "+ "}${catalogueRateLabel(adder)}`}
+      mark={
+        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+          <Wrench className="size-3.5" />
+        </span>
+      }
+      selected={selected}
+      onSelect={onSelect}
+      muted={!adder.isActive}
+    />
+  );
+}
+
+/** Adding to the catalogue: which kind, and enough to open it on. */
+function AddItemDialog({ onAdded, full }: { onAdded: (id: string) => void; full?: boolean }) {
+  const router = useRouter();
+  const [open, setOpen] = React.useState(false);
+  const [kind, setKind] = React.useState<SolarEquipmentKind | "adder">("module");
+  const [manufacturer, setManufacturer] = React.useState("");
+  const [model, setModel] = React.useState("");
+  const [ratingW, setRatingW] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const isAdder = kind === "adder";
+  const meta = KINDS.find((k) => k.value === kind);
+
+  async function add() {
+    if (!model.trim()) return toast.error(isAdder ? "Give the adder a name." : "Model is required.");
+    setBusy(true);
+    try {
+      const res = await upsertSolarEquipmentAction(
+        null,
+        isAdder
+          ? {
+              kind: "adder",
+              manufacturer: null,
+              model: model.trim(),
+              // A flat adder with a price of zero is the one shape the action
+              // takes without a price — its rate is filled in on the panel next.
+              adderBasis: "custom",
+            }
+          : {
+              kind: kind as SolarEquipmentKind,
+              manufacturer: manufacturer.trim() || null,
+              model: model.trim(),
+              ratingW: ratingW.trim() === "" ? null : Number(ratingW),
+            }
+      );
+      if (!res.ok) return toast.error(res.error, { duration: 9000 });
+      if (res.id) onAdded(res.id);
+      toast.success(`${model.trim()} added`);
+      setManufacturer("");
+      setModel("");
+      setRatingW("");
+      setOpen(false);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className={full ? "w-full" : undefined}>
+          <Plus className="size-4" /> New item
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
-          Cancel
-        </Button>
-      </div>
-    </div>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add to the catalogue</DialogTitle>
+          <DialogDescription>
+            Enough to open it on. Its price, dimensions, photo and approved-vendor lists are filled
+            in on the panel next.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <ChoiceCards
+            name="new-equipment-kind"
+            legend="What is it?"
+            value={kind}
+            onChange={(v) => setKind(v)}
+            columns={2}
+            options={[
+              ...KINDS.map((k) => ({
+                value: k.value as SolarEquipmentKind | "adder",
+                label: k.label,
+                detail:
+                  k.value === "module"
+                    ? "Sized and laid out on the roof. Needs a wattage."
+                    : k.value === "inverter"
+                      ? "Converts the array's output."
+                      : "Storage. Priced per battery on a storage-only deal.",
+              })),
+              {
+                value: "adder" as SolarEquipmentKind | "adder",
+                label: "Adder",
+                detail: "Extra work sold alongside the system — a priced rule, not a product.",
+              },
+            ]}
+          />
+
+          {!isAdder && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs" htmlFor="new-eq-manufacturer">
+                  Manufacturer
+                </Label>
+                <Input
+                  id="new-eq-manufacturer"
+                  value={manufacturer}
+                  onChange={(e) => setManufacturer(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs" htmlFor="new-eq-rating">
+                  {meta?.ratingLabel}
+                </Label>
+                <Input
+                  id="new-eq-rating"
+                  type="number"
+                  value={ratingW}
+                  onChange={(e) => setRatingW(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label className="text-xs" htmlFor="new-eq-model">
+              {isAdder ? "Name" : "Model"}
+            </Label>
+            <Input
+              id="new-eq-model"
+              value={model}
+              placeholder={isAdder ? "e.g. Trenching Adder" : "e.g. Powerwall 3"}
+              onChange={(e) => setModel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void add();
+                }
+              }}
+            />
+          </div>
+
+          {kind === "module" && (
+            <Hint>
+              A module needs a wattage above zero — every downstream figure, from system size to
+              price, is derived from it.
+            </Hint>
+          )}
+          {isAdder && (
+            <Hint>
+              It starts as a custom adder — priced by the rep on the day — so it can be created with
+              no amount. Pick how it is really priced on the Pricing tab.
+            </Hint>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={add} disabled={busy || !model.trim()}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add
+            item
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

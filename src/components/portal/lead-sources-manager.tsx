@@ -3,10 +3,15 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Check, X, Pencil, Trash2, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import {
+  Caution,
+  Hint,
+  ListEditor,
+  Panel,
+  SaveBar,
+  type ListRow,
+} from "@/components/portal/settings-kit";
 import {
   createLeadSourceAction,
   renameLeadSourceAction,
@@ -15,143 +20,184 @@ import {
   deleteLeadSourceAction,
 } from "@/server/modules/settings/actions";
 
-type Source = { id: string; name: string; active: boolean; position: number; _count: { leads: number } };
+type Source = {
+  id: string;
+  name: string;
+  active: boolean;
+  position: number;
+  _count: { leads: number };
+};
 
+type Row = ListRow & { sourceId: string | null; active: boolean; leads: number };
+
+/**
+ * Where leads come from — the options in the "Source" dropdown a rep books
+ * against.
+ *
+ * Every control on this screen used to be its own write: a pencil to rename, two
+ * arrows that each posted a move, a switch that posted an activation, a bin
+ * behind a browser confirm. It is one draft and one Save now, and the Save
+ * works out which of those actions each row actually needs.
+ *
+ * Deactivating hides a source from the picker but keeps it on past leads and in
+ * reports. A source no lead has ever used can be deleted outright; one that has
+ * been used cannot, and the row says so rather than failing on the click.
+ */
 export function LeadSourcesManager({ items }: { items: Source[] }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
-  const [addName, setAddName] = React.useState("");
-  const [editId, setEditId] = React.useState<string | null>(null);
-  const [editName, setEditName] = React.useState("");
-  const addRef = React.useRef<HTMLInputElement | null>(null);
-  // Mirrors `busy` for the guard below: two Enters in the same tick would both
-  // read the pre-render state value and fire the action twice.
-  const busyRef = React.useRef(false);
+
+  const seed = React.useCallback(
+    (): Row[] =>
+      items.map((s) => ({
+        id: s.id,
+        sourceId: s.id,
+        label: s.name,
+        active: s.active,
+        leads: s._count.leads,
+        note: s._count.leads > 0 ? `${s._count.leads} lead${s._count.leads === 1 ? "" : "s"}` : "unused",
+        lockedReason:
+          s._count.leads > 0
+            ? "Leads were booked against this source — switch it off instead, so past leads and reports keep it."
+            : undefined,
+      })),
+    [items]
+  );
+
+  const [rows, setRows] = React.useState(seed);
+  const serverKey = JSON.stringify(items.map((s) => [s.id, s.name, s.active]));
+  const [seen, setSeen] = React.useState(serverKey);
+  if (seen !== serverKey) {
+    setSeen(serverKey);
+    setRows(seed());
+  }
+
+  const dirty =
+    JSON.stringify(rows.map((r) => [r.sourceId ?? "new", r.label.trim(), r.active])) !==
+    JSON.stringify(items.map((s) => [s.id, s.name, s.active]));
+
+  const activeCount = rows.filter((r) => r.active && r.label.trim()).length;
 
   /**
-   * Runs one action with the panel in its saving state. `work` is a thunk rather
-   * than a promise so a save already in flight can be dropped before it starts —
-   * and so a *throw* (dropped connection, restarted dev server, expired session)
-   * still clears `busy`. Leaving it set stranded every control on the page,
-   * including the add field, until a full reload.
+   * Save the DIFF, through the action each change was written for.
+   *
+   * Ordering is the one that has to go last: `moveLeadSourceAction` swaps a row
+   * with its neighbour, so it only makes sense once every row that is going to
+   * exist does.
    */
-  async function run(work: () => Promise<{ ok: boolean; error?: string }>, success?: string) {
-    if (busyRef.current) return false;
-    busyRef.current = true;
+  async function commit() {
     setBusy(true);
     try {
-      const res = await work();
-      if (!res.ok) { toast.error(res.error); return false; }
-      if (success) toast.success(success);
+      const before = items;
+
+      for (const gone of before.filter((s) => !rows.some((r) => r.sourceId === s.id))) {
+        const res = await deleteLeadSourceAction(gone.id);
+        if (!res.ok) return toast.error(res.error);
+      }
+
+      for (const row of rows) {
+        const name = row.label.trim();
+        if (name === "") continue;
+        if (row.sourceId == null) {
+          const res = await createLeadSourceAction(name);
+          if (!res.ok) return toast.error(res.error);
+          continue;
+        }
+        const was = before.find((s) => s.id === row.sourceId);
+        if (!was) continue;
+        if (was.name !== name) {
+          const res = await renameLeadSourceAction(row.sourceId, name);
+          if (!res.ok) return toast.error(res.error);
+        }
+        if (was.active !== row.active) {
+          const res = await setLeadSourceActiveAction(row.sourceId, row.active);
+          if (!res.ok) return toast.error(res.error);
+        }
+      }
+
+      // Ordering, once the list is settled. Each step is a swap with the row
+      // above, applied top-down, which walks any list into any order.
+      const kept = rows.filter((r) => r.sourceId != null && r.label.trim() !== "");
+      const order = before
+        .filter((s) => kept.some((r) => r.sourceId === s.id))
+        .map((s) => s.id);
+      for (const [target, row] of kept.entries()) {
+        const at = order.indexOf(row.sourceId!);
+        for (let i = at; i > target; i--) {
+          const res = await moveLeadSourceAction(row.sourceId!, "up");
+          if (!res.ok) return toast.error(res.error);
+          [order[i - 1], order[i]] = [order[i], order[i - 1]];
+        }
+      }
+
+      toast.success("Lead sources saved");
       router.refresh();
-      return true;
-    } catch (err) {
-      console.error("Lead source action failed", err);
-      toast.error("Couldn’t save that — check your connection and try again.");
-      return false;
+    } catch {
+      toast.error("That did not save. Try again, or reload if it keeps failing.");
     } finally {
-      busyRef.current = false;
       setBusy(false);
     }
   }
 
-  async function add() {
-    const name = addName.trim();
-    if (!name) { toast.error("Enter a source name."); addRef.current?.focus(); return; }
-    if (await run(() => createLeadSourceAction(name), "Source added")) setAddName("");
-    // Sources get entered in a burst, so hand the caret straight back.
-    addRef.current?.focus();
-  }
-  async function saveEdit(id: string) {
-    const name = editName.trim();
-    if (!name) return toast.error("Enter a source name.");
-    if (await run(() => renameLeadSourceAction(id, name), "Source renamed")) setEditId(null);
-  }
-  async function remove(s: Source) {
-    if (s._count.leads > 0) return toast.error("Used by existing leads — deactivate it instead.");
-    if (!confirm(`Delete "${s.name}"?`)) return;
-    await run(() => deleteLeadSourceAction(s.id), "Source deleted");
-  }
-
-  const activeCount = items.filter((s) => s.active).length;
-
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        {activeCount} active source{activeCount === 1 ? "" : "s"} — the options reps pick in the “Source” dropdown when
-        booking a lead. Deactivating one hides it from the picker but keeps it on past leads and in reports; you can only
-        delete a source that no lead has used.
-      </p>
-
-      <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-        {items.length === 0 && (
-          <div className="px-5 py-8 text-center text-sm text-muted-foreground">No sources yet — add your first below.</div>
-        )}
-        {items.map((s, i) => (
-          <div key={s.id} className="flex items-center justify-between gap-3 px-5 py-3">
-            {editId === s.id ? (
-              <div className="flex flex-1 items-center gap-2">
-                <Input
-                  autoFocus
-                  value={editName}
-                  disabled={busy}
-                  placeholder="Source name"
-                  onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") saveEdit(s.id); if (e.key === "Escape") setEditId(null); }}
-                  className="h-8 w-56"
-                />
-                <Button size="icon" variant="ghost" className="size-8" disabled={busy} onClick={() => saveEdit(s.id)}><Check className="size-4 text-emerald-600" /></Button>
-                <Button size="icon" variant="ghost" className="size-8" disabled={busy} onClick={() => setEditId(null)}><X className="size-4" /></Button>
-              </div>
-            ) : (
-              <>
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">{i + 1}</span>
-                  <span className={`truncate font-medium ${s.active ? "" : "text-muted-foreground line-through"}`}>{s.name}</span>
-                  {!s.active && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Inactive</span>}
-                  <span className="shrink-0 text-xs text-muted-foreground">{s._count.leads} lead{s._count.leads === 1 ? "" : "s"}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" disabled={busy || i === 0} onClick={() => run(() => moveLeadSourceAction(s.id, "up"))}><ArrowUp className="size-4" /></Button>
-                  <Button variant="ghost" size="icon" disabled={busy || i === items.length - 1} onClick={() => run(() => moveLeadSourceAction(s.id, "down"))}><ArrowDown className="size-4" /></Button>
-                  <Button variant="ghost" size="icon" disabled={busy} onClick={() => { setEditId(s.id); setEditName(s.name); }}><Pencil className="size-4" /></Button>
-                  <span className="mx-1 inline-flex items-center" title={s.active ? "Active — shown in picker" : "Inactive — hidden from picker"}>
-                    <Switch checked={s.active} disabled={busy} onCheckedChange={(v) => run(() => setLeadSourceActiveAction(s.id, v), v ? "Source activated" : "Source deactivated")} />
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={busy || s._count.leads > 0}
-                    title={s._count.leads > 0 ? "Used by leads — deactivate instead" : "Delete"}
-                    onClick={() => remove(s)}
-                  >
-                    <Trash2 className="size-4 text-destructive" />
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {/*
-          Deliberately not disabled while saving: disabling a focused input blurs
-          it, so a slow save swallowed whatever was typed next and left the field
-          looking dead. The button is what guards against a double submit.
-        */}
-        <Input
-          ref={addRef}
-          value={addName}
-          placeholder="New source, e.g. Facebook Ads"
-          onChange={(e) => setAddName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && add()}
-          className="w-64"
+    <>
+      <Panel
+        title="Sources"
+        description="The options a rep picks from when booking a lead, in the order they are offered."
+      >
+        <ListEditor
+          rows={rows}
+          onChange={(next) =>
+            setRows(
+              next.map((n) => {
+                const was = rows.find((r) => r.id === n.id);
+                return {
+                  ...n,
+                  sourceId: was?.sourceId ?? null,
+                  active: was?.active ?? true,
+                  leads: was?.leads ?? 0,
+                };
+              })
+            )
+          }
+          addLabel="Add source"
+          placeholder="e.g. Facebook Ads"
+          disabled={busy}
+          renderExtra={(row, i) => (
+            <span
+              className="shrink-0"
+              title={(row as Row).active ? "Offered in the picker" : "Hidden from the picker"}
+            >
+              <Switch
+                checked={(row as Row).active}
+                disabled={busy}
+                aria-label={`${row.label || `Source ${i + 1}`} offered to reps`}
+                onCheckedChange={(v) =>
+                  setRows((prev) => prev.map((r, j) => (j === i ? { ...r, active: v } : r)))
+                }
+              />
+            </span>
+          )}
         />
-        <Button onClick={add} disabled={busy} className="bg-gold text-gold-foreground hover:bg-gold/90">
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add source
-        </Button>
-      </div>
-    </div>
+        <Hint>
+          {activeCount} source{activeCount === 1 ? "" : "s"} offered to reps. Switching one off
+          hides it from the picker but keeps it on every lead already booked against it and in every
+          report.
+        </Hint>
+        {activeCount === 0 && rows.length > 0 && (
+          <Caution>
+            Nothing is switched on, so the Source dropdown a rep books against will be empty.
+          </Caution>
+        )}
+      </Panel>
+
+      <SaveBar
+        dirty={dirty}
+        busy={busy}
+        what="lead sources"
+        onSave={commit}
+        onDiscard={() => setRows(seed())}
+      />
+    </>
   );
 }

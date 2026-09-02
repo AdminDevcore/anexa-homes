@@ -1,17 +1,21 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { CommissionRulesManager } from "@/components/portal/commission-rules-manager";
-import { DealSplitSettings } from "@/components/portal/deal-split-settings";
 
 export const metadata = { title: "Commission Settings" };
 
-export default async function CommissionRulesPage() {
+export default async function CommissionRulesPage({
+  searchParams,
+}: {
+  /** Which rule is open. Read on the SERVER so the first paint is the right one. */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
   // Roofing's page. Solar's hub no longer offers it — a rep's split lives on
@@ -31,21 +35,14 @@ export default async function CommissionRulesPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Commission Rules"
+      <SettingsScreenHeader
+        section="commission_rules"
         description="Define how commissions and crew pay are calculated by role, type, and project type."
       />
-      <DealSplitSettings
+      <CommissionRulesManager
         overheadPct={company?.overheadPct ?? 10}
         paFeePct={company?.paFeePct ?? 10}
-      />
-      <CommissionRulesManager
+        initialRuleId={one(params.rule)}
         rules={rules.map((r) => ({
           id: r.id,
           name: r.name,

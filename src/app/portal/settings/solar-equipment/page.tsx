@@ -1,18 +1,30 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { prisma } from "@/server/db/client";
 import { SolarEquipmentManager } from "@/components/portal/solar-equipment-manager";
-import { SolarAdderCatalogue } from "@/components/portal/solar-adder-catalogue";
 import { catalogueBasis } from "@/server/modules/solar/adders";
 
 export const dynamic = "force-dynamic";
 
-export default async function SolarEquipmentPage() {
+export default async function SolarEquipmentPage({
+  searchParams,
+}: {
+  /**
+   * Which catalogue item is open, and on which tab.
+   *
+   * Read HERE rather than in the browser: the panel keeps it in the URL so a
+   * reload comes back where you were, and a client that reads
+   * `window.location` while hydrating renders an item the server never sent —
+   * which React reports as a hydration mismatch and repairs by throwing the
+   * server's markup away.
+   */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
   const user = await requireUser("/portal/settings/solar-equipment");
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
   if ((await getActiveVertical(user)) !== "solar") redirect("/portal/settings");
@@ -32,19 +44,15 @@ export default async function SolarEquipmentPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Solar Equipment"
+      <SettingsScreenHeader
+        section="solar_equipment"
         description="What reps can pick from when they build a system. Adders are rank-ordered, so the ones you want sold lead."
       />
       <SolarEquipmentManager
         canEdit={can(user, "update", "Settings")}
         lenders={lenders}
+        initialItemId={one(params.item)}
+        initialTab={one(params.tab)}
         items={items
           .filter((i) => i.kind !== "adder")
           .map((i) => ({
@@ -53,28 +61,28 @@ export default async function SolarEquipmentPage() {
             manufacturer: i.manufacturer,
             model: i.model,
             ratingW: i.ratingW,
+            widthMm: i.widthMm,
+            heightMm: i.heightMm,
             costCents: i.costCents,
             priceCents: i.priceCents,
             isActive: i.isActive,
             isDefault: i.isDefault,
             avlYear: i.avlYear,
+            specSheetUrl: i.specSheetUrl,
             lenderIds: i.lenderApprovals.map((a) => a.lenderId),
             // The serving route, cache-busted on the photo's own timestamp, so
             // replacing a product shot shows the new one immediately instead of
             // whatever the browser kept. Null when there is no photo — the
-            // manager renders an upload control rather than a broken frame.
+            // panel renders an upload control rather than a broken frame.
             photoUrl: i.photoKey
               ? `/api/solar/equipment-photo?equipment=${i.id}&v=${(i.photoUpdatedAt ?? new Date()).getTime()}`
               : null,
           }))}
-      />
-      {/* Adders are their own list: a priced rule rather than a product, and
-          ordered by hand because that order is the order a rep is offered
-          them. Sorted by rank here — sellable first — so the arrows on the
-          rows move things where the picker will show them. */}
-      <SolarAdderCatalogue
-        canEdit={can(user, "update", "Settings")}
-        items={items
+        // Adders are their own group in the rail: a priced rule rather than a
+        // product, ordered by hand because that order is the order a rep is
+        // offered them. Sorted by rank here — sellable first — so the arrows on
+        // the panel move things where the picker will show them.
+        adders={items
           .filter((i) => i.kind === "adder")
           .sort((a, b) =>
             a.isActive === b.isActive

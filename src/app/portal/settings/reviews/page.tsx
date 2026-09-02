@@ -1,9 +1,7 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { ReviewsManager } from "@/components/portal/reviews-manager";
 import {
   getReviewsForAdmin,
@@ -36,14 +34,8 @@ export default async function ReviewsSettingsPage({
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Website Reviews"
+      <SettingsScreenHeader
+        section="reviews"
         description="Reviews submitted from anexahomes.com go live on the homepage and Reviews page immediately. You can Hide, Reject, or Delete any review here to take it down."
       />
       <ReviewsManager

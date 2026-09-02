@@ -1,10 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarLenderManager } from "@/components/portal/solar-lender-manager";
@@ -100,14 +98,8 @@ export default async function SolarLendersPage({
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Lenders"
+      <SettingsScreenHeader
+        section="solar_lenders"
         description="Who finances your deals, which equipment each one approves, and the terms they finance on. Pick a lender on a deal and the equipment narrows to its approved-vendor list; pick one of its products and the payment is quoted from it."
       />
       <SolarLenderManager

@@ -41,7 +41,7 @@ test("a stage move fires the rule and files the document", async ({ page }) => {
   // 2. Write a rule for exactly that stage.
   await page.goto("/portal/settings/automations");
   await page.getByRole("button", { name: "New automation" }).click();
-  await page.getByLabel("Name").fill("E2E paperwork");
+  await page.getByLabel("What this automation is called").fill("E2E paperwork");
 
   await page.getByRole("combobox", { name: "Which stage" }).click();
   await page.getByRole("option", { name: target, exact: true }).click();
@@ -50,8 +50,8 @@ test("a stage move fires the rule and files the document", async ({ page }) => {
   await page.getByRole("combobox", { name: "Action 1 which document" }).click();
   await page.getByRole("option").first().click();
 
-  await page.getByRole("button", { name: "Create" }).click();
-  await expect(page.getByText("E2E paperwork")).toBeVisible();
+  await page.getByRole("button", { name: "Create automation" }).click();
+  await expect(page.getByText("E2E paperwork created")).toBeVisible({ timeout: 15000 });
 
   // 3. Move the deal. Nobody touches the document.
   await page.goto(dealUrl);
@@ -68,6 +68,8 @@ test("a stage move fires the rule and files the document", async ({ page }) => {
   // server, so waiting on a static DOM would never pick the run up.
   await expect(async () => {
     await page.goto("/portal/settings/automations");
+    // Runs are their own row in the rail — every rule's, newest first.
+    await page.getByRole("button", { name: /Recent runs/ }).click();
     await expect(page.getByText(/Generated .*\.pdf/)).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 30000 });
 });
@@ -77,7 +79,7 @@ test("a rule cannot send a deal back to the stage that triggered it", async ({ p
   await page.goto("/portal/settings/automations");
 
   await page.getByRole("button", { name: "New automation" }).click();
-  await page.getByLabel("Name").fill("E2E loop");
+  await page.getByLabel("What this automation is called").fill("E2E loop");
 
   // Same stage on both sides of the rule — the shortest possible loop.
   await page.getByRole("combobox", { name: "Which stage" }).click();
@@ -91,7 +93,7 @@ test("a rule cannot send a deal back to the stage that triggered it", async ({ p
   await page.getByRole("combobox", { name: "Action 1 which stage" }).click();
   await page.getByRole("option", { name: stageName, exact: true }).click();
 
-  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByRole("button", { name: "Create automation" }).click();
 
   // Refused at the point somebody writes it, rather than three needless runs later.
   await expect(page.getByText(/same stage that triggered it/i)).toBeVisible();

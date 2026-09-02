@@ -1,11 +1,9 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { getAppointmentDispositions } from "@/server/modules/settings/queries";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { AppointmentDispositionsManager } from "@/components/portal/appointment-dispositions-manager";
 
 export const metadata = { title: "Appointment Outcomes" };
@@ -18,11 +16,8 @@ export default async function AppointmentOutcomesSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Appointment Outcomes"
+      <SettingsScreenHeader
+        section="appointment_outcomes"
         description="Customize the outcomes a rep can record when running an appointment, their wording, and order."
       />
       <AppointmentDispositionsManager items={items} />

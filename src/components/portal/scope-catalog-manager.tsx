@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Hint, Panel } from "@/components/portal/settings-kit";
 import { SCOPE_UNITS } from "@/lib/scope-catalog";
 import {
   createCatalogItemAction,
@@ -63,7 +64,15 @@ export function ScopeCatalogManager({ items }: { items: CatalogItem[] }) {
   }
 
   return (
-    <div className="space-y-4">
+    <Panel
+      title="Line items"
+      description="The master list every estimate is built from. No pricing here — a cost or supplement template prices it, and insurance pricing is entered on the job."
+      action={
+        <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+          <Plus className="size-4" /> Add item
+        </Button>
+      }
+    >
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-full sm:max-w-xs">
@@ -83,10 +92,9 @@ export function ScopeCatalogManager({ items }: { items: CatalogItem[] }) {
           <option value="active">Active only</option>
           <option value="inactive">Inactive only</option>
         </select>
-        <span className="text-xs text-muted-foreground">{filtered.length} of {items.length}</span>
-        <Button size="sm" className="ml-auto" onClick={() => setAddOpen(true)}>
-          <Plus className="size-4" /> Add item
-        </Button>
+        <Hint className="ml-auto">
+          {filtered.length} of {items.length}
+        </Hint>
       </div>
 
       {/* Catalog */}
@@ -131,7 +139,7 @@ export function ScopeCatalogManager({ items }: { items: CatalogItem[] }) {
       </div>
 
       <AddDialog open={addOpen} onOpenChange={setAddOpen} trades={trades} categories={categories} />
-    </div>
+    </Panel>
   );
 }
 

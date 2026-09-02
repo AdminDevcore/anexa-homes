@@ -46,7 +46,8 @@ export async function createNotificationRuleAction(input: RuleInput) {
   const parsed = ruleSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid rule.");
   const d = parsed.data;
-  await prisma.notificationRule.create({
+  // The id comes back so the screen can OPEN the rule that was just created.
+  const row = await prisma.notificationRule.create({
     data: {
       companyId: user.companyId,
       name: d.name,
@@ -58,9 +59,10 @@ export async function createNotificationRuleAction(input: RuleInput) {
       bodyTemplate: d.bodyTemplate,
       active: d.active,
     },
+    select: { id: true },
   });
   revalidatePath("/portal/settings/notifications");
-  return ok();
+  return { ok: true as const, id: row.id };
 }
 
 export async function updateNotificationRuleAction(id: string, input: RuleInput) {

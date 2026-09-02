@@ -97,6 +97,10 @@ export function Caution({ children }: { children: React.ReactNode }) {
  * Everything the old screen printed in full under each field lives in one of
  * these. It is a real button with a name, so a screen reader gets "why: what
  * this partner charges a homeowner" rather than an unlabelled icon.
+ *
+ * A NOTE FOR SPECS: that name contains the field's own label, so
+ * `getByLabel("Target net $/W")` matches the button as well as the box and
+ * fails strict mode. Address the field by role — `getByRole("textbox", { name })`.
  */
 export function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
   return (

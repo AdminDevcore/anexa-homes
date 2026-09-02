@@ -32,17 +32,25 @@ test("creating a lead notifies admins via the rules engine", async ({ page }) =>
 test("admin can create a notification rule", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await page.goto("/portal/settings/notifications");
-  await expect(page.getByText("Notification Rules")).toBeVisible();
-  // Seeded rules present
-  await expect(page.getByText("New appointment → Managers")).toBeVisible();
+  // By heading: the settings rail carries the same words on its own row.
+  await expect(page.getByRole("heading", { name: "Notification Rules" })).toBeVisible();
+  // Seeded rules present — in the rail, which is where they are picked from.
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notification rules" })
+      .getByRole("button", { name: /New appointment → Managers/ })
+  ).toBeVisible();
 
-  await page.getByRole("button", { name: /Add Rule/ }).click();
+  // Rail and panel: "New rule" opens an unsaved rule in the panel, and the one
+  // Save at the bottom is what creates it.
+  await page.getByRole("button", { name: "New rule" }).click();
   const name = `QA Rule ${Date.now() % 100000}`;
   await page.getByPlaceholder(/Notify managers/).fill(name);
-  // Pick a dynamic recipient (unique label) and create.
+  // Pick a dynamic recipient (unique label) — a rule with none cannot be saved.
   await page.getByText("Assigned sales rep").click();
-  await page.getByRole("button", { name: /^Create$/ }).click();
-  await expect(page.getByText(name)).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: "Create rule" }).click();
+  await expect(page.getByText(`${name} created`)).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("heading", { name })).toBeVisible({ timeout: 10000 });
 });
 
 test("sales rep cannot access notification settings", async ({ page }) => {

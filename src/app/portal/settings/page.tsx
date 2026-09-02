@@ -8,8 +8,10 @@ import { prisma } from "@/server/db/client";
 import { PageHeader } from "@/components/portal/ui";
 import { SettingsHub } from "@/components/portal/settings-hub";
 import { VERTICAL_ACCENT, VERTICAL_LABEL } from "@/lib/vertical";
-import { workspaceSetupGaps } from "@/server/modules/settings/workspace-health";
-import { settingsInventory } from "@/server/modules/settings/inventory";
+import {
+  settingsInventoryCached,
+  workspaceSetupGapsCached,
+} from "@/server/modules/settings/cached";
 
 export const metadata = { title: "Settings" };
 
@@ -22,8 +24,8 @@ export default async function SettingsPage() {
   // are for everyone who can read Settings — they say nothing a reader could not
   // learn by opening the page itself.
   const [gaps, inventory] = await Promise.all([
-    can(user, "update", "Settings") ? workspaceSetupGaps(user.companyId, vertical) : [],
-    settingsInventory(user.companyId, vertical),
+    can(user, "update", "Settings") ? workspaceSetupGapsCached(user.companyId, vertical) : [],
+    settingsInventoryCached(user.companyId, vertical),
   ]);
 
   // Users is a company-wide count on purpose — one legal entity, one roster —

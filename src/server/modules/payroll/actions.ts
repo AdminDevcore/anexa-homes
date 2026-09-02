@@ -153,7 +153,8 @@ export async function createCommissionRuleAction(input: z.infer<typeof ruleSchem
   if (blocked) return blocked;
   const parsed = ruleSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid rule.");
-  await prisma.commissionRule.create({
+  // The id comes back so the screen can OPEN the rule that was just created.
+  const row = await prisma.commissionRule.create({
     data: {
       companyId: user.companyId,
       name: parsed.data.name,
@@ -163,9 +164,10 @@ export async function createCommissionRuleAction(input: z.infer<typeof ruleSchem
       flatAmount: parsed.data.flatAmount,
       projectType: parsed.data.projectType || null,
     },
+    select: { id: true },
   });
   revalidatePath("/portal/settings/commissions");
-  return ok();
+  return { ok: true as const, id: row.id };
 }
 
 export async function updateCommissionRuleAction(id: string, input: z.infer<typeof ruleSchema>) {

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Loader2, Upload, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Hint, Panel } from "@/components/portal/settings-kit";
 import { importOwnerRecordsAction } from "@/server/modules/canvassing/actions";
 
 // Read just the header row + a sample of a CSV client-side (files can be large).
@@ -62,13 +63,10 @@ export function CountyRecordsImport() {
   }
 
   return (
-    <div className="max-w-xl space-y-3 rounded-xl border border-border bg-card p-4">
-      <h2 className="font-semibold">Import county appraisal roll (free)</h2>
-      <p className="text-xs text-muted-foreground">
-        Download your county&rsquo;s public appraisal roll (Collin CAD, DCAD, Denton CAD, TAD…), upload the CSV, and match
-        its columns. Fills <b>owner name + appraised value</b> on every matching house — no per-lookup cost.
-        (County data has no phone/email; those need a paid provider.)
-      </p>
+    <Panel
+      title="Import a county appraisal roll"
+      description="Free, and the cheapest owner data there is. Download your county's public roll (Collin CAD, DCAD, Denton CAD, TAD…), upload the CSV, and match its columns — it fills the owner name and appraised value on every matching house at no per-lookup cost. County data carries no phone or email; those need a paid provider."
+    >
 
       <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
       <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => fileRef.current?.click()}>
@@ -86,16 +84,16 @@ export function CountyRecordsImport() {
           <ColMap label="Owner name" value={map.owner} headers={headers} onChange={(v) => setMap((m) => ({ ...m, owner: v }))} required />
           <ColMap label="Property (situs) address" value={map.address} headers={headers} onChange={(v) => setMap((m) => ({ ...m, address: v }))} required />
           <ColMap label="Appraised value (optional)" value={map.value} headers={headers} onChange={(v) => setMap((m) => ({ ...m, value: v }))} />
-          <Button onClick={run} disabled={busy} className="mt-1 gap-1.5 bg-gold text-gold-foreground hover:bg-gold/90">
+          <Button onClick={run} disabled={busy} className="mt-1">
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Import & match
           </Button>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        Big counties: if the full roll is huge, filter the export to your ZIPs/city first. Re-import after each new roll to
-        refresh owners.
-      </p>
-    </div>
+      <Hint>
+        On a big county, filter the export down to your ZIPs or city before uploading. Re-import
+        after each new roll to refresh the owners.
+      </Hint>
+    </Panel>
   );
 }
 

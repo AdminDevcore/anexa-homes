@@ -95,9 +95,14 @@ async function addLoan(page: Page, name: string, apr: string, months: string, fe
  */
 async function setNetTarget(page: Page, dollars: string) {
   await page.goto("/portal/settings/solar");
-  await expect(page.getByLabel("Target net $/W")).toBeVisible({ timeout: 15000 });
-  await page.getByLabel("Target net $/W").fill(dollars);
-  await page.getByRole("button", { name: "Save solar settings" }).click();
+  // Solar settings are tabbed now, and the screen has one Save.
+  await page.getByRole("tab", { name: "Pricing" }).click();
+  // By ROLE, not getByLabel: the "why" popover beside the label is a button
+  // whose own accessible name contains the same words.
+  const box = page.getByRole("textbox", { name: "Target net $/W" });
+  await expect(box).toBeVisible({ timeout: 15000 });
+  await box.fill(dollars);
+  await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText(/settings saved/i)).toBeVisible({ timeout: 15000 });
 }
 

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { expectRowValue } from "./list-value";
 
 const PASSWORD = "Passw0rd!";
 
@@ -41,12 +42,22 @@ test("settings: inspection outcomes are customizable", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Inspection Outcomes" })).toBeVisible();
   // A default outcome is present
-  await expect(page.locator('input[value="Damage confirmed"]')).toBeVisible();
+  await expectRowValue(page, "Damage confirmed");
 
-  // Add a new outcome
+  // Add a new one. The list is a draft with one Save, like every settings
+  // screen, so the row appears first and the Save is what writes it.
   await page.getByPlaceholder(/Approved/).fill("Re-inspection requested");
-  await page.getByRole("button", { name: /Add outcome/ }).click();
-  await expect(page.locator('input[value="Re-inspection requested"]')).toBeVisible();
+  await page.getByRole("button", { name: "Add outcome" }).click();
+  await expectRowValue(page, "Re-inspection requested");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  // The exact toast: "Saved" on its own is a substring of the save bar's own
+  // "Unsaved changes to …", so it passes before the action has run.
+  await expect(page.getByText("Outcomes saved")).toBeVisible({ timeout: 15000 });
+  // The save bar goes when the panel's draft matches what the server sent back:
+  // the round trip has landed, and a reload now cannot race it.
+  await expect(page.getByTestId("settings-save-bar")).toHaveCount(0, { timeout: 15000 });
+  await page.reload();
+  await expectRowValue(page, "Re-inspection requested", 15000);
 
   await page.context().clearCookies();
 });
@@ -56,11 +67,18 @@ test("settings: production checklist is customizable", async ({ page }) => {
   await page.goto("/portal/settings/production-checklist");
 
   await expect(page.getByRole("heading", { name: "Production Checklist" })).toBeVisible();
-  await expect(page.locator('input[value="Magnetic nail sweep complete"]')).toBeVisible();
+  await expectRowValue(page, "Magnetic nail sweep complete");
 
   await page.getByPlaceholder(/Magnetic/).fill("Permit posted on site");
-  await page.getByRole("button", { name: /Add item/ }).click();
-  await expect(page.locator('input[value="Permit posted on site"]')).toBeVisible();
+  await page.getByRole("button", { name: "Add item" }).click();
+  await expectRowValue(page, "Permit posted on site");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Steps saved")).toBeVisible({ timeout: 15000 });
+  // The save bar goes when the panel's draft matches what the server sent back:
+  // the round trip has landed, and a reload now cannot race it.
+  await expect(page.getByTestId("settings-save-bar")).toHaveCount(0, { timeout: 15000 });
+  await page.reload();
+  await expectRowValue(page, "Permit posted on site", 15000);
 
   await page.context().clearCookies();
 });

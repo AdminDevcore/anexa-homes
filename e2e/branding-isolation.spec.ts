@@ -31,11 +31,11 @@ test("editing company B's branding does not change company A", async ({ page }) 
   await login(page, "ownerb@summitroofing.test");
   await page.goto("/portal/settings/branding", { waitUntil: "domcontentloaded" });
 
-  // The company-name input is in the Company Identity form (placeholder e.g. Anexa Homes).
-  const nameInput = page.getByPlaceholder("e.g., Acme Roofing");
-  await nameInput.fill("Summit Roofing Co");
-  await page.getByRole("button", { name: /save company info/i }).click();
-  await expect(page.getByText("Company information saved")).toBeVisible();
+  // The company's own name is on the Company tab, and the screen has one Save.
+  await page.getByRole("tab", { name: "Company" }).click();
+  await page.getByPlaceholder("e.g. Acme Roofing").fill("Summit Roofing Co");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Branding saved")).toBeVisible({ timeout: 15000 });
 
   // Tenant A (Anexa) must be completely unaffected by tenant B's write.
   await login(page, "owner@anexahomes.com");

@@ -186,17 +186,22 @@ test.describe(FLAG_ON ? "solar adders" : "solar adders (flag off — skipped)", 
     // its own — and names it per run, because the catalogue is unique on
     // identity and these specs accumulate across runs.
     const name = `ZZ Steep roof ${Date.now().toString(36)}`;
+    // The catalogue is one rail with the hardware and the adders in it, and one
+    // panel: an adder is created with a name, then priced on its own tab.
     await page.goto("/portal/settings/solar-equipment");
-    // Every kind renders its own section AND its own Add form on this page, so
-    // the section has to be scoped before anything inside it is clicked.
-    const adders = page
-      .locator("section")
-      .filter({ has: page.getByRole("heading", { name: "Adders", exact: true }) });
-    await adders.getByRole("button", { name: "Add", exact: true }).click();
-    await page.getByLabel("Model *").fill(name);
-    await page.getByLabel("Or $ per watt").fill("0.05");
-    await adders.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Added")).toBeVisible({ timeout: 15000 });
+    await page.getByRole("button", { name: "New item" }).click();
+    await page.getByRole("radio", { name: "Adder" }).check();
+    await page.getByLabel("Name", { exact: true }).fill(name);
+    await page.getByRole("button", { name: "Add item" }).click();
+    await expect(page.getByText(`${name} added`)).toBeVisible({ timeout: 15000 });
+
+    const adder = page.getByTestId("adder-panel");
+    await adder.getByRole("tab", { name: "Pricing" }).click();
+    await adder.getByRole("radio", { name: "Per Watt" }).check();
+    // By role: two of the pricing radios carry "price" in their own description.
+    await adder.getByRole("textbox", { name: "Price" }).fill("0.05");
+    await adder.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText(`${name} saved`)).toBeVisible({ timeout: 15000 });
 
     await openFinancing(page, leadId);
     await clearAdders(page);

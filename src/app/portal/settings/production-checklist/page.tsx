@@ -1,12 +1,10 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { getQcChecklistTemplate } from "@/server/modules/settings/queries";
 import { updateQcChecklistTemplateAction } from "@/server/modules/settings/actions";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { ListSettingsManager } from "@/components/portal/list-settings-manager";
 
 export const metadata = { title: "Production Checklist" };
@@ -19,14 +17,14 @@ export default async function ProductionChecklistSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Production Checklist"
+      <SettingsScreenHeader
+        section="production_checklist"
         description="The QC checklist applied to every new job. Edit it here so production is consistent across jobs."
       />
-      <ListSettingsManager items={items} save={updateQcChecklistTemplateAction} addLabel="Add item" placeholder="e.g. Magnetic nail sweep complete" />
+      <ListSettingsManager
+        title="Steps"
+        description="Applied to every new job as it is created. Editing it here changes what future jobs are checked against — jobs already running keep the checklist they were created with."
+        items={items} save={updateQcChecklistTemplateAction} addLabel="Add item" placeholder="e.g. Magnetic nail sweep complete" />
     </div>
   );
 }

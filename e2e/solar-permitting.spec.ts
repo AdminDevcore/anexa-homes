@@ -136,16 +136,12 @@ test.describe(
       const label = `Permit Packet Notes ${Date.now()}`;
 
       await page.goto("/portal/settings/fields");
-      const projectColumn = page
-        .locator("div")
-        .filter({ has: page.getByRole("heading", { name: "Project Fields" }) })
-        .last();
-      await projectColumn.getByRole("button", { name: "Add" }).click();
-      await expect(page.getByRole("heading", { name: "New project field" })).toBeVisible();
-      // By placeholder: the dialog's <Label> is not associated with its input.
+      await page.getByRole("button", { name: "New field" }).click();
+      await expect(page.getByRole("heading", { name: "Add a custom field" })).toBeVisible();
+      await page.getByRole("radio", { name: "Projects" }).check();
       await page.getByPlaceholder("e.g. Gate Code").fill(label);
       await page.getByRole("button", { name: "Add field" }).click();
-      await expect(page.getByText(label)).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText(`${label} added`)).toBeVisible({ timeout: 15000 });
 
       // Already in the Solar workspace — switching again would not navigate.
       await page.goto("/portal/leads?q=Marcus");

@@ -4,8 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Search, Landmark, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Loader2, Plus, Landmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +19,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/portal/ui";
+import {
+  ItemRail,
+  RailGroup,
+  RailLayout,
+  RailNoMatch,
+  RailRow,
+} from "@/components/portal/settings-kit";
 import { upsertSolarLenderAction } from "@/server/modules/solar/actions";
 import type { AdderRuleOption, LenderRow } from "./solar-lender/types";
 import { ppwToDollars } from "./solar-lender/types";
@@ -101,7 +107,15 @@ export function SolarLenderManager({
     if (selectedIdInUrl) p.set("lender", selectedIdInUrl);
     else p.delete("lender");
     p.set("tab", tab);
-    window.history.replaceState(null, "", `${window.location.pathname}?${p}`);
+    const next = `${window.location.pathname}?${p}`;
+    // ONLY WHEN IT WOULD CHANGE. This effect re-runs on every server refresh —
+    // saving a product refreshes the panel — and a `replaceState` issued while
+    // the browser has a real navigation in flight cancels it: Playwright saw it
+    // as `net::ERR_ABORTED; maybe frame was detached?` on a `goto` fired just
+    // after a save, and a person clicking a link in the same moment would have
+    // watched it do nothing.
+    if (next === `${window.location.pathname}${window.location.search}`) return;
+    window.history.replaceState(null, "", next);
   }, [selectedIdInUrl, tab]);
 
   const q = query.trim().toLowerCase();
@@ -132,79 +146,43 @@ export function SolarLenderManager({
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[17rem_minmax(0,1fr)]">
-      {/* ── The partners ─────────────────────────────────────────────────
-          Sticky on a wide screen so the panel scrolls under it: setting a
-          lender up means moving between its tabs, not losing your place in
-          the list of who they all are. */}
-      <aside className="lg:sticky lg:top-4 lg:self-start">
-        <div className="space-y-2">
-          {canEdit && <AddLenderDialog onAdded={setSelectedId} full />}
+    <RailLayout
+      rail={
+        <ItemRail
+          label="Financing partners"
+          add={canEdit ? <AddLenderDialog onAdded={setSelectedId} full /> : undefined}
+          query={query}
+          onQueryChange={setQuery}
+          searchPlaceholder="Find a partner"
+          showSearch={lenders.length > 6}
+        >
+          {shownLive.map((l) => (
+            <LenderRailRow
+              key={l.id}
+              lender={l}
+              selected={l.id === selected?.id}
+              onSelect={() => setSelectedId(l.id)}
+            />
+          ))}
 
-          {lenders.length > 6 && (
-            <div className="relative">
-              <Search
-                aria-hidden
-                className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Find a partner"
-                aria-label="Find a financing partner"
-                className="h-8 pl-8 pr-8"
-              />
-              {query !== "" && (
-                <button
-                  type="button"
-                  onClick={() => setQuery("")}
-                  aria-label="Clear search"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              )}
-            </div>
+          {shownRetired.length > 0 && (
+            <>
+              <RailGroup>Retired ({shownRetired.length})</RailGroup>
+              {shownRetired.map((l) => (
+                <LenderRailRow
+                  key={l.id}
+                  lender={l}
+                  selected={l.id === selected?.id}
+                  onSelect={() => setSelectedId(l.id)}
+                />
+              ))}
+            </>
           )}
 
-          <nav
-            aria-label="Financing partners"
-            className="max-h-[20rem] space-y-1 overflow-y-auto pr-1 lg:max-h-[calc(100vh-13rem)]"
-          >
-            {shownLive.map((l) => (
-              <LenderRailRow
-                key={l.id}
-                lender={l}
-                selected={l.id === selected?.id}
-                onSelect={() => setSelectedId(l.id)}
-              />
-            ))}
-
-            {shownRetired.length > 0 && (
-              <>
-                <p className="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Retired ({shownRetired.length})
-                </p>
-                {shownRetired.map((l) => (
-                  <LenderRailRow
-                    key={l.id}
-                    lender={l}
-                    selected={l.id === selected?.id}
-                    onSelect={() => setSelectedId(l.id)}
-                  />
-                ))}
-              </>
-            )}
-
-            {shownLive.length === 0 && shownRetired.length === 0 && (
-              <p className="px-2 py-4 text-xs text-muted-foreground">
-                No partner matches &ldquo;{query}&rdquo;.
-              </p>
-            )}
-          </nav>
-        </div>
-      </aside>
-
+          {shownLive.length === 0 && shownRetired.length === 0 && <RailNoMatch query={query} />}
+        </ItemRail>
+      }
+    >
       {selected && (
         <LenderDetail
           // Keyed so switching partners remounts the panel: the draft belongs
@@ -221,7 +199,7 @@ export function SolarLenderManager({
           onDeleted={() => setSelectedId(null)}
         />
       )}
-    </div>
+    </RailLayout>
   );
 }
 
@@ -250,33 +228,17 @@ function LenderRailRow({
       : `${products} ${products === 1 ? "programme" : "programmes"}`;
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-current={selected ? "true" : undefined}
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
-        selected
-          ? "border-gold/50 bg-gold/[0.08]"
-          : "border-transparent hover:border-border hover:bg-muted/50",
-        !lender.isActive && "opacity-70"
-      )}
-    >
-      <LenderMark name={lender.name} logoUrl={lender.logoUrl} size="md" />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{lender.name}</span>
-        <span className="block truncate text-[11px] text-muted-foreground">
-          {needsWork ? (products === 0 ? "no programmes yet" : "no equipment approved") : price}
-        </span>
-      </span>
-      {needsWork && (
-        <span
-          className="size-1.5 shrink-0 rounded-full bg-amber-500"
-          aria-label="Needs setup"
-          role="img"
-        />
-      )}
-    </button>
+    <RailRow
+      title={lender.name}
+      subtitle={
+        needsWork ? (products === 0 ? "no programmes yet" : "no equipment approved") : price
+      }
+      mark={<LenderMark name={lender.name} logoUrl={lender.logoUrl} size="md" />}
+      selected={selected}
+      onSelect={onSelect}
+      needsWork={needsWork}
+      muted={!lender.isActive}
+    />
   );
 }
 

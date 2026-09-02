@@ -1,12 +1,10 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { stormEnabled } from "@/lib/vertical-features";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { StormCoverageSettings } from "@/components/portal/storm-coverage-settings";
 import { OwnerDataRefreshPanel } from "@/components/portal/owner-data-refresh-panel";
 import { CountyRecordsImport } from "@/components/portal/county-records-import";
@@ -27,7 +25,8 @@ export default async function StormCoveragePage() {
   // Owner re-verify and county records are ordinary canvassing tooling and stay
   // in every workspace. The storm search area is the only roofing-specific panel
   // here, so solar gets the page without it rather than losing the page.
-  const storm = stormEnabled(await getActiveVertical(user));
+  const vertical = await getActiveVertical(user);
+  const storm = stormEnabled(vertical);
 
   const [s, enrichStats] = await Promise.all([
     storm
@@ -42,10 +41,9 @@ export default async function StormCoveragePage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
+      <SettingsScreenHeader
+        section="storm_homeowner"
+        vertical={vertical}
         title={storm ? "Storm & Homeowner Data" : "Homeowner Data"}
         description={
           storm

@@ -1,10 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { prisma } from "@/server/db/client";
 import { SolarProviderManager } from "@/components/portal/solar-provider-manager";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
@@ -26,7 +24,22 @@ export const metadata = { title: "Energy providers" };
  * same way on every proposal — the previous free-text field is how a production
  * deal ended up naming "ZZ TEST UTILITY - DO NOT USE".
  */
-export default async function SolarProvidersPage() {
+export default async function SolarProvidersPage({
+  searchParams,
+}: {
+  /**
+   * Which provider is open, and on which tab.
+   *
+   * Read HERE rather than in the browser: the panel keeps it in the URL so a
+   * reload comes back where you were, and a client that reads
+   * `window.location` while hydrating renders a provider the server never
+   * sent — which React reports as a hydration mismatch and repairs by throwing
+   * the server's markup away.
+   */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
   const user = await requireUser("/portal/settings/solar-providers");
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
   if ((await getActiveVertical(user)) !== "solar") redirect("/portal/settings");
@@ -111,28 +124,21 @@ export default async function SolarProvidersPage() {
   }));
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-6">
-      <Link
-        href="/portal/settings"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-
-      <PageHeader
-        title="Energy providers"
+    <div className="space-y-6">
+      <SettingsScreenHeader
+        section="solar_providers"
         description="The utilities and retail providers your reps pick from on the Energy step."
       />
 
-      <div className="mt-6">
-        <SolarProviderManager
-          utilities={providers.filter((r) => r.kind === "utility")}
-          retailers={providers.filter((r) => r.kind === "retail")}
-          batteries={batteryOptions}
-          lenderProducts={productOptions}
-          canEdit={can(user, "update", "Settings")}
-        />
-      </div>
+      <SolarProviderManager
+        utilities={providers.filter((r) => r.kind === "utility")}
+        retailers={providers.filter((r) => r.kind === "retail")}
+        batteries={batteryOptions}
+        lenderProducts={productOptions}
+        canEdit={can(user, "update", "Settings")}
+        initialProviderId={one(params.provider)}
+        initialTab={one(params.tab)}
+      />
     </div>
   );
 }

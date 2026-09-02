@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { expectRowValue } from "./list-value";
 
 const PASSWORD = "Passw0rd!";
 
@@ -206,17 +207,26 @@ test("photos: deal Survey/Install folders capture and compile each group separat
 test("photos: admin can add a slot to a photo template", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await page.goto("/portal/settings/photo-templates");
-  await expect(page.getByText("Site / Inspection Photos")).toBeVisible({ timeout: 10000 });
+  const panel = page.getByTestId("checklist-panel");
+  await expect(panel.getByRole("heading", { name: "Site / Inspection Photos" })).toBeVisible({
+    timeout: 10000,
+  });
 
+  // The checklist is one draft with one Save: "Add photo" puts an empty row on
+  // the end, and nothing is written until the Save.
   const label = `QA Slot ${Date.now() % 100000}`;
-  await page.getByPlaceholder(/New photo label/).first().fill(label);
-  await page.getByRole("button", { name: /Add photo/ }).first().click();
-  // The new slot renders as an editable input whose value is the label.
-  await expect
-    .poll(() => page.getByRole("textbox").evaluateAll((els, l) => els.some((e) => (e as HTMLInputElement).value === l), label), {
-      timeout: 10000,
-    })
-    .toBe(true);
+  await panel.getByRole("button", { name: "Add photo" }).click();
+  const last = panel.getByRole("textbox", { name: /^Photo \d+ label$/ }).last();
+  await last.fill(label);
+  await panel.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(/ saved$/)).toBeVisible({ timeout: 15000 });
+
+  // The save bar goes when the panel's draft matches what the server sent back:
+  // the round trip has landed, and a reload now cannot race it.
+  await expect(page.getByTestId("settings-save-bar")).toHaveCount(0, { timeout: 15000 });
+
+  await page.reload();
+  await expectRowValue(page, label, 15000);
 });
 
 /**
@@ -240,7 +250,9 @@ test("photos: an example photo shows on the job without counting as one of its p
   // Set the example on that slot. The first file input on the settings page is
   // the first slot of the site checklist — the same "Front of house".
   await page.goto("/portal/settings/photo-templates");
-  await expect(page.getByText("Site / Inspection Photos")).toBeVisible({ timeout: 10000 });
+  await expect(
+    page.getByTestId("checklist-panel").getByRole("heading", { name: "Site / Inspection Photos" })
+  ).toBeVisible({ timeout: 10000 });
   await page.locator('input[type="file"][accept="image/jpeg,image/png,image/webp"]').first()
     .setInputFiles("public/anexa-mark.png");
   await expect(page.getByText("Example photo set")).toBeVisible({ timeout: 15000 });
@@ -292,27 +304,31 @@ test("photos: the solar workspace has its own editable checklists", async ({ pag
 
   await page.goto("/portal/settings/photo-templates");
 
-  // Both checklists are on screen under solar's own vocabulary, whether or not
+  // Both checklists are in the rail under solar's own vocabulary, whether or not
   // a row exists yet — the bug was that neither was.
-  await expect(page.getByRole("heading", { name: "Site Survey Photos" })).toBeVisible({ timeout: 15000 });
-  await expect(page.getByRole("heading", { name: "Installation Photos" })).toBeVisible();
+  const rail = page.getByRole("navigation", { name: "Photo checklists" });
+  await expect(rail.getByRole("button", { name: /Site Survey Photos/ })).toBeVisible({
+    timeout: 15000,
+  });
+  await expect(rail.getByRole("button", { name: /Installation Photos/ })).toBeVisible();
   // Roofing's names must not leak across the workspace boundary.
   await expect(page.getByText("Site / Inspection Photos")).toHaveCount(0);
 
   // A slot can be added, creating the solar template row on the way in if this
   // workspace has never had one.
+  const panel = page.getByTestId("checklist-panel");
   const label = `QA Solar Slot ${Date.now() % 100000}`;
-  await page.getByPlaceholder(/New photo label/).first().fill(label);
-  await page.getByRole("button", { name: /Add photo/ }).first().click();
-  await expect
-    .poll(
-      () =>
-        page
-          .getByRole("textbox")
-          .evaluateAll((els, l) => els.some((e) => (e as HTMLInputElement).value === l), label),
-      { timeout: 15000 }
-    )
-    .toBe(true);
+  await panel.getByRole("button", { name: "Add photo" }).click();
+  await panel.getByRole("textbox", { name: /^Photo \d+ label$/ }).last().fill(label);
+  await panel.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText(/ saved$/)).toBeVisible({ timeout: 15000 });
+
+  // The save bar goes when the panel's draft matches what the server sent back:
+  // the round trip has landed, and a reload now cannot race it.
+  await expect(page.getByTestId("settings-save-bar")).toHaveCount(0, { timeout: 15000 });
+
+  await page.reload();
+  await expectRowValue(page, label, 15000);
 });
 
 test("photos: a solar deal's photo folders are checklist folders, not file dumps", async ({ page }) => {

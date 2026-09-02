@@ -1,21 +1,24 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { ROLES } from "@/server/rbac/matrix";
 import { roleLabel } from "@/lib/roles";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { NotificationRulesManager } from "@/components/portal/notification-rules-manager";
-import { ScheduledRemindersSettings } from "@/components/portal/scheduled-reminders-settings";
-import { EsignDeliverySettings } from "@/components/portal/esign-delivery-settings";
 
 const STATUSES = ["not_started", "in_production", "on_hold", "qc", "completed", "closed", "cancelled"];
 
 export const metadata = { title: "Notification Rules" };
 
-export default async function NotificationSettingsPage() {
+export default async function NotificationSettingsPage({
+  searchParams,
+}: {
+  /** Which rule is open. Read on the SERVER so the first paint is the right one. */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
@@ -28,19 +31,17 @@ export default async function NotificationSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Notification Rules"
+      <SettingsScreenHeader
+        section="notification_rules"
         description="Define what triggers a notification, who receives it, and how it's delivered."
       />
-      <ScheduledRemindersSettings
-        weeklyTaskReminders={settings?.weeklyTaskRemindersEnabled ?? true}
-        overdueDigest={settings?.overdueDigestEnabled ?? true}
-      />
-      <EsignDeliverySettings emailSignedCopyToSigners={settings?.emailSignedCopyToSigners ?? true} />
       <NotificationRulesManager
+        initialRuleId={one(params.rule)}
+        schedules={{
+          weeklyTaskReminders: settings?.weeklyTaskRemindersEnabled ?? true,
+          overdueDigest: settings?.overdueDigestEnabled ?? true,
+          emailSignedCopyToSigners: settings?.emailSignedCopyToSigners ?? true,
+        }}
         rules={rules.map((r) => ({
           id: r.id,
           name: r.name,

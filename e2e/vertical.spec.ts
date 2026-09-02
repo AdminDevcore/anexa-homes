@@ -92,10 +92,13 @@ test.describe("workspace switcher", () => {
     // The production checklist, because both workspaces have one and both store
     // it in the same vertical-namespaced column. (This used to prove the point
     // on inspection outcomes — solar no longer has that page at all.)
+    // Scoped to the list itself: the settings rail carries a search box and the
+    // list carries an add box, and neither is one of the steps.
+    const steps = (p: typeof page) => p.getByRole("textbox", { name: /^Item \d+$/ });
+
     await page.goto("/portal/settings/production-checklist");
-    const firstRow = page.getByRole("textbox").first();
-    await expect(firstRow).toBeVisible({ timeout: 15000 });
-    const roofingBefore = await page.getByRole("textbox").evaluateAll((els) =>
+    await expect(steps(page).first()).toBeVisible({ timeout: 15000 });
+    const roofingBefore = await steps(page).evaluateAll((els) =>
       els.map((e) => (e as HTMLInputElement).value)
     );
     expect(roofingBefore.length).toBeGreaterThan(0);
@@ -103,17 +106,17 @@ test.describe("workspace switcher", () => {
     // Rename the first step while in SOLAR.
     await switchTo(page, "Solar");
     await page.goto("/portal/settings/production-checklist");
-    const solarFirst = page.getByRole("textbox").first();
+    const solarFirst = steps(page).first();
     await expect(solarFirst).toBeVisible({ timeout: 15000 });
     await solarFirst.fill("SOLAR ONLY STEP");
-    await solarFirst.blur();
-    await page.waitForTimeout(1500); // debounced autosave
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Steps saved")).toBeVisible({ timeout: 15000 });
 
     // Roofing's list must be byte-for-byte what it was.
     await switchTo(page, "Roofing");
     await page.goto("/portal/settings/production-checklist");
-    await expect(page.getByRole("textbox").first()).toBeVisible({ timeout: 15000 });
-    const roofingAfter = await page.getByRole("textbox").evaluateAll((els) =>
+    await expect(steps(page).first()).toBeVisible({ timeout: 15000 });
+    const roofingAfter = await steps(page).evaluateAll((els) =>
       els.map((e) => (e as HTMLInputElement).value)
     );
     expect(roofingAfter).toEqual(roofingBefore);

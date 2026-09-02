@@ -1,12 +1,10 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { getInspectionOutcomes } from "@/server/modules/settings/queries";
 import { updateInspectionOutcomesAction } from "@/server/modules/settings/actions";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { ListSettingsManager } from "@/components/portal/list-settings-manager";
 
 export const metadata = { title: "Inspection Outcomes" };
@@ -27,14 +25,13 @@ export default async function InspectionOutcomesSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Inspection Outcomes"
+      <SettingsScreenHeader
+        section="inspection_outcomes"
         description="Customize the outcomes recorded after a roof inspection / adjuster meeting, and their order."
       />
       <ListSettingsManager
+        title="Outcomes"
+        description="The outcomes a rep records after a roof inspection or an adjuster meeting, in the order they are offered. Renaming one keeps every inspection already recorded against it."
         items={items}
         save={updateInspectionOutcomesAction}
         addLabel="Add outcome"

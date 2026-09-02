@@ -3,13 +3,47 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Undo2, Archive, Check, Pencil, X, Zap } from "lucide-react";
+import { Archive, Check, Loader2, MoreHorizontal, Plus, Undo2, Zap } from "lucide-react";
 import type { FinanceProduct, SolarProviderKind } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/portal/ui";
+import {
+  Caution,
+  ChoiceCards,
+  FieldGrid,
+  Hint,
+  ItemRail,
+  Panel,
+  PanelEmpty,
+  Pill,
+  RailGroup,
+  RailLayout,
+  RailNoMatch,
+  RailRow,
+  SaveBar,
+  StatRow,
+  TextAreaField,
+  TextField,
+} from "@/components/portal/settings-kit";
 import {
   saveSolarProviderAction,
   saveSolarProviderTermsAction,
@@ -50,12 +84,24 @@ export type ProviderTermsInput = Omit<ProviderTerms, "vppBatteries" | "vppProduc
 /** The four ways a solar deal is ever paid for, in the order a rep meets them. */
 const FINANCE_KINDS: FinanceProduct[] = ["cash", "loan", "lease", "ppa"];
 
+const PROVIDER_TABS = ["details", "rates", "programme"] as const;
+type ProviderTab = (typeof PROVIDER_TABS)[number];
+
+type Row = ProviderRow & { kind: SolarProviderKind };
+
 /**
- * The two provider lists a solar company sells against.
+ * Every energy provider this company sells against, one at a time.
  *
- * Separate lists because they are separate things: in a deregulated market the
- * utility delivers the power and a retailer bills for it, and a proposal that
- * confuses the two names the wrong company on the customer's own document.
+ * A LIST AND A PANEL. The screen this replaces printed two hundred Texas
+ * municipals as two flat lists and opened a seven-field editor INSIDE whichever
+ * row you clicked, pushing everything below it down the page — so finding a
+ * provider meant scrolling, and editing one meant losing your place. The rail
+ * searches; the panel gets the window.
+ *
+ * The two kinds stay separate groups inside one rail, because they are separate
+ * companies in a deregulated market: the utility delivers the power and owns
+ * the meter, the retailer bills for it, and a proposal naming the wrong one is
+ * wrong on the customer's own document.
  */
 export function SolarProviderManager({
   utilities,
@@ -63,173 +109,160 @@ export function SolarProviderManager({
   batteries,
   lenderProducts,
   canEdit,
+  initialProviderId,
+  initialTab,
 }: {
   utilities: ProviderRow[];
   retailers: ProviderRow[];
   batteries: BatteryOption[];
   lenderProducts: LenderProductOption[];
   canEdit: boolean;
+  /** Read on the SERVER — see the note on the page. */
+  initialProviderId?: string | null;
+  initialTab?: string | null;
 }) {
-  return (
-    <div className="space-y-6">
-      <ProviderList
-        kind="utility"
-        title="Utilities"
-        blurb="Who physically delivers the power and owns the meter — Oncor, CenterPoint, AEP Texas, TNMP."
-        rows={utilities}
-        batteries={batteries}
-        lenderProducts={lenderProducts}
-        canEdit={canEdit}
-      />
-      <ProviderList
-        kind="retail"
-        title="Retail electric providers"
-        blurb="Who bills the customer, where that is a different company from the utility."
-        rows={retailers}
-        batteries={batteries}
-        lenderProducts={lenderProducts}
-        canEdit={canEdit}
-      />
-    </div>
+  const rows: Row[] = React.useMemo(
+    () => [
+      ...utilities.map((r) => ({ ...r, kind: "utility" as const })),
+      ...retailers.map((r) => ({ ...r, kind: "retail" as const })),
+    ],
+    [utilities, retailers]
   );
-}
 
-/** Module scope on purpose — react-hooks/static-components is an error here. */
-function ProviderList({
-  kind,
-  title,
-  blurb,
-  rows,
-  batteries,
-  lenderProducts,
-  canEdit,
-}: {
-  kind: SolarProviderKind;
-  title: string;
-  blurb: string;
-  rows: ProviderRow[];
-  batteries: BatteryOption[];
-  lenderProducts: LenderProductOption[];
-  canEdit: boolean;
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState(false);
-  const [adding, setAdding] = React.useState("");
+  const live = rows.filter((r) => r.active);
+  const [selectedId, setSelectedId] = React.useState<string | null>(
+    () => initialProviderId ?? live[0]?.id ?? rows[0]?.id ?? null
+  );
+  const [tab, setTab] = React.useState<ProviderTab>(() =>
+    (PROVIDER_TABS as readonly string[]).includes(initialTab ?? "")
+      ? (initialTab as ProviderTab)
+      : "details"
+  );
+  const [query, setQuery] = React.useState("");
 
-  async function run(fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) {
-    setBusy(true);
-    const res = await fn();
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error ?? "Something went wrong.");
-    toast.success(okMsg);
-    router.refresh();
+  const selected = rows.find((r) => r.id === selectedId) ?? live[0] ?? rows[0] ?? null;
+
+  // Moving between providers is not a navigation, so it replaces rather than
+  // pushes — but a reload, or a link sent to somebody, still lands here.
+  const idInUrl = selected?.id ?? null;
+  React.useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (idInUrl) p.set("provider", idInUrl);
+    else p.delete("provider");
+    p.set("tab", tab);
+    window.history.replaceState(null, "", `${window.location.pathname}?${p}`);
+  }, [idInUrl, tab]);
+
+  const q = query.trim().toLowerCase();
+  const shown = rows.filter((r) => q === "" || r.name.toLowerCase().includes(q));
+  const shownUtilities = shown.filter((r) => r.active && r.kind === "utility");
+  const shownRetail = shown.filter((r) => r.active && r.kind === "retail");
+  const shownRetired = shown.filter((r) => !r.active);
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={Zap}
+        title="No energy providers yet"
+        description="Add the utilities that deliver the power and, where the market is deregulated, the retailers that bill for it. A rep can still type one by hand on the Energy step — this list saves them doing it, and keeps the spelling the same on every proposal."
+        action={canEdit ? <AddProviderDialog onAdded={setSelectedId} /> : undefined}
+      />
+    );
   }
 
+  const railRow = (r: Row) => (
+    <RailRow
+      key={r.id}
+      title={r.name}
+      subtitle={providerTermsLine(r) || (hasProviderTerms(r) ? "no buyback or programme" : "nothing recorded")}
+      selected={r.id === selected?.id}
+      onSelect={() => setSelectedId(r.id)}
+      needsWork={r.active && !hasProviderTerms(r)}
+      muted={!r.active}
+    />
+  );
+
   return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-5">
-      <div>
-        <h3 className="font-semibold">{title}</h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">{blurb}</p>
-      </div>
+    <RailLayout
+      rail={
+        <ItemRail
+          label="Energy providers"
+          add={canEdit ? <AddProviderDialog onAdded={setSelectedId} full /> : undefined}
+          query={query}
+          onQueryChange={setQuery}
+          searchPlaceholder="Find a provider"
+          showSearch={rows.length > 6}
+        >
+          {shownUtilities.length > 0 && <RailGroup>Utilities ({shownUtilities.length})</RailGroup>}
+          {shownUtilities.map(railRow)}
 
-      {rows.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          Nothing here yet. A rep can still type a provider by hand on the Energy step — this list
-          just saves them doing it, and keeps the spelling consistent.
-        </p>
-      ) : (
-        <ul className="divide-y divide-border">
-          {rows.map((r) => (
-            <ProviderItem
-              key={r.id}
-              row={r}
-              batteries={batteries}
-              lenderProducts={lenderProducts}
-              busy={busy}
-              canEdit={canEdit}
-              onToggle={() =>
-                run(
-                  () => setSolarProviderActiveAction(r.id, !r.active),
-                  r.active ? "Retired" : "Back in use"
-                )
-              }
-              onSaveTerms={(terms) =>
-                run(() => saveSolarProviderTermsAction(r.id, terms), `${r.name} updated`)
-              }
-            />
-          ))}
-        </ul>
-      )}
+          {shownRetail.length > 0 && <RailGroup>Retail providers ({shownRetail.length})</RailGroup>}
+          {shownRetail.map(railRow)}
 
-      {canEdit && (
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-48 flex-1 space-y-1">
-            <Label htmlFor={`add-${kind}`} className="text-xs">
-              Add a {kind === "utility" ? "utility" : "retail provider"}
-            </Label>
-            <Input
-              id={`add-${kind}`}
-              value={adding}
-              placeholder={kind === "utility" ? "e.g. Oncor" : "e.g. Rhythm Energy"}
-              onChange={(e) => setAdding(e.target.value)}
-            />
-          </div>
-          <Button
-            size="sm"
-            disabled={busy || !adding.trim()}
-            onClick={async () => {
-              const name = adding.trim();
-              await run(
-                () => saveSolarProviderAction({ kind, name, position: rows.length }),
-                `${name} added`
-              );
-              setAdding("");
-            }}
-          >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-            Add
-          </Button>
-        </div>
+          {shownRetired.length > 0 && <RailGroup>Retired ({shownRetired.length})</RailGroup>}
+          {shownRetired.map(railRow)}
+
+          {shown.length === 0 && <RailNoMatch query={query} />}
+        </ItemRail>
+      }
+    >
+      {selected && (
+        <ProviderPanel
+          // Keyed so switching providers remounts the panel: a draft belongs to
+          // the provider it was seeded from.
+          key={selected.id}
+          row={selected}
+          batteries={batteries}
+          lenderProducts={lenderProducts}
+          canEdit={canEdit}
+          tab={tab}
+          onTabChange={setTab}
+        />
       )}
-    </section>
+    </RailLayout>
   );
 }
 
 /**
- * One provider, and what the office knows about it.
+ * Everything the office knows about one provider.
  *
- * The terms open on demand rather than sitting open on every row: this list
- * runs to two hundred Texas municipals, and seven fields against each of them
- * is a settings page nobody can find anything on. Closed, a provider is a name
- * and one line of summary — which is the form a rep needs it in anyway.
+ * Three tabs because there are three separate questions: who they are, what
+ * they pay for power, and what their battery programme takes. Every field is
+ * rep-facing except the two time-of-use rates, which are the only figures here
+ * that reach a homeowner's document — a storage proposal's savings are the
+ * spread between them, which is why they are called out on their own.
  */
-function ProviderItem({
+function ProviderPanel({
   row,
   batteries,
   lenderProducts,
-  busy,
   canEdit,
-  onToggle,
-  onSaveTerms,
+  tab,
+  onTabChange,
 }: {
-  row: ProviderRow;
+  row: Row;
   batteries: BatteryOption[];
   lenderProducts: LenderProductOption[];
-  busy: boolean;
   canEdit: boolean;
-  onToggle: () => void;
-  onSaveTerms: (terms: ProviderTermsInput) => void;
+  tab: ProviderTab;
+  onTabChange: (t: ProviderTab) => void;
 }) {
-  const [editing, setEditing] = React.useState(false);
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
   const [draft, setDraft] = React.useState(() => seedTerms(row));
 
-  function open() {
+  // Re-seed during render when the server sends something new — an effect would
+  // paint the pre-save values for a frame after every refresh.
+  const serverKey = JSON.stringify([row.id, seedTerms(row)]);
+  const [seen, setSeen] = React.useState(serverKey);
+  if (seen !== serverKey) {
+    setSeen(serverKey);
     setDraft(seedTerms(row));
-    setEditing(true);
   }
 
-  const summary = providerTermsLine(row);
-  const requirements = vppRequirementsLine(row);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(seedTerms(row));
+  const set = <K extends keyof TermsDraft>(k: K, v: TermsDraft[K]) =>
+    setDraft((d) => ({ ...d, [k]: v }));
 
   /**
    * The catalogue, plus anything already on this programme that has since left
@@ -255,295 +288,536 @@ function ProviderItem({
     [lenderProducts, row.vppProducts]
   );
 
+  /** Both rates or neither — the action refuses one alone, so say so first. */
+  const halfTou = (draft.touPeak.trim() === "") !== (draft.touOffPeak.trim() === "");
+
+  async function act(fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) {
+    setBusy(true);
+    try {
+      const res = await fn();
+      if (!res.ok) {
+        toast.error(res.error ?? "Something went wrong.");
+        return res;
+      }
+      toast.success(okMsg);
+      router.refresh();
+      return res;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * ONE SAVE for the whole panel, across two server actions.
+   *
+   * The name lives on the provider row and the terms on their own action, but
+   * that is a fact about the schema, not something a person editing a provider
+   * should have to know — so the rename only posts when the name actually
+   * changed, and a failure there stops the terms going in behind it.
+   */
+  async function save() {
+    setBusy(true);
+    try {
+      const name = draft.name.trim();
+      if (name === "") return toast.error("A provider needs a name.");
+      if (name !== row.name) {
+        const res = await saveSolarProviderAction({ id: row.id, kind: row.kind, name });
+        if (!res.ok) return toast.error(res.error ?? "Could not rename this provider.");
+      }
+      const res = await saveSolarProviderTermsAction(row.id, termsFromDraft(draft));
+      if (!res.ok) return toast.error(res.error ?? "Something went wrong.");
+      toast.success(`${name} saved`);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const requirements = vppRequirementsLine(row);
+
   return (
-    <li className="py-2">
-      <div className="flex items-center gap-2">
+    <div className="min-w-0" data-testid="provider-panel">
+      <header className="flex flex-wrap items-start gap-3 border-b border-border pb-4">
         <div className="min-w-0 flex-1">
-          <span className={cn("text-sm", !row.active && "text-muted-foreground line-through")}>
-            {row.name}
-          </span>
-          {/* NOTHING RECORDED IS ITS OWN ANSWER. On a list whose job is to say
-              who buys back, a blank line reads as "they do not" when it means
-              "nobody has checked", and a rep quotes the first one. */}
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {summary ||
-              (hasProviderTerms(row) ? "No buyback or programme" : "Buyback and VPP not recorded")}
-          </p>
-          {/* Who the programme is open to, closed. A row that reads "$500/yr"
-              and says nothing about its conditions is the sentence a rep
-              repeats across the kitchen table. */}
-          {requirements && (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{requirements}</p>
-          )}
-          {row.notes && (
-            <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
-              {row.notes}
-            </p>
-          )}
-        </div>
-        {!row.active && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-            retired
-          </span>
-        )}
-        {canEdit && !editing && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={open}>
-            <Zap className="size-4" /> Terms
-          </Button>
-        )}
-        {canEdit && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onToggle}>
-            {row.active ? <Archive className="size-4" /> : <Undo2 className="size-4" />}
-            {row.active ? "Retire" : "Restore"}
-          </Button>
-        )}
-      </div>
-
-      {editing && (
-        <div className="mt-2 space-y-3 rounded-lg border border-border bg-muted/30 p-3">
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={draft.buyback}
-                onChange={(e) => setDraft((d) => ({ ...d, buyback: e.target.checked }))}
-              />
-              Buys back exported power
-            </label>
-            {draft.buyback && (
-              <div className="ml-6 max-w-56 space-y-1">
-                <Label htmlFor={`buyback-${row.id}`} className="text-xs">
-                  Export rate ($/kWh)
-                </Label>
-                <Input
-                  id={`buyback-${row.id}`}
-                  type="number"
-                  step="0.001"
-                  value={draft.buybackRate}
-                  placeholder="blank — rate varies"
-                  onChange={(e) => setDraft((d) => ({ ...d, buybackRate: e.target.value }))}
-                />
-              </div>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="truncate font-display text-xl font-semibold tracking-tight">
+              {row.name}
+            </h2>
+            {!row.active && <Pill>Retired</Pill>}
           </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <Pill>{row.kind === "utility" ? "Utility" : "Retail provider"}</Pill>
+            {row.buyback ? (
+              <Pill tone="solar">
+                Buys back
+                {row.buybackRateMills != null && ` $${(row.buybackRateMills / 1000).toFixed(3)}/kWh`}
+              </Pill>
+            ) : (
+              <Pill>No buyback</Pill>
+            )}
+            {row.vpp && <Pill tone="gold">{row.vppProgramme?.trim() || "Battery programme"}</Pill>}
+            {row.touPeakRateMills != null && <Pill tone="gold">Time-of-use</Pill>}
+            {!hasProviderTerms(row) && <Pill tone="warn">Nothing recorded</Pill>}
+          </div>
+        </div>
 
-          {/* Time-of-use. The only figures on this form that reach a
-              homeowner's document: a storage proposal's savings are the spread
-              between them. Both or neither — the action refuses one alone
-              rather than letting the savings line vanish unexplained. */}
-          <div className="space-y-2 border-t border-border pt-3">
-            <p className="text-sm font-medium">Time-of-use rates</p>
-            <p className="text-xs text-muted-foreground">
-              Used to work out what a battery saves by charging off-peak and discharging at peak.
-              Leave blank if this provider has no time-of-use plan — the proposal then omits the
-              saving rather than guessing at one.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <div className="w-36 space-y-1">
-                <Label htmlFor={`tou-peak-${row.id}`} className="text-xs">
-                  Peak ($/kWh)
-                </Label>
-                <Input
-                  id={`tou-peak-${row.id}`}
-                  type="number"
-                  step="0.001"
-                  value={draft.touPeak}
-                  placeholder="0.240"
-                  onChange={(e) => setDraft((d) => ({ ...d, touPeak: e.target.value }))}
+        {canEdit && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                disabled={busy}
+                aria-label={`More for ${row.name}`}
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuItem
+                onSelect={() =>
+                  void act(
+                    () => setSolarProviderActiveAction(row.id, !row.active),
+                    row.active ? "Retired" : "Back in use"
+                  )
+                }
+              >
+                {row.active ? (
+                  <>
+                    <Archive className="size-4" /> Retire — deals already naming it keep working
+                  </>
+                ) : (
+                  <>
+                    <Undo2 className="size-4" /> Put back in use
+                  </>
+                )}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </header>
+
+      <Tabs value={tab} onValueChange={(v) => onTabChange(v as ProviderTab)} className="mt-4 gap-4">
+        <TabsList variant="line" className="w-full justify-start overflow-x-auto">
+          <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsTrigger value="rates">
+            Rates
+            {row.touPeakRateMills != null && (
+              <span className="size-1.5 rounded-full bg-gold" aria-hidden />
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="programme">
+            Battery programme
+            {row.vpp && <span className="size-1.5 rounded-full bg-solar" aria-hidden />}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── DETAILS ──────────────────────────────────────────────────── */}
+        <TabsContent value="details" className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
+            <div className="space-y-4">
+              <Panel
+                title="Identity"
+                description="The spelling here is the spelling on every proposal that names this provider."
+              >
+                <TextField
+                  label="Provider name"
+                  value={draft.name}
+                  onChange={(v) => set("name", v)}
+                  id={`pv-${row.id}-name`}
                 />
-              </div>
-              <div className="w-36 space-y-1">
-                <Label htmlFor={`tou-off-${row.id}`} className="text-xs">
-                  Off-peak ($/kWh)
-                </Label>
-                <Input
-                  id={`tou-off-${row.id}`}
-                  type="number"
-                  step="0.001"
-                  value={draft.touOffPeak}
-                  placeholder="0.090"
-                  onChange={(e) => setDraft((d) => ({ ...d, touOffPeak: e.target.value }))}
+              </Panel>
+
+              <Panel
+                title="Notes"
+                description="Rep-facing only — none of this reaches a customer's proposal."
+              >
+                <TextAreaField
+                  label="What the office knows"
+                  value={draft.notes}
+                  rows={4}
+                  placeholder="Term length, which batteries qualify, enrolment window — anything the boxes on the other tabs cannot hold."
+                  onChange={(v) => set("notes", v)}
                 />
-              </div>
-              <div className="w-40 space-y-1">
-                <Label htmlFor={`tou-window-${row.id}`} className="text-xs">
-                  Peak window
-                </Label>
-                <Input
-                  id={`tou-window-${row.id}`}
-                  value={draft.touWindow}
-                  placeholder="4pm – 8pm"
-                  onChange={(e) => setDraft((d) => ({ ...d, touWindow: e.target.value }))}
-                />
-              </div>
+              </Panel>
+            </div>
+
+            <div className="xl:sticky xl:top-20 xl:self-start">
+              <Panel title="At a glance" tone="muted">
+                <dl>
+                  <StatRow label="Kind" value={row.kind === "utility" ? "Utility" : "Retail"} />
+                  <StatRow
+                    label="Buyback"
+                    value={
+                      row.buyback
+                        ? row.buybackRateMills != null
+                          ? `$${(row.buybackRateMills / 1000).toFixed(3)}/kWh`
+                          : "yes — rate varies"
+                        : "no"
+                    }
+                    tone={row.buyback ? "plain" : "warn"}
+                  />
+                  <StatRow
+                    label="Time-of-use"
+                    value={row.touPeakRateMills != null ? row.touPeakWindow || "set" : "not set"}
+                  />
+                  <StatRow
+                    label="Battery programme"
+                    value={row.vpp ? row.vppProgramme?.trim() || "yes" : "none"}
+                  />
+                </dl>
+                {requirements && <Hint className="mt-2">{requirements}</Hint>}
+              </Panel>
             </div>
           </div>
+        </TabsContent>
 
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={draft.vpp}
-                onChange={(e) => setDraft((d) => ({ ...d, vpp: e.target.checked }))}
+        {/* ── RATES ────────────────────────────────────────────────────── */}
+        <TabsContent value="rates" className="space-y-4">
+          <Panel
+            title="Exported power"
+            description="What this provider pays for the power a system sends back to the grid."
+          >
+            <ChoiceCards
+              name={`buyback-${row.id}`}
+              legend="Does this provider buy back exports?"
+              value={draft.buyback ? "yes" : "no"}
+              onChange={(v) => set("buyback", v === "yes")}
+              columns={2}
+              options={[
+                {
+                  value: "yes",
+                  label: "Yes",
+                  detail: "Exports are credited. Type the rate if it is a fixed one.",
+                },
+                {
+                  value: "no",
+                  label: "No",
+                  detail: "Exports earn nothing, so the value of the system is what it offsets.",
+                },
+              ]}
+            />
+            {draft.buyback && (
+              <RateField
+                id={`buyback-${row.id}`}
+                label="Export rate"
+                value={draft.buybackRate}
+                onChange={(v) => set("buybackRate", v)}
+                placeholder="blank — rate varies"
               />
-              Runs a battery / VPP programme
-            </label>
-            {draft.vpp && (
-              <div className="ml-6 grid max-w-2xl gap-2 sm:grid-cols-3">
-                <div className="space-y-1">
-                  <Label htmlFor={`vpp-name-${row.id}`} className="text-xs">
-                    Programme
-                  </Label>
-                  <Input
-                    id={`vpp-name-${row.id}`}
-                    value={draft.vppProgramme}
-                    placeholder="e.g. Renew Home"
-                    onChange={(e) => setDraft((d) => ({ ...d, vppProgramme: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor={`vpp-up-${row.id}`} className="text-xs">
-                    Upfront ($)
-                  </Label>
-                  <Input
-                    id={`vpp-up-${row.id}`}
-                    type="number"
-                    value={draft.vppUpfront}
-                    onChange={(e) => setDraft((d) => ({ ...d, vppUpfront: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor={`vpp-yr-${row.id}`} className="text-xs">
-                    Per year ($)
-                  </Label>
-                  <Input
-                    id={`vpp-yr-${row.id}`}
-                    type="number"
-                    value={draft.vppAnnual}
-                    onChange={(e) => setDraft((d) => ({ ...d, vppAnnual: e.target.value }))}
-                  />
-                </div>
-              </div>
             )}
+          </Panel>
 
-            {/* WHO THE PROGRAMME IS OPEN TO.
-                Three lists, all ANDed, and every one of them EMPTY MEANS
-                EVERYTHING — which is why each says so in its own words rather
-                than rendering as blank space. On a screen whose job is to
-                record conditions, an empty list is ambiguous between "open to
-                all" and "nobody has filled this in", and only one of those is
-                safe to quote. */}
-            {draft.vpp && (
-              <div className="ml-6 space-y-3 border-l border-border pl-3">
-                <PickerBlock
-                  title="Ways of paying that qualify"
-                  hint="Nothing ticked means any. Cash is here and not in the list below because a cash deal has no lender product to tick."
-                  empty={draft.financeProducts.length === 0}
-                >
-                  {FINANCE_KINDS.map((k) => (
-                    <Chip
-                      key={k}
-                      on={draft.financeProducts.includes(k)}
-                      label={PRODUCT_LABEL[k]}
-                      onClick={() =>
-                        setDraft((d) => ({ ...d, financeProducts: toggle(d.financeProducts, k) }))
-                      }
-                    />
-                  ))}
-                </PickerBlock>
-
-                <PickerBlock
-                  title="Batteries the programme enrols"
-                  hint="Nothing ticked means any battery."
-                  empty={draft.batteryIds.length === 0}
-                  none={
-                    batteryChoices.length === 0
-                      ? "No batteries on the catalogue yet — add them under Equipment."
-                      : null
-                  }
-                >
-                  {batteryChoices.map((b) => (
-                    <Chip
-                      key={b.id}
-                      on={draft.batteryIds.includes(b.id)}
-                      label={b.label}
-                      gone={b.gone}
-                      onClick={() =>
-                        setDraft((d) => ({ ...d, batteryIds: toggle(d.batteryIds, b.id) }))
-                      }
-                    />
-                  ))}
-                </PickerBlock>
-
-                <PickerBlock
-                  title="Specific finance products"
-                  hint="Nothing ticked means any product of the types above. Tick rows only where the programme takes some of a lender's paper and not the rest."
-                  empty={draft.productIds.length === 0}
-                  none={
-                    productChoices.length === 0
-                      ? "No rate sheet entered yet — add products under Lenders."
-                      : null
-                  }
-                >
-                  {productChoices.map((p) => (
-                    <Chip
-                      key={p.id}
-                      on={draft.productIds.includes(p.id)}
-                      label={`${p.lender} ${p.label}`.trim()}
-                      gone={p.gone}
-                      onClick={() =>
-                        setDraft((d) => ({ ...d, productIds: toggle(d.productIds, p.id) }))
-                      }
-                    />
-                  ))}
-                </PickerBlock>
-              </div>
+          <Panel
+            title="Time-of-use rates"
+            tone="accent"
+            description="The only figures on this screen that reach a homeowner's document — a storage proposal's saving is the spread between them. Leave both blank where this provider has no time-of-use plan, and the proposal omits the line rather than guessing at one."
+          >
+            <FieldGrid columns={3}>
+              <RateField
+                id={`tou-peak-${row.id}`}
+                label="Peak"
+                value={draft.touPeak}
+                onChange={(v) => set("touPeak", v)}
+                placeholder="0.240"
+              />
+              <RateField
+                id={`tou-off-${row.id}`}
+                label="Off-peak"
+                value={draft.touOffPeak}
+                onChange={(v) => set("touOffPeak", v)}
+                placeholder="0.090"
+              />
+              <TextField
+                label="Peak window"
+                value={draft.touWindow}
+                placeholder="4pm – 8pm"
+                onChange={(v) => set("touWindow", v)}
+              />
+            </FieldGrid>
+            {halfTou && (
+              <Caution>
+                Enter both the peak and the off-peak rate, or neither. One rate on its own computes
+                no saving, and the proposal would drop the line with nothing to say why.
+              </Caution>
             )}
-          </div>
+          </Panel>
+        </TabsContent>
 
-          <div className="space-y-1">
-            <Label htmlFor={`notes-${row.id}`} className="text-xs">
-              Notes
+        {/* ── BATTERY PROGRAMME ────────────────────────────────────────── */}
+        <TabsContent value="programme" className="space-y-4">
+          <Panel
+            title="Virtual power plant"
+            description="What this provider pays a customer for letting it call on their battery."
+          >
+            <ChoiceCards
+              name={`vpp-${row.id}`}
+              legend="Does this provider run a battery programme?"
+              value={draft.vpp ? "yes" : "no"}
+              onChange={(v) => set("vpp", v === "yes")}
+              columns={2}
+              options={[
+                {
+                  value: "yes",
+                  label: "Yes",
+                  detail: "Its payments flow into the savings a storage proposal quotes.",
+                },
+                { value: "no", label: "No", detail: "Nothing is added to a storage proposal." },
+              ]}
+            />
+
+            {draft.vpp && (
+              <FieldGrid columns={3}>
+                <TextField
+                  label="Programme"
+                  value={draft.vppProgramme}
+                  placeholder="e.g. Renew Home"
+                  onChange={(v) => set("vppProgramme", v)}
+                />
+                <TextField
+                  label="Upfront ($)"
+                  type="number"
+                  value={draft.vppUpfront}
+                  onChange={(v) => set("vppUpfront", v)}
+                />
+                <TextField
+                  label="Per year ($)"
+                  type="number"
+                  value={draft.vppAnnual}
+                  onChange={(v) => set("vppAnnual", v)}
+                />
+              </FieldGrid>
+            )}
+          </Panel>
+
+          {/* WHO THE PROGRAMME IS OPEN TO.
+              Three lists, all ANDed, and every one of them EMPTY MEANS
+              EVERYTHING — which is why each says so in its own words rather
+              than rendering as blank space. On a screen whose job is to record
+              conditions, an empty list is ambiguous between "open to all" and
+              "nobody has filled this in", and only one of those is safe to
+              quote across a kitchen table. */}
+          {draft.vpp && (
+            <Panel
+              title="Who it is open to"
+              description="All three conditions have to hold. Ticking nothing in a list means it does not narrow anything."
+            >
+              <PickerBlock
+                title="Ways of paying that qualify"
+                hint="Nothing ticked means any. Cash is here and not in the list below because a cash deal has no lender product to tick."
+                empty={draft.financeProducts.length === 0}
+              >
+                {FINANCE_KINDS.map((k) => (
+                  <Chip
+                    key={k}
+                    on={draft.financeProducts.includes(k)}
+                    label={PRODUCT_LABEL[k]}
+                    onClick={() => set("financeProducts", toggle(draft.financeProducts, k))}
+                  />
+                ))}
+              </PickerBlock>
+
+              <PickerBlock
+                title="Batteries the programme enrols"
+                hint="Nothing ticked means any battery."
+                empty={draft.batteryIds.length === 0}
+                none={
+                  batteryChoices.length === 0
+                    ? "No batteries on the catalogue yet — add them under Solar Equipment."
+                    : null
+                }
+              >
+                {batteryChoices.map((b) => (
+                  <Chip
+                    key={b.id}
+                    on={draft.batteryIds.includes(b.id)}
+                    label={b.label}
+                    gone={b.gone}
+                    onClick={() => set("batteryIds", toggle(draft.batteryIds, b.id))}
+                  />
+                ))}
+              </PickerBlock>
+
+              <PickerBlock
+                title="Specific finance products"
+                hint="Nothing ticked means any product of the types above. Tick rows only where the programme takes some of a lender's paper and not the rest."
+                empty={draft.productIds.length === 0}
+                none={
+                  productChoices.length === 0
+                    ? "No rate sheet entered yet — add products under Lenders."
+                    : null
+                }
+              >
+                {productChoices.map((p) => (
+                  <Chip
+                    key={p.id}
+                    on={draft.productIds.includes(p.id)}
+                    label={`${p.lender} ${p.label}`.trim()}
+                    gone={p.gone}
+                    onClick={() => set("productIds", toggle(draft.productIds, p.id))}
+                  />
+                ))}
+              </PickerBlock>
+            </Panel>
+          )}
+
+          {!draft.vpp && (
+            <PanelEmpty>
+              No battery programme, so nothing is added to a storage proposal for this provider.
+            </PanelEmpty>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {canEdit && (
+        <SaveBar
+          dirty={dirty}
+          busy={busy}
+          what={row.name}
+          onSave={save}
+          onDiscard={() => setDraft(seedTerms(row))}
+          disabled={halfTou}
+          blockedReason={
+            halfTou ? "Enter both time-of-use rates, or neither, before saving." : undefined
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+/** A $/kWh box. Three decimals, because these rates are cents-and-tenths. */
+function RateField({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs" htmlFor={id}>
+        {label} ($/kWh)
+      </Label>
+      <Input
+        id={id}
+        type="number"
+        step="0.001"
+        value={value}
+        placeholder={placeholder}
+        className="tabular-nums"
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
+/** Adding a provider: which kind it is, and what it is called. */
+function AddProviderDialog({
+  onAdded,
+  full,
+}: {
+  onAdded: (id: string) => void;
+  full?: boolean;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = React.useState(false);
+  const [kind, setKind] = React.useState<SolarProviderKind>("utility");
+  const [name, setName] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  async function add() {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const res = await saveSolarProviderAction({ kind, name: name.trim() });
+      if (!res.ok) return toast.error(res.error ?? "Something went wrong.");
+      onAdded(res.id);
+      toast.success(`${name.trim()} added`);
+      setName("");
+      setOpen(false);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className={full ? "w-full" : undefined}>
+          <Plus className="size-4" /> New provider
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add an energy provider</DialogTitle>
+          <DialogDescription>
+            Its buyback rate, time-of-use plan and battery programme are filled in on the panel
+            next.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <ChoiceCards
+            name="new-provider-kind"
+            legend="Which is it?"
+            value={kind}
+            onChange={(v) => setKind(v)}
+            columns={2}
+            options={[
+              {
+                value: "utility" as SolarProviderKind,
+                label: "Utility",
+                detail: "Delivers the power and owns the meter — Oncor, CenterPoint, AEP.",
+              },
+              {
+                value: "retail" as SolarProviderKind,
+                label: "Retail provider",
+                detail: "Bills the customer, where that is a different company.",
+              },
+            ]}
+          />
+          <div className="space-y-1.5">
+            <Label className="text-xs" htmlFor="new-provider-name">
+              Name
             </Label>
-            <Textarea
-              id={`notes-${row.id}`}
-              rows={2}
-              value={draft.notes}
-              placeholder="Term length, which batteries qualify, enrolment window — anything the boxes above cannot hold."
-              onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+            <Input
+              id="new-provider-name"
+              value={name}
+              placeholder={kind === "utility" ? "e.g. Oncor" : "e.g. Rhythm Energy"}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void add();
+                }
+              }}
             />
           </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() => {
-                onSaveTerms(termsFromDraft(draft));
-                setEditing(false);
-              }}
-            >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-              Save
-            </Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(false)}>
-              <X className="size-4" /> Cancel
-            </Button>
-            <span className="text-[11px] text-muted-foreground">
-              <Pencil className="mr-1 inline size-3" />
-              Rep-facing only — none of this reaches a customer&rsquo;s proposal.
-            </span>
-          </div>
         </div>
-      )}
-    </li>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={add} disabled={busy || !name.trim()}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add
+            provider
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /** The row as text boxes. Money and rates are typed in dollars, stored in cents. */
 type TermsDraft = {
+  name: string;
   buyback: boolean;
   buybackRate: string;
   touPeak: string;
@@ -561,6 +835,7 @@ type TermsDraft = {
 
 function seedTerms(r: ProviderRow): TermsDraft {
   return {
+    name: r.name,
     buyback: r.buyback,
     buybackRate: r.buybackRateMills == null ? "" : (r.buybackRateMills / 1000).toFixed(3),
     touPeak: r.touPeakRateMills == null ? "" : (r.touPeakRateMills / 1000).toFixed(3),
@@ -644,11 +919,11 @@ function PickerBlock({
         {empty && <span className="ml-1.5 font-normal text-muted-foreground">Any</span>}
       </p>
       {none ? (
-        <p className="text-[11px] text-muted-foreground">{none}</p>
+        <Hint>{none}</Hint>
       ) : (
         <div className="flex flex-wrap gap-1.5">{children}</div>
       )}
-      <p className="text-[11px] text-muted-foreground">{hint}</p>
+      <Hint>{hint}</Hint>
     </div>
   );
 }
@@ -671,7 +946,7 @@ function Chip({
       className={cn(
         "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
         on
-          ? "border-violet-300 bg-violet-100 text-violet-900 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200"
+          ? "border-gold/50 bg-gold/[0.12] text-gold-muted"
           : "border-border hover:bg-muted"
       )}
     >

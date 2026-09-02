@@ -1,6 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
@@ -8,7 +6,7 @@ import { getPhotoTemplates } from "@/server/modules/photos/queries";
 import { KIND_BLURB, KIND_LABEL } from "@/server/modules/photos/defaults";
 import { VERTICAL_LABEL } from "@/lib/vertical";
 import { photoExampleUrl } from "@/lib/photo-example";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { PhotoTemplatesManager } from "@/components/portal/photo-templates-manager";
 
 export const metadata = { title: "Photo Templates" };
@@ -31,14 +29,8 @@ export default async function PhotoTemplatesPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Photo Templates"
+      <SettingsScreenHeader
+        section="photo_templates" vertical={vertical}
         description={`The photo checklists reps and crews complete on every ${VERTICAL_LABEL[vertical]} job. Each workspace keeps its own. Set an example photo on a slot and the crew sees exactly what the shot should look like before they take it.`}
       />
       <PhotoTemplatesManager

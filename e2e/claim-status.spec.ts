@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { expectRowValue } from "./list-value";
 
 const PASSWORD = "Passw0rd!";
 
@@ -36,7 +37,11 @@ test("a custom claim status reaches the deal picker and sticks", async ({ page }
 
   await page.getByPlaceholder("e.g. Depreciation released").fill("Depreciation Released");
   await page.getByRole("button", { name: "Add status" }).click();
-  await expect(page.locator('input[value="Depreciation Released"]')).toBeVisible({ timeout: 10000 });
+  // The list is a draft with one Save, like every settings screen — the row is
+  // on screen straight away, and nothing is written until the Save.
+  await expectRowValue(page, "Depreciation Released", 10000);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Claim statuses saved")).toBeVisible({ timeout: 15000 });
 
   // ── Deal page: the picker offers the office's own list ──
   await page.goto("/portal/leads?q=Robert");

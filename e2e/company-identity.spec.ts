@@ -20,9 +20,11 @@ test("the company's own phone and email can be set, and survive a reload", async
   await login(page, "admin@anexahomes.com");
   await page.goto("/portal/settings/branding");
 
+  // The legal entity lives on the Company tab; the screen has one Save.
+  await page.getByRole("tab", { name: "Company" }).click();
   const card = page
-    .locator("div.rounded-xl")
-    .filter({ has: page.getByRole("heading", { name: "Company Information" }) })
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "The legal entity" }) })
     .first();
 
   const phone = `(555) 010-${String(Date.now() % 10000).padStart(4, "0")}`;
@@ -30,10 +32,11 @@ test("the company's own phone and email can be set, and survive a reload", async
 
   await card.getByPlaceholder("(555) 123-4567").fill(phone);
   await card.getByPlaceholder("support@example.com").fill(email);
-  await card.getByRole("button", { name: /Save company info/ }).click();
-  await expect(page.getByText("Company information saved")).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Branding saved")).toBeVisible({ timeout: 15000 });
 
   await page.reload();
+  await page.getByRole("tab", { name: "Company" }).click();
   await expect(card.getByPlaceholder("(555) 123-4567")).toHaveValue(phone);
   await expect(card.getByPlaceholder("support@example.com")).toHaveValue(email);
 });

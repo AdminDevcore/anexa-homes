@@ -1,10 +1,8 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { AutomationRulesManager } from "@/components/portal/automation-rules-manager";
 
 // Matches the ProjectStatus enum. Same list the notification settings page
@@ -29,7 +27,18 @@ export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Automations" };
 
-export default async function AutomationSettingsPage() {
+export default async function AutomationSettingsPage({
+  searchParams,
+}: {
+  /**
+   * Which rule is open, and on which tab. Read HERE rather than in the browser:
+   * a client that reads `window.location` while hydrating renders a rule the
+   * server never sent, which React reports as a hydration mismatch.
+   */
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null;
   const user = await requireUser();
   if (!can(user, "update", "Settings")) redirect("/portal/settings");
 
@@ -63,17 +72,13 @@ export default async function AutomationSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Automations"
+      <SettingsScreenHeader
+        section="automations"
         description="When a deal hits a milestone, do the paperwork — generate a document, send it for signature, compile the photos, move the job on."
       />
       <AutomationRulesManager
+        initialRuleId={one(params.rule)}
+        initialTab={one(params.tab)}
         rules={rules.map((r) => ({
           id: r.id,
           name: r.name,

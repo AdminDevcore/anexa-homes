@@ -1,6 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
@@ -9,7 +7,7 @@ import { insuranceEnabled } from "@/lib/vertical-features";
 import { isScopeReady } from "@/server/modules/scope/policies";
 import { getClaimStatuses } from "@/server/modules/settings/queries";
 import { updateClaimStatusesAction } from "@/server/modules/settings/actions";
-import { PageHeader } from "@/components/portal/ui";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { ClaimStatusSettings } from "@/components/portal/claim-status-settings";
 
 export const metadata = { title: "Claim Statuses" };
@@ -38,14 +36,8 @@ export default async function ClaimStatusesSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/portal/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> Back to settings
-      </Link>
-      <PageHeader
-        title="Claim Statuses"
+      <SettingsScreenHeader
+        section="claim_statuses"
         description="Customize the insurance claim statuses on the deal Summary, and their order."
       />
       <ClaimStatusSettings

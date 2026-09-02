@@ -19,14 +19,28 @@ async function login(page: Page, email: string) {
 test("admin can customize pipeline stages", async ({ page }) => {
   await login(page, "admin@anexahomes.com");
   await page.goto("/portal/settings/pipeline");
-  await expect(page.getByText("Pipeline Stages")).toBeVisible();
-  await expect(page.getByText("New Appointment")).toBeVisible();
+  // By heading: the settings rail carries the same words on its own row. The
+  // generous timeout is the dev server compiling this route on first hit.
+  await expect(page.getByRole("heading", { name: "Pipeline Stages" })).toBeVisible({
+    timeout: 45000,
+  });
+  // By heading: the rail lists every stage by name too.
+  await expect(
+    page.getByTestId("stage-panel").getByRole("heading", { name: "New Appointment" })
+  ).toBeVisible({ timeout: 15000 });
 
-  await page.getByRole("button", { name: /Add Stage/ }).click();
+  await page.getByRole("button", { name: "New stage" }).click();
   const unique = `QA Stage ${Date.now() % 100000}`;
-  await page.getByPlaceholder(/Adjuster Meeting/).fill(unique);
-  await page.getByRole("button", { name: /^Add$/ }).click();
-  await expect(page.getByText(unique)).toBeVisible({ timeout: 10000 });
+  // Scoped to the dialog: the open stage's own Name field carries the same
+  // placeholder, because it is the same question.
+  const dialog = page.getByRole("dialog");
+  await dialog.getByPlaceholder(/Adjuster Meeting/).fill(unique);
+  await dialog.getByRole("button", { name: "Add stage" }).click();
+  await expect(page.getByText(`${unique} added`)).toBeVisible({ timeout: 15000 });
+  // Added and opened: the panel is the stage that was just created.
+  await expect(page.getByTestId("stage-panel").getByRole("heading", { name: unique })).toBeVisible({
+    timeout: 10000,
+  });
 });
 
 test("admin can open all settings sections", async ({ page }) => {
@@ -40,7 +54,7 @@ test("admin can open all settings sections", async ({ page }) => {
     await page.goto(path);
     await expect(page).toHaveURL(new RegExp(path.replace(/\//g, "\\/")));
   }
-  await expect(page.getByText(/Commission Rules/).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Commission Rules" })).toBeVisible();
 });
 
 test("sales rep cannot access settings", async ({ page }) => {

@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FilePlus2 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listSupplementTemplates } from "@/server/modules/scope/template-queries";
-import { PageHeader } from "@/components/portal/ui";
+import { Button } from "@/components/ui/button";
+import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { ScopeTemplateList } from "@/components/portal/scope-template-list";
 
 export const metadata = { title: "Supplement Templates" };
@@ -16,12 +17,17 @@ export default async function SupplementTemplatesPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/portal/settings/scope-template" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> Back to catalog
-      </Link>
-      <PageHeader
+      <SettingsScreenHeader
+        icon={FilePlus2}
         title="Supplement Templates"
         description="Versioned expected-supplement price lists over the scope catalog, with optional reason, required evidence, and notes per item. A project's Scope of Work selects one to model supplement potential."
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/portal/settings/scope-template">
+              <ArrowLeft className="size-4" /> Scope catalog
+            </Link>
+          </Button>
+        }
       />
       <ScopeTemplateList kind="supplement" basePath="/portal/settings/scope-supplement-templates" templates={templates} />
     </div>

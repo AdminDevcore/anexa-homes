@@ -29,7 +29,9 @@ export async function createAutomationRuleAction(input: RuleInput) {
   const v = validateRule(input);
   if (!v.ok) return fail(v.error);
 
-  await prisma.automationRule.create({
+  // The id comes back so the screen can OPEN the rule that was just created —
+  // a new automation is a name and nothing else until its actions are filled in.
+  const row = await prisma.automationRule.create({
     data: {
       companyId: user.companyId,
       name: v.value.name,
@@ -39,9 +41,10 @@ export async function createAutomationRuleAction(input: RuleInput) {
       once: v.value.once,
       active: v.value.active,
     },
+    select: { id: true },
   });
   revalidatePath("/portal/settings/automations");
-  return { ok: true as const };
+  return { ok: true as const, id: row.id };
 }
 
 export async function updateAutomationRuleAction(id: string, input: RuleInput) {
