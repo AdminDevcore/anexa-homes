@@ -60,7 +60,7 @@ import {
   Pill,
   StatRow,
   TextField,
-} from "./fields";
+} from "@/components/portal/settings-kit/fields";
 import { LogoControl } from "./logo-control";
 import { RateSheetPanel } from "./rate-sheet";
 import { AdderRulesPanel } from "./adder-rules";
@@ -70,6 +70,22 @@ export type LenderTab = (typeof LENDER_TABS)[number];
 
 /** The example job every "what does this mean" line on the Pricing tab is worked on. */
 const EXAMPLE_KW = 10;
+
+/**
+ * The cell where a price box would be, on a partner that publishes none.
+ *
+ * A hole in the row would be worse than a box: the ceiling and the floor are
+ * read as a pair, and an empty half reads as a field that failed to render
+ * rather than as a partner that prices the ordinary way.
+ */
+function NotPriced({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5">
+      <div className="text-xs font-medium text-muted-foreground">{label}</div>
+      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{children}</p>
+    </div>
+  );
+}
 
 /**
  * Everything about ONE financing partner, in one place.
@@ -659,160 +675,189 @@ export function LenderDetail({
 
         {/* ── PRICING ──────────────────────────────────────────────────── */}
         <TabsContent value="pricing" className="space-y-4">
-          <div className="grid items-start gap-4 xl:grid-cols-2">
-            {/* WHAT THIS PARTNER CHARGES A HOMEOWNER, and whether that is a
-                limit or the whole price list. Some partners fund a flat rate
-                whatever the job — Amos is $5.50/W — and priced the ordinary way
-                their dealer fee stickers that at three times the figure they
-                actually advance. */}
-            <Panel
-              title="What the homeowner pays"
-              description="Dealer fee and adders included. This is the number that reaches a customer's proposal."
-            >
-              <ChoiceCards<PricingMode>
-                name={`ppw-mode-${lender.id}`}
-                legend="How this partner prices"
-                why={
-                  <>
-                    Most partners price the ordinary way: the base $/W a rep types, grossed up by
-                    the programme&rsquo;s dealer fee. A few publish one number the homeowner pays
-                    whatever the job — set FLAT for those. MAXIMUM holds the contract at or under a
-                    figure, so extra work comes out of what you keep rather than out of the
-                    customer&rsquo;s price.
-                  </>
-                }
-                value={draft.ppwMode}
-                onChange={(v) => set("ppwMode", v)}
-                options={[
-                  {
-                    value: "normal",
-                    label: "Prices the normal way",
-                    detail: "Base $/W grossed up by the programme's dealer fee.",
-                  },
-                  {
-                    value: "cap",
-                    label: "Maximum $/W",
-                    detail: "A cheaper deal quotes cheaper; nothing goes above this.",
-                  },
-                  {
-                    value: "flat",
-                    label: "Flat $/W",
-                    detail: "Every deal is this figure. Extra work only changes what you keep.",
-                  },
-                ]}
-              />
-
-              {draft.ppwMode !== "normal" && (
-                <>
-                  <MoneyField
-                    id={`ld-${lender.id}-final-ppw`}
-                    label="Final $/W — what this partner charges a homeowner"
-                    suffix="/W"
-                    placeholder="5.50"
-                    value={draft.maxFinalPpw}
-                    onChange={(v) => set("maxFinalPpw", v)}
-                    invalid={ppwToCents(draft.maxFinalPpw) === "invalid"}
-                  />
-                  {draftPpwCents != null && (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Figure
-                        label={`A ${EXAMPLE_KW} kW system quotes`}
-                        tone="gold"
-                        value={money(EXAMPLE_KW * 1000 * draftPpwCents)}
-                      />
-                      <Figure
-                        label={
-                          capBasePpwCents == null
-                            ? "Leaves you (needs a dealer fee)"
-                            : "Leaves you, before your cut"
-                        }
-                        value={
-                          capBasePpwCents == null ? "—" : `$${ppwToDollars(capBasePpwCents)}/W`
-                        }
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-            </Panel>
-
-            {/* The other end of the same deal. The ceiling above is about the
-                CUSTOMER'S number; this is about YOURS, which is why the two are
-                set separately and neither is derived from the other. */}
-            <Panel
-              title="The least you will take"
-              description="A deal under this floor cannot be quoted or generated."
-            >
-              <MoneyField
-                id={`ld-${lender.id}-min-ppw`}
-                label="Min base $/W — the least this partner's deals may leave you"
-                suffix="/W"
-                placeholder="no floor"
-                value={draft.minBasePpw}
-                onChange={(v) => set("minBasePpw", v)}
-                invalid={floorUnreachable || ppwToCents(draft.minBasePpw) === "invalid"}
-                hint="Measured before the dealer fee, on what actually survives it — so on a capped lender it is what the cap leaves you, not what the rep typed."
-              />
-              {capBasePpwCents != null && (
-                <Hint>
-                  This lender&rsquo;s cap and fee leave at most{" "}
-                  <span className="font-medium tabular-nums text-foreground">
-                    ${ppwToDollars(capBasePpwCents)}/W
-                  </span>
-                  , so a floor above that blocks every deal on it.
-                </Hint>
-              )}
-              {floorUnreachable && (
-                <Caution>
-                  A ${ppwToDollars(floorCents)}/W floor is above the ${ppwToDollars(capBasePpwCents)}
-                  /W this partner&rsquo;s cap and fee can leave you. Every deal on it would be
-                  blocked.
-                </Caution>
-              )}
-            </Panel>
-
-            {/* The same two rules, on a deal with no watts.
-                A storage job has no array for a $/W figure to be per, so the pair
-                above cannot reach it — they would divide by zero and wave every
-                price through. These are the same ceiling and the same floor,
-                measured per battery. Grouped and labelled so nobody sets one
-                believing it guards a solar deal. */}
-            <Panel
-              title="Battery-only jobs"
-              description="A battery job has no watts, so the figures above do not apply to it. These do. Leave them alone if this lender does not fund storage on its own."
-            >
-              <ChoiceCards<PricingMode>
-                name={`batt-mode-${lender.id}`}
-                legend="How this partner prices a storage-only job"
-                value={draft.batteryMode}
-                onChange={(v) => set("batteryMode", v)}
-                options={[
-                  { value: "normal", label: "Prices the normal way" },
-                  { value: "cap", label: "Maximum per battery" },
-                  { value: "flat", label: "Flat per battery" },
-                ]}
-                columns={3}
-              />
-              {draft.batteryMode !== "normal" && (
-                <MoneyField
-                  id={`ld-${lender.id}-final-battery`}
-                  label="Final $/battery — what this partner charges a homeowner"
-                  placeholder="13000"
-                  value={draft.maxFinalBattery}
-                  onChange={(v) => set("maxFinalBattery", v)}
-                  invalid={batteryPriceToCents(draft.maxFinalBattery) === "invalid"}
+          {/* TWO COLUMNS ONLY WHEN THERE IS ROOM FOR TWO.
+              This panel shares the window with the Settings rail as well as the
+              lender rail, so at `xl` each half is about 250px — narrow enough
+              that "Min base $/W" wrapped to three lines above a box reading
+              "no fl". The pair of money fields inside is the thing that has to
+              stay side by side; the panels beside it are the ones that can
+              stack. */}
+          <div className="grid items-start gap-4 2xl:grid-cols-2">
+            <div className="space-y-4">
+              {/* THE TWO ENDS OF THE SAME BAND, SIDE BY SIDE.
+                  The ceiling is about the CUSTOMER'S number and the floor is
+                  about YOURS — neither is derived from the other — but they are
+                  read together and set together, and having them in separate
+                  cards a column apart meant setting one without seeing what the
+                  other already said. Which is exactly how a floor gets typed
+                  above what a cap can ever leave. */}
+              <Panel
+                title="Price per watt"
+                description="What this partner charges a homeowner, and the least those deals may leave you. Dealer fee and adders are included in the first; the second is measured before the fee, on what survives it."
+              >
+                <ChoiceCards<PricingMode>
+                  name={`ppw-mode-${lender.id}`}
+                  legend="How this partner prices"
+                  why={
+                    <>
+                      Most partners price the ordinary way: the base $/W a rep types, grossed up by
+                      the programme&rsquo;s dealer fee. A few publish one number the homeowner pays
+                      whatever the job — set FLAT for those. MAXIMUM holds the contract at or under
+                      a figure, so extra work comes out of what you keep rather than out of the
+                      customer&rsquo;s price.
+                    </>
+                  }
+                  value={draft.ppwMode}
+                  onChange={(v) => set("ppwMode", v)}
+                  options={[
+                    {
+                      value: "normal",
+                      label: "Prices the normal way",
+                      detail: "Base $/W grossed up by the programme's dealer fee.",
+                    },
+                    {
+                      value: "cap",
+                      label: "Maximum $/W",
+                      detail: "A cheaper deal quotes cheaper; nothing goes above this.",
+                    },
+                    {
+                      value: "flat",
+                      label: "Flat $/W",
+                      detail: "Every deal is this figure. Extra work only changes what you keep.",
+                    },
+                  ]}
                 />
-              )}
-              <MoneyField
-                id={`ld-${lender.id}-min-battery`}
-                label="Min base $/battery — the least these deals may leave you"
-                placeholder="no floor"
-                value={draft.minBaseBattery}
-                onChange={(v) => set("minBaseBattery", v)}
-                invalid={batteryPriceToCents(draft.minBaseBattery) === "invalid"}
-                hint="Measured before the dealer fee, on what survives it — the same rule as the $/W floor."
-              />
-            </Panel>
+
+                <div className="grid items-start gap-3 sm:grid-cols-2">
+                  {draft.ppwMode === "normal" ? (
+                    <NotPriced label="Final $/W">
+                      Derived per programme: the base a rep types, grossed up by that
+                      programme&rsquo;s dealer fee. Choose a maximum or a flat price above to set
+                      one here.
+                    </NotPriced>
+                  ) : (
+                    <MoneyField
+                      id={`ld-${lender.id}-final-ppw`}
+                      label="Final $/W"
+                      suffix="/W"
+                      placeholder="5.50"
+                      value={draft.maxFinalPpw}
+                      onChange={(v) => set("maxFinalPpw", v)}
+                      invalid={ppwToCents(draft.maxFinalPpw) === "invalid"}
+                      hint="What this partner charges a homeowner."
+                    />
+                  )}
+                  <MoneyField
+                    id={`ld-${lender.id}-min-ppw`}
+                    label="Min base $/W"
+                    suffix="/W"
+                    placeholder="no floor"
+                    value={draft.minBasePpw}
+                    onChange={(v) => set("minBasePpw", v)}
+                    invalid={floorUnreachable || ppwToCents(draft.minBasePpw) === "invalid"}
+                    hint="The least this partner's deals may leave you."
+                  />
+                </div>
+
+                {draftPpwCents != null && (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Figure
+                      label={`A ${EXAMPLE_KW} kW system quotes`}
+                      tone="gold"
+                      value={money(EXAMPLE_KW * 1000 * draftPpwCents)}
+                    />
+                    <Figure
+                      label={
+                        capBasePpwCents == null
+                          ? "Leaves you (needs a dealer fee)"
+                          : "Leaves you, before your cut"
+                      }
+                      tone={floorUnreachable ? "warn" : "plain"}
+                      value={capBasePpwCents == null ? "—" : `$${ppwToDollars(capBasePpwCents)}/W`}
+                    />
+                  </div>
+                )}
+
+                <Hint>
+                  A deal under the floor cannot be quoted or generated. It is measured on what
+                  actually survives the dealer fee — so on a capped partner it is what the cap
+                  leaves you, not what the rep typed.
+                  {capBasePpwCents != null && (
+                    <>
+                      {" "}
+                      This lender&rsquo;s cap and fee leave at most{" "}
+                      <span className="font-medium tabular-nums text-foreground">
+                        ${ppwToDollars(capBasePpwCents)}/W
+                      </span>
+                      , so a floor above that blocks every deal on it.
+                    </>
+                  )}
+                </Hint>
+
+                {floorUnreachable && (
+                  <Caution>
+                    A ${ppwToDollars(floorCents)}/W floor is above the $
+                    {ppwToDollars(capBasePpwCents)}/W this partner&rsquo;s cap and fee can leave
+                    you. Every deal on it would be blocked.
+                  </Caution>
+                )}
+              </Panel>
+
+              {/* The same two rules, on a deal with no watts.
+                  A storage job has no array for a $/W figure to be per, so the
+                  pair above cannot reach it — they would divide by zero and
+                  wave every price through. These are the same ceiling and the
+                  same floor, measured per battery. Grouped and labelled so
+                  nobody sets one believing it guards a solar deal. */}
+              <Panel
+                title="Battery-only jobs"
+                description="A battery job has no watts, so the figures above do not apply to it. These do. Leave them alone if this lender does not fund storage on its own."
+              >
+                <ChoiceCards<PricingMode>
+                  name={`batt-mode-${lender.id}`}
+                  legend="How this partner prices a storage-only job"
+                  value={draft.batteryMode}
+                  onChange={(v) => set("batteryMode", v)}
+                  options={[
+                    { value: "normal", label: "Prices the normal way" },
+                    { value: "cap", label: "Maximum per battery" },
+                    { value: "flat", label: "Flat per battery" },
+                  ]}
+                  columns={3}
+                />
+                <div className="grid items-start gap-3 sm:grid-cols-2">
+                  {draft.batteryMode === "normal" ? (
+                    <NotPriced label="Final $/battery">
+                      Priced the ordinary way. Choose a maximum or a flat price above to set one
+                      here.
+                    </NotPriced>
+                  ) : (
+                    <MoneyField
+                      id={`ld-${lender.id}-final-battery`}
+                      label="Final $/battery"
+                      placeholder="13000"
+                      value={draft.maxFinalBattery}
+                      onChange={(v) => set("maxFinalBattery", v)}
+                      invalid={batteryPriceToCents(draft.maxFinalBattery) === "invalid"}
+                      hint="What this partner charges a homeowner."
+                    />
+                  )}
+                  <MoneyField
+                    id={`ld-${lender.id}-min-battery`}
+                    label="Min base $/battery"
+                    placeholder="no floor"
+                    value={draft.minBaseBattery}
+                    onChange={(v) => set("minBaseBattery", v)}
+                    invalid={batteryPriceToCents(draft.minBaseBattery) === "invalid"}
+                    hint="The least these deals may leave you."
+                  />
+                </div>
+                <Hint>
+                  Measured before the dealer fee, on what survives it — the same rule as the $/W
+                  floor.
+                </Hint>
+              </Panel>
+            </div>
 
             <div className="space-y-4">
               {/* Pay mode is a property of the PARTNER, not of the rep — a

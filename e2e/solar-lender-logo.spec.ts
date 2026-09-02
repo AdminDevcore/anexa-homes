@@ -92,6 +92,12 @@ async function addLoan(page: Page, name: string, apr: string, months: string, fe
   await page.getByLabel("Dealer fee %", { exact: true }).fill(fee);
   await page.getByRole("button", { name: "Add product" }).click();
   await expect(page.getByText("Product added")).toBeVisible({ timeout: 15000 });
+  // Wait for the ROW, not just the toast: the toast fires before the panel's
+  // refresh lands, and navigating away mid-refresh is how the next `goto`
+  // ended up aborted.
+  await expect(panel(page).getByText(`${apr}%`, { exact: false }).first()).toBeVisible({
+    timeout: 15000,
+  });
 }
 
 /**

@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { AdderRuleOption, LenderDraft, LenderRow } from "./types";
-import { Caution, Hint, Pill } from "./fields";
+import { Caution, Hint, Pill } from "@/components/portal/settings-kit/fields";
 
 /**
  * What ONE lender does with each adder: on top of its price, or out of it.

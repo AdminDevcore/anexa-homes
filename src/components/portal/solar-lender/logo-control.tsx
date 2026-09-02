@@ -13,7 +13,7 @@ import {
   removeSolarLenderLogoAction,
 } from "@/server/modules/solar/lender-logo-actions";
 import type { LenderRow } from "./types";
-import { Hint } from "./fields";
+import { Hint } from "@/components/portal/settings-kit/fields";
 
 /**
  * Giving a lender its logo.

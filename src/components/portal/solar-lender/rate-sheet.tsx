@@ -21,7 +21,7 @@ import {
 } from "@/server/modules/solar/lender-product-actions";
 import type { LenderProduct, LenderRow } from "./types";
 import { floatOrNull, intOrNull, str } from "./types";
-import { Hint, NumField, Pill, TextField } from "./fields";
+import { Hint, NumField, Pill, TextField } from "@/components/portal/settings-kit/fields";
 
 /**
  * What one lender will finance, and on what terms.

@@ -6,16 +6,32 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
- * The furniture the lender panels are built out of.
+ * The furniture every Settings panel is built out of.
  *
- * The point of the rebuild is here rather than in any one panel: the old screen
- * put a three-line paragraph under every field, so a partner's whole setup read
- * as a wall of prose in which nothing was more important than anything else.
- * The paragraphs were right — they carry knowledge nobody can guess — so they
- * are kept, but demoted: a short line under the field, and the long-form answer
- * behind a "why" button next to the label, where somebody goes looking for it.
+ * Written first for the lenders screen, and the point of that rebuild lives
+ * here rather than in any one panel: the old screen put a three-line paragraph
+ * under every field, so a partner's whole setup read as a wall of prose in
+ * which nothing was more important than anything else. The paragraphs were
+ * right — they carry knowledge nobody can guess — so they are kept, but
+ * demoted: a short line under the field, and the long-form answer behind a
+ * "why" button next to the label, where somebody goes looking for it.
+ *
+ * It sits under `settings-kit/` because that judgement is not about lenders.
+ * Every screen in Settings is the same shape of problem — a handful of
+ * decisions with consequences a rep cannot guess — so they are all built out
+ * of these, and a person who has learned one settings screen has learned the
+ * rest.
  */
 
 /** A titled block. One question per block, never four loose fields. */
@@ -418,5 +434,164 @@ export function Pill({
     >
       {children}
     </span>
+  );
+}
+
+/** Long-form wording — a disclosure, an email body, a note nobody reads twice. */
+export function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  hint,
+  why,
+  rows = 3,
+  id: idProp,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  hint?: React.ReactNode;
+  why?: React.ReactNode;
+  rows?: number;
+  id?: string;
+}) {
+  const auto = React.useId();
+  const id = idProp ?? auto;
+  return (
+    <div className="space-y-1.5">
+      <FieldLabel htmlFor={id} why={why} whyLabel={label}>
+        {label}
+      </FieldLabel>
+      <Textarea
+        id={id}
+        rows={rows}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {hint && <Hint>{hint}</Hint>}
+    </div>
+  );
+}
+
+/**
+ * A dropdown, for lists too long to lay out as cards.
+ *
+ * Anything up to about four answers should be `ChoiceCards` instead — a
+ * `<select>` hides the options you did not pick, and on a settings screen the
+ * option you did not pick is exactly the thing that needs explaining.
+ */
+export function SelectField<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+  hint,
+  why,
+  placeholder,
+  disabled,
+  id: idProp,
+}: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+  hint?: React.ReactNode;
+  why?: React.ReactNode;
+  placeholder?: string;
+  disabled?: boolean;
+  id?: string;
+}) {
+  const auto = React.useId();
+  const id = idProp ?? auto;
+  return (
+    <div className="space-y-1.5">
+      <FieldLabel htmlFor={id} why={why} whyLabel={label}>
+        {label}
+      </FieldLabel>
+      <Select value={value} onValueChange={(v) => onChange(v as T)} disabled={disabled}>
+        <SelectTrigger id={id} className="w-full">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {hint && <Hint>{hint}</Hint>}
+    </div>
+  );
+}
+
+/**
+ * A switch with its consequence written beside it.
+ *
+ * The label says what it is; the line under it says what turning it off does to
+ * a live deal, which is the part somebody flipping it at 6pm needs.
+ */
+export function ToggleRow({
+  label,
+  description,
+  checked,
+  onChange,
+  why,
+  disabled,
+}: {
+  label: string;
+  description?: React.ReactNode;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  why?: React.ReactNode;
+  disabled?: boolean;
+}) {
+  const id = React.useId();
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0 space-y-0.5">
+        <FieldLabel htmlFor={id} why={why} whyLabel={label}>
+          {label}
+        </FieldLabel>
+        {description && <Hint>{description}</Hint>}
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
+    </div>
+  );
+}
+
+/** Two or three fields that belong on one line where the window allows it. */
+export function FieldGrid({
+  columns = 2,
+  children,
+  className,
+}: {
+  columns?: 2 | 3;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid gap-3",
+        columns === 2 && "sm:grid-cols-2",
+        columns === 3 && "sm:grid-cols-3",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Nothing here yet — inside a panel, where a full-page EmptyState is too loud. */
+export function PanelEmpty({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
+      <p className="text-xs leading-relaxed text-muted-foreground">{children}</p>
+    </div>
   );
 }
