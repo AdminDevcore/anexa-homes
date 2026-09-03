@@ -38,6 +38,24 @@ type Step = {
   title: string;
   blurb?: string;
   icon: React.ComponentType<{ className?: string }>;
+  /**
+   * How much of the screen this step's content is actually worth.
+   *
+   * The roof designer, the shelf of lender programmes and the comparison all
+   * get better the wider they are — `full`, the page is full-bleed for them.
+   * The form-shaped steps do not: left full-bleed they put a 768px column of
+   * inputs against the left edge of a 1700px card, which is what made the
+   * builder read as an empty screen. Those get a centred column sized to what
+   * they hold: `rail` for a step that carries a form AND a sidebar, `form` for
+   * a plain stack of fields.
+   */
+  width: "rail" | "form" | "full";
+};
+
+const COLUMN: Record<Step["width"], string> = {
+  rail: "mx-auto w-full max-w-6xl",
+  form: "mx-auto w-full max-w-4xl",
+  full: "w-full",
 };
 
 /**
@@ -56,6 +74,7 @@ const stepsFor = (systemType: SolarSystemType): Step[] => {
       title: "Customer",
       blurb: "Check we are quoting the right person at the right house before anything else.",
       icon: User,
+      width: "rail",
     },
     {
       id: "energy",
@@ -64,6 +83,7 @@ const stepsFor = (systemType: SolarSystemType): Step[] => {
       blurb:
         "What the house uses and what they pay for it — from their usage, or from their bill and rate.",
       icon: Zap,
+      width: "form",
     },
     {
       id: "design",
@@ -73,6 +93,8 @@ const stepsFor = (systemType: SolarSystemType): Step[] => {
         ? "Which battery, and how many. There is no array on this deal."
         : "The array on the roof, and the size and output that follow from it.",
       icon: isStorage ? BatteryCharging : Hammer,
+      // A roof wants the room; a battery picker is a stack of fields.
+      width: isStorage ? "form" : "full",
     },
     {
       id: "financing",
@@ -81,12 +103,14 @@ const stepsFor = (systemType: SolarSystemType): Step[] => {
       blurb:
         "What we charge for this system, and every way the customer could pay for it. Both travel with the quote they sign.",
       icon: Landmark,
+      width: "full",
     },
     {
       id: "generate",
       label: "Review & send",
       title: "Review & send",
       icon: Sun,
+      width: "full",
     },
   ];
 };
@@ -241,7 +265,6 @@ export function SolarProposalBuilder({
         <StepPanel
           key={s.id}
           active={step === s.id}
-          ordinal={i + 1}
           step={s}
           prev={i > 0 ? STEPS[i - 1] : null}
           next={i < STEPS.length - 1 ? STEPS[i + 1] : null}
@@ -252,6 +275,7 @@ export function SolarProposalBuilder({
               leadId={leadId}
               customer={customer}
               systemType={systemType}
+              systemSizeKwDc={systemSizeKwDc}
               hasLayout={hasLayout}
               canEdit={canEditDeal}
             />
@@ -541,13 +565,21 @@ function Figure({ label, value, muted }: { label: string; value: string; muted?:
  * unsaved state while another one is on screen — and stays out of the
  * accessibility tree and tab order while it is off.
  *
- * The footer moves BOTH ways now. A one-way "Next" is fine for a form nobody
+ * The card stays full-bleed on every step; only its CONTENTS are constrained,
+ * and only on the form-shaped ones. Narrowing the card itself would put grey
+ * bands down both sides of the page and make the step look like it had shrunk;
+ * narrowing what is inside it centres the work and leaves the surface whole.
+ *
+ * The ordinal is gone from this header. The rail draws it in a disc, the line
+ * under the card counts "Step 3 of 5", and a third "STEP 3" in the corner was
+ * the same fact stated for the third time in one screen.
+ *
+ * The footer moves BOTH ways. A one-way "Next" is fine for a form nobody
  * revisits; this is a quote, and the commonest move on the financing step is
  * back to the roof and forward again.
  */
 function StepPanel({
   active,
-  ordinal,
   step,
   prev,
   next,
@@ -555,44 +587,50 @@ function StepPanel({
   children,
 }: {
   active: boolean;
-  ordinal: number;
   step: Step;
   prev: Step | null;
   next: Step | null;
   onGo: (id: StepId) => void;
   children: React.ReactNode;
 }) {
+  // Header, body and footer all share it, so the title, the first field and
+  // the Next button sit on one left edge instead of three.
+  const column = COLUMN[step.width];
+
   return (
     <section hidden={!active} className="overflow-hidden rounded-xl border border-border bg-card">
-      <header className="flex items-start gap-3 border-b border-border/70 px-5 py-4">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-solar/10 text-solar">
-          <step.icon className="size-4" />
-        </span>
-        <div className="min-w-0">
-          <h2 className="font-display text-lg font-semibold">{step.title}</h2>
-          {step.blurb && <p className="mt-0.5 text-sm text-muted-foreground">{step.blurb}</p>}
+      <header className="border-b border-border/70 px-5 py-4">
+        <div className={cn("flex items-start gap-3", column)}>
+          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-solar/10 text-solar">
+            <step.icon className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="font-display text-lg font-semibold">{step.title}</h2>
+            {step.blurb && <p className="mt-0.5 text-sm text-muted-foreground">{step.blurb}</p>}
+          </div>
         </div>
-        <span className="ml-auto hidden shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground sm:block">
-          Step {ordinal}
-        </span>
       </header>
 
-      <div className="space-y-5 p-5">{children}</div>
+      <div className="p-5">
+        <div className={cn("space-y-5", column)}>{children}</div>
+      </div>
 
       {(prev || next) && (
-        <footer className="flex items-center justify-between gap-3 border-t border-border/70 bg-muted/20 px-5 py-3">
-          {prev ? (
-            <Button variant="ghost" size="sm" onClick={() => onGo(prev.id)}>
-              <ArrowLeft className="size-4" /> {prev.label}
-            </Button>
-          ) : (
-            <span />
-          )}
-          {next && (
-            <Button variant="outline" size="sm" onClick={() => onGo(next.id)}>
-              {next.label} <ArrowRight className="size-4" />
-            </Button>
-          )}
+        <footer className="border-t border-border/70 bg-muted/20 px-5 py-3">
+          <div className={cn("flex items-center justify-between gap-3", column)}>
+            {prev ? (
+              <Button variant="ghost" size="sm" onClick={() => onGo(prev.id)}>
+                <ArrowLeft className="size-4" /> {prev.label}
+              </Button>
+            ) : (
+              <span />
+            )}
+            {next && (
+              <Button variant="outline" size="sm" onClick={() => onGo(next.id)}>
+                {next.label} <ArrowRight className="size-4" />
+              </Button>
+            )}
+          </div>
         </footer>
       )}
     </section>
