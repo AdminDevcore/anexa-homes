@@ -113,9 +113,37 @@ describe('submitToAmos', () => {
     await expect(submitToAmos(creds, payload)).rejects.toBeInstanceOf(AmosSubmissionError)
   })
 
-  it('turns a network failure into a readable error', async () => {
+  it('turns a network failure into a readable error naming the host', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
     await expect(submitToAmos(creds, payload)).rejects.toMatchObject({ code: 'network_error' })
+    await expect(submitToAmos(creds, payload)).rejects.toThrow(/lender\.test/)
+  })
+
+  it('names a DNS failure as an address problem, not a connection one', async () => {
+    // The single most common cause is a typo in the configured address, and
+    // "could not reach the lender" sends an admin to their firewall instead.
+    const dnsError = Object.assign(new TypeError('fetch failed'), {
+      cause: { code: 'ENOTFOUND' },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(dnsError))
+    await expect(submitToAmos(creds, payload)).rejects.toThrow(/does not resolve/)
+  })
+
+  it('distinguishes a refused connection from a missing host', async () => {
+    const refused = Object.assign(new TypeError('fetch failed'), {
+      cause: { code: 'ECONNREFUSED' },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(refused))
+    await expect(submitToAmos(creds, payload)).rejects.toThrow(/Nothing is answering/)
+  })
+
+  it('rejects a malformed address before attempting a request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(
+      submitToAmos({ baseUrl: 'not a url', apiKey: 'ak_live_secret' }, payload),
+    ).rejects.toThrow(/not a valid API address/)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('never puts the API key in the error it throws', async () => {
