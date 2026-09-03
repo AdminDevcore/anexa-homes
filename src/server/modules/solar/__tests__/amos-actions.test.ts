@@ -6,14 +6,26 @@ vi.mock('@/server/auth/session', () => ({ requireUser: () => requireUser() }))
 vi.mock('@/server/rbac/guards', () => ({ can: (...a: unknown[]) => can(...a) }))
 
 const decryptField = vi.fn()
-vi.mock('@/server/lib/crypto', () => ({ decryptField: (...a: unknown[]) => decryptField(...a) }))
+const encryptField = vi.fn()
+vi.mock('@/server/lib/crypto', () => ({
+  decryptField: (...a: unknown[]) => decryptField(...a),
+  encryptField: (...a: unknown[]) => encryptField(...a),
+  maskTail: () => 'MASKED',
+}))
+vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 
 const designFindFirst = vi.fn()
 const financeFindFirst = vi.fn()
+const lenderFindFirst = vi.fn()
+const lenderUpdate = vi.fn()
 vi.mock('@/server/db/client', () => ({
   prisma: {
     solarDesign: { findFirst: (...a: unknown[]) => designFindFirst(...a) },
     solarFinance: { findFirst: (...a: unknown[]) => financeFindFirst(...a) },
+    solarLender: {
+      findFirst: (...a: unknown[]) => lenderFindFirst(...a),
+      update: (...a: unknown[]) => lenderUpdate(...a),
+    },
   },
 }))
 
@@ -23,7 +35,12 @@ vi.mock('../amos-client', async () => {
   return { ...actual, submitToAmos: (...a: unknown[]) => submitToAmos(...a) }
 })
 
-const { submitDealToLenderAction, amosSubmissionStatusAction } = await import('../amos-actions')
+const {
+  submitDealToLenderAction,
+  amosSubmissionStatusAction,
+  setSolarLenderApiKeyAction,
+  clearSolarLenderApiKeyAction,
+} = await import('../amos-actions')
 const { AmosSubmissionError } = await import('../amos-client')
 
 const USER = { id: 'u1', companyId: 'co-1', fullName: 'Sender Person' }
@@ -64,6 +81,9 @@ beforeEach(() => {
   requireUser.mockReset().mockResolvedValue(USER)
   can.mockReset().mockReturnValue(true)
   decryptField.mockReset().mockReturnValue('ak_live_secret')
+  encryptField.mockReset().mockReturnValue('ENCRYPTED-BLOB')
+  lenderFindFirst.mockReset().mockResolvedValue({ id: 'lender-1' })
+  lenderUpdate.mockReset().mockResolvedValue({})
   designFindFirst.mockReset().mockResolvedValue(DESIGN)
   financeFindFirst
     .mockReset()
@@ -212,5 +232,53 @@ describe('amosSubmissionStatusAction', () => {
     const r = await amosSubmissionStatusAction('lead-1')
     expect(r).toMatchObject({ mode: 'api', ready: false })
     expect((r as { problems: string[] }).problems.join(' ')).toContain('phone')
+  })
+})
+
+describe('setSolarLenderApiKeyAction', () => {
+  it('denies a caller without settings permission', async () => {
+    can.mockReturnValue(false)
+    expect(await setSolarLenderApiKeyAction('lender-1', 'ak_live_x')).toMatchObject({ ok: false })
+    expect(lenderUpdate).not.toHaveBeenCalled()
+  })
+
+  it('rejects an empty key rather than storing a blank credential', async () => {
+    expect(await setSolarLenderApiKeyAction('lender-1', '   ')).toMatchObject({ ok: false })
+    expect(lenderUpdate).not.toHaveBeenCalled()
+  })
+
+  it('encrypts before storing and never writes the plaintext', async () => {
+    const r = await setSolarLenderApiKeyAction('lender-1', 'ak_live_secret')
+    expect(r).toMatchObject({ ok: true })
+    expect(encryptField).toHaveBeenCalledWith('ak_live_secret')
+    const written = JSON.stringify(lenderUpdate.mock.calls[0]?.[0]?.data)
+    expect(written).not.toContain('ak_live_secret')
+    expect(written).toContain('ENCRYPTED-BLOB')
+  })
+
+  it('returns only the last four so the paster can confirm it', async () => {
+    const r = await setSolarLenderApiKeyAction('lender-1', 'ak_live_secret')
+    expect((r as { masked: string }).masked).toBe('MASKED')
+  })
+
+  it('refuses a lender outside the caller company', async () => {
+    lenderFindFirst.mockResolvedValue(null)
+    expect(await setSolarLenderApiKeyAction('other-co-lender', 'ak_live_x')).toMatchObject({
+      ok: false,
+    })
+    expect(lenderUpdate).not.toHaveBeenCalled()
+  })
+})
+
+describe('clearSolarLenderApiKeyAction', () => {
+  it('nulls the stored key', async () => {
+    expect(await clearSolarLenderApiKeyAction('lender-1')).toMatchObject({ ok: true })
+    expect(lenderUpdate.mock.calls[0]?.[0]?.data).toEqual({ apiKeyEncrypted: null })
+  })
+
+  it('denies a caller without settings permission', async () => {
+    can.mockReturnValue(false)
+    expect(await clearSolarLenderApiKeyAction('lender-1')).toMatchObject({ ok: false })
+    expect(lenderUpdate).not.toHaveBeenCalled()
   })
 })

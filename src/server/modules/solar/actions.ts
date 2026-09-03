@@ -1153,6 +1153,16 @@ const lenderSchema = z.object({
   portalUrl: urlField,
   /** Customer-facing application link — the proposal's Qualify button. */
   applyUrl: urlField,
+  /**
+   * Direct API submission. Origin of the lender's partner API, and which of
+   * their loan products this dealer submits against.
+   *
+   * The KEY is not here on purpose: it is a secret, and a form that round-trips
+   * one has to send it to the browser to send it back. It has its own action
+   * (`setSolarLenderApiKeyAction`) that only ever travels inbound.
+   */
+  apiBaseUrl: urlField,
+  apiProductSlug: z.string().max(80).nullable().optional(),
   creditInstructions: z.string().max(4000).nullable().optional(),
   /**
    * How reps are paid on this lender's deals: `redline` (they keep the overage

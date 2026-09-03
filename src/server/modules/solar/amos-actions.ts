@@ -4,7 +4,8 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { decryptField } from "@/server/lib/crypto";
+import { revalidatePath } from "next/cache";
+import { decryptField, encryptField, maskTail } from "@/server/lib/crypto";
 import { buildAmosPayload, preflightAmosSubmission } from "./amos-payload";
 import { submitToAmos, AmosSubmissionError } from "./amos-client";
 
@@ -224,4 +225,62 @@ async function loadDesign(leadId: string, companyId: string) {
       },
     },
   });
+}
+
+/**
+ * Store a lender's API key.
+ *
+ * Its own action, separate from `saveSolarLenderAction`, because a secret must
+ * only ever travel INBOUND. A form that edits the key alongside the other
+ * fields has to be given the current value to send it back, which means
+ * shipping a live credential to a browser on every settings page load. This
+ * one takes a key and returns nothing but success.
+ */
+export async function setSolarLenderApiKeyAction(
+  lenderId: string,
+  apiKey: string,
+): Promise<{ ok: true; masked: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return { ok: false, error: "Not allowed." };
+
+  const key = apiKey.trim();
+  if (!key) return { ok: false, error: "Paste the key the lender issued you." };
+  if (key.length > 200) return { ok: false, error: "That does not look like an API key." };
+
+  const lender = await prisma.solarLender.findFirst({
+    where: { id: lenderId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!lender) return { ok: false, error: "Lender not found." };
+
+  await prisma.solarLender.update({
+    where: { id: lender.id },
+    data: { apiKeyEncrypted: encryptField(key) },
+  });
+  revalidatePath("/portal/settings/lenders");
+
+  // The last four, so the person who pasted it can confirm they pasted the
+  // right one. Never the whole key again.
+  return { ok: true, masked: maskTail(key) };
+}
+
+/** Remove a lender's API key. The lender falls back to its link. */
+export async function clearSolarLenderApiKeyAction(
+  lenderId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return { ok: false, error: "Not allowed." };
+
+  const lender = await prisma.solarLender.findFirst({
+    where: { id: lenderId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!lender) return { ok: false, error: "Lender not found." };
+
+  await prisma.solarLender.update({
+    where: { id: lender.id },
+    data: { apiKeyEncrypted: null },
+  });
+  revalidatePath("/portal/settings/lenders");
+  return { ok: true };
 }
