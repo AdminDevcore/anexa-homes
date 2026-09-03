@@ -316,6 +316,29 @@ export async function setSolarLenderApiKeyAction(
   if (!key) return { ok: false, error: "Paste the key the lender issued you." };
   if (key.length > 200) return { ok: false, error: "That does not look like an API key." };
 
+  /**
+   * An HTTP header value can only hold bytes. A key pasted out of a terminal
+   * commonly arrives with the shell's prompt glyph on the front — "❯", U+276F —
+   * and that single character makes the Authorization header impossible to
+   * encode, so `fetch` throws BEFORE any request is sent. The failure then
+   * looks exactly like the network being down, which is where a real
+   * afternoon went.
+   *
+   * Refused here, at the moment of pasting, where the person can see what they
+   * pasted. `stray` names the offending character so the message is actionable
+   * rather than a shrug.
+   */
+  const stray = [...key].find((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) > 0x7e);
+  if (stray) {
+    return {
+      ok: false,
+      error:
+        `That key contains a character it cannot have: "${stray}". ` +
+        "It usually means a shell prompt or a line break was copied along with the key. " +
+        "Copy just the key itself and paste it again.",
+    };
+  }
+
   const lender = await prisma.solarLender.findFirst({
     where: { id: lenderId, companyId: user.companyId },
     select: { id: true },

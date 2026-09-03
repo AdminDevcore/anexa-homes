@@ -289,6 +289,37 @@ describe('setSolarLenderApiKeyAction', () => {
     })
     expect(lenderUpdate).not.toHaveBeenCalled()
   })
+
+  it('refuses a key carrying a shell prompt glyph, naming the character', async () => {
+    // The real incident: "❯" (U+276F) copied from a terminal prompt made the
+    // Authorization header impossible to encode, so fetch threw before sending
+    // and it looked exactly like the network being down.
+    const r = await setSolarLenderApiKeyAction('lender-1', '❯ak_live_secret')
+    expect(r).toMatchObject({ ok: false })
+    expect((r as { error: string }).error).toContain('❯')
+    expect(lenderUpdate).not.toHaveBeenCalled()
+  })
+
+  it('refuses a key with an embedded line break', async () => {
+    expect(await setSolarLenderApiKeyAction('lender-1', 'ak_live\nsecret')).toMatchObject({
+      ok: false,
+    })
+    expect(lenderUpdate).not.toHaveBeenCalled()
+  })
+
+  it('refuses a key with a non-breaking space from a rich-text paste', async () => {
+    expect(await setSolarLenderApiKeyAction('lender-1', 'ak_live\u00a0secret')).toMatchObject({
+      ok: false,
+    })
+    expect(lenderUpdate).not.toHaveBeenCalled()
+  })
+
+  it('still accepts every character a real key uses', async () => {
+    // base64url plus the underscore-separated prefix.
+    expect(
+      await setSolarLenderApiKeyAction('lender-1', 'ak_live_aZ09-_abcDEF1234567890'),
+    ).toMatchObject({ ok: true })
+  })
 })
 
 describe('clearSolarLenderApiKeyAction', () => {
