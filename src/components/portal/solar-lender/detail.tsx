@@ -62,6 +62,7 @@ import {
   TextField,
 } from "@/components/portal/settings-kit/fields";
 import { LogoControl } from "./logo-control";
+import { LenderApiKeyField } from "./api-key-field";
 import { RateSheetPanel } from "./rate-sheet";
 import { AdderRulesPanel } from "./adder-rules";
 
@@ -358,6 +359,8 @@ export function LenderDetail({
           notes: draft.notes.trim() || null,
           portalUrl: draft.portalUrl.trim() || null,
           applyUrl: draft.applyUrl.trim() || null,
+          apiBaseUrl: draft.apiBaseUrl.trim() || null,
+          apiProductSlug: draft.apiProductSlug.trim() || null,
           creditInstructions: draft.creditInstructions.trim() || null,
           repPayMode: draft.repPayMode,
           maxFinalPpwCents,
@@ -591,6 +594,28 @@ export function LenderDetail({
                   placeholder="https://…"
                   onChange={(v) => set("applyUrl", v)}
                 />
+              </Panel>
+
+              {/* Direct submission. Empty on every partner that has not given
+                  you an integration, which is most of them — and a lender left
+                  empty here keeps the application link above, unchanged. */}
+              <Panel
+                title="Direct submission (optional)"
+                description="If this partner gave you API access, a rep can send a priced deal straight into their system instead of the customer retyping it. The customer still enters their own SSN and authorises the credit check on the lender's page."
+              >
+                <TextField
+                  label="API address"
+                  value={draft.apiBaseUrl}
+                  placeholder="https://admin.example.com"
+                  onChange={(v) => set("apiBaseUrl", v)}
+                />
+                <TextField
+                  label="Loan product"
+                  value={draft.apiProductSlug}
+                  placeholder="solar-installation-financing"
+                  onChange={(v) => set("apiProductSlug", v)}
+                />
+                <LenderApiKeyField lenderId={lender.id} masked={lender.apiKeyMasked} />
               </Panel>
 
               <Panel

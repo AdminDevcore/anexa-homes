@@ -3560,6 +3560,28 @@ model SolarLender {
   /// of it. See SolarLenderAdderRule.
   adderRules SolarLenderAdderRule[]
 
+  /// ── Direct API submission ────────────────────────────────────────────
+  /// Set for a lender that accepts applications over an API instead of only
+  /// a link. When all three are present the proposal's Qualify button submits
+  /// the deal and opens the link the lender hands back, rather than opening
+  /// `applyUrl` and asking the customer to retype everything.
+  ///
+  /// Absent on every lender by default: a partner without an integration keeps
+  /// the link behaviour unchanged, which is why this is three nullable columns
+  /// and not a mode flag.
+
+  /// Origin of the lender's partner API, e.g. "https://admin.amoscapitalfund.com".
+  /// No trailing slash; the client appends "/api/v1/partner/...".
+  apiBaseUrl      String?
+  /// The API key, encrypted at rest with `server/lib/crypto.encryptField`.
+  /// NEVER selected into anything that reaches the browser — the settings UI
+  /// shows `maskTail()` of the last four characters and nothing more.
+  apiKeyEncrypted String?
+  /// Which of the lender's loan products this dealer submits against. Their
+  /// value, not ours: Amos calls it a product slug, and it is discoverable from
+  /// their catalog endpoint.
+  apiProductSlug  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -20,6 +20,17 @@ export type LenderRow = {
   portalUrl: string | null;
   /** Customer-facing application link — the proposal's Qualify button. */
   applyUrl: string | null;
+  /**
+   * Direct API submission. When all three are set, a rep can send a priced deal
+   * straight into this lender's system instead of the customer retyping it.
+   *
+   * `apiKeyMasked` is the LAST FOUR characters of the stored key, or null when
+   * none is stored. The key itself is never sent to the browser — see
+   * setSolarLenderApiKeyAction.
+   */
+  apiBaseUrl: string | null;
+  apiProductSlug: string | null;
+  apiKeyMasked: string | null;
   creditInstructions: string | null;
   /**
    * How reps are paid on this lender's deals: they keep the overage above their
@@ -240,6 +251,8 @@ export function draftFrom(lender: LenderRow) {
     notes: lender.notes ?? "",
     portalUrl: lender.portalUrl ?? "",
     applyUrl: lender.applyUrl ?? "",
+    apiBaseUrl: lender.apiBaseUrl ?? "",
+    apiProductSlug: lender.apiProductSlug ?? "",
     creditInstructions: lender.creditInstructions ?? "",
     repPayMode: lender.repPayMode,
     ppwMode: (lender.maxFinalPpwCents == null

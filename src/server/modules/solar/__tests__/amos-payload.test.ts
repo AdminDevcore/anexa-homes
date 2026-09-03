@@ -1,0 +1,174 @@
+import { describe, expect, it } from 'vitest'
+import { buildAmosPayload, preflightAmosSubmission } from '../amos-payload'
+
+const lead = {
+  firstName: 'Dana',
+  lastName: 'Reyes',
+  email: 'Dana.Reyes@Example.com ',
+  phone: '(512) 555-0143',
+  address: '4120 Sage Hollow Dr',
+  city: 'Austin',
+  state: 'tx',
+  zip: '78735',
+}
+
+const design = {
+  id: 'design-abc',
+  systemSizeKwDc: 10.66,
+  year1ProductionKwh: 14200,
+  annualUsageKwh: 15800,
+  moduleQty: 26,
+  batteryQty: 2,
+  module: { kind: 'module', manufacturer: 'Qcells', model: 'Q.PEAK DUO BLK ML-G10+ 410' },
+  inverter: { kind: 'inverter', manufacturer: 'Enphase', model: 'IQ8PLUS-72-2-US' },
+  battery: { kind: 'battery', manufacturer: 'Enphase', model: 'IQ Battery 5P' },
+}
+
+const opts = {
+  productSlug: 'solar-installation-financing',
+  amountCents: 4875000,
+  termMonths: 300,
+  salesRepName: 'Marco Diaz',
+  ownerOccupied: true,
+}
+
+describe('preflightAmosSubmission', () => {
+  it('passes on a complete lead and design', () => {
+    expect(preflightAmosSubmission(lead, design)).toEqual([])
+  })
+
+  it('names every missing customer field at once', () => {
+    const problems = preflightAmosSubmission(
+      { ...lead, email: null, phone: null, zip: null },
+      design,
+    )
+    expect(problems).toHaveLength(3)
+    expect(problems.join(' ')).toContain('email')
+    expect(problems.join(' ')).toContain('phone')
+    expect(problems.join(' ')).toContain('ZIP')
+  })
+
+  it('requires a panel and an inverter — the lender derives system size from them', () => {
+    const problems = preflightAmosSubmission(lead, { ...design, module: null, inverter: null })
+    expect(problems.join(' ')).toContain('panel')
+    expect(problems.join(' ')).toContain('inverter')
+  })
+
+  it('requires a panel quantity, not just a panel', () => {
+    expect(preflightAmosSubmission(lead, { ...design, moduleQty: 0 }).join(' ')).toContain(
+      'panel quantity',
+    )
+  })
+
+  it('requires a manufacturer — the lender matches on brand AND model', () => {
+    const problems = preflightAmosSubmission(lead, {
+      ...design,
+      module: { ...design.module, manufacturer: null },
+    })
+    expect(problems.join(' ')).toContain('manufacturer')
+  })
+})
+
+describe('buildAmosPayload', () => {
+  it('maps a complete deal onto the partner contract', () => {
+    const p = buildAmosPayload(lead, design, opts)
+    expect(p.externalId).toBe('design-abc')
+    expect(p.productSlug).toBe('solar-installation-financing')
+    expect(p.applicant).toEqual({
+      firstName: 'Dana',
+      lastName: 'Reyes',
+      email: 'dana.reyes@example.com',
+      phone: '5125550143',
+    })
+    expect(p.property).toEqual({
+      line1: '4120 Sage Hollow Dr',
+      city: 'Austin',
+      state: 'TX',
+      postalCode: '78735',
+      ownerOccupied: true,
+    })
+    expect(p.termMonths).toBe(300)
+    expect(p.salesRepName).toBe('Marco Diaz')
+  })
+
+  it('sends money as a decimal STRING, never a float', () => {
+    const p = buildAmosPayload(lead, design, opts)
+    expect(p.requestedAmount).toBe('48750.00')
+    expect(typeof p.requestedAmount).toBe('string')
+  })
+
+  it('renders a whole-dollar amount with two decimals', () => {
+    expect(buildAmosPayload(lead, design, { ...opts, amountCents: 5000000 }).requestedAmount).toBe(
+      '50000.00',
+    )
+  })
+
+  it('renders cents that would round badly as a float', () => {
+    expect(buildAmosPayload(lead, design, { ...opts, amountCents: 4875005 }).requestedAmount).toBe(
+      '48750.05',
+    )
+  })
+
+  it('sends one equipment line per slot with its quantity', () => {
+    const p = buildAmosPayload(lead, design, opts)
+    expect(p.equipment).toEqual([
+      { kind: 'panel', brand: 'Qcells', model: 'Q.PEAK DUO BLK ML-G10+ 410', quantity: 26 },
+      { kind: 'inverter', brand: 'Enphase', model: 'IQ8PLUS-72-2-US', quantity: 26 },
+      { kind: 'battery', brand: 'Enphase', model: 'IQ Battery 5P', quantity: 2 },
+    ])
+  })
+
+  it('omits a battery line when the design has none', () => {
+    const p = buildAmosPayload(lead, design, { ...opts, ...{} })
+    const noBattery = buildAmosPayload(lead, { ...design, battery: null, batteryQty: 0 }, opts)
+    expect(p.equipment).toHaveLength(3)
+    expect(noBattery.equipment).toHaveLength(2)
+  })
+
+  it('omits a battery line when the quantity is zero even if one is selected', () => {
+    const p = buildAmosPayload(lead, { ...design, batteryQty: 0 }, opts)
+    expect(p.equipment?.some((e) => e.kind === 'battery')).toBe(false)
+  })
+
+  it('carries production and usage but NOT system size', () => {
+    // The lender derives DC nameplate from panel wattage x count and ignores a
+    // submitted sizeKw for any deal with a panel. Sending ours would imply it
+    // is authoritative when it is not.
+    const p = buildAmosPayload(lead, design, opts)
+    expect(p.system).toEqual({ annualProductionKwh: 14200, annualConsumptionKwh: 15800 })
+  })
+
+  it('omits the system block entirely when neither figure exists', () => {
+    const p = buildAmosPayload(
+      lead,
+      { ...design, year1ProductionKwh: 0, annualUsageKwh: null },
+      opts,
+    )
+    expect(p.system).toBeUndefined()
+  })
+
+  it('NEVER includes identity or consent, whatever it is handed', () => {
+    const p = buildAmosPayload({ ...lead, ssn: '123456789', dateOfBirth: '1985-04-02' } as never, design, opts)
+    const serialized = JSON.stringify(p)
+    expect(serialized).not.toContain('ssn')
+    expect(serialized).not.toContain('dateOfBirth')
+    expect(serialized).not.toContain('123456789')
+    expect(serialized).not.toContain('consent')
+  })
+
+  it('passes ownerOccupied through from the rep’s answer', () => {
+    expect(buildAmosPayload(lead, design, { ...opts, ownerOccupied: false }).property.ownerOccupied).toBe(
+      false,
+    )
+  })
+
+  it('asks for the in-person handoff so the rep gets a link back', () => {
+    expect(buildAmosPayload(lead, design, opts).delivery).toBe('in_person')
+  })
+
+  it('can send to the customer instead when the rep is not present', () => {
+    expect(buildAmosPayload(lead, design, { ...opts, delivery: 'customer' }).delivery).toBe(
+      'customer',
+    )
+  })
+})

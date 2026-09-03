@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LenderMark } from "@/components/ui/lender-mark";
+import { SolarSendToLender } from "@/components/portal/solar-send-to-lender";
 import {
   builderStepFromHref,
   groupIssues,
@@ -1346,6 +1347,13 @@ export function SolarFinancePanel({
 
   return (
     <div className="space-y-6">
+      {/* Direct submission, when the quoted lender has an integration. Renders
+          nothing at all otherwise, which is every lender that does not — so a
+          partner on a plain application link is unaffected. Above the pricing
+          because by the time a rep is sending, the price is already settled and
+          this is the next thing they do. */}
+      <SolarSendToLender leadId={leadId} canEdit={canEdit} />
+
       {/* WHAT WE CHARGE, first, above everything derived from it. The step used
           to open on a shelf of lender cards and put the price below the
           comparison — a rep scrolled past every figure derived from the price
