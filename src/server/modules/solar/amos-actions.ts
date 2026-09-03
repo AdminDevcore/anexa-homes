@@ -1,0 +1,227 @@
+"use server";
+
+import { z } from "zod";
+import { prisma } from "@/server/db/client";
+import { requireUser } from "@/server/auth/session";
+import { can } from "@/server/rbac/guards";
+import { decryptField } from "@/server/lib/crypto";
+import { buildAmosPayload, preflightAmosSubmission } from "./amos-payload";
+import { submitToAmos, AmosSubmissionError } from "./amos-client";
+
+/**
+ * Submitting a deal to a lender that accepts applications over an API.
+ *
+ * Its own module rather than more of `actions.ts`. Every export of a
+ * "use server" file is a callable endpoint, so each one re-establishes who the
+ * caller is and scopes every query to their company — a lead id posted from
+ * elsewhere must never reach another company's deal, and a lender id from
+ * elsewhere must never lend us its credentials.
+ *
+ * WHAT LEAVES ANEXA
+ *
+ * Name, contact details, property address, system design and the quoted
+ * amount. Never an SSN, never a date of birth, never a consent flag — the
+ * authorization to pull credit has to be the customer's own, captured on the
+ * lender's page under their disclosures.
+ */
+
+const fail = (error: string, kind: FailureKind = "deal") =>
+  ({ ok: false as const, error, kind });
+
+/**
+ * What a rep should DO about it, which is a different question from what went
+ * wrong:
+ *   "deal"    — fix the deal and try again (missing email, unmatched panel).
+ *   "config"  — nobody on site can fix it; an admin must fix lender settings.
+ *   "transient" — try again as-is; re-sending the same deal is safe.
+ */
+type FailureKind = "deal" | "config" | "transient";
+
+export type AmosSubmitResult =
+  | {
+      ok: true;
+      referenceNumber: string;
+      /** Present for an in-person handoff; null when the customer was emailed. */
+      customerUrl: string | null;
+      sentTo: string;
+    }
+  | { ok: false; error: string; kind: FailureKind; problems?: string[] };
+
+const submitSchema = z.object({
+  leadId: z.string().min(1),
+  /** The rep's answer. Anexa does not store this, so it is asked at send time. */
+  ownerOccupied: z.boolean(),
+  /** `in_person` hands the link back; `customer` emails it and returns nothing. */
+  delivery: z.enum(["in_person", "customer"]).default("in_person"),
+});
+
+/**
+ * Is this deal's lender wired for API submission, and would a send succeed?
+ *
+ * Read-only, and safe to call on render: the Qualify button uses it to decide
+ * between submitting and opening the old link, and to explain itself when the
+ * deal is not ready. Reporting the blockers BEFORE the click is the whole
+ * point — the alternative is an error in front of a customer.
+ */
+export async function amosSubmissionStatusAction(leadId: string): Promise<
+  | { mode: "link" }
+  | { mode: "api"; lenderName: string; ready: true }
+  | { mode: "api"; lenderName: string; ready: false; problems: string[] }
+> {
+  const user = await requireUser();
+  if (!can(user, "read", "Lead")) return { mode: "link" };
+
+  const design = await loadDesign(leadId, user.companyId);
+  if (!design?.lender) return { mode: "link" };
+
+  const { lender } = design;
+  if (!lender.apiBaseUrl || !lender.apiKeyEncrypted || !lender.apiProductSlug) {
+    return { mode: "link" };
+  }
+
+  const problems = preflightAmosSubmission(design.lead, design);
+  return problems.length === 0
+    ? { mode: "api", lenderName: lender.name, ready: true }
+    : { mode: "api", lenderName: lender.name, ready: false, problems };
+}
+
+export async function submitDealToLenderAction(
+  input: z.infer<typeof submitSchema>,
+): Promise<AmosSubmitResult> {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.", "config");
+
+  const parsed = submitSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid request.");
+  const { leadId, ownerOccupied, delivery } = parsed.data;
+
+  const design = await loadDesign(leadId, user.companyId);
+  if (!design) return fail("Deal not found.");
+
+  const lender = design.lender;
+  if (!lender) return fail("This deal has no lender selected.");
+
+  const apiKey = decryptField(lender.apiKeyEncrypted);
+  if (!lender.apiBaseUrl || !apiKey || !lender.apiProductSlug) {
+    return fail(
+      `${lender.name} is not set up for direct submission. An administrator can add its API details in Settings → Lenders.`,
+      "config",
+    );
+  }
+
+  const problems = preflightAmosSubmission(design.lead, design);
+  if (problems.length > 0) {
+    return {
+      ok: false,
+      kind: "deal",
+      error: "This deal is missing information the lender requires.",
+      problems,
+    };
+  }
+
+  // The money lives on SolarFinance, not the design. Financed amount is the
+  // contract price less anything the customer puts down — the same figure the
+  // proposal quotes a payment from, so the lender is asked for exactly what
+  // the customer was shown.
+  const finance = await prisma.solarFinance.findFirst({
+    where: { leadId, companyId: user.companyId },
+    select: { contractPriceCents: true, downPaymentCents: true, loanTermMonths: true },
+  });
+  const amountCents =
+    (finance?.contractPriceCents ?? 0) - (finance?.downPaymentCents ?? 0);
+  if (amountCents <= 0) {
+    return fail("This deal has no financed amount to submit. Price the deal first.");
+  }
+  if (!finance?.loanTermMonths) {
+    return fail("This deal has no loan term to submit. Choose a term first.");
+  }
+
+  const payload = buildAmosPayload(design.lead, design, {
+    productSlug: lender.apiProductSlug,
+    amountCents,
+    termMonths: finance.loanTermMonths,
+    // The rep on the deal if there is one, otherwise whoever is sending. The
+    // lender takes a typed name and maps it to a real login on their side.
+    salesRepName: repName(design.lead.assignedRep) ?? user.fullName,
+    ownerOccupied,
+    delivery,
+  });
+
+  try {
+    const result = await submitToAmos(
+      { baseUrl: lender.apiBaseUrl, apiKey },
+      payload,
+    );
+    return {
+      ok: true,
+      referenceNumber: result.referenceNumber,
+      customerUrl: result.customerUrl,
+      sentTo: result.sentTo,
+    };
+  } catch (e) {
+    if (e instanceof AmosSubmissionError) {
+      return {
+        ok: false,
+        error: e.message,
+        kind: e.isConfigProblem
+          ? "config"
+          : e.code === "network_error" || e.code === "internal_error" || e.code === "bad_response"
+            ? "transient"
+            : "deal",
+      };
+    }
+    // Never surface an unexpected error verbatim: it can carry a connection
+    // string or another company's identifiers.
+    return fail(
+      "Something went wrong sending this deal. Re-sending the same deal is safe.",
+      "transient",
+    );
+  }
+}
+
+/** The deal's rep, as the lender wants it: a typed name, or nothing. */
+function repName(rep: { firstName: string; lastName: string } | null): string | null {
+  if (!rep) return null;
+  const name = `${rep.firstName} ${rep.lastName}`.trim();
+  return name.length > 0 ? name : null;
+}
+
+/** Everything both entry points read, scoped to the caller's company. */
+async function loadDesign(leadId: string, companyId: string) {
+  return prisma.solarDesign.findFirst({
+    where: { leadId, companyId },
+    select: {
+      id: true,
+      systemSizeKwDc: true,
+      year1ProductionKwh: true,
+      annualUsageKwh: true,
+      moduleQty: true,
+      batteryQty: true,
+      module: { select: { manufacturer: true, model: true } },
+      inverter: { select: { manufacturer: true, model: true } },
+      battery: { select: { manufacturer: true, model: true } },
+      lender: {
+        select: {
+          id: true,
+          name: true,
+          apiBaseUrl: true,
+          apiKeyEncrypted: true,
+          apiProductSlug: true,
+        },
+      },
+      lead: {
+        select: {
+          firstName: true,
+          lastName: true,
+          email: true,
+          phone: true,
+          address: true,
+          city: true,
+          state: true,
+          zip: true,
+          assignedRep: { select: { firstName: true, lastName: true } },
+        },
+      },
+    },
+  });
+}
