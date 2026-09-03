@@ -98,9 +98,25 @@ export async function submitToAmos(
   creds: AmosCredentials,
   payload: AmosApplicationPayload,
 ): Promise<AmosSubmissionResult> {
+  const url = applicationsUrl(creds.baseUrl)
+
+  // The host, for the error a human reads. Named separately because a
+  // malformed address is the single most common cause of a failure here, and
+  // "could not reach the lender" without saying WHICH address was tried sends
+  // an admin looking at their firewall instead of at the typo they made.
+  let host: string
+  try {
+    host = new URL(url).host
+  } catch {
+    throw new AmosSubmissionError(
+      'network_error',
+      `"${creds.baseUrl}" is not a valid API address. Fix it in Settings → Lenders → Direct submission.`,
+    )
+  }
+
   let res: Response
   try {
-    res = await fetch(applicationsUrl(creds.baseUrl), {
+    res = await fetch(url, {
       method: 'POST',
       headers: {
         // Never logged, never echoed into an error — see the test that asserts
@@ -110,10 +126,31 @@ export async function submitToAmos(
       },
       body: JSON.stringify(payload),
     })
-  } catch {
+  } catch (cause) {
+    // The underlying reason, on the server only. Swallowing it entirely — as
+    // this did — turns every DNS typo, TLS failure and refused connection into
+    // one indistinguishable message, and leaves nothing behind to diagnose
+    // from. The rep still sees the friendly sentence below.
+    console.error('[amos-client] submission fetch failed', {
+      host,
+      cause: cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause),
+      // Node puts the useful part here: ENOTFOUND, ECONNREFUSED, CERT_HAS_EXPIRED.
+      code: (cause as { cause?: { code?: string } })?.cause?.code ?? null,
+    })
+
+    const reason = (cause as { cause?: { code?: string } })?.cause?.code
+    const hint =
+      reason === 'ENOTFOUND'
+        ? ` The address "${host}" does not resolve — check it in Settings → Lenders → Direct submission.`
+        : reason === 'ECONNREFUSED'
+          ? ` Nothing is answering at "${host}".`
+          : reason === 'CERT_HAS_EXPIRED' || reason === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
+            ? ` The certificate at "${host}" could not be verified.`
+            : ''
+
     throw new AmosSubmissionError(
       'network_error',
-      'Could not reach the lender. Check your connection and try again — re-sending the same deal is safe.',
+      `Could not reach ${host}.${hint} Re-sending the same deal is safe.`,
     )
   }
 
