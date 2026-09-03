@@ -4,6 +4,7 @@ import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { prisma } from "@/server/db/client";
+import { decryptField, maskTail } from "@/server/lib/crypto";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { SolarLenderManager } from "@/components/portal/solar-lender-manager";
 import { lenderLogoUrl } from "@/lib/lender-mark";
@@ -46,6 +47,10 @@ export default async function SolarLendersPage({
     select: {
       id: true, name: true, isActive: true, rank: true, notes: true, repPayMode: true,
       portalUrl: true, applyUrl: true, creditInstructions: true,
+      // Direct submission. The KEY is selected only to learn whether one is
+      // set and to show its last four — the plaintext never leaves the server,
+      // and the encrypted blob never reaches the browser.
+      apiBaseUrl: true, apiProductSlug: true, apiKeyEncrypted: true,
       logoUpdatedAt: true, maxFinalPpwCents: true, minBasePpwCents: true,
       finalPpwMode: true,
       minBasePricePerBatteryCents: true, maxFinalPricePerBatteryCents: true,
@@ -127,6 +132,9 @@ export default async function SolarLendersPage({
           notes: l.notes,
           portalUrl: l.portalUrl,
           applyUrl: l.applyUrl,
+          apiBaseUrl: l.apiBaseUrl,
+          apiProductSlug: l.apiProductSlug,
+          apiKeyMasked: maskTail(decryptField(l.apiKeyEncrypted)),
           creditInstructions: l.creditInstructions,
           repPayMode: l.repPayMode,
           maxFinalPpwCents: l.maxFinalPpwCents,

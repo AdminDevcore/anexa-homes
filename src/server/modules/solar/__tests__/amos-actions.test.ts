@@ -219,12 +219,33 @@ describe('amosSubmissionStatusAction', () => {
     expect(await amosSubmissionStatusAction('lead-1')).toEqual({ mode: 'link' })
   })
 
-  it('reports ready when the deal is complete', async () => {
-    expect(await amosSubmissionStatusAction('lead-1')).toEqual({
-      mode: 'api',
-      lenderName: 'Amos Capital Fund',
-      ready: true,
+  it('reports ready with a server-built summary of what will be sent', async () => {
+    const r = await amosSubmissionStatusAction('lead-1')
+    expect(r).toMatchObject({ mode: 'api', lenderName: 'Amos Capital Fund', ready: true })
+    // Built from the same rows the submission reads, so the rep confirms what
+    // actually goes rather than what the browser happened to hold.
+    expect((r as { summary: Record<string, string> }).summary).toEqual({
+      customer: 'Dana Reyes',
+      property: '4120 Sage Hollow Dr, Austin, TX, 78735',
+      system: '10.7 kW · 26 x Qcells Q.PEAK 410',
+      financing: '$48,750 over 300 months',
     })
+  })
+
+  it('reports not-ready when the deal has no price yet', async () => {
+    financeFindFirst.mockResolvedValue({
+      contractPriceCents: 0,
+      downPaymentCents: 0,
+      loanTermMonths: 300,
+    })
+    const r = await amosSubmissionStatusAction('lead-1')
+    expect(r).toMatchObject({ mode: 'api', ready: false })
+    expect((r as { problems: string[] }).problems.join(' ')).toContain('financed amount')
+  })
+
+  it('omits a battery from the summary when the deal has none', async () => {
+    const r = await amosSubmissionStatusAction('lead-1')
+    expect((r as { summary: { system: string } }).summary.system).not.toContain('Battery')
   })
 
   it('reports the blockers when it is not', async () => {

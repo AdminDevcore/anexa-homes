@@ -15,6 +15,7 @@ import {
 import {
   amosSubmissionStatusAction,
   submitDealToLenderAction,
+  type AmosSubmissionSummary,
 } from "@/server/modules/solar/amos-actions";
 
 /**
@@ -34,7 +35,7 @@ import {
 type Status =
   | { mode: "loading" }
   | { mode: "link" }
-  | { mode: "api"; lenderName: string; ready: true }
+  | { mode: "api"; lenderName: string; ready: true; summary: AmosSubmissionSummary }
   | { mode: "api"; lenderName: string; ready: false; problems: string[] };
 
 type Sent = { referenceNumber: string; customerUrl: string | null; sentTo: string };
@@ -42,18 +43,9 @@ type Sent = { referenceNumber: string; customerUrl: string | null; sentTo: strin
 export function SolarSendToLender({
   leadId,
   canEdit,
-  customerName,
-  propertyLine,
-  systemLine,
-  amountLine,
 }: {
   leadId: string;
   canEdit: boolean;
-  /** Shown back to the rep so they can see what is about to be sent. */
-  customerName: string;
-  propertyLine: string;
-  systemLine: string;
-  amountLine: string;
 }) {
   const [status, setStatus] = React.useState<Status>({ mode: "loading" });
   const [open, setOpen] = React.useState(false);
@@ -172,12 +164,14 @@ export function SolarSendToLender({
             </DialogDescription>
           </DialogHeader>
 
-          <dl className="space-y-1.5 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-            <Row k="Customer" v={customerName} />
-            <Row k="Property" v={propertyLine} />
-            <Row k="System" v={systemLine} />
-            <Row k="Financing" v={amountLine} />
-          </dl>
+          {status.ready && (
+            <dl className="space-y-1.5 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <Row k="Customer" v={status.summary.customer} />
+              <Row k="Property" v={status.summary.property} />
+              <Row k="System" v={status.summary.system} />
+              <Row k="Financing" v={status.summary.financing} />
+            </dl>
+          )}
 
           {/* Anexa does not record this anywhere, and the lender requires it, so
               it is asked at send time rather than guessed. */}

@@ -64,9 +64,16 @@ const submitSchema = z.object({
  * deal is not ready. Reporting the blockers BEFORE the click is the whole
  * point — the alternative is an error in front of a customer.
  */
+export type AmosSubmissionSummary = {
+  customer: string;
+  property: string;
+  system: string;
+  financing: string;
+};
+
 export async function amosSubmissionStatusAction(leadId: string): Promise<
   | { mode: "link" }
-  | { mode: "api"; lenderName: string; ready: true }
+  | { mode: "api"; lenderName: string; ready: true; summary: AmosSubmissionSummary }
   | { mode: "api"; lenderName: string; ready: false; problems: string[] }
 > {
   const user = await requireUser();
@@ -81,9 +88,71 @@ export async function amosSubmissionStatusAction(leadId: string): Promise<
   }
 
   const problems = preflightAmosSubmission(design.lead, design);
-  return problems.length === 0
-    ? { mode: "api", lenderName: lender.name, ready: true }
-    : { mode: "api", lenderName: lender.name, ready: false, problems };
+  if (problems.length > 0) {
+    return { mode: "api", lenderName: lender.name, ready: false, problems };
+  }
+
+  const finance = await prisma.solarFinance.findFirst({
+    where: { leadId, companyId: user.companyId },
+    select: { contractPriceCents: true, downPaymentCents: true, loanTermMonths: true },
+  });
+  const amountCents = (finance?.contractPriceCents ?? 0) - (finance?.downPaymentCents ?? 0);
+  if (amountCents <= 0 || !finance?.loanTermMonths) {
+    return {
+      mode: "api",
+      lenderName: lender.name,
+      ready: false,
+      problems: [
+        amountCents <= 0
+          ? "This deal has no financed amount yet. Price it first."
+          : "This deal has no loan term yet. Choose one first.",
+      ],
+    };
+  }
+
+  // Built on the SERVER from the same rows the submission reads, so the
+  // confirmation shows what will actually be sent rather than whatever the
+  // browser happened to be holding.
+  return {
+    mode: "api",
+    lenderName: lender.name,
+    ready: true,
+    summary: {
+      customer: `${design.lead.firstName} ${design.lead.lastName}`.trim(),
+      property: [design.lead.address, design.lead.city, design.lead.state, design.lead.zip]
+        .filter(Boolean)
+        .join(", "),
+      system: describeSystem(design),
+      financing: `${usd(amountCents)} over ${finance.loanTermMonths} months`,
+    },
+  };
+}
+
+/** "10.7 kW · 26 x Qcells Q.PEAK 410 · 2 x Enphase IQ Battery 5P" */
+function describeSystem(design: {
+  systemSizeKwDc: number;
+  moduleQty: number;
+  batteryQty: number;
+  module: { manufacturer: string | null; model: string } | null;
+  battery: { manufacturer: string | null; model: string } | null;
+}): string {
+  const parts = [`${design.systemSizeKwDc.toFixed(1)} kW`];
+  if (design.module && design.moduleQty > 0) {
+    parts.push(
+      `${design.moduleQty} x ${[design.module.manufacturer, design.module.model].filter(Boolean).join(" ")}`,
+    );
+  }
+  if (design.battery && design.batteryQty > 0) {
+    parts.push(
+      `${design.batteryQty} x ${[design.battery.manufacturer, design.battery.model].filter(Boolean).join(" ")}`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+/** Cents to "$48,750" — whole dollars; the cents are noise at this size. */
+function usd(cents: number): string {
+  return `$${Math.round(cents / 100).toLocaleString("en-US")}`;
 }
 
 export async function submitDealToLenderAction(
