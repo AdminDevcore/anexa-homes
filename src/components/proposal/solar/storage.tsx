@@ -6,6 +6,7 @@ import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
 import { SOLAR_TIMELINE } from "@/lib/solar-proposal";
 import { PROPOSAL_NAV_PX } from "@/lib/proposal";
+import type { QualifyOffer } from "@/lib/proposal-qualify";
 import { ProposalChrome, type ChromeNavItem } from "../proposal-chrome";
 import { PaymentMenu } from "../payment-menu";
 import { usd } from "../format";
@@ -47,6 +48,7 @@ export function SolarStorageProposalView({
   showPaymentOptions = true,
   accentColor,
   chromeOffset = 0,
+  qualifyOffer = null,
 }: {
   snapshot: SolarProposalSnapshot;
   token: string;
@@ -64,6 +66,8 @@ export function SolarStorageProposalView({
   rep?: RepContext | null;
   accentColor?: string | null;
   chromeOffset?: number;
+  /** See `PaymentMenu` — null keeps Qualify the plain application link. */
+  qualifyOffer?: QualifyOffer | null;
 }) {
   const s = snapshot;
   const st = s.storage;
@@ -386,6 +390,9 @@ export function SolarStorageProposalView({
             selectedKey={quoted.key}
             onSelect={setSelectedKey}
             showMenu={showPaymentOptions}
+            token={token}
+            qualifyOffer={qualifyOffer}
+            previewMode={previewMode}
           />
         )}
       </Chapter>

@@ -4,6 +4,7 @@ import * as React from "react";
 import { Chapter, SpecList } from "../primitives";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { PaymentMenu } from "../../payment-menu";
+import { QualifyCallout } from "../../qualify-button";
 import { BatteryCredit } from "../../battery-credit";
 import { usd, pct, perKwh, loanTermLabel } from "../../format";
 import {
@@ -12,6 +13,7 @@ import {
   type ProposalPaymentOption,
 } from "@/lib/solar-proposal";
 import type { Doc } from "./doc";
+import type { QualifyOffer } from "@/lib/proposal-qualify";
 
 const PRODUCT_LABEL: Record<string, string> = {
   cash: "Cash purchase",
@@ -38,10 +40,18 @@ export function ChapterPay({
   doc,
   onSelect,
   showPaymentOptions,
+  token,
+  qualifyOffer,
+  previewMode,
 }: {
   doc: Doc;
   onSelect: (key: string) => void;
   showPaymentOptions: boolean;
+  /** The share token. The payment card holds the one control that acts. */
+  token: string;
+  /** See `PaymentMenu` — null keeps Qualify the plain application link. */
+  qualifyOffer: QualifyOffer | null;
+  previewMode: boolean;
 }) {
   const { s, f, option, options, vpp, credits } = doc;
   const utility = s.energy.utilityProvider ?? "your utility";
@@ -259,6 +269,22 @@ export function ChapterPay({
         </div>
       )}
 
+      {/* THE CALL TO ACTION, when the card that usually carries it is not on
+          this sheet. Qualify lives in the third column of the payment menu, and
+          a document with one way to pay does not render that menu — which used
+          to mean a single-option proposal had nowhere to apply from at all. */}
+      {!offerMenu && (
+        <div className="mt-10 print:hidden">
+          <QualifyCallout
+            token={token}
+            applyUrl={f.applyUrl}
+            lender={f.lender}
+            offer={option.quoted ? qualifyOffer : null}
+            previewMode={previewMode}
+          />
+        </div>
+      )}
+
       {/* The menu is a CONTROL, so it never prints — see the note above. */}
       {options.length > 1 && showPaymentOptions && (
         <div className="mt-10 print:hidden">
@@ -271,6 +297,9 @@ export function ChapterPay({
             onSelect={onSelect}
             showMenu={offerMenu}
             creditsApplied={!!credits?.on}
+            token={token}
+            qualifyOffer={qualifyOffer}
+            previewMode={previewMode}
           />
         </div>
       )}

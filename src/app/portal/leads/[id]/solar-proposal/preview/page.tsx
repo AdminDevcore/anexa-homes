@@ -11,6 +11,7 @@ import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { adderAmountCents, catalogueBasis } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
+import { readProposalQualifyOffer } from "@/server/modules/solar/proposal-qualify";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +58,7 @@ export default async function SolarProposalPreviewPage({
     select: {
       id: true, version: true, snapshot: true, signedAt: true, supersededAt: true,
       createdAt: true, showComparison: true, showPaymentOptions: true,
+      leadId: true, companyId: true, lead: { select: { vertical: true } },
     },
   });
   if (!proposal) notFound();
@@ -177,6 +179,15 @@ export default async function SolarProposalPreviewPage({
         previewMode
         layoutImageUrl={layoutImageUrl}
         accentColor={branding.accentColor}
+        // THE ONE THING THIS PREVIEW SHOWS THAT THE CUSTOMER'S COPY DOES NOT.
+        // The "rep" audience carries the blockers behind a Qualify button that
+        // cannot yet start an application — a missing phone number, an
+        // unbranded panel. This page is authenticated; the customer's is not,
+        // and is handed the ready case or nothing at all.
+        qualifyOffer={await readProposalQualifyOffer(
+          { leadId: proposal.leadId, companyId: proposal.companyId, lead: proposal.lead },
+          "rep",
+        )}
         // The portal shell's header is already pinned at the top of the
         // viewport. Without this the document's own nav pins to y=0 as well and
         // the two bars paint over each other.

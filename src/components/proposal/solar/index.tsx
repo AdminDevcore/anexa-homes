@@ -13,6 +13,7 @@ import {
 } from "@/lib/solar-proposal";
 import { coverPitch, lifetimeFigure, monthlyToday } from "@/lib/solar-proposal-pitch";
 import { PROPOSAL_NAV_PX } from "@/lib/proposal";
+import type { QualifyOffer } from "@/lib/proposal-qualify";
 import { ProposalChrome, type ChromeNavItem } from "../proposal-chrome";
 import { CreditSwitch } from "../credit-switch";
 import { RepBar, type RepContext } from "../rep-bar";
@@ -157,6 +158,7 @@ export function SolarProposalView(props: SolarProposalViewProps) {
       rep={props.rep}
       accentColor={props.accentColor}
       chromeOffset={props.chromeOffset}
+      qualifyOffer={props.qualifyOffer}
     />
   ) : (
     <SolarPvProposalView {...props} />
@@ -244,6 +246,17 @@ type SolarProposalViewProps = {
    * either way round.
    */
   creditsApplied?: boolean;
+  /**
+   * WHAT THE QUALIFY BUTTON IS ALLOWED TO DO, resolved by the CALLER.
+   *
+   * Null — the ordinary case — leaves it the plain application link it has
+   * always been. Non-null means the deal's lender takes applications over its
+   * own API and this document may start one. Resolved on the server at render
+   * rather than fetched on mount, so the customer's copy never flashes one
+   * button and then swaps it for another, and so the blockers behind a
+   * "blocked" offer are only ever put on the authenticated preview.
+   */
+  qualifyOffer?: QualifyOffer | null;
 };
 
 function SolarPvProposalView({
@@ -261,6 +274,7 @@ function SolarPvProposalView({
   accentColor,
   chromeOffset = 0,
   creditsApplied: initialCreditsApplied = false,
+  qualifyOffer = null,
 }: SolarProposalViewProps) {
   /**
    * The document on screen, and which version it is.
@@ -616,7 +630,14 @@ function SolarPvProposalView({
       <ChapterCost doc={doc} />
 
       {/* 04 · paper. The payment and the terms. */}
-      <ChapterPay doc={doc} onSelect={setOptionKey} showPaymentOptions={showPaymentOptions} />
+      <ChapterPay
+        doc={doc}
+        onSelect={setOptionKey}
+        showPaymentOptions={showPaymentOptions}
+        token={token}
+        qualifyOffer={qualifyOffer}
+        previewMode={previewMode}
+      />
 
       {/* 05 · plate. A rep may turn this off for a household that reads a table
           as a wall of numbers; the lifetime figure moves up to 01 rather than

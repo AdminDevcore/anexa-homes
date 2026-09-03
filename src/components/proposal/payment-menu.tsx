@@ -1,9 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { ChevronDown, ExternalLink } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LenderMark } from "@/components/ui/lender-mark";
+import { QualifyAction, QualifyNote, hasQualifyAction } from "./qualify-button";
+import type { QualifyOffer } from "@/lib/proposal-qualify";
 import {
   optionMonthlyCents,
   quotedTotalCents,
@@ -37,17 +39,42 @@ export function PaymentMenu({
    * the chosen option's switched figure with the others' unswitched ones.
    */
   creditsApplied = false,
+  /** The share token, for the one control on this card that acts. */
+  token = "",
+  /**
+   * Whether Qualify can start a real application, resolved on the server. See
+   * `QualifyAction` — null keeps today's plain link, which is every deal whose
+   * lender has no integration.
+   */
+  qualifyOffer = null,
+  previewMode = false,
 }: {
   options: ProposalPaymentOption[];
   selectedKey: string;
   onSelect: (key: string) => void;
   showMenu: boolean;
   creditsApplied?: boolean;
+  token?: string;
+  qualifyOffer?: QualifyOffer | null;
+  previewMode?: boolean;
 }) {
   const selected = options.find((o) => o.key === selectedKey) ?? options[0];
   const f = selected.financing;
   const offerMenu = showMenu && options.length > 1;
   const monthly = optionMonthlyCents(selected, creditsApplied);
+
+  /**
+   * THE OFFER BELONGS TO THE QUOTED OPTION AND TO NOTHING ELSE.
+   *
+   * The application carries this deal's price, term and lender — the ones on
+   * SolarFinance, which are the quoted option's. A reader who has switched the
+   * menu to a different partner's programme is looking at a hypothetical the
+   * deal is not priced at, and submitting the quoted numbers underneath it
+   * would put a figure in front of an underwriter that nobody on screen was
+   * shown. Those options keep their own application link, as before.
+   */
+  const qualify = selected.quoted ? qualifyOffer : null;
+  const canAct = hasQualifyAction(f.applyUrl, qualify);
 
   return (
     <div className="mt-8 overflow-hidden rounded-2xl bg-white text-neutral-900 shadow-xl ring-1 ring-black/5 print:shadow-none print:ring-neutral-300">
@@ -57,7 +84,7 @@ export function PaymentMenu({
       <div
         className={cn(
           "grid gap-px bg-neutral-200/70",
-          f.applyUrl
+          canAct
             ? "sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_auto]"
             : "sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
         )}
@@ -134,25 +161,24 @@ export function PaymentMenu({
         </div>
 
         {/* ── What to do about it ─────────────────────────────────────── */}
-        {f.applyUrl && (
-          <div className="flex items-center bg-white p-6 print:hidden">
-            <a
-              href={f.applyUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-neutral-900 px-8 py-4 font-display text-lg font-bold tracking-[0.12em] text-neutral-900 transition hover:bg-neutral-900 hover:text-white sm:w-auto"
-            >
-              QUALIFY <ExternalLink className="size-4" />
-            </a>
-          </div>
+        {canAct && (
+          <QualifyAction
+            token={token}
+            applyUrl={f.applyUrl}
+            lender={f.lender}
+            offer={qualify}
+            previewMode={previewMode}
+          />
         )}
       </div>
 
-      {f.applyUrl && (
-        <p className="border-t border-neutral-200/70 bg-neutral-50 px-6 py-3 text-xs text-neutral-500 print:hidden">
-          Opens {f.lender ?? "the lender"}&rsquo;s own secure application. Nothing is submitted from
-          this page, and no information here is sent anywhere.
-        </p>
+      {canAct && (
+        <QualifyNote
+          applyUrl={f.applyUrl}
+          lender={f.lender}
+          offer={qualify}
+          previewMode={previewMode}
+        />
       )}
     </div>
   );

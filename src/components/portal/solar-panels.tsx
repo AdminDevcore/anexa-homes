@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LenderMark } from "@/components/ui/lender-mark";
-import { SolarSendToLender } from "@/components/portal/solar-send-to-lender";
 import {
   builderStepFromHref,
   groupIssues,
@@ -1347,12 +1346,12 @@ export function SolarFinancePanel({
 
   return (
     <div className="space-y-6">
-      {/* Direct submission, when the quoted lender has an integration. Renders
-          nothing at all otherwise, which is every lender that does not — so a
-          partner on a plain application link is unaffected. Above the pricing
-          because by the time a rep is sending, the price is already settled and
-          this is the next thing they do. */}
-      <SolarSendToLender leadId={leadId} canEdit={canEdit} />
+      {/* DIRECT SUBMISSION USED TO SIT HERE, as a "Send to <lender>" card above
+          the price. It moved onto the customer's proposal, behind the Qualify
+          button — a credit application is the household's own act, and every
+          partner issues its own API key, so this was never a card about one
+          lender. See `components/proposal/qualify-button.tsx`. The rep still
+          sees why a deal cannot be applied to, on the proposal preview. */}
 
       {/* WHAT WE CHARGE, first, above everything derived from it. The step used
           to open on a shelf of lender cards and put the price below the

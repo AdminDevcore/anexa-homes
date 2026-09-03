@@ -7,6 +7,7 @@ import { objectExists } from "@/server/storage";
 import { runUnscoped } from "@/server/vertical/context";
 import { brandingForRecord } from "@/server/branding/resolve";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
+import { readProposalQualifyOffer } from "@/server/modules/solar/proposal-qualify";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,12 @@ export default async function PublicSolarProposalPage({
       // would 404 on every zoom level.
       siteImageBase={proposal.snapshot.site ? `/proposal/${token}/site-image` : null}
       accentColor={branding.accentColor}
+      // WHAT QUALIFY DOES ON THIS DOCUMENT. Resolved here, on the server,
+      // where the authorization already is — the "customer" audience means a
+      // deal that is not submittable comes back null and the button stays the
+      // lender's ordinary application link. Our preflight strings are written
+      // for a rep and never reach this page.
+      qualifyOffer={await readProposalQualifyOffer(proposal, "customer")}
     />
   );
 }
