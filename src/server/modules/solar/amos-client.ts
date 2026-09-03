@@ -79,6 +79,27 @@ function applicationsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/api/v1/partner/applications`
 }
 
+/**
+ * Strip anything an HTTP header cannot carry.
+ *
+ * A key pasted out of a terminal arrives with the shell's prompt glyph on the
+ * front — "❯", U+276F — and that one character makes the Authorization header
+ * impossible to encode, so `fetch` throws before a request is ever sent.
+ *
+ * Stripping rather than refusing is correct here, and is not papering over a
+ * corrupt value: a byte outside printable ASCII CANNOT be part of a working
+ * credential, because no such key could ever be sent. Removing it recovers
+ * exactly the key the lender issued. Keys already stored with the glyph — the
+ * reason this exists — therefore start working without anyone re-pasting.
+ *
+ * `setSolarLenderApiKeyAction` still refuses one at paste time, where the
+ * person can see what they pasted. This is the belt to that's braces.
+ */
+function headerSafeKey(apiKey: string): { key: string; stripped: number } {
+  const key = apiKey.replace(/[^\x20-\x7e]/g, '').trim()
+  return { key, stripped: [...apiKey].length - [...key].length }
+}
+
 /** Append the offending items to the message so a rep can act without a log. */
 function withDetails(message: string, details: unknown): string {
   if (!Array.isArray(details) || details.length === 0) return message
@@ -114,6 +135,22 @@ export async function submitToAmos(
     )
   }
 
+  const { key, stripped } = headerSafeKey(creds.apiKey)
+  if (stripped > 0) {
+    // Worth a line: the stored credential is grubby even though the request
+    // will now succeed, and an admin should re-paste it cleanly at some point.
+    console.warn('[amos-client] stripped characters an HTTP header cannot carry from the API key', {
+      host,
+      stripped,
+    })
+  }
+  if (!key) {
+    throw new AmosSubmissionError(
+      'unauthorized',
+      'No usable API key is configured for this lender. Add one in Settings → Lenders → Direct submission.',
+    )
+  }
+
   let res: Response
   try {
     res = await fetch(url, {
@@ -121,7 +158,7 @@ export async function submitToAmos(
       headers: {
         // Never logged, never echoed into an error — see the test that asserts
         // the key cannot appear in a thrown error's message or stack.
-        Authorization: `Bearer ${creds.apiKey}`,
+        Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),

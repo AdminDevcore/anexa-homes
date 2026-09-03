@@ -137,6 +137,50 @@ describe('submitToAmos', () => {
     await expect(submitToAmos(creds, payload)).rejects.toThrow(/Nothing is answering/)
   })
 
+  it('sends successfully with a key that carries a shell prompt glyph', async () => {
+    // The real incident: "❯" (U+276F) on the front of the key made the
+    // Authorization header impossible to encode, so fetch threw before
+    // sending. A byte outside printable ASCII cannot be part of a working
+    // credential, so stripping it recovers exactly the key that was issued.
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse(201, {
+        applicationId: 'app-1',
+        referenceNumber: 'AMS-1042',
+        customerUrl: null,
+        sentTo: 'd@e.com',
+        expiresAt: 'x',
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await submitToAmos({ ...creds, apiKey: '❯ak_live_secret' }, payload)
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer ak_live_secret')
+  })
+
+  it('strips a trailing newline from a key too', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse(201, {
+        applicationId: 'a',
+        referenceNumber: 'r',
+        customerUrl: null,
+        sentTo: 'd@e.com',
+        expiresAt: 'x',
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await submitToAmos({ ...creds, apiKey: 'ak_live_secret\n' }, payload)
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer ak_live_secret')
+  })
+
+  it('refuses when nothing usable is left after stripping', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(submitToAmos({ ...creds, apiKey: '❯❯❯' }, payload)).rejects.toMatchObject({
+      code: 'unauthorized',
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects a malformed address before attempting a request', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
