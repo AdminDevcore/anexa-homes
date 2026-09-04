@@ -206,6 +206,21 @@ export async function submitToAmos(
     const err = (body as { error?: { code?: string; message?: string; details?: unknown } })?.error
     const code = (err?.code ?? 'bad_response') as AmosErrorCode
     const message = err?.message ?? `The lender rejected the submission (HTTP ${res.status}).`
+
+    // A REJECTION is not a crash, so it used to pass silently to the toast and
+    // nowhere else — which meant the only record of why a deal was refused
+    // lived on a screen someone had already closed. The lender's own logs are
+    // not always reachable from here; ours are.
+    console.error('[amos-client] submission rejected by the lender', {
+      host,
+      status: res.status,
+      code,
+      message,
+      details: err?.details ?? null,
+      // Which deal, so a refusal can be traced back without guessing.
+      externalId: payload.externalId,
+    })
+
     throw new AmosSubmissionError(code, withDetails(message, err?.details), res.status, err?.details)
   }
 
