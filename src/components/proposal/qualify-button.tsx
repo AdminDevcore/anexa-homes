@@ -123,6 +123,20 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode }: P
     );
   }
 
+  // THE PREVIEW OF A LIVE ONE. Inert, because the note under it says so — and
+  // because a rep checking their own work must not be handed the customer's
+  // control. Rendering the plain link here instead would make the button open
+  // the lender's page on a click the note promises does nothing.
+  if (offer?.state === "ready" && previewMode) {
+    return (
+      <div className="flex items-center bg-white p-6 print:hidden">
+        <span className={`${BUTTON_CLASS} cursor-not-allowed opacity-40`} aria-disabled>
+          QUALIFY
+        </span>
+      </div>
+    );
+  }
+
   if (!submits) {
     // Everything else: the link the document has always carried.
     return (
