@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { WorkspaceSwitcher } from "./workspace-switcher";
+import { rememberAppPath, SettingsSidebarNav, SETTINGS_ROOT } from "./settings-nav";
 import { VERTICAL_ACCENT, type ActiveVertical } from "@/lib/vertical";
 
 export type ShellUser = {
@@ -38,40 +39,26 @@ function NavPending() {
   return <Loader2 className="size-3.5 shrink-0 animate-spin text-white/70" aria-hidden />;
 }
 
-export function PortalShell({
-  user,
-  allowedHrefs,
-  branding,
-  vertical,
-  availableVerticals,
-  children,
+/**
+ * The app menu: every section this user is allowed to open.
+ *
+ * Module level rather than declared inside the shell — a component created
+ * during render is a new type on every render, so React throws the subtree away
+ * and rebuilds it instead of updating in place, which loses focus and any state
+ * inside it.
+ */
+function AppNavList({
+  items,
+  pathname,
+  unread,
+  onNavigate,
 }: {
-  user: ShellUser;
-  allowedHrefs: string[];
-  branding: Branding;
-  /** Active workspace. Null when the multi-vertical experience is switched off. */
-  vertical: ActiveVertical | null;
-  availableVerticals: ActiveVertical[];
-  children: React.ReactNode;
+  items: typeof PORTAL_NAV;
+  pathname: string;
+  unread: number;
+  onNavigate?: () => void;
 }) {
-  const pathname = usePathname();
-  const items = PORTAL_NAV.filter((i) => allowedHrefs.includes(i.href));
-  const chatEnabled = allowedHrefs.includes("/portal/chat");
-
-  const { data: chatUnread } = useQuery<{ count: number }>({
-    queryKey: ["chat-unread"],
-    queryFn: async () => {
-      const res = await fetch("/api/chat/unread");
-      if (!res.ok) return { count: 0 };
-      return res.json();
-    },
-    enabled: chatEnabled,
-    refetchInterval: 10000,
-    refetchOnWindowFocus: true,
-  });
-  const unread = chatUnread?.count ?? 0;
-
-  const NavList = ({ onNavigate }: { onNavigate?: () => void }) => (
+  return (
     <nav className="flex flex-col gap-1 px-3">
       {items.map((item) => {
         const matches = (href: string) => pathname === href || pathname.startsWith(href + "/");
@@ -114,6 +101,70 @@ export function PortalShell({
       })}
     </nav>
   );
+}
+
+export function PortalShell({
+  user,
+  allowedHrefs,
+  branding,
+  vertical,
+  availableVerticals,
+  settingsVertical,
+  children,
+}: {
+  user: ShellUser;
+  allowedHrefs: string[];
+  branding: Branding;
+  /** Active workspace. Null when the multi-vertical experience is switched off. */
+  vertical: ActiveVertical | null;
+  availableVerticals: ActiveVertical[];
+  /**
+   * The workspace the settings menu answers for. Unlike `vertical` this is never
+   * null — with the switcher off there is still exactly one workspace, and the
+   * menu still has to know which sections belong to it.
+   */
+  settingsVertical: ActiveVertical;
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const items = PORTAL_NAV.filter((i) => allowedHrefs.includes(i.href));
+
+  // Settings takes the sidebar over rather than adding a second one beside it.
+  // Read from the pathname rather than published on mount, because `usePathname`
+  // resolves during the server render of a client component: the right menu is
+  // in the first paint instead of swapping in after hydration.
+  const inSettings = pathname === SETTINGS_ROOT || pathname.startsWith(`${SETTINGS_ROOT}/`);
+
+  // Remember the screen you opened Settings from, so "Back to app" returns to
+  // it rather than dumping everyone on the dashboard. In session storage rather
+  // than in state: nothing renders it — it is read once, when the control is
+  // pressed — and storing it survives a reload, which a ref would not.
+  React.useEffect(() => {
+    if (inSettings) return;
+    rememberAppPath(pathname);
+  }, [inSettings, pathname]);
+  const chatEnabled = allowedHrefs.includes("/portal/chat");
+
+  const { data: chatUnread } = useQuery<{ count: number }>({
+    queryKey: ["chat-unread"],
+    queryFn: async () => {
+      const res = await fetch("/api/chat/unread");
+      if (!res.ok) return { count: 0 };
+      return res.json();
+    },
+    enabled: chatEnabled,
+    refetchInterval: 10000,
+    refetchOnWindowFocus: true,
+  });
+  const unread = chatUnread?.count ?? 0;
+
+  // An element rather than a component, so the desktop sidebar and the mobile
+  // sheet share one definition without declaring a component mid-render.
+  const sidebarNav = inSettings ? (
+    <SettingsSidebarNav vertical={settingsVertical} pathname={pathname} />
+  ) : (
+    <AppNavList items={items} pathname={pathname} unread={unread} />
+  );
 
   return (
     <div className="portal-root flex min-h-screen bg-muted/30">
@@ -140,8 +191,15 @@ export function PortalShell({
             </div>
           </Link>
         </div>
-        <div className="flex-1 overflow-y-auto py-4">
-          <NavList />
+        {/* The settings menu scrolls its own list beneath a pinned search box,
+            so it needs the height rather than the overflow. */}
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            inSettings ? "py-3" : "overflow-y-auto py-4"
+          )}
+        >
+          {sidebarNav}
         </div>
         <div className="border-t border-border p-4">
           {branding.supportPhone && (
@@ -169,13 +227,23 @@ export function PortalShell({
                   <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="dark w-72 bg-shell p-0 text-foreground">
-                <SheetTitle className="sr-only">Navigation</SheetTitle>
-                <div className="flex h-16 items-center border-b border-shell-border px-5">
+              <SheetContent
+                side="left"
+                className="dark flex w-72 flex-col bg-shell p-0 text-foreground"
+              >
+                <SheetTitle className="sr-only">
+                  {inSettings ? "Settings" : "Navigation"}
+                </SheetTitle>
+                <div className="flex h-16 shrink-0 items-center border-b border-shell-border px-5">
                   <Logo href="/portal/dashboard" />
                 </div>
-                <div className="py-4">
-                  <NavList />
+                <div
+                  className={cn(
+                    "flex min-h-0 flex-1 flex-col",
+                    inSettings ? "py-3" : "overflow-y-auto py-4"
+                  )}
+                >
+                  {sidebarNav}
                 </div>
               </SheetContent>
             </Sheet>

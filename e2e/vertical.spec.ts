@@ -132,24 +132,31 @@ test.describe("workspace switcher", () => {
 
     // Roofing has both — this is a strip for solar, not a deletion.
     await page.goto("/portal/settings");
+    // Both live in the settings menu, which is what the app sidebar becomes
+    // while you are inside Settings.
     await expect(page.getByText("Commission Rules")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Inspection Outcomes")).toBeVisible();
 
     await switchTo(page, "Solar");
     await page.goto("/portal/settings");
-    // `exact`: the solar hub also carries a "Solar Settings" card heading.
+    // `exact`: the solar menu also carries a "Solar Settings" row.
     await expect(
       page.getByRole("heading", { name: "Settings", exact: true })
     ).toBeVisible({ timeout: 15000 });
-    // Neither card, and neither as a setup-gap warning either — a gap linking
-    // to a page this workspace hides is worse than no gap at all.
+    // Neither in the menu, and neither as a setup-gap warning either — a gap
+    // linking to a page this workspace hides is worse than no gap at all.
     const body = await page.locator("body").innerText();
     for (const gone of ["Commission Rules", "Commission rules", "Inspection Outcomes", "Site Survey Outcomes"]) {
-      expect(body, `"${gone}" is still offered in the solar hub`).not.toContain(gone);
+      expect(body, `"${gone}" is still offered in the solar menu`).not.toContain(gone);
     }
-    // Search finds nothing either: the card is absent, not merely unbanded.
-    await page.getByLabel("Search settings").fill("commission");
-    await expect(page.getByText(/No setting matches/)).toBeVisible({ timeout: 15000 });
+    // And searching for it turns up the solar answer instead of the roofing one:
+    // "Rep Pay" carries the keyword "commission" precisely because a solar rep's
+    // cut is the redline on his own profile. The assertion this replaces expected
+    // an empty result and had been failing since that keyword was added.
+    await page.getByLabel("Find a setting").fill("commission");
+    const menu = page.getByRole("navigation", { name: "Settings sections" });
+    await expect(menu.getByText("Rep Pay")).toBeVisible({ timeout: 15000 });
+    await expect(menu.getByText("Commission Rules")).toHaveCount(0);
 
     // And the URLs are closed, not just unlinked — both pages write
     // vertical-scoped rows a solar workspace would never read back.

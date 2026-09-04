@@ -47,7 +47,13 @@ export default async function PortalLayout({
   // so the shell renders precisely as it did before this work.
   const multiVertical = solarVerticalEnabled();
   const availableVerticals = multiVertical ? userVerticals(user) : [];
-  const vertical = multiVertical ? await getActiveVertical(user) : null;
+
+  // Always resolved — it is a cookie read, and the settings menu in the sidebar
+  // needs to know which workspace's sections to list whether or not there is a
+  // switcher to show. `vertical` stays null with the flag off so the header
+  // renders exactly as it did before this work.
+  const settingsVertical = await getActiveVertical(user);
+  const vertical = multiVertical ? settingsVertical : null;
 
   return (
     <BrandingProvider branding={branding}>
@@ -64,6 +70,7 @@ export default async function PortalLayout({
         branding={branding}
         vertical={vertical}
         availableVerticals={availableVerticals}
+        settingsVertical={settingsVertical}
       >
         {children}
       </PortalShell>

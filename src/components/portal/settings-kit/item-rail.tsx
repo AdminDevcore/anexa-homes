@@ -17,10 +17,12 @@ import { cn } from "@/lib/utils";
  *
  * A rail costs one column and buys the whole window for the thing being edited.
  *
- * It stacks above the panel below `xl`, rather than disappearing: Settings
- * already spends a column on its own section nav, and two rails plus a form do
- * not fit a laptop. Stacked, the list keeps its own scroll so a long list never
- * pushes the panel off the screen.
+ * It stacks above the panel below `lg`, rather than disappearing. That used to
+ * be `xl`, because Settings spent a second column on its own section nav and
+ * two rails plus a form do not fit a laptop; the section nav now lives in the
+ * app sidebar, so the rail is the only one left and can appear a breakpoint
+ * earlier. Stacked, the list keeps its own scroll so a long list never pushes
+ * the panel off the screen.
  */
 export function RailLayout({
   rail,
@@ -32,8 +34,8 @@ export function RailLayout({
   className?: string;
 }) {
   return (
-    <div className={cn("grid gap-5 xl:grid-cols-[16rem_minmax(0,1fr)]", className)}>
-      <aside className="xl:sticky xl:top-20 xl:self-start">{rail}</aside>
+    <div className={cn("grid gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]", className)}>
+      <aside className="lg:sticky lg:top-20 lg:self-start">{rail}</aside>
       {children}
     </div>
   );
@@ -44,6 +46,11 @@ export function RailLayout({
  *
  * Search only appears once the list is long enough to need it — a filter box
  * over four rows is furniture, not help.
+ *
+ * It sits on a surface of its own. A workspace with one lender used to render
+ * as a button and a single row adrift in the page background above a very tall
+ * empty column, which reads as something broken rather than as a short list;
+ * inside a card the same two elements are simply a small panel.
  */
 export function ItemRail({
   label,
@@ -65,7 +72,7 @@ export function ItemRail({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 rounded-2xl border border-border bg-card p-2">
       {add}
 
       {showSearch && onQueryChange && (
@@ -96,7 +103,7 @@ export function ItemRail({
 
       <nav
         aria-label={label}
-        className="max-h-[20rem] space-y-1 overflow-y-auto pr-1 xl:max-h-[calc(100vh-13rem)]"
+        className="max-h-[20rem] space-y-1 overflow-y-auto pr-0.5 lg:max-h-[calc(100vh-13rem)]"
       >
         {children}
       </nav>

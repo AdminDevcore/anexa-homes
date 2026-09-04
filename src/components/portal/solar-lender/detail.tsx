@@ -58,7 +58,6 @@ import {
   MoneyField,
   Panel,
   Pill,
-  StatRow,
   TextField,
 } from "@/components/portal/settings-kit/fields";
 import { LogoControl } from "./logo-control";
@@ -455,6 +454,10 @@ export function LenderDetail({
             <Pill>
               {lender.dealCount} {lender.dealCount === 1 ? "deal" : "deals"}
             </Pill>
+            {/* Was a row of the "At a glance" box on Details. It belongs up here:
+                how this partner pays a rep is as true on the rate sheet as it is
+                on the identity form, and the box could only say it on one tab. */}
+            <Pill>{draft.repPayMode === "per_watt" ? "Fixed $/W" : "Redline"}</Pill>
             {lender.contractAdjustmentEnabled && (
               <Pill tone="solar">
                 {lender.contractAdjustmentLabel?.trim() || "Contract adjustment"}
@@ -558,156 +561,125 @@ export function LenderDetail({
         <TabsContent value="details" className="space-y-4">
           {canEdit && <LogoControl lender={lender} />}
 
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-            <div className="space-y-4">
-              <Panel title="Identity">
-                <TextField
-                  label="Lender name"
-                  value={draft.name}
-                  onChange={(v) => set("name", v)}
-                  id={`ld-${lender.id}-name`}
-                />
-                <TextField
-                  label="Notes"
-                  value={draft.notes}
-                  placeholder="Anything worth remembering about this partner"
-                  onChange={(v) => set("notes", v)}
-                />
-              </Panel>
-
-              {/* Two links, never one. The portal is your dealer login; the apply
-                  link is what a homeowner opens from the proposal. One shared
-                  field is how a back office ends up in front of a customer. */}
-              <Panel
-                title="Links"
-                description="Only the customer application link ever reaches a proposal. The dealer portal stays inside the CRM."
+          {/* A lender approving nothing produces empty equipment lists on every
+              deal that selects it, and one with no programme cannot be quoted at
+              all. Both used to sit in a column beside the form, under a box that
+              restated the programme, equipment and deal counts already in the
+              header two inches above. The counts are gone; the warnings, which
+              are the only part of that column somebody could act on, are not. */}
+          {lender.isActive && lender.approvedCount === 0 && (
+            <Caution>
+              No equipment approved yet — a deal on this lender will show empty lists.{" "}
+              <Link
+                href="/portal/settings/solar-equipment"
+                className="underline underline-offset-2"
               >
-                <TextField
-                  label="Dealer portal — where your team runs credit"
-                  value={draft.portalUrl}
-                  placeholder="https://…"
-                  onChange={(v) => set("portalUrl", v)}
-                />
-                <TextField
-                  label="Customer application link — the proposal's Qualify button"
-                  value={draft.applyUrl}
-                  placeholder="https://…"
-                  onChange={(v) => set("applyUrl", v)}
-                />
-              </Panel>
-
-              {/* Direct submission. Empty on every partner that has not given
-                  you an integration, which is most of them — and a lender left
-                  empty here keeps the application link above, unchanged. */}
-              <Panel
-                title="Direct submission (optional)"
-                description="If this partner gave you API access, a rep can send a priced deal straight into their system instead of the customer retyping it. The customer still enters their own SSN and authorises the credit check on the lender's page."
+                Tag equipment
+              </Link>
+              .
+            </Caution>
+          )}
+          {lender.isActive && liveProducts.length === 0 && (
+            <Caution>
+              Nothing on the rate sheet — a deal cannot be quoted on this partner until it has a
+              programme.{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2"
+                onClick={() => onTabChange("rates")}
               >
-                <TextField
-                  label="API address"
-                  value={draft.apiBaseUrl}
-                  placeholder="https://admin.example.com"
-                  onChange={(v) => set("apiBaseUrl", v)}
-                />
-                <TextField
-                  label="Loan product"
-                  value={draft.apiProductSlug}
-                  placeholder="solar-installation-financing"
-                  onChange={(v) => set("apiProductSlug", v)}
-                />
-                <LenderApiKeyField lenderId={lender.id} masked={lender.apiKeyMasked} />
-              </Panel>
+                Add one
+              </button>
+              .
+            </Caution>
+          )}
 
-              <Panel
-                title="How to run credit with this partner"
-                description="Rep-facing. Shown on the deal beside this lender."
-              >
-                <Textarea
-                  id={`ld-${lender.id}-credit`}
-                  aria-label="How to run credit with this partner"
-                  rows={4}
-                  value={draft.creditInstructions}
-                  placeholder="The steps a rep needs — which portal, what to have ready, who to call when it stips."
-                  onChange={(e) => set("creditInstructions", e.target.value)}
-                />
-              </Panel>
-            </div>
+          <div className="space-y-4">
+            <Panel title="Identity">
+              <TextField
+                label="Lender name"
+                value={draft.name}
+                onChange={(v) => set("name", v)}
+                id={`ld-${lender.id}-name`}
+              />
+              <TextField
+                label="Notes"
+                value={draft.notes}
+                placeholder="Anything worth remembering about this partner"
+                onChange={(v) => set("notes", v)}
+              />
+            </Panel>
 
-            <aside className="space-y-3">
-              <div className="rounded-xl border border-border bg-card p-4">
-                <h3 className="text-sm font-semibold">At a glance</h3>
-                <dl className="mt-2 divide-y divide-border/60">
-                  <StatRow
-                    label="Approved equipment"
-                    tone={lender.approvedCount === 0 ? "warn" : "plain"}
-                    value={
-                      <>
-                        {lender.approvedCount}
-                        {sellableEquipment > 0 && (
-                          <span className="text-muted-foreground"> / {sellableEquipment}</span>
-                        )}
-                      </>
-                    }
-                  />
-                  <StatRow label="Deals designed for it" value={lender.dealCount} />
-                  <StatRow
-                    label="Programmes on the sheet"
-                    tone={liveProducts.length === 0 ? "warn" : "plain"}
-                    value={liveProducts.length}
-                  />
-                  <StatRow
-                    label="Rep pay"
-                    value={draft.repPayMode === "per_watt" ? "Fixed $/W" : "Redline"}
-                  />
-                  {adderCatalogue.length > 0 && (
-                    <StatRow label="Adders on top" value={`${onTop} / ${adderCatalogue.length}`} />
-                  )}
-                </dl>
-              </div>
+            {/* Two links, never one. The portal is your dealer login; the apply
+                link is what a homeowner opens from the proposal. One shared
+                field is how a back office ends up in front of a customer. */}
+            <Panel
+              title="Links"
+              description="Only the customer application link ever reaches a proposal. The dealer portal stays inside the CRM."
+            >
+              <TextField
+                label="Dealer portal — where your team runs credit"
+                value={draft.portalUrl}
+                placeholder="https://…"
+                onChange={(v) => set("portalUrl", v)}
+              />
+              <TextField
+                label="Customer application link — the proposal's Qualify button"
+                value={draft.applyUrl}
+                placeholder="https://…"
+                onChange={(v) => set("applyUrl", v)}
+              />
+            </Panel>
 
-              {/* A lender approving nothing produces empty equipment lists on
-                  every deal that selects it. Better to say so here than to let a
-                  rep meet it mid-build. */}
-              {lender.isActive && lender.approvedCount === 0 && (
-                <Caution>
-                  No equipment approved yet — a deal on this lender will show empty lists.{" "}
-                  <Link
-                    href="/portal/settings/solar-equipment"
-                    className="underline underline-offset-2"
-                  >
-                    Tag equipment
-                  </Link>
-                  .
-                </Caution>
-              )}
-              {lender.isActive && liveProducts.length === 0 && (
-                <Caution>
-                  Nothing on the rate sheet — a deal cannot be quoted on this partner until it has a
-                  programme.{" "}
-                  <button
-                    type="button"
-                    className="underline underline-offset-2"
-                    onClick={() => onTabChange("rates")}
-                  >
-                    Add one
-                  </button>
-                  .
-                </Caution>
-              )}
-            </aside>
+            {/* Direct submission. Empty on every partner that has not given
+                you an integration, which is most of them — and a lender left
+                empty here keeps the application link above, unchanged. */}
+            <Panel
+              title="Direct submission (optional)"
+              description="If this partner gave you API access, a rep can send a priced deal straight into their system instead of the customer retyping it. The customer still enters their own SSN and authorises the credit check on the lender's page."
+            >
+              <TextField
+                label="API address"
+                value={draft.apiBaseUrl}
+                placeholder="https://admin.example.com"
+                onChange={(v) => set("apiBaseUrl", v)}
+              />
+              <TextField
+                label="Loan product"
+                value={draft.apiProductSlug}
+                placeholder="solar-installation-financing"
+                onChange={(v) => set("apiProductSlug", v)}
+              />
+              <LenderApiKeyField lenderId={lender.id} masked={lender.apiKeyMasked} />
+            </Panel>
+
+            <Panel
+              title="How to run credit with this partner"
+              description="Rep-facing. Shown on the deal beside this lender."
+            >
+              <Textarea
+                id={`ld-${lender.id}-credit`}
+                aria-label="How to run credit with this partner"
+                rows={4}
+                value={draft.creditInstructions}
+                placeholder="The steps a rep needs — which portal, what to have ready, who to call when it stips."
+                onChange={(e) => set("creditInstructions", e.target.value)}
+              />
+            </Panel>
           </div>
         </TabsContent>
 
         {/* ── PRICING ──────────────────────────────────────────────────── */}
         <TabsContent value="pricing" className="space-y-4">
           {/* TWO COLUMNS ONLY WHEN THERE IS ROOM FOR TWO.
-              This panel shares the window with the Settings rail as well as the
-              lender rail, so at `xl` each half is about 250px — narrow enough
-              that "Min base $/W" wrapped to three lines above a box reading
-              "no fl". The pair of money fields inside is the thing that has to
-              stay side by side; the panels beside it are the ones that can
-              stack. */}
-          <div className="grid items-start gap-4 2xl:grid-cols-2">
+              This used to wait until `2xl` because the panel shared the window
+              with the Settings rail as well as the lender rail, and at `xl` each
+              half came to about 250px — narrow enough that "Min base $/W"
+              wrapped to three lines above a box reading "no fl". Settings gave
+              its column back, so the second half arrives a breakpoint earlier.
+              The pair of money fields inside is the thing that has to stay side
+              by side; the panels beside it are the ones that can stack. */}
+          <div className="grid items-start gap-4 xl:grid-cols-2">
             <div className="space-y-4">
               {/* THE TWO ENDS OF THE SAME BAND, SIDE BY SIDE.
                   The ceiling is about the CUSTOMER'S number and the floor is

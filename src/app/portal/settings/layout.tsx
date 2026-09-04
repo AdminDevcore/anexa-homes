@@ -1,43 +1,22 @@
 import { redirect } from "next/navigation";
 import { requireUser } from "@/server/auth/session";
-import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
-import {
-  settingsInventoryCached,
-  workspaceSetupGapsCached,
-} from "@/server/modules/settings/cached";
-import { SettingsChrome } from "@/components/portal/settings-nav";
 
 /**
- * Settings is one screen with a rail, not twenty pages with a Back link.
+ * Settings has no chrome of its own — the app sidebar becomes its menu.
  *
- * The guard lives here as well as on every page under it, deliberately: a
- * layout is not a security boundary in Next — a page renders even when its
- * layout redirects — so the pages keep their own `can()` check. What this one
- * buys is that the rail is never built for somebody who cannot read Settings.
+ * It used to build a second navigation rail here, beside the one the portal
+ * already had, and fetch the counts to decorate it with. Both moved: the menu to
+ * the sidebar, and its counts to /api/settings/inventory, which is the only
+ * place that can keep them current while you are editing the very things being
+ * counted.
+ *
+ * What is left is the guard, and it lives here as well as on every page under it
+ * deliberately: a layout is not a security boundary in Next — a page renders even
+ * when its layout redirects — so the pages keep their own `can()` check.
  */
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   if (!can(user, "read", "Settings")) redirect("/portal/dashboard");
-  const vertical = await getActiveVertical(user);
-
-  // Same split the hub makes: everyone who can read Settings sees the counts,
-  // because they say nothing opening the page would not, but only somebody who
-  // can act on a gap is shown one.
-  const [inventory, gaps] = await Promise.all([
-    settingsInventoryCached(user.companyId, vertical),
-    can(user, "update", "Settings")
-      ? workspaceSetupGapsCached(user.companyId, vertical)
-      : Promise.resolve([]),
-  ]);
-
-  return (
-    <SettingsChrome
-      vertical={vertical}
-      inventory={inventory}
-      gapKeys={gaps.map((g) => g.key)}
-    >
-      {children}
-    </SettingsChrome>
-  );
+  return <>{children}</>;
 }
