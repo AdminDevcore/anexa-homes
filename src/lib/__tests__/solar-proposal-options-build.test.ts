@@ -61,6 +61,7 @@ const base = {
   quoted: {
     product: "loan" as const,
     lenderProductId: "p-quoted",
+    lenderId: "L-quoted",
     grossPpwCents: 350,
     dealerFeePct: 18,
   },
@@ -167,6 +168,49 @@ describe("the menu stays a choice rather than a spreadsheet", () => {
       programmes: [loanProgramme({ id: "p-quoted", lenderId: "L1", lenderName: "GoodLeap" })],
     });
     expect(out.map((o) => o.key)).toEqual(["cash"]);
+  });
+
+  it("never offers a SECOND programme from the partner the deal is already quoted by", () => {
+    // A company running one partner with two rows — a solar loan and a battery
+    // loan. The quoted row is skipped by id; the sibling used to walk straight
+    // past the one-per-lender rule and print as a second offer from Amos.
+    const out = proposalAlternatives({
+      ...base,
+      quoted: { ...base.quoted, lenderProductId: "p-solar", lenderId: "L-amos" },
+      programmes: [
+        loanProgramme({ id: "p-solar", lenderId: "L-amos", lenderName: "Amos Capital Fund" }),
+        loanProgramme({ id: "p-batt", lenderId: "L-amos", lenderName: "Amos Capital Fund", rank: 1 }),
+        loanProgramme({ id: "p-other", lenderId: "L2", lenderName: "Sunergy" }),
+      ],
+    });
+    expect(out.map((o) => o.key)).toEqual(["cash", "loan:p-other"]);
+  });
+
+  it("still offers a lender's loan under a CASH quote, which names no partner", () => {
+    const out = proposalAlternatives({
+      ...base,
+      quoted: { product: "cash", lenderProductId: null, lenderId: null, grossPpwCents: 287, dealerFeePct: 0 },
+      programmes: [loanProgramme({ id: "p-a", lenderId: "L1", lenderName: "GoodLeap" })],
+    });
+    expect(out.map((o) => o.key)).toEqual(["loan:p-a"]);
+  });
+});
+
+describe("the storage line is drawn in both directions", () => {
+  it("keeps battery-only paper off a deal that has an array on it", () => {
+    const out = proposalAlternatives({
+      ...base,
+      programmes: [
+        loanProgramme({
+          id: "p-batt",
+          lenderId: "L1",
+          lenderName: "Amos Capital Fund",
+          financesStorageOnly: true,
+        }),
+        loanProgramme({ id: "p-solar", lenderId: "L2", lenderName: "Sunergy" }),
+      ],
+    });
+    expect(out.map((o) => o.key)).toEqual(["cash", "loan:p-solar"]);
   });
 });
 

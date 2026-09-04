@@ -665,6 +665,11 @@ export async function generateProposalVersion(
     quoted: {
       product: finance.product,
       lenderProductId: finance.lenderProductId,
+      // The partner the quoted option actually names — `dealLender`, not
+      // `design.lenderId`, because a cash deal can still carry a lender on the
+      // design and the menu must not suppress that lender's loan underneath a
+      // cash quote that never mentioned them.
+      lenderId: dealLender?.id ?? null,
       grossPpwCents: finance.grossPpwCents,
       dealerFeePct: finance.dealerFeePct,
     },

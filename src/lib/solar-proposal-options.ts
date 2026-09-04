@@ -105,6 +105,13 @@ export type AlternativesInput = {
     product: FinanceProduct;
     /** The catalogue row this deal was quoted from, when it was quoted from one. */
     lenderProductId: string | null;
+    /**
+     * The PARTNER that row belongs to, so the one-programme-per-lender rule
+     * below can count the quoted option as that lender's turn. Null when the
+     * quoted option names no partner — a cash deal — which is the one case
+     * where a lender's own loan still belongs on the menu underneath it.
+     */
+    lenderId: string | null;
     /** The deal's sticker per watt, cents. Carries the lender's fee on a loan. */
     grossPpwCents: number;
     dealerFeePct: number;
@@ -170,8 +177,18 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
    * alternative derived from zero — which is the same $0 menu the per-watt
    * ladder was already producing, arrived at more slowly.
    */
+  /**
+   * Whether this deal has an array on it, decided from what the deal SELLS.
+   *
+   * Separate from `storage` below, which additionally requires a per-battery
+   * price and therefore answers a pricing question, not an eligibility one. A
+   * storage deal missing its price must still be offered storage paper — the
+   * old `!storage` test handed it the whole rate sheet instead.
+   */
+  const storageDeal = input.systemType === "storage";
+
   const storage =
-    input.systemType === "storage" &&
+    storageDeal &&
     input.storage != null &&
     input.storage.batteryQty > 0 &&
     input.storage.stickerPricePerBatteryCents > 0
@@ -215,10 +232,24 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
   const eligible = input.programmes
     .filter((p) => p.id !== input.quoted.lenderProductId)
     .filter((p) => lenderIsApproved(p.lender.id, input.approvedLenderIds))
-    // On a job with no array, only paper written to fund one. The same line the
-    // builder's programme picker draws — a menu that offered the rest would be
-    // offering a household a decline.
-    .filter((p) => !storage || (p.product === "loan" && p.financesStorageOnly === true))
+    /**
+     * THE STORAGE LINE, DRAWN IN BOTH DIRECTIONS.
+     *
+     * On a job with no array, only paper written to fund one — the same line
+     * the builder's programme picker draws, because a menu that offered the
+     * rest would be offering a household a decline.
+     *
+     * And the converse, which this filter used to let through: a programme a
+     * lender publishes for BATTERIES ONLY is not an alternative way to pay for
+     * an array. It priced a battery-term loan against the whole system and put
+     * the result on the strip as a second offer — "Amos · 20 Year Battery,
+     * $292/mo" beside a $70,180 solar job the programme will not fund.
+     */
+    .filter((p) =>
+      storageDeal
+        ? p.product === "loan" && p.financesStorageOnly === true
+        : p.financesStorageOnly !== true
+    )
     .sort(
       (a, b) =>
         a.lender.rank - b.lender.rank ||
@@ -226,11 +257,23 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         a.rank - b.rank
     );
 
-  // At most ONE programme per lender. A homeowner comparing four of GoodLeap's
-  // terms against nothing else is comparing paperwork, not offers; the point of
-  // the menu is breadth across partners. The rate sheet's own ranking decides
-  // which of a lender's rows leads, which is what `rank` is for.
-  const usedLenders = new Set<string>();
+  /**
+   * At most ONE programme per lender. A homeowner comparing four of GoodLeap's
+   * terms against nothing else is comparing paperwork, not offers; the point of
+   * the menu is breadth across partners. The rate sheet's own ranking decides
+   * which of a lender's rows leads, which is what `rank` is for.
+   *
+   * SEEDED WITH THE QUOTED OPTION'S OWN LENDER, and this is the half that was
+   * missing: skipping the catalogue ROW the deal was quoted from is a narrower
+   * rule than one row per PARTNER, and the gap between them is exactly one
+   * extra row from the bank the customer is already being quoted by. A company
+   * running a single partner with two programmes got both of them on the strip
+   * — the quoted one badged, the other sitting under it looking like a second
+   * offer — which is what the rule above exists to prevent.
+   */
+  const usedLenders = new Set<string>(
+    input.quoted.lenderId ? [input.quoted.lenderId] : []
+  );
 
   for (const p of eligible) {
     if (out.length >= room) break;

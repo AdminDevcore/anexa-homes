@@ -175,7 +175,7 @@ const PROGRAMME = (over: Partial<CatalogueProgramme> = {}): CatalogueProgramme =
 
 const alts = (programmes: CatalogueProgramme[]) =>
   proposalAlternatives({
-    quoted: { product: "cash", lenderProductId: null, grossPpwCents: 0, dealerFeePct: 0 },
+    quoted: { product: "cash", lenderProductId: null, lenderId: null, grossPpwCents: 0, dealerFeePct: 0 },
     programmes,
     approvedLenderIds: null,
     design: { systemSizeKwDc: 0 },
