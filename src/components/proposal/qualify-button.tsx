@@ -236,7 +236,13 @@ function QualifySheet({
       aria-modal="true"
       aria-labelledby={titleId}
     >
-      <div className="w-full max-w-lg rounded-t-2xl bg-white p-6 text-neutral-900 shadow-2xl sm:rounded-2xl sm:p-8">
+      {/* THE PANEL SCROLLS, not the overlay. A centred flex child taller than
+          its container overflows ABOVE the scroll origin, and that part of it
+          cannot be reached by scrolling at all — on a phone in a driveway,
+          which is where this is read, the household would see the occupancy
+          question and never the list of what is being sent. Capping the panel
+          and giving it its own scrollbar is what keeps the top reachable. */}
+      <div className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 text-neutral-900 shadow-2xl sm:max-h-[calc(100dvh-3rem)] sm:rounded-2xl sm:p-8">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-400">
           Start your application
         </p>
