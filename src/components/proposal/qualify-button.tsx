@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { ExternalLink, Loader2, ShieldAlert, Check } from "lucide-react";
 import { qualifyOnProposalAction } from "@/server/modules/solar/proposal-qualify-action";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
@@ -220,6 +221,19 @@ function QualifySheet({
 }) {
   const [ownerOccupied, setOwnerOccupied] = React.useState<boolean | null>(null);
   const titleId = React.useId();
+  /**
+   * THE SHEET LEAVES THE DOCUMENT, and this is not a preference.
+   *
+   * `Chapter` carries `@container`, and a `container-type` other than `normal`
+   * makes that element the containing block for every fixed-position
+   * descendant — so `fixed inset-0` resolved to the chapter rather than the
+   * viewport, and the chapter's `overflow-hidden` then cut the top off. The
+   * household saw the occupancy question and the Continue button and never the
+   * list of what was about to be sent to a bank.
+   *
+   * Safe to reach for `document` unguarded: this component is only ever
+   * rendered from a click handler, so it never runs during the server render.
+   */
 
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -229,7 +243,7 @@ function QualifySheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onCancel]);
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-end justify-center overflow-y-auto bg-neutral-900/60 p-0 backdrop-blur-sm sm:items-center sm:p-6 print:hidden"
       role="dialog"
@@ -295,7 +309,8 @@ function QualifySheet({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
