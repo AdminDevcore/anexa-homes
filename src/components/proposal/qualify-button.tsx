@@ -2,18 +2,24 @@
 
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, Loader2, ShieldAlert, Check } from "lucide-react";
+import { ChevronDown, ExternalLink, Loader2, ShieldAlert, Check } from "lucide-react";
 import { qualifyOnProposalAction } from "@/server/modules/solar/proposal-qualify-action";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
 
 /**
  * QUALIFY — the one thing the document asks the household to do.
  *
- * It has two behaviours and looks the same in both, which is the point. On a
- * partner with no integration it is what it has always been: a link to their
- * own application. On a partner that accepts applications over its API it
- * starts the application with everything this deal already knows, and lands
- * the household on the lender's page with the form filled in.
+ * THERE ARE TWO WAYS TO RUN CREDIT WITH A PARTNER, and most partners have
+ * both: a public application link, and an API that takes the deal and returns
+ * a pre-filled application. They reach the same underwriter. Making the API
+ * silently REPLACE the link — which is what this did at first — left the other
+ * road with no door onto it, and a rep who wanted the plain form had nowhere
+ * to go.
+ *
+ * So one button with a chevron. QUALIFY runs the automatic route, and the
+ * chevron opens the other one. The chevron appears only when the partner
+ * genuinely has both: a lender on a link alone gets exactly the button it
+ * always had, and a lender with an API and no link gets no menu to open.
  *
  * The capability used to be a "Send to <lender>" card on the rep's Financing
  * step. It is here now because a credit application is the household's own act
@@ -41,6 +47,15 @@ type Props = {
   offer: QualifyOffer | null;
   /** The portal preview and the PDF render. Nothing here may act. */
   previewMode: boolean;
+  /**
+   * Told when the automatic route has failed and the link has taken over.
+   *
+   * The CAPTION lives outside this component — it spans the whole card — and a
+   * caption describing a button that has since changed behaviour is the exact
+   * defect the preview shipped with once already. So the fact is raised to
+   * whoever owns both halves rather than kept in here.
+   */
+  onFailed?: () => void;
 };
 
 /** True when tapping the button starts a real application. */
@@ -56,15 +71,45 @@ export function hasQualifyAction(applyUrl: string | null, offer: QualifyOffer | 
 const BUTTON_CLASS =
   "inline-flex w-full items-center justify-center gap-2 rounded-xl border-2 border-neutral-900 px-8 py-4 font-display text-lg font-bold tracking-[0.12em] text-neutral-900 transition hover:bg-neutral-900 hover:text-white sm:w-auto";
 
-export function QualifyAction({ token, applyUrl, lender, offer, previewMode }: Props) {
+/** The same button cut in two, when there is a second road to offer. */
+const SEGMENT =
+  "inline-flex items-center justify-center gap-2 border-2 border-neutral-900 font-display font-bold tracking-[0.12em] text-neutral-900 transition hover:bg-neutral-900 hover:text-white";
+const SEGMENT_MAIN = `${SEGMENT} flex-1 rounded-l-xl border-r-0 px-8 py-4 text-lg sm:flex-none`;
+const SEGMENT_CHEVRON = `${SEGMENT} rounded-r-xl px-3.5 py-4`;
+
+export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onFailed }: Props) {
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   /** Set once a submission has failed: the link takes over from here. */
   const [failure, setFailure] = React.useState<string | null>(null);
   /** The lender emailed the link instead of handing it back. */
   const [emailed, setEmailed] = React.useState<string | null>(null);
+  /** The other road, open. */
+  const [menu, setMenu] = React.useState(false);
 
   const submits = qualifySubmits(offer, previewMode) && !failure;
+  /**
+   * Both roads exist, so the chevron has something to offer. Not a styling
+   * choice: a chevron on a partner with only one route is a control that opens
+   * a menu of one, and a household taps it expecting an alternative.
+   */
+  const bothRoutes = submits && !!applyUrl;
+
+  React.useEffect(() => {
+    if (!menu) return;
+    function away(e: MouseEvent) {
+      if (!(e.target as HTMLElement).closest?.("[data-qualify-menu]")) setMenu(false);
+    }
+    function esc(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenu(false);
+    }
+    document.addEventListener("mousedown", away);
+    window.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [menu]);
 
   async function start(ownerOccupied: boolean) {
     setBusy(true);
@@ -73,6 +118,7 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode }: P
       setBusy(false);
       setOpen(false);
       setFailure(res.error);
+      onFailed?.();
       return;
     }
     if (res.customerUrl) {
@@ -159,10 +205,81 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode }: P
   }
 
   return (
-    <div className="flex items-center bg-white p-6 print:hidden">
-      <button type="button" onClick={() => setOpen(true)} className={BUTTON_CLASS}>
-        QUALIFY
-      </button>
+    <div className="bg-white p-6 print:hidden" data-qualify-menu>
+      <div className="flex w-full sm:w-auto">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className={bothRoutes ? SEGMENT_MAIN : BUTTON_CLASS}
+        >
+          QUALIFY
+        </button>
+        {bothRoutes && (
+          <button
+            type="button"
+            onClick={() => setMenu((m) => !m)}
+            aria-expanded={menu}
+            aria-haspopup="true"
+            aria-label="Other ways to apply"
+            className={SEGMENT_CHEVRON}
+          >
+            <ChevronDown className={menu ? "size-5 rotate-180 transition" : "size-5 transition"} />
+          </button>
+        )}
+      </div>
+
+      {/*
+        THE MENU EXPANDS THE CARD rather than floating over it. `Chapter` is
+        `overflow-hidden`, so an absolutely-positioned panel would be clipped
+        at whichever edge it crossed — the same containment that sent the
+        confirm sheet through a portal. A panel that is simply in the flow
+        cannot be clipped by anything, and it needs no measuring, no
+        reposition-on-scroll and no second portal.
+      */}
+      {menu && bothRoutes && (
+        <div
+          role="menu"
+          className="mt-3 w-full overflow-hidden rounded-xl border border-neutral-300 sm:w-[22rem]"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenu(false);
+              setOpen(true);
+            }}
+            className="flex w-full items-start gap-2.5 border-b border-neutral-200 bg-neutral-50 p-3.5 text-left transition hover:bg-neutral-100"
+          >
+            <Check className="mt-0.5 size-4 shrink-0 text-neutral-900" />
+            <span>
+              <span className="block text-sm font-semibold text-neutral-900">Start it here</span>
+              <span className="block text-xs leading-relaxed text-neutral-500">
+                We fill in what we already know, then hand you to{" "}
+                {lender ?? "the lender"} to finish.
+              </span>
+            </span>
+          </button>
+          <a
+            role="menuitem"
+            href={applyUrl ?? undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMenu(false)}
+            className="flex w-full items-start gap-2.5 p-3.5 text-left transition hover:bg-neutral-50"
+          >
+            <ExternalLink className="mt-0.5 size-4 shrink-0 text-neutral-400" />
+            <span>
+              <span className="block text-sm font-semibold text-neutral-900">
+                Open {lender ?? "the lender"}&rsquo;s own application
+              </span>
+              <span className="block text-xs leading-relaxed text-neutral-500">
+                Their blank form. You type everything in yourself.
+              </span>
+            </span>
+          </a>
+        </div>
+      )}
+
       {open && offer?.state === "ready" && (
         <QualifySheet
           offer={offer}
@@ -184,15 +301,17 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode }: P
  * allowed to disappear with a picker, so on those sheets it stands alone.
  */
 export function QualifyCallout(props: Props) {
+  const [failed, setFailed] = React.useState(false);
   if (!hasQualifyAction(props.applyUrl, props.offer)) return null;
   return (
     <div className="overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5 print:hidden">
-      <QualifyAction {...props} />
+      <QualifyAction {...props} onFailed={() => setFailed(true)} />
       <QualifyNote
         applyUrl={props.applyUrl}
         lender={props.lender}
         offer={props.offer}
         previewMode={props.previewMode}
+        failed={failed}
       />
     </div>
   );
@@ -360,11 +479,14 @@ export function QualifyNote({
   lender,
   offer,
   previewMode,
+  failed = false,
 }: {
   applyUrl: string | null;
   lender: string | null;
   offer: QualifyOffer | null;
   previewMode: boolean;
+  /** The automatic route failed and the plain link has taken the button over. */
+  failed?: boolean;
 }) {
   if (offer?.state === "blocked") {
     return (
@@ -375,13 +497,14 @@ export function QualifyNote({
     );
   }
 
-  if (qualifySubmits(offer, previewMode)) {
+  if (qualifySubmits(offer, previewMode) && !failed) {
     const name = offer?.state === "ready" ? offer.lenderName : (lender ?? "the lender");
     return (
       <p className="border-t border-neutral-200/70 bg-neutral-50 px-6 py-3 text-xs text-neutral-500 print:hidden">
         Starts your application with {name} using the details above, then opens their own secure
         page to finish it. Your Social Security number and the credit authorisation are entered
         there, never here.
+        {applyUrl ? " The arrow beside it opens their blank form instead." : ""}
       </p>
     );
   }

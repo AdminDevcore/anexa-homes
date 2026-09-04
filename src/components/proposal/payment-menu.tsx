@@ -76,6 +76,14 @@ export function PaymentMenu({
   const qualify = selected.quoted ? qualifyOffer : null;
   const canAct = hasQualifyAction(f.applyUrl, qualify);
 
+  /**
+   * Whether the automatic route has fallen over and the plain link has taken
+   * the button. Held HERE because the button and the caption describing it are
+   * two different cells of this card, and a caption that keeps promising an
+   * automatic submission after one failed is a document lying about itself.
+   */
+  const [qualifyFailed, setQualifyFailed] = React.useState(false);
+
   return (
     <div className="mt-8 overflow-hidden rounded-2xl bg-white text-neutral-900 shadow-xl ring-1 ring-black/5 print:shadow-none print:ring-neutral-300">
       {/* Two columns, or three when there is somewhere to send them. Reserving
@@ -168,6 +176,7 @@ export function PaymentMenu({
             lender={f.lender}
             offer={qualify}
             previewMode={previewMode}
+            onFailed={() => setQualifyFailed(true)}
           />
         )}
       </div>
@@ -178,6 +187,7 @@ export function PaymentMenu({
           lender={f.lender}
           offer={qualify}
           previewMode={previewMode}
+          failed={qualifyFailed}
         />
       )}
     </div>
