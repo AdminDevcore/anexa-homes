@@ -125,7 +125,18 @@ export type LenderSubmitInput = {
    * them and nobody else should be making it on their behalf.
    */
   ownerOccupied: boolean;
-  /** `in_person` hands the link back; `customer` emails it and returns nothing. */
+  /**
+   * Whether the response ALSO carries the completion link.
+   *
+   * BOTH VALUES EMAIL THE CUSTOMER. The lender's invitation always emails, and
+   * texts too when a phone number is on file — there is no per-channel switch
+   * and no way to suppress delivery. `in_person` only adds the link to the
+   * response so a rep can hand over their own device.
+   *
+   * This matters for testing: there is no such thing as a silent submission.
+   * A smoke test reaches whoever is on the lead, so put your own email AND
+   * your own phone on it first.
+   */
   delivery?: "in_person" | "customer";
   /** Used only when the deal has no assigned rep of its own. */
   fallbackRepName: string;

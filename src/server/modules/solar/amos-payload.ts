@@ -52,8 +52,16 @@ export type AmosSubmitOptions = {
   /** The rep's answer. Anexa does not store this, so it is asked at send time. */
   ownerOccupied: boolean
   /**
-   * `in_person` (default) returns the link so the rep can hand over their
-   * device. `customer` sends it to the customer's own email and phone only.
+   * Whether the response ALSO carries the completion link.
+   *
+   * BOTH VALUES EMAIL THE CUSTOMER. The lender's invitation always emails, and
+   * texts too when a phone number is on file — there is no per-channel switch
+   * and no way to suppress delivery. `in_person` only adds the link to the
+   * response so a rep can hand over their own device.
+   *
+   * This matters for testing: there is no such thing as a silent submission.
+   * A smoke test reaches whoever is on the lead, so put your own email AND
+   * your own phone on it first.
    */
   delivery?: 'in_person' | 'customer'
 }
