@@ -46,7 +46,6 @@ export default async function SolarLendersPage({
     orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
     select: {
       id: true, name: true, isActive: true, rank: true, notes: true, repPayMode: true,
-      batteryPayMode: true,
       portalUrl: true, applyUrl: true, creditInstructions: true,
       // Direct submission. The KEY is selected only to learn whether one is
       // set and to show its last four — the plaintext never leaves the server,
@@ -155,7 +154,6 @@ export default async function SolarLendersPage({
           apiKeyMasked: maskTail(decryptField(l.apiKeyEncrypted)),
           creditInstructions: l.creditInstructions,
           repPayMode: l.repPayMode,
-          batteryPayMode: l.batteryPayMode,
           maxFinalPpwCents: l.maxFinalPpwCents,
           finalPpwMode: l.finalPpwMode,
           minBasePpwCents: l.minBasePpwCents,

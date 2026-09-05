@@ -13,7 +13,7 @@ import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
-import { dealRebateTotalCents } from "./storage-queries";
+import { dealRebateTotalCents } from "./storage";
 import { priceStorageStored } from "@/lib/solar-money";
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -1173,9 +1173,6 @@ const lenderSchema = z.object({
    * lines carry a snapshot of the terms they were sold on.
    */
   repPayMode: z.enum(["redline", "per_watt"]).optional(),
-  // The storage twin of the field above. Its own setting because a job with no
-  // watts cannot be reached by a per-watt one -- see SolarBatteryPayMode.
-  batteryPayMode: z.enum(["redline", "flat"]).optional(),
   /**
    * The most this partner's paper ever puts in front of a homeowner per watt,
    * cents, dealer fee and adders included. Null clears the ceiling.
