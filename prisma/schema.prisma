@@ -517,6 +517,12 @@ model User {
   // exactly its minimum on every storage deal. Null = no line is written at
   // all, exactly as a null redline above means.
   solarRedlinePerBatteryCents Int?
+  // The flat amount, in cents, this rep earns per installed battery on a
+  // storage-only job through a lender set to flat battery pay. The per-battery
+  // twin of solarPerWattMills below, and in CENTS rather than mills because a
+  // battery is a $1,500 unit, not a $0.405 one -- nobody needs a tenth of a
+  // cent of it. Null = no line is written at all, as everywhere else here.
+  solarPerBatteryFlatCents    Int?
   // Fixed rate per installed watt on a lender set to per_watt pay, and on every
   // lease/PPA (which have no system price to redline against). In MILLS --
   // tenths of a cent, 400 = $0.40/W -- because $0.405/W is a real rate and cents
@@ -1906,7 +1912,10 @@ model Commission {
   // on every roofing line. Watts and price are deliberately NOT snapshotted -- a
   // design that grows between contract and install should move the number,
   // exactly as job costs move a roofing pool.
-  // "redline" | "per_watt" -- which basis produced this line.
+  // "redline" | "per_watt" | "battery_redline" | "battery_flat" -- which basis
+  // produced this line. The two battery bases only ever appear on a job selling
+  // storage on its own; a battery riding along on an array is paid by the watt
+  // bases, exactly as it always was.
   solarBasis                  String?
   // The rep's redline at generation, cents per watt.
   solarRedlineCentsPerWatt    Int?
@@ -1914,6 +1923,9 @@ model Commission {
   // for the same reason as the two beside it: raising a rep's redline must
   // never re-price a deal they already sold.
   solarRedlinePerBatteryCents Int?
+  // The rep's flat per-battery rate at generation, cents. Snapshotted for the
+  // same reason as the three beside it.
+  solarPerBatteryFlatCents    Int?
   // The rep's fixed rate at generation, mills per watt.
   solarMillsPerWatt           Int?
   status                      CommissionStatus    @default(pending)
@@ -3298,6 +3310,25 @@ enum SolarRepPayMode {
   per_watt
 }
 
+/// How reps are paid on a job that sells STORAGE ONLY.
+///
+/// A separate enum from SolarRepPayMode and not a third value on it, because a
+/// lender holds both opinions at once and they are routinely different: Amos
+/// pays a fixed $/W on an array while pricing storage as a flat $10,000 a
+/// battery. Folding them together would force one answer to stand for both.
+///
+/// The reason this exists at all: every value of SolarRepPayMode is denominated
+/// in WATTS, and a storage job has none. Before this column a battery-only deal
+/// on a per-watt partner produced no commission line whatsoever -- the resolver
+/// refused it, correctly, because nothing in the data could say what the rep
+/// was owed. This is what says it.
+enum SolarBatteryPayMode {
+  /// The rep keeps everything the deal holds above their own net $/battery.
+  redline
+  /// The rep earns a flat amount per installed battery, whatever it prices at.
+  flat
+}
+
 /// What a deal is SELLING.
 ///
 /// `pv` and `pv_storage` take the IDENTICAL code path everywhere. The
@@ -3383,15 +3414,22 @@ model SolarLender {
   /// Isolated per vertical: this row belongs to exactly one workspace.
   vertical  Vertical @default(solar)
 
-  name       String
+  name           String
   /// Retired rather than deleted, for the same reason equipment is: designs
   /// point at it, and last year's deals have to keep explaining themselves.
-  isActive   Boolean         @default(true)
+  isActive       Boolean             @default(true)
   /// How reps are paid on this lender's deals -- see SolarRepPayMode.
-  repPayMode SolarRepPayMode @default(redline)
+  repPayMode     SolarRepPayMode     @default(redline)
+  /// How reps are paid on this lender's BATTERY-ONLY deals -- see
+  /// SolarBatteryPayMode. Deliberately its own column: the field above is
+  /// measured in watts and a storage job has none, so it cannot reach one.
+  ///
+  /// `redline` is the default and is what the resolver already assumed of every
+  /// lender it could answer for, so no existing lender changes behaviour.
+  batteryPayMode SolarBatteryPayMode @default(redline)
   /// Display order, so the lenders you use most lead.
-  rank       Int             @default(0)
-  notes      String?
+  rank           Int                 @default(0)
+  notes          String?
 
   /// The most this partner's paper ever puts in front of a homeowner, per
   /// installed watt, in cents -- DEALER FEE AND ADDERS INCLUDED. 550 = $5.50/W.
@@ -3696,7 +3734,7 @@ model SolarEquipmentLender {
   lender      SolarLender    @relation(fields: [lenderId], references: [id], onDelete: Cascade)
   createdAt   DateTime       @default(now())
 
-  /// ── What this partner calls the same item ─────────────────────────
+  /// ── What this partner calls the same item ─────────────────────────────
   ///
   /// Our catalogue names a SKU; a lender's approved-vendor list names a
   /// product family. Both are right and they are rarely the same string:
@@ -3705,7 +3743,7 @@ model SolarEquipmentLender {
   ///   Amos   Qcells | Q.PEAK DUO BLK ML G10.C+
   ///
   /// Ours carries the wattage because the designer sizes an array from it, so
-  /// renaming the catalogue to match a partner is not available to us -- it
+  /// renaming the catalogue to match a partner is not available to us — it
   /// would throw the wattage away, and the second partner would want a third
   /// spelling anyway. The partner's own words therefore live HERE, on the row
   /// that already says this partner approves this item.

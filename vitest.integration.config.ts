@@ -46,5 +46,17 @@ export default defineConfig({
     // Postgres schema would race on fixtures.
     fileParallelism: false,
     testTimeout: 30_000,
+    /**
+     * Fixtures reset with `TRUNCATE "companies" CASCADE`, and the cascade now
+     * walks a foreign-key graph 150-odd migrations deep. On this schema that
+     * single statement measures ~9s in raw psql — before any Prisma client work
+     * — against a 10s default hook budget, so every DB-backed suite failed in
+     * `beforeAll` with a timeout that looked like a broken test and was not.
+     *
+     * Raised rather than chased: the cost is the size of the schema, and the
+     * alternative (truncating a hand-maintained list of tables) is a list that
+     * silently stops covering whatever table gets added next.
+     */
+    hookTimeout: 60_000,
   },
 });

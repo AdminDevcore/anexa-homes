@@ -39,6 +39,11 @@ const REDLINE_CENTS = 200;
 const PER_WATT_MILLS = 400;
 const KW = 10;
 
+/** And the per-battery pair, on a 2-battery storage job. */
+const BATT_REDLINE_CENTS = 9_000_00;
+const BATT_FLAT_CENTS = 1_500_00;
+const BATTERIES = 2;
+
 async function resetFixtures() {
   await raw.$executeRawUnsafe('TRUNCATE TABLE "companies" CASCADE');
   const company = await raw.company.create({
@@ -51,6 +56,7 @@ async function resetFixtures() {
       companyId, email: `rep-${process.pid}@test.local`, passwordHash: "x",
       firstName: "Solar", lastName: "Rep", role: "sales_rep", verticals: ["roofing", "solar"],
       solarRedlineCentsPerWatt: REDLINE_CENTS, solarPerWattMills: PER_WATT_MILLS,
+      solarRedlinePerBatteryCents: BATT_REDLINE_CENTS, solarPerBatteryFlatCents: BATT_FLAT_CENTS,
       // Roofing terms too: a rep who works both sides must not have one side's
       // model reach the other's deal.
       commissionSplitPct: 50,
@@ -66,8 +72,14 @@ async function resetFixtures() {
   managerId = manager.id;
 
   const [redlineLender, fixedLender] = await Promise.all([
-    raw.solarLender.create({ data: { companyId, name: "Redline Bank", repPayMode: "redline" } }),
-    raw.solarLender.create({ data: { companyId, name: "Amos Capital Funding", repPayMode: "per_watt" } }),
+    raw.solarLender.create({
+      data: { companyId, name: "Redline Bank", repPayMode: "redline", batteryPayMode: "redline" },
+    }),
+    // The real Amos's shape: a flat rate per watt on an array, and a flat
+    // amount per battery on a job that has no watts to rate.
+    raw.solarLender.create({
+      data: { companyId, name: "Amos Capital Funding", repPayMode: "per_watt", batteryPayMode: "flat" },
+    }),
   ]);
   redlineLenderId = redlineLender.id;
   fixedPayLenderId = fixedLender.id;
@@ -108,6 +120,47 @@ async function makeSolarDeal(opts: {
   return project.id;
 }
 
+/**
+ * A priced BATTERY-ONLY deal. No array, and never will be one — which is the
+ * whole reason the per-battery bases exist.
+ */
+async function makeStorageDeal(opts: {
+  tag: string;
+  stickerPerBatteryCents: number;
+  dealerFeePct: number;
+  lenderId: string | null;
+  product?: "cash" | "loan" | "lease" | "ppa";
+  batteryQty?: number;
+}): Promise<string> {
+  const qty = opts.batteryQty ?? BATTERIES;
+  const lead = await raw.lead.create({
+    data: { companyId, vertical: "solar", firstName: opts.tag, lastName: "Storage", assignedRepId: repId },
+  });
+  await raw.solarDesign.create({
+    data: {
+      companyId, leadId: lead.id, systemType: "storage",
+      // Zero, and it has to be: a storage job with watts on it would not prove
+      // the per-battery path was taken.
+      systemSizeKwDc: 0,
+      batteryQty: qty, lenderId: opts.lenderId,
+    },
+  });
+  await raw.solarFinance.create({
+    data: {
+      companyId, leadId: lead.id, product: opts.product ?? "loan",
+      grossPpwCents: 0,
+      stickerPricePerBatteryCents: opts.stickerPerBatteryCents,
+      dealerFeePct: opts.dealerFeePct,
+      adderTotalCents: 0,
+      contractPriceCents: opts.stickerPerBatteryCents * qty,
+    },
+  });
+  const project = await raw.project.create({
+    data: { companyId, vertical: "solar", leadId: lead.id, projectNumber: `${opts.tag}-1`, contractValue: 0 },
+  });
+  return project.id;
+}
+
 /** The engine runs unscoped, the way a payroll cron does: no workspace context. */
 function computeFor(projectId: string) {
   return runUnscoped("test: payroll runs company-wide", () =>
@@ -118,7 +171,11 @@ function computeFor(projectId: string) {
 const repLine = (projectId: string) =>
   raw.commission.findFirst({
     where: { projectId, userId: repId, overrideId: null },
-    select: { amount: true, label: true, baseAmount: true, solarBasis: true, solarRedlineCentsPerWatt: true, solarMillsPerWatt: true, vertical: true },
+    select: {
+      amount: true, label: true, baseAmount: true, solarBasis: true, vertical: true,
+      solarRedlineCentsPerWatt: true, solarMillsPerWatt: true,
+      solarRedlinePerBatteryCents: true, solarPerBatteryFlatCents: true,
+    },
   });
 
 beforeAll(resetFixtures);
@@ -318,5 +375,120 @@ describe("the roofing path is untouched", () => {
     expect(line.label).toContain("Deal split");
     expect(line.splitPct).toBe(50);
     expect(line.solarBasis).toBeNull();
+  });
+});
+
+/**
+ * Battery-only jobs — the deals that paid NOBODY.
+ *
+ * Every basis above is denominated in watts and a storage job has none, so
+ * before the lender carried a `batteryPayMode` one of two things happened: on a
+ * per-watt partner the resolver refused the deal (correctly — nothing in the
+ * data could say what the rep was owed), and on a redline partner the rep's
+ * per-battery column answered, except that no screen could ever write to it and
+ * it was null on every row. Either way: no commission line, silently.
+ */
+describe("battery-only jobs", () => {
+  it("pays the flat per-battery rate on a lender set to flat battery pay", async () => {
+    // Amos: flat $/W on an array, flat $/battery here. The price is not read.
+    const p = await makeStorageDeal({
+      tag: "B1", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
+    });
+    expect(await computeFor(p)).toBe(1);
+
+    const line = await repLine(p);
+    expect(line?.solarBasis).toBe("battery_flat");
+    expect(line?.amount).toBe(BATT_FLAT_CENTS * BATTERIES); // $3,000
+    expect(line?.label).toContain("Solar battery flat");
+    expect(line?.solarPerBatteryFlatCents).toBe(BATT_FLAT_CENTS);
+    expect(line?.vertical).toBe("solar");
+  });
+
+  it("the flat rate does not move when the job is priced up", async () => {
+    const cheap = await makeStorageDeal({
+      tag: "B2", stickerPerBatteryCents: 8_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
+    });
+    const dear = await makeStorageDeal({
+      tag: "B3", stickerPerBatteryCents: 20_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
+    });
+    await computeFor(cheap);
+    await computeFor(dear);
+    expect((await repLine(cheap))?.amount).toBe((await repLine(dear))?.amount);
+  });
+
+  it("pays the overage above the per-battery redline on a redline lender", async () => {
+    // $10,000/battery through an 18% lender nets $8,200 each; $16,400 of base
+    // price against a $9,000 × 2 redline leaves nothing. Price it high enough
+    // to clear the redline instead: $13,000 nets $10,660, so $1,660 × 2 over.
+    const p = await makeStorageDeal({
+      tag: "B4", stickerPerBatteryCents: 13_000_00, dealerFeePct: 18, lenderId: redlineLenderId,
+    });
+    expect(await computeFor(p)).toBe(1);
+
+    const line = await repLine(p);
+    expect(line?.solarBasis).toBe("battery_redline");
+    expect(line?.amount).toBe(3_320_00);
+    expect(line?.solarRedlinePerBatteryCents).toBe(BATT_REDLINE_CENTS);
+  });
+
+  it("the LENDER'S per-watt mode is not consulted on a job with no watts", async () => {
+    // The exact case that used to be refused. Amos pays per watt on an array;
+    // this deal has none, so its battery mode decides and a line gets written.
+    const p = await makeStorageDeal({
+      tag: "B5", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
+    });
+    await computeFor(p);
+    const line = await repLine(p);
+    expect(line).not.toBeNull();
+    expect(line?.solarBasis).not.toBe("per_watt");
+  });
+
+  it("locks the terms once a line exists, exactly as the per-watt bases do", async () => {
+    const p = await makeStorageDeal({
+      tag: "B6", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
+    });
+    await computeFor(p);
+    expect((await repLine(p))?.amount).toBe(BATT_FLAT_CENTS * BATTERIES);
+
+    // Double the rep's rate. A deal already sold must not re-price.
+    await raw.user.update({
+      where: { id: repId }, data: { solarPerBatteryFlatCents: BATT_FLAT_CENTS * 2 },
+    });
+    await computeFor(p);
+    expect((await repLine(p))?.amount).toBe(BATT_FLAT_CENTS * BATTERIES);
+  });
+
+  it("writes NO line at all when the rep has no rate for the lender's mode", async () => {
+    // Not a $0 line. A rep who is owed nothing and a rep nobody configured must
+    // not look alike on a payroll run.
+    await raw.user.update({ where: { id: repId }, data: { solarPerBatteryFlatCents: null } });
+    const p = await makeStorageDeal({
+      tag: "B7", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
+    });
+    await computeFor(p);
+    expect(await repLine(p)).toBeNull();
+  });
+
+  it("NEVER pays the whole base price when the battery count is zero", async () => {
+    // `max(0, base − redline × 0)` is the entire base price, and the same shape
+    // on the flat basis is a rate times nothing. The engine declines the deal
+    // before either can happen.
+    const p = await makeStorageDeal({
+      tag: "B8", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18,
+      lenderId: redlineLenderId, batteryQty: 0,
+    });
+    await computeFor(p);
+    expect(await repLine(p)).toBeNull();
+  });
+
+  it("a PV deal with a battery on it is still paid by the watt", async () => {
+    // `pv_storage` takes the identical path to `pv`. A battery riding along on
+    // an array must not reach the per-battery bases.
+    const p = await makeSolarDeal({ tag: "B9", grossPpwCents: 320, dealerFeePct: 18, lenderId: redlineLenderId });
+    await computeFor(p);
+    const line = await repLine(p);
+    expect(line?.solarBasis).toBe("redline");
+    expect(line?.solarRedlinePerBatteryCents).toBeNull();
+    expect(line?.solarPerBatteryFlatCents).toBeNull();
   });
 });

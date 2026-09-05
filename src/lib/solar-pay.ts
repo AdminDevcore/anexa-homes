@@ -1,4 +1,4 @@
-import type { FinanceProduct, SolarRepPayMode } from "@prisma/client";
+import type { FinanceProduct, SolarBatteryPayMode, SolarRepPayMode } from "@prisma/client";
 
 /**
  * What a solar rep earns, and on which basis.
@@ -18,12 +18,21 @@ import type { FinanceProduct, SolarRepPayMode } from "@prisma/client";
  *               prices at. What a fixed-pay partner (Amos) pays, and the only
  *               thing that can pay on a lease or PPA.
  *
+ * Both of those are denominated in WATTS, so neither can reach a job that sells
+ * storage on its own. Such a job is paid by the same two ideas counted per
+ * BATTERY, off a second lender setting — `batteryPayMode` — because a partner
+ * routinely holds different opinions about the two: Amos pays a flat $/W on an
+ * array while pricing storage at a flat $10,000 a battery.
+ *
+ *   BATTERY REDLINE — everything the deal holds above the rep's net $/battery.
+ *   BATTERY FLAT    — a flat amount per installed battery, whatever it prices at.
+ *
  * Nothing in here prices a deal. Price comes from `pricePurchase` /
  * `priceThirdParty` in solar-money.ts and is passed in, so there is one pricing
  * model and this file cannot drift from it.
  */
 
-export type SolarPayBasis = "redline" | "per_watt" | "battery_redline";
+export type SolarPayBasis = "redline" | "per_watt" | "battery_redline" | "battery_flat";
 
 /**
  * The terms one deal is paid on. Deliberately flat and serialisable: these are
@@ -39,6 +48,8 @@ export type SolarPayTerms = {
   millsPerWatt: number | null;
   /** Cents of BASE price per BATTERY. Set only on `battery_redline`. */
   redlinePerBatteryCents: number | null;
+  /** Flat cents per installed BATTERY. Set only on `battery_flat`. */
+  perBatteryFlatCents: number | null;
 };
 
 /** The rep's own configured terms, straight off their User row. */
@@ -46,6 +57,7 @@ export type SolarRepConfig = {
   solarRedlineCentsPerWatt: number | null;
   solarPerWattMills: number | null;
   solarRedlinePerBatteryCents: number | null;
+  solarPerBatteryFlatCents: number | null;
 };
 
 /**
@@ -78,14 +90,24 @@ export function resolveSolarPay(input: {
   product: FinanceProduct;
   /** The deal's lender pay mode. Null when the deal has no lender yet. */
   lenderPayMode: SolarRepPayMode | null;
+  /** The deal's lender BATTERY pay mode — the only one a storage-only job
+   *  consults. Null when the deal has no lender yet. */
+  lenderBatteryPayMode: SolarBatteryPayMode | null;
   rep: SolarRepConfig;
 }): SolarPayResolution {
-  const { systemType, product, lenderPayMode, rep } = input;
+  const { systemType, product, lenderPayMode, lenderBatteryPayMode, rep } = input;
 
   if (systemType === "storage") {
     // A lease or PPA sells electricity, so there is no system price for a
     // redline to measure — and unlike PV there is no per-watt rate to fall back
     // on, because there are no watts. Say so rather than paying on nothing.
+    //
+    // THE ONLY REFUSAL LEFT ON THIS BRANCH. There used to be a second — a
+    // per-watt lender meeting a deal with no watts — and it was not a rule but
+    // an admission that no column could answer the question. `batteryPayMode`
+    // answers it, so `lenderPayMode` is simply never consulted here: a partner
+    // that pays a flat $/W on an array can price and pay storage any way it
+    // likes, which is exactly what Amos does.
     if (product === "lease" || product === "ppa") {
       return {
         kind: "refused",
@@ -93,12 +115,19 @@ export function resolveSolarPay(input: {
           "A lease or PPA has no system price to measure a redline against, and a storage deal has no watts to pay a rate on.",
       };
     }
-    // The failure this whole type exists for.
-    if ((lenderPayMode ?? "redline") === "per_watt") {
+    // Cash has no lender by definition and a loan not yet routed to one has no
+    // mode to read. Both fall to the redline, as the per-watt pair does.
+    if ((lenderBatteryPayMode ?? "redline") === "flat") {
+      if (rep.solarPerBatteryFlatCents == null) return { kind: "unconfigured" };
       return {
-        kind: "refused",
-        reason:
-          "This lender pays per watt and this deal has none. Set a per-battery redline on the rep, or move the lender off per-watt pay.",
+        kind: "terms",
+        terms: {
+          basis: "battery_flat",
+          redlineCentsPerWatt: null,
+          millsPerWatt: null,
+          redlinePerBatteryCents: null,
+          perBatteryFlatCents: rep.solarPerBatteryFlatCents,
+        },
       };
     }
     if (rep.solarRedlinePerBatteryCents == null) return { kind: "unconfigured" };
@@ -109,6 +138,7 @@ export function resolveSolarPay(input: {
         redlineCentsPerWatt: null,
         millsPerWatt: null,
         redlinePerBatteryCents: rep.solarRedlinePerBatteryCents,
+        perBatteryFlatCents: null,
       },
     };
   }
@@ -138,6 +168,7 @@ export function resolveSolarPay(input: {
         redlineCentsPerWatt: null,
         millsPerWatt: rep.solarPerWattMills,
         redlinePerBatteryCents: null,
+        perBatteryFlatCents: null,
       },
     };
   }
@@ -149,6 +180,7 @@ export function resolveSolarPay(input: {
       redlineCentsPerWatt: rep.solarRedlineCentsPerWatt,
       millsPerWatt: null,
       redlinePerBatteryCents: null,
+      perBatteryFlatCents: null,
     },
   };
 }
@@ -204,6 +236,16 @@ export function solarRepPayCents(
     };
   }
 
+  if (terms.basis === "battery_flat") {
+    const qty = Math.max(0, Math.round(deal.batteryQty ?? 0));
+    // The per-watt basis's twin, counted per battery, and guarded on the count
+    // for the reason its sibling above is: a rate is only honestly zero when
+    // there is nothing to pay it on. Cents, not mills — see the column.
+    const amountCents = qty > 0 ? Math.max(0, qty * (terms.perBatteryFlatCents ?? 0)) : 0;
+    // The basis is the COUNT, exactly as it is the watt count on `per_watt`.
+    return { amountCents, basisCents: qty, basePpwCents: 0, overageCentsPerWatt: 0 };
+  }
+
   if (terms.basis === "per_watt") {
     // Mills are tenths of a cent, so the rate divides by 10 — not 1000. A $0.40/W
     // rate is 400 mills, and 10,000 W of it is $4,000.
@@ -235,6 +277,12 @@ export function millsPerWattLabel(mills: number): string {
   return `$${(mills / 1000).toFixed(2)}/W`;
 }
 
+/** `$1,500/battery` from 150000 cents. Whole dollars — a battery is not priced
+ *  to the cent, and the rate sits inline in a sentence. */
+export function perBatteryLabel(cents: number): string {
+  return `${usd(cents)}/battery`;
+}
+
 /** `$2.00/W` from 200 cents. */
 export function centsPerWattLabel(cents: number): string {
   return `$${(cents / 100).toFixed(2)}/W`;
@@ -247,6 +295,12 @@ export function centsPerWattLabel(cents: number): string {
 export function solarPayLabel(terms: SolarPayTerms, watts: number, result: SolarPayResult): string {
   if (terms.basis === "battery_redline") {
     return `Solar battery redline (${usd(terms.redlinePerBatteryCents ?? 0)}/battery)`;
+  }
+  if (terms.basis === "battery_flat") {
+    const n = Math.max(0, Math.round(result.basisCents));
+    return `Solar battery flat (${usd(terms.perBatteryFlatCents ?? 0)}/battery · ${n} ${
+      n === 1 ? "battery" : "batteries"
+    })`;
   }
   const size = `${watts.toLocaleString("en-US")} W`;
   if (terms.basis === "per_watt") {
@@ -262,6 +316,8 @@ export function solarPayExplanation(terms: SolarPayTerms, result: SolarPayResult
     return `Keeps everything above ${usd(terms.redlinePerBatteryCents ?? 0)} a battery — ${usd(
       result.amountCents
     )} to the rep.`;
+  if (terms.basis === "battery_flat")
+    return `Flat ${usd(terms.perBatteryFlatCents ?? 0)} a battery, whatever the deal prices at.`;
   if (terms.basis === "per_watt") return `Flat rate, whatever the deal prices at.`;
   return `Nets ${centsPerWattLabel(Math.round(result.basePpwCents))} against a ${centsPerWattLabel(
     terms.redlineCentsPerWatt ?? 0

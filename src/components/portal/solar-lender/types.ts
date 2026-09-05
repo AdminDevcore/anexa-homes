@@ -37,6 +37,7 @@ export type LenderRow = {
    * own redline, or they earn a flat rate per installed watt.
    */
   repPayMode: "redline" | "per_watt";
+  batteryPayMode: "redline" | "flat";
   /**
    * The most this partner's paper ever puts in front of a homeowner per watt,
    * cents, dealer fee and adders included. Null — nearly every lender — leaves
@@ -296,6 +297,7 @@ export function draftFrom(lender: LenderRow) {
     apiProductSlug: lender.apiProductSlug ?? "",
     creditInstructions: lender.creditInstructions ?? "",
     repPayMode: lender.repPayMode,
+    batteryPayMode: lender.batteryPayMode,
     ppwMode: (lender.maxFinalPpwCents == null
       ? "normal"
       : lender.finalPpwMode) as PricingMode,

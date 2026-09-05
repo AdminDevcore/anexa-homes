@@ -139,6 +139,8 @@ export type UserDetail = TeamMember & {
   solarRedlineCentsPerWatt: number | null;
   /** Solar: the rep's fixed rate in mills per watt. */
   solarPerWattMills: number | null;
+  solarRedlinePerBatteryCents: number | null;
+  solarPerBatteryFlatCents: number | null;
   verticals: import("@prisma/client").Vertical[];
   // Canvasser → rep reporting.
   salesRepId: string | null;
@@ -203,6 +205,8 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
       deductiblePct: true,
       solarRedlineCentsPerWatt: true,
       solarPerWattMills: true,
+      solarRedlinePerBatteryCents: true,
+      solarPerBatteryFlatCents: true,
       verticals: true,
       salesRepId: true,
       salesRep: { select: { firstName: true, lastName: true } },
@@ -245,6 +249,8 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
     deductiblePct: u.deductiblePct,
     solarRedlineCentsPerWatt: u.solarRedlineCentsPerWatt,
     solarPerWattMills: u.solarPerWattMills,
+    solarRedlinePerBatteryCents: u.solarRedlinePerBatteryCents,
+    solarPerBatteryFlatCents: u.solarPerBatteryFlatCents,
     verticals: u.verticals,
     salesRepId: u.salesRepId,
     salesRepName: u.salesRep ? `${u.salesRep.firstName} ${u.salesRep.lastName}`.trim() : null,

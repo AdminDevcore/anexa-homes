@@ -179,18 +179,27 @@ export const SETUP_CHECKS: Check[] = [
   },
   {
     key: "solar_pay",
-    label: "Per-battery rep redline",
-    // Team, not a settings page: the redline is per rep, on their own profile.
+    label: "Per-battery rep pay",
+    // Team, not a settings page: both rates are per rep, on their own profile.
     // The Rep Pay card is the signpost to it — see settings-sections.ts.
     href: "/portal/team",
     // The specific failure, because "no commission" and "a commission of zero"
     // are the two things this whole feature was careful to keep apart.
-    hint: "No rep can be paid on a storage deal — no commission line is written at all, silently. Their per-watt redline does not apply to a job with no watts.",
+    hint: "No rep can be paid on a storage deal — no commission line is written at all, silently. Neither per-watt rate applies to a job with no watts.",
     severity: "silent",
     verticals: ["solar"],
+    // EITHER rate clears it. Which of the two a given deal needs is the
+    // lender's call (SolarLender.batteryPayMode), so a company running one
+    // partner on flat battery pay is correctly set up with only flat rates set.
     count: (companyId) =>
       prisma.user.count({
-        where: { companyId, solarRedlinePerBatteryCents: { not: null } },
+        where: {
+          companyId,
+          OR: [
+            { solarRedlinePerBatteryCents: { not: null } },
+            { solarPerBatteryFlatCents: { not: null } },
+          ],
+        },
       }),
   },
   {

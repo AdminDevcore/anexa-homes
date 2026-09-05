@@ -51,6 +51,7 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
         lender: {
           select: {
             repPayMode: true,
+            batteryPayMode: true,
             maxFinalPpwCents: true,
             finalPpwMode: true,
             maxFinalPricePerBatteryCents: true,
@@ -124,6 +125,10 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
     product: finance.product,
     systemType: design.systemType,
     lenderPayMode: design.lender?.repPayMode ?? null,
+    // Its own setting, not a fallback off the one above: a storage job has no
+    // watts for that one to measure, and a partner holds different opinions
+    // about the two. See SolarBatteryPayMode.
+    lenderBatteryPayMode: design.lender?.batteryPayMode ?? null,
     // Zero on a storage deal, and zero is the truth there rather than a
     // conversion that did not happen.
     systemWatts: isStorage ? 0 : (purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
@@ -146,12 +151,14 @@ function snapshotFrom(row: {
   solarBasis: string | null;
   solarRedlineCentsPerWatt: number | null;
   solarRedlinePerBatteryCents: number | null;
+  solarPerBatteryFlatCents: number | null;
   solarMillsPerWatt: number | null;
 }): SolarPayTerms | null {
   if (
     row.solarBasis !== "redline" &&
     row.solarBasis !== "per_watt" &&
-    row.solarBasis !== "battery_redline"
+    row.solarBasis !== "battery_redline" &&
+    row.solarBasis !== "battery_flat"
   ) {
     return null;
   }
@@ -160,6 +167,7 @@ function snapshotFrom(row: {
     redlineCentsPerWatt: row.solarRedlineCentsPerWatt,
     millsPerWatt: row.solarMillsPerWatt,
     redlinePerBatteryCents: row.solarRedlinePerBatteryCents,
+    perBatteryFlatCents: row.solarPerBatteryFlatCents,
   };
 }
 
@@ -214,6 +222,7 @@ export async function computeSolarCommissionsForProject(
         solarRedlineCentsPerWatt: true,
         solarPerWattMills: true,
         solarRedlinePerBatteryCents: true,
+        solarPerBatteryFlatCents: true,
       },
     });
 
@@ -244,6 +253,7 @@ export async function computeSolarCommissionsForProject(
         solarBasis: true,
         solarRedlineCentsPerWatt: true,
         solarRedlinePerBatteryCents: true,
+        solarPerBatteryFlatCents: true,
         solarMillsPerWatt: true,
       },
     });
@@ -260,6 +270,7 @@ export async function computeSolarCommissionsForProject(
             systemType: deal.systemType,
             product: deal.product,
             lenderPayMode: deal.lenderPayMode,
+            lenderBatteryPayMode: deal.lenderBatteryPayMode,
             rep,
           })
         : { kind: "unconfigured" };
@@ -285,6 +296,7 @@ export async function computeSolarCommissionsForProject(
         solarBasis: terms.basis,
         solarRedlineCentsPerWatt: terms.redlineCentsPerWatt,
         solarRedlinePerBatteryCents: terms.redlinePerBatteryCents,
+        solarPerBatteryFlatCents: terms.perBatteryFlatCents,
         solarMillsPerWatt: terms.millsPerWatt,
       };
       if (existing) {

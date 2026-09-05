@@ -37,10 +37,23 @@ export type MemberPay = {
   deductiblePct: number | null;
   solarRedlineCentsPerWatt: number | null;
   solarPerWattMills: number | null;
+  solarRedlinePerBatteryCents: number | null;
+  solarPerBatteryFlatCents: number | null;
 };
 
 /** The illustrative deal the solar worked example prices. */
 const EXAMPLE_KW = 10;
+
+/**
+ * And the illustrative BATTERY-ONLY job beside it.
+ *
+ * Stated rather than derived, unlike the array above: a battery's price comes
+ * off the equipment catalogue per deal, so there is no company-wide default
+ * this could be priced from. Both figures are named in the heading of the
+ * example, so nothing about it is implied.
+ */
+const EXAMPLE_BATTERIES = 2;
+const EXAMPLE_BATTERY_BASE_CENTS = 23_000_00;
 
 const money = (cents: number) =>
   (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -131,6 +144,14 @@ export function MemberPayStructure({
   const [perWatt, setPerWatt] = React.useState(
     current.solarPerWattMills == null ? "" : (current.solarPerWattMills / 1000).toFixed(2)
   );
+  // The per-battery pair. Whole dollars — a battery is a five-figure unit and
+  // nobody sets a redline on it to the cent.
+  const [battRedline, setBattRedline] = React.useState(
+    current.solarRedlinePerBatteryCents == null ? "" : String(current.solarRedlinePerBatteryCents / 100)
+  );
+  const [battFlat, setBattFlat] = React.useState(
+    current.solarPerBatteryFlatCents == null ? "" : String(current.solarPerBatteryFlatCents / 100)
+  );
   const [busy, setBusy] = React.useState(false);
 
   const dirty =
@@ -140,13 +161,17 @@ export function MemberPayStructure({
     providedFlat !== (current.providedLeadFlatCents == null ? "" : String(current.providedLeadFlatCents / 100)) ||
     deductible !== str(current.deductiblePct) ||
     redline !== (current.solarRedlineCentsPerWatt == null ? "" : (current.solarRedlineCentsPerWatt / 100).toFixed(2)) ||
-    perWatt !== (current.solarPerWattMills == null ? "" : (current.solarPerWattMills / 1000).toFixed(2));
+    perWatt !== (current.solarPerWattMills == null ? "" : (current.solarPerWattMills / 1000).toFixed(2)) ||
+    battRedline !== (current.solarRedlinePerBatteryCents == null ? "" : String(current.solarRedlinePerBatteryCents / 100)) ||
+    battFlat !== (current.solarPerBatteryFlatCents == null ? "" : String(current.solarPerBatteryFlatCents / 100));
 
   // ── The worked example ──────────────────────────────────────────────────
   // Recomputed from the SAME functions the commission engine calls, so a number
   // shown here cannot drift from the one that eventually gets paid.
   const redlineCents = redline.trim() === "" ? null : Math.round((Number(redline) || 0) * 100);
   const perWattMills = perWatt.trim() === "" ? null : Math.round((Number(perWatt) || 0) * 1000);
+  const battRedlineCents = battRedline.trim() === "" ? null : Math.round((Number(battRedline) || 0) * 100);
+  const battFlatCents = battFlat.trim() === "" ? null : Math.round((Number(battFlat) || 0) * 100);
 
   const example = React.useMemo(() => {
     const priced = pricePurchase({
@@ -157,19 +182,46 @@ export function MemberPayStructure({
       adderTotalCents: 0,
     });
     const deal = { systemWatts: priced.systemWatts, basePriceCents: priced.basePriceCents };
+    // The storage job the two per-battery bases are shown against. No watts, by
+    // definition — which is the whole reason those bases exist.
+    const storage = {
+      systemWatts: 0,
+      basePriceCents: EXAMPLE_BATTERY_BASE_CENTS,
+      batteryQty: EXAMPLE_BATTERIES,
+    };
     return {
       watts: priced.systemWatts,
       basePpwCents: Math.round(priced.basePpwCents),
       redlinePay:
         redlineCents == null
           ? null
-          : solarRepPayCents({ basis: "redline", redlineCentsPerWatt: redlineCents, millsPerWatt: null, redlinePerBatteryCents: null }, deal),
+          : solarRepPayCents(
+              { basis: "redline", redlineCentsPerWatt: redlineCents, millsPerWatt: null, redlinePerBatteryCents: null, perBatteryFlatCents: null },
+              deal
+            ),
       perWattPay:
         perWattMills == null
           ? null
-          : solarRepPayCents({ basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: perWattMills, redlinePerBatteryCents: null }, deal),
+          : solarRepPayCents(
+              { basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: perWattMills, redlinePerBatteryCents: null, perBatteryFlatCents: null },
+              deal
+            ),
+      battRedlinePay:
+        battRedlineCents == null
+          ? null
+          : solarRepPayCents(
+              { basis: "battery_redline", redlineCentsPerWatt: null, millsPerWatt: null, redlinePerBatteryCents: battRedlineCents, perBatteryFlatCents: null },
+              storage
+            ),
+      battFlatPay:
+        battFlatCents == null
+          ? null
+          : solarRepPayCents(
+              { basis: "battery_flat", redlineCentsPerWatt: null, millsPerWatt: null, redlinePerBatteryCents: null, perBatteryFlatCents: battFlatCents },
+              storage
+            ),
     };
-  }, [redlineCents, perWattMills, solarExample.grossPpwCents, solarExample.dealerFeePct]);
+  }, [redlineCents, perWattMills, battRedlineCents, battFlatCents, solarExample.grossPpwCents, solarExample.dealerFeePct]);
 
   const who = isRep ? "rep" : "manager";
 
@@ -206,8 +258,16 @@ export function MemberPayStructure({
       if (r !== null && !(r >= 0 && r <= 20)) return toast.error("Redline must be between $0 and $20 per watt.");
       const w = num(perWatt);
       if (w !== null && !(w >= 0 && w <= 20)) return toast.error("Fixed rate must be between $0 and $20 per watt.");
+      const br = num(battRedline);
+      if (br !== null && !(br >= 0 && br <= 100_000))
+        return toast.error("Per-battery redline must be between $0 and $100,000.");
+      const bf = num(battFlat);
+      if (bf !== null && !(bf >= 0 && bf <= 100_000))
+        return toast.error("Flat per-battery rate must be between $0 and $100,000.");
       payload.solarRedlineCentsPerWatt = r === null ? null : Math.round(r * 100);
       payload.solarPerWattMills = w === null ? null : Math.round(w * 1000);
+      payload.solarRedlinePerBatteryCents = br === null ? null : Math.round(br * 100);
+      payload.solarPerBatteryFlatCents = bf === null ? null : Math.round(bf * 100);
     }
 
     setBusy(true);
@@ -347,6 +407,37 @@ export function MemberPayStructure({
               />
             </div>
 
+            {/* BOTH rates above are per WATT, and a battery-only job has none.
+                These are the pair that reaches one. Which of the two applies is
+                the lender's call, exactly as it is for the pair above. */}
+            <div className="space-y-3 border-t border-border/70 pt-3">
+              <p className="text-[11px] font-medium text-foreground">Battery-only jobs</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field
+                  label="Redline"
+                  prefix="$"
+                  suffix="/battery"
+                  step="100"
+                  value={battRedline}
+                  onChange={(e) => setBattRedline(e.target.value)}
+                  placeholder="9,000"
+                  disabled={!canEdit}
+                  hint="Net of the lender's fee. They keep every cent above it."
+                />
+                <Field
+                  label="Fixed-pay rate"
+                  prefix="$"
+                  suffix="/battery"
+                  step="100"
+                  value={battFlat}
+                  onChange={(e) => setBattFlat(e.target.value)}
+                  placeholder="1,500"
+                  disabled={!canEdit}
+                  hint="A flat amount per installed battery, whatever it prices at."
+                />
+              </div>
+            </div>
+
             {/* The worked example. Same functions the engine calls, so what is
                 shown here is what eventually gets paid. */}
             <div className="rounded-lg bg-muted/50 p-3">
@@ -372,6 +463,32 @@ export function MemberPayStructure({
                   </dd>
                 </div>
               </dl>
+
+              {/* The storage job, priced separately because it shares nothing
+                  with the deal above — no watts, and a base price that comes
+                  off the battery catalogue rather than a $/W. */}
+              <p className="mt-3 flex items-center gap-1.5 border-t border-border/60 pt-2.5 text-[11px] font-medium text-muted-foreground">
+                <Info className="size-3.5" /> On a {EXAMPLE_BATTERIES}-battery storage job holding{" "}
+                {money(EXAMPLE_BATTERY_BASE_CENTS)} of base price
+              </p>
+              <dl className="mt-2 space-y-1.5 text-xs">
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="text-muted-foreground">
+                    Redline{battRedlineCents != null && ` · ${money(battRedlineCents)}/battery × ${EXAMPLE_BATTERIES}`}
+                  </dt>
+                  <dd className="shrink-0 font-semibold tabular-nums">
+                    {example.battRedlinePay ? money(example.battRedlinePay.amountCents) : <span className="font-normal text-muted-foreground">not set</span>}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="text-muted-foreground">
+                    Fixed pay{battFlatCents != null && ` · ${money(battFlatCents)}/battery × ${EXAMPLE_BATTERIES}`}
+                  </dt>
+                  <dd className="shrink-0 font-semibold tabular-nums">
+                    {example.battFlatPay ? money(example.battFlatPay.amountCents) : <span className="font-normal text-muted-foreground">not set</span>}
+                  </dd>
+                </div>
+              </dl>
             </div>
 
             {/* A blank rate is not a zero rate — it generates no commission line
@@ -383,6 +500,20 @@ export function MemberPayStructure({
                   : redlineCents == null
                     ? `No redline set — deals through a redline lender (and every cash deal) will pay this ${who} nothing.`
                     : `No fixed rate set — deals through a fixed-pay lender, and every lease/PPA, will pay this ${who} nothing.`}
+              </p>
+            )}
+
+            {/* Said separately from the warning above rather than folded into
+                it: a rep can be fully set up for arrays and still earn nothing
+                on a battery-only job, and one sentence covering both reads as
+                though the rates above were the problem. */}
+            {(battRedlineCents == null || battFlatCents == null) && (
+              <p className="rounded-lg bg-amber-50 p-2 text-[11px] text-amber-900">
+                {battRedlineCents == null && battFlatCents == null
+                  ? `No battery-only terms set — a job selling storage on its own will pay this ${who} nothing, whatever the rates above say.`
+                  : battRedlineCents == null
+                    ? `No per-battery redline set — battery-only jobs through a redline lender (and every cash one) will pay this ${who} nothing.`
+                    : `No flat per-battery rate set — battery-only jobs through a lender set to flat battery pay will pay this ${who} nothing.`}
               </p>
             )}
           </div>

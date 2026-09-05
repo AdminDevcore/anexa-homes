@@ -173,6 +173,8 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                 deductiblePct: detail.deductiblePct,
                 solarRedlineCentsPerWatt: detail.solarRedlineCentsPerWatt,
                 solarPerWattMills: detail.solarPerWattMills,
+                solarRedlinePerBatteryCents: detail.solarRedlinePerBatteryCents,
+                solarPerBatteryFlatCents: detail.solarPerBatteryFlatCents,
               }}
               solarExample={{
                 grossPpwCents: solarSettings?.defaultGrossPpwCents ?? 350,

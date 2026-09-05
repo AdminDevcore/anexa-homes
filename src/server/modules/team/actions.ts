@@ -224,6 +224,16 @@ const paySchema = z.object({
   // -- Solar: mills (tenths of a cent) per watt. $2.00/W of commission is already
   // absurd; the cap is a typo rail, not a policy.
   solarPerWattMills: z.number().int().min(0).max(20000).optional().nullable(),
+  // -- Solar, storage-only: the per-battery pair of the two above. Neither of
+  // those is reachable on a job with no watts, and until these were accepted
+  // here NEITHER per-battery column could be written from any screen at all --
+  // `solarRedlinePerBatteryCents` existed, was read by the payroll engine, and
+  // was null on every row, so every battery-only deal silently paid nothing.
+  //
+  // Cents, and capped at $100,000 a battery as a typo rail on a unit that
+  // really does cost five figures.
+  solarRedlinePerBatteryCents: z.number().int().min(0).max(10_000_000).optional().nullable(),
+  solarPerBatteryFlatCents: z.number().int().min(0).max(10_000_000).optional().nullable(),
 });
 
 /**
