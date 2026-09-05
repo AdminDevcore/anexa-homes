@@ -13,7 +13,7 @@ import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
-import { dealRebateTotalCents } from "./storage";
+import { dealRebateTotalCents } from "./storage-queries";
 import { priceStorageStored } from "@/lib/solar-money";
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -1173,6 +1173,9 @@ const lenderSchema = z.object({
    * lines carry a snapshot of the terms they were sold on.
    */
   repPayMode: z.enum(["redline", "per_watt"]).optional(),
+  // The storage twin of the field above. Its own setting because a job with no
+  // watts cannot be reached by a per-watt one -- see SolarBatteryPayMode.
+  batteryPayMode: z.enum(["redline", "flat"]).optional(),
   /**
    * The most this partner's paper ever puts in front of a homeowner per watt,
    * cents, dealer fee and adders included. Null clears the ceiling.
@@ -1562,14 +1565,45 @@ export async function setEquipmentLendersAction(equipmentId: string, lenderIds: 
     select: { id: true },
   });
 
+  /**
+   * A DIFF, not a rewrite.
+   *
+   * This used to delete every row and write the ticked set back, which is the
+   * same thing when a row holds nothing but the tick. It stopped being the
+   * same thing when the row gained the partner's own name for the item
+   * (`lenderBrand`/`lenderModel`): re-saving a panel — even without changing a
+   * tick — silently threw every mapping away, and the deals that used it
+   * started bouncing off the lender's 422 with nothing on any screen to say
+   * why. Untouched lenders now keep their rows, and their names with them.
+   */
+  const keep = new Set(valid.map((l) => l.id));
+  const existing = await prisma.solarEquipmentLender.findMany({
+    where: { equipmentId },
+    select: { lenderId: true },
+  });
+  const have = new Set(existing.map((r) => r.lenderId));
+  const remove = [...have].filter((id) => !keep.has(id));
+  const add = [...keep].filter((id) => !have.has(id));
+
   await prisma.$transaction([
-    prisma.solarEquipmentLender.deleteMany({ where: { equipmentId } }),
-    prisma.solarEquipmentLender.createMany({
-      data: valid.map((l) => ({ equipmentId, lenderId: l.id })),
-      skipDuplicates: true,
-    }),
+    ...(remove.length > 0
+      ? [
+          prisma.solarEquipmentLender.deleteMany({
+            where: { equipmentId, lenderId: { in: remove } },
+          }),
+        ]
+      : []),
+    ...(add.length > 0
+      ? [
+          prisma.solarEquipmentLender.createMany({
+            data: add.map((lenderId) => ({ equipmentId, lenderId })),
+            skipDuplicates: true,
+          }),
+        ]
+      : []),
   ]);
   revalidatePath("/portal/settings/solar-equipment");
+  revalidatePath("/portal/settings/solar-lenders");
   return { ok: true as const, count: valid.length };
 }
 

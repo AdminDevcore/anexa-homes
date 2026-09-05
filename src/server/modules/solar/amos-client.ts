@@ -79,6 +79,10 @@ function applicationsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/api/v1/partner/applications`
 }
 
+function catalogUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/api/v1/partner/catalog`
+}
+
 /**
  * Strip anything an HTTP header cannot carry.
  *
@@ -240,4 +244,125 @@ export async function submitToAmos(
     sentTo: ok.sentTo ?? '',
     expiresAt: ok.expiresAt ?? '',
   }
+}
+
+/** One line of a partner's approved-vendor list, in THEIR words. */
+export type AmosCatalogItem = {
+  kind: 'panel' | 'inverter' | 'battery' | 'racking'
+  brand: string
+  model: string
+  watts: number | null
+  capacityKwh: number | null
+}
+
+export type AmosCatalog = {
+  products: { slug: string; name: string }[]
+  equipment: AmosCatalogItem[]
+}
+
+/**
+ * The partner's own approved-vendor list.
+ *
+ * READ-ONLY, and the reason the equipment mapping is a picker rather than a
+ * text box. Their names are not derivable from ours — theirs is a product
+ * family, ours is a SKU with a wattage on the end — so the only reliable way
+ * to write one down is to read theirs and choose from it. Typing them by hand
+ * produces a string that looks right and submits to a 422.
+ *
+ * Errors are the submission's errors: the same key, the same host, the same
+ * `unauthorized` when it is wrong. An admin pressing "pull their list" and
+ * getting "This API key is not recognized" has learned something worth
+ * knowing before a homeowner presses Qualify.
+ */
+export async function fetchAmosCatalog(creds: AmosCredentials): Promise<AmosCatalog> {
+  const url = catalogUrl(creds.baseUrl)
+
+  let host: string
+  try {
+    host = new URL(url).host
+  } catch {
+    throw new AmosSubmissionError(
+      'network_error',
+      `"${creds.baseUrl}" is not a valid API address. Fix it in Settings → Lenders → Direct submission.`,
+    )
+  }
+
+  const { key } = headerSafeKey(creds.apiKey)
+  if (!key) {
+    throw new AmosSubmissionError(
+      'unauthorized',
+      'No usable API key is configured for this lender. Add one in Settings → Lenders → Direct submission.',
+    )
+  }
+
+  let res: Response
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${key}` } })
+  } catch (cause) {
+    console.error('[amos-client] catalog fetch failed', {
+      host,
+      cause: cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause),
+      code: (cause as { cause?: { code?: string } })?.cause?.code ?? null,
+    })
+    throw new AmosSubmissionError('network_error', `Could not reach ${host}.`)
+  }
+
+  let body: unknown
+  try {
+    body = await res.json()
+  } catch {
+    throw new AmosSubmissionError(
+      'bad_response',
+      `The lender returned an unreadable catalogue (HTTP ${res.status}).`,
+      res.status,
+    )
+  }
+
+  if (!res.ok) {
+    const err = (body as { error?: { code?: string; message?: string } })?.error
+    const code = (err?.code ?? 'bad_response') as AmosErrorCode
+    console.error('[amos-client] catalog rejected by the lender', {
+      host,
+      status: res.status,
+      code,
+      message: err?.message ?? null,
+    })
+    throw new AmosSubmissionError(
+      code,
+      err?.message ?? `The lender refused the catalogue request (HTTP ${res.status}).`,
+      res.status,
+    )
+  }
+
+  const raw = body as { products?: unknown; equipment?: unknown }
+  const products = Array.isArray(raw.products)
+    ? raw.products
+        .map((p) => p as { slug?: unknown; name?: unknown })
+        .filter((p): p is { slug: string; name: string } => typeof p.slug === 'string')
+        .map((p) => ({ slug: p.slug, name: typeof p.name === 'string' ? p.name : p.slug }))
+    : []
+
+  // Anything without a brand AND a model is unusable as a mapping target, and
+  // a blank row in a picker is worse than a shorter list.
+  const equipment = Array.isArray(raw.equipment)
+    ? raw.equipment
+        .map((e) => e as Record<string, unknown>)
+        .filter(
+          (e) =>
+            typeof e.brand === 'string' &&
+            e.brand.trim() !== '' &&
+            typeof e.model === 'string' &&
+            e.model.trim() !== '' &&
+            (e.kind === 'panel' || e.kind === 'inverter' || e.kind === 'battery' || e.kind === 'racking'),
+        )
+        .map((e) => ({
+          kind: e.kind as AmosCatalogItem['kind'],
+          brand: (e.brand as string).trim(),
+          model: (e.model as string).trim(),
+          watts: typeof e.watts === 'number' ? e.watts : null,
+          capacityKwh: typeof e.capacityKwh === 'number' ? e.capacityKwh : null,
+        }))
+    : []
+
+  return { products, equipment }
 }

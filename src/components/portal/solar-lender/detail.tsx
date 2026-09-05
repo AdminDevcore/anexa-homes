@@ -63,9 +63,15 @@ import {
 import { LogoControl } from "./logo-control";
 import { LenderApiKeyField } from "./api-key-field";
 import { RateSheetPanel } from "./rate-sheet";
+import { setLenderEquipmentNamesAction } from "@/server/modules/solar/amos-actions";
 import { AdderRulesPanel } from "./adder-rules";
+import {
+  LenderEquipmentPanel,
+  equipmentNameDraftFrom,
+  type EquipmentNameDraft,
+} from "./equipment-names";
 
-export const LENDER_TABS = ["details", "pricing", "rates", "adders", "legal"] as const;
+export const LENDER_TABS = ["details", "pricing", "rates", "adders", "equipment", "legal"] as const;
 export type LenderTab = (typeof LENDER_TABS)[number];
 
 /** The example job every "what does this mean" line on the Pricing tab is worked on. */
@@ -124,6 +130,9 @@ export function LenderDetail({
   const [busy, setBusy] = React.useState(false);
   const [draft, setDraft] = React.useState(() => draftFrom(lender));
   const [adderDraft, setAdderDraft] = React.useState(() => resolvedAdderRules(lender, adderCatalogue));
+  const [equipDraft, setEquipDraft] = React.useState<EquipmentNameDraft>(() =>
+    equipmentNameDraftFrom(lender)
+  );
 
   /**
    * Re-seed when the server sends something new — DURING RENDER, not in an
@@ -139,19 +148,23 @@ export function LenderDetail({
     lender.id,
     draftFrom(lender),
     resolvedAdderRules(lender, adderCatalogue),
+    equipmentNameDraftFrom(lender),
   ]);
   const [seen, setSeen] = React.useState(serverKey);
   if (seen !== serverKey) {
     setSeen(serverKey);
     setDraft(draftFrom(lender));
     setAdderDraft(resolvedAdderRules(lender, adderCatalogue));
+    setEquipDraft(equipmentNameDraftFrom(lender));
   }
 
   const savedDraft = draftFrom(lender);
   const savedRules = resolvedAdderRules(lender, adderCatalogue);
+  const savedEquip = equipmentNameDraftFrom(lender);
   const fieldsDirty = JSON.stringify(draft) !== JSON.stringify(savedDraft);
   const addersDirty = adderCatalogue.some((a) => adderDraft[a.id] !== savedRules[a.id]);
-  const dirty = fieldsDirty || addersDirty;
+  const equipDirty = JSON.stringify(equipDraft) !== JSON.stringify(savedEquip);
+  const dirty = fieldsDirty || addersDirty || equipDirty;
 
   const set = <K extends keyof typeof draft>(k: K, v: (typeof draft)[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
@@ -362,6 +375,7 @@ export function LenderDetail({
           apiProductSlug: draft.apiProductSlug.trim() || null,
           creditInstructions: draft.creditInstructions.trim() || null,
           repPayMode: draft.repPayMode,
+          batteryPayMode: draft.batteryPayMode,
           maxFinalPpwCents,
           // The stored mode only means anything alongside a figure, so on
           // "prices the normal way" it keeps whatever it was — flipping back to
@@ -401,6 +415,26 @@ export function LenderDetail({
         }
       }
 
+      /**
+       * Third write, same Save. The names live on the approval rows, which
+       * belong to neither the lender nor the catalogue on their own, so they
+       * cannot ride along on either update.
+       */
+      if (equipDirty) {
+        const res = await setLenderEquipmentNamesAction(
+          lender.id,
+          lender.approvedEquipment.map((row) => ({
+            equipmentId: row.equipmentId,
+            lenderBrand: equipDraft[row.equipmentId]?.brand ?? null,
+            lenderModel: equipDraft[row.equipmentId]?.model ?? null,
+          }))
+        );
+        if (!res.ok) {
+          toast.error(res.error, { duration: 9000 });
+          return;
+        }
+      }
+
       toast.success(`${draft.name.trim()} saved`);
       router.refresh();
     } finally {
@@ -409,6 +443,20 @@ export function LenderDetail({
   }
 
   const onTop = adderCatalogue.filter((a) => adderDraft[a.id]).length;
+
+  /**
+   * Approved hardware this partner has no name for, counted off the DRAFT so
+   * the badge falls as they are filled in rather than only after a Save.
+   *
+   * Only badged on a partner that actually submits over an API: on a link
+   * lender the names are never sent, and a red count against a setting that
+   * changes nothing is how a settings screen teaches people to ignore it.
+   */
+  const submitsOverApi =
+    !!lender.apiBaseUrl && !!lender.apiKeyMasked && !!lender.apiProductSlug;
+  const unnamedEquipment = submitsOverApi
+    ? lender.approvedEquipment.filter((r) => !equipDraft[r.equipmentId]).length
+    : 0;
 
   return (
     // Named for the specs: only one partner's panel is mounted at a time, so a
@@ -547,6 +595,14 @@ export function LenderDetail({
               <span className="text-[11px] tabular-nums text-muted-foreground">
                 {onTop}/{adderCatalogue.length}
               </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="equipment">
+            Equipment
+            {unnamedEquipment > 0 && (
+              <Pill tone="warn" className="ml-1.5">
+                {unnamedEquipment}
+              </Pill>
             )}
           </TabsTrigger>
           <TabsTrigger value="legal">
@@ -889,6 +945,40 @@ export function LenderDetail({
                   . Changing this only affects deals whose commission hasn&rsquo;t been generated
                   yet.
                 </Hint>
+
+                {/* THE STORAGE TWIN, and its own setting rather than a third
+                    value above, because every basis up there is measured in
+                    WATTS and a battery-only job has none. A partner holds both
+                    opinions at once and they are routinely different: this one
+                    pays a flat $/W on an array while pricing storage at a flat
+                    figure per battery. Before this existed a battery-only deal
+                    generated no commission line whatsoever. */}
+                <div className="mt-5 border-t border-border pt-4">
+                  <ChoiceCards
+                    name={`batt-pay-${lender.id}`}
+                    legend="Battery-only jobs"
+                    value={draft.batteryPayMode}
+                    onChange={(v) => set("batteryPayMode", v)}
+                    options={[
+                      {
+                        value: "redline",
+                        label: "Redline per battery",
+                        detail: "The rep keeps everything above their own net $/battery.",
+                      },
+                      {
+                        value: "flat",
+                        label: "Fixed $ per battery",
+                        detail: "The rep earns a flat amount per installed battery.",
+                      },
+                    ]}
+                    columns={2}
+                  />
+                  <Hint>
+                    A storage job has no watts, so the basis above cannot reach it. This is what
+                    pays it. Only battery-only deals read this — a battery riding along on an
+                    array is paid by the watt.
+                  </Hint>
+                </div>
               </Panel>
 
               {/* WHETHER THIS PARTNER WILL FUND AN ARRAY WITH NO BATTERY.
@@ -950,6 +1040,15 @@ export function LenderDetail({
         </TabsContent>
 
         {/* ── DISCLOSURES ──────────────────────────────────────────────── */}
+        <TabsContent value="equipment">
+          <LenderEquipmentPanel
+            lender={lender}
+            draft={equipDraft}
+            canEdit={canEdit}
+            onChange={setEquipDraft}
+          />
+        </TabsContent>
+
         <TabsContent value="legal" className="space-y-4">
           <div className="grid gap-4 xl:grid-cols-2">
             <div className="space-y-4">

@@ -87,7 +87,7 @@ export async function readLenderSubmission(
     return { mode: "link" };
   }
 
-  const problems = preflightAmosSubmission(design.lead, design);
+  const problems = preflightAmosSubmission(design.lead, asSubmitted(design), lender.name);
   if (problems.length > 0) {
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
@@ -148,7 +148,11 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     );
   }
 
-  const problems = preflightAmosSubmission(design.lead, design);
+  // Renamed to this partner's own vocabulary before either the check or the
+  // build sees it, so the two can never disagree about what is being sent.
+  const submitted = asSubmitted(design);
+
+  const problems = preflightAmosSubmission(design.lead, submitted, lender.name);
   if (problems.length > 0) {
     return {
       ok: false,
@@ -161,7 +165,7 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
   const money = await loadMoney(leadId, companyId);
   if (money.problem) return fail(money.problem);
 
-  const payload = buildAmosPayload(design.lead, design, {
+  const payload = buildAmosPayload(design.lead, submitted, {
     productSlug: lender.apiProductSlug,
     amountCents: money.amountCents,
     termMonths: money.termMonths,
@@ -258,6 +262,59 @@ function repName(rep: { firstName: string; lastName: string } | null): string | 
   return name.length > 0 ? name : null;
 }
 
+const EQUIPMENT_SELECT = {
+  manufacturer: true,
+  model: true,
+  lenderApprovals: { select: { lenderId: true, lenderBrand: true, lenderModel: true } },
+} as const;
+
+type CatalogueItem = {
+  manufacturer: string | null;
+  model: string;
+  lenderApprovals?: { lenderId: string; lenderBrand: string | null; lenderModel: string | null }[];
+};
+
+/**
+ * One catalogue item as the LENDER knows it.
+ *
+ * Our catalogue names a SKU with its wattage on the end; a partner's approved-
+ * vendor list names a product family. Both names are correct and they are
+ * rarely the same string, so the submission carries the partner's where an
+ * admin has mapped it — see `SolarEquipmentLender.lenderModel`.
+ *
+ * A missing mapping is NOT silently corrected to something near it. Sending a
+ * panel the customer is not getting, onto a real credit application, to save
+ * an admin a dropdown, is not a trade this module is allowed to make: the
+ * preflight refuses the deal instead, on a rep's screen.
+ */
+function withLenderNames(item: CatalogueItem | null, lenderId: string) {
+  if (!item) return null;
+  // Defensive on the relation rather than the row: a caller that selects the
+  // item without its approvals would otherwise throw INSIDE a submission,
+  // and "no mapping" is the honest reading of "we did not load any" -- it
+  // sends our own name, exactly as this did before mappings existed.
+  const mapped = (item.lenderApprovals ?? []).find((a) => a.lenderId === lenderId);
+  return {
+    manufacturer: item.manufacturer,
+    model: item.model,
+    lenderBrand: mapped?.lenderBrand ?? null,
+    lenderModel: mapped?.lenderModel ?? null,
+  };
+}
+
+/** The design as the lender's mapping renames it. */
+function asSubmitted<T extends { lender: { id: string } | null; module: CatalogueItem | null; inverter: CatalogueItem | null; battery: CatalogueItem | null }>(
+  design: T,
+) {
+  const lenderId = design.lender?.id ?? "";
+  return {
+    ...design,
+    module: withLenderNames(design.module, lenderId),
+    inverter: withLenderNames(design.inverter, lenderId),
+    battery: withLenderNames(design.battery, lenderId),
+  };
+}
+
 /** Everything both entry points read, scoped to the company the caller resolved. */
 async function loadDesign(leadId: string, companyId: string) {
   return prisma.solarDesign.findFirst({
@@ -269,9 +326,17 @@ async function loadDesign(leadId: string, companyId: string) {
       annualUsageKwh: true,
       moduleQty: true,
       batteryQty: true,
-      module: { select: { manufacturer: true, model: true } },
-      inverter: { select: { manufacturer: true, model: true } },
-      battery: { select: { manufacturer: true, model: true } },
+      /**
+       * Each item's own name AND every partner's name for it.
+       *
+       * All of the approval rows rather than just this deal's lender: Prisma
+       * cannot filter a nested relation on a sibling field of the parent row
+       * (`lender.id` is selected in the same query), and an item is approved by
+       * a handful of partners at most. `withLenderNames` picks the right one.
+       */
+      module: { select: EQUIPMENT_SELECT },
+      inverter: { select: EQUIPMENT_SELECT },
+      battery: { select: EQUIPMENT_SELECT },
       lender: {
         select: {
           id: true,

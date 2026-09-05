@@ -19,6 +19,35 @@ const design = {
   annualUsageKwh: 15800,
   moduleQty: 26,
   batteryQty: 2,
+  // Mapped to the partner's own approved-vendor list, which is what a
+  // submittable deal looks like: ours names the SKU with its wattage, theirs
+  // names the product family. See SolarEquipmentLender.lenderModel.
+  module: {
+    kind: 'module',
+    manufacturer: 'Qcells',
+    model: 'Q.PEAK DUO BLK ML-G10+ 410',
+    lenderBrand: 'Qcells',
+    lenderModel: 'Q.PEAK DUO BLK ML-G10+',
+  },
+  inverter: {
+    kind: 'inverter',
+    manufacturer: 'Enphase',
+    model: 'IQ8PLUS-72-2-US',
+    lenderBrand: 'Enphase',
+    lenderModel: 'IQ8PLUS-72-M-US',
+  },
+  battery: {
+    kind: 'battery',
+    manufacturer: 'Enphase',
+    model: 'IQ Battery 5P',
+    lenderBrand: 'Enphase',
+    lenderModel: 'IQ Battery 5P',
+  },
+}
+
+/** The same design before anybody said what the partner calls its hardware. */
+const unmapped = {
+  ...design,
   module: { kind: 'module', manufacturer: 'Qcells', model: 'Q.PEAK DUO BLK ML-G10+ 410' },
   inverter: { kind: 'inverter', manufacturer: 'Enphase', model: 'IQ8PLUS-72-2-US' },
   battery: { kind: 'battery', manufacturer: 'Enphase', model: 'IQ Battery 5P' },
@@ -67,6 +96,40 @@ describe('preflightAmosSubmission', () => {
     })
     expect(problems.join(' ')).toContain('manufacturer')
   })
+
+  /**
+   * THE 422. Our catalogue's name is not on their approved-vendor list, so the
+   * lender refuses the whole application with `unknown_equipment`. Caught here
+   * means the rep is told on the deal; missed means a homeowner presses Qualify
+   * and is bounced.
+   */
+  it('blocks an item this partner has no name for, and says which item', () => {
+    const problems = preflightAmosSubmission(lead, unmapped, 'Amos Capital Fund')
+    expect(problems).toHaveLength(3)
+    expect(problems.join(' ')).toContain('Qcells Q.PEAK DUO BLK ML-G10+ 410')
+    expect(problems.join(' ')).toContain('Amos Capital Fund')
+    expect(problems.join(' ')).toContain('Settings')
+  })
+
+  it('only asks about equipment the submission will actually send', () => {
+    // No battery on the deal, so the battery nobody mapped is not its problem.
+    const problems = preflightAmosSubmission(
+      lead,
+      { ...unmapped, batteryQty: 0, module: design.module, inverter: design.inverter },
+      'Amos Capital Fund',
+    )
+    expect(problems).toEqual([])
+  })
+
+  it('treats half a mapping as no mapping', () => {
+    const problems = preflightAmosSubmission(
+      lead,
+      { ...design, module: { ...design.module, lenderModel: null } },
+      'Amos Capital Fund',
+    )
+    // Their brand with our model is a name neither catalogue contains.
+    expect(problems.join(' ')).toContain('Q.PEAK DUO BLK ML-G10+ 410')
+  })
 })
 
 describe('buildAmosPayload', () => {
@@ -109,13 +172,43 @@ describe('buildAmosPayload', () => {
     )
   })
 
-  it('sends one equipment line per slot with its quantity', () => {
+  it('sends one equipment line per slot with its quantity, in the PARTNER\'s words', () => {
     const p = buildAmosPayload(lead, design, opts)
     expect(p.equipment).toEqual([
-      { kind: 'panel', brand: 'Qcells', model: 'Q.PEAK DUO BLK ML-G10+ 410', quantity: 26 },
-      { kind: 'inverter', brand: 'Enphase', model: 'IQ8PLUS-72-2-US', quantity: 26 },
+      // Their name for the family, not our SKU with its wattage on the end.
+      { kind: 'panel', brand: 'Qcells', model: 'Q.PEAK DUO BLK ML-G10+', quantity: 26 },
+      { kind: 'inverter', brand: 'Enphase', model: 'IQ8PLUS-72-M-US', quantity: 26 },
       { kind: 'battery', brand: 'Enphase', model: 'IQ Battery 5P', quantity: 2 },
     ])
+  })
+
+  /**
+   * The fallback that makes the migration safe: a partner nobody has mapped
+   * anything for submits exactly what it submitted before the column existed.
+   * Whether that is ACCEPTED is the preflight's business, not this function's.
+   */
+  it('falls back to our own catalogue name where the partner has none', () => {
+    const p = buildAmosPayload(lead, unmapped, opts)
+    expect(p.equipment?.[0]).toEqual({
+      kind: 'panel',
+      brand: 'Qcells',
+      model: 'Q.PEAK DUO BLK ML-G10+ 410',
+      quantity: 26,
+    })
+  })
+
+  it('does not mix their brand with our model when only half is mapped', () => {
+    const p = buildAmosPayload(
+      lead,
+      { ...design, module: { ...design.module, lenderModel: null } },
+      opts,
+    )
+    expect(p.equipment?.[0]).toEqual({
+      kind: 'panel',
+      brand: 'Qcells',
+      model: 'Q.PEAK DUO BLK ML-G10+ 410',
+      quantity: 26,
+    })
   })
 
   it('omits a battery line when the design has none', () => {

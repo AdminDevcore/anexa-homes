@@ -37,6 +37,7 @@ export type LenderRow = {
    * own redline, or they earn a flat rate per installed watt.
    */
   repPayMode: "redline" | "per_watt";
+  batteryPayMode: "redline" | "flat";
   /**
    * The most this partner's paper ever puts in front of a homeowner per watt,
    * cents, dealer fee and adders included. Null — nearly every lender — leaves
@@ -85,6 +86,15 @@ export type LenderRow = {
   logoUrl: string | null;
   /** How many catalogue items this lender approves. */
   approvedCount: number;
+  /**
+   * The sellable hardware on this partner's approved-vendor list, and what the
+   * PARTNER calls each piece where somebody has written it down.
+   *
+   * Both names travel together because the Equipment tab exists to show them
+   * side by side: ours is a SKU with a wattage, theirs is a product family,
+   * and the gap between the two is what a 422 `unknown_equipment` is made of.
+   */
+  approvedEquipment: ApprovedEquipmentRow[];
   /** How many designs are being built for it. */
   dealCount: number;
   /** The terms this lender finances on. Empty until somebody enters them. */
@@ -110,6 +120,38 @@ export type LenderProduct = {
   paydownPct: number | null;
   paydownMonths: number | null;
   isActive: boolean;
+};
+
+/**
+ * One piece of hardware on a partner's approved-vendor list.
+ *
+ * `lenderBrand`/`lenderModel` are null until somebody maps it, which is the
+ * state every row starts in and the state a submission refuses to send in.
+ */
+export type ApprovedEquipmentRow = {
+  equipmentId: string;
+  kind: "module" | "inverter" | "battery";
+  /** "Silfab SIL440-QD-DCA2" — our catalogue's name, as a person reads it. */
+  ourName: string;
+  /**
+   * The same name in its two halves, which is what the matcher needs: a brand
+   * of "REC Group" against their "REC" cannot be stripped off the front of the
+   * joined string by guessing how long it is.
+   */
+  manufacturer: string | null;
+  model: string;
+  ratingW: number | null;
+  lenderBrand: string | null;
+  lenderModel: string | null;
+};
+
+/** One line of the partner's own catalogue, as their API returns it. */
+export type PartnerCatalogueItem = {
+  kind: "panel" | "inverter" | "battery" | "racking";
+  brand: string;
+  model: string;
+  watts: number | null;
+  capacityKwh: number | null;
 };
 
 /** One adder the company sells, as a lender is asked to rule on it. */
@@ -255,6 +297,7 @@ export function draftFrom(lender: LenderRow) {
     apiProductSlug: lender.apiProductSlug ?? "",
     creditInstructions: lender.creditInstructions ?? "",
     repPayMode: lender.repPayMode,
+    batteryPayMode: lender.batteryPayMode,
     ppwMode: (lender.maxFinalPpwCents == null
       ? "normal"
       : lender.finalPpwMode) as PricingMode,

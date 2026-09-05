@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { submitToAmos, AmosSubmissionError } from '../amos-client'
+import { submitToAmos, fetchAmosCatalog, AmosSubmissionError } from '../amos-client'
 
 const payload = {
   externalId: 'design-abc',
@@ -200,5 +200,81 @@ describe('submitToAmos', () => {
         'ak_live_secret',
       )
     }
+  })
+})
+
+describe('fetchAmosCatalog', () => {
+  it('asks for the catalogue with the key, and returns their list', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        products: [{ slug: 'solar-30-year-cpe', name: 'Solar 30 Year CPE' }],
+        equipment: [
+          { kind: 'panel', brand: 'Silfab', model: 'PRIME DCA2 (SIL440QD-DCA2)', watts: 440 },
+        ],
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const catalog = await fetchAmosCatalog(creds)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://lender.test/api/v1/partner/catalog')
+    expect(fetchMock.mock.calls[0]?.[1]?.headers?.Authorization).toBe('Bearer ak_live_secret')
+    expect(catalog.products).toEqual([{ slug: 'solar-30-year-cpe', name: 'Solar 30 Year CPE' }])
+    expect(catalog.equipment).toEqual([
+      {
+        kind: 'panel',
+        brand: 'Silfab',
+        model: 'PRIME DCA2 (SIL440QD-DCA2)',
+        watts: 440,
+        capacityKwh: null,
+      },
+    ])
+  })
+
+  it('surfaces the lender\'s own sentence when the key is refused', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(401, {
+          error: { code: 'unauthorized', message: 'This API key is not recognized.' },
+        }),
+      ),
+    )
+    // The whole reason an admin presses the button: it establishes whether the
+    // stored credential works, before a homeowner does it for them.
+    await expect(fetchAmosCatalog(creds)).rejects.toMatchObject({
+      code: 'unauthorized',
+      message: 'This API key is not recognized.',
+      isConfigProblem: true,
+    })
+  })
+
+  it('drops rows that could not be a mapping target', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          equipment: [
+            { kind: 'panel', brand: '', model: 'No brand', watts: null },
+            { kind: 'panel', brand: 'Qcells', model: '   ', watts: null },
+            { kind: 'nonsense', brand: 'Qcells', model: 'Q.PEAK', watts: null },
+            { kind: 'battery', brand: 'Tesla', model: 'Powerwall 3', capacityKwh: 13.5 },
+          ],
+        }),
+      ),
+    )
+    const catalog = await fetchAmosCatalog(creds)
+    expect(catalog.equipment).toEqual([
+      { kind: 'battery', brand: 'Tesla', model: 'Powerwall 3', watts: null, capacityKwh: 13.5 },
+    ])
+  })
+
+  it('never sends a key the header cannot carry, and says so', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(
+      fetchAmosCatalog({ baseUrl: 'https://lender.test', apiKey: '\u276f\u276f' }),
+    ).rejects.toMatchObject({ code: 'unauthorized' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

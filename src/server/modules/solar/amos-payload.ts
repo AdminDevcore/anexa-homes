@@ -29,6 +29,16 @@ export type AmosLeadInput = {
 type EquipmentRef = {
   manufacturer: string | null
   model: string
+  /**
+   * What the DEAL'S LENDER calls this same item on its own approved-vendor
+   * list, from `SolarEquipmentLender`. Null where nobody has mapped it.
+   *
+   * Resolved by the caller, not looked up here, because this module is pure —
+   * and because which translation applies is a fact about the deal's lender
+   * rather than about the catalogue item.
+   */
+  lenderBrand?: string | null
+  lenderModel?: string | null
 } | null
 
 /** The subset of a SolarDesign this mapping reads. */
@@ -94,6 +104,8 @@ export type AmosApplicationPayload = {
 export function preflightAmosSubmission(
   lead: AmosLeadInput,
   design: AmosDesignInput,
+  /** Named in the mapping problems, which send somebody to this partner's screen. */
+  lenderName = 'This lender',
 ): string[] {
   const problems: string[] = []
 
@@ -123,7 +135,50 @@ export function preflightAmosSubmission(
     problems.push('The selected battery has no manufacturer — the lender matches on brand and model.')
   }
 
+  /**
+   * THE ITEM IS ON OUR CATALOGUE AND NOT ON THEIRS, OR IS ON BOTH UNDER TWO
+   * NAMES. Either way the lender answers 422 `unknown_equipment` and the deal
+   * bounces — so it is caught here, before the button is offered, rather than
+   * after a homeowner has pressed it.
+   *
+   * Only the items that will actually be SENT are checked: a design with no
+   * battery on it is not blocked by a battery nobody mapped.
+   */
+  for (const item of equipmentToMap(design)) {
+    if (!isMapped(item.ref)) {
+      problems.push(
+        `${lenderName} has no name on file for the ${item.what} “${describe(item.ref)}”. ` +
+          `Map it to their approved-vendor list in Settings → Lenders → ${lenderName} → Equipment.`,
+      )
+    }
+  }
+
   return problems
+}
+
+/** The pieces of a design that become equipment lines, where they exist. */
+function equipmentToMap(design: AmosDesignInput): { what: string; ref: NonNullable<EquipmentRef> }[] {
+  const out: { what: string; ref: NonNullable<EquipmentRef> }[] = []
+  if (design.module?.manufacturer?.trim() && design.moduleQty > 0) {
+    out.push({ what: 'panel', ref: design.module })
+  }
+  if (design.inverter?.manufacturer?.trim() && design.moduleQty > 0) {
+    out.push({ what: 'inverter', ref: design.inverter })
+  }
+  if (design.battery?.manufacturer?.trim() && design.batteryQty > 0) {
+    out.push({ what: 'battery', ref: design.battery })
+  }
+  return out
+}
+
+/** Both halves or neither — see `submittedName`. */
+function isMapped(ref: NonNullable<EquipmentRef>): boolean {
+  return !!ref.lenderBrand?.trim() && !!ref.lenderModel?.trim()
+}
+
+/** Our own name for an item, as it reads in a sentence to a rep. */
+function describe(ref: NonNullable<EquipmentRef>): string {
+  return [ref.manufacturer, ref.model].filter(Boolean).join(' ').trim() || ref.model
 }
 
 /** Integer cents -> a decimal string. Money never crosses the wire as a float. */
@@ -133,13 +188,29 @@ function centsToDecimalString(cents: number): string {
   return `${whole}.${String(rest).padStart(2, '0')}`
 }
 
+/**
+ * The name to send for one item: the partner's own, where somebody has written
+ * it down, and ours otherwise.
+ *
+ * Both halves move together on purpose. A row that pairs their brand with our
+ * model — or the reverse — is not a name either catalogue contains, so a
+ * half-filled mapping is treated as no mapping at all rather than as an
+ * improvement on ours.
+ */
+function submittedName(ref: NonNullable<EquipmentRef>): { brand: string; model: string } {
+  const brand = ref.lenderBrand?.trim()
+  const model = ref.lenderModel?.trim()
+  if (brand && model) return { brand, model }
+  return { brand: (ref.manufacturer ?? '').trim(), model: ref.model.trim() }
+}
+
 function line(
   kind: EquipmentLine['kind'],
   ref: EquipmentRef,
   quantity: number,
 ): EquipmentLine | null {
   if (!ref || !ref.manufacturer?.trim() || quantity < 1) return null
-  return { kind, brand: ref.manufacturer.trim(), model: ref.model.trim(), quantity }
+  return { kind, ...submittedName(ref), quantity }
 }
 
 /**

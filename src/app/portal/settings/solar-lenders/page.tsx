@@ -46,6 +46,7 @@ export default async function SolarLendersPage({
     orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
     select: {
       id: true, name: true, isActive: true, rank: true, notes: true, repPayMode: true,
+      batteryPayMode: true,
       portalUrl: true, applyUrl: true, creditInstructions: true,
       // Direct submission. The KEY is selected only to learn whether one is
       // set and to show its last four — the plaintext never leaves the server,
@@ -69,6 +70,23 @@ export default async function SolarLendersPage({
       /// What this partner does with each adder, where it has overruled the
       /// catalogue. Absent ids fall back to the catalogue's own answer.
       adderRules: { select: { equipmentId: true, financedOnTop: true } },
+      /**
+       * The hardware this partner approves, and what IT calls each piece.
+       *
+       * Sellable items only — a retired panel is not being quoted, so a name
+       * for it on somebody's approved-vendor list is a name for nothing. The
+       * `_count` below still counts every approval, retired included, because
+       * that badge is about the relationship and not about today's designs.
+       */
+      approvals: {
+        where: { equipment: { isActive: true, kind: { in: ["module", "inverter", "battery"] } } },
+        select: {
+          equipmentId: true,
+          lenderBrand: true,
+          lenderModel: true,
+          equipment: { select: { kind: true, manufacturer: true, model: true, ratingW: true } },
+        },
+      },
       _count: { select: { approvals: true, designs: true } },
       products: {
         orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
@@ -137,6 +155,7 @@ export default async function SolarLendersPage({
           apiKeyMasked: maskTail(decryptField(l.apiKeyEncrypted)),
           creditInstructions: l.creditInstructions,
           repPayMode: l.repPayMode,
+          batteryPayMode: l.batteryPayMode,
           maxFinalPpwCents: l.maxFinalPpwCents,
           finalPpwMode: l.finalPpwMode,
           minBasePpwCents: l.minBasePpwCents,
@@ -158,6 +177,20 @@ export default async function SolarLendersPage({
           adderRules: Object.fromEntries(
             l.adderRules.map((r) => [r.equipmentId, r.financedOnTop])
           ),
+          approvedEquipment: l.approvals
+            .map((a) => ({
+              equipmentId: a.equipmentId,
+              kind: a.equipment.kind as "module" | "inverter" | "battery",
+              ourName:
+                [a.equipment.manufacturer, a.equipment.model].filter(Boolean).join(" ") ||
+                a.equipment.model,
+              manufacturer: a.equipment.manufacturer,
+              model: a.equipment.model,
+              ratingW: a.equipment.ratingW,
+              lenderBrand: a.lenderBrand,
+              lenderModel: a.lenderModel,
+            }))
+            .sort((x, y) => x.ourName.localeCompare(y.ourName)),
           logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
           approvedCount: l._count.approvals,
           dealCount: l._count.designs,

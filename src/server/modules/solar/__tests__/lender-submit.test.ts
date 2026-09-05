@@ -44,8 +44,27 @@ const DESIGN = {
   annualUsageKwh: 15800,
   moduleQty: 26,
   batteryQty: 0,
-  module: { manufacturer: 'Qcells', model: 'Q.PEAK 410' },
-  inverter: { manufacturer: 'Enphase', model: 'IQ8PLUS' },
+  /**
+   * Each item carries EVERY partner's name for it, because Prisma cannot filter
+   * a nested relation on a sibling field of the parent row -- `withLenderNames`
+   * picks this deal's lender out of the list. `lender-2` is here to prove it
+   * picks, rather than taking the first row it finds.
+   */
+  module: {
+    manufacturer: 'Qcells',
+    model: 'Q.PEAK 410',
+    lenderApprovals: [
+      { lenderId: 'lender-2', lenderBrand: 'Q CELLS', lenderModel: 'SOMEBODY ELSE' },
+      { lenderId: 'lender-1', lenderBrand: 'Qcells', lenderModel: 'Q.PEAK DUO BLK ML-G10+' },
+    ],
+  },
+  inverter: {
+    manufacturer: 'Enphase',
+    model: 'IQ8PLUS',
+    lenderApprovals: [
+      { lenderId: 'lender-1', lenderBrand: 'Enphase', lenderModel: 'IQ8PLUS-72-M-US' },
+    ],
+  },
   battery: null,
   lender: {
     id: 'lender-1',
@@ -181,6 +200,32 @@ describe('submitDealToLender', () => {
     const r = await submitDealToLender(input)
     expect(r).toMatchObject({ ok: false, kind: 'deal' })
     expect((r as { error: string }).error).toContain('Powerwall 3')
+  })
+
+  /**
+   * THE TRANSLATION. Our catalogue names a SKU with its wattage; the partner's
+   * approved-vendor list names a product family. Sending ours is the 422 this
+   * mapping exists to stop.
+   */
+  it('sends the name THIS lender uses, from its own approval row', async () => {
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.equipment).toEqual([
+      { kind: 'panel', brand: 'Qcells', model: 'Q.PEAK DUO BLK ML-G10+', quantity: 26 },
+      { kind: 'inverter', brand: 'Enphase', model: 'IQ8PLUS-72-M-US', quantity: 26 },
+    ])
+  })
+
+  it('refuses to send an item this lender has no name for, and never calls them', async () => {
+    designFindFirst.mockResolvedValue({
+      ...DESIGN,
+      module: { manufacturer: 'Silfab', model: 'SIL440-QD-DCA2', lenderApprovals: [] },
+    })
+    const r = await submitDealToLender(input)
+    expect(r).toMatchObject({ ok: false, kind: 'deal' })
+    expect((r as { problems?: string[] }).problems?.join(' ')).toContain('Silfab SIL440-QD-DCA2')
+    expect((r as { problems?: string[] }).problems?.join(' ')).toContain('Amos Capital Fund')
+    // The whole point: the lender is never asked a question it would answer 422.
+    expect(submitToAmos).not.toHaveBeenCalled()
   })
 
   it('never surfaces an unexpected error verbatim', async () => {

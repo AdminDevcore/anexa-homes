@@ -4,7 +4,8 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { revalidatePath } from "next/cache";
-import { encryptField, maskTail } from "@/server/lib/crypto";
+import { decryptField, encryptField, maskTail } from "@/server/lib/crypto";
+import { AmosSubmissionError, fetchAmosCatalog, type AmosCatalogItem } from "./amos-client";
 
 /**
  * A lender's API credential, on the Settings screen.
@@ -98,4 +99,106 @@ export async function clearSolarLenderApiKeyAction(
   });
   revalidatePath("/portal/settings/lenders");
   return { ok: true };
+}
+
+/**
+ * Pull this partner's approved-vendor list, live.
+ *
+ * The mapping screen's only source of truth for the right-hand side. Their
+ * names cannot be derived from ours — theirs is a product family, ours is a
+ * SKU with a wattage on the end — so an admin picks from THEIR list rather
+ * than retyping it, and a string that looks right but submits to a 422 is not
+ * reachable through the UI.
+ *
+ * Not cached. It is pressed by hand, a few times a year, by one admin; a
+ * stale approved-vendor list is exactly the thing this screen exists to stop.
+ */
+export async function readLenderCatalogueAction(lenderId: string): Promise<
+  | { ok: true; equipment: AmosCatalogItem[]; products: { slug: string; name: string }[] }
+  | { ok: false; error: string }
+> {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return { ok: false, error: "Not allowed." };
+
+  const lender = await prisma.solarLender.findFirst({
+    where: { id: lenderId, companyId: user.companyId },
+    select: { name: true, apiBaseUrl: true, apiKeyEncrypted: true },
+  });
+  if (!lender) return { ok: false, error: "Lender not found." };
+
+  const apiKey = decryptField(lender.apiKeyEncrypted);
+  if (!lender.apiBaseUrl || !apiKey) {
+    return {
+      ok: false,
+      error: `${lender.name} has no API address and key yet. Add them on the Details tab first.`,
+    };
+  }
+
+  try {
+    const catalog = await fetchAmosCatalog({ baseUrl: lender.apiBaseUrl, apiKey });
+    return { ok: true, equipment: catalog.equipment, products: catalog.products };
+  } catch (e) {
+    // The lender's own sentence, which is written for a person: "This API key
+    // is not recognized." Anything else would hide the one fact an admin
+    // pressing this button is trying to establish.
+    if (e instanceof AmosSubmissionError) return { ok: false, error: e.message };
+    return { ok: false, error: "Could not read that lender's catalogue. Try again in a moment." };
+  }
+}
+
+/**
+ * Write down what this partner calls each item it approves.
+ *
+ * Only ever touches rows that ALREADY EXIST. The join row is the approval, so
+ * creating one here to hold a name would silently add an item to a partner's
+ * approved-vendor list — a change with pricing and eligibility consequences —
+ * as a side effect of typing a name. Approvals are set on the equipment
+ * screen; this sets the words.
+ *
+ * Both halves or neither: a row carrying their brand and our model is a name
+ * no catalogue contains, so a half-filled pair is stored as null and the
+ * submission falls back to ours. See `submittedName` in amos-payload.
+ */
+export async function setLenderEquipmentNamesAction(
+  lenderId: string,
+  entries: { equipmentId: string; lenderBrand: string | null; lenderModel: string | null }[],
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return { ok: false, error: "Not allowed." };
+
+  const lender = await prisma.solarLender.findFirst({
+    where: { id: lenderId, companyId: user.companyId },
+    select: { id: true },
+  });
+  if (!lender) return { ok: false, error: "Lender not found." };
+
+  // The approvals this lender actually holds, so an equipment id from another
+  // company — or one this partner does not approve — writes nothing.
+  const approved = new Set(
+    (
+      await prisma.solarEquipmentLender.findMany({
+        where: { lenderId: lender.id, equipment: { companyId: user.companyId } },
+        select: { equipmentId: true },
+      })
+    ).map((a) => a.equipmentId),
+  );
+
+  const writes = entries
+    .filter((e) => approved.has(e.equipmentId))
+    .map((e) => {
+      const brand = e.lenderBrand?.trim() || null;
+      const model = e.lenderModel?.trim() || null;
+      const paired = brand && model;
+      return prisma.solarEquipmentLender.update({
+        where: { equipmentId_lenderId: { equipmentId: e.equipmentId, lenderId: lender.id } },
+        data: {
+          lenderBrand: paired ? brand : null,
+          lenderModel: paired ? model : null,
+        },
+      });
+    });
+
+  await prisma.$transaction(writes);
+  revalidatePath("/portal/settings/solar-lenders");
+  return { ok: true, count: writes.length };
 }
