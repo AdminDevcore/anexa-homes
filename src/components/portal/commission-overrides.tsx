@@ -17,10 +17,21 @@ export type OverrideRow = {
   sourceId: string;
   sourceName: string;
   vertical: ActiveVertical;
-  type: "percentage" | "flat";
+  type: OverrideType;
   percent: number;
   flatAmount: number;
+  /** Tenths of a cent per watt. Read only when type = ppw. */
+  perWattMills: number;
 };
+
+/**
+ * The three bases an override can be written on.
+ *
+ * `ppw` is Solar-only and the picker enforces it: a $/W rate needs a system
+ * size to multiply and a roofing job has none, so the row would look configured
+ * and pay nothing.
+ */
+export type OverrideType = "percentage" | "flat" | "ppw";
 /** Whose deals this person can earn off, and on which sides they actually work. */
 export type OverrideCandidate = { id: string; name: string; verticals: ActiveVertical[] };
 
@@ -49,7 +60,13 @@ function OverrideLi({
   return (
     <li className="flex items-center justify-between py-2 text-sm">
       <span>
-        <span className="font-medium">{o.type === "percentage" ? `${o.percent}%` : money(o.flatAmount)}</span>
+        <span className="font-medium">
+          {o.type === "percentage"
+            ? `${o.percent}%`
+            : o.type === "ppw"
+              ? `$${(o.perWattMills / 1000).toFixed(2)}/W`
+              : money(o.flatAmount)}
+        </span>
         <span className="text-muted-foreground"> off {o.sourceName}&rsquo;s deals</span>
       </span>
       {canEdit && (
@@ -103,7 +120,7 @@ export function CommissionOverrides({
   const [busy, setBusy] = React.useState(false);
   const [sourceId, setSourceId] = React.useState("");
   const [vertical, setVertical] = React.useState<ActiveVertical>(verticals[0] ?? DEFAULT_VERTICAL);
-  const [type, setType] = React.useState<"percentage" | "flat">("percentage");
+  const [type, setType] = React.useState<OverrideType>("percentage");
   const [amount, setAmount] = React.useState("");
 
   // Show the workspace dimension only when there is more than one workspace in
@@ -120,6 +137,11 @@ export function CommissionOverrides({
   // The sides the currently-picked person actually works, minus the ones that
   // already have a rate — so you can never write a row that can't pay.
   const selected = candidates.find((c) => c.id === sourceId);
+  // $/W is Solar's basis. Switching the workspace to Roofing with it selected
+  // would submit a row the server rejects, so the picker drops back to a
+  // percentage rather than letting an impossible combination be saved.
+  const isSolar = vertical === "solar";
+  if (!isSolar && type === "ppw") setType("percentage");
   const openVerticals = (selected?.verticals ?? verticals).filter(
     (v) => !overrides.some((o) => o.sourceId === sourceId && o.vertical === v)
   );
@@ -147,6 +169,8 @@ export function CommissionOverrides({
       type,
       percent: type === "percentage" ? n : 0,
       flatAmount: type === "flat" ? Math.round(n * 100) : 0,
+      // Mills, so $0.075/W survives the round trip. Cents would floor it to $0.07.
+      perWattMills: type === "ppw" ? Math.round(n * 1000) : 0,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -178,7 +202,8 @@ export function CommissionOverrides({
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        {beneficiaryName} earns these off other people&rsquo;s deals (% of contract or a flat amount per deal)
+        {beneficiaryName} earns these off other people&rsquo;s deals (a percentage, a flat amount per deal,
+        or a $/W rate on Solar)
         {multiVertical ? ", set separately for each workspace" : ""}.
       </p>
 
@@ -252,22 +277,31 @@ export function CommissionOverrides({
           <div className="flex items-end gap-2">
             <div className="space-y-1.5">
               <Label className="text-xs">Type</Label>
-              <Select value={type} onValueChange={(v) => setType(v as "percentage" | "flat")}>
-                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+              <Select value={type} onValueChange={(v) => setType(v as OverrideType)}>
+                <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="percentage">% of contract</SelectItem>
+                  {/* The percentage means different things on the two sides and
+                      says so — solar pays a share of what the REP earned, which
+                      is why raising a rep's redline raises his manager too. */}
+                  <SelectItem value="percentage">
+                    {isSolar ? "% of rep's commission" : "% of contract"}
+                  </SelectItem>
                   <SelectItem value="flat">Flat $ / deal</SelectItem>
+                  {isSolar && <SelectItem value="ppw">$ / watt</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex-1 space-y-1.5">
-              <Label className="text-xs">{type === "percentage" ? "Percent" : "Amount (USD)"}</Label>
+              <Label className="text-xs">
+                {type === "percentage" ? "Percent" : type === "ppw" ? "Rate ($/W)" : "Amount (USD)"}
+              </Label>
               <Input
                 type="number"
                 inputMode="decimal"
+                step={type === "ppw" ? "0.01" : undefined}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder={type === "percentage" ? "e.g. 3" : "e.g. 500"}
+                placeholder={type === "percentage" ? "e.g. 3" : type === "ppw" ? "e.g. 0.10" : "e.g. 500"}
               />
             </div>
           </div>

@@ -40,6 +40,25 @@ export type CommissionLite = {
 /** What the commission pays on, unless somebody types something else. */
 const DEFAULT_TRIGGER = "M1 funding";
 
+/**
+ * What the pay engine says this deal is currently worth to its rep.
+ *
+ * ESTIMATED, and the word is on the screen. It is what the sale is worth today,
+ * not a promise about a cheque: a later deduction or bonus changes the PAYROLL
+ * and never comes back and rewrites this. The two disagreeing is normal, and
+ * both are true.
+ *
+ * `fromSnapshot` is the honest half of it. Once a deal is SIGNED the figure
+ * comes from the terms frozen at signing and stops moving with the rep's
+ * profile; before that it is priced off the profile as it stands today and will
+ * move if either changes. A rep reading a number is entitled to know which of
+ * those two he is looking at.
+ */
+export type CommissionEstimate =
+  | { state: "estimate"; grossCents: number; netCents: number; basis: string; fromSnapshot: boolean }
+  | { state: "needs_review" }
+  | { state: "unavailable"; reason: string };
+
 export type SystemMoney = {
   /**
    * WHAT THIS DEAL IS — the signed proposal wherever there is one.
@@ -109,6 +128,7 @@ export function SolarSystemMoneyPanel({
   money,
   financing,
   commission,
+  estimate,
   canEdit,
 }: {
   leadId: string;
@@ -116,6 +136,8 @@ export function SolarSystemMoneyPanel({
   /** The lender's own terms. Rendered here rather than as a section below. */
   financing: FinancingTerms | null;
   commission: CommissionLite | null;
+  /** The engine's own figure. Null when the viewer may not see rep pay. */
+  estimate: CommissionEstimate | null;
   canEdit: boolean;
 }) {
   return (
@@ -289,7 +311,7 @@ export function SolarSystemMoneyPanel({
             </Block>
           )}
           <Block label="Rep commission">
-            <RepCommission leadId={leadId} row={commission} canEdit={canEdit} />
+            <RepCommission leadId={leadId} row={commission} estimate={estimate} canEdit={canEdit} />
           </Block>
         </div>
       </div>
@@ -326,10 +348,12 @@ function Block({ label, children }: { label: string; children: React.ReactNode }
 function RepCommission({
   leadId,
   row,
+  estimate,
   canEdit,
 }: {
   leadId: string;
   row: CommissionLite | null;
+  estimate: CommissionEstimate | null;
   canEdit: boolean;
 }) {
   const [editing, setEditing] = React.useState(false);
@@ -340,6 +364,17 @@ function RepCommission({
 
   const paid = !!row?.paidAt;
   const trigger = row?.trigger?.trim() || DEFAULT_TRIGGER;
+  const typed = !!row?.amountCents;
+  const est = estimate?.state === "estimate" ? estimate : null;
+
+  /* WHICH FIGURE LEADS.
+   *
+   * A typed amount always does — somebody put it there deliberately and the
+   * screen must not argue with them. With nothing typed the engine's estimate
+   * takes the slot, because "Not set" on a fully designed and priced deal is
+   * the page declining to answer a question it can answer. */
+  const headline = typed ? usd(row!.amountCents) : est ? usd(est.netCents) : "Not set";
+
   const sub = paid
     ? `Paid ${new Date(row!.paidAt!).toLocaleDateString()}`
     : row?.expectedAt
@@ -347,35 +382,101 @@ function RepCommission({
       : `Pays on ${trigger}`;
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5">
-      <span
-        className={cn(
-          "grid size-7 shrink-0 place-items-center rounded-full",
-          paid ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
-        )}
-      >
-        {paid ? <Check className="size-3.5" /> : <DollarSign className="size-3.5" />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5">
+        <span
           className={cn(
-            "text-sm font-semibold tabular-nums",
-            !row?.amountCents && "font-medium text-muted-foreground"
+            "grid size-7 shrink-0 place-items-center rounded-full",
+            paid ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
           )}
         >
-          {row?.amountCents ? usd(row.amountCents) : "Not set"}
+          {paid ? <Check className="size-3.5" /> : <DollarSign className="size-3.5" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div
+            className={cn(
+              "flex items-baseline gap-2 text-sm font-semibold tabular-nums",
+              !typed && !est && "font-medium text-muted-foreground"
+            )}
+          >
+            {headline}
+            {!typed && est && (
+              <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Estimated
+              </span>
+            )}
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground">{sub}</div>
         </div>
-        <div className="truncate text-[11px] text-muted-foreground">{sub}</div>
+        {canEdit && (
+          <button
+            onClick={() => setEditing(true)}
+            aria-label="Edit commission"
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+        )}
       </div>
-      {canEdit && (
-        <button
-          onClick={() => setEditing(true)}
-          aria-label="Edit commission"
-          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <Pencil className="size-3.5" />
-        </button>
+
+      <EstimateNote estimate={estimate} typedCents={typed ? row!.amountCents : null} />
+    </div>
+  );
+}
+
+/**
+ * The line under the figure that says where it came from.
+ *
+ * It is deliberately wordy about the SIGNED case. "Estimated" beside a number
+ * that can still move means something quite different from the same word beside
+ * one that is now fixed by a snapshot, and a rep who cannot tell the two apart
+ * will read the first as a promise.
+ */
+function EstimateNote({
+  estimate,
+  typedCents,
+}: {
+  estimate: CommissionEstimate | null;
+  typedCents: number | null;
+}) {
+  if (!estimate) return null;
+
+  if (estimate.state === "needs_review") {
+    return (
+      <p className="px-1 text-[11px] text-amber-700 dark:text-amber-400">
+        This deal signed without resolvable pay terms. An admin has to establish them before it can
+        be estimated or paid — payroll will not guess from today&rsquo;s settings.
+      </p>
+    );
+  }
+
+  if (estimate.state === "unavailable") {
+    return <p className="px-1 text-[11px] text-muted-foreground">{estimate.reason}</p>;
+  }
+
+  const basis = estimate.fromSnapshot
+    ? "From the terms frozen when this deal was signed — it no longer moves with the rep's settings."
+    : "Priced on the rep's current settings. It will move if the design, the price or those settings change.";
+
+  /* A typed figure that disagrees with the engine is worth saying out loud
+     rather than quietly showing the typed one and hiding the other. */
+  const disagrees = typedCents != null && Math.abs(typedCents - estimate.netCents) >= 100;
+
+  return (
+    <div className="space-y-0.5 px-1 text-[11px] text-muted-foreground">
+      {disagrees && (
+        <p>
+          Engine estimate: <span className="tabular-nums">{usd(estimate.netCents)}</span> — the
+          figure above was entered by hand.
+        </p>
       )}
+      {estimate.grossCents !== estimate.netCents && (
+        <p>
+          <span className="tabular-nums">{usd(estimate.grossCents)}</span> before the company&rsquo;s
+          lead deduction.
+        </p>
+      )}
+      <p>{basis}</p>
     </div>
   );
 }

@@ -1,4 +1,9 @@
-import type { FinanceProduct, SolarBatteryPayMode, SolarRepPayMode } from "@prisma/client";
+import type {
+  FinanceProduct,
+  SolarBatteryPayPlan,
+  SolarLeadAdjustMode,
+  SolarRepPayMode,
+} from "@prisma/client";
 
 /**
  * What a solar rep earns, and on which basis.
@@ -56,7 +61,20 @@ export type SolarPayTerms = {
 export type SolarRepConfig = {
   solarRedlineCentsPerWatt: number | null;
   solarPerWattMills: number | null;
+  /**
+   * WHICH battery-only plan this rep is on. A property of the REP.
+   *
+   * It used to be read off the lender's `batteryPayMode`, which was wrong: two
+   * reps selling the same battery through the same partner can be on different
+   * plans, and a partner's pricing model is not an employment agreement. The
+   * lender's setting still prices the deal; it no longer decides anybody's pay.
+   *
+   * Null = not configured, which writes no line rather than a misleading zero.
+   */
+  solarBatteryPayPlan: SolarBatteryPayPlan | null;
+  /** The company's battery COST basis for this rep. Read on the `margin` plan. */
   solarRedlinePerBatteryCents: number | null;
+  /** Flat cents per installed battery. Read on the `flat` plan. */
   solarPerBatteryFlatCents: number | null;
 };
 
@@ -90,12 +108,9 @@ export function resolveSolarPay(input: {
   product: FinanceProduct;
   /** The deal's lender pay mode. Null when the deal has no lender yet. */
   lenderPayMode: SolarRepPayMode | null;
-  /** The deal's lender BATTERY pay mode — the only one a storage-only job
-   *  consults. Null when the deal has no lender yet. */
-  lenderBatteryPayMode: SolarBatteryPayMode | null;
   rep: SolarRepConfig;
 }): SolarPayResolution {
-  const { systemType, product, lenderPayMode, lenderBatteryPayMode, rep } = input;
+  const { systemType, product, lenderPayMode, rep } = input;
 
   if (systemType === "storage") {
     // A lease or PPA sells electricity, so there is no system price for a
@@ -104,10 +119,10 @@ export function resolveSolarPay(input: {
     //
     // THE ONLY REFUSAL LEFT ON THIS BRANCH. There used to be a second — a
     // per-watt lender meeting a deal with no watts — and it was not a rule but
-    // an admission that no column could answer the question. `batteryPayMode`
-    // answers it, so `lenderPayMode` is simply never consulted here: a partner
-    // that pays a flat $/W on an array can price and pay storage any way it
-    // likes, which is exactly what Amos does.
+    // an admission that no column could answer the question. The REP's own
+    // battery plan answers it, so no lender setting is consulted here at all: a
+    // partner that pays a flat $/W on an array can price storage any way it
+    // likes, and how the REP is paid on it is a separate agreement.
     if (product === "lease" || product === "ppa") {
       return {
         kind: "refused",
@@ -115,9 +130,11 @@ export function resolveSolarPay(input: {
           "A lease or PPA has no system price to measure a redline against, and a storage deal has no watts to pay a rate on.",
       };
     }
-    // Cash has no lender by definition and a loan not yet routed to one has no
-    // mode to read. Both fall to the redline, as the per-watt pair does.
-    if ((lenderBatteryPayMode ?? "redline") === "flat") {
+    // The rep's plan, and nothing else. No plan configured is `unconfigured` —
+    // not a silent default to one of them, because guessing which way a rep is
+    // paid is exactly the mistake that reading the lender's column was.
+    if (rep.solarBatteryPayPlan == null) return { kind: "unconfigured" };
+    if (rep.solarBatteryPayPlan === "flat") {
       if (rep.solarPerBatteryFlatCents == null) return { kind: "unconfigured" };
       return {
         kind: "terms",
@@ -182,6 +199,213 @@ export function resolveSolarPay(input: {
       redlinePerBatteryCents: null,
       perBatteryFlatCents: null,
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Company-provided leads
+// ---------------------------------------------------------------------------
+
+/**
+ * The company's cut of a rep's commission when the COMPANY provided the lead.
+ *
+ * READ THE DIRECTION CAREFULLY. This percentage is the COMPANY TAKE, not the
+ * rep's share — `solarCompanyLeadTakePct = 25` means the company keeps 25% and
+ * the rep is paid 75%. It is the opposite convention to roofing's
+ * `providedLeadSplitPct`, which names the REP's percentage of the pool, and the
+ * two must never be read into one another.
+ *
+ * Applied to the rep's gross commission, whatever basis produced it — a redline
+ * overage, a per-watt rate, or a per-battery amount on a storage job. The lead
+ * came from the company in all four cases.
+ *
+ * WHEN IT IS DECIDED. Whether a deal was company-provided is finalised at M1,
+ * not at signing: a lead's origin is routinely still being argued about while
+ * the job is being built, and M1 is the first moment the answer has to be right
+ * because it is the moment the money moves. The rate itself is snapshotted with
+ * the rest of the rep's terms, so raising the company take tomorrow cannot
+ * reprice a deal that has already funded.
+ *
+ * Null or zero is "no take", which is also what every deal did before this
+ * existed — so an unconfigured company keeps paying exactly what it paid.
+ */
+export type CompanyLeadTake = {
+  /** True only once M1 has finalised the classification. */
+  companyProvided: boolean;
+  /**
+   * WHICH adjustment applies. Explicit, never inferred from which amount is
+   * non-null — "nothing configured" and "a take of zero" are different answers
+   * and a nullable pair cannot tell them apart.
+   */
+  mode: SolarLeadAdjustMode;
+  /** The COMPANY's percentage. Read only on `percentage`. */
+  takePct: number | null;
+  /** The COMPANY's flat deduction, cents. Read only on `flat`. */
+  flatCents: number | null;
+};
+
+export type SolarRepPayout = {
+  /** What the basis produced, before the company's lead adjustment. */
+  grossCents: number;
+  /** What the company keeps because it provided the lead. Never negative. */
+  companyTakeCents: number;
+  /** What the rep is actually owed. This is the figure an override is a % of. */
+  netCents: number;
+  /** Which adjustment was applied. `none` when nothing was. */
+  appliedMode: SolarLeadAdjustMode;
+  /** The rate applied, snapshotted onto the commission row. 0 when not a percentage. */
+  appliedTakePct: number;
+  /** The flat amount applied, cents. 0 when not a flat deduction. */
+  appliedFlatCents: number;
+};
+
+/**
+ * Apply the company's lead adjustment to a gross commission.
+ *
+ * EXACTLY ONE METHOD. A rep is on a percentage, a flat deduction, or neither —
+ * never both. `mode` decides, and the other amount is ignored rather than
+ * combined, so a stale value left on a rep's profile from a previous
+ * arrangement cannot quietly stack on top of the current one.
+ *
+ * Worked, from the spec:
+ *   gross $10,000, percentage 40%  → company $4,000, rep $6,000
+ *   gross $10,000, flat $1,500     → company $1,500, rep $8,500
+ *   self-generated                 → company $0,     rep $10,000
+ *
+ * Never returns a negative. A percentage is clamped to 0–100 and a flat
+ * deduction cannot exceed the gross: owing a rep a negative commission is a
+ * chargeback, and a chargeback is raised deliberately and approved by an admin.
+ * A mistyped rate must not be able to create one silently.
+ */
+/**
+ * WHICH AMOUNT A PROFILE IS ALLOWED TO KEEP once a mode is chosen.
+ *
+ * The write-side twin of `applyCompanyLeadTake`. That function ignores the
+ * amount its mode does not name; this one makes sure the ignored column is not
+ * there to be read at all.
+ *
+ * Both halves are needed. Ignoring on read stops the wrong figure being
+ * applied; clearing on write stops it existing — so a rep moved from "40%
+ * company take" to "$1,500 flat" does not keep a 40% sitting underneath,
+ * waiting for the next reader, the next report, or the next author who assumes
+ * a non-null column means something.
+ *
+ * Returns exactly what should be persisted, both columns, always. Pure, so the
+ * rule can be proved without a session or a database.
+ */
+export function leadAdjustColumns(
+  mode: SolarLeadAdjustMode,
+  input: { takePct: number | null; flatCents: number | null }
+): { solarCompanyLeadTakePct: number | null; solarCompanyLeadFlatCents: number | null } {
+  if (mode === "percentage") {
+    return { solarCompanyLeadTakePct: input.takePct, solarCompanyLeadFlatCents: null };
+  }
+  if (mode === "flat") {
+    return { solarCompanyLeadTakePct: null, solarCompanyLeadFlatCents: input.flatCents };
+  }
+  // "none" is an answer, not an absence: this rep gives up nothing on a company
+  // lead. Both amounts go, so there is nothing left to read back.
+  return { solarCompanyLeadTakePct: null, solarCompanyLeadFlatCents: null };
+}
+
+export function applyCompanyLeadTake(grossCents: number, take: CompanyLeadTake): SolarRepPayout {
+  const gross = Math.max(0, Math.round(grossCents));
+  const none: SolarRepPayout = {
+    grossCents: gross,
+    companyTakeCents: 0,
+    netCents: gross,
+    appliedMode: "none",
+    appliedTakePct: 0,
+    appliedFlatCents: 0,
+  };
+  if (!take.companyProvided || take.mode === "none") return none;
+
+  if (take.mode === "percentage") {
+    const pct = Math.min(100, Math.max(0, take.takePct ?? 0));
+    if (pct === 0) return none;
+    const companyTakeCents = Math.round((gross * pct) / 100);
+    return {
+      grossCents: gross,
+      companyTakeCents,
+      netCents: Math.max(0, gross - companyTakeCents),
+      appliedMode: "percentage",
+      appliedTakePct: pct,
+      appliedFlatCents: 0,
+    };
+  }
+
+  // flat
+  const flat = Math.max(0, Math.round(take.flatCents ?? 0));
+  if (flat === 0) return none;
+  const companyTakeCents = Math.min(gross, flat);
+  return {
+    grossCents: gross,
+    companyTakeCents,
+    netCents: Math.max(0, gross - companyTakeCents),
+    appliedMode: "flat",
+    appliedTakePct: 0,
+    appliedFlatCents: companyTakeCents,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Manager overrides
+// ---------------------------------------------------------------------------
+
+/**
+ * What a manager's override pays on one deal.
+ *
+ * Four shapes, and the caller supplies the two figures they measure against:
+ *
+ *   ppw        — the system's DC watts × the manager's rate. Independent of what
+ *                the rep earned; a manager on $/W is paid for the system going
+ *                on the roof.
+ *   percentage — a share of the rep's FINAL commission, after the company's lead
+ *                adjustment. Off the contract price a manager's cut moved with
+ *                the size of the system rather than with the rep's performance,
+ *                and on a company-provided lead they were paid a share of money
+ *                the company had already taken back.
+ *   flat       — a fixed amount per qualifying deal.
+ *   none       — no override. Represented by the absence of a row, so this
+ *                function is never asked for it.
+ *
+ * NEVER SUBTRACTED FROM THE REP. An override is the company's arrangement with a
+ * manager, paid alongside the rep's commission; several managers can hold one on
+ * the same rep and they do not compete with each other or with the rep.
+ */
+export type ManagerOverrideTerms = {
+  type: "percentage" | "flat" | "ppw";
+  percent: number;
+  flatAmount: number;
+  perWattMills: number;
+};
+
+export type ManagerOverrideResult = {
+  amountCents: number;
+  /** What the amount was measured against — watts on `ppw`, cents otherwise. */
+  basisCents: number;
+};
+
+export function managerOverrideCents(
+  terms: ManagerOverrideTerms,
+  deal: { systemWatts: number; repNetCents: number }
+): ManagerOverrideResult {
+  if (terms.type === "flat") {
+    return { amountCents: Math.max(0, Math.round(terms.flatAmount)), basisCents: 0 };
+  }
+  if (terms.type === "ppw") {
+    const watts = Math.max(0, Math.round(deal.systemWatts));
+    // Mills are tenths of a cent, so the rate divides by 10 — not 1000. The same
+    // arithmetic as the rep's per-watt basis, deliberately: one $/W convention.
+    return {
+      amountCents: Math.max(0, Math.round((watts * Math.max(0, terms.perWattMills)) / 10)),
+      basisCents: watts,
+    };
+  }
+  const net = Math.max(0, Math.round(deal.repNetCents));
+  return {
+    amountCents: Math.max(0, Math.round((net * Math.max(0, terms.percent)) / 100)),
+    basisCents: net,
   };
 }
 

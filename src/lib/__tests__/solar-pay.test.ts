@@ -5,6 +5,7 @@ import { pricePurchase } from "@/lib/solar-money";
 const REP = {
   solarRedlineCentsPerWatt: 200,
   solarPerWattMills: 400,
+  solarBatteryPayPlan: null,
   solarRedlinePerBatteryCents: null,
   solarPerBatteryFlatCents: null,
 };
@@ -18,12 +19,9 @@ const REP = {
  * shape and each one keeps saying exactly what it said.
  */
 const terms = (
-  input: Omit<Parameters<typeof resolveSolarPay>[0], "systemType" | "lenderBatteryPayMode">
+  input: Omit<Parameters<typeof resolveSolarPay>[0], "systemType">
 ): SolarPayTerms | null => {
-  // The battery mode is supplied here rather than by each case: it cannot reach
-  // a PV deal, and every assertion below would otherwise restate a value that
-  // provably does not affect it. `pv is untouched` at the foot proves the claim.
-  const r = resolveSolarPay({ systemType: "pv", lenderBatteryPayMode: "redline", ...input });
+  const r = resolveSolarPay({ systemType: "pv", ...input });
   return r.kind === "terms" ? r.terms : null;
 };
 
@@ -64,7 +62,7 @@ describe("basis selection", () => {
     const t = terms({
       product: "loan",
       lenderPayMode: "redline",
-      rep: { solarRedlineCentsPerWatt: null, solarPerWattMills: 400, solarRedlinePerBatteryCents: null, solarPerBatteryFlatCents: null },
+      rep: { solarRedlineCentsPerWatt: null, solarPerWattMills: 400, solarBatteryPayPlan: null, solarRedlinePerBatteryCents: null, solarPerBatteryFlatCents: null },
     });
     expect(t).toBeNull();
   });
@@ -73,7 +71,7 @@ describe("basis selection", () => {
     const t = terms({
       product: "loan",
       lenderPayMode: "per_watt",
-      rep: { solarRedlineCentsPerWatt: 200, solarPerWattMills: null, solarRedlinePerBatteryCents: null, solarPerBatteryFlatCents: null },
+      rep: { solarRedlineCentsPerWatt: 200, solarPerWattMills: null, solarBatteryPayPlan: null, solarRedlinePerBatteryCents: null, solarPerBatteryFlatCents: null },
     });
     expect(t).toBeNull();
   });
@@ -82,7 +80,7 @@ describe("basis selection", () => {
     const t = terms({
       product: "loan",
       lenderPayMode: "per_watt",
-      rep: { solarRedlineCentsPerWatt: null, solarPerWattMills: 0, solarRedlinePerBatteryCents: null, solarPerBatteryFlatCents: null },
+      rep: { solarRedlineCentsPerWatt: null, solarPerWattMills: 0, solarBatteryPayPlan: null, solarRedlinePerBatteryCents: null, solarPerBatteryFlatCents: null },
     });
     expect(t).toEqual({ basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: 0, redlinePerBatteryCents: null, perBatteryFlatCents: null });
   });
@@ -180,17 +178,28 @@ describe("per-watt pay", () => {
 // zero: `basePriceCents − redline × 0` is the entire base price. Neither may
 // happen quietly.
 // ---------------------------------------------------------------------------
+/**
+ * A rep configured for everything. `solarBatteryPayPlan` is the REP's own
+ * battery plan and is set per case below — it moved off the lender on
+ * 2026-09-06, because two reps selling the same battery through the same
+ * partner can be paid differently and a partner's pricing model is not an
+ * employment agreement.
+ */
 const REP_ALL = {
   solarRedlineCentsPerWatt: 200,
   solarPerWattMills: 400,
+  solarBatteryPayPlan: "margin" as const,
   solarRedlinePerBatteryCents: 9_000_00,
   solarPerBatteryFlatCents: 1_500_00,
 };
 
+/** The same rep, on the flat-per-battery plan instead. */
+const REP_ALL_FLAT = { ...REP_ALL, solarBatteryPayPlan: "flat" as const };
+
 describe("storage deals", () => {
   it("pays the rep what they hold above their own per-battery redline", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "redline", rep: REP_ALL,
+      systemType: "storage", product: "loan", lenderPayMode: "redline", rep: REP_ALL,
     });
     expect(r.kind).toBe("terms");
     if (r.kind !== "terms") throw new Error("unreachable");
@@ -205,7 +214,7 @@ describe("storage deals", () => {
 
   it("pays nothing, not a negative, on a deal priced under the redline", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "redline", rep: REP_ALL,
+      systemType: "storage", product: "loan", lenderPayMode: "redline", rep: REP_ALL,
     });
     if (r.kind !== "terms") throw new Error("unreachable");
     const pay = solarRepPayCents(r.terms, {
@@ -216,30 +225,52 @@ describe("storage deals", () => {
 
   // WAS a refusal, and is deliberately no longer one. The resolver used to
   // reject a storage deal on a per-watt lender because nothing in the data
-  // could say what the rep was owed. The lender's own battery mode says it now,
-  // so the watt-denominated mode is simply not consulted on a job with no watts.
+  // could say what the rep was owed. The REP's own battery plan says it now, so
+  // no lender setting is consulted on a job with no watts.
   it("ignores the lender's PER-WATT mode entirely on a job with no watts", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "per_watt", lenderBatteryPayMode: "redline", rep: REP_ALL,
+      systemType: "storage", product: "loan", lenderPayMode: "per_watt", rep: REP_ALL,
     });
     expect(r.kind).toBe("terms");
     if (r.kind !== "terms") throw new Error("unreachable");
     expect(r.terms.basis).toBe("battery_redline");
   });
 
-  it("the battery mode decides, whichever way the per-watt mode is set", () => {
+  it("the REP'S battery plan decides, whichever way the lender's per-watt mode is set", () => {
     for (const lenderPayMode of ["redline", "per_watt"] as const) {
       const r = resolveSolarPay({
-        systemType: "storage", product: "loan", lenderPayMode, lenderBatteryPayMode: "flat", rep: REP_ALL,
+        systemType: "storage", product: "loan", lenderPayMode, rep: REP_ALL_FLAT,
       });
       expect(r.kind === "terms" && r.terms.basis).toBe("battery_flat");
     }
   });
 
+  /**
+   * THE RULE THIS FILE EXISTS TO PIN, as of 2026-09-06: two reps, ONE lender,
+   * different pay. Battery compensation is a property of the rep's employment
+   * agreement, not of the partner who funded the job.
+   */
+  it("two reps on the SAME lender are paid on their own plans", () => {
+    const common = { systemType: "storage" as const, product: "loan" as const, lenderPayMode: "per_watt" as const };
+    const a = resolveSolarPay({ ...common, rep: REP_ALL });        // margin
+    const b = resolveSolarPay({ ...common, rep: REP_ALL_FLAT });   // flat
+    expect(a.kind === "terms" && a.terms.basis).toBe("battery_redline");
+    expect(b.kind === "terms" && b.terms.basis).toBe("battery_flat");
+  });
+
+  it("a rep with NO battery plan configured generates nothing", () => {
+    const r = resolveSolarPay({
+      systemType: "storage", product: "loan", lenderPayMode: "redline",
+      rep: { ...REP_ALL, solarBatteryPayPlan: null },
+    });
+    // Not a zero line and not a guess at one of the two plans: unconfigured.
+    expect(r.kind).toBe("unconfigured");
+  });
+
   it("REFUSES a lease or PPA rather than paying a per-watt rate on no watts", () => {
     for (const product of ["lease", "ppa"] as const) {
       const r = resolveSolarPay({
-        systemType: "storage", product, lenderPayMode: "redline", lenderBatteryPayMode: "redline", rep: REP_ALL,
+        systemType: "storage", product, lenderPayMode: "redline", rep: REP_ALL,
       });
       expect(r.kind).toBe("refused");
     }
@@ -247,16 +278,14 @@ describe("storage deals", () => {
 
   it("writes no line at all when the rep has no per-battery redline", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "redline",
-      rep: { ...REP_ALL, solarRedlinePerBatteryCents: null },
+      systemType: "storage", product: "loan", lenderPayMode: "redline", rep: { ...REP_ALL, solarRedlinePerBatteryCents: null },
     });
     expect(r.kind).toBe("unconfigured");
   });
 
   it("a zero per-battery redline is a real answer, not an unset one", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "redline",
-      rep: { ...REP_ALL, solarRedlinePerBatteryCents: 0 },
+      systemType: "storage", product: "loan", lenderPayMode: "redline", rep: { ...REP_ALL, solarRedlinePerBatteryCents: 0 },
     });
     expect(r.kind).toBe("terms");
   });
@@ -268,7 +297,7 @@ describe("storage deals", () => {
   // same reason that one does.
   it("pays a flat rate per installed battery", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "per_watt", lenderBatteryPayMode: "flat", rep: REP_ALL,
+      systemType: "storage", product: "loan", lenderPayMode: "per_watt", rep: REP_ALL_FLAT,
     });
     expect(r.kind).toBe("terms");
     if (r.kind !== "terms") throw new Error("unreachable");
@@ -299,25 +328,23 @@ describe("storage deals", () => {
 
   it("writes no line at all when the rep has no flat per-battery rate", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "per_watt", lenderBatteryPayMode: "flat",
-      rep: { ...REP_ALL, solarPerBatteryFlatCents: null },
+      systemType: "storage", product: "loan", lenderPayMode: "per_watt", rep: { ...REP_ALL_FLAT, solarPerBatteryFlatCents: null },
     });
     expect(r.kind).toBe("unconfigured");
   });
 
   it("a zero flat rate is a real answer, not an unset one", () => {
     const r = resolveSolarPay({
-      systemType: "storage", product: "loan", lenderPayMode: "per_watt", lenderBatteryPayMode: "flat",
-      rep: { ...REP_ALL, solarPerBatteryFlatCents: 0 },
+      systemType: "storage", product: "loan", lenderPayMode: "per_watt", rep: { ...REP_ALL_FLAT, solarPerBatteryFlatCents: 0 },
     });
     expect(r.kind).toBe("terms");
   });
 
-  it("a lease or PPA is STILL refused, on either battery mode", () => {
-    for (const lenderBatteryPayMode of ["redline", "flat"] as const) {
+  it("a lease or PPA is STILL refused, on either battery plan", () => {
+    for (const rep of [REP_ALL, REP_ALL_FLAT]) {
       for (const product of ["lease", "ppa"] as const) {
         const r = resolveSolarPay({
-          systemType: "storage", product, lenderPayMode: "redline", lenderBatteryPayMode, rep: REP_ALL,
+          systemType: "storage", product, lenderPayMode: "redline", rep,
         });
         expect(r.kind).toBe("refused");
       }
@@ -357,19 +384,19 @@ describe("storage deals", () => {
 describe("PV is untouched by any of it", () => {
   it("still resolves the redline basis", () => {
     const r = resolveSolarPay({
-      systemType: "pv", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "flat", rep: REP_ALL,
+      systemType: "pv", product: "loan", lenderPayMode: "redline", rep: REP_ALL_FLAT,
     });
     expect(r.kind === "terms" && r.terms.basis).toBe("redline");
   });
 
   it("pv_storage takes the IDENTICAL path to pv", () => {
-    const a = resolveSolarPay({ systemType: "pv", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "flat", rep: REP_ALL });
-    const b = resolveSolarPay({ systemType: "pv_storage", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "flat", rep: REP_ALL });
+    const a = resolveSolarPay({ systemType: "pv", product: "loan", lenderPayMode: "redline", rep: REP_ALL_FLAT });
+    const b = resolveSolarPay({ systemType: "pv_storage", product: "loan", lenderPayMode: "redline", rep: REP_ALL_FLAT });
     expect(b).toEqual(a);
   });
 
   it("a battery on a pv_storage deal does not reach the pay maths", () => {
-    const r = resolveSolarPay({ systemType: "pv_storage", product: "loan", lenderPayMode: "redline", lenderBatteryPayMode: "flat", rep: REP_ALL });
+    const r = resolveSolarPay({ systemType: "pv_storage", product: "loan", lenderPayMode: "redline", rep: REP_ALL_FLAT });
     if (r.kind !== "terms") throw new Error("unreachable");
     const withBattery = solarRepPayCents(r.terms, { systemWatts: 10_000, basePriceCents: 2_600_000, batteryQty: 2 });
     const without = solarRepPayCents(r.terms, { systemWatts: 10_000, basePriceCents: 2_600_000 });

@@ -385,6 +385,9 @@ model Company {
   dealFeedPosts            DealFeedPost[]
   projectAssignees         ProjectAssignee[]
 
+  solarDealComps SolarDealComp[]
+  chargebacks        Chargeback[]
+  payrollAdjustments PayrollAdjustment[]
   @@map("companies")
 }
 
@@ -528,6 +531,28 @@ model User {
   // tenths of a cent, 400 = $0.40/W -- because $0.405/W is a real rate and cents
   // cannot express it. Matches SolarDealAdder.millsPerWatt.
   solarPerWattMills           Int?
+  /// The COMPANY's percentage of this rep's solar commission when the COMPANY
+  /// provided the lead. THE OPPOSITE CONVENTION to `providedLeadSplitPct` above,
+  /// which names the rep's share of a roofing pool — this one names what the
+  /// company keeps. 25 here means the rep is paid 75% of what their basis earned.
+  ///
+  /// Null = no take, which is what every solar deal did before this column
+  /// existed, so an unconfigured company keeps paying exactly what it paid.
+  /// Whether a given deal counts as company-provided is finalised at M1 and
+  /// recorded on SolarDealComp, not here.
+  solarCompanyLeadTakePct     Float?
+  /// WHICH company-provided-lead adjustment this rep is on. Explicit rather
+  /// than inferred from which amount happens to be non-null: "nothing
+  /// configured" and "a take of zero" are different answers and a nullable pair
+  /// cannot tell them apart. Exactly one method — never both.
+  solarLeadAdjustMode         SolarLeadAdjustMode @default(none)
+  /// The COMPANY's flat deduction from this rep's solar commission on a
+  /// company-provided lead, cents. Read only when solarLeadAdjustMode = flat.
+  solarCompanyLeadFlatCents   Int?
+  /// How this rep is paid on a BATTERY-ONLY job. Null = not configured, which
+  /// writes no line rather than a misleading zero. The lender's own
+  /// `batteryPayMode` prices the deal; it does not decide anybody's pay.
+  solarBatteryPayPlan         SolarBatteryPayPlan?
   // Verticals this user may open and switch between. New users start in Roofing
   // only; the super admin grants Solar explicitly. Retired values on existing
   // rows are filtered out by allowedVerticals() and can never surface.
@@ -589,6 +614,10 @@ model User {
   @@index([companyId, role, status])
   @@index([companyId, salesRepId])
   @@index([companyId, managerId])
+  solarDealComps        SolarDealComp[] @relation("SolarDealCompRep")
+  solarDealCompsTakenFrom SolarDealComp[] @relation("SolarDealCompReassignedFrom")
+  chargebacks        Chargeback[]        @relation("ChargebackUser")
+  payrollAdjustments PayrollAdjustment[] @relation("PayrollAdjustmentUser")
   @@map("users")
 }
 
@@ -1020,6 +1049,7 @@ model Lead {
   creditApplications CreditApplication[]
   solarProposals     SolarProposal[]
   solarMilestones    SolarMilestone[]
+  solarDealComp    SolarDealComp?
   solarDealAdders    SolarDealAdder[]
   feedPosts          DealFeedPost[]
   automationRuns     AutomationRun[]
@@ -1928,6 +1958,19 @@ model Commission {
   solarPerBatteryFlatCents    Int?
   // The rep's fixed rate at generation, mills per watt.
   solarMillsPerWatt           Int?
+  // What the basis produced BEFORE the company's lead take, cents. `amount` is
+  // what the rep is actually owed. Equal on a self-generated deal; on a
+  // company-provided one the difference is what the company kept, and a pay stub
+  // that could not show both would be a number a rep cannot check.
+  // Null on every roofing line and on solar lines written before this existed.
+  solarGrossAmount            Int?
+  // The company take applied to THIS line, snapshotted at generation for the
+  // same reason the rates beside it are: changing the rate tomorrow must never
+  // reprice a deal that has already funded.
+  solarCompanyLeadTakePct     Float?
+  // The flat lead deduction applied to THIS line, cents. Exactly one of this
+  // and the percentage above is ever set.
+  solarCompanyLeadFlatCents   Int?
   status                      CommissionStatus    @default(pending)
   notes                       String?
   approvedAt                  DateTime?
@@ -1941,6 +1984,7 @@ model Commission {
   @@unique([projectId, userId, ruleId])
   @@index([companyId, userId, status])
   @@index([companyId, projectId])
+  chargebacks Chargeback[]
   @@map("commissions")
 }
 
@@ -2032,9 +2076,16 @@ model CommissionOverride {
   /// verticals gets one row per vertical, each with its own type and amount —
   /// an override never pays across the workspace it was written for.
   vertical      Vertical       @default(roofing)
-  type          CommissionType @default(percentage) // percentage (of contract) | flat
+  /// percentage (of the rep's FINAL commission) | flat (per deal) | ppw ($/W of
+  /// system DC size). `job_cost` and `margin` are roofing-era values that no
+  /// solar override uses.
+  type          CommissionType @default(percentage)
   percent       Float          @default(0)
   flatAmount    Int            @default(0) // cents per deal
+  /// Mills (tenths of a cent) per watt of system DC size. Read only when
+  /// type = ppw — mills rather than cents for the same reason
+  /// `User.solarPerWattMills` is: a $/W rate is quoted to the cent.
+  perWattMills  Int            @default(0)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -2056,12 +2107,21 @@ model PayrollRun {
   notes       String?
   approvedAt  DateTime?
   paidAt      DateTime?
+  /// When this run was FINALISED. Once set the run is historically immutable:
+  /// no commission may enter it, no amount may change, no adjustment may be
+  /// added or edited. Anything found afterwards goes to the next run or through
+  /// an explicit reversal — a closed payroll is a record of what was paid, and
+  /// rewriting it makes every earlier statement unverifiable.
+  finalizedAt   DateTime?
+  finalizedById String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
   items PayrollItem[]
 
   @@index([companyId, status])
+  adjustments        PayrollAdjustment[]
+  chargebackRecoveries ChargebackRecovery[]
   @@map("payroll_runs")
 }
 
@@ -2949,6 +3009,18 @@ model StoredFile {
   size        Int
   contentType String?
   createdAt   DateTime @default(now())
+  /// When these bytes were first observed with no FileAsset row pointing at
+  /// them — the start of the 30-day retention window, not the age of the file.
+  ///
+  /// The distinction is the whole point. `createdAt` is when the bytes were
+  /// written, which for a two-year-old document deleted yesterday is two years
+  /// ago; purging on that would delete it immediately, which is the exact
+  /// mistake a grace period exists to prevent. `scripts/storage-orphans.ts`
+  /// stamps this on its first sweep and only deletes on a later one.
+  ///
+  /// Cleared if a row ever points at the key again, so a restored reference
+  /// restarts the clock rather than inheriting a countdown.
+  orphanedAt  DateTime?
 
   @@map("stored_files")
 }
@@ -3303,6 +3375,28 @@ model SolarSettings {
 /// switched to per_watt; the second one needs no deploy. Hardcoding
 /// `name === "Amos"` would flip every rep back onto redline pay the day somebody
 /// renames the lender to "Amos Capital" -- silently, and mid-quarter.
+/// How the company adjusts a rep's solar commission on a COMPANY-PROVIDED lead.
+/// Exactly one method per rep — never both. `none` is the default and means the
+/// rep keeps everything whatever the lead's origin.
+enum SolarLeadAdjustMode {
+  none
+  /// The company keeps a PERCENTAGE of the rep's commission.
+  percentage
+  /// The company deducts a FLAT dollar amount from the rep's commission.
+  flat
+}
+
+/// How ONE REP is paid on a battery-only job. A property of the REP, not of the
+/// lender: two reps selling the same battery through the same partner can be on
+/// different plans, and the lender's own battery pricing exists for pricing, not
+/// for deciding anybody's pay.
+enum SolarBatteryPayPlan {
+  /// Selling price minus the company's battery cost. The rep keeps the margin.
+  margin
+  /// A flat amount per installed battery, whatever it sells for.
+  flat
+}
+
 enum SolarRepPayMode {
   /// The rep sells against their own redline and keeps every cent above it.
   redline
@@ -4673,6 +4767,235 @@ model SolarMilestone {
 }
 
 /// Which audience a feed post is for.
+/// The compensation terms ONE solar deal is paid on, frozen when the customer
+/// signs.
+///
+/// WHY THIS EXISTS SEPARATELY FROM THE COMMISSION ROW. The terms were already
+/// snapshotted — onto `Commission` — but that row is not created until M1, which
+/// is months after signing. Between those two moments a rep's redline can be
+/// raised, their basis switched, or the deal handed to somebody else, and the
+/// deal would have quietly repriced against terms nobody agreed to when it sold.
+/// This row is written at SIGNING and is what the engine reads first.
+///
+/// ONE REP PER DEAL. There is no split and no second earner: `repId` is the one
+/// person whose commission this deal generates. Managers earn through
+/// CommissionOverride, which is a separate arrangement between a manager and a
+/// rep and never comes out of the rep's number.
+model SolarDealComp {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: this row belongs to exactly one workspace.
+  vertical  Vertical @default(solar)
+  leadId    String   @unique
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// The one commission-earning rep. Snapshotted rather than read off the lead
+  /// so reassigning the deal in the pipeline cannot silently move the money.
+  repId String
+  rep   User   @relation("SolarDealCompRep", fields: [repId], references: [id])
+
+  /// The frozen terms — the same four rates `Commission` carries, resolved once
+  /// at signing. "redline" | "per_watt" | "battery_redline" | "battery_flat".
+  basis                       String
+  redlineCentsPerWatt         Int?
+  millsPerWatt                Int?
+  redlinePerBatteryCents      Int?
+  perBatteryFlatCents         Int?
+
+  /// When the customer signed — the moment these terms stopped being editable.
+  signedAt DateTime
+
+  /// ── Lead origin, finalised at M1 ────────────────────────────────────────
+  /// NULL until M1 finalises it. Null is not "self-generated": it means nobody
+  /// has decided yet, and the engine pays as self-generated in the meantime
+  /// because taking money off a rep on an undecided classification is the wrong
+  /// way round.
+  companyProvidedLead   Boolean?
+  /// WHICH adjustment applies, copied off the rep when the classification was
+  /// finalised. Snapshotted rather than read live so moving a rep from a
+  /// percentage to a flat deduction next quarter cannot reprice a funded deal.
+  leadAdjustMode        SolarLeadAdjustMode @default(none)
+  /// The COMPANY's take percentage. Read only when leadAdjustMode = percentage.
+  companyLeadTakePct    Float?
+  /// The COMPANY's flat deduction, cents. Read only when leadAdjustMode = flat.
+  companyLeadFlatCents  Int?
+  leadClassFinalizedAt  DateTime?
+  leadClassFinalizedBy  String?
+
+  /// ── Compensation could not be resolved at signing ───────────────────────
+  /// TRUE means this deal sold without usable pay terms — no assigned rep, or a
+  /// rep with nothing configured for this kind of deal. The row exists anyway,
+  /// carrying `basis = "unresolved"`, precisely so the deal can be FOUND and
+  /// blocked rather than quietly falling back to whatever the rep's profile
+  /// says on the day payroll runs. An authorised admin establishes the terms
+  /// the deal was actually sold on; until then no commission generates.
+  needsReview        Boolean   @default(false)
+  reviewNote         String?
+  reviewResolvedById String?
+  reviewResolvedAt   DateTime?
+
+  /// ── Super Admin reassignment, after signing ─────────────────────────────
+  /// Reassignment is deliberate, rare, and always leaves a trail: who it was
+  /// taken from, who moved it, when, and why. Absent on the overwhelming
+  /// majority of rows.
+  reassignedFromId String?
+  reassignedFrom   User?     @relation("SolarDealCompReassignedFrom", fields: [reassignedFromId], references: [id])
+  reassignedById   String?
+  reassignedAt     DateTime?
+  reassignReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, repId])
+  @@map("solar_deal_comp")
+}
+
+/// Why a commission was clawed back.
+///
+/// A chargeback is NEVER automatic. Funding being reversed is not, on its own, a
+/// rep's fault — an install that failed, a permit that was refused, a utility
+/// that would not interconnect, a lender problem, a customer who stopped
+/// answering: none of those are the rep's conduct, and none of them may take a
+/// rep's pay. A chargeback is raised deliberately, for a documented rep-caused
+/// loss, and approved by an admin before a cent moves.
+enum ChargebackReason {
+  fraud
+  fabricated_deal
+  misrepresentation
+  rep_misconduct
+  /// Another documented rep-caused loss. `notes` is required in practice.
+  other_rep_caused
+}
+
+enum ChargebackStatus {
+  /// Raised, not yet approved. Nothing is recoverable in this state.
+  pending
+  approved
+  rejected
+  /// Fully recovered — balance is zero.
+  settled
+  /// Approved, then withdrawn. Recoveries already taken are NOT undone by this;
+  /// undoing one is a positive payroll adjustment, which leaves its own record.
+  voided
+}
+
+/// A deliberate, admin-approved clawback of commission already paid or approved.
+model Chargeback {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vertical  Vertical @default(solar)
+
+  /// The commission being clawed back. Kept as a link rather than copied,
+  /// because the original row must survive untouched — see the note on
+  /// `Commission.status`. SetNull so a deleted commission cannot erase the
+  /// financial record of the clawback.
+  commissionId String?
+  commission   Commission? @relation(fields: [commissionId], references: [id], onDelete: SetNull)
+  /// Denormalised so the record still reads correctly if the commission goes.
+  projectId String?
+  leadId    String?
+  /// Who owes it back. A rep, or a MANAGER whose override rode on the same deal.
+  userId String
+  user   User   @relation("ChargebackUser", fields: [userId], references: [id])
+
+  amountCents Int              @default(0)
+  reason      ChargebackReason
+  notes       String?
+  status      ChargebackStatus @default(pending)
+
+  requestedById String
+  requestedAt   DateTime @default(now())
+  approvedById  String?
+  approvedAt    DateTime?
+  rejectedById  String?
+  rejectedAt    DateTime?
+
+  recoveries ChargebackRecovery[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, userId, status])
+  @@index([companyId, projectId])
+  @@map("chargebacks")
+}
+
+/// One instalment of a chargeback, taken on one payroll run.
+///
+/// An approved chargeback creates a BALANCE, not a deduction. How much of it
+/// comes off a given payroll is an admin's decision every time — full, partial
+/// or nothing at all. Taking a rep's entire cheque because a balance exists is
+/// how a chargeback becomes a second, unintended punishment.
+model ChargebackRecovery {
+  id           String     @id @default(uuid())
+  chargebackId String
+  chargeback   Chargeback @relation(fields: [chargebackId], references: [id], onDelete: Cascade)
+  payrollRunId String
+  payrollRun   PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+
+  amountCents Int      @default(0)
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([chargebackId])
+  @@index([payrollRunId])
+  @@map("chargeback_recoveries")
+}
+
+enum PayrollAdjustmentKind {
+  /// Money added — a bonus, a spiff, a correction in the rep's favour.
+  bonus
+  /// Money taken — trenching, materials, an agreed cost.
+  deduction
+  /// An instalment against an approved chargeback balance. Always carries a
+  /// `chargebackId`, and is the only kind payroll creates on its own.
+  chargeback_recovery
+}
+
+/// A manual line on ONE payroll run.
+///
+/// Adjustments change what somebody is PAID. They never touch the deal's
+/// commission: an approved commission is a record of what was earned, and a
+/// deduction for trenching does not mean the rep sold a smaller system. The
+/// deal keeps saying $10,000 while the cheque says $9,500, and both are true.
+model PayrollAdjustment {
+  id           String     @id @default(uuid())
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollRunId String
+  payrollRun   PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  /// Who is paid (or docked).
+  userId String
+  user   User   @relation("PayrollAdjustmentUser", fields: [userId], references: [id])
+
+  kind PayrollAdjustmentKind
+  /// SIGNED cents: positive adds, negative deducts. The sign and `kind` are kept
+  /// consistent by the action that writes it, so a report can sum this column
+  /// directly without asking what kind each row is.
+  amountCents Int    @default(0)
+  reason      String
+
+  /// Optional deal association, for an adjustment that belongs to one job.
+  leadId    String?
+  projectId String?
+
+  /// Set only on `chargeback_recovery`, linking the instalment to its balance.
+  chargebackId String?
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, payrollRunId])
+  @@index([companyId, userId])
+  @@map("payroll_adjustments")
+}
+
 enum FeedChannel {
   /// Visible to the customer in their portal.
   external

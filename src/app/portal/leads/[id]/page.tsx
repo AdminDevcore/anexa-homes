@@ -75,6 +75,7 @@ import { DealTypeToggle } from "@/components/portal/deal-type-toggle";
 import { SolarProductChip } from "@/components/portal/solar/product-chip";
 import { SolarProposalStrip } from "@/components/portal/solar/proposal-strip";
 import { readSolarReadiness } from "@/server/modules/solar/readiness";
+import { estimatedSolarCommission } from "@/server/modules/payroll/solar-engine";
 import { approverNames } from "@/server/modules/solar/proposal-approval";
 import { canGenerate } from "@/lib/solar-validation";
 import { solarProposalState } from "@/lib/solar-proposal-state";
@@ -765,6 +766,27 @@ export default async function LeadDetailPage({
     : [null, []];
 
   /**
+   * What the pay engine says this deal is worth to its rep, beside the figure
+   * somebody typed.
+   *
+   * WHO MAY SEE IT. `can(read, Commission)` is granted to reps and managers as
+   * well as the finance roles, but the row policy behind it narrows a rep to
+   * `userId: user.userId` — a rep may see HIS OWN pay, not a colleague's. The
+   * boolean cannot express that on its own, so the ownership half is spelled
+   * out here: a sales rep gets the estimate only on a deal assigned to him.
+   *
+   * The estimate is not computed at all when the viewer may not see it, so the
+   * figure never crosses the network to a browser that must not have it.
+   */
+  const mayReadThisRepsPay =
+    isSolarDeal &&
+    can(user, "read", "Commission") &&
+    (user.role !== "sales_rep" || lead.assignedRepId === user.userId);
+  const solarCommissionEstimate = mayReadThisRepsPay
+    ? await estimatedSolarCommission(prisma, user.companyId, lead.id)
+    : null;
+
+  /**
    * The pricing ladder is DERIVED from the design + finance rows, and unlike
    * the figures above it it is not read off the proposal — because it is not on
    * the proposal. A homeowner's document quotes one price; the base, the adders
@@ -1328,6 +1350,7 @@ export default async function LeadDetailPage({
                         }
                       : null
                   }
+                  estimate={solarCommissionEstimate}
                 />
               </div>
 

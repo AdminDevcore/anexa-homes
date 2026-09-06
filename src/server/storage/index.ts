@@ -36,6 +36,12 @@ export function getLocalPath(key: string): string {
   return path.join(root(), key);
 }
 
+async function deleteLocal(key: string): Promise<void> {
+  // `force` so a missing file is success, not an error: deletion is idempotent
+  // and a re-run after a partial failure must not throw.
+  await fs.rm(path.join(root(), key), { force: true });
+}
+
 // --- S3 driver -----------------------------------------------------------
 
 let s3Client: import("@aws-sdk/client-s3").S3Client | null = null;
@@ -65,6 +71,13 @@ async function putS3(key: string, data: Buffer): Promise<string> {
   return key;
 }
 
+async function deleteS3(key: string): Promise<void> {
+  const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
+  const { client, bucket } = await s3();
+  // S3 DELETE is idempotent — deleting an absent key succeeds.
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
 async function getS3(key: string): Promise<Buffer> {
   const { GetObjectCommand } = await import("@aws-sdk/client-s3");
   const { client, bucket } = await s3();
@@ -88,6 +101,12 @@ async function putDb(key: string, data: Buffer): Promise<string> {
   return key;
 }
 
+async function deleteDb(key: string): Promise<void> {
+  const { prisma } = await import("@/server/db/client");
+  // deleteMany, not delete: an absent row is not an error.
+  await prisma.storedFile.deleteMany({ where: { key } });
+}
+
 async function getDb(key: string): Promise<Buffer> {
   const { prisma } = await import("@/server/db/client");
   const row = await prisma.storedFile.findUnique({ where: { key }, select: { data: true } });
@@ -101,6 +120,21 @@ export async function putObject(key: string, data: Buffer): Promise<string> {
   if (DRIVER === "s3") return putS3(key, data);
   if (DRIVER === "db") return putDb(key, data);
   return putLocal(key, data);
+}
+
+/**
+ * Delete the bytes behind one key.
+ *
+ * LOW-LEVEL AND UNGUARDED — it does not ask whether anything still points at
+ * the key. Almost every caller wants `releaseStorageKeys()` instead, which
+ * refuses to delete bytes another FileAsset row is still using.
+ *
+ * Idempotent on all three drivers: deleting a key that is not there succeeds.
+ */
+export async function deleteObject(key: string): Promise<void> {
+  if (DRIVER === "s3") return deleteS3(key);
+  if (DRIVER === "db") return deleteDb(key);
+  return deleteLocal(key);
 }
 
 export async function getObject(key: string): Promise<Buffer> {

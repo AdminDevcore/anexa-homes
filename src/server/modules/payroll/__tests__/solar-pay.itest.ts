@@ -57,6 +57,11 @@ async function resetFixtures() {
       firstName: "Solar", lastName: "Rep", role: "sales_rep", verticals: ["roofing", "solar"],
       solarRedlineCentsPerWatt: REDLINE_CENTS, solarPerWattMills: PER_WATT_MILLS,
       solarRedlinePerBatteryCents: BATT_REDLINE_CENTS, solarPerBatteryFlatCents: BATT_FLAT_CENTS,
+      // The REP's battery plan. It moved off the lender on 2026-09-06: two reps
+      // selling the same battery through the same partner can be paid
+      // differently, so the partner's own batteryPayMode no longer decides.
+      // Each case below sets whichever plan it is exercising.
+      solarBatteryPayPlan: "margin",
       // Roofing terms too: a rep who works both sides must not have one side's
       // model reach the other's deal.
       commissionSplitPct: 50,
@@ -159,6 +164,11 @@ async function makeStorageDeal(opts: {
     data: { companyId, vertical: "solar", leadId: lead.id, projectNumber: `${opts.tag}-1`, contractValue: 0 },
   });
   return project.id;
+}
+
+/** Put the rep on one of the two battery plans for the case under test. */
+async function repBatteryPlan(plan: "margin" | "flat") {
+  await raw.user.update({ where: { id: repId }, data: { solarBatteryPayPlan: plan } });
 }
 
 /** The engine runs unscoped, the way a payroll cron does: no workspace context. */
@@ -328,20 +338,43 @@ describe("nothing is invented", () => {
 });
 
 describe("overrides finally compute off a real number", () => {
-  it("a solar override pays a percentage of the CONTRACT price, not the Project's zero", async () => {
+  /**
+   * CHANGED 2026-09-05, deliberately. This used to assert a percentage of the
+   * CONTRACT PRICE, and the business rule is now a percentage of the REP'S
+   * FINAL COMMISSION, after any company lead take.
+   *
+   * The reason this test exists is unchanged and still guarded below: an
+   * override must compute off a REAL number and never off `Project.contractValue`,
+   * which is 0 on every solar row. What moved is which real number. Off the
+   * contract, a manager earned thousands on a deal where the rep sold at their
+   * redline and earned nothing — a manager's cut moved with the size of the
+   * system rather than with the rep's performance.
+   *
+   * Asserted as a RELATIONSHIP to the rep's line rather than a hard-coded
+   * figure: duplicating the pricing model in the expectation is how a test stops
+   * noticing that the model changed.
+   */
+  it("a solar override pays a percentage of the REP'S COMMISSION, not the Project's zero", async () => {
     await raw.commissionOverride.create({
       data: { companyId, beneficiaryId: managerId, sourceId: repId, vertical: "solar", type: "percentage", percent: 3 },
     });
     const p = await makeSolarDeal({ tag: "OV", grossPpwCents: 320, dealerFeePct: 18, lenderId: redlineLenderId });
     await computeFor(p);
 
+    const rep = await raw.commission.findFirstOrThrow({
+      where: { projectId: p, userId: repId, overrideId: null },
+      select: { amount: true },
+    });
     const line = await raw.commission.findFirstOrThrow({
       where: { projectId: p, overrideId: { not: null } },
       select: { userId: true, amount: true, baseAmount: true },
     });
+
     expect(line.userId).toBe(managerId);
-    expect(line.baseAmount).toBe(3_200_000); // 10 kW × $3.20/W
-    expect(line.amount).toBe(96_000); // 3%
+    // Not the Project's zero — the original point of this test.
+    expect(rep.amount).toBeGreaterThan(0);
+    expect(line.baseAmount).toBe(rep.amount);
+    expect(line.amount).toBe(Math.round((rep.amount * 3) / 100));
   });
 
   it("a roofing override is invisible on a solar deal", async () => {
@@ -389,8 +422,10 @@ describe("the roofing path is untouched", () => {
  * it was null on every row. Either way: no commission line, silently.
  */
 describe("battery-only jobs", () => {
-  it("pays the flat per-battery rate on a lender set to flat battery pay", async () => {
-    // Amos: flat $/W on an array, flat $/battery here. The price is not read.
+  it("pays the flat per-battery rate when the REP is on the flat plan", async () => {
+    // The lender here is the fixed-pay one, but that is now irrelevant to pay —
+    // the rep's own plan decides. The price is not read on this basis.
+    await repBatteryPlan("flat");
     const p = await makeStorageDeal({
       tag: "B1", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
     });
@@ -405,6 +440,7 @@ describe("battery-only jobs", () => {
   });
 
   it("the flat rate does not move when the job is priced up", async () => {
+    await repBatteryPlan("flat");
     const cheap = await makeStorageDeal({
       tag: "B2", stickerPerBatteryCents: 8_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
     });
@@ -416,7 +452,8 @@ describe("battery-only jobs", () => {
     expect((await repLine(cheap))?.amount).toBe((await repLine(dear))?.amount);
   });
 
-  it("pays the overage above the per-battery redline on a redline lender", async () => {
+  it("pays the margin above the per-battery cost when the REP is on the margin plan", async () => {
+    await repBatteryPlan("margin");
     // $10,000/battery through an 18% lender nets $8,200 each; $16,400 of base
     // price against a $9,000 × 2 redline leaves nothing. Price it high enough
     // to clear the redline instead: $13,000 nets $10,660, so $1,660 × 2 over.
@@ -432,6 +469,7 @@ describe("battery-only jobs", () => {
   });
 
   it("the LENDER'S per-watt mode is not consulted on a job with no watts", async () => {
+    await repBatteryPlan("margin");
     // The exact case that used to be refused. Amos pays per watt on an array;
     // this deal has none, so its battery mode decides and a line gets written.
     const p = await makeStorageDeal({
@@ -444,6 +482,7 @@ describe("battery-only jobs", () => {
   });
 
   it("locks the terms once a line exists, exactly as the per-watt bases do", async () => {
+    await repBatteryPlan("flat");
     const p = await makeStorageDeal({
       tag: "B6", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,
     });
@@ -458,9 +497,10 @@ describe("battery-only jobs", () => {
     expect((await repLine(p))?.amount).toBe(BATT_FLAT_CENTS * BATTERIES);
   });
 
-  it("writes NO line at all when the rep has no rate for the lender's mode", async () => {
+  it("writes NO line at all when the rep has no rate for their own plan", async () => {
     // Not a $0 line. A rep who is owed nothing and a rep nobody configured must
     // not look alike on a payroll run.
+    await repBatteryPlan("flat");
     await raw.user.update({ where: { id: repId }, data: { solarPerBatteryFlatCents: null } });
     const p = await makeStorageDeal({
       tag: "B7", stickerPerBatteryCents: 10_000_00, dealerFeePct: 18, lenderId: fixedPayLenderId,

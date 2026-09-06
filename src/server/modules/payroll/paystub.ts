@@ -3,6 +3,7 @@ import path from "node:path";
 import { PDFDocument, PDFFont, PDFImage, StandardFonts, rgb } from "pdf-lib";
 import { prisma } from "@/server/db/client";
 import { formatCents, formatDate } from "@/lib/format";
+import { payStubBreakdown } from "./adjustments";
 
 // Strip characters StandardFonts (WinAnsi) can't encode so drawText never throws.
 function safe(s: string): string {
@@ -57,7 +58,17 @@ export async function getPayStubData(companyId: string, runId: string, userId: s
   });
   const ytdGross = ytdItems.reduce((s, i) => s + i.amount, 0);
 
-  return { run, company: run.company, employee, items: run.items, ytdGross, year };
+  /* WHAT THE STUB HAS TO SHOW.
+   *
+   * Commission lines alone are not what this person is paid. A bonus, a
+   * trenching deduction and a chargeback instalment all change the cheque, and
+   * a stub whose NET PAY equalled gross earnings while $1,000 came off the
+   * transfer is a document nobody can reconcile against their bank. Manager
+   * overrides are broken out separately because an override is not the
+   * recipient's own sale, and one total hides which is which. */
+  const breakdown = await payStubBreakdown({ companyId, payrollRunId: runId, userId });
+
+  return { run, company: run.company, employee, items: run.items, ytdGross, year, breakdown };
 }
 
 export async function getRunStubList(companyId: string, runId: string): Promise<NonNullable<PayStubData>[]> {
@@ -105,7 +116,7 @@ function jobFor(it: NonNullable<PayStubData>["items"][number]) {
 }
 
 function drawStub(doc: PDFDocument, font: PDFFont, bold: PDFFont, logo: PDFImage | null, data: NonNullable<PayStubData>) {
-  const { run, company, employee, items, ytdGross, year } = data;
+  const { run, company, employee, items, ytdGross, year, breakdown } = data;
   const page = doc.addPage([W, H]);
   const text = (t: string, x: number, y: number, size: number, f = font, color = INK) => page.drawText(safe(t), { x, y, size, font: f, color });
   const right = (t: string, rx: number, y: number, size: number, f = font, color = INK) => page.drawText(safe(t), { x: rx - f.widthOfTextAtSize(safe(t), size), y, size, font: f, color });
@@ -171,8 +182,6 @@ function drawStub(doc: PDFDocument, font: PDFFont, bold: PDFFont, logo: PDFImage
     page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.4, color: LINE });
   });
 
-  const gross = items.reduce((s, i) => s + i.amount, 0);
-
   // Lower two-column section: payment details (left) + summary (right)
   y -= 30;
   const sectionTop = y;
@@ -211,12 +220,36 @@ function drawStub(doc: PDFDocument, font: PDFFont, bold: PDFFont, logo: PDFImage
     right(formatCents(cur), curRight, sy, 9.5, font, INK);
     right(formatCents(ytd), sumRight, sy, 9.5, font, INK);
   };
-  sumRow("Gross earnings", gross, ytdGross);
-  sumRow("Deductions / withholdings", 0, 0);
+  /* THE SUMMARY IS THE ARITHMETIC OF THE CHEQUE, line by line.
+   *
+   * Only rows that carry money are printed: a stub with four permanent zeroes
+   * on it trains the reader to skip the column, which is exactly where a
+   * deduction hides. Overrides, bonuses, deductions and chargeback recoveries
+   * each appear only when there is one.
+   *
+   * Deductions and recoveries are STORED NEGATIVE, so every row is a plain sum
+   * and NET PAY is their total — there is no place for a sign to be applied
+   * twice or not at all. */
+  sumRow("Commissions", breakdown.baseCommissionCents, ytdGross);
+  if (breakdown.managerOverrideCents !== 0) sumRow("Manager overrides", breakdown.managerOverrideCents, 0);
+  if (breakdown.bonusCents !== 0) sumRow("Bonuses / additions", breakdown.bonusCents, 0);
+  if (breakdown.deductionCents !== 0) sumRow("Deductions", breakdown.deductionCents, 0);
+  if (breakdown.chargebackRecoveryCents !== 0) {
+    sumRow("Chargeback recovery", breakdown.chargebackRecoveryCents, 0);
+  }
+
+  // Each adjustment's own reason, under the totals. "Deductions -$1,000" with
+  // no explanation is the line that generates the phone call.
+  for (const a of breakdown.lines.adjustments) {
+    sy -= 13;
+    text(`  ${a.reason}`, rightX, sy, 7.5, font, GRAY);
+    right(formatCents(a.amountCents), curRight, sy, 7.5, font, GRAY);
+  }
+
   sy -= 30;
   page.drawRectangle({ x: rightX - 8, y: sy - 8, width: sumRight - (rightX - 8) + 8, height: 30, color: DARK });
   text("NET PAY", rightX, sy + 2, 11.5, bold, rgb(1, 1, 1));
-  right(formatCents(gross), curRight, sy + 2, 11.5, bold, rgb(1, 1, 1));
+  right(formatCents(breakdown.finalCents), curRight, sy + 2, 11.5, bold, rgb(1, 1, 1));
   right(formatCents(ytdGross), sumRight, sy + 2, 11.5, bold, ORANGE);
 
   // Acknowledgement / signature — anchored toward the bottom to balance the page.
