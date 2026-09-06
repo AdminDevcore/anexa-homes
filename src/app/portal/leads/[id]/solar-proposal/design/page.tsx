@@ -96,8 +96,21 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
     orderBy: [{ isDefault: "desc" }, { manufacturer: "asc" }, { model: "asc" }],
     select: {
       id: true, kind: true, manufacturer: true, model: true, ratingW: true, widthMm: true, heightMm: true,
+      isDefault: true, isActive: true,
     },
   });
+
+  /**
+   * The starred inverter, for a design that has not named one yet.
+   *
+   * Off the list already loaded rather than a second query, and it is not a
+   * suggestion: `recomputeDesignFigures` writes exactly this onto the design
+   * the next time anything on the deal is saved. Showing it is the picker
+   * agreeing with the deal instead of reading "Not set" for a slot that is
+   * about to be filled.
+   */
+  const defaultInverterId =
+    equipment.find((e) => e.kind === "inverter" && e.isDefault && e.isActive)?.id ?? null;
   const optionsOf = (kind: "module" | "inverter" | "battery") =>
     equipment
       .filter((e) => e.kind === kind)
@@ -167,7 +180,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         // catalogue default resolved to — so the picker shows the panel the
         // figures were actually computed with.
         moduleId: design?.moduleId ?? sizingModule?.id ?? null,
-        inverterId: design?.inverterId ?? null,
+        inverterId: design?.inverterId ?? defaultInverterId,
         batteryId: design?.batteryId ?? null,
         batteryQty: design?.batteryQty ?? 0,
       }}

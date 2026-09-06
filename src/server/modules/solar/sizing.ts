@@ -40,3 +40,46 @@ export async function resolveSizingModule(
     select,
   });
 }
+
+/**
+ * Which inverter a design is built with.
+ *
+ * The same rule as the panel above, and for the same reason: a rep does not
+ * choose hardware on a sales call, the approved-vendor list does. A design that
+ * already names an inverter KEEPS it; one that names none takes the
+ * catalogue's active default.
+ *
+ * Until this existed the star on an inverter was decoration. It sorted the
+ * picker and nothing else, so `inverterId` stayed null on every deal unless a
+ * rep opened the system picker and chose one by hand — which is not something
+ * a rep has any reason to do, because none of their own screens ask for it and
+ * no figure they watch moves when they do. The first thing that noticed was
+ * the lender, at the worst possible moment: Amos will not take an application
+ * with no inverter on it, so the customer's own Qualify button read "the
+ * design has no inverter selected" on a company that had starred one.
+ *
+ * Only the id, because unlike the module nothing is DERIVED from the inverter —
+ * it is a fact about what gets installed, carried onto the customer's document
+ * and into the lender's bill of materials. Returns null when there is no
+ * default to use, which leaves the slot exactly as empty as it was rather than
+ * guessing at a product.
+ */
+export async function resolveDesignInverter(
+  companyId: string,
+  existingInverterId: string | null
+): Promise<{ id: string } | null> {
+  const select = { id: true } as const;
+
+  if (existingInverterId) {
+    const kept = await prisma.solarEquipment.findFirst({
+      where: { companyId, id: existingInverterId, kind: "inverter" },
+      select,
+    });
+    if (kept) return kept;
+  }
+
+  return prisma.solarEquipment.findFirst({
+    where: { companyId, kind: "inverter", isActive: true, isDefault: true },
+    select,
+  });
+}

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { runInVertical } from "@/server/vertical/context";
-import { resolveSizingModule } from "@/server/modules/solar/sizing";
+import { resolveSizingModule, resolveDesignInverter } from "@/server/modules/solar/sizing";
+import { recomputeDesignFigures } from "@/server/modules/solar/recompute";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 
 /**
@@ -12,6 +13,9 @@ import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
  * built from. These tests pin the two halves of that: a design with no module
  * takes the catalogue default, and a design that already HAS one keeps it, so
  * next year's AVL cannot silently re-price a quote sent last year.
+ *
+ * The inverter follows the same rule, for the same reason — and did not, for
+ * long enough that a starred inverter never reached a single deal.
  */
 process.env.SOLAR_VERTICAL_ENABLED = "1";
 
@@ -56,6 +60,17 @@ const panel = (over: Record<string, unknown> = {}) =>
     },
   });
 
+const inverter = (over: Record<string, unknown> = {}) =>
+  db.solarEquipment.create({
+    data: {
+      companyId,
+      kind: "inverter",
+      model: `I-${Math.random().toString(36).slice(2, 8)}`,
+      ratingW: 7600,
+      ...over,
+    },
+  });
+
 describe("the default panel sizes the system", () => {
   it("fills an empty design with the active default module", async () => {
     const def = await panel({ ratingW: 450, isDefault: true });
@@ -94,6 +109,77 @@ describe("the default panel sizes the system", () => {
     expect(await runInVertical("solar", () => resolveSizingModule(companyId, null))).toBeNull();
 
     await db.company.deleteMany({ where: { id: other.id } });
+  });
+});
+
+describe("the default inverter reaches the deal", () => {
+  it("fills an empty design with the active default inverter", async () => {
+    const def = await inverter({ isDefault: true });
+
+    const chosen = await runInVertical("solar", () => resolveDesignInverter(companyId, null));
+
+    expect(chosen?.id).toBe(def.id);
+  });
+
+  it("keeps an inverter the design already names, even after the default changes", async () => {
+    const lastYear = await inverter();
+    await inverter({ isDefault: true });
+
+    const chosen = await runInVertical("solar", () =>
+      resolveDesignInverter(companyId, lastYear.id)
+    );
+
+    expect(chosen?.id).toBe(lastYear.id);
+  });
+
+  it("ignores a retired default rather than building on a product nobody sells", async () => {
+    await inverter({ isDefault: true, isActive: false });
+
+    expect(await runInVertical("solar", () => resolveDesignInverter(companyId, null))).toBeNull();
+  });
+
+  it("does not reach into another company's catalogue", async () => {
+    const other = await db.company.create({
+      data: { name: "Other Inv Co", slug: `oi-${process.pid}-${Date.now()}` },
+    });
+    await db.solarEquipment.create({
+      data: { companyId: other.id, kind: "inverter", model: "THEIRS", isDefault: true },
+    });
+
+    expect(await runInVertical("solar", () => resolveDesignInverter(companyId, null))).toBeNull();
+
+    await db.company.deleteMany({ where: { id: other.id } });
+  });
+
+  /**
+   * The one that actually failed in front of a customer.
+   *
+   * The star used to order the picker and nothing else, so `inverterId` stayed
+   * null on every deal and the lender refused the application: "the design has
+   * no inverter selected", under the homeowner's own Qualify button, on a
+   * company that had starred one.
+   */
+  it("writes the starred inverter onto a design that names none", async () => {
+    await panel({ isDefault: true });
+    const def = await inverter({ isDefault: true });
+    await db.solarDesign.create({ data: { companyId, leadId, moduleQty: 0 } });
+
+    await runInVertical("solar", () => recomputeDesignFigures(companyId, leadId));
+
+    expect((await db.solarDesign.findUnique({ where: { leadId } }))?.inverterId).toBe(def.id);
+  });
+
+  it("never re-points a design at this year's inverter once it names one", async () => {
+    await panel({ isDefault: true });
+    const lastYear = await inverter();
+    await inverter({ isDefault: true });
+    await db.solarDesign.create({
+      data: { companyId, leadId, moduleQty: 0, inverterId: lastYear.id },
+    });
+
+    await runInVertical("solar", () => recomputeDesignFigures(companyId, leadId));
+
+    expect((await db.solarDesign.findUnique({ where: { leadId } }))?.inverterId).toBe(lastYear.id);
   });
 });
 
