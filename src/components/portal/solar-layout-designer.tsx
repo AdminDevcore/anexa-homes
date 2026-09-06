@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Compass, Eraser, Loader2, MapPin, Minus, MousePointer2, Move, Pentagon,
-  Plus, Layers, RotateCcw, RotateCw, Ruler, Scissors, Square, Sun, Trash2, Wand2,
-  ZoomIn, ZoomOut,
+  ArrowLeft, ChevronDown, Compass, Crosshair, Eraser, Hand, Loader2, MapPin, Maximize2,
+  Minus, MousePointer2, Move, Pentagon, Plus, Layers, RotateCcw, RotateCw, Ruler,
+  Scissors, Search, Square, Sun, Trash2, Wand2, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,25 @@ import {
   type Orientation,
 } from "@/lib/solar-layout";
 import { systemTotals } from "@/lib/solar-arrays";
+import {
+  BASEMAP_HINT,
+  BASEMAP_LABEL,
+  BASEMAP_SOURCES,
+  ESRI_MAX_ZOOM,
+  GOOGLE_MAX_ZOOM,
+  MIN_ZOOM,
+  SUPERTILE_RADIUS,
+  SUPERTILE_PX,
+  attribution,
+  frameOn,
+  isUpsampled,
+  latLngToMetres,
+  singleImageView,
+  metresToLatLng,
+  type BasemapSource,
+  type MapView,
+} from "@/lib/map-view";
+import { useBasemap, useDevicePixelRatio } from "@/components/portal/solar-designer/use-basemap";
 import {
   applyPlanes,
   assignPlanes,
@@ -117,8 +136,14 @@ export type EquipOption = {
   sized?: boolean;
 };
 
-/** Google clamps each side of a Static Maps image to 640; scale=2 doubles it. */
-const DEFAULT_CANVAS_PX = 1280;
+/**
+ * The customer's layout picture, in pixels a side.
+ *
+ * FIXED, and square. The canvas is the size of the rep's window now, so
+ * exporting "what is on screen" would hand the proposal a different aspect
+ * ratio for every laptop in the company.
+ */
+const EXPORT_PX = 1280;
 
 /**
  * How close to a traced setback point a click has to land to count as being ON
@@ -127,9 +152,15 @@ const DEFAULT_CANVAS_PX = 1280;
  */
 const SETBACK_SNAP_PX = 12;
 
-/** That radius in ground metres, which is what the trace is stored in. */
-function setbackSnapM(viewScale: number, mpp: number) {
-  return Math.max(8, SETBACK_SNAP_PX / viewScale) * mpp;
+/**
+ * That radius in ground metres, which is what the trace is stored in.
+ *
+ * It used to divide by a separate view scale, because the canvas was a fixed
+ * 1280 px picture stretched to fit the screen. The canvas is now the screen, so
+ * its pixels ARE CSS pixels and `mpp` alone carries the whole conversion.
+ */
+function setbackSnapM(mpp: number) {
+  return SETBACK_SNAP_PX * mpp;
 }
 
 /**
@@ -169,8 +200,12 @@ function setbackVertexAt(
  * So the palette is whole again, and the modifiers stay as accelerators on the
  * pointer for whoever wants them. Nothing is only reachable by holding a key.
  */
-type Tool = "select" | "draw" | "face" | "panel" | "movePanel" | "erase" | "setback";
-type Zoom = 20 | 21;
+type Tool =
+  | "select" | "draw" | "face" | "panel" | "movePanel" | "erase" | "setback"
+  /** Drag the picture. Also space-held, middle-drag and two-finger scroll. */
+  | "pan"
+  /** Put the deal's own coordinate on the right roof. See `movePin`. */
+  | "pin";
 
 type Drag =
   | { kind: "new"; fromX: number; fromY: number; toX: number; toY: number }
@@ -232,6 +267,8 @@ const TOOL_KEYS: Record<Tool, string> = {
   movePanel: "g",
   erase: "e",
   setback: "s",
+  pan: "h",
+  pin: "k",
 };
 
 /** Nudge distances. A rail is 2 cm, so 5 cm is "just off" and 50 cm is "over a bit". */
@@ -295,6 +332,7 @@ export function SolarLayoutDesigner({
   leadId,
   address,
   lat,
+  lng,
   moduleMm,
   moduleRatingW,
   catalogue,
@@ -314,6 +352,11 @@ export function SolarLayoutDesigner({
   address: string;
   /** Null when the deal has no rooftop coordinate — the roof cannot be shown. */
   lat: number | null;
+  /**
+   * The other half of the coordinate. Needed now that the picture can be moved:
+   * a pannable map has to know where it IS, not just how big a metre is there.
+   */
+  lng: number | null;
   moduleMm: ModuleMm;
   moduleRatingW: number | null;
   /** Everything this company sells, for the three pickers in the top bar. */
@@ -361,7 +404,6 @@ export function SolarLayoutDesigner({
 }) {
   const router = useRouter();
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const imgRef = React.useRef<HTMLImageElement | null>(null);
   const viewportRef = React.useRef<HTMLDivElement>(null);
 
   /**
@@ -473,10 +515,64 @@ export function SolarLayoutDesigner({
    * not be one click away from drawing over the design.
    */
   const [tool, setTool] = React.useState<Tool>("select");
-  const [zoom, setZoom] = React.useState<Zoom>(21);
-  const [viewScale, setViewScale] = React.useState(1);
+
+  /**
+   * WHERE THE PICTURE IS, AND HOW BIG A METRE IS ON IT.
+   *
+   * These two replace the old `zoom: 20 | 21` and `viewScale`, and the change
+   * is not cosmetic. The old pair could only describe one framing — the deal's
+   * geocoded point, at one of two magnifications — because the imagery was a
+   * single photograph centred there. A rep whose house sat outside that frame
+   * had no move to make.
+   *
+   * `centre` is in ground metres from the deal's coordinate, the same units
+   * every panel is stored in, so panning is arithmetic rather than a second
+   * coordinate system. `mpp` is metres per CSS pixel, continuous rather than a
+   * pair of steps, so zoom can rest wherever the roof reads best.
+   */
+  const [centre, setCentre] = React.useState<{ e: number; n: number }>({ e: 0, n: 0 });
+  const [mpp, setMpp] = React.useState(() =>
+    lat == null ? 0.03 : metresPerPixel(lat, GOOGLE_MAX_ZOOM, 2)
+  );
+  /** Which vendor's imagery is behind the panels. See BASEMAP_HINT. */
+  const [source, setSource] = React.useState<BasemapSource>("satellite");
+
+  /**
+   * The deal's coordinate, which every stored panel is measured from — held as
+   * STATE because the rep can correct it.
+   *
+   * Moving the pin re-bases the whole drawing so the panels stay on the roof
+   * they were drawn on (see `movePin`), which means the origin after a
+   * correction is genuinely a different point from the one the props carried.
+   */
+  const [originLat, setOriginLat] = React.useState<number | null>(lat);
+  const [originLng, setOriginLng] = React.useState<number | null>(lng);
+  const origin = React.useMemo(
+    () => (originLat == null || originLng == null ? null : { lat: originLat, lng: originLng }),
+    [originLat, originLng]
+  );
+  /** Has the rep moved it? Only then does the save carry a new coordinate. */
+  const pinMoved = originLat !== lat || originLng !== lng;
+  const [showPin, setShowPin] = React.useState(true);
+
+  /**
+   * A pan in progress, held as a ref because it updates on every pointer move
+   * and a state round trip per frame is a stuttering map.
+   */
+  const panRef = React.useRef<{ x: number; y: number } | null>(null);
+  const [panning, setPanning] = React.useState(false);
+  /** Space turns any tool into the hand, the way every drawing tool does it. */
+  const [spaceHeld, setSpaceHeld] = React.useState(false);
+
+  /** The canvas, in CSS pixels — it is the size of the screen it is on. */
+  const [canvas, setCanvas] = React.useState({ w: 1280, h: 720 });
+  const canvasW = canvas.w;
+  const canvasH = canvas.h;
+
   const [dirty, setDirty] = React.useState(false);
   const [shadeOpen, setShadeOpen] = React.useState(false);
+  /** The tool rail sits ON the roof, so it has to be possible to get it off. */
+  const [railOpen, setRailOpen] = React.useState(true);
   const [tiltOpen, setTiltOpen] = React.useState(false);
   const [showPlanes, setShowPlanes] = React.useState(false);
 
@@ -547,31 +643,51 @@ export function SolarLayoutDesigner({
     setPendingEquip(null);
   }
 
-  // Which zoom's imagery has resolved, how, and AT WHAT SIZE. The size is part
-  // of the answer because the canvas and the metres-per-pixel are both derived
-  // from it — Google clamps a Static Maps request to 640 a side and says
-  // nothing, so the only trustworthy dimensions are the ones that arrived.
-  const [loaded, setLoaded] = React.useState<{
-    zoom: Zoom;
-    ok: boolean;
-    widthPx: number;
-    heightPx: number;
-  } | null>(null);
   const [busy, setBusy] = React.useState(false);
 
-  const imageState: "loading" | "ready" | "failed" =
-    loaded?.zoom !== zoom ? "loading" : loaded.ok ? "ready" : "failed";
+  /**
+   * The imagery, and everything about fetching it — see use-basemap.
+   *
+   * Note what is NOT here any more: the canvas no longer takes its size from
+   * whatever picture happened to arrive. It used to, because the single Static
+   * Maps image was silently clamped to a square and the only trustworthy
+   * dimensions were the ones that came back. The canvas is now the size of the
+   * screen and the imagery is fitted to IT, which is the right way round.
+   */
+  const basemap = useBasemap({ leadId, origin, source });
+  const imageState: "loading" | "ready" | "failed" = basemap.failed
+    ? "failed"
+    : basemap.ready
+      ? "ready"
+      : "loading";
 
-  const canvasW = loaded?.ok ? loaded.widthPx : DEFAULT_CANVAS_PX;
-  const canvasH = loaded?.ok ? loaded.heightPx : DEFAULT_CANVAS_PX;
+  /** Everything the projection needs, in one value. */
+  const view: MapView = React.useMemo(
+    () => ({ centreE: centre.e, centreN: centre.n, mpp, widthPx: canvasW, heightPx: canvasH }),
+    [centre, mpp, canvasW, canvasH]
+  );
 
-  const mpp = lat == null ? 0 : metresPerPixel(lat, zoom, 2);
+  /**
+   * How far the imagery reaches, in metres from the deal.
+   *
+   * The pan is bounded because the IMAGERY ROUTE is bounded: a supertile is
+   * addressed as an offset from a lead so that it can never be asked for an
+   * arbitrary coordinate. Stopping the view at the same edge means a rep hits a
+   * limit rather than a wall of blank tiles.
+   */
+  const panLimitM = React.useMemo(
+    () =>
+      lat == null
+        ? 0
+        : (SUPERTILE_RADIUS + 0.5) * SUPERTILE_PX * metresPerPixel(lat, GOOGLE_MAX_ZOOM, 2),
+    [lat]
+  );
   /**
    * The point a click would land on right now, if any — so the cursor, the
    * rubber band and the click itself all agree about where the trace ends.
    */
   const setbackSnap =
-    tool === "setback" ? setbackVertexAt(pending, ghostPoint, setbackSnapM(viewScale, mpp)) : null;
+    tool === "setback" ? setbackVertexAt(pending, ghostPoint, setbackSnapM(mpp)) : null;
   const selected = blocks.find((b) => b.id === selectedId) ?? null;
   const count = panelCount(blocks);
   /**
@@ -1144,100 +1260,221 @@ export function SolarLayoutDesigner({
     [planes, showPlanes]
   );
 
-  // ── Imagery ────────────────────────────────────────────────────────────
-  React.useEffect(() => {
-    if (lat == null) return;
-    let live = true;
-    const img = new Image();
-    // Same-origin: the route proxies Google server-side so the API key never
-    // reaches the browser. That is also what keeps the canvas untainted, which
-    // is what makes `toBlob` on save possible at all.
-    img.src = `/api/property/satellite?leadId=${encodeURIComponent(leadId)}&zoom=${zoom}&pin=0&square=1`;
-    img.onload = () => {
-      if (!live) return;
-      imgRef.current = img;
-      setLoaded({
-        zoom,
-        ok: true,
-        widthPx: img.naturalWidth || DEFAULT_CANVAS_PX,
-        heightPx: img.naturalHeight || DEFAULT_CANVAS_PX,
-      });
-    };
-    img.onerror = () => {
-      if (!live) return;
-      imgRef.current = null;
-      setLoaded({ zoom, ok: false, widthPx: DEFAULT_CANVAS_PX, heightPx: DEFAULT_CANVAS_PX });
-    };
-    return () => {
-      live = false;
-    };
-  }, [leadId, zoom, lat]);
-
+  // ── The view ───────────────────────────────────────────────────────────
   /**
-   * Open filling the viewport rather than at 1:1.
+   * The canvas is the size of the space it is given, in CSS pixels.
    *
-   * A 1280px canvas inside an 900px-tall screen opens showing the middle
-   * quarter of the roof, which is why the old embedded version read as "it
-   * gives me the wrong thing" — the house was there, just outside the box.
+   * This replaces a fixed 1280 px square scaled to fit, and it is why the roof
+   * fills the screen now rather than sitting letterboxed in the middle of it.
+   * The backing store is multiplied by the device pixel ratio at paint time; the
+   * GEOMETRY stays in CSS pixels so that a grab radius is the same size under a
+   * finger on every display.
    */
-  const fitted = React.useRef(false);
   React.useEffect(() => {
     const el = viewportRef.current;
-    /**
-     * NOT GATED ON THE IMAGERY, and it used to be — the comment here said one
-     * thing and the line under it did the other.
-     *
-     * `loaded` is set by the satellite tile's own load or error handler, so
-     * until one of them fires the fit never ran and the canvas stayed at 1:1:
-     * 1280 pixels of roof in a screen a few hundred shorter, with the bottom
-     * half of the house below the fold. Everything down there is unreachable
-     * until somebody thinks to scroll, which on a picture with no visible edges
-     * is not an obvious thing to think.
-     *
-     * A tile that is slow, or a Maps key that is wrong, is exactly when a rep
-     * least wants the picture to also be three times the height of the screen.
-     * The canvas has a size either way — `canvasW`/`canvasH` fall back to the
-     * default until the real dimensions arrive, and both are in the deps, so
-     * this re-fits the moment they do.
-     */
     if (!el) return;
-    const fit = () => {
-      const f = Math.min(el.clientWidth / canvasW, el.clientHeight / canvasH);
-      if (Number.isFinite(f) && f > 0) setViewScale(Math.max(0.2, Math.min(2, f)));
+    const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setCanvas((c) => (c.w === w && c.h === h ? c : { w, h }));
     };
-    fit();
-    fitted.current = true;
-    // A window resized, a laptop undocked, a browser zoom: the roof has to come
-    // back to fitting rather than sit half off the bottom of the screen. Once a
-    // rep has zoomed in deliberately this stops — refitting under someone who
-    // is inspecting a vent is worse than leaving the picture where they put it.
-    const ro = new ResizeObserver(() => {
-      if (fitted.current) fit();
-    });
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [loaded, canvasW, canvasH]);
-
-  /** Any deliberate zoom hands control over: stop refitting behind their back. */
-  const zoomBy = React.useCallback((mul: number) => {
-    fitted.current = false;
-    setViewScale((v) => Math.max(0.15, Math.min(6, v * mul)));
   }, []);
+
+  /**
+   * How far in and out the view may go.
+   *
+   * The far end is a whole subdivision. The near end is deliberately PAST what
+   * any vendor serves — a rep nudging a panel around a vent wants the pixels
+   * bigger even when they are only bigger, not sharper, and the note on screen
+   * says so rather than the control refusing.
+   */
+  const mppRange = React.useMemo(() => {
+    if (lat == null) return { min: 0.005, max: 5 };
+    return {
+      min: metresPerPixel(lat, GOOGLE_MAX_ZOOM + 3, 2),
+      max: metresPerPixel(lat, MIN_ZOOM, 2),
+    };
+  }, [lat]);
+
+  /** Keep the view over ground the imagery route will actually serve. */
+  const clampCentre = React.useCallback(
+    (c: { e: number; n: number }) => ({
+      e: Math.max(-panLimitM, Math.min(panLimitM, c.e)),
+      n: Math.max(-panLimitM, Math.min(panLimitM, c.n)),
+    }),
+    [panLimitM]
+  );
+
+  const panBy = React.useCallback(
+    (dxPx: number, dyPx: number) =>
+      setCentre((c) => clampCentre({ e: c.e - dxPx * mpp, n: c.n + dyPx * mpp })),
+    [mpp, clampCentre]
+  );
+
+  /**
+   * Zoom, optionally holding one point of the picture still.
+   *
+   * Anchoring matters on a map: zooming towards the cursor is how every mapping
+   * tool behaves, and without it a rep zooming into a vent watches the vent
+   * slide off the screen and has to chase it.
+   */
+  const zoomBy = React.useCallback(
+    (mul: number, anchor?: { x: number; y: number }) => {
+      setMpp((m) => {
+        const next = Math.max(mppRange.min, Math.min(mppRange.max, m / mul));
+        if (anchor && next !== m) {
+          // The ground point under the anchor must not move, so the centre
+          // takes up the difference.
+          const dx = anchor.x - canvasW / 2;
+          const dy = anchor.y - canvasH / 2;
+          setCentre((c) => clampCentre({ e: c.e + dx * (m - next), n: c.n - dy * (m - next) }));
+        }
+        return next;
+      });
+    },
+    [mppRange, canvasW, canvasH, clampCentre]
+  );
+
+  /**
+   * PUT THE DEAL'S COORDINATE ON THE RIGHT ROOF.
+   *
+   * The whole difficulty is in one sentence: every panel, every traced face,
+   * every setback and every roof plane on this screen is stored in metres FROM
+   * that coordinate. Move it naively and the drawing does not stay where it was
+   * drawn — it slides by exactly the distance the pin travelled, off the roof
+   * and onto the neighbour's.
+   *
+   * So moving the pin is a change of origin, and everything measured from the
+   * old one is re-expressed against the new one in the same breath. Subtracting
+   * the new origin from each stored point is all "stay where you are on the
+   * ground" means, and doing it here — rather than leaving it to the save — is
+   * what makes the correction visibly a no-op on screen. The picture does not
+   * move. Only the question "where is this house" gets a new answer.
+   *
+   * The view is shifted too, so the roof the rep is looking at stays under
+   * their eyes rather than jumping by the width of the correction.
+   */
+  const movePin = React.useCallback(
+    (m: { e: number; n: number }) => {
+      if (!origin) return;
+      const shift = <T extends { e: number; n: number }>(pt: T): T => ({
+        ...pt,
+        e: pt.e - m.e,
+        n: pt.n - m.n,
+      });
+      const shiftBlocks = (bs: LayoutBlock[]): LayoutBlock[] =>
+        bs.map((b) => ({
+          ...b,
+          originE: b.originE - m.e,
+          originN: b.originN - m.n,
+          face: b.face ? { ...b.face, points: b.face.points.map(shift) } : b.face,
+        }));
+
+      setBlocks(shiftBlocks(blocksRef.current));
+
+      /**
+       * EVERY OTHER COPY OF THE LAYOUT MOVES TOO, and forgetting this is a bug
+       * that only shows up on the second action.
+       *
+       * The undo stack and the "put the saved design back" snapshot are lists
+       * of blocks in the frame they were captured in. Re-base the live drawing
+       * and leave those behind, and the design sits correctly on the roof until
+       * the rep presses undo — at which point the whole array jumps by exactly
+       * the distance the pin was moved, for no reason they could ever connect
+       * to the pin.
+       */
+      setHistory((h) => h.map(shiftBlocks));
+      savedRef.current = shiftBlocks(savedRef.current);
+      setSetbacks(setbacksRef.current.map((sb) => ({ ...sb, points: sb.points.map(shift) })));
+      setPending(pendingRef.current ? pendingRef.current.map(shift) : null);
+      // Google's roof model is measured from the old origin as well, and an
+      // un-shifted one would hand every array it touches a facing read off the
+      // wrong plane.
+      const pl = planesRef.current;
+      if (pl) {
+        setPlanes({
+          ...pl,
+          segments: pl.segments.map((sg) => ({
+            ...sg,
+            centerE: sg.centerE - m.e,
+            centerN: sg.centerN - m.n,
+          })),
+          panels: pl.panels.map((pn) => ({ ...pn, e: pn.e - m.e, n: pn.n - m.n })),
+        });
+      }
+      setCentre((c) => ({ e: c.e - m.e, n: c.n - m.n }));
+      const next = metresToLatLng(origin, m);
+      setOriginLat(next.lat);
+      setOriginLng(next.lng);
+      setDirty(true);
+      setTool("select");
+    },
+    [origin, setBlocks, setSetbacks, setPending, setPlanes]
+  );
+
+  /** Put the whole array (or the house, when there is none) on the screen. */
+  const fitToArray = React.useCallback(() => {
+    const pts = blocksRef.current.flatMap((b) =>
+      panelCorners(b, moduleMm).flat().map((c) => ({ e: c.e, n: c.n }))
+    );
+    const framed = frameOn(pts, { widthPx: canvasW, heightPx: canvasH }, { marginM: 8 });
+    setCentre(clampCentre({ e: framed.centreE, n: framed.centreN }));
+    setMpp(Math.max(mppRange.min, Math.min(mppRange.max, framed.mpp)));
+  }, [moduleMm, canvasW, canvasH, mppRange, clampCentre]);
+
+  /**
+   * Open framed on the array rather than on the geocoder's guess.
+   *
+   * Once, when the panels first arrive and the canvas has a size. A designer
+   * reopened on a finished layout should show the layout; a fresh one falls
+   * back to the house, which is what `frameOn` does with no points.
+   */
+  const framedOnce = React.useRef(false);
+  React.useEffect(() => {
+    if (framedOnce.current || lat == null || canvasW <= 1) return;
+    framedOnce.current = true;
+    if (initialBlocks.length > 0) fitToArray();
+  }, [lat, canvasW, initialBlocks, fitToArray]);
 
   // ── Drawing ────────────────────────────────────────────────────────────
   const paint = React.useCallback(
-    (ctx: CanvasRenderingContext2D, opts: { chrome: boolean }) => {
-      ctx.clearRect(0, 0, canvasW, canvasH);
-      // 1:1 with the source. Any scaling here is a scaling bug waiting to
-      // happen, which is exactly the one this component shipped with.
-      if (imgRef.current) ctx.drawImage(imgRef.current, 0, 0, canvasW, canvasH);
-      else {
-        ctx.fillStyle = "#1f2937";
-        ctx.fillRect(0, 0, canvasW, canvasH);
+    (
+      ctx: CanvasRenderingContext2D,
+      opts: {
+        chrome: boolean;
+        view?: MapView;
+        dpr?: number;
+        source?: BasemapSource;
+        /** One image to use as the whole basemap — see `singleImageView`. */
+        backdrop?: HTMLImageElement | null;
       }
+    ) => {
+      const v = opts.view ?? view;
+      const dpr = opts.dpr ?? 1;
+      // Everything below is authored in CSS pixels. One transform at the top
+      // buys the whole file retina sharpness without a single size changing.
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, v.widthPx, v.heightPx);
 
-      const img = { widthPx: canvasW, heightPx: canvasH };
-      const toPx = (c: { e: number; n: number }) => metresToImagePx(c.e, c.n, mpp, img);
+      // THE IMAGERY IS DRAWN IN SCREEN SPACE, before the pan transform: the
+      // tile rectangles already account for where the view is looking, because
+      // they were computed from it. Translating them again would move the
+      // photograph out from under the panels drawn on it.
+      if (opts.backdrop) ctx.drawImage(opts.backdrop, 0, 0, v.widthPx, v.heightPx);
+      else basemap.draw(ctx, v, opts.source);
+
+      // From here on the origin of the canvas is the deal's own coordinate,
+      // which is the space every panel, face and setback is stored in. The pan
+      // lives entirely in this one translate — that is why nothing else in this
+      // function had to learn that the map can move.
+      ctx.translate(-v.centreE / v.mpp, v.centreN / v.mpp);
+
+      const img = { widthPx: v.widthPx, heightPx: v.heightPx };
+      const toPx = (c: { e: number; n: number }) => metresToImagePx(c.e, c.n, v.mpp, img);
       const trace = (pts: { x: number; y: number }[]) => {
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
@@ -1404,14 +1641,14 @@ export function SolarLayoutDesigner({
             ctx.setLineDash([]);
           }
 
-          drawFacing(ctx, b, moduleMm, mpp, img, {
+          drawFacing(ctx, b, moduleMm, v.mpp, img, {
             factorPct:
               b.azimuthDeg != null && b.tiltDeg != null
                 ? Math.round(arrayFactor(totals, b.id) * 100)
                 : null,
             active: drag?.kind === "facing" && drag.id === b.id,
           });
-          const hp = handlePositions(b, moduleMm, mpp, img);
+          const hp = handlePositions(b, moduleMm, v.mpp, img);
           for (const [pos, colour] of [
             [hp.rotate, "#f4631e"],
             [hp.resize, "#38bdf8"],
@@ -1439,6 +1676,40 @@ export function SolarLayoutDesigner({
         );
         ctx.setLineDash([]);
       }
+
+      /**
+       * THE PIN: where this deal thinks the house is.
+       *
+       * Always at ground zero, because that IS the origin — moving it re-bases
+       * everything else rather than moving the marker (see `movePin`).
+       *
+       * Drawn under `chrome` only, which is what keeps it out of the picture
+       * the customer receives. That was the whole reason the old Static Maps
+       * marker had to be switched off: it landed on the roof, over the array,
+       * and got baked into the layout image.
+       *
+       * A ring rather than a teardrop. A pin with a point has to be drawn above
+       * the thing it marks, hiding it; a ring sits around the spot and leaves
+       * the roof inside it visible, which matters when the spot is where the
+       * panels go.
+       */
+      if (opts.chrome && showPin) {
+        const c = toPx({ e: 0, n: 0 });
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 11, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.strokeStyle = "#f4631e";
+        ctx.lineWidth = 1.75;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#f4631e";
+        ctx.fill();
+        ctx.restore();
+      }
     },
     [
       blocks,
@@ -1452,24 +1723,37 @@ export function SolarLayoutDesigner({
       drag,
       totals,
       moduleMm,
-      mpp,
-      canvasW,
-      canvasH,
+      view,
+      basemap,
+      showPin,
     ]
   );
 
+  const dpr = useDevicePixelRatio();
+
   React.useEffect(() => {
     const ctx = canvasRef.current?.getContext("2d");
-    if (ctx) paint(ctx, { chrome: true });
-  }, [paint, imageState]);
+    // `basemap.version` is in the deps because a tile arriving is a reason to
+    // repaint that nothing else on this screen knows about.
+    if (ctx) paint(ctx, { chrome: true, dpr });
+  }, [paint, dpr, basemap.version]);
 
   // ── Pointer maths ──────────────────────────────────────────────────────
-  /** Client coords → canvas pixels, whatever the element is scaled to. */
-  const toCanvas = (e: React.PointerEvent) => {
+  /**
+   * Client coords → the space the drawing is done in.
+   *
+   * THE PAN IS FOLDED IN HERE, and only here. Everything downstream — hit
+   * testing, the rubber band, the grab radius of the facing arrow, the ground
+   * conversion below — was written against a canvas whose centre was the deal's
+   * coordinate, and all of it still is. Adding the view's offset to the pointer
+   * at the single point where a real event becomes a canvas position is what
+   * let the map start moving without any of that code being touched.
+   */
+  const toCanvas = (e: { clientX: number; clientY: number }) => {
     const r = canvasRef.current!.getBoundingClientRect();
     return {
-      x: ((e.clientX - r.left) / r.width) * canvasW,
-      y: ((e.clientY - r.top) / r.height) * canvasH,
+      x: e.clientX - r.left + centre.e / mpp,
+      y: e.clientY - r.top - centre.n / mpp,
     };
   };
   const toMetres = (p: { x: number; y: number }) => ({
@@ -1600,6 +1884,20 @@ export function SolarLayoutDesigner({
   );
 
   /**
+   * Choose a tool. One function, because a half-finished trace has to be dealt
+   * with whichever control the rep reached for — leaving one dangling was how
+   * a dashed line ended up following the pointer around forever.
+   */
+  const pickTool = React.useCallback(
+    (id: Tool) => {
+      if (pendingRef.current) finishTrace();
+      setTraceKind(id === "face" ? "face" : "setback");
+      setTool(id);
+    },
+    [finishTrace, setTraceKind]
+  );
+
+  /**
    * Has the pointer gone far enough for this to be a drag rather than a click?
    *
    * `DETACH_TRAVEL_PX` is a SCREEN distance, and `toCanvas` has already scaled
@@ -1608,7 +1906,7 @@ export function SolarLayoutDesigner({
    * finger's width of roof and at a zoomed-in one is nothing at all.
    */
   const travelled = (p: { x: number; y: number }, startX: number, startY: number) =>
-    Math.hypot(p.x - startX, p.y - startY) > DETACH_TRAVEL_PX / Math.max(0.05, viewScale);
+    Math.hypot(p.x - startX, p.y - startY) > DETACH_TRAVEL_PX;
 
   /**
    * A swung bearing, rounded to something a person would say out loud.
@@ -1703,9 +2001,33 @@ export function SolarLayoutDesigner({
   };
 
   function onPointerDown(ev: React.PointerEvent) {
-    if (!canEdit || lat == null) return;
+    if (lat == null) return;
+
+    /**
+     * PANNING BEATS EVERY OTHER GESTURE, and it is allowed to someone who
+     * cannot edit — looking around a roof is not an edit. Three ways in,
+     * because these are the three a map is expected to answer to: the hand
+     * tool, space held over any tool, and the middle or right button.
+     */
+    if (tool === "pan" || spaceHeld || ev.button === 1 || ev.button === 2) {
+      panRef.current = { x: ev.clientX, y: ev.clientY };
+      setPanning(true);
+      try {
+        canvasRef.current?.setPointerCapture(ev.pointerId);
+      } catch {
+        /* capture is an optimisation, not a requirement */
+      }
+      return;
+    }
+
+    if (!canEdit) return;
     const p = toCanvas(ev);
     const m = toMetres(p);
+
+    // Placing the pin is a mode, not a grab radius. The pin sits in the middle
+    // of the roof, exactly where the panels are, so anything that made it
+    // grabbable by proximity would steal presses meant for a module.
+    if (tool === "pin") return movePin(m);
     // Synthetic pointers (and a pointer already released) throw here, and an
     // exception mid-handler leaves the tool dead for the rest of the gesture.
     try {
@@ -1718,7 +2040,7 @@ export function SolarLayoutDesigner({
       // Landing on a point already down ends the trace rather than stacking
       // another point on it. Hit-tested against the click, not against the
       // hover, so this works on a touchscreen too — there is no hover there.
-      const on = setbackVertexAt(pendingRef.current, m, setbackSnapM(viewScale, mpp));
+      const on = setbackVertexAt(pendingRef.current, m, setbackSnapM(mpp));
       if (on) return finishTrace({ close: on === "close" });
       setPending([...(pendingRef.current ?? []), m]);
       return;
@@ -1827,9 +2149,12 @@ export function SolarLayoutDesigner({
     if (selected) {
       const img = { widthPx: canvasW, heightPx: canvasH };
       const hp = handlePositions(selected, moduleMm, mpp, img);
-      const grab = Math.max(18, canvasW / 70);
+      // A fixed CSS-pixel radius, now that the canvas is measured in them. It
+      // used to be a fraction of a 1280 px picture, which meant the size of a
+      // grab target depended on how big the window happened to be.
+      const grab = 18;
       const head = facingArrow(selected, moduleMm, mpp, img).to;
-      if (Math.hypot(p.x - head.x, p.y - head.y) < Math.max(FACING_GRIP_PX, canvasW / 55)) {
+      if (Math.hypot(p.x - head.x, p.y - head.y) < FACING_GRIP_PX) {
         return setDrag({ kind: "facing", id: selected.id });
       }
       if (Math.hypot(p.x - hp.rotate.x, p.y - hp.rotate.y) < grab) {
@@ -1916,6 +2241,12 @@ export function SolarLayoutDesigner({
   }
 
   function onPointerMove(ev: React.PointerEvent) {
+    if (panRef.current) {
+      const dx = ev.clientX - panRef.current.x;
+      const dy = ev.clientY - panRef.current.y;
+      panRef.current = { x: ev.clientX, y: ev.clientY };
+      return panBy(dx, dy);
+    }
     if ((tool === "setback" || tool === "face") && pendingRef.current) {
       const m = toMetres(toCanvas(ev));
       return setGhostPoint(m);
@@ -2023,6 +2354,11 @@ export function SolarLayoutDesigner({
   }
 
   function onPointerUp(ev: React.PointerEvent) {
+    if (panRef.current) {
+      panRef.current = null;
+      setPanning(false);
+      return;
+    }
     const d = dragRef.current;
     if (!d) return;
     setDrag(null);
@@ -2115,6 +2451,29 @@ export function SolarLayoutDesigner({
    * is, and it deserves to be one gesture on the thing itself rather than a
    * trip to a button at the bottom of the screen.
    */
+  /**
+   * ATTACHED BY HAND, and it has to be.
+   *
+   * React registers wheel listeners at the root as PASSIVE, so a
+   * `preventDefault` inside an `onWheel` prop is ignored with a console
+   * warning — and a pinch over the roof zooms the browser's own chrome
+   * instead of the picture. A native listener with `passive: false` is the
+   * only way to own the gesture.
+   */
+  React.useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || lat == null) return;
+    const handler = (ev: WheelEvent) => {
+      ev.preventDefault();
+      const r = el.getBoundingClientRect();
+      const at = { x: ev.clientX - r.left, y: ev.clientY - r.top };
+      if (ev.ctrlKey || ev.metaKey) return zoomBy(Math.exp(-ev.deltaY * 0.01), at);
+      panBy(-ev.deltaX, -ev.deltaY);
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [lat, zoomBy, panBy]);
+
   function onDoubleClick(ev: React.MouseEvent) {
     if (!canEdit || lat == null) return;
     if (pendingRef.current) return finishTrace();
@@ -2125,7 +2484,7 @@ export function SolarLayoutDesigner({
       y: ((ev.clientY - r.top) / r.height) * canvasH,
     };
     const head = facingArrow(selected, moduleMm, mpp, { widthPx: canvasW, heightPx: canvasH }).to;
-    if (Math.hypot(p.x - head.x, p.y - head.y) > Math.max(FACING_GRIP_PX, canvasW / 55)) return;
+    if (Math.hypot(p.x - head.x, p.y - head.y) > FACING_GRIP_PX) return;
     patchSelected({
       azimuthDeg: norm360(facingBearing(selected) + 180),
       facingSource: null,
@@ -2133,6 +2492,8 @@ export function SolarLayoutDesigner({
   }
 
   function onPointerCancel() {
+    panRef.current = null;
+    setPanning(false);
     const d = dragRef.current;
     if (!d) return;
     setDrag(null);
@@ -2142,6 +2503,37 @@ export function SolarLayoutDesigner({
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
+  /**
+   * Space turns whatever tool is selected into the hand, for as long as it is
+   * held. Separate from the shortcut table below because it is a MODIFIER
+   * rather than a choice: a rep nudging a panel wants to shove the picture
+   * aside and carry on, not to switch tools and switch back.
+   */
+  React.useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.code === "Space" && !e.repeat) {
+        // Or the page scrolls under the designer while the rep pans.
+        e.preventDefault();
+        setSpaceHeld(true);
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") setSpaceHeld(false);
+    };
+    // A window that loses focus mid-pan must not come back still holding it.
+    const blur = () => setSpaceHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
+
   React.useEffect(() => {
     if (!canEdit) return;
     const onKey = (e: KeyboardEvent) => {
@@ -2172,9 +2564,7 @@ export function SolarLayoutDesigner({
         const next = (Object.keys(TOOL_KEYS) as Tool[]).find((t) => TOOL_KEYS[t] === typed);
         if (next) {
           e.preventDefault();
-          if (pendingRef.current) finishTrace();
-          setTraceKind(next === "face" ? "face" : "setback");
-          return setTool(next);
+          return pickTool(next);
         }
       }
 
@@ -2229,7 +2619,7 @@ export function SolarLayoutDesigner({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, blocks, commit, undo, canEdit, patchSelected, finishTrace, setPending, setTraceKind]);
+  }, [selected, blocks, commit, undo, canEdit, patchSelected, finishTrace, setPending, pickTool]);
 
   /** Leaving with an unsaved array is the one way to lose work here. */
   React.useEffect(() => {
@@ -2242,7 +2632,15 @@ export function SolarLayoutDesigner({
   // ── Save ───────────────────────────────────────────────────────────────
   async function save(then?: () => void) {
     setBusy(true);
-    const res = await saveSolarLayoutAction({ leadId, blocks, setbacks });
+    const res = await saveSolarLayoutAction({
+      leadId,
+      blocks,
+      setbacks,
+      // Only when the rep has actually corrected it. The blocks above are
+      // already measured from this point — `movePin` re-based them the moment
+      // it moved — so the two travel together and land in one write.
+      ...(pinMoved && origin ? { origin } : {}),
+    });
     if (!res.ok) {
       setBusy(false);
       return toast.error(res.error);
@@ -2253,13 +2651,87 @@ export function SolarLayoutDesigner({
     // reporting separately if it fails, never worth losing the count over.
     const canvas = canvasRef.current;
     if (canvas) {
+      /**
+       * FRAMED ON THE ARRAY, not on whatever the rep left the map showing.
+       *
+       * This used to export the designer's own fixed frame, which was fine only
+       * because the frame could not move. Now that it can, a rep who panned to
+       * the real house — the whole point of the feature — would have sent the
+       * customer a photograph of empty ground beside it. The picture is the
+       * array, so the array decides where it points.
+       *
+       * The scale is floored at the vendor's own resolution: framing tightly on
+       * six panels would otherwise produce a magnified blur, and nobody wants
+       * their roof delivered out of focus.
+       */
+      const size = { widthPx: EXPORT_PX, heightPx: EXPORT_PX };
+      const corners = blocks.flatMap((b) =>
+        panelCorners(b, moduleMm).flat().map((c) => ({ e: c.e, n: c.n }))
+      );
+      const framed = frameOn(corners, size, {
+        marginM: 8,
+        fallback: { centreE: centre.e, centreN: centre.n, mpp, ...size },
+      });
+      const floorMpp = lat == null ? framed.mpp : metresPerPixel(lat, GOOGLE_MAX_ZOOM, 2);
+      const wanted: MapView = { ...framed, mpp: Math.max(framed.mpp, floorMpp) };
+
+      /**
+       * The customer gets a PHOTOGRAPH. A rep who flipped to the street map to
+       * find a lot in a new subdivision — which is exactly what that layer is
+       * there for — must not thereby post a road diagram as the roof layout.
+       */
+      const exportSource: BasemapSource = source === "road" ? "satellite" : source;
+
+      /**
+       * ONE IMAGE, not the mosaic that is on screen.
+       *
+       * Each Static Maps square carries Google's logo and imagery credit in its
+       * corners, so a picture built from four of them carries four — scattered
+       * across the middle of a document sent to a homeowner. A single image
+       * centred on the array carries exactly one, in the corner, which is where
+       * attribution belongs and what this screen produced before it could pan.
+       *
+       * Esri has no such stamp and no single-image endpoint, so it keeps the
+       * mosaic; its credit is rendered by the proposal instead.
+       */
+      const single =
+        origin && exportSource !== "esri"
+          ? singleImageView(wanted, origin, { leadId, source: exportSource })
+          : null;
+      const exportView = single?.view ?? wanted;
+
+      let backdrop: HTMLImageElement | null = null;
+      if (single) {
+        backdrop = await new Promise<HTMLImageElement | null>((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          // A save must not be lost to a slow tile: fall through to the mosaic,
+          // which is very likely already in the cache from the screen.
+          img.onerror = () => resolve(null);
+          setTimeout(() => resolve(null), 8000);
+          img.src = single.url;
+        });
+      }
+      if (!backdrop) await basemap.preload(exportView, exportSource);
+
+      /**
+       * SIZED FROM THE VIEW, not from EXPORT_PX.
+       *
+       * A single-image export takes its dimensions from the imagery it is drawn
+       * on. The two happen to be the same number today; taking it from the view
+       * means they cannot quietly stop being, which would show up as a picture
+       * with the panels drawn at the wrong scale rather than as an error.
+       */
       const off = document.createElement("canvas");
-      off.width = canvasW;
-      off.height = canvasH;
+      off.width = exportView.widthPx;
+      off.height = exportView.heightPx;
       const octx = off.getContext("2d");
+
       // Re-render WITHOUT selection handles, ghosts or the drag outline: this
       // image is what the homeowner sees.
-      if (octx) paint(octx, { chrome: false });
+      if (octx) {
+        paint(octx, { chrome: false, view: exportView, dpr: 1, source: exportSource, backdrop });
+      }
       const blob = await new Promise<Blob | null>((r) => off.toBlob(r, "image/jpeg", 0.9));
       if (blob) {
         const fd = new FormData();
@@ -2287,11 +2759,21 @@ export function SolarLayoutDesigner({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-neutral-950 text-white">
-      {/* ── Top bar: whose roof, and what it is being built from ─────────── */}
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-900 px-3 py-2">
+      {/* ── Top bar ──────────────────────────────────────────────────────────
+          WHOSE ROOF, AND WHAT IT IS BUILT FROM — in that order of prominence.
+
+          It used to carry five dropdowns in a row: module, inverter, battery,
+          quantity and imagery. Every one of them was a decision made once and
+          then looked at for the rest of the session, competing for width with
+          the only thing on this bar a rep reads constantly, which is the
+          address. They are one button now. The bar says whose house this is and
+          what the system is in a sentence; pressing it opens the pickers,
+          unchanged.
+      ─────────────────────────────────────────────────────────────────────── */}
+      <header className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-neutral-900 px-3 py-2">
         <Link
           href={backHref}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-white/70 hover:bg-white/10 hover:text-white"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-white/70 hover:bg-white/10 hover:text-white"
         >
           <ArrowLeft className="size-4" /> Proposal
         </Link>
@@ -2299,99 +2781,53 @@ export function SolarLayoutDesigner({
           <MapPin className="size-4 shrink-0 text-solar" />
           <span className="truncate text-sm">{address || "No address on this deal"}</span>
         </div>
-        {/* Equipment is read-only here on purpose: the approved-vendor list
-            decides what this system is built from, and it is set on the deal's
-            Operations card with the lender that gates it. Showing it is worth
-            it — a rep drawing 93 panels needs to see which panel they are. */}
-        {/* Chosen HERE, not on a settings page. The panel decides how many fit
-            on the roof and what each one is worth, and both are questions you
-            are looking at while you draw. The catalogue's starred default is
-            the fallback it was always meant to be. */}
-        <EquipPicker
-          label="Module"
-          options={catalogue.module}
-          value={equip.moduleId}
-          disabled={!canEdit || equipBusy}
-          onChange={(id) => void pickEquipment({ moduleId: id })}
-        />
-        <EquipPicker
-          label="Inverter"
-          options={catalogue.inverter}
-          value={equip.inverterId}
-          disabled={!canEdit || equipBusy}
-          onChange={(id) => void pickEquipment({ inverterId: id })}
-        />
-        <EquipPicker
-          label="Battery"
-          options={catalogue.battery}
-          value={equip.batteryId}
-          disabled={!canEdit || equipBusy}
-          onChange={(id) => void pickEquipment({ batteryId: id })}
-        />
-        {/* HOW MANY OF THEM. Only once there is a battery to count — a
-            quantity box beside an empty slot is a question with no meaning.
-            It matters beyond the equipment list: the battery programme pays
-            per battery, so a second Powerwall nobody could record was a second
-            Powerwall nobody got paid for.
 
-            Labelled "Qty" rather than "×": a bare multiplication sign beside a
-            dropdown is the reason people looked for this control and reported
-            it missing. It starts at the company's standard quantity — see
-            Settings → Solar. */}
-        {equip.batteryId && (
-          <label className="flex items-center gap-1.5 text-xs text-neutral-400">
-            <span>Qty</span>
-            <select
-              className="h-8 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white disabled:opacity-50"
-              value={Math.max(1, equip.batteryQty)}
-              aria-label="How many batteries"
-              disabled={!canEdit || equipBusy}
-              onChange={(e) => void pickEquipment({ batteryQty: Number(e.target.value) })}
-            >
-              {/* Always long enough to contain the number actually on the
-                  design: a company whose standard is eight would otherwise
-                  land on a select with no matching option, which renders
-                  blank and reads as "no batteries". */}
-              {Array.from(
-                { length: Math.max(6, Math.max(1, equip.batteryQty)) },
-                (_, i) => i + 1
-              ).map((n) => (
-                <option className="text-black" key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
+        {lat != null && (
+          <AddressSearch
+            onPick={(p) => {
+              if (!origin) return;
+              const m = latLngToMetres(origin, p);
+              if (Math.hypot(m.e, m.n) > panLimitM) {
+                return toast.error("That address is outside the picture this deal can show.");
+              }
+              setCentre(clampCentre(m));
+            }}
+          />
         )}
-        <select
-          className="h-8 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white"
-          value={zoom}
-          aria-label="Imagery detail"
-          onChange={(e) => setZoom(Number(e.target.value) as Zoom)}
-        >
-          <option className="text-black" value={21}>Closest imagery</option>
-          <option className="text-black" value={20}>Wider imagery</option>
-        </select>
+
+        {/* ONE BUTTON for the whole system. The label is what a rep would say
+            out loud — "twelve seven six, twenty-nine Silfabs" — so the common
+            case of glancing at it costs no click at all. */}
+        <SystemPicker
+          catalogue={catalogue}
+          equip={equip}
+          disabled={!canEdit || equipBusy}
+          busy={equipBusy}
+          summary={
+            moduleRatingW
+              ? `${totals.systemSizeKwDc.toFixed(2)} kW · ${count} × ${
+                  catalogue.module.find((o) => o.id === equip.moduleId)?.label ?? "module"
+                }`
+              : "Choose a module"
+          }
+          onChange={(patch) => void pickEquipment(patch)}
+        />
       </header>
 
       {/* ── The roof ─────────────────────────────────────────────────────── */}
       {/*
-        Two layers, and they must not be the same element. The picture scrolls
-        and the controls do not: an `absolute` child of a scrolling box scrolls
-        with its content, so a toolbar inside the scroller slides off the screen
-        the moment a rep zooms in and pans — exactly when they need it most.
+        Two layers, and they must not be the same element. The canvas fills the
+        viewport and the controls float over it; putting a control inside the
+        canvas's own box is how a toolbar ends up sliding away under a pan.
+
+        THE SCROLL CONTAINER IS GONE. It used to be the panning mechanism — a
+        fixed 1280 px photograph in an `overflow-auto` box — which is exactly
+        why the map could not be moved anywhere the photograph did not already
+        cover. The canvas is now the size of the screen and the VIEW moves
+        instead, so there is nothing to scroll.
       */}
       <div className="relative flex-1 overflow-hidden bg-neutral-950">
-        <div ref={viewportRef} className="absolute inset-0 overflow-auto">
-        {/*
-          Centred when it fits, scrollable when it does not. `min-w-full` on a
-          `w-fit` wrapper is what gets both: zoomed out the wrapper is the size
-          of the viewport and the picture sits in the middle of it, zoomed in
-          the wrapper is the size of the picture and every edge stays reachable.
-          Centring the scroll container itself makes the left overflow
-          impossible to scroll back to.
-        */}
-        <div className="flex h-fit min-h-full w-fit min-w-full items-center justify-center">
+        <div ref={viewportRef} className="absolute inset-0">
         {lat == null ? (
           <div className="flex h-full items-center justify-center p-8">
             <p className="max-w-md rounded-lg border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
@@ -2413,19 +2849,17 @@ export function SolarLayoutDesigner({
              * one message is three afternoons.
              */
             data-trace-points={pending?.length ?? 0}
-            width={canvasW}
-            height={canvasH}
+            /* The backing store is in DEVICE pixels; the drawing is done in CSS
+               pixels and scaled up by one transform at the top of `paint`. */
+            width={Math.round(canvasW * dpr)}
+            height={Math.round(canvasH * dpr)}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
             onDoubleClick={onDoubleClick}
             onContextMenu={(e) => e.preventDefault()}
-            style={{
-              width: canvasW * viewScale,
-              height: canvasH * viewScale,
-              touchAction: "none",
-            }}
+            style={{ width: canvasW, height: canvasH, touchAction: "none" }}
             className={cn(
               "block max-w-none",
               canEdit &&
@@ -2436,142 +2870,182 @@ export function SolarLayoutDesigner({
               // Over the dot that ends the trace it stops being a crosshair,
               // because this click is not another corner.
               canEdit && setbackSnap && "!cursor-pointer",
-              canEdit && tool === "select" && "cursor-default"
+              canEdit && tool === "select" && "cursor-default",
+              // The hand says what a press will do before it is pressed.
+              (tool === "pan" || spaceHeld) && "cursor-grab",
+              panning && "!cursor-grabbing"
             )}
           />
         )}
         </div>
-        </div>
 
-        {/* ── Tools ──────────────────────────────────────────────────────── */}
+        {/* ── Tools ────────────────────────────────────────────────────────
+            FEWER THINGS, AND THE COMMON ONE FIRST.
+
+            The palette used to be eleven flat rows of equal weight: seven
+            tools, two fill actions, the plane outlines, and whatever the
+            selection added. Every one of them looked as important as every
+            other, so the thing a rep does on nine roofs out of ten — cover it
+            with panels — was the eighth row down and looked like a footnote.
+
+            Now: one obvious action at the top, the tools that draw by hand
+            under it, and the occasional ones behind `More`. Nothing was taken
+            away and every keyboard shortcut still fires, so a rep who knows
+            where something lives has not lost it — see TOOL_KEYS.
+
+            The whole rail collapses, because it sits ON the roof and sometimes
+            the roof is what you need to see.
+        ───────────────────────────────────────────────────────────────────── */}
         {canEdit && lat != null && (
           <div className="pointer-events-none absolute inset-0">
-            <div className="pointer-events-auto absolute left-3 top-3 w-44 overflow-hidden rounded-lg border border-black/10 bg-white text-neutral-900 shadow-lg">
-              {(
-                [
-                  ["select", "Pointer", MousePointer2],
-                  ["face", "Roof face", Pentagon],
-                  ["draw", "Draw array", Square],
-                  ["panel", "Add panel", Plus],
-                  ["movePanel", "Move panel", Move],
-                  ["erase", "Remove panels", Eraser],
-                  ["setback", "Setbacks", Ruler],
-                ] as const
-              ).map(([id, label, Icon]) => (
+            <div className="pointer-events-auto absolute left-3 top-3 w-48 overflow-hidden rounded-lg border border-black/10 bg-white text-neutral-900 shadow-lg">
+              <div className="flex items-center justify-between border-b border-neutral-200 px-2 py-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                  Tools
+                </span>
                 <button
-                  key={id}
                   type="button"
-                  aria-pressed={tool === id}
-                  onClick={() => {
-                    if (pendingRef.current) finishTrace();
-                    setTraceKind(id === "face" ? "face" : "setback");
-                    setTool(id);
-                  }}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium",
-                    tool === id ? "bg-solar text-solar-foreground" : "hover:bg-neutral-100"
-                  )}
+                  aria-label={railOpen ? "Hide the tools" : "Show the tools"}
+                  aria-expanded={railOpen}
+                  onClick={() => setRailOpen((v) => !v)}
+                  className="rounded p-1 text-neutral-500 hover:bg-neutral-100"
                 >
-                  <Icon className="size-4" /> {label}
-                  {/*
-                    Hidden from the accessibility tree on purpose. A shortcut
-                    hint is not part of what the button is called — leaving it
-                    in makes this control answer to "Pointer V", which is a
-                    name nobody would look for, by voice or otherwise.
-                  */}
-                  <kbd
-                    aria-hidden="true"
-                    className="ml-auto text-[10px] font-normal opacity-60"
-                  >
-                    {TOOL_KEYS[id].toUpperCase()}
-                  </kbd>
+                  <ChevronDown
+                    className={cn("size-4 transition-transform", !railOpen && "-rotate-90")}
+                  />
                 </button>
-              ))}
+              </div>
 
-              <div className="border-t border-neutral-200" />
-              {/*
-                MAX ROOF IS ALWAYS OFFERED, even before there is anything to
-                fill from. Hiding it until Google had modelled the roof is what
-                made it invisible on every house this company sells to — the
-                Solar API is off, so `planes` is null everywhere and the button
-                simply never existed. Pressed with nothing traced it now says
-                what to do and switches to the tool that does it, which is a
-                control that teaches its own workflow rather than one that is
-                not there.
-              */}
-              <button
-                type="button"
-                data-testid="max-roof"
-                disabled={filling}
-                title={
-                  fillSource === "planes"
-                    ? "Cover every roof plane Google modelled with panels. Replaces the fill — undo puts it back."
-                    : fillSource === "faces"
-                      ? "Cover every roof face you have traced with as many panels as it holds. Replaces the fill — undo puts it back."
-                      : "Cover the roof with panels, working from the building's outline. Replaces the fill — undo puts it back."
-                }
-                onClick={() => void maxRoof()}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100 disabled:opacity-60"
-              >
-                {filling ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Wand2 className="size-4" />
-                )}{" "}
-                {filling ? "Reading the building…" : "Max roof"}
-              </button>
-              {/*
-                NOT DISABLED WHEN THERE IS NO TARGET.
-                
-                It was greyed out on any deal without an annual usage figure,
-                with the reason hidden in a tooltip — which is a control that
-                looks broken to everyone who does not hover. It presses, and it
-                says what is missing and where to fill it in.
-              */}
-              <button
-                type="button"
-                data-testid="trim-to-usage"
-                title={
-                  annualUsageKwh && annualUsageKwh > 0
-                    ? `Take the worst-facing panels off until the system just covers ${Math.round(annualUsageKwh).toLocaleString()} kWh a year.`
-                    : "Needs the home's annual usage, which comes from the Energy step."
-                }
-                onClick={trimToUsage}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
-              >
-                <Scissors className="size-4" /> Trim to usage
-              </button>
-              {planes && (
-                <button
-                  type="button"
-                  aria-pressed={showPlanes}
-                  title="Outline the roof planes Google has modelled, with the way each one faces."
-                  onClick={() => setShowPlanes((v) => !v)}
-                  className={cn(
-                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium",
-                    showPlanes ? "bg-sky-600 text-white" : "hover:bg-neutral-100"
-                  )}
-                >
-                  <Layers className="size-4" /> Roof planes
-                </button>
-              )}
-              {selected && (
+              {railOpen && (
                 <>
-                  <div className="border-t border-neutral-200" />
+                  {/*
+                    THE ONE-CLICK PATH, at the top and in the colour that means
+                    "press this". It is always offered, even before there is
+                    anything to fill from: hiding it until Google had modelled
+                    the roof is what made it invisible on every house this
+                    company sells to — the Solar API is off, so `planes` is null
+                    everywhere and the button simply never existed.
+                  */}
                   <button
                     type="button"
-                    onClick={() => { setTiltOpen((v) => !v); setShadeOpen(false); }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                    data-testid="max-roof"
+                    disabled={filling}
+                    title={
+                      fillSource === "planes"
+                        ? "Cover every roof plane Google modelled with panels. Replaces the fill — undo puts it back."
+                        : fillSource === "faces"
+                          ? "Cover every roof face you have traced with as many panels as it holds. Replaces the fill — undo puts it back."
+                          : "Cover the roof with panels, working from the building's outline. Replaces the fill — undo puts it back."
+                    }
+                    onClick={() => void maxRoof()}
+                    className="flex w-full items-center gap-2 bg-solar px-3 py-2.5 text-left text-sm font-semibold text-solar-foreground hover:brightness-95 disabled:opacity-60"
                   >
-                    <Compass className="size-4" /> Set tilt
+                    {filling ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Wand2 className="size-4" />
+                    )}{" "}
+                    {filling ? "Reading the building…" : "Fill this roof"}
                   </button>
+                  {/*
+                    NOT DISABLED WHEN THERE IS NO TARGET. It was greyed out on
+                    any deal without an annual usage figure, with the reason
+                    hidden in a tooltip — a control that looks broken to
+                    everyone who does not hover. It presses, and it says what is
+                    missing and where to fill it in.
+                  */}
                   <button
                     type="button"
-                    onClick={() => { setShadeOpen((v) => !v); setTiltOpen(false); }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                    data-testid="trim-to-usage"
+                    title={
+                      annualUsageKwh && annualUsageKwh > 0
+                        ? `Take the worst-facing panels off until the system just covers ${Math.round(annualUsageKwh).toLocaleString()} kWh a year.`
+                        : "Needs the home's annual usage, which comes from the Energy step."
+                    }
+                    onClick={trimToUsage}
+                    className="flex w-full items-center gap-2 border-b border-neutral-200 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
                   >
-                    <Sun className="size-4" /> Set shading
+                    <Scissors className="size-4" /> Trim to usage
                   </button>
+
+                  {(
+                    [
+                      ["select", "Pointer", MousePointer2],
+                      ["face", "Roof face", Pentagon],
+                      ["draw", "Draw array", Square],
+                      ["panel", "Add panel", Plus],
+                      ["erase", "Remove panels", Eraser],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <ToolButton
+                      key={id}
+                      id={id}
+                      label={label}
+                      Icon={Icon}
+                      active={tool === id}
+                      onPick={pickTool}
+                    />
+                  ))}
+
+                  {/*
+                    The rest. Not hidden — one press away, and named so that
+                    somebody looking for "Setbacks" finds where it went.
+                  */}
+                  <details className="group border-t border-neutral-200">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-100">
+                      <ChevronDown className="size-4 -rotate-90 transition-transform group-open:rotate-0" />
+                      More
+                    </summary>
+                    {(
+                      [
+                        ["movePanel", "Move panel", Move],
+                        ["setback", "Setbacks", Ruler],
+                      ] as const
+                    ).map(([id, label, Icon]) => (
+                      <ToolButton
+                        key={id}
+                        id={id}
+                        label={label}
+                        Icon={Icon}
+                        active={tool === id}
+                        onPick={pickTool}
+                      />
+                    ))}
+                    {planes && (
+                      <button
+                        type="button"
+                        aria-pressed={showPlanes}
+                        title="Outline the roof planes Google has modelled, with the way each one faces."
+                        onClick={() => setShowPlanes((v) => !v)}
+                        className={cn(
+                          "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium",
+                          showPlanes ? "bg-sky-600 text-white" : "hover:bg-neutral-100"
+                        )}
+                      >
+                        <Layers className="size-4" /> Roof planes
+                      </button>
+                    )}
+                  </details>
+
+                  {selected && (
+                    <>
+                      <div className="border-t border-neutral-200" />
+                      <button
+                        type="button"
+                        onClick={() => { setTiltOpen((v) => !v); setShadeOpen(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                      >
+                        <Compass className="size-4" /> Set tilt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShadeOpen((v) => !v); setTiltOpen(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-neutral-100"
+                      >
+                        <Sun className="size-4" /> Set shading
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -2821,8 +3295,9 @@ export function SolarLayoutDesigner({
 
             {imageState === "failed" && (
               <div className="pointer-events-auto absolute bottom-3 left-3 max-w-sm rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 shadow-lg">
-                The satellite image did not load — try the wider imagery, or check the Maps key.
-                Panels you draw are still saved against the real coordinates.
+                <strong>No imagery is loading.</strong> Try another map — Esri needs no Google key
+                at all, so if it works and the others do not, the key or its API allow-list is the
+                problem. Panels you draw are still saved against the real coordinates either way.
               </div>
             )}
 
@@ -2848,29 +3323,145 @@ export function SolarLayoutDesigner({
               <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-neutral-900/80 px-4 py-1.5 text-[11px] text-white/85 shadow-lg">
                 Drag to move · <strong>⌘ drag</strong> one panel · <strong>⌥ click</strong> to
                 remove · click beside an array to add · <strong>swing the arrow</strong> to set the
-                facing · double-click it to flip
+                facing · <strong>space-drag</strong> or two fingers to move the picture
               </div>
             )}
 
-            {/* ── Zoom ───────────────────────────────────────────────────── */}
-            <div className="pointer-events-auto absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-black/10 bg-white text-neutral-900 shadow-lg">
-              <button
-                type="button"
-                aria-label="Zoom in"
-                className="px-2 py-1.5 hover:bg-neutral-100"
-                onClick={() => zoomBy(1.25)}
-              >
-                <ZoomIn className="size-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Zoom out"
-                className="border-t border-neutral-200 px-2 py-1.5 hover:bg-neutral-100"
-                onClick={() => zoomBy(1 / 1.25)}
-              >
-                <ZoomOut className="size-4" />
-              </button>
+            {/* ── The map ────────────────────────────────────────────────────
+                WHICH PICTURE, AND WHERE IT IS POINTED.
+
+                All of this is new, and all of it exists for one report: houses
+                that are not on the map. There turned out to be three different
+                causes wearing that one sentence — the photo predates the house,
+                the geocoder framed the wrong roof, or the vendor has nothing at
+                that depth — and a rep cannot tell them apart without being able
+                to change the vendor, move the picture, and move the pin.
+            ─────────────────────────────────────────────────────────────── */}
+            <div className="pointer-events-auto absolute bottom-3 right-3 w-44 overflow-hidden rounded-lg border border-black/10 bg-white text-neutral-900 shadow-lg">
+              <div className="grid grid-cols-2">
+                {BASEMAP_SOURCES.map((b, i) => (
+                  <button
+                    key={b}
+                    type="button"
+                    aria-pressed={source === b}
+                    title={BASEMAP_HINT[b]}
+                    onClick={() => setSource(b)}
+                    className={cn(
+                      "border-neutral-200 px-2 py-1.5 text-xs font-medium",
+                      i >= 2 && "border-t",
+                      i % 2 === 0 && "border-r",
+                      source === b ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+                    )}
+                  >
+                    {BASEMAP_LABEL[b]}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex border-t border-neutral-200">
+                <button
+                  type="button"
+                  aria-label="Zoom out"
+                  className="flex-1 border-r border-neutral-200 px-2 py-1.5 hover:bg-neutral-100"
+                  onClick={() => zoomBy(1 / 1.4)}
+                >
+                  <ZoomOut className="mx-auto size-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Zoom in"
+                  className="flex-1 border-r border-neutral-200 px-2 py-1.5 hover:bg-neutral-100"
+                  onClick={() => zoomBy(1.4)}
+                >
+                  <ZoomIn className="mx-auto size-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Fit the array on screen"
+                  title="Frame the whole array."
+                  className="flex-1 px-2 py-1.5 hover:bg-neutral-100"
+                  onClick={fitToArray}
+                >
+                  <Maximize2 className="mx-auto size-4" />
+                </button>
+              </div>
+
+              <div className="flex border-t border-neutral-200">
+                <button
+                  type="button"
+                  aria-pressed={tool === "pan"}
+                  aria-label="Move the picture"
+                  title="Drag the picture. Space, the middle button and two fingers do the same thing."
+                  onClick={() => pickTool(tool === "pan" ? "select" : "pan")}
+                  className={cn(
+                    "flex-1 border-r border-neutral-200 px-2 py-1.5",
+                    tool === "pan" ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+                  )}
+                >
+                  <Hand className="mx-auto size-4" />
+                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    aria-pressed={tool === "pin"}
+                    aria-label="Move the pin"
+                    title="Click the roof this deal is actually about. The drawing stays where it is; only the address's coordinate moves."
+                    onClick={() => pickTool(tool === "pin" ? "select" : "pin")}
+                    className={cn(
+                      "flex-1 border-r border-neutral-200 px-2 py-1.5",
+                      tool === "pin" ? "bg-solar text-solar-foreground" : "hover:bg-neutral-100"
+                    )}
+                  >
+                    <Crosshair className="mx-auto size-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-pressed={showPin}
+                  aria-label="Show the pin"
+                  title="Show or hide the marker on the deal's coordinate. It is never in the customer's picture either way."
+                  onClick={() => setShowPin((v) => !v)}
+                  className={cn(
+                    "flex-1 px-2 py-1.5",
+                    showPin ? "bg-neutral-900 text-white" : "hover:bg-neutral-100"
+                  )}
+                >
+                  <MapPin className="mx-auto size-4" />
+                </button>
+              </div>
+
+              {/* The vendor's own credit line, which both require. */}
+              <div className="border-t border-neutral-200 px-2 py-1 text-[10px] leading-tight text-neutral-500">
+                {attribution(source)}
+              </div>
             </div>
+
+            {/* ── What the picture cannot do ─────────────────────────────────
+                Said out loud, because every one of these reads as "the tool is
+                broken" when it is not explained.
+            ─────────────────────────────────────────────────────────────── */}
+            {lat != null && (
+              <div className="pointer-events-none absolute bottom-14 left-1/2 flex max-w-[90vw] -translate-x-1/2 flex-col items-center gap-1 text-center">
+                {tool === "pin" && (
+                  <div className="pointer-events-auto rounded-full bg-solar px-4 py-1.5 text-[11px] font-medium text-solar-foreground shadow-lg">
+                    Click the roof this deal is about. The panels stay where they are.
+                  </div>
+                )}
+                {pinMoved && (
+                  <div className="pointer-events-auto rounded-full bg-neutral-900 px-4 py-1.5 text-[11px] text-white shadow-lg">
+                    Pin moved. <strong>Save</strong> to keep it on the deal.
+                  </div>
+                )}
+                {isUpsampled(source, lat, mpp) && (
+                  <div className="rounded-full bg-neutral-900/80 px-4 py-1.5 text-[11px] text-white/85 shadow-lg">
+                    {source === "esri"
+                      ? `Magnified — Esri has no sharper picture than zoom ${ESRI_MAX_ZOOM} here.`
+                      : `Magnified — Google serves nothing deeper than zoom ${GOOGLE_MAX_ZOOM}.`}{" "}
+                    Panels are still drawn to true scale.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -3279,6 +3870,235 @@ function Metric({
  * searched by typing, and the browser's own control does that on a phone in a
  * driveway better than anything rebuilt here.
  */
+/**
+ * One row of the palette.
+ *
+ * Extracted so the primary group and the `More` group cannot drift apart — the
+ * shortcut hint in particular, which has to keep matching TOOL_KEYS or a button
+ * is printing a lie about which key fires it.
+ */
+function ToolButton({
+  id,
+  label,
+  Icon,
+  active,
+  onPick,
+}: {
+  id: Tool;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  active: boolean;
+  onPick: (id: Tool) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={() => onPick(id)}
+      className={cn(
+        "flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium",
+        active ? "bg-solar text-solar-foreground" : "hover:bg-neutral-100"
+      )}
+    >
+      <Icon className="size-4" /> {label}
+      {/*
+        Hidden from the accessibility tree on purpose. A shortcut hint is not
+        part of what the button is called — leaving it in makes this control
+        answer to "Pointer V", which is a name nobody would look for, by voice
+        or otherwise.
+      */}
+      <kbd aria-hidden="true" className="ml-auto text-[10px] font-normal opacity-60">
+        {TOOL_KEYS[id].toUpperCase()}
+      </kbd>
+    </button>
+  );
+}
+
+/**
+ * The whole system behind one button.
+ *
+ * The pickers inside are the ones that used to sit in a row across the top bar,
+ * unchanged — this is a matter of WHERE they live, not what they do. What the
+ * button itself shows is the answer they add up to, because that is the thing a
+ * rep actually reads while drawing: the size, the count and the panel.
+ *
+ * `details`/`summary` rather than a popover library: it opens on click, closes
+ * on Escape, is reachable by keyboard and needs no state to keep in step.
+ */
+function SystemPicker({
+  catalogue,
+  equip,
+  disabled,
+  busy,
+  summary,
+  onChange,
+}: {
+  catalogue: { module: EquipOption[]; inverter: EquipOption[]; battery: EquipOption[] };
+  equip: { moduleId: string | null; inverterId: string | null; batteryId: string | null; batteryQty: number };
+  disabled: boolean;
+  busy: boolean;
+  summary: string;
+  onChange: (patch: Partial<{ moduleId: string | null; inverterId: string | null; batteryId: string | null; batteryQty: number }>) => void;
+}) {
+  return (
+    <details className="group relative shrink-0">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white hover:bg-white/10">
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sun className="size-3.5 text-solar" />}
+        <span className="max-w-[18rem] truncate">{summary}</span>
+        <ChevronDown className="size-3.5 opacity-60 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="absolute right-0 z-20 mt-1 w-80 space-y-2 rounded-lg border border-white/15 bg-neutral-900 p-3 shadow-xl">
+        {/* Chosen HERE, not on a settings page. The panel decides how many fit
+            on the roof and what each one is worth, and both are questions you
+            are looking at while you draw. The catalogue's starred default is
+            the fallback it was always meant to be. */}
+        <EquipPicker label="Module" options={catalogue.module} value={equip.moduleId} disabled={disabled} onChange={(id) => onChange({ moduleId: id })} />
+        <EquipPicker label="Inverter" options={catalogue.inverter} value={equip.inverterId} disabled={disabled} onChange={(id) => onChange({ inverterId: id })} />
+        <EquipPicker label="Battery" options={catalogue.battery} value={equip.batteryId} disabled={disabled} onChange={(id) => onChange({ batteryId: id })} />
+        {/* HOW MANY OF THEM. Only once there is a battery to count — a
+            quantity box beside an empty slot is a question with no meaning.
+            It matters beyond the equipment list: the battery programme pays
+            per battery, so a second Powerwall nobody could record was a second
+            Powerwall nobody got paid for. */}
+        {equip.batteryId && (
+          <label className="flex items-center justify-between gap-1.5 rounded-md bg-white/5 px-2 py-1.5 text-xs text-white/45">
+            <span>Batteries</span>
+            <select
+              className="rounded bg-transparent py-0.5 text-white outline-none disabled:opacity-50"
+              value={Math.max(1, equip.batteryQty)}
+              aria-label="How many batteries"
+              disabled={disabled}
+              onChange={(e) => onChange({ batteryQty: Number(e.target.value) })}
+            >
+              {/* Always long enough to contain the number actually on the
+                  design: a company whose standard is eight would otherwise
+                  land on a select with no matching option, which renders
+                  blank and reads as "no batteries". */}
+              {Array.from({ length: Math.max(6, Math.max(1, equip.batteryQty)) }, (_, i) => i + 1).map((n) => (
+                <option className="text-black" key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * Jump the picture to another address.
+ *
+ * IT MOVES THE VIEW AND NOTHING ELSE. Searching is how a rep finds the house
+ * when the geocoder put the deal on the wrong street — a look, not a decision —
+ * so it must never quietly rewrite the deal's own coordinate. Committing to
+ * what was found is a separate, deliberate act: drop the pin.
+ *
+ * Rides the portal's existing address suggestion route, so it inherits the
+ * Places-then-Geocoding-then-Nominatim chain and its billing session rather
+ * than opening a second way to ask the same question.
+ */
+function AddressSearch({ onPick }: { onPick: (p: { lat: number; lng: number }) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
+  const [hits, setHits] = React.useState<{ label: string; placeId: string | null; lat: number | null; lng: number | null }[]>([]);
+  const [looking, setLooking] = React.useState(false);
+  // One token for the whole typing session is what makes Google bill a session
+  // rather than a request per keystroke.
+  const [session] = React.useState(() =>
+    typeof crypto !== "undefined" ? crypto.randomUUID() : "designer-search"
+  );
+
+  React.useEffect(() => {
+    let live = true;
+    // Everything happens inside the debounce, including the clearing: a
+    // `setState` in the body of an effect is a second render for a decision
+    // that could just as well be made a quarter of a second later.
+    const t = setTimeout(() => {
+      if (!live) return;
+      if (!open || q.trim().length < 4) return setHits([]);
+      setLooking(true);
+      fetch(`/api/geocode/autocomplete?q=${encodeURIComponent(q)}&session=${session}`)
+        .then((r) => r.json())
+        .then((b) => {
+          if (!live) return;
+          setHits(
+            (b.results ?? []).slice(0, 6).map((r: { label?: string; placeId?: string | null; parts?: { lat?: number; lng?: number } }) => ({
+              label: r.label ?? "",
+              placeId: r.placeId ?? null,
+              lat: r.parts?.lat ?? null,
+              lng: r.parts?.lng ?? null,
+            }))
+          );
+        })
+        .catch(() => live && setHits([]))
+        .finally(() => live && setLooking(false));
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [q, open, session]);
+
+  async function choose(h: { placeId: string | null; lat: number | null; lng: number | null }) {
+    setOpen(false);
+    setQ("");
+    // Nominatim answers with the coordinate up front; Places deliberately does
+    // not, and charges for the details call that carries it.
+    if (h.lat != null && h.lng != null) return onPick({ lat: h.lat, lng: h.lng });
+    if (!h.placeId) return;
+    const r = await fetch(`/api/geocode/place?placeId=${encodeURIComponent(h.placeId)}&session=${session}`).then((r) => r.json()).catch(() => null);
+    const p = r?.place;
+    if (p?.lat != null && p?.lng != null) onPick({ lat: p.lat, lng: p.lng });
+    else toast.error("That address could not be placed on the map.");
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        aria-label="Find an address on the map"
+        title="Move the picture to another address. It does not change the deal."
+        onClick={() => setOpen(true)}
+        className="shrink-0 rounded-md border border-white/15 bg-white/5 p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+      >
+        <Search className="size-4" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative shrink-0">
+      <input
+        autoFocus
+        value={q}
+        placeholder="Find an address…"
+        aria-label="Find an address on the map"
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && (setOpen(false), setQ(""))}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className="h-8 w-56 rounded-md border border-white/15 bg-white/5 px-2 text-xs text-white outline-none placeholder:text-white/35"
+      />
+      {(hits.length > 0 || looking) && (
+        <ul className="absolute right-0 z-20 mt-1 w-72 overflow-hidden rounded-lg border border-white/15 bg-neutral-900 shadow-xl">
+          {looking && hits.length === 0 && <li className="px-3 py-2 text-xs text-white/50">Looking…</li>}
+          {hits.map((h, i) => (
+            <li key={`${h.placeId ?? h.label}-${i}`}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => void choose(h)}
+                className="block w-full px-3 py-2 text-left text-xs text-white hover:bg-white/10"
+              >
+                {h.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function EquipPicker({
   label,
   options,
@@ -3296,13 +4116,13 @@ function EquipPicker({
   const current = options.find((o) => o.id === value) ?? null;
 
   return (
-    <div className="hidden items-center gap-1.5 rounded-md bg-white/5 px-2 py-1 text-xs lg:flex">
-      <label htmlFor={id} className="text-white/45">
+    <div className="flex items-center justify-between gap-1.5 rounded-md bg-white/5 px-2 py-1.5 text-xs">
+      <label htmlFor={id} className="shrink-0 text-white/45">
         {label}
       </label>
       <select
         id={id}
-        className="max-w-[13rem] truncate rounded bg-transparent py-0.5 text-white outline-none disabled:opacity-60"
+        className="min-w-0 max-w-[13rem] truncate rounded bg-transparent py-0.5 text-white outline-none disabled:opacity-60"
         value={value ?? ""}
         disabled={disabled || options.length === 0}
         onChange={(e) => onChange(e.target.value || null)}

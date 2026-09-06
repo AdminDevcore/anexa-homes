@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
+import { pinMoveAllowed } from "@/lib/map-view";
 import { recomputeDesignFigures } from "./recompute";
 
 // `actions.ts` is a "use server" module, so its helpers cannot be shared —
@@ -88,6 +89,18 @@ const layoutSchema = z.object({
   // Optional so an older client — or any caller that only means to change the
   // array — leaves the traced setbacks alone instead of wiping them.
   setbacks: z.array(setbackSchema).max(40).optional(),
+  /**
+   * Where the house actually is, when the rep has corrected it.
+   *
+   * IT TRAVELS WITH THE LAYOUT, and that is the point. Every block above is
+   * stored in metres from this coordinate, so the two are one fact: writing a
+   * new pin without the re-based geometry — or the geometry without the pin —
+   * moves the array off the roof it was drawn on. One payload, one transaction,
+   * no window in which the deal disagrees with itself.
+   */
+  origin: z
+    .object({ lat: z.number().finite().min(-90).max(90), lng: z.number().finite().min(-180).max(180) })
+    .optional(),
 });
 
 /**
@@ -116,6 +129,29 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
 
   const moduleQty = panelCount(blocks as LayoutBlock[]);
   if (moduleQty > 500) return fail("That is more than 500 panels — check the drawing.");
+
+  // The corrected pin, if there is one. Written FIRST, because the recompute
+  // below simulates this design against the weather at the deal's coordinate,
+  // and the whole point of moving the pin is that the old one was the wrong
+  // house.
+  const origin = parsed.data.origin;
+  if (origin && lead.lat != null && lead.lng != null) {
+    if (!pinMoveAllowed({ lat: lead.lat, lng: lead.lng }, origin)) {
+      return fail("That pin is too far from the address.");
+    }
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: {
+        lat: origin.lat,
+        lng: origin.lng,
+        // Stamped so the nightly geocoder treats this as answered and never
+        // overwrites a person's own correction with an interpolated guess.
+        // Editing the ADDRESS still clears it, which is right: a new address
+        // is a new question.
+        geocodedAt: new Date(),
+      },
+    });
+  }
 
   // Write the geometry, then derive everything that follows from it through
   // the one shared path — the same one that runs when the MODULE changes, so a

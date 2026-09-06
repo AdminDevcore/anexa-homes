@@ -7,7 +7,14 @@ import {
   clampSide,
   staticMapPixelSize,
   STATIC_MAP_MAX_PX,
+  MAX_STATIC_ZOOM,
+  MIN_STATIC_ZOOM,
+  parseMapType,
+  parseSupertile,
+  supertileCentre,
 } from "@/server/modules/property/satellite";
+import { SUPERTILE_PX, SUPERTILE_RADIUS, latLngToMetres } from "@/lib/map-view";
+import { metresPerPixel } from "@/lib/web-mercator";
 // Geocoding moved to geo/ — it answers "where is this house" for the canvassing
 // map and the skip-trace too, not just for this picture.
 import { parseGoogleGeocode, geocodeStatusReason } from "@/server/modules/geo/google";
@@ -240,5 +247,117 @@ describe("Google's undocumented size clamp", () => {
       widthPx: 400,
       heightPx: 300,
     });
+  });
+});
+
+
+/**
+ * The pannable grid the roof designer draws on.
+ *
+ * These tests are about ONE property above all: this route resolves the
+ * coordinate itself, from a lead the caller already has access to. It is what
+ * stops an authenticated session from becoming a general-purpose satellite
+ * imagery proxy billed to this company, and it is only a property as long as
+ * nothing in a request can name a place.
+ */
+describe("supertiles", () => {
+  const origin = { lat: 33.0335, lng: -96.73 };
+  const q = (o: Record<string, string>) => new URLSearchParams(o);
+
+  it("is not a tile request at all when no tile is named", () => {
+    expect(parseSupertile(q({ zoom: "21" }))).toBeNull();
+  });
+
+  it("reads a tile inside the bound", () => {
+    expect(parseSupertile(q({ tx: "-2", ty: "3", zoom: "20" }))).toEqual({
+      zoom: 20,
+      tx: -2,
+      ty: 3,
+    });
+  });
+
+  it("refuses a tile past the pan bound rather than clamping it", () => {
+    // Clamping would quietly serve a DIFFERENT piece of ground than was asked
+    // for, which the designer would then draw panels onto at the wrong place.
+    for (const bad of [
+      { tx: String(SUPERTILE_RADIUS + 1), ty: "0", zoom: "21" },
+      { tx: "0", ty: String(-SUPERTILE_RADIUS - 1), zoom: "21" },
+      { tx: "9999", ty: "9999", zoom: "21" },
+    ]) {
+      expect(parseSupertile(q(bad))).toBe("invalid");
+    }
+  });
+
+  it("refuses a zoom outside what Google will actually serve", () => {
+    expect(parseSupertile(q({ tx: "0", ty: "0", zoom: String(MAX_STATIC_ZOOM + 1) }))).toBe("invalid");
+    expect(parseSupertile(q({ tx: "0", ty: "0", zoom: String(MIN_STATIC_ZOOM - 1) }))).toBe("invalid");
+  });
+
+  it("refuses anything that is not a number, or a fractional zoom", () => {
+    for (const bad of [
+      { tx: "abc", ty: "0", zoom: "21" },
+      { tx: "0", ty: "0", zoom: "" },
+      { tx: "0", ty: "", zoom: "21" },
+      { tx: "0", ty: "0", zoom: "20.5" },
+      { tx: "Infinity", ty: "0", zoom: "21" },
+    ]) {
+      expect(parseSupertile(q(bad))).toBe("invalid");
+    }
+  });
+
+  /**
+   * The customer's layout picture is ONE image centred on the array, not a
+   * mosaic — otherwise it carries a Google watermark per tile. That needs a
+   * centre between grid points, and it must still be inside the bound.
+   */
+  it("allows a fractional offset, so one image can be centred on the array", () => {
+    expect(parseSupertile(q({ tx: "0.37", ty: "-1.8", zoom: "21" }))).toEqual({
+      zoom: 21,
+      tx: 0.37,
+      ty: -1.8,
+    });
+  });
+
+  it("bounds a fractional offset exactly as tightly as a whole one", () => {
+    expect(parseSupertile(q({ tx: String(SUPERTILE_RADIUS + 0.01), ty: "0", zoom: "21" }))).toBe(
+      "invalid"
+    );
+  });
+
+  it("centres tile (0,0) on the deal itself", () => {
+    expect(supertileCentre(origin, { zoom: 21, tx: 0, ty: 0 })).toEqual(origin);
+  });
+
+  it("steps one whole supertile of ground per index, east and south", () => {
+    const zoom = 21;
+    const sideM = SUPERTILE_PX * metresPerPixel(origin.lat, zoom, 2);
+    const east = latLngToMetres(origin, supertileCentre(origin, { zoom, tx: 1, ty: 0 }));
+    const south = latLngToMetres(origin, supertileCentre(origin, { zoom, tx: 0, ty: 1 }));
+    expect(east.e).toBeCloseTo(sideM, 3);
+    expect(east.n).toBeCloseTo(0, 6);
+    // ty counts DOWN the screen, so it goes south.
+    expect(south.n).toBeCloseTo(-sideM, 3);
+    expect(south.e).toBeCloseTo(0, 6);
+  });
+
+  it("covers less ground per tile the deeper the zoom", () => {
+    const wide = latLngToMetres(origin, supertileCentre(origin, { zoom: 18, tx: 1, ty: 0 })).e;
+    const close = latLngToMetres(origin, supertileCentre(origin, { zoom: 21, tx: 1, ty: 0 })).e;
+    expect(close).toBeCloseTo(wide / 8, 3);
+  });
+});
+
+describe("map type", () => {
+  it("takes the three Google actually serves and nothing else", () => {
+    expect(parseMapType("satellite")).toBe("satellite");
+    expect(parseMapType("roadmap")).toBe("roadmap");
+    // The labelled photo — how a rep checks WHICH roof the deal is about.
+    expect(parseMapType("hybrid")).toBe("hybrid");
+  });
+
+  it("falls back to the photograph for anything else", () => {
+    for (const junk of [null, undefined, "", "terrain", "../../etc/passwd"]) {
+      expect(parseMapType(junk)).toBe("satellite");
+    }
   });
 });

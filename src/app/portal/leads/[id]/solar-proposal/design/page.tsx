@@ -151,6 +151,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
       leadId={lead.id}
       address={address}
       lat={lead.lat}
+      lng={lead.lng}
       moduleRatingW={sizingModule?.ratingW ?? null}
       moduleMm={{
         widthMm: sizingModule?.widthMm ?? MODULE_FALLBACK_MM.widthMm,

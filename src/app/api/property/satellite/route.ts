@@ -5,8 +5,10 @@ import {
   staticMapUrl,
   satelliteConfigured,
   parseZoomParam,
+  parseMapType,
+  parseSupertile,
+  supertileCentre,
   STATIC_MAP_MAX_PX,
-  type MapType,
 } from "@/server/modules/property/satellite";
 import { resolveLeadLocation } from "@/server/modules/geo/resolve";
 
@@ -34,8 +36,14 @@ export async function GET(req: Request) {
   const leadId = url.searchParams.get("leadId");
   if (!leadId) return new NextResponse("Missing leadId", { status: 400 });
 
-  const type: MapType = url.searchParams.get("type") === "roadmap" ? "roadmap" : "satellite";
+  const type = parseMapType(url.searchParams.get("type"));
   const zoom = parseZoomParam(url.searchParams.get("zoom"));
+
+  // `?tx=&ty=` asks for one square of the roof designer's pannable grid rather
+  // than the deal card's single framed photo. Both live here because both must
+  // resolve the coordinate from the LEAD — see parseSupertile.
+  const tile = parseSupertile(url.searchParams);
+  if (tile === "invalid") return new NextResponse("Tile out of range", { status: 400 });
   // `?pin=0` for the panel-layout designer: the pin lands on the roof the rep
   // is drawing on, and would be baked into the customer's layout picture.
   const marker = url.searchParams.get("pin") !== "0";
@@ -77,17 +85,26 @@ export async function GET(req: Request) {
     });
   }
 
-  const upstream = await fetch(
-    staticMapUrl(key!, {
-      lat,
-      lng,
-      type,
-      zoom,
-      marker,
-      ...(square ? { width: STATIC_MAP_MAX_PX, height: STATIC_MAP_MAX_PX } : {}),
-    }),
-    { cache: "no-store" }
-  );
+  // A supertile is a square of imagery centred on its own point in a grid
+  // anchored on this deal, so the designer can pan without ever naming a
+  // coordinate. Everything else is the one framed picture of the house.
+  const framed = tile
+    ? {
+        ...supertileCentre({ lat, lng }, tile),
+        zoom: tile.zoom,
+        marker: false,
+        width: STATIC_MAP_MAX_PX,
+        height: STATIC_MAP_MAX_PX,
+      }
+    : {
+        lat,
+        lng,
+        zoom,
+        marker,
+        ...(square ? { width: STATIC_MAP_MAX_PX, height: STATIC_MAP_MAX_PX } : {}),
+      };
+
+  const upstream = await fetch(staticMapUrl(key!, { type, ...framed }), { cache: "no-store" });
   if (!upstream.ok) return new NextResponse("Imagery unavailable", { status: 404 });
 
   const body = Buffer.from(await upstream.arrayBuffer());

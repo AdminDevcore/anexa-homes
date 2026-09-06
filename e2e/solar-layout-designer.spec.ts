@@ -62,6 +62,10 @@ async function openDesigner(page: Page): Promise<string> {
  */
 async function pickTool(page: Page, name: string) {
   const button = page.getByRole("button", { name, exact: true });
+  // The palette leads with the handful of tools a roof is usually drawn with
+  // and keeps the occasional ones behind `More`. Open it if what we want is in
+  // there — a rep does the same thing, and it is one click either way.
+  if (!(await button.isVisible())) await openMoreTools(page);
   await button.click();
   /**
    * WAIT FOR THE TOOL TO ACTUALLY BE THE TOOL.
@@ -78,6 +82,12 @@ async function pickTool(page: Page, name: string) {
     await expect(button).toHaveAttribute("aria-pressed", "true");
   }
   return (await page.getByTestId("layout-canvas").boundingBox())!;
+}
+
+/** Expand the palette's `More` group. Harmless when it is already open. */
+async function openMoreTools(page: Page) {
+  const summary = page.getByText("More", { exact: true });
+  if (await summary.isVisible()) await summary.click();
 }
 
 /**
@@ -1024,15 +1034,23 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await openDesigner(page);
     await clearRoof(page);
 
-    for (const name of [
-      "Pointer",
-      "Roof face",
-      "Draw array",
-      "Add panel",
-      "Move panel",
-      "Remove panels",
-      "Setbacks",
-    ]) {
+    // The tools a roof is usually drawn with, always on screen.
+    for (const name of ["Pointer", "Roof face", "Draw array", "Add panel", "Remove panels"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+    }
+
+    /**
+     * And the occasional ones, one press away rather than gone.
+     *
+     * The palette used to be eleven flat rows of equal weight, which is what
+     * the report of "too many tools" was about. Nothing was removed — this is
+     * the test that says so, and that they are still findable by name.
+     */
+    for (const name of ["Move panel", "Setbacks"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toBeHidden();
+    }
+    await openMoreTools(page);
+    for (const name of ["Move panel", "Setbacks"]) {
       await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
     }
 

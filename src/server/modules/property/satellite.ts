@@ -21,7 +21,21 @@
  * API allow-list) instead.
  */
 
-export type MapType = "satellite" | "roadmap";
+import { metresPerPixel } from "@/lib/web-mercator";
+import { SUPERTILE_PX, SUPERTILE_RADIUS, metresToLatLng } from "@/lib/map-view";
+
+/**
+ * `hybrid` is the satellite photo with street names and house numbers drawn
+ * over it. It exists here because a rep on a new subdivision needs to check
+ * WHICH roof the deal is about, and the labels are the only thing on the
+ * picture that can answer that.
+ */
+export type MapType = "satellite" | "roadmap" | "hybrid";
+
+/** Read a `?type=` query parameter down to something Google will accept. */
+export function parseMapType(raw: string | null | undefined): MapType {
+  return raw === "roadmap" || raw === "hybrid" ? raw : "satellite";
+}
 
 /** Zoom that frames a single suburban roof. 20 is Google's max for most areas. */
 export const DEFAULT_ZOOM = 20;
@@ -149,4 +163,88 @@ export function satelliteConfigured(
   key: string | undefined = process.env.GOOGLE_MAPS_API_KEY
 ): boolean {
   return !!key && key.trim().length > 0;
+}
+
+/**
+ * Google's deepest Static Maps imagery.
+ *
+ * MEASURED, and it is the second thing on this endpoint that fails by lying.
+ * A `zoom=22` request answers 200 with an image byte-identical to `zoom=21` —
+ * same MD5, same 1280x1280 — so a caller that asked for 22 and computed its
+ * metres-per-pixel as though it had received 22 draws every panel at half the
+ * size of the roof underneath it. The clamp belongs here, beside the size one,
+ * for the same reason: what the caller gets back should be what it asked for.
+ */
+export const MAX_STATIC_ZOOM = 21;
+
+/** Wide enough to show a subdivision and the road network around it. */
+export const MIN_STATIC_ZOOM = 15;
+
+/**
+ * One address in the pannable grid the roof designer draws on.
+ *
+ * A SUPERTILE IS ADDRESSED AS AN OFFSET FROM A DEAL, never as a coordinate.
+ * That is the whole security design of the pannable map: this route resolves
+ * the centre itself, from the lead the caller is already entitled to read, so
+ * no browser can hand it a latitude and turn an authenticated session into a
+ * general-purpose satellite-imagery proxy billed to this company. The radius
+ * bound is what keeps that promise finite.
+ */
+export type Supertile = { zoom: number; tx: number; ty: number };
+
+/**
+ * TILE OFFSETS MAY BE FRACTIONAL, and the reason is Google's own watermark.
+ *
+ * Every Static Maps image carries "Google" and its imagery credit baked into
+ * the bottom corners. That is fine on one picture and awful on a mosaic: the
+ * designer draws four of them across a screen, so the roof gets four logos —
+ * and the customer's layout picture, rendered from the same mosaic, would carry
+ * them too. Cropping them off is not an option; the attribution is a condition
+ * of using the imagery.
+ *
+ * So the export asks for ONE image, centred exactly on the array rather than on
+ * a grid point, which needs a fractional offset. It widens nothing: the bound
+ * below is unchanged, so the reachable ground is exactly what it was. Only the
+ * centring within it is free.
+ */
+
+/** The grid is anchored on the deal: tile (0,0) is centred on the house. */
+export function supertileCentre(
+  origin: { lat: number; lng: number },
+  tile: Supertile
+): { lat: number; lng: number } {
+  const sideM = SUPERTILE_PX * metresPerPixel(origin.lat, tile.zoom, 2);
+  return metresToLatLng(origin, { e: tile.tx * sideM, n: -tile.ty * sideM });
+}
+
+/**
+ * Read a supertile out of a query string, or null when this is not a tile
+ * request at all.
+ *
+ * Returns null rather than throwing for an ABSENT tile so the one route can go
+ * on serving the deal-detail card its single framed image; anything present but
+ * out of bounds is a hard reject, because a caller reaching past the bound is
+ * either broken or probing.
+ */
+export function parseSupertile(sp: URLSearchParams): Supertile | null | "invalid" {
+  const rawX = sp.get("tx");
+  const rawY = sp.get("ty");
+  if (rawX === null && rawY === null) return null;
+
+  /**
+   * BLANK IS NOT ZERO, and this is the third time that has bitten this file —
+   * see `parseZoomParam`. `Number("")` is 0 and `Number.isInteger(0)` is true,
+   * so `?tx=0&ty=` read as "the tile the house is on" and served a picture of
+   * the wrong ground with a 200. A caller that sends half a coordinate is
+   * broken; say so rather than guessing which half it meant.
+   */
+  const nums = [rawX, rawY, sp.get("zoom")].map((raw) =>
+    raw === null || raw.trim() === "" ? NaN : Number(raw)
+  );
+  const [tx, ty, zoom] = nums;
+  if (!nums.every(Number.isFinite)) return "invalid";
+  if (!Number.isInteger(zoom)) return "invalid";
+  if (Math.abs(tx) > SUPERTILE_RADIUS || Math.abs(ty) > SUPERTILE_RADIUS) return "invalid";
+  if (zoom < MIN_STATIC_ZOOM || zoom > MAX_STATIC_ZOOM) return "invalid";
+  return { zoom, tx, ty };
 }
