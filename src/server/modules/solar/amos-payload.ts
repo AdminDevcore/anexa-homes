@@ -30,6 +30,11 @@ type EquipmentRef = {
   manufacturer: string | null
   model: string
   /**
+   * Nameplate watts, where the catalogue carries it. Read for ONE thing: how
+   * many of this inverter it takes to carry the array — see `inverterCount`.
+   */
+  ratingW?: number | null
+  /**
    * What the DEAL'S LENDER calls this same item on its own approved-vendor
    * list, from `SolarEquipmentLender`. Null where nobody has mapped it.
    *
@@ -189,6 +194,34 @@ function describe(ref: NonNullable<EquipmentRef>): string {
   return [ref.manufacturer, ref.model].filter(Boolean).join(' ').trim() || ref.model
 }
 
+/**
+ * How many of this inverter the array needs.
+ *
+ * Anexa stores no inverter count, and this used to send the PANEL count on the
+ * reasoning that a microinverter system has one per panel and a string design
+ * "is corrected by the lender's own review". It is not corrected: a real
+ * submission went out claiming 29 Tesla PV Standalone Inverters — a 220 kW
+ * bill of materials on a 12.76 kW roof — for a system that has one or two.
+ *
+ * Nameplate answers it without a new column. A 366 W microinverter cannot
+ * carry a 12.76 kW array, so the arithmetic asks for 35 and the clamp brings
+ * it back to the 29 panels there are; a 7.6 kW string inverter asks for 2 and
+ * gets 2. The clamp is the part that makes this safe in both directions —
+ * there can never be more inverters than panels on a microinverter design.
+ *
+ * With no wattage on the catalogue row there is nothing to reason from, so it
+ * falls back to the panel count exactly as before. That is a guess, and it is
+ * the guess this system has always made; filling the rated watts in on the
+ * equipment item is what turns it into an answer.
+ */
+function inverterCount(design: AmosDesignInput): number {
+  const rated = design.inverter?.ratingW
+  if (!rated || rated <= 0) return design.moduleQty
+  const arrayWatts = design.systemSizeKwDc * 1000
+  if (arrayWatts <= 0) return 1
+  return Math.min(design.moduleQty, Math.max(1, Math.ceil(arrayWatts / rated)))
+}
+
 /** Integer cents -> a decimal string. Money never crosses the wire as a float. */
 function centsToDecimalString(cents: number): string {
   const whole = Math.trunc(cents / 100)
@@ -234,12 +267,7 @@ export function buildAmosPayload(
 ): AmosApplicationPayload {
   const equipment = [
     line('panel', design.module, design.moduleQty),
-    // Anexa does not track an inverter count separately. For a microinverter
-    // system the count IS the panel count, which is the overwhelmingly common
-    // case here; a string-inverter design is corrected by the lender's own
-    // review. Sending 1 would understate a real microinverter bill of
-    // materials, which is the worse error of the two.
-    line('inverter', design.inverter, design.moduleQty),
+    line('inverter', design.inverter, inverterCount(design)),
     line('battery', design.battery, design.batteryQty),
   ].filter((l): l is EquipmentLine => l !== null)
 

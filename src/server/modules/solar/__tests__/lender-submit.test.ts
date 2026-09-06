@@ -9,10 +9,12 @@ vi.mock('@/server/lib/crypto', () => ({
 
 const designFindFirst = vi.fn()
 const financeFindFirst = vi.fn()
+const proposalFindFirst = vi.fn()
 vi.mock('@/server/db/client', () => ({
   prisma: {
     solarDesign: { findFirst: (...a: unknown[]) => designFindFirst(...a) },
     solarFinance: { findFirst: (...a: unknown[]) => financeFindFirst(...a) },
+    solarProposal: { findFirst: (...a: unknown[]) => proposalFindFirst(...a) },
   },
 }))
 
@@ -82,6 +84,9 @@ beforeEach(() => {
   financeFindFirst
     .mockReset()
     .mockResolvedValue({ contractPriceCents: 5000000, downPaymentCents: 125000, loanTermMonths: 300 })
+  // No document by default, so the existing cases below exercise the pricing-row
+  // fallback. The frozen-snapshot path gets its own block.
+  proposalFindFirst.mockReset().mockResolvedValue(null)
   submitToAmos.mockReset().mockResolvedValue({
     applicationId: 'app-1',
     referenceNumber: 'AMS-1042',
@@ -226,6 +231,43 @@ describe('submitDealToLender', () => {
     expect((r as { problems?: string[] }).problems?.join(' ')).toContain('Amos Capital Fund')
     // The whole point: the lender is never asked a question it would answer 422.
     expect(submitToAmos).not.toHaveBeenCalled()
+  })
+
+  /**
+   * THE AMOUNT COMES OFF THE DOCUMENT, NOT THE PRICING ROWS.
+   *
+   * On a partner carrying a programme contribution those are two different
+   * numbers: `SolarFinance.contractPriceCents` is the household's own price,
+   * while the sheet in front of them quotes its payment from the contract value
+   * the partner's paper is written at. Reading the rows asked Amos for $70,180
+   * against a proposal that says $150,180.
+   */
+  it('asks the lender for the amount the live proposal quotes', async () => {
+    proposalFindFirst.mockResolvedValue({
+      snapshot: { financing: { financedAmountCents: 15018000, loanTermMonths: 360 } },
+    })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('150180.00')
+    expect(submitToAmos.mock.calls[0]?.[1]?.termMonths).toBe(360)
+  })
+
+  it('reads only the version the customer can still open', async () => {
+    proposalFindFirst.mockResolvedValue({
+      snapshot: { financing: { financedAmountCents: 15018000, loanTermMonths: 360 } },
+    })
+    await submitDealToLender(input)
+    expect(proposalFindFirst.mock.calls[0]?.[0]?.where).toMatchObject({
+      leadId: 'lead-1',
+      companyId: 'co-1',
+      supersededAt: null,
+    })
+  })
+
+  it('falls back to the pricing rows on a snapshot too old to carry the figure', async () => {
+    proposalFindFirst.mockResolvedValue({ snapshot: { financing: { aprPct: 0 } } })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('48750.00')
+    expect(submitToAmos.mock.calls[0]?.[1]?.termMonths).toBe(300)
   })
 
   it('never surfaces an unexpected error verbatim', async () => {

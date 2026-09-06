@@ -218,13 +218,30 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
 }
 
 /**
- * THE MONEY, which lives on SolarFinance and not on the design.
+ * THE MONEY — READ OFF THE DOCUMENT THE CUSTOMER WAS SHOWN.
  *
- * Financed amount is the contract price less anything the customer puts down —
- * the same figure the proposal quotes a payment from, so the lender is asked
- * for exactly what the customer was shown.
+ * The live proposal's FROZEN figures, not the live pricing rows. The lender has
+ * to be asked for the amount on the sheet in front of the household, and on a
+ * partner carrying a programme contribution those are two different numbers:
+ * `SolarFinance.contractPriceCents` is the household's own price, while the
+ * document quotes its payment from the contract value the partner's paper is
+ * written at. Reading the rows sent Amos $70,180 for a deal whose proposal says
+ * $150,180 and whose payment is $417.17 a month — an $80,000 understatement on
+ * a real credit application, and it is only luck that their 500 got there
+ * first.
+ *
+ * The snapshot cannot drift the way the rows can, either: a rep re-pricing
+ * mid-application cannot move what has already been submitted, because the
+ * figure came from a document that is frozen. Same principle as every
+ * reporting surface — see resolveReportedSystem.
+ *
+ * FALLS BACK to SolarFinance when no proposal has been generated, which is the
+ * only route that reaches here without one.
  */
 async function loadMoney(leadId: string, companyId: string) {
+  const quoted = await quotedFromProposal(leadId, companyId);
+  if (quoted) return { problem: null, ...quoted };
+
   const finance = await prisma.solarFinance.findFirst({
     where: { leadId, companyId },
     select: { contractPriceCents: true, downPaymentCents: true, loanTermMonths: true },
@@ -237,6 +254,32 @@ async function loadMoney(leadId: string, companyId: string) {
     return { problem: "This deal has no loan term yet. Choose one first." as const };
   }
   return { problem: null, amountCents, termMonths: finance.loanTermMonths };
+}
+
+/**
+ * The amount and term the CURRENT document quotes, or null if it says neither.
+ *
+ * Superseded versions are excluded for the same reason `qualifyOnProposal`
+ * refuses to submit from one: it quotes a price the deal is no longer written
+ * at. A snapshot older than the field simply has no answer here and the rows
+ * below take over, which is the right reading of an older proposal rather than
+ * a guess at one.
+ */
+async function quotedFromProposal(leadId: string, companyId: string) {
+  const live = await prisma.solarProposal.findFirst({
+    where: { leadId, companyId, supersededAt: null },
+    orderBy: { version: "desc" },
+    select: { snapshot: true },
+  });
+  const financing = (live?.snapshot as { financing?: Record<string, unknown> } | null)?.financing;
+  if (!financing) return null;
+
+  const amountCents = financing.financedAmountCents;
+  const termMonths = financing.loanTermMonths;
+  if (typeof amountCents !== "number" || amountCents <= 0) return null;
+  if (typeof termMonths !== "number" || termMonths <= 0) return null;
+
+  return { amountCents, termMonths };
 }
 
 /** "10.7 kW · 26 x Qcells Q.PEAK 410 · 2 x Enphase IQ Battery 5P" */
@@ -276,12 +319,14 @@ function repName(rep: { firstName: string; lastName: string } | null): string | 
 const EQUIPMENT_SELECT = {
   manufacturer: true,
   model: true,
+  ratingW: true,
   lenderApprovals: { select: { lenderId: true, lenderBrand: true, lenderModel: true } },
 } as const;
 
 type CatalogueItem = {
   manufacturer: string | null;
   model: string;
+  ratingW?: number | null;
   lenderApprovals?: { lenderId: string; lenderBrand: string | null; lenderModel: string | null }[];
 };
 
@@ -308,6 +353,7 @@ function withLenderNames(item: CatalogueItem | null, lenderId: string) {
   return {
     manufacturer: item.manufacturer,
     model: item.model,
+    ratingW: item.ratingW ?? null,
     lenderBrand: mapped?.lenderBrand ?? null,
     lenderModel: mapped?.lenderModel ?? null,
   };

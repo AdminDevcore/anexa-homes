@@ -211,6 +211,52 @@ describe('buildAmosPayload', () => {
     })
   })
 
+  /**
+   * THE BILL OF MATERIALS HAS TO BE PHYSICAL.
+   *
+   * A real submission went out claiming 29 Tesla PV Standalone Inverters — a
+   * 220 kW bill of materials on a 12.76 kW roof — because the panel count was
+   * sent for the inverter too.
+   */
+  it('sends one string inverter per slice of the array it can carry', () => {
+    const p = buildAmosPayload(
+      lead,
+      {
+        ...design,
+        systemSizeKwDc: 12.76,
+        moduleQty: 29,
+        inverter: { ...design.inverter, ratingW: 7600 },
+      },
+      opts,
+    )
+    // 12,760 W over a 7.6 kW inverter is two of them, not twenty-nine.
+    expect(p.equipment?.find((e) => e.kind === 'inverter')?.quantity).toBe(2)
+  })
+
+  it('still sends one microinverter per panel, never more', () => {
+    const p = buildAmosPayload(
+      lead,
+      {
+        ...design,
+        systemSizeKwDc: 12.76,
+        moduleQty: 29,
+        inverter: { ...design.inverter, ratingW: 366 },
+      },
+      opts,
+    )
+    // The arithmetic asks for 35; there are only 29 panels to put them on.
+    expect(p.equipment?.find((e) => e.kind === 'inverter')?.quantity).toBe(29)
+  })
+
+  it('falls back to the panel count when the catalogue carries no wattage', () => {
+    const p = buildAmosPayload(
+      lead,
+      { ...design, systemSizeKwDc: 12.76, moduleQty: 29, inverter: { ...design.inverter, ratingW: null } },
+      opts,
+    )
+    expect(p.equipment?.find((e) => e.kind === 'inverter')?.quantity).toBe(29)
+  })
+
   it('omits a battery line when the design has none', () => {
     const p = buildAmosPayload(lead, design, { ...opts, ...{} })
     const noBattery = buildAmosPayload(lead, { ...design, battery: null, batteryQty: 0 }, opts)
