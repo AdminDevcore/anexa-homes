@@ -80,14 +80,28 @@ const SEGMENT_CHEVRON = `${SEGMENT} rounded-r-xl px-3.5 py-4`;
 export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onFailed }: Props) {
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
-  /** Set once a submission has failed: the link takes over from here. */
+  /** What went wrong last time, shown above the button. */
   const [failure, setFailure] = React.useState<string | null>(null);
+  /**
+   * Set only by a failure THIS DOCUMENT CANNOT RETRY — a deal missing
+   * something, or a lender nobody has finished configuring. Then, and only
+   * then, the plain application link takes the button over.
+   *
+   * A transient failure deliberately does NOT set it. The lender's own message
+   * for those says "try the same request again — it is idempotent", and the
+   * submission is keyed on the design so a second press cannot open a second
+   * credit file. Swapping in the link on the first blip stranded a real
+   * application for two hours: the button afterwards was an `<a>` to the
+   * lender's website, so every retry opened a blank form and not one of them
+   * reached the API.
+   */
+  const [terminal, setTerminal] = React.useState(false);
   /** The lender emailed the link instead of handing it back. */
   const [emailed, setEmailed] = React.useState<string | null>(null);
   /** The other road, open. */
   const [menu, setMenu] = React.useState(false);
 
-  const submits = qualifySubmits(offer, previewMode) && !failure;
+  const submits = qualifySubmits(offer, previewMode) && !terminal;
   /**
    * Both roads exist, so the chevron has something to offer. Not a styling
    * choice: a chevron on a partner with only one route is a control that opens
@@ -118,7 +132,12 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
       setBusy(false);
       setOpen(false);
       setFailure(res.error);
-      onFailed?.();
+      if (!res.retryable) {
+        setTerminal(true);
+        // The CARD's caption promises an automatic submission, so it only
+        // changes when the automatic route is genuinely gone.
+        onFailed?.();
+      }
       return;
     }
     if (res.customerUrl) {
@@ -206,6 +225,10 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
 
   return (
     <div className="bg-white p-6 print:hidden" data-qualify-menu>
+      {/* A retryable failure keeps the button that can retry, and says why. */}
+      {failure && (
+        <p className="mb-3 text-xs leading-relaxed text-amber-900">{failure}</p>
+      )}
       <div className="flex w-full sm:w-auto">
         <button
           type="button"

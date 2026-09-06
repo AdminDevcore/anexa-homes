@@ -20,7 +20,10 @@ export async function qualifyOnProposalAction(input: {
   const proposal = await getPublicSolarProposal(input.token);
   // Deliberately the same sentence a bad token gets: a page that distinguishes
   // "no such proposal" from "exists but not sent" is a page you can probe.
-  if (!proposal) return { ok: false, error: "This proposal is no longer available." };
+  // Not retryable: no amount of pressing turns a bad token into a proposal.
+  if (!proposal) {
+    return { ok: false, error: "This proposal is no longer available.", retryable: false };
+  }
 
   const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   return qualifyOnProposal(proposal, { ownerOccupied: input.ownerOccupied, ip });

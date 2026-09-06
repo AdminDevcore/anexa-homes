@@ -53,7 +53,18 @@ export async function readProposalQualifyOffer(
 
 export type QualifyResult =
   | { ok: true; lenderName: string; referenceNumber: string; customerUrl: string | null; sentTo: string }
-  | { ok: false; error: string };
+  /**
+   * `retryable` is the difference between "the lender was briefly unreachable"
+   * and "this deal cannot be sent" — and the document has to act on it, not
+   * just say it. A message reading "please try again in a moment" beside a
+   * control that can no longer try is worse than no message: the household
+   * presses it, is handed the lender's blank form, and nobody finds out the
+   * automatic route was never retried.
+   *
+   * The KIND itself never crosses: "config" tells a customer their rep has not
+   * finished setting the company up.
+   */
+  | { ok: false; error: string; retryable: boolean };
 
 /**
  * Start the application.
@@ -83,6 +94,8 @@ export async function qualifyOnProposal(
       ok: false,
       error:
         "This proposal has been replaced by a newer version. Please open the most recent one your representative sent you.",
+      // Nothing they do on THIS document can change that.
+      retryable: false,
     };
   }
 
@@ -103,7 +116,11 @@ export async function qualifyOnProposal(
       // not is the single most time-critical thing that can happen on a solar
       // deal, and the reason is on the deal rather than in a log nobody reads.
       await record(proposal, "qualify_failed", input.ip, [result.error, ...(result.problems ?? [])].join(" "));
-      return { ok: false, error: customerFacing(result.kind) };
+      return {
+        ok: false,
+        error: customerFacing(result.kind),
+        retryable: result.kind === "transient",
+      };
     }
 
     await record(

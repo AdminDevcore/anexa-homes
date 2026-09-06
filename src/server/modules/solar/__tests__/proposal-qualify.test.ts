@@ -174,6 +174,46 @@ describe('qualifyOnProposal', () => {
     expect((r as { error: string }).error).toContain('try again')
   })
 
+  /**
+   * SAYING "try again" IS NOT ENOUGH — the document has to still be able to.
+   *
+   * A transient failure used to swap the automatic control for a plain link to
+   * the lender's website for the life of the page. The message asked for a
+   * retry, the button could no longer perform one, and every press afterwards
+   * opened a blank form instead: a real application sat stranded for two hours
+   * with nothing reaching the API. `retryable` is what the document branches
+   * on, so it is asserted here rather than left to the component.
+   */
+  it('marks a transient failure retryable', async () => {
+    submitDealToLender.mockResolvedValue({ ok: false, kind: 'transient', error: 'no route' })
+    expect(await qualifyOnProposal(PROPOSAL, input)).toMatchObject({
+      ok: false,
+      retryable: true,
+    })
+  })
+
+  it('marks a deal problem NOT retryable — pressing again cannot fix it', async () => {
+    submitDealToLender.mockResolvedValue({ ok: false, kind: 'deal', error: 'x', problems: [] })
+    expect(await qualifyOnProposal(PROPOSAL, input)).toMatchObject({
+      ok: false,
+      retryable: false,
+    })
+  })
+
+  it('marks a config problem NOT retryable — only an admin can move it', async () => {
+    submitDealToLender.mockResolvedValue({ ok: false, kind: 'config', error: 'x' })
+    expect(await qualifyOnProposal(PROPOSAL, input)).toMatchObject({
+      ok: false,
+      retryable: false,
+    })
+  })
+
+  it('a superseded document is never retryable', async () => {
+    const r = await qualifyOnProposal({ ...PROPOSAL, supersededAt: new Date() }, input)
+    expect(r).toMatchObject({ ok: false, retryable: false })
+    expect(submitDealToLender).not.toHaveBeenCalled()
+  })
+
   it('still returns the application when the bookkeeping throws', async () => {
     // The household is already through to the lender by then.
     eventCreate.mockRejectedValue(new Error('db down'))
