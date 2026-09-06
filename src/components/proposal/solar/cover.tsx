@@ -115,12 +115,16 @@ export function Cover({
           {name ? `, ${name}` : ""}.
         </h1>
 
+        {/* The address used to sit in the middle of this sentence. It is in the
+            block below now, written properly and labelled, and a cover that
+            states the same address twice in two different punctuations is the
+            thing this change was made to stop. */}
         <p className="mt-4 text-[0.95rem] leading-relaxed text-neutral-700">
           {article(s.system.sizeKwDc)}{" "}
           <strong className="font-semibold text-neutral-900">
             {s.system.sizeKwDc.toFixed(2)} kW
           </strong>{" "}
-          system for <span className="text-neutral-900">{s.customer.address}</span>, sized to cover{" "}
+          system, sized to cover{" "}
           <strong className="font-semibold text-neutral-900">{pctWhole(s.system.offsetPct)}</strong>{" "}
           of what your home uses.
         </p>
@@ -131,7 +135,37 @@ export function Cover({
 
         <div className="mt-7 h-px bg-neutral-900/15" />
 
-        <dl data-cover-meta className="mt-5 flex flex-wrap gap-x-8 gap-y-3">
+        {/* ── who it is for, and who wrote it ────────────────────────────
+            The block a proposal is expected to open with. Before this the
+            cover named the household ONCE, in the greeting, by first name —
+            warm, and useless as a document: nothing on the sheet said whose
+            house it was, how to reach them, or which of the three quotes on a
+            kitchen table this one was. The greeting keeps the first name; the
+            record goes here. */}
+        <div data-cover-parties className="mt-5 grid grid-cols-2 gap-x-5 gap-y-4">
+          <Party
+            k="Prepared for"
+            lead={s.customer.name}
+            lines={[addressLine(s.customer.address), s.customer.email, tel(s.customer.phone)]}
+          />
+          <Party
+            k="Prepared by"
+            lead={s.company.name}
+            /* The rep the household actually deals with, and their own line —
+               falling back to the company's only where there is no rep on the
+               deal. A main office number under a consultant's name sends a
+               homeowner to a switchboard. */
+            lines={[
+              s.representative?.name,
+              tel(s.representative?.phone ?? s.company.phone),
+              s.representative?.email ?? s.company.email,
+            ]}
+          />
+        </div>
+
+        <div className="mt-5 h-px bg-neutral-900/15" />
+
+        <dl data-cover-meta className="mt-4 flex flex-wrap gap-x-8 gap-y-3">
           <Meta k="Prepared">
             {new Date(s.generatedAt).toLocaleDateString("en-US", {
               year: "numeric",
@@ -142,11 +176,78 @@ export function Cover({
           <Meta k="Reference">
             <span className="tabular-nums">{s.reference}</span>
           </Meta>
-          {s.representative && <Meta k="Your consultant">{s.representative.name}</Meta>}
         </dl>
       </GlassCard>
     </section>
   );
+}
+
+/**
+ * One side of the cover's address block.
+ *
+ * `lead` is the name and is always drawn; `lines` are dropped where they are
+ * empty rather than rendered as an em dash or a blank row. A household with no
+ * email on file gets a three-line block, not a four-line one with a hole in it —
+ * and the two columns are top-aligned so an uneven pair still shares a baseline
+ * where it matters, at the name.
+ */
+function Party({
+  k,
+  lead,
+  lines,
+}: {
+  k: string;
+  lead: string;
+  lines: (string | null | undefined)[];
+}) {
+  const rest = lines.map((l) => l?.trim()).filter(Boolean) as string[];
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neutral-500">{k}</p>
+      {/* `break-words`, not `truncate`: an email is the one line on this card
+          that must be readable in full, and a 28-character address on a phone
+          is allowed to take two lines rather than end in an ellipsis. */}
+      <p className="mt-1.5 break-words text-[0.85rem] font-semibold leading-snug text-neutral-950">
+        {lead || "—"}
+      </p>
+      {rest.map((line) => (
+        <p key={line} className="mt-1 break-words text-[0.78rem] leading-snug text-neutral-700">
+          {line}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A US number as it is SPOKEN — "(361) 555-0134".
+ *
+ * Phone numbers are stored exactly as they were typed, which on a lead imported
+ * from a list means ten bare digits. That is fine in a table and wrong on the
+ * cover of a document. Anything that is not a plain 10- (or 1+10-) digit number
+ * — an extension, an international number, something half-typed — is passed
+ * through untouched rather than mangled into a shape it does not have.
+ */
+export function tel(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const d = raw.replace(/\D/g, "");
+  const n = d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
+  if (n.length !== 10 || /[a-z]/i.test(raw)) return raw;
+  return `(${n.slice(0, 3)}) ${n.slice(3, 6)}-${n.slice(6)}`;
+}
+
+/**
+ * The frozen address string, with the comma the old generator put in front of
+ * the ZIP taken back out: "Victoria, TX, 77901" → "Victoria, TX 77901".
+ *
+ * Display-only, and deliberately anchored to a trailing ZIP so it cannot touch
+ * anything else in the line. Documents generated from now on never need it —
+ * see `formatMailingAddress` — but the ones already in the database are frozen
+ * and are not going to be rewritten for a comma.
+ */
+export function addressLine(address: string | null | undefined): string | null {
+  if (!address) return null;
+  return address.replace(/,\s*(\d{5}(?:-\d{4})?)\s*$/, " $1");
 }
 
 function Meta({ k, children }: { k: string; children: React.ReactNode }) {

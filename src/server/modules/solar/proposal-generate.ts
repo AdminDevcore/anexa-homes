@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { lenderLogoUrl } from "@/lib/lender-mark";
+import { formatMailingAddress } from "@/lib/address";
 import type { SessionUser } from "@/server/auth/session";
 import { resolveVppCredits } from "@/server/modules/solar/vpp-credits";
 import { resolveLayoutAsset } from "./layout-asset";
@@ -216,6 +217,10 @@ export async function generateProposalVersion(
       select: {
         id: true, vertical: true, firstName: true, lastName: true,
         address: true, city: true, state: true, zip: true,
+        // The rest of the cover's "Prepared for" block. Frozen with the
+        // document like everything else on it, so a proposal keeps addressing
+        // the household it was written for even after the deal is edited.
+        email: true, phone: true,
         // The coordinate the array is drawn on. Null omits the drawing rather
         // than centring a customer's roof on the middle of the ocean.
         lat: true, lng: true,
@@ -775,7 +780,9 @@ export async function generateProposalVersion(
     generatedById: user.userId,
     customer: {
       name: `${lead.firstName} ${lead.lastName}`.trim(),
-      address: [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", "),
+      address: formatMailingAddress(lead),
+      email: lead.email,
+      phone: lead.phone,
     },
     company: {
       name: company?.name ?? "",

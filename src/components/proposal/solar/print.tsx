@@ -171,10 +171,18 @@ const PRINT_CSS = `
     padding: 0.42in 0.44in;
   }
   #proposal-root [data-section="cover"] h1 { font-size: 2.6rem; line-height: 0.98; }
-  /* Prepared · Reference · Consultant are one line or they are three: the flex
-     row wraps a whole item at a time, and 2rem of gutter is enough to push the
-     consultant onto a line of its own on a card this wide. */
+  /* Prepared and Reference are one line or they are two: the flex row wraps a
+     whole item at a time, and 2rem of gutter is enough to push the second onto
+     a line of its own on a card this wide. */
   #proposal-root [data-cover-meta] { column-gap: 1.5rem; }
+  /* Prepared for · Prepared by stay TWO columns on paper. The card is 5.35in
+     here whatever the window was, so the pair has ~2.1in a side — enough for an
+     address and an email, and the one thing that must not happen is the block
+     stacking into eight lines and pushing the card off the sheet. */
+  #proposal-root [data-cover-parties] {
+    grid-template-columns: 1fr 1fr;
+    column-gap: 1.1rem;
+  }
 
   /* ── seams inside a chapter ─────────────────────────────────────────────
      Where a chapter genuinely runs past a sheet — a long price table, a deal

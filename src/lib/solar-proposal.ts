@@ -1098,7 +1098,16 @@ export type SolarProposalSnapshot = {
   generatedById: string | null;
   /** Human-facing document reference, e.g. "SP-1042-V2". */
   reference: string;
-  customer: { name: string; address: string };
+  /**
+   * Who the document is FOR — the whole "Prepared for" block on the cover.
+   *
+   * `email` and `phone` arrived after the first documents were generated, so
+   * they are optional on the TYPE and undefined on every snapshot frozen before
+   * them. That difference is meaningful and is read on the way out: undefined
+   * means "this document predates the field", null means "there was nothing on
+   * file the day it was generated". See `withCustomerContact`.
+   */
+  customer: { name: string; address: string; email?: string | null; phone?: string | null };
   company: {
     name: string;
     phone: string | null;
@@ -2040,7 +2049,7 @@ function priceOption(args: {
 export function buildProposalSnapshot(args: {
   reference: string;
   generatedById: string | null;
-  customer: { name: string; address: string };
+  customer: { name: string; address: string; email?: string | null; phone?: string | null };
   company: {
     name: string;
     phone: string | null;
@@ -2428,4 +2437,38 @@ export function hasCreditSwitch(snapshot: unknown): boolean {
     | undefined;
   if (!s || s.systemType === "storage") return false;
   return s.options?.[0]?.creditsApplied != null;
+}
+
+/**
+ * COMPLETE THE "PREPARED FOR" BLOCK ON A DOCUMENT FROZEN BEFORE IT EXISTED.
+ *
+ * Everything else in a snapshot is frozen because re-reading it later would
+ * silently re-quote a household: prices, terms, production, the rate sheet. The
+ * contact block is the one part that is not an offer — it is who the document
+ * is addressed to — and the proposals generated before the cover carried one
+ * would otherwise show a name and nothing else for the rest of their lives.
+ *
+ * So the fill is deliberately narrow: it runs ONLY where the field is
+ * `undefined`, which is exactly the pre-change snapshots. A snapshot that froze
+ * `null` recorded that there was no email on file that day and keeps saying so;
+ * one that froze an address keeps the address it was generated with, even after
+ * the lead is edited. Nothing already written is ever overwritten.
+ */
+export function withCustomerContact<T extends { customer: SolarProposalSnapshot["customer"] }>(
+  snapshot: T,
+  lead: { email?: string | null; phone?: string | null } | null | undefined,
+  // The return type is spelled out rather than left as `T`: a caller passing a
+  // narrower literal would otherwise get its own type back, and the two fields
+  // this function exists to add would not be on it.
+): Omit<T, "customer"> & { customer: SolarProposalSnapshot["customer"] } {
+  const c = snapshot?.customer;
+  if (!c || (c.email !== undefined && c.phone !== undefined)) return snapshot;
+  return {
+    ...snapshot,
+    customer: {
+      ...c,
+      email: c.email !== undefined ? c.email : (lead?.email ?? null),
+      phone: c.phone !== undefined ? c.phone : (lead?.phone ?? null),
+    },
+  };
 }

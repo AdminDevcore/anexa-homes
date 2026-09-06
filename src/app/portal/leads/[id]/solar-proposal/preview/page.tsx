@@ -12,7 +12,7 @@ import { adderAmountCents, catalogueBasis } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
 import { readProposalQualifyOffer } from "@/server/modules/solar/proposal-qualify";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Proposal preview" };
@@ -58,12 +58,18 @@ export default async function SolarProposalPreviewPage({
     select: {
       id: true, version: true, snapshot: true, signedAt: true, supersededAt: true,
       createdAt: true, showComparison: true, showPaymentOptions: true,
-      leadId: true, companyId: true, lead: { select: { vertical: true } },
+      leadId: true, companyId: true,
+      // `email`/`phone` complete the cover's address block on documents frozen
+      // before it existed — see `withCustomerContact`.
+      lead: { select: { vertical: true, email: true, phone: true } },
     },
   });
   if (!proposal) notFound();
 
-  const snapshot = proposal.snapshot as unknown as SolarProposalSnapshot;
+  const snapshot = withCustomerContact(
+    proposal.snapshot as unknown as SolarProposalSnapshot,
+    proposal.lead,
+  );
 
   // The snapshot stores the layout's FILE ID, not a URL, so the preview serves
   // it through the authenticated portal route — no share token is involved, and

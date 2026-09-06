@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { runUnscoped } from "@/server/vertical/context";
 import { readPrintSignature } from "./print-signature";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * Resolve the one proposal a print signature names, or null.
@@ -32,10 +32,19 @@ export async function proposalForPrint(sig: string) {
           id: true, companyId: true, leadId: true, version: true,
           snapshot: true, signedAt: true, supersededAt: true,
           showComparison: true, showPaymentOptions: true,
-          lead: { select: { vertical: true } },
+          lead: { select: { vertical: true, email: true, phone: true } },
         },
       })
   );
   if (!proposal) return null;
-  return { ...proposal, snapshot: proposal.snapshot as unknown as SolarProposalSnapshot };
+  return {
+    ...proposal,
+    // The filed PDF is meant to be the proposal as the customer sees it, and
+    // the customer's copy fills the contact block on pre-change documents. The
+    // two renders would otherwise disagree about the cover.
+    snapshot: withCustomerContact(
+      proposal.snapshot as unknown as SolarProposalSnapshot,
+      proposal.lead,
+    ),
+  };
 }
