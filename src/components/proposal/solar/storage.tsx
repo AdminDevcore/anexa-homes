@@ -49,6 +49,7 @@ export function SolarStorageProposalView({
   accentColor,
   chromeOffset = 0,
   qualifyOffer = null,
+  repQualify = null,
 }: {
   snapshot: SolarProposalSnapshot;
   token: string;
@@ -68,6 +69,8 @@ export function SolarStorageProposalView({
   chromeOffset?: number;
   /** See `PaymentMenu` — null keeps Qualify the plain application link. */
   qualifyOffer?: QualifyOffer | null;
+  /** See `QualifyAction` — the portal preview's own door onto the submission. */
+  repQualify?: { proposalId: string } | null;
 }) {
   const s = snapshot;
   const st = s.storage;
@@ -393,6 +396,7 @@ export function SolarStorageProposalView({
             token={token}
             qualifyOffer={qualifyOffer}
             previewMode={previewMode}
+            repQualify={repQualify}
           />
         )}
       </Chapter>

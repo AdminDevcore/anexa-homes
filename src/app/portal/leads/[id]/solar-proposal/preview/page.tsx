@@ -101,6 +101,26 @@ export default async function SolarProposalPreviewPage({
 
   const rep = canAdjust ? await repContext(user.companyId, id, proposal) : null;
 
+  /**
+   * WHETHER QUALIFY IS LIVE ON THIS PAGE.
+   *
+   * A deliberately different gate from `canAdjust` above, because the two
+   * controls refuse for different reasons. Re-pricing writes a new version, so
+   * it stands down on a signed document and on any version but the current
+   * one. Submitting writes nothing here — it asks a lender to open a credit
+   * file at the price this document already quotes — so a SIGNED document is
+   * the most normal thing to submit from, not the least, and reading an old
+   * version is fine as long as it is still the price the deal is written at.
+   *
+   * Superseded is the one that must refuse: `qualifyOnProposalAsRep` rejects it
+   * on the server, and a live button that always errors is worse than a note.
+   *
+   * Same permission pair as the adjust bar: somebody who may not change what
+   * this deal is priced at may not put that price in front of an underwriter.
+   */
+  const canQualify =
+    can(user, "update", "Proposal") && can(user, "update", "Lead") && !proposal.supersededAt;
+
   return (
     <div className="min-h-screen bg-[#f6f3ee]">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 pt-6 print:hidden sm:px-6">
@@ -188,6 +208,11 @@ export default async function SolarProposalPreviewPage({
           { leadId: proposal.leadId, companyId: proposal.companyId, lead: proposal.lead },
           "rep",
         )}
+        // AND THE DOOR IT PRESSES. Without this the button on this page is the
+        // dead grey one it was: the customer's copy carries a share token and
+        // this page deliberately does not, so the token route has nothing to
+        // act with. This is the same submission behind a session instead.
+        repQualify={canQualify ? { proposalId: proposal.id } : null}
         // The portal shell's header is already pinned at the top of the
         // viewport. Without this the document's own nav pins to y=0 as well and
         // the two bars paint over each other.

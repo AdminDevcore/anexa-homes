@@ -159,6 +159,7 @@ export function SolarProposalView(props: SolarProposalViewProps) {
       accentColor={props.accentColor}
       chromeOffset={props.chromeOffset}
       qualifyOffer={props.qualifyOffer}
+      repQualify={props.repQualify}
     />
   ) : (
     <SolarPvProposalView {...props} />
@@ -257,6 +258,16 @@ type SolarProposalViewProps = {
    * "blocked" offer are only ever put on the authenticated preview.
    */
   qualifyOffer?: QualifyOffer | null;
+  /**
+   * THE PORTAL PREVIEW'S OWN DOOR onto the submission, and the only prop that
+   * makes a control live while `previewMode` is on.
+   *
+   * Passed only by `/portal/leads/[id]/solar-proposal/preview`, which is
+   * authenticated — so the id it carries is acted on against a session, never
+   * against a share token. Null everywhere else, which is every render of the
+   * customer's copy and every PDF: those keep the token route, or nothing.
+   */
+  repQualify?: { proposalId: string } | null;
 };
 
 function SolarPvProposalView({
@@ -275,6 +286,7 @@ function SolarPvProposalView({
   chromeOffset = 0,
   creditsApplied: initialCreditsApplied = false,
   qualifyOffer = null,
+  repQualify = null,
 }: SolarProposalViewProps) {
   /**
    * The document on screen, and which version it is.
@@ -637,6 +649,7 @@ function SolarPvProposalView({
         token={token}
         qualifyOffer={qualifyOffer}
         previewMode={previewMode}
+        repQualify={repQualify}
       />
 
       {/* 05 · plate. A rep may turn this off for a household that reads a table

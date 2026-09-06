@@ -43,6 +43,7 @@ export function ChapterPay({
   token,
   qualifyOffer,
   previewMode,
+  repQualify,
 }: {
   doc: Doc;
   onSelect: (key: string) => void;
@@ -52,6 +53,8 @@ export function ChapterPay({
   /** See `PaymentMenu` — null keeps Qualify the plain application link. */
   qualifyOffer: QualifyOffer | null;
   previewMode: boolean;
+  /** See `QualifyAction` — the portal preview's own door onto the submission. */
+  repQualify: { proposalId: string } | null;
 }) {
   const { s, f, option, options, vpp, credits } = doc;
   const utility = s.energy.utilityProvider ?? "your utility";
@@ -281,6 +284,7 @@ export function ChapterPay({
             lender={f.lender}
             offer={option.quoted ? qualifyOffer : null}
             previewMode={previewMode}
+            repQualify={repQualify}
           />
         </div>
       )}
@@ -300,6 +304,7 @@ export function ChapterPay({
             token={token}
             qualifyOffer={qualifyOffer}
             previewMode={previewMode}
+            repQualify={repQualify}
           />
         </div>
       )}

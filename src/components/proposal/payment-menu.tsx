@@ -48,6 +48,12 @@ export function PaymentMenu({
    */
   qualifyOffer = null,
   previewMode = false,
+  /**
+   * Present only on the authenticated portal preview, where the reader is a
+   * rep rather than the household. It carries the proposal id, which is the
+   * second door's whole authorization surface. See `QualifyAction`.
+   */
+  repQualify = null,
 }: {
   options: ProposalPaymentOption[];
   selectedKey: string;
@@ -57,6 +63,7 @@ export function PaymentMenu({
   token?: string;
   qualifyOffer?: QualifyOffer | null;
   previewMode?: boolean;
+  repQualify?: { proposalId: string } | null;
 }) {
   const selected = options.find((o) => o.key === selectedKey) ?? options[0];
   const f = selected.financing;
@@ -176,6 +183,7 @@ export function PaymentMenu({
             lender={f.lender}
             offer={qualify}
             previewMode={previewMode}
+            repQualify={repQualify}
             onFailed={() => setQualifyFailed(true)}
           />
         )}
@@ -187,6 +195,7 @@ export function PaymentMenu({
           lender={f.lender}
           offer={qualify}
           previewMode={previewMode}
+          repQualify={repQualify}
           failed={qualifyFailed}
         />
       )}

@@ -4,6 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ExternalLink, Loader2, ShieldAlert, Check } from "lucide-react";
 import { qualifyOnProposalAction } from "@/server/modules/solar/proposal-qualify-action";
+import { qualifyFromPortalAction } from "@/server/modules/solar/proposal-qualify-rep-action";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
 
 /**
@@ -27,6 +28,14 @@ import type { QualifyOffer } from "@/lib/proposal-qualify";
  * about one lender. Whichever lender the deal is quoted with is the one whose
  * key is used, resolved on the server at the moment of the tap.
  *
+ * TWO DOORS, ONE BUTTON. The customer's copy is authorized by its share token.
+ * The portal preview carries no token — deliberately, so none appears in that
+ * page's HTML — and so the same button was dead there, which left a rep sitting
+ * with a signed document and nowhere to press. `repQualify` is the second door:
+ * the same submission, authorized by the session instead. It changes nothing
+ * about whose details go or whose consent is captured; those were never
+ * statements about which screen the deal was sent from.
+ *
  * WHAT IS NOT SENT: no Social Security number, no date of birth, no consent
  * flag. That authorization has to be the customer's own, captured on the
  * lender's page under the lender's disclosures — which is also what keeps this
@@ -45,8 +54,22 @@ type Props = {
    * switched to a payment option this deal is not priced at.
    */
   offer: QualifyOffer | null;
-  /** The portal preview and the PDF render. Nothing here may act. */
+  /** The portal preview and the PDF render. Neither can act on the token. */
   previewMode: boolean;
+  /**
+   * THE PREVIEW'S OWN DOOR, and the only thing that makes a control live while
+   * `previewMode` is on.
+   *
+   * Passed only by `/portal/leads/[id]/solar-proposal/preview`, which is
+   * authenticated and deliberately carries no share token — so the customer's
+   * route has nothing to act with there, and the button was dead. This carries
+   * the proposal id instead, and the action behind it proves the session owns
+   * that row before anything reaches a lender.
+   *
+   * Null on the customer's copy and on every print render, which leaves both
+   * exactly as they were.
+   */
+  repQualify?: { proposalId: string } | null;
   /**
    * Told when the automatic route has failed and the link has taken over.
    *
@@ -58,9 +81,19 @@ type Props = {
   onFailed?: () => void;
 };
 
-/** True when tapping the button starts a real application. */
-export function qualifySubmits(offer: QualifyOffer | null, previewMode: boolean): boolean {
-  return offer?.state === "ready" && !previewMode;
+/**
+ * True when tapping the button starts a real application.
+ *
+ * The preview is inert UNLESS it was handed its own door — the button and the
+ * caption under it are computed from this one function precisely so they can
+ * never disagree about what a press is about to do.
+ */
+export function qualifySubmits(
+  offer: QualifyOffer | null,
+  previewMode: boolean,
+  repQualify: { proposalId: string } | null = null,
+): boolean {
+  return offer?.state === "ready" && (!previewMode || !!repQualify);
 }
 
 /** Whether there is anything at all to put in the card's third column. */
@@ -77,7 +110,24 @@ const SEGMENT =
 const SEGMENT_MAIN = `${SEGMENT} flex-1 rounded-l-xl border-r-0 px-8 py-4 text-lg sm:flex-none`;
 const SEGMENT_CHEVRON = `${SEGMENT} rounded-r-xl px-3.5 py-4`;
 
-export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onFailed }: Props) {
+/** What came back from a submission that worked. Shaped locally rather than
+ *  imported: `QualifyResult` lives in a module that imports Prisma. */
+type Submitted = {
+  lenderName: string;
+  referenceNumber: string;
+  customerUrl: string | null;
+  sentTo: string;
+};
+
+export function QualifyAction({
+  token,
+  applyUrl,
+  lender,
+  offer,
+  previewMode,
+  repQualify = null,
+  onFailed,
+}: Props) {
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   /** What went wrong last time, shown above the button. */
@@ -98,10 +148,12 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
   const [terminal, setTerminal] = React.useState(false);
   /** The lender emailed the link instead of handing it back. */
   const [emailed, setEmailed] = React.useState<string | null>(null);
+  /** What the lender gave back, on the rep's door. See `start`. */
+  const [submitted, setSubmitted] = React.useState<Submitted | null>(null);
   /** The other road, open. */
   const [menu, setMenu] = React.useState(false);
 
-  const submits = qualifySubmits(offer, previewMode) && !terminal;
+  const submits = qualifySubmits(offer, previewMode, repQualify) && !terminal;
   /**
    * Both roads exist, so the chevron has something to offer. Not a styling
    * choice: a chevron on a partner with only one route is a control that opens
@@ -127,7 +179,13 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
 
   async function start(ownerOccupied: boolean) {
     setBusy(true);
-    const res = await qualifyOnProposalAction({ token, ownerOccupied });
+    // WHICH DOOR. The customer's copy carries a share token and that token is
+    // its authorization; the portal preview carries no token at all and is
+    // authorized by the session behind it. Same deal, same lender, same key,
+    // same idempotency — the only difference is who proved they may ask.
+    const res = repQualify
+      ? await qualifyFromPortalAction({ proposalId: repQualify.proposalId, ownerOccupied })
+      : await qualifyOnProposalAction({ token, ownerOccupied });
     if (!res.ok) {
       setBusy(false);
       setOpen(false);
@@ -140,6 +198,18 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
       }
       return;
     }
+    if (repQualify) {
+      // NOT a redirect, which is the one place the two doors behave
+      // differently after a success. The household is sent straight on because
+      // finishing the form is the next thing they do; a rep has the deal open
+      // behind this tab, and throwing it at a bank's website to confirm the
+      // send worked is a worse answer than saying so. The link is an anchor
+      // they press — a real click, which nothing blocks.
+      setBusy(false);
+      setOpen(false);
+      setSubmitted(res);
+      return;
+    }
     if (res.customerUrl) {
       // Same tab, deliberately. A popup opened after an await is blocked by
       // every mobile browser worth naming, and this is read on a phone in a
@@ -150,6 +220,34 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
     setBusy(false);
     setOpen(false);
     setEmailed(res.sentTo || null);
+  }
+
+  // WHAT THE REP SEES AFTERWARDS. The reference is the thing worth reading —
+  // it is what an office quotes back to the lender — and the handoff link is
+  // offered rather than taken, because the deal is still open behind this tab.
+  if (submitted) {
+    return (
+      <div className="bg-white p-6 print:hidden">
+        <p className="flex items-start gap-2 text-sm leading-relaxed text-neutral-700">
+          <Check className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+          <span>
+            Application started with {submitted.lenderName} · reference{" "}
+            <span className="font-semibold">{submitted.referenceNumber}</span>. A link to finish it
+            {submitted.sentTo ? ` has gone to ${submitted.sentTo}` : " is on its way to the customer"}.
+          </span>
+        </p>
+        {submitted.customerUrl && (
+          <a
+            href={submitted.customerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-2 rounded-xl border-2 border-neutral-900 px-5 py-2.5 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-900 hover:text-white"
+          >
+            Open it on this device <ExternalLink className="size-4" />
+          </a>
+        )}
+      </div>
+    );
   }
 
   if (emailed !== null) {
@@ -193,7 +291,9 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
   // because a rep checking their own work must not be handed the customer's
   // control. Rendering the plain link here instead would make the button open
   // the lender's page on a click the note promises does nothing.
-  if (offer?.state === "ready" && previewMode) {
+  // ...unless this page was handed its own door, above. Reached now only by a
+  // reader who may not act — no `update` grant, or a superseded version.
+  if (offer?.state === "ready" && previewMode && !repQualify) {
     return (
       <div className="flex items-center bg-white p-6 print:hidden">
         <span className={`${BUTTON_CLASS} cursor-not-allowed opacity-40`} aria-disabled>
@@ -307,6 +407,7 @@ export function QualifyAction({ token, applyUrl, lender, offer, previewMode, onF
         <QualifySheet
           offer={offer}
           busy={busy}
+          forRep={!!repQualify}
           onCancel={() => setOpen(false)}
           onContinue={start}
         />
@@ -334,6 +435,7 @@ export function QualifyCallout(props: Props) {
         lender={props.lender}
         offer={props.offer}
         previewMode={props.previewMode}
+        repQualify={props.repQualify}
         failed={failed}
       />
     </div>
@@ -353,11 +455,23 @@ export function QualifyCallout(props: Props) {
 function QualifySheet({
   offer,
   busy,
+  forRep = false,
   onCancel,
   onContinue,
 }: {
   offer: Extract<QualifyOffer, { state: "ready" }>;
   busy: boolean;
+  /**
+   * Opened from the portal preview rather than the customer's copy.
+   *
+   * The sheet is otherwise IDENTICAL on purpose — same figures, same list of
+   * what goes, same occupancy question, because it is the same submission and a
+   * shorter confirmation for the person who is not the applicant would be the
+   * wrong way round. What it adds is the one fact the rep needs and the
+   * customer does not: this is not a rehearsal, and the household finds out
+   * because the lender writes to them.
+   */
+  forRep?: boolean;
   onCancel: () => void;
   onContinue: (ownerOccupied: boolean) => void;
 }) {
@@ -413,14 +527,41 @@ function QualifySheet({
           <Row k="Financing" v={offer.summary.financing} />
         </dl>
 
+        {forRep && (
+          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-50 p-3.5">
+            <p className="flex items-start gap-2 text-sm leading-relaxed text-amber-900">
+              <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+              <span>
+                This is a real credit application in the customer&rsquo;s name, not a preview of
+                one. {offer.lenderName} emails them the link to finish it — and texts it, if there
+                is a number on the deal — the moment you continue. There is no way to send this
+                quietly.
+              </span>
+            </p>
+          </div>
+        )}
+
         <p className="mt-4 text-sm leading-relaxed text-neutral-600">
-          That is everything we send. Your Social Security number, your date of birth and your
-          authorisation for the credit check are entered on {offer.lenderName}&rsquo;s own secure
-          page — none of it passes through this document.
+          {forRep ? (
+            <>
+              That is everything we send. The customer&rsquo;s Social Security number, date of
+              birth and authorisation for the credit check are entered by them on{" "}
+              {offer.lenderName}&rsquo;s own secure page — none of it passes through this
+              document, and none of it can be entered here.
+            </>
+          ) : (
+            <>
+              That is everything we send. Your Social Security number, your date of birth and your
+              authorisation for the credit check are entered on {offer.lenderName}&rsquo;s own
+              secure page — none of it passes through this document.
+            </>
+          )}
         </p>
 
         <div className="mt-5">
-          <p className="text-sm font-semibold">Do you live in this home?</p>
+          <p className="text-sm font-semibold">
+            {forRep ? "Does the customer live in this home?" : "Do you live in this home?"}
+          </p>
           <div className="mt-2 flex gap-2">
             <Choice on={ownerOccupied === true} onClick={() => setOwnerOccupied(true)}>
               Yes
@@ -502,12 +643,15 @@ export function QualifyNote({
   lender,
   offer,
   previewMode,
+  repQualify = null,
   failed = false,
 }: {
   applyUrl: string | null;
   lender: string | null;
   offer: QualifyOffer | null;
   previewMode: boolean;
+  /** See `QualifyAction`. Read here so the caption cannot outlive the button. */
+  repQualify?: { proposalId: string } | null;
   /** The automatic route failed and the plain link has taken the button over. */
   failed?: boolean;
 }) {
@@ -520,8 +664,21 @@ export function QualifyNote({
     );
   }
 
-  if (qualifySubmits(offer, previewMode) && !failed) {
+  if (qualifySubmits(offer, previewMode, repQualify) && !failed) {
     const name = offer?.state === "ready" ? offer.lenderName : (lender ?? "the lender");
+    // THE PREVIEW'S BUTTON IS LIVE NOW, so the strip that used to say it was
+    // inert would be the exact defect this file already shipped once — a
+    // caption describing a control that has since changed behaviour. Said to
+    // the person actually reading it, and said before they press.
+    if (repQualify) {
+      return (
+        <p className="border-t border-neutral-200/70 bg-neutral-50 px-6 py-3 text-xs text-neutral-500 print:hidden">
+          Only you can see this, but the button is live: it starts a real application with {name}{" "}
+          in the customer&rsquo;s name, and {name} writes to them to finish it.
+          {applyUrl ? " The arrow beside it opens their blank form instead." : ""}
+        </p>
+      );
+    }
     return (
       <p className="border-t border-neutral-200/70 bg-neutral-50 px-6 py-3 text-xs text-neutral-500 print:hidden">
         Starts your application with {name} using the details above, then opens their own secure
@@ -532,9 +689,16 @@ export function QualifyNote({
     );
   }
 
-  // The rep's preview of a live, submittable document: say so, rather than
-  // printing the link's sentence under a button that will not behave that way.
-  if (offer?.state === "ready" && previewMode) {
+  // The rep's preview of a live, submittable document they may NOT press —
+  // no `update` grant, or a superseded version. Say so, rather than printing
+  // the link's sentence under a button that will not behave that way.
+  //
+  // `!repQualify` is load-bearing in the failed case too: once the automatic
+  // route has died terminally the button above is an `<a>` to the lender, and
+  // a strip under it reading "inert in the preview" is the same defect this
+  // file shipped once already (21151fa). Falling through to the plain-link
+  // sentence below is the true description of what that button now does.
+  if (offer?.state === "ready" && previewMode && !repQualify) {
     return (
       <p className="border-t border-neutral-200/70 bg-neutral-50 px-6 py-3 text-xs text-neutral-500 print:hidden">
         Only you can see this. On the customer&rsquo;s copy this button starts a real application
