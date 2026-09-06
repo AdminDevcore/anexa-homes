@@ -83,6 +83,13 @@ const ALLOWED: Record<string, string> = {
   // tear down cleanly between cases.
   "src/server/modules/team/__tests__/pay-structure-roles.itest.ts":
     'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
+  // The solar compensation-snapshot suite resets its own `vertical_test`
+  // fixtures the same way and for the same reason as its neighbours above: it
+  // builds a company, two reps and a manager per case on the UNextended client,
+  // because what it proves is that terms frozen at signing survive a later
+  // change to the rep's configuration — which needs both states to exist.
+  "src/server/modules/payroll/__tests__/solar-comp-snapshot.itest.ts":
+    'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
   // The guard itself and its own fixtures mention the identifiers in strings.
   "src/lib/__tests__/no-raw-sql.test.ts": "this guard",
 };

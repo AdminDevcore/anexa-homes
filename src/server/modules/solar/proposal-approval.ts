@@ -218,9 +218,16 @@ export async function unapproveProposalVersion(
 /**
  * Drop filed copies from the folder.
  *
- * Row-only, matching deleteFileAction: the stored object is left behind rather
- * than destroyed, so a mistaken unapprove costs a database row and not the
- * document itself.
+ * Row-only, matching deleteFileAction and pruneSupersededLayouts: the stored
+ * object is left behind rather than destroyed, so a mistaken unapprove costs a
+ * database row and not the document itself.
+ *
+ * That retention is deliberate and applies to every deletion path in the
+ * application, which is why bytes accumulate. `server/storage/release.ts` can
+ * free them safely (it refuses while any other FileAsset still points at the
+ * key) but is intentionally NOT wired in here — reversing this policy is a
+ * product decision, not a refactor. `scripts/storage-orphans.ts` lists what has
+ * built up in the meantime.
  */
 export async function removeFiledCopies(companyId: string, fileIds: string[]): Promise<void> {
   if (fileIds.length === 0) return;

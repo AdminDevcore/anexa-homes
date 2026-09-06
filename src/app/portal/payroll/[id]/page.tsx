@@ -8,6 +8,8 @@ import { PageHeader, StatCard } from "@/components/portal/ui";
 import { PayrollRunActions } from "@/components/portal/payroll-actions";
 import { PayStubActions } from "@/components/portal/pay-stub-actions";
 import { PayStubBatchActions } from "@/components/portal/pay-stub-batch";
+import { PayrollLedger } from "@/components/portal/payroll-ledger";
+import { openBalancesFor } from "@/server/modules/payroll/chargebacks";
 import { Button } from "@/components/ui/button";
 import { currentFormatters } from "@/lib/format-server";
 import { Wallet } from "lucide-react";
@@ -48,10 +50,60 @@ export default async function PayrollRunPage({
   });
   if (!run) notFound();
 
-  const total = run.items.reduce((s, i) => s + i.amount, 0);
-  const paidTotal = run.items.filter((i) => i.paid).reduce((s, i) => s + i.amount, 0);
   const canManage = can(user, "update", "Payroll");
   const canExport = can(user, "export", "Payroll");
+
+  /* THE MANUAL LEDGER, and every open debt belonging to somebody on this run.
+   *
+   * Balances are looked up per payee rather than company-wide: an admin
+   * preparing this run should see what the people ON IT owe, not a list of
+   * every outstanding chargeback in the business. */
+  const payeeIds = [...new Set(run.items.map((i) => i.userId))];
+  const [adjustments, chargebackLists] = await Promise.all([
+    prisma.payrollAdjustment.findMany({
+      where: { companyId: user.companyId, payrollRunId: run.id },
+      orderBy: { createdAt: "asc" },
+      include: { user: { select: { firstName: true, lastName: true } } },
+    }),
+    Promise.all(payeeIds.map((uid) => openBalancesFor(user.companyId, uid))),
+  ]);
+
+  const nameOf = new Map(
+    run.items.map((i) => [i.userId, `${i.user.firstName} ${i.user.lastName}`.trim()])
+  );
+
+  /* Who entered each adjustment. `createdById` is stored without a relation —
+   * it is an audit stamp, and a foreign key would let deleting a departed
+   * admin's account cascade into or block the financial record they made. So
+   * the names are resolved here, and an id with no user left simply reads
+   * "System" rather than breaking the page. */
+  const authors = await prisma.user.findMany({
+    where: {
+      companyId: user.companyId,
+      id: { in: [...new Set(adjustments.map((a) => a.createdById))] },
+    },
+    select: { id: true, firstName: true, lastName: true },
+  });
+  const authorName = new Map(authors.map((a) => [a.id, `${a.firstName} ${a.lastName}`.trim()]));
+  const openChargebacks = chargebackLists.flatMap((list, idx) =>
+    list.map((b) => ({
+      chargebackId: b.chargebackId,
+      userId: payeeIds[idx],
+      payeeName: nameOf.get(payeeIds[idx]) ?? "—",
+      reason: b.reason,
+      originalCents: b.originalCents,
+      recoveredCents: b.recoveredCents,
+      remainingCents: b.remainingCents,
+    }))
+  );
+
+  const commissionTotal = run.items.reduce((s, i) => s + i.amount, 0);
+  const adjustmentTotal = adjustments.reduce((s, a) => s + a.amountCents, 0);
+  // The figure that leaves the bank. Adjustments are stored signed, so this is
+  // a plain sum — a run showing only its commission total was the number
+  // nobody could reconcile against the transfer.
+  const total = commissionTotal + adjustmentTotal;
+  const paidTotal = run.items.filter((i) => i.paid).reduce((s, i) => s + i.amount, 0);
 
   // Group line items per employee for pay stubs.
   const byEmployee = new Map<string, { name: string; total: number; count: number }>();
@@ -92,11 +144,31 @@ export default async function PayrollRunPage({
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Total" value={fmt.money(total)} icon={Wallet} accent />
+      <div className="grid gap-4 sm:grid-cols-4">
+        <StatCard label="Commissions" value={fmt.money(commissionTotal)} icon={Wallet} />
+        <StatCard label="Adjustments" value={fmt.money(adjustmentTotal)} icon={Wallet} />
+        <StatCard label="Run total" value={fmt.money(total)} icon={Wallet} accent />
         <StatCard label="Paid" value={fmt.money(paidTotal)} icon={Wallet} />
-        <StatCard label="Items" value={run.items.length} icon={Wallet} />
       </div>
+
+      {canManage && (
+        <PayrollLedger
+          runId={run.id}
+          finalized={!!run.finalizedAt}
+          canManage={canManage}
+          payees={payeeIds.map((id) => ({ id, name: nameOf.get(id) ?? "—" }))}
+          adjustments={adjustments.map((a) => ({
+            id: a.id,
+            kind: a.kind,
+            reason: a.reason,
+            amountCents: a.amountCents,
+            payeeName: `${a.user.firstName} ${a.user.lastName}`.trim(),
+            createdByName: authorName.get(a.createdById) ?? "System",
+            createdAt: a.createdAt.toISOString(),
+          }))}
+          openChargebacks={openChargebacks}
+        />
+      )}
 
       {canExport && (
         <div className="overflow-hidden rounded-xl border border-border bg-card">

@@ -17,6 +17,7 @@ import { getCommissionEligibleStageIds, commissionGateLabel } from "./eligibilit
 import { generateOutcomeMessage } from "./gate";
 import { getPayStubData, getRunStubList, buildPayStubPdf } from "./paystub";
 import { postRunToBookkeeping } from "./post-bookkeeping";
+import { collectPayables } from "./payables";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -38,9 +39,32 @@ export async function generateCommissionsAction() {
   // Name the gate the user is actually behind, in the workspace they're standing in.
   const gate = commissionGateLabel(await getActiveVertical(user));
 
+  /**
+   * A SOLAR deal needs M1 FUNDING RECORDED, not merely a stage that says so.
+   *
+   * The stage gate says where the deal has got to in the pipeline; the milestone
+   * says the lender's first payment actually landed. They are not the same fact,
+   * and paying a rep on the first is advancing them the company's own cash on a
+   * job that can still cancel. `SolarMilestone(payee: rep, sequence: 1).paidAt`
+   * is where somebody marks that money received — see solar/cockpit-actions.ts.
+   *
+   * Roofing is untouched: its gate is the depreciation request and it has no
+   * milestone row, so the extra condition applies only to the solar side.
+   *
+   * There is no partial-M1 rule. The milestone is paid or it is not, and a rep
+   * gets 100% of what they are owed from it. M2 is company money and generates
+   * no rep commission at all, which is why nothing here consults it.
+   */
   const projects = eligibleStageIds.size
     ? await prisma.project.findMany({
-        where: { companyId: user.companyId, lead: { stageId: { in: [...eligibleStageIds] } } },
+        where: {
+          companyId: user.companyId,
+          lead: { stageId: { in: [...eligibleStageIds] } },
+          OR: [
+            { vertical: { not: "solar" } },
+            { lead: { is: { solarMilestones: { some: { payee: "rep", sequence: 1, paidAt: { not: null } } } } } },
+          ],
+        },
         select: { id: true },
       })
     : [];
@@ -236,43 +260,12 @@ export async function createPayrollRunAction(input: z.infer<typeof runSchema>) {
   const end = new Date(parsed.data.periodEnd);
   end.setHours(23, 59, 59, 999);
 
-  /* One run pays EVERYONE we owe for the period.
-   *
-   * Two sources, batched by identical rules — approved, in range, not already
-   * in a run — because a payroll run is a list of payables, and the crew that
-   * built the job is owed as surely as the rep that sold it. Before this the
-   * button meant "commissions", and a contractor's invoice was approved into
-   * nothing.
-   *
-   * Contractor lines are pulled with the plain client and no vertical filter on
-   * purpose: ContractorPay is a TAGGED model, so its reads are never scoped, and
-   * payroll is a company-wide act. A run assembled inside one workspace that
-   * silently omitted the other workspace's crews would look complete and short
-   * somebody their money.
-   */
-  const [commissions, contractorPays] = await Promise.all([
-    prisma.commission.findMany({
-      where: {
-        companyId: user.companyId,
-        status: "approved",
-        createdAt: { gte: start, lte: end },
-        payrollItems: { none: {} },
-      },
-      include: { user: { select: { firstName: true, lastName: true } }, project: { select: { projectNumber: true } } },
-    }),
-    prisma.contractorPay.findMany({
-      where: {
-        companyId: user.companyId,
-        status: "approved",
-        createdAt: { gte: start, lte: end },
-        payrollItems: { none: {} },
-      },
-      include: {
-        user: { select: { firstName: true, lastName: true } },
-        project: { select: { projectNumber: true } },
-      },
-    }),
-  ]);
+  /* One run pays EVERYONE we owe as of the end of the period — commissions and
+   * contractor invoices alike, because the crew that built the job is owed as
+   * surely as the rep that sold it. The sweep and the reason it has no lower
+   * bound live in `payables.ts`; the short version is that a late M1 lands on
+   * the next run instead of falling out of existence. */
+  const { commissions, contractorPays } = await collectPayables(user.companyId, end);
 
   if (commissions.length + contractorPays.length === 0) {
     return fail("No approved commissions or contractor invoices found in that period.");
@@ -383,10 +376,18 @@ export async function deletePayrollRunAction(id: string) {
   if (!can(user, "update", "Payroll")) return fail("Not allowed.");
   const runRow = await prisma.payrollRun.findFirst({
     where: { id, companyId: user.companyId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, finalizedAt: true },
   });
   if (!runRow) return fail("Run not found.");
   if (runRow.status === "paid") return fail("Paid payroll runs can't be deleted.");
+  /* A FINALISED RUN IS A HISTORICAL RECORD, whether or not the money has moved
+   * yet. Deleting one would erase the statement somebody was given and release
+   * its lines back into the pool to be paid a second time — which is the exact
+   * outcome finalisation exists to make impossible. A correction goes on the
+   * next run. */
+  if (runRow.finalizedAt) {
+    return fail("Finalised payroll runs can't be deleted. Put the correction on the next run.");
+  }
 
   await prisma.payrollRun.delete({ where: { id } });
   revalidatePath("/portal/payroll");

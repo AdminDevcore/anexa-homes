@@ -39,6 +39,12 @@ export type MemberPay = {
   solarPerWattMills: number | null;
   solarRedlinePerBatteryCents: number | null;
   solarPerBatteryFlatCents: number | null;
+  /** Which of the two per-battery rates this rep is actually paid on. */
+  solarBatteryPayPlan: "margin" | "flat" | null;
+  /** Which company-lead adjustment applies. Never inferred from the amounts. */
+  solarLeadAdjustMode: "none" | "percentage" | "flat";
+  solarCompanyLeadTakePct: number | null;
+  solarCompanyLeadFlatCents: number | null;
 };
 
 /** The illustrative deal the solar worked example prices. */
@@ -152,6 +158,19 @@ export function MemberPayStructure({
   const [battFlat, setBattFlat] = React.useState(
     current.solarPerBatteryFlatCents == null ? "" : String(current.solarPerBatteryFlatCents / 100)
   );
+  // Which battery rate this rep is on. "" = no plan, which is not the same as
+  // either plan set to zero: it writes no commission line at all.
+  const [battPlan, setBattPlan] = React.useState<"" | "margin" | "flat">(
+    current.solarBatteryPayPlan ?? ""
+  );
+  // The company-lead adjustment. The mode leads; only its own amount is read.
+  const [leadMode, setLeadMode] = React.useState<"none" | "percentage" | "flat">(
+    current.solarLeadAdjustMode
+  );
+  const [leadPct, setLeadPct] = React.useState(str(current.solarCompanyLeadTakePct));
+  const [leadFlat, setLeadFlat] = React.useState(
+    current.solarCompanyLeadFlatCents == null ? "" : String(current.solarCompanyLeadFlatCents / 100)
+  );
   const [busy, setBusy] = React.useState(false);
 
   const dirty =
@@ -163,7 +182,11 @@ export function MemberPayStructure({
     redline !== (current.solarRedlineCentsPerWatt == null ? "" : (current.solarRedlineCentsPerWatt / 100).toFixed(2)) ||
     perWatt !== (current.solarPerWattMills == null ? "" : (current.solarPerWattMills / 1000).toFixed(2)) ||
     battRedline !== (current.solarRedlinePerBatteryCents == null ? "" : String(current.solarRedlinePerBatteryCents / 100)) ||
-    battFlat !== (current.solarPerBatteryFlatCents == null ? "" : String(current.solarPerBatteryFlatCents / 100));
+    battFlat !== (current.solarPerBatteryFlatCents == null ? "" : String(current.solarPerBatteryFlatCents / 100)) ||
+    battPlan !== (current.solarBatteryPayPlan ?? "") ||
+    leadMode !== current.solarLeadAdjustMode ||
+    leadPct !== str(current.solarCompanyLeadTakePct) ||
+    leadFlat !== (current.solarCompanyLeadFlatCents == null ? "" : String(current.solarCompanyLeadFlatCents / 100));
 
   // ── The worked example ──────────────────────────────────────────────────
   // Recomputed from the SAME functions the commission engine calls, so a number
@@ -268,6 +291,31 @@ export function MemberPayStructure({
       payload.solarPerWattMills = w === null ? null : Math.round(w * 1000);
       payload.solarRedlinePerBatteryCents = br === null ? null : Math.round(br * 100);
       payload.solarPerBatteryFlatCents = bf === null ? null : Math.round(bf * 100);
+      payload.solarBatteryPayPlan = battPlan === "" ? null : battPlan;
+      // A plan pointing at a blank rate pays nothing while looking configured,
+      // which is worse than no plan at all — that at least refuses out loud.
+      if (battPlan === "margin" && br === null) {
+        return toast.error("Set a per-battery redline, or leave the battery plan unset.");
+      }
+      if (battPlan === "flat" && bf === null) {
+        return toast.error("Set a flat per-battery rate, or leave the battery plan unset.");
+      }
+
+      const lp = pct(leadPct, "Company take");
+      if (lp === undefined) return;
+      const lf = num(leadFlat);
+      if (lf !== null && lf < 0) return toast.error("Company deduction must be a positive amount.");
+      if (leadMode === "percentage" && lp === null) {
+        return toast.error("Enter the company's percentage, or set the lead adjustment to None.");
+      }
+      if (leadMode === "flat" && lf === null) {
+        return toast.error("Enter the company's flat deduction, or set the lead adjustment to None.");
+      }
+      payload.solarLeadAdjustMode = leadMode;
+      // Only the amount this mode reads is sent. The action clears the other.
+      payload.solarCompanyLeadTakePct = leadMode === "percentage" ? lp : null;
+      payload.solarCompanyLeadFlatCents =
+        leadMode === "flat" && lf !== null ? Math.round(lf * 100) : null;
     }
 
     setBusy(true);
@@ -407,11 +455,91 @@ export function MemberPayStructure({
               />
             </div>
 
+            {/* ── WHAT THE COMPANY KEEPS ON ITS OWN LEAD ──────────────────
+                One method or none. The picker is the rule: choosing a mode is
+                what decides which box below is read, and the action clears the
+                other on save so a row can never hold two live figures. */}
+            <div className="space-y-3 border-t border-border/70 pt-3">
+              <p className="text-[11px] font-medium text-foreground">Company-provided leads</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">Adjustment</Label>
+                  <Select
+                    value={leadMode}
+                    onValueChange={(v) => setLeadMode(v as "none" | "percentage" | "flat")}
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None — {who} keeps it all</SelectItem>
+                      <SelectItem value="percentage">Company takes a %</SelectItem>
+                      <SelectItem value="flat">Company deducts a flat $</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Applies only to deals marked company-provided. A self-generated deal is never
+                    adjusted.
+                  </p>
+                </div>
+                {leadMode === "percentage" && (
+                  <Field
+                    label="Company take"
+                    suffix="%"
+                    step="1"
+                    value={leadPct}
+                    onChange={(e) => setLeadPct(e.target.value)}
+                    placeholder="40"
+                    disabled={!canEdit}
+                    hint={
+                      leadPct.trim() === ""
+                        ? "Percentage of this person's commission the company keeps."
+                        : `On a ${money(10_000_00)} commission the ${who} nets ${money(Math.round(10_000_00 * (1 - Math.min(100, Math.max(0, Number(leadPct) || 0)) / 100)))}.`
+                    }
+                  />
+                )}
+                {leadMode === "flat" && (
+                  <Field
+                    label="Company deduction"
+                    prefix="$"
+                    step="100"
+                    value={leadFlat}
+                    onChange={(e) => setLeadFlat(e.target.value)}
+                    placeholder="1,500"
+                    disabled={!canEdit}
+                    hint={
+                      leadFlat.trim() === ""
+                        ? "A fixed amount off this person's commission, per deal."
+                        : `On a ${money(10_000_00)} commission the ${who} nets ${money(Math.max(0, 10_000_00 - Math.round((Number(leadFlat) || 0) * 100)))}.`
+                    }
+                  />
+                )}
+              </div>
+            </div>
+
             {/* BOTH rates above are per WATT, and a battery-only job has none.
-                These are the pair that reaches one. Which of the two applies is
-                the lender's call, exactly as it is for the pair above. */}
+                These are the pair that reaches one.
+
+                WHICH OF THE TWO APPLIES IS THIS PERSON'S PLAN, not the lender's.
+                It used to be read off the lender, so two reps working the same
+                lender could not be paid differently and editing a lender
+                silently repriced everybody on it. */}
             <div className="space-y-3 border-t border-border/70 pt-3">
               <p className="text-[11px] font-medium text-foreground">Battery-only jobs</p>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Pay plan</Label>
+                <Select
+                  value={battPlan === "" ? "unset" : battPlan}
+                  onValueChange={(v) => setBattPlan(v === "unset" ? "" : (v as "margin" | "flat"))}
+                  disabled={!canEdit}
+                >
+                  <SelectTrigger className="w-full sm:w-64"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">Not set — pays nothing</SelectItem>
+                    <SelectItem value="margin">Margin — keeps what it sells above the redline</SelectItem>
+                    <SelectItem value="flat">Flat — a fixed amount per battery</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field
                   label="Redline"
@@ -421,8 +549,12 @@ export function MemberPayStructure({
                   value={battRedline}
                   onChange={(e) => setBattRedline(e.target.value)}
                   placeholder="9,000"
-                  disabled={!canEdit}
-                  hint="Net of the lender's fee. They keep every cent above it."
+                  disabled={!canEdit || battPlan === "flat"}
+                  hint={
+                    battPlan === "flat"
+                      ? "Not used — this person is on the flat plan."
+                      : "Net of the lender's fee. They keep every cent above it."
+                  }
                 />
                 <Field
                   label="Fixed-pay rate"
@@ -432,8 +564,12 @@ export function MemberPayStructure({
                   value={battFlat}
                   onChange={(e) => setBattFlat(e.target.value)}
                   placeholder="1,500"
-                  disabled={!canEdit}
-                  hint="A flat amount per installed battery, whatever it prices at."
+                  disabled={!canEdit || battPlan === "margin"}
+                  hint={
+                    battPlan === "margin"
+                      ? "Not used — this person is on the margin plan."
+                      : "A flat amount per installed battery, whatever it prices at."
+                  }
                 />
               </div>
             </div>
@@ -507,13 +643,15 @@ export function MemberPayStructure({
                 it: a rep can be fully set up for arrays and still earn nothing
                 on a battery-only job, and one sentence covering both reads as
                 though the rates above were the problem. */}
-            {(battRedlineCents == null || battFlatCents == null) && (
+            {(battPlan === "" ||
+              (battPlan === "margin" && battRedlineCents == null) ||
+              (battPlan === "flat" && battFlatCents == null)) && (
               <p className="rounded-lg bg-amber-50 p-2 text-[11px] text-amber-900">
-                {battRedlineCents == null && battFlatCents == null
-                  ? `No battery-only terms set — a job selling storage on its own will pay this ${who} nothing, whatever the rates above say.`
-                  : battRedlineCents == null
-                    ? `No per-battery redline set — battery-only jobs through a redline lender (and every cash one) will pay this ${who} nothing.`
-                    : `No flat per-battery rate set — battery-only jobs through a lender set to flat battery pay will pay this ${who} nothing.`}
+                {battPlan === ""
+                  ? `No battery pay plan chosen — a job selling storage on its own will pay this ${who} nothing, whatever the rates above say.`
+                  : battPlan === "margin"
+                    ? `On the margin plan with no per-battery redline set — battery-only jobs will pay this ${who} nothing.`
+                    : `On the flat plan with no per-battery rate set — battery-only jobs will pay this ${who} nothing.`}
               </p>
             )}
           </div>

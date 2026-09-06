@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
+import { leadAdjustColumns } from "@/lib/solar-pay";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { isPayEligible, PAY_ELIGIBLE_ROLES } from "@/server/rbac/matrix";
@@ -27,9 +28,13 @@ const overrideSchema = z.object({
   // Roofing and Solar are separate businesses with separate pay. An override is
   // always written for one of them; `others` is retired and rejected here.
   vertical: z.enum(VERTICALS),
-  type: z.enum(["percentage", "flat"]),
+  // The three bases a manager's override can be written on. `job_cost` and
+  // `margin` exist in the enum for roofing-era rules and are deliberately not
+  // offered here — neither engine pays an override on them.
+  type: z.enum(["percentage", "flat", "ppw"]),
   percent: z.number().min(0).max(100).default(0),
   flatAmount: z.number().int().min(0).default(0), // cents
+  perWattMills: z.number().int().min(0).default(0), // tenths of a cent per watt
 });
 
 /**
@@ -42,10 +47,17 @@ export async function setCommissionOverrideAction(input: z.infer<typeof override
   if (!can(me, "update", "User")) return fail("Not allowed.");
   const parsed = overrideSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid override.");
-  const { beneficiaryId, sourceId, vertical, type, percent, flatAmount } = parsed.data;
+  const { beneficiaryId, sourceId, vertical, type, percent, flatAmount, perWattMills } = parsed.data;
   if (beneficiaryId === sourceId) return fail("An override must be on a different person.");
   if (type === "percentage" && !(percent > 0)) return fail("Enter a percent above 0.");
   if (type === "flat" && !(flatAmount > 0)) return fail("Enter an amount above 0.");
+  if (type === "ppw" && !(perWattMills > 0)) return fail("Enter a $/W rate above 0.");
+  // A $/W override needs a system size to multiply, and only a solar deal has
+  // one. The roofing engine has no watts to read and would silently pay zero,
+  // which is the worst of both outcomes: configured, and never paid.
+  if (type === "ppw" && vertical !== "solar") {
+    return fail("A $/W override only applies to Solar deals — a roofing job has no system size.");
+  }
   const both = await prisma.user.findMany({
     where: { companyId: me.companyId, id: { in: [beneficiaryId, sourceId] } },
     select: { id: true, role: true, verticals: true },
@@ -61,8 +73,12 @@ export async function setCommissionOverrideAction(input: z.infer<typeof override
     where: {
       companyId_beneficiaryId_sourceId_vertical: { companyId: me.companyId, beneficiaryId, sourceId, vertical },
     },
-    create: { companyId: me.companyId, beneficiaryId, sourceId, vertical, type, percent, flatAmount },
-    update: { type, percent, flatAmount },
+    // Every rate field is written on both paths, including the ones this type
+    // does not use. Leaving a stale figure behind is how changing an override
+    // from 3% to $0.10/W leaves a 3% still sitting in the row for whichever
+    // reader looks at `percent` first.
+    create: { companyId: me.companyId, beneficiaryId, sourceId, vertical, type, percent, flatAmount, perWattMills },
+    update: { type, percent, flatAmount, perWattMills },
   });
   revalidatePath(`/portal/team/${beneficiaryId}`);
   return { ok: true as const };
@@ -234,6 +250,23 @@ const paySchema = z.object({
   // really does cost five figures.
   solarRedlinePerBatteryCents: z.number().int().min(0).max(10_000_000).optional().nullable(),
   solarPerBatteryFlatCents: z.number().int().min(0).max(10_000_000).optional().nullable(),
+  // -- Solar, storage-only: WHICH of the pair above this rep is actually paid
+  // on. It belongs to the rep, not the lender: two reps working the same lender
+  // can be on different plans, and letting a lender's configuration decide how
+  // a person is compensated means editing a lender silently repays everybody on
+  // it. Null = no plan, which writes NO commission line rather than a zero.
+  solarBatteryPayPlan: z.enum(["margin", "flat"]).optional().nullable(),
+  // -- Solar: what the COMPANY keeps when IT provided the lead.
+  //
+  // ONE METHOD, NEVER TWO. The mode is the single source of truth; the two
+  // amount columns beside it are storage for whichever it names. Inferring the
+  // method from which nullable field happened to be set left "both set" with no
+  // defined answer and made "no adjustment" indistinguishable from "nobody has
+  // configured this yet" -- on a field that decides how much of a rep's money
+  // the company keeps.
+  solarLeadAdjustMode: z.enum(["none", "percentage", "flat"]).optional(),
+  solarCompanyLeadTakePct: z.number().min(0).max(100).optional().nullable(),
+  solarCompanyLeadFlatCents: z.number().int().min(0).max(100_000_00).optional().nullable(),
 });
 
 /**
@@ -265,10 +298,28 @@ export async function updateMemberPayAction(input: z.infer<typeof paySchema>) {
     return fail("Only people who can be the rep on a deal have a pay structure.");
   }
 
-  await prisma.user.update({
-    where: { id: target.id },
-    data: Object.fromEntries(Object.entries(pay).filter(([, v]) => v !== undefined)),
-  });
+  /* THE MODE DECIDES WHICH AMOUNT SURVIVES.
+   *
+   * Whenever the caller names a lead-adjustment mode, the column the OTHER
+   * method reads is cleared in the same write. Two live figures on one row is
+   * how a rep set to "40% company take" keeps a $1,500 flat deduction sitting
+   * underneath it, waiting for whichever reader looks at that column first.
+   * Enforced here rather than in the form because a server action is reachable
+   * without the form. */
+  const data: Record<string, unknown> = Object.fromEntries(
+    Object.entries(pay).filter(([, v]) => v !== undefined)
+  );
+  if (pay.solarLeadAdjustMode !== undefined) {
+    Object.assign(
+      data,
+      leadAdjustColumns(pay.solarLeadAdjustMode, {
+        takePct: pay.solarCompanyLeadTakePct ?? null,
+        flatCents: pay.solarCompanyLeadFlatCents ?? null,
+      })
+    );
+  }
+
+  await prisma.user.update({ where: { id: target.id }, data });
   revalidatePath("/portal/team");
   revalidatePath(`/portal/team/${target.id}`);
   return { ok: true as const };

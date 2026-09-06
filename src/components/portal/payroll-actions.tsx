@@ -21,6 +21,7 @@ import {
   markPayrollRunPaidAction,
   deletePayrollRunAction,
 } from "@/server/modules/payroll/actions";
+import { currentPayrollPeriod, toDateInputValue } from "@/server/modules/payroll/schedule";
 
 export function NewPayrollRunDialog() {
   const router = useRouter();
@@ -29,6 +30,22 @@ export function NewPayrollRunDialog() {
   const [start, setStart] = React.useState("");
   const [end, setEnd] = React.useState("");
   const [pending, setPending] = React.useState(false);
+
+  /* The schedule fills the form in: Thursday pays the prior Monday-to-FRIDAY
+   * workweek. Computed on OPEN rather than at mount, so a browser left open
+   * overnight does not offer last week's dates.
+   *
+   * Every field stays editable. The default is the ordinary week; an off-cycle
+   * run is still a run somebody may need to cut. */
+  function onOpenChange(next: boolean) {
+    if (next) {
+      const period = currentPayrollPeriod();
+      setLabel(period.label);
+      setStart(toDateInputValue(period.periodStart));
+      setEnd(toDateInputValue(period.periodEnd));
+    }
+    setOpen(next);
+  }
 
   async function create() {
     if (!label || !start || !end) {
@@ -48,7 +65,7 @@ export function NewPayrollRunDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button className="bg-gold text-gold-foreground hover:bg-gold/90">
           <Plus className="size-4" /> New Payroll Run
@@ -74,7 +91,9 @@ export function NewPayrollRunDialog() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Pulls everything approved and unpaid from this period into the run — commissions and contractor invoices alike.
+            Payroll runs Thursday for the prior Monday&ndash;Friday workweek. Pulls in everything approved and still
+            unpaid as of the period end &mdash; commissions and contractor invoices alike &mdash; including anything
+            approved too late for an earlier run, so a weekend funding or a late M1 never misses a payroll.
           </p>
         </div>
         <DialogFooter>

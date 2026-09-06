@@ -175,6 +175,10 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                 solarPerWattMills: detail.solarPerWattMills,
                 solarRedlinePerBatteryCents: detail.solarRedlinePerBatteryCents,
                 solarPerBatteryFlatCents: detail.solarPerBatteryFlatCents,
+                solarBatteryPayPlan: detail.solarBatteryPayPlan,
+                solarLeadAdjustMode: detail.solarLeadAdjustMode,
+                solarCompanyLeadTakePct: detail.solarCompanyLeadTakePct,
+                solarCompanyLeadFlatCents: detail.solarCompanyLeadFlatCents,
               }}
               solarExample={{
                 grossPpwCents: solarSettings?.defaultGrossPpwCents ?? 350,
@@ -348,9 +352,13 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                 // Retired verticals are pinned to the default so a legacy row
                 // still renders somewhere real instead of an empty group.
                 vertical: isActiveVertical(o.vertical) ? o.vertical : DEFAULT_VERTICAL,
-                type: o.type as "percentage" | "flat",
+                // A legacy roofing row on `job_cost` or `margin` has no override
+                // basis either engine pays on; it reads as a percentage, which
+                // is what it already behaved as, rather than crashing the sheet.
+                type: o.type === "flat" || o.type === "ppw" ? o.type : "percentage",
                 percent: o.percent,
                 flatAmount: o.flatAmount,
+                perWattMills: o.perWattMills,
               }))}
               candidates={overrideCandidates.map((c) => ({
                 id: c.id,

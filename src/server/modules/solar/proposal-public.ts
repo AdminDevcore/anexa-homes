@@ -8,6 +8,7 @@ import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 import { approveProposalVersion } from "./proposal-approval";
 import { SIGNATURE_SELECT, certificateFor } from "./proposal-signature";
 import { readWitness } from "./witness";
+import { snapshotSolarDealComp } from "./deal-comp";
 
 /**
  * Statuses that make a proposal publicly readable.
@@ -218,6 +219,11 @@ export async function acceptSolarProposal(
       });
       await recordStageEntry({ leadId: proposal.leadId, stageId: stage.id, stage });
     }
+
+    // Freeze what this deal pays, now that it is sold. Best-effort and
+    // create-only: a customer's signature must never fail because a rep's
+    // redline was not configured. See solar/deal-comp.ts.
+    await snapshotSolarDealComp({ companyId: co, leadId: proposal.leadId, signedAt: now });
 
     await prisma.activityLog.create({
       data: {
