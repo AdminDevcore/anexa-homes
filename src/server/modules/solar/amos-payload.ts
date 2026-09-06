@@ -61,6 +61,13 @@ export type AmosDesignInput = {
 
 export type AmosSubmitOptions = {
   productSlug: string
+  /**
+   * The reference this application is filed under, and the thing the lender is
+   * idempotent on. Passed in rather than read off the design so a deal whose
+   * reference the LENDER has broken can be given a fresh one — see
+   * `SolarDesign.lenderSubmissionAttempt`.
+   */
+  externalId: string
   amountCents: number
   termMonths: number
   salesRepName: string
@@ -278,9 +285,9 @@ export function buildAmosPayload(
   }
 
   return {
-    // The design id. Re-sending the same design returns the same application
-    // instead of creating a second one.
-    externalId: design.id,
+    // Re-sending the same reference returns the same application instead of
+    // creating a second one. Normally the design id; see `externalId`.
+    externalId: opts.externalId,
     productSlug: opts.productSlug,
     applicant: {
       firstName: lead.firstName.trim(),

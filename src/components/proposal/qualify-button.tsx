@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, ExternalLink, Loader2, ShieldAlert, Check } from "lucide-react";
 import { qualifyOnProposalAction } from "@/server/modules/solar/proposal-qualify-action";
 import { qualifyFromPortalAction } from "@/server/modules/solar/proposal-qualify-rep-action";
+import { resetLenderSubmissionKeyAction } from "@/server/modules/solar/lender-submission-key";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
 
 /**
@@ -146,6 +147,9 @@ export function QualifyAction({
    * reached the API.
    */
   const [terminal, setTerminal] = React.useState(false);
+  /** The reference a fresh start has just been filed under, for reading out. */
+  const [freshRef, setFreshRef] = React.useState<string | null>(null);
+  const [resetting, setResetting] = React.useState(false);
   /** The lender emailed the link instead of handing it back. */
   const [emailed, setEmailed] = React.useState<string | null>(null);
   /** What the lender gave back, on the rep's door. See `start`. */
@@ -323,11 +327,69 @@ export function QualifyAction({
     );
   }
 
+  /**
+   * ABANDONING A REFERENCE THE LENDER HAS BROKEN — REP ONLY.
+   *
+   * Rendered only when `repQualify` is set, which means an authenticated
+   * person on the portal preview. A homeowner must never see this: the choice
+   * it makes is whether to risk a SECOND application in their own name, and
+   * that is not a question to put to them on a document.
+   *
+   * Why it is a button and not something automatic, in the words the person
+   * pressing it needs: the lender crashed part-way through and their API has
+   * no way to read back what survived, so this either gets the deal through or
+   * files it twice. Somebody who has looked at the lender's own portal knows
+   * which; nothing here does.
+   */
+  function NewReferenceEscape() {
+    return (
+      <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50/60 p-3">
+        <p className="text-xs leading-relaxed text-amber-900">
+          If {lender ?? "the lender"} keeps failing on a deal it has already accepted once, the
+          reference it filed may be stuck at their end and no retry can get past it. Starting a new
+          one bypasses it &mdash; but if they DID create an application under the old reference,
+          this makes a second one. Check their portal first.
+        </p>
+        <button
+          type="button"
+          disabled={resetting}
+          onClick={async () => {
+            setResetting(true);
+            try {
+              const res = await resetLenderSubmissionKeyAction(repQualify!.proposalId);
+              if (!res.ok) {
+                setFailure(res.error);
+                return;
+              }
+              // A clean slate: the old failure was about a reference that no
+              // longer applies, so leaving it on screen would be a lie.
+              setFreshRef(res.reference);
+              setFailure(null);
+              setTerminal(false);
+            } finally {
+              setResetting(false);
+            }
+          }}
+          className="mt-2 rounded-md border border-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+        >
+          {resetting ? "Starting\u2026" : "Start a new reference"}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white p-6 print:hidden" data-qualify-menu>
       {/* A retryable failure keeps the button that can retry, and says why. */}
       {failure && (
         <p className="mb-3 text-xs leading-relaxed text-amber-900">{failure}</p>
+      )}
+      {failure && repQualify && <NewReferenceEscape />}
+      {freshRef && (
+        <p className="mb-3 text-xs leading-relaxed text-neutral-500">
+          Filed under a new reference: <span className="font-mono">{freshRef}</span>. Press QUALIFY
+          to send it.
+        </p>
       )}
       <div className="flex w-full sm:w-auto">
         <button

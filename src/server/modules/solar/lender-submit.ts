@@ -178,6 +178,7 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
 
   const payload = buildAmosPayload(design.lead, submitted, {
     productSlug: lender.apiProductSlug,
+    externalId: lenderReference(design.id, design.lenderSubmissionAttempt),
     amountCents: money.amountCents,
     termMonths: money.termMonths,
     // The rep on the deal if there is one, otherwise whoever the caller named.
@@ -215,6 +216,18 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
       "transient",
     );
   }
+}
+
+/**
+ * The reference this deal is filed under at the lender.
+ *
+ * The design id until somebody has had to abandon it, and `id-N` after. Exported
+ * so the screen that offers a fresh reference can show which one a failure was
+ * filed under — a rep on the phone to the lender's support desk needs to be
+ * able to read it out, and "the design id" is not something they can see.
+ */
+export function lenderReference(designId: string, attempt: number): string {
+  return attempt > 0 ? `${designId}-${attempt}` : designId;
 }
 
 /**
@@ -383,6 +396,7 @@ async function loadDesign(leadId: string, companyId: string) {
       annualUsageKwh: true,
       moduleQty: true,
       batteryQty: true,
+      lenderSubmissionAttempt: true,
       /**
        * Each item's own name AND every partner's name for it.
        *

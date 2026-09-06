@@ -4051,6 +4051,25 @@ model SolarDesign {
   /// Null = no lender chosen yet, so nothing is filtered.
   lenderId           String?
   lender             SolarLender?    @relation(fields: [lenderId], references: [id], onDelete: SetNull)
+
+  /// How many times this deal has been given a FRESH reference at the lender.
+  ///
+  /// A partner API is idempotent on the reference we send, which is what stops
+  /// a second tap opening a second credit file. The cost of that guarantee is
+  /// that a reference the LENDER has broken is broken forever: on 2026-09-05
+  /// Amos accepted a submission, crashed part-way through writing it, and then
+  /// answered `500 internal_error` to every retry of the same reference — four
+  /// materially different payloads, six attempts, one error. Nothing we could
+  /// send would ever have got past it.
+  ///
+  /// So the reference is `design.id` at 0 and `design.id-N` after, and this
+  /// counter is bumped only by a person, through
+  /// `resetLenderSubmissionKeyAction`, only after a failure, and never once the
+  /// deal has a `qualify_submitted` event — because bumping after a success is
+  /// precisely how a household ends up with two applications in its name.
+  ///
+  /// Retries AFTER a bump are idempotent among themselves, exactly as before.
+  lenderSubmissionAttempt Int @default(0)
   moduleId           String?
   module             SolarEquipment? @relation("DesignModule", fields: [moduleId], references: [id], onDelete: SetNull)
   moduleQty          Int             @default(0)

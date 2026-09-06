@@ -55,6 +55,9 @@ const unmapped = {
 
 const opts = {
   productSlug: 'solar-installation-financing',
+  // Normally the design id; passed in so a deal whose reference the LENDER
+  // broke can be given a fresh one. See lenderReference.
+  externalId: 'design-abc',
   amountCents: 4875000,
   termMonths: 300,
   salesRepName: 'Marco Diaz',
