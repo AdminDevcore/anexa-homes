@@ -378,6 +378,7 @@ model Company {
   solarFinance             SolarFinance[]
   creditApplications       CreditApplication[]
   solarProposals           SolarProposal[]
+  solarLenderSubmissions   SolarLenderSubmission[]
   solarMilestones          SolarMilestone[]
   solarDealAdders          SolarDealAdder[]
   solarLenders             SolarLender[]
@@ -1048,6 +1049,7 @@ model Lead {
   solarFinance       SolarFinance?
   creditApplications CreditApplication[]
   solarProposals     SolarProposal[]
+  solarLenderSubmissions SolarLenderSubmission[]
   solarMilestones    SolarMilestone[]
   solarDealComp    SolarDealComp?
   solarDealAdders    SolarDealAdder[]
@@ -3735,6 +3737,53 @@ model SolarLender {
 /// One table with per-product columns rather than three tables, matching
 /// SolarFinance, which holds the same four products the same way. Which columns
 /// a row must carry is enforced where it is written, not by the column types.
+/// ONE ATTEMPT TO FILE A DEAL WITH A PARTNER LENDER: what we sent, what came
+/// back.
+///
+/// Written on every attempt, successful or not, because until this existed the
+/// only record of a submission was a one-line error string on the activity log
+/// and a `console.error` nobody in the product can read. Diagnosing a refusal
+/// meant decrypting the lender's key and replaying the payload by hand.
+///
+/// `request` is the exact body that crossed the wire. The API key is not in it
+/// and never can be — it travels as a header, and this column is populated from
+/// the payload object, not from the fetch.
+model SolarLenderSubmission {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId    String
+  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// Null only if the lender row is deleted afterwards; the name is kept below.
+  lenderId   String?
+  lenderName String
+  /// The reference this attempt was filed under — see `lenderReference`.
+  externalId String
+
+  /// What we sent. Frozen: re-reading the deal later answers a different
+  /// question from "what did the underwriter actually receive".
+  request Json
+
+  ok      Boolean
+  /// Their HTTP status, or null when the request never reached them.
+  status  Int?
+  /// Their machine-readable code, or ours for a failure before the wire
+  /// (`network_error`, `preflight`).
+  code    String?
+  /// The sentence a human reads. Their words where they gave any.
+  message String?
+
+  /// Present only on success.
+  referenceNumber String?
+  applicationId   String?
+
+  actorName String?
+  createdAt DateTime @default(now())
+
+  @@index([companyId, leadId, createdAt])
+  @@map("solar_lender_submissions")
+}
+
 model SolarLenderProduct {
   id        String   @id @default(uuid())
   companyId String

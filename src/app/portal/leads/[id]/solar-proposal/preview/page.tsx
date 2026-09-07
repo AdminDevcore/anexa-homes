@@ -12,6 +12,9 @@ import { adderAmountCents, catalogueBasis } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
 import { readProposalQualifyOffer } from "@/server/modules/solar/proposal-qualify";
+import { readLenderPayloadPreview } from "@/server/modules/solar/lender-submit";
+import { runInVertical, asActiveVertical } from "@/server/vertical/context";
+import { LenderPayloadInspector } from "@/components/portal/lender-payload-inspector";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 export const dynamic = "force-dynamic";
@@ -121,6 +124,30 @@ export default async function SolarProposalPreviewPage({
   const canQualify =
     can(user, "update", "Proposal") && can(user, "update", "Lead") && !proposal.supersededAt;
 
+  /**
+   * THE APPLICATION BODY, FOR THE PERSON ABOUT TO SEND IT.
+   *
+   * Same permission pair as the button, because the payload carries the
+   * household's name, address, telephone number and the amount they are asking
+   * to borrow. It renders only on this page — the customer's copy is a
+   * different route and never resolves any of this.
+   *
+   * Superseded versions are included deliberately: reading why an OLD attempt
+   * was refused is most of what this panel is for, and it sends nothing.
+   *
+   * Run in the DEAL'S vertical, exactly as the qualify offer below is. Without
+   * it a roofing admin previewing a solar proposal — which this page explicitly
+   * supports — reads `SolarDesign` under the roofing scope, finds nothing, and
+   * the panel silently does not render. Not an error; just absent, which is the
+   * worst way for this to fail.
+   */
+  const payloadPreview =
+    can(user, "update", "Proposal") && can(user, "update", "Lead")
+      ? await runInVertical(asActiveVertical(proposal.lead.vertical), () =>
+          readLenderPayloadPreview(proposal.leadId, proposal.companyId, user.fullName),
+        )
+      : { mode: "link" as const };
+
   return (
     <div className="min-h-screen bg-[#f6f3ee]">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 pt-6 print:hidden sm:px-6">
@@ -180,6 +207,15 @@ export default async function SolarProposalPreviewPage({
             </span>
           </div>
         </div>
+      )}
+
+      {payloadPreview.mode === "api" && (
+        <LenderPayloadInspector
+          leadId={proposal.leadId}
+          lenderName={payloadPreview.lenderName}
+          payload={payloadPreview.ready ? payloadPreview.payload : null}
+          problems={payloadPreview.ready ? [] : payloadPreview.problems}
+        />
       )}
 
       <SolarProposalView

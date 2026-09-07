@@ -83,6 +83,10 @@ function catalogUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/api/v1/partner/catalog`
 }
 
+function validateUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/api/v1/partner/applications/validate`
+}
+
 /**
  * Strip anything an HTTP header cannot carry.
  *
@@ -365,4 +369,123 @@ export async function fetchAmosCatalog(creds: AmosCredentials): Promise<AmosCata
     : []
 
   return { products, equipment }
+}
+
+/**
+ * ASK THE LENDER WHETHER THIS DEAL WOULD BE ACCEPTED, WITHOUT SENDING IT.
+ *
+ * Their `/applications/validate` runs the same code path as create — the whole
+ * request schema AND the product rules — and writes nothing. No application, no
+ * credit file, no email, no text. It is the only way to find out that a deal
+ * will be refused WITHOUT a homeowner watching it happen.
+ *
+ * That mattered enough to build this for: their intake spent three weeks
+ * rejecting every solar deal we sent because it required five savings figures
+ * its own schema had fields for two of, and the first signal either side had
+ * was a 500 in front of a customer who had already signed. A rep pressing
+ * "Check with the lender" would have read the reason on the first day.
+ *
+ * NEVER THROWS ON A REFUSAL. `valid: false` is an answer, not a failure — the
+ * whole point is to collect their objections and show them. Only a request that
+ * could not be made or understood raises, and it raises the same error type
+ * everything else here does, so one catch handles both doors.
+ */
+export type AmosValidation = {
+  valid: boolean
+  /** Their words, one per objection. Written to be shown to a rep verbatim. */
+  problems: { code: string; field?: string; message: string }[]
+}
+
+export async function validateWithAmos(
+  creds: AmosCredentials,
+  payload: AmosApplicationPayload,
+): Promise<AmosValidation> {
+  const url = validateUrl(creds.baseUrl)
+
+  let host: string
+  try {
+    host = new URL(url).host
+  } catch {
+    throw new AmosSubmissionError(
+      'network_error',
+      `"${creds.baseUrl}" is not a valid API address. Fix it in Settings → Lenders → Direct submission.`,
+    )
+  }
+
+  const { key } = headerSafeKey(creds.apiKey)
+  if (!key) {
+    throw new AmosSubmissionError(
+      'unauthorized',
+      'No usable API key is configured for this lender. Add one in Settings → Lenders → Direct submission.',
+    )
+  }
+
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+  } catch (cause) {
+    console.error('[amos-client] validation fetch failed', {
+      host,
+      cause: cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause),
+    })
+    throw new AmosSubmissionError('network_error', `Could not reach ${host}.`)
+  }
+
+  let body: unknown
+  try {
+    body = await res.json()
+  } catch {
+    throw new AmosSubmissionError(
+      'bad_response',
+      `The lender returned an unreadable response (HTTP ${res.status}).`,
+      res.status,
+    )
+  }
+
+  // An AUTH or ROUTING failure is not a verdict on the deal and must not be
+  // shown as one: a partner who has not deployed this endpoint would otherwise
+  // read as "your deal is fine".
+  if (res.status === 401 || res.status === 403) {
+    throw new AmosSubmissionError('unauthorized', 'The lender rejected this key.', res.status)
+  }
+  if (res.status === 404) {
+    throw new AmosSubmissionError(
+      'bad_response',
+      `${host} does not offer a validation endpoint, so this deal can only be checked by sending it.`,
+      404,
+    )
+  }
+
+  const b = body as Partial<AmosValidation> & {
+    error?: { code?: string; message?: string; details?: unknown }
+  }
+
+  // Some refusals arrive as an ordinary error envelope rather than in the
+  // problems array. Both are objections; the caller should not have to know
+  // which shape a given rule uses.
+  if (b.error) {
+    return {
+      valid: false,
+      problems: [
+        {
+          code: b.error.code ?? 'bad_response',
+          message: withDetails(b.error.message ?? 'The lender refused this deal.', b.error.details),
+        },
+      ],
+    }
+  }
+
+  if (typeof b.valid !== 'boolean') {
+    throw new AmosSubmissionError(
+      'bad_response',
+      `The lender returned an answer this system does not understand (HTTP ${res.status}).`,
+      res.status,
+    )
+  }
+
+  return { valid: b.valid, problems: Array.isArray(b.problems) ? b.problems : [] }
 }
