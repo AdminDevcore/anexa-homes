@@ -2,7 +2,11 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { runInVertical } from "@/server/vertical/context";
-import { resolveSizingModule, resolveDesignInverter } from "@/server/modules/solar/sizing";
+import {
+  resolveSizingModule,
+  resolveDesignInverter,
+  resolveDesignBattery,
+} from "@/server/modules/solar/sizing";
 import { recomputeDesignFigures } from "@/server/modules/solar/recompute";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 
@@ -67,6 +71,18 @@ const inverter = (over: Record<string, unknown> = {}) =>
       kind: "inverter",
       model: `I-${Math.random().toString(36).slice(2, 8)}`,
       ratingW: 7600,
+      ...over,
+    },
+  });
+
+const battery = (over: Record<string, unknown> = {}) =>
+  db.solarEquipment.create({
+    data: {
+      companyId,
+      kind: "battery",
+      model: `B-${Math.random().toString(36).slice(2, 8)}`,
+      // Watt-HOURS on a battery — 13.5 kWh, a Powerwall.
+      ratingW: 13500,
       ...over,
     },
   });
@@ -242,5 +258,108 @@ describe("the drawing is what sets the module count", () => {
 
     const after = await db.solarDesign.findUnique({ where: { leadId } });
     expect(after?.layoutBlocks).toEqual(blocks);
+  });
+});
+
+/**
+ * The battery star, which for most of this product's life did nothing at all.
+ *
+ * Its rule is deliberately NOT the module's. Storage is a sales decision, so
+ * filling an empty slot whenever the figures recompute would put a battery on
+ * every deal in the pipeline. The trigger is the rep answering "what are we
+ * quoting?" — and the answer going back to solar has to take it off again.
+ */
+describe("the default battery follows what the deal is quoting", () => {
+  beforeEach(async () => {
+    await db.solarSettings.deleteMany({ where: { companyId } });
+  });
+
+  it("lands on an empty slot when the deal takes storage on", async () => {
+    const b = await battery({ isDefault: true });
+    await db.solarSettings.create({ data: { companyId, defaultBatteryQty: 3 } });
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "pv_storage", null, 0)
+    );
+
+    expect(patch).toEqual({ batteryId: b.id, batteryQty: 3 });
+  });
+
+  it("uses the standard quantity of two when the company has never set one", async () => {
+    const b = await battery({ isDefault: true });
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "storage", null, 0)
+    );
+
+    expect(patch).toEqual({ batteryId: b.id, batteryQty: 2 });
+  });
+
+  it("never overwrites a battery a rep already chose", async () => {
+    const theirs = await battery();
+    await battery({ isDefault: true });
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "pv_storage", theirs.id, 1)
+    );
+
+    expect(patch).toEqual({});
+  });
+
+  it("takes the battery off a deal that goes back to panels only", async () => {
+    const theirs = await battery();
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "pv", theirs.id, 2)
+    );
+
+    expect(patch).toEqual({ batteryId: null, batteryQty: 0 });
+  });
+
+  it("writes nothing at all on a solar deal that never had one", async () => {
+    await battery({ isDefault: true });
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "pv", null, 0)
+    );
+
+    expect(patch).toEqual({});
+  });
+
+  it("guesses at no product when the catalogue has no default starred", async () => {
+    await battery();
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "pv_storage", null, 0)
+    );
+
+    expect(patch).toEqual({});
+  });
+
+  it("ignores a retired default rather than quoting a battery nobody sells", async () => {
+    await battery({ isDefault: true, isActive: false });
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "pv_storage", null, 0)
+    );
+
+    expect(patch).toEqual({});
+  });
+
+  it("does not reach into another company's catalogue", async () => {
+    const other = await db.company.create({
+      data: { name: "Other Batt Co", slug: `obt-${process.pid}-${Date.now()}` },
+    });
+    await db.solarEquipment.create({
+      data: { companyId: other.id, kind: "battery", model: "THEIRS", ratingW: 10000, isDefault: true },
+    });
+
+    const patch = await runInVertical("solar", () =>
+      resolveDesignBattery(companyId, "pv_storage", null, 0)
+    );
+
+    expect(patch).toEqual({});
+
+    await db.company.deleteMany({ where: { id: other.id } });
   });
 });

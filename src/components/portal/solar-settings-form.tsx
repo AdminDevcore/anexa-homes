@@ -210,15 +210,14 @@ export function SolarSettingsForm({
             />
           </Panel>
 
-          <Panel title="Equipment defaults">
-            <TextField
-              label="Batteries per system"
-              type="number"
-              value={f.defaultBatteryQty}
-              onChange={(v) => set("defaultBatteryQty", v)}
-              hint="How many batteries a design starts with the moment a rep picks one, in the roof designer. Your standard offer — a rep can still change it on any deal, and changing this never touches a deal that already has a battery on it."
-            />
-          </Panel>
+          {/* "Batteries per system" MOVED to Settings → Solar Equipment →
+              Default equipment, beside the battery it counts. It was the only
+              field in an "Equipment defaults" panel on a screen otherwise made
+              of assumptions and rates, two clicks from the catalogue it
+              describes and with no sign of which battery it was counting. The
+              value itself is unchanged and still saved through this action —
+              see `settingsSchema.defaultBatteryQty`, which the form keeps
+              posting so this screen never blanks it. */}
         </TabsContent>
 
         {/* ── PRICING ────────────────────────────────────────────────────── */}

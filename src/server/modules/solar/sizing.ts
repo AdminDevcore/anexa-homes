@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/client";
+import { DEFAULT_BATTERY_QTY } from "./settings";
 
 /**
  * Which panel a design is sized from.
@@ -82,4 +83,68 @@ export async function resolveDesignInverter(
     where: { companyId, kind: "inverter", isActive: true, isDefault: true },
     select,
   });
+}
+
+/**
+ * What the battery slot should say once a deal has declared its system type.
+ *
+ * The third star, and until now the only decorative one: `isDefault` on a
+ * battery sorted the picker and did nothing else, so a company that had chosen
+ * its standard battery still watched every rep pick it by hand — or not, and
+ * quote a solar-plus-storage system with no storage in it.
+ *
+ * It cannot follow the module's rule of "fill an empty slot whenever the
+ * figures are recomputed", because that rule would put a battery on every deal
+ * in the pipeline: storage is a sales decision, not an approved-vendor one, and
+ * most deals do not have any. So the trigger is narrower and it is the rep's
+ * own: the moment the deal is set to solar + storage or storage only, an empty
+ * slot takes the default at the company's standard quantity.
+ *
+ * The three outcomes, in the order they are decided:
+ *
+ *   - solar only  → the slot is CLEARED, count and all. A battery left behind
+ *                   on a deal quoting panels prices storage nobody is selling.
+ *   - slot filled → untouched. A default that overwrites a rep's own pick is
+ *                   not a default, it is a correction.
+ *   - slot empty  → the active default, at `defaultBatteryQty`. No default
+ *                   starred means no change, not a guess at a product.
+ *
+ * Returns a patch to spread into the design's update — `{}` when there is
+ * nothing to say, so a caller never writes a column it did not decide.
+ *
+ * `SolarEquipment` and `SolarSettings` are SCOPED models, so callers outside a
+ * portal session must wrap this in `runInVertical("solar", …)`.
+ */
+export async function resolveDesignBattery(
+  companyId: string,
+  systemType: "pv" | "pv_storage" | "storage",
+  existingBatteryId: string | null,
+  existingBatteryQty: number
+): Promise<{ batteryId?: string | null; batteryQty?: number }> {
+  if (systemType === "pv") {
+    // Already empty is already right — and writing nothing keeps a design that
+    // never had storage out of the "changed" set entirely.
+    return existingBatteryId || existingBatteryQty > 0
+      ? { batteryId: null, batteryQty: 0 }
+      : {};
+  }
+
+  if (existingBatteryId) return {};
+
+  const [battery, settings] = await Promise.all([
+    prisma.solarEquipment.findFirst({
+      where: { companyId, kind: "battery", isActive: true, isDefault: true },
+      select: { id: true },
+    }),
+    prisma.solarSettings.findUnique({
+      where: { companyId },
+      select: { defaultBatteryQty: true },
+    }),
+  ]);
+  if (!battery) return {};
+
+  return {
+    batteryId: battery.id,
+    batteryQty: Math.max(1, settings?.defaultBatteryQty ?? DEFAULT_BATTERY_QTY),
+  };
 }

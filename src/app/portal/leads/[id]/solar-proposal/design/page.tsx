@@ -118,6 +118,11 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         id: e.id,
         label: [e.manufacturer, e.model].filter(Boolean).join(" ") || e.model,
         ratingW: e.ratingW,
+        // Which one the company standardised on, said on the OPTION rather
+        // than left to the sort order — "first in the list" is not a fact a rep
+        // sitting on a customer's sofa can read. A starred item that has since
+        // been retired is not the standard any more, so both have to hold.
+        isDefault: e.isDefault && e.isActive,
         // Only a module is drawn, so only a module's size matters.
         ...(kind === "module" ? { sized: e.widthMm != null && e.heightMm != null } : {}),
       }));
@@ -175,6 +180,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         inverter: optionsOf("inverter"),
         battery: optionsOf("battery"),
       }}
+      defaultBatteryQty={settings.defaultBatteryQty}
       chosen={{
         // The design's own module if it names one, otherwise whatever the
         // catalogue default resolved to — so the picker shows the panel the

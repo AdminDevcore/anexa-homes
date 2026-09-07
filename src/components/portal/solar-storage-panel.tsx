@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { BatteryCharging, Loader2 } from "lucide-react";
+import { BatteryCharging, Loader2, Star } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { setSolarDesignEquipmentAction } from "@/server/modules/solar/equipment-actions";
 import { usableKwh, backupTable, type BackupProfile } from "@/lib/solar-storage";
@@ -13,6 +13,8 @@ export type StorageEquipmentOption = {
   label: string;
   /** Watt-HOURS. `SolarEquipment.ratingW` holds capacity on a battery. */
   ratingW: number | null;
+  /** The company's standard battery — the one starred on the catalogue. */
+  isDefault?: boolean;
 };
 
 export type SolarStorageView = {
@@ -20,6 +22,8 @@ export type SolarStorageView = {
   batteryQty: number;
   /** Every battery this deal's lender approves. Same list the designer offers. */
   batteries: StorageEquipmentOption[];
+  /** How many of the standard battery this company's standard offer is. */
+  defaultQty: number;
   /** The company's active load profiles, rank-ordered. */
   profiles: BackupProfile[];
 };
@@ -67,6 +71,7 @@ export function SolarStoragePanel({
   }
 
   const battery = view.batteries.find((b) => b.id === batteryId) ?? null;
+  const standard = view.batteries.find((b) => b.isDefault) ?? null;
   const kwh = usableKwh(battery?.ratingW ?? null, batteryId ? qty : 0);
   const rows = backupTable(kwh, view.profiles);
 
@@ -125,6 +130,7 @@ export function SolarStoragePanel({
                 {view.batteries.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.label}
+                    {b.isDefault ? " · standard" : ""}
                   </option>
                 ))}
               </select>
@@ -163,6 +169,27 @@ export function SolarStoragePanel({
 
             {busy && <Loader2 className="mb-2 size-4 animate-spin text-muted-foreground" />}
           </div>
+        )}
+
+        {/* THE STANDARD BATTERY, in one click, on an empty slot only.
+            Setting a deal to solar + storage already fills the slot, so this is
+            for the deal that was on that answer BEFORE the company starred a
+            battery — it never passed through that moment, and there is nothing
+            else that would ever offer it. */}
+        {!batteryId && standard && canEdit && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setBatteryId(standard.id);
+              setQty(Math.max(1, view.defaultQty));
+              void save({ batteryId: standard.id, batteryQty: Math.max(1, view.defaultQty) });
+            }}
+            className="flex items-center gap-2 rounded-lg border border-solar/40 bg-solar/5 px-3 py-2 text-sm font-medium hover:bg-solar/10 disabled:opacity-50"
+          >
+            <Star className="size-4 shrink-0 text-solar" aria-hidden />
+            Add {Math.max(1, view.defaultQty)} × {standard.label}
+          </button>
         )}
       </section>
 
