@@ -951,6 +951,12 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     // Back onto the first dot: how a shape is closed here and in every mapping
     // tool there is.
     const first = at(corners[0][0], corners[0][1]);
+    // And the tool says so BEFORE the click. The hint reads "click the first
+    // dot to close", so the dot has to answer the pointer — a rep who gets no
+    // cursor, no ring and no rubber band snapping home cannot tell a closing
+    // click from another corner until they have already made the wrong one.
+    await page.mouse.move(first.x, first.y);
+    await expect(canvas).toHaveClass(/cursor-pointer/);
     await page.mouse.click(first.x, first.y);
     await expect(canvas).toHaveAttribute("data-trace-points", "0");
 
@@ -971,6 +977,66 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     await page.getByTestId("max-roof").click();
     await expect(page.getByText(/Filled 1 plane/)).toBeVisible({ timeout: 10000 });
     expect(await panelsOnRoof(page)).toBe(filled);
+  });
+
+  /**
+   * A HALF-DRAWN OUTLINE MUST NOT OUTLIVE THE BUTTON THE REP PRESSED NEXT.
+   *
+   * Reported as "the roof face keeps making this", with a screenshot of a
+   * sky-blue polygon sprawling across three neighbouring houses. Nothing was
+   * misplacing the clicks: a trace abandoned halfway stayed armed through Fill
+   * this roof, through the fill-size nudges, through undo — invisible at two
+   * points in the corner of the picture — and the rep's next click on the roof
+   * extended THAT polygon instead of starting a new one. Two corners here, two
+   * corners there, and the shape spans the street.
+   */
+  test("a half-traced roof face does not survive the fill and swallow the next click", async ({
+    page,
+  }) => {
+    await login(page, "admin@anexahomes.com");
+    await openDesigner(page);
+    await clearRoof(page);
+
+    const box = await pickTool(page, "Roof face");
+    const at = (fx: number, fy: number) => ({
+      x: box.x + box.width * fx,
+      y: box.y + box.height * fy,
+    });
+    const canvas = page.getByTestId("layout-canvas");
+    const trace = async (corners: readonly (readonly [number, number])[]) => {
+      for (const [i, [fx, fy]] of corners.entries()) {
+        const p = at(fx, fy);
+        await page.mouse.click(p.x, p.y);
+        await expect(canvas).toHaveAttribute("data-trace-points", String(i + 1));
+      }
+    };
+
+    // One plane traced and closed, so the roof has something for the fill to
+    // re-cover — this is a rep mid-job, not an empty screen.
+    const first = [
+      [0.55, 0.4],
+      [0.88, 0.4],
+      [0.88, 0.72],
+      [0.55, 0.72],
+    ] as const;
+    await trace(first);
+    await page.mouse.click(at(first[0][0], first[0][1]).x, at(first[0][0], first[0][1]).y);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+
+    // A second outline started and left halfway, and then the rep's attention
+    // goes to a button.
+    await pickTool(page, "Roof face");
+    await trace([
+      [0.3, 0.3],
+      [0.42, 0.3],
+    ] as const);
+
+    await page.getByTestId("max-roof").click();
+    await expect(page.getByText(/Filled 1 plane/)).toBeVisible({ timeout: 15000 });
+
+    // The outline is gone with the press, so the next click on the roof starts
+    // a shape of its own rather than reaching back across the picture.
+    await expect(canvas).toHaveAttribute("data-trace-points", "0");
   });
 
   /**

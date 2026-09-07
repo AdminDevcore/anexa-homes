@@ -491,6 +491,28 @@ export function SolarLayoutDesigner({
   /** Where the pointer is while tracing, so the next segment previews. */
   const [ghostPoint, setGhostPoint] = React.useState<{ e: number; n: number } | null>(null);
 
+  /**
+   * Drop a trace nobody came back to.
+   *
+   * A HALF-DRAWN OUTLINE IS ARMED, and at two points in the corner of the
+   * picture it is also nearly invisible. Reported as "the roof face keeps
+   * making this", with a sky-blue polygon sprawling across three houses: the
+   * rep had put two corners down, gone to Fill this roof, looked at what
+   * landed, and clicked the roof again — and that click extended the outline
+   * they had left behind rather than starting a new one. Two corners here, two
+   * corners there, and the shape spans the street.
+   *
+   * Abandoned rather than closed. A tool change FINISHES a trace, because
+   * reaching for another tool says the shape is done; pressing a button that
+   * lays out the roof says the opposite, and turning the leftovers into an
+   * array nobody asked for would be worse than losing three clicks.
+   */
+  const abandonTrace = React.useCallback(() => {
+    if (!pendingRef.current) return;
+    setPending(null);
+    setGhostPoint(null);
+  }, [setPending]);
+
   const [drag, setDragState] = React.useState<Drag>(null);
   const dragRef = React.useRef<Drag>(null);
   const setDrag = React.useCallback((next: Drag) => {
@@ -685,9 +707,18 @@ export function SolarLayoutDesigner({
   /**
    * The point a click would land on right now, if any — so the cursor, the
    * rubber band and the click itself all agree about where the trace ends.
+   *
+   * BOTH TRACES, because both end the same way. This was computed for setbacks
+   * only, while the instruction under a face read "click the first dot to
+   * close" — so the one gesture the hint named was the one gesture with no
+   * cursor, no ring and no rubber band snapping home to say it had been
+   * understood. A rep aiming at that dot and missing it by four pixels got
+   * another corner instead, silently, and went round again.
    */
-  const setbackSnap =
-    tool === "setback" ? setbackVertexAt(pending, ghostPoint, setbackSnapM(mpp)) : null;
+  const traceSnap =
+    tool === "setback" || tool === "face"
+      ? setbackVertexAt(pending, ghostPoint, setbackSnapM(mpp))
+      : null;
   const selected = blocks.find((b) => b.id === selectedId) ?? null;
   const count = panelCount(blocks);
   /**
@@ -755,21 +786,29 @@ export function SolarLayoutDesigner({
       ? totals.systemSizeKwDc / inverterKwAc
       : null;
 
-  /** Every mutation goes through here, so undo has one place to record. */
+  /**
+   * Every mutation goes through here, so undo has one place to record — and,
+   * for the same reason, one place to let go of a trace nobody finished. The
+   * trace that closes into an array has already cleared itself by the time it
+   * gets here (see `finishTrace`), so this only ever catches the leftovers of
+   * one the rep walked away from.
+   */
   const commit = React.useCallback((next: LayoutBlock[]) => {
+    abandonTrace();
     setHistory((h) => [...h.slice(-49), blocksRef.current]);
     setBlocks(next);
     setDirty(true);
-  }, [setBlocks]);
+  }, [abandonTrace, setBlocks]);
 
   const undo = React.useCallback(() => {
+    abandonTrace();
     setHistory((h) => {
       if (h.length === 0) return h;
       setBlocks(h[h.length - 1]);
       setDirty(true);
       return h.slice(0, -1);
     });
-  }, [setBlocks]);
+  }, [abandonTrace, setBlocks]);
 
   // ── Filling the roof ──────────────────────────────────────────────────────
   /**
@@ -1560,9 +1599,9 @@ export function SolarLayoutDesigner({
         // would close the loop, so a rep can see the shape shut before they
         // commit to it rather than after.
         const tail =
-          setbackSnap === "close"
+          traceSnap === "close"
             ? pending[0]
-            : setbackSnap === "end"
+            : traceSnap === "end"
               ? pending[pending.length - 1]
               : ghostPoint;
         const pts = [...pending, ...(tail ? [tail] : [])].map(toPx);
@@ -1586,7 +1625,7 @@ export function SolarLayoutDesigner({
         ctx.stroke();
         ctx.setLineDash([]);
         const target =
-          setbackSnap === "close" ? 0 : setbackSnap === "end" ? pending.length - 1 : -1;
+          traceSnap === "close" ? 0 : traceSnap === "end" ? pending.length - 1 : -1;
         pending.map(toPx).forEach((p, i) => {
           const isTarget = i === target;
           ctx.beginPath();
@@ -1718,7 +1757,7 @@ export function SolarLayoutDesigner({
       pending,
       traceKind,
       ghostPoint,
-      setbackSnap,
+      traceSnap,
       selectedId,
       drag,
       totals,
@@ -2869,7 +2908,7 @@ export function SolarLayoutDesigner({
               canEdit && tool === "erase" && "cursor-cell",
               // Over the dot that ends the trace it stops being a crosshair,
               // because this click is not another corner.
-              canEdit && setbackSnap && "!cursor-pointer",
+              canEdit && traceSnap && "!cursor-pointer",
               canEdit && tool === "select" && "cursor-default",
               // The hand says what a press will do before it is pressed.
               (tool === "pan" || spaceHeld) && "cursor-grab",
