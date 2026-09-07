@@ -1222,6 +1222,12 @@ const lenderSchema = z.object({
    * before this existed; `optional` says nothing at all.
    */
   batteryRule: z.enum(["optional", "warn", "required"]).optional(),
+  // WHAT THE PARTNER API IS TOLD. Which of the document's several true amounts
+  // this partner underwrites, and what it means by a saving.
+  submissionAmountBasis: z
+    .enum(["contract_value", "customer_obligation", "after_credits"])
+    .optional(),
+  submissionSavingBasis: z.enum(["utility_avoided", "net_of_payment"]).optional(),
 
   // ── The programme contribution ──────────────────────────────────────────
   // The only setting in this file that makes the contract value and the

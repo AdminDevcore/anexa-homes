@@ -39,6 +39,7 @@ import {
   deleteSolarLenderAction,
   setLenderAdderRulesAction,
 } from "@/server/modules/solar/actions";
+import { SubmissionMapping } from "./submission-mapping";
 import type { AdderRuleOption, LenderRow, PricingMode } from "./types";
 import {
   adjustmentToCents,
@@ -71,7 +72,7 @@ import {
   type EquipmentNameDraft,
 } from "./equipment-names";
 
-export const LENDER_TABS = ["details", "pricing", "rates", "adders", "equipment", "legal"] as const;
+export const LENDER_TABS = ["details", "pricing", "rates", "adders", "equipment", "submission", "legal"] as const;
 export type LenderTab = (typeof LENDER_TABS)[number];
 
 /** The example job every "what does this mean" line on the Pricing tab is worked on. */
@@ -387,6 +388,8 @@ export function LenderDetail({
             draft.batteryMode === "normal" ? lender.finalBatteryPriceMode : draft.batteryMode,
           minBasePricePerBatteryCents,
           batteryRule: draft.batteryRule,
+          submissionAmountBasis: draft.submissionAmountBasis,
+          submissionSavingBasis: draft.submissionSavingBasis,
           contractAdjustmentEnabled: draft.adjustmentEnabled,
           contractAdjustmentType: "fixed",
           contractAdjustmentCents,
@@ -605,6 +608,10 @@ export function LenderDetail({
               </Pill>
             )}
           </TabsTrigger>
+          {/* WHAT THE PARTNER API IS TOLD. Beside Equipment because the two
+              answer the same question — what leaves Anexa and under whose
+              name — and an admin looking for one is looking for the other. */}
+          <TabsTrigger value="submission">Submission</TabsTrigger>
           <TabsTrigger value="legal">
             Disclosures
             {lender.contractAdjustmentEnabled && (
@@ -1046,6 +1053,15 @@ export function LenderDetail({
             draft={equipDraft}
             canEdit={canEdit}
             onChange={setEquipDraft}
+          />
+        </TabsContent>
+
+        <TabsContent value="submission" className="space-y-4">
+          <SubmissionMapping
+            lender={lender}
+            draft={draft}
+            onAmountBasis={(v) => set("submissionAmountBasis", v)}
+            onSavingBasis={(v) => set("submissionSavingBasis", v)}
           />
         </TabsContent>
 

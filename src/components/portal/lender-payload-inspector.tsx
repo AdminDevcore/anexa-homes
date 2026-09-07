@@ -184,6 +184,13 @@ function CheckResult({ result }: { result: LenderCheckResult }) {
   );
 }
 
+/** How a recorded basis reads to somebody who did not set it. */
+const AMOUNT_BASIS: Record<string, string> = {
+  contract_value: "contract value",
+  customer_obligation: "household obligation",
+  after_credits: "after tax credits",
+};
+
 /** Every previous attempt, with the partner's own answer beside it. */
 function SubmissionHistory({ rows }: { rows: SubmissionLogRow[] | null }) {
   if (rows === null) {
@@ -212,6 +219,12 @@ function SubmissionHistory({ rows }: { rows: SubmissionLogRow[] | null }) {
               {r.code && <span className="font-mono text-muted-foreground">{r.code}</span>}
               {r.referenceNumber && (
                 <span className="font-medium text-emerald-700">ref {r.referenceNumber}</span>
+              )}
+              {/* WHICH FIGURE THIS ATTEMPT ASKED THEM TO FUND. Recorded per
+                  attempt because the lender's setting can be changed later and
+                  this has to stay answerable about the submission that went. */}
+              {r.amountBasis && r.amountBasis !== "contract_value" && (
+                <span className="text-muted-foreground">{AMOUNT_BASIS[r.amountBasis] ?? r.amountBasis}</span>
               )}
             </div>
             {r.message && <p className="mt-1 text-muted-foreground">{r.message}</p>}

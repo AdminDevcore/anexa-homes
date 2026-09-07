@@ -59,6 +59,8 @@ export type SubmissionLogRow = {
   code: string | null;
   message: string | null;
   referenceNumber: string | null;
+  /** Which figure produced the amount on this attempt. */
+  amountBasis: string | null;
   actorName: string | null;
   request: unknown;
 };
@@ -89,6 +91,7 @@ export async function readSubmissionLogAction(leadId: string): Promise<Submissio
     code: r.code,
     message: r.message,
     referenceNumber: r.referenceNumber,
+    amountBasis: r.amountBasis,
     actorName: r.actorName,
     request: r.request,
   }));
