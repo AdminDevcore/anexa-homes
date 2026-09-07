@@ -3471,6 +3471,45 @@ enum SolarFinalPpwMode {
 /// different meaning. A one-member enum is the cheapest way for the figure to
 /// state what kind of figure it is; a second member later is a migration that
 /// adds a value rather than one that re-reads existing rows.
+/// WHICH FIGURE A PARTNER UNDERWRITES.
+///
+/// A priced solar deal carries several defensible "amounts" and they can differ
+/// by six figures. Which one a lender's paper is written at is a fact about the
+/// PARTNER, not about the deal, so it belongs on the lender row rather than in
+/// code:
+///
+///   contract_value       the value the partner's own paper is written at,
+///                        including any programme contribution. What every
+///                        lender received before this column existed.
+///   customer_obligation  what the household is actually liable for. Correct
+///                        for a partner with no programme contribution, and a
+///                        SIX-FIGURE understatement for one that has one.
+///   after_credits        the contract value less the federal credits the
+///                        proposal quotes. Only correct where a partner
+///                        underwrites the post-incentive balance, which is
+///                        unusual: the homeowner claims those on their own
+///                        return, months later, and the loan is written for
+///                        the whole amount in the meantime.
+enum SolarSubmissionAmountBasis {
+  contract_value
+  customer_obligation
+  after_credits
+}
+
+/// WHAT A PARTNER MEANS BY "ESTIMATED SAVING".
+///
+///   utility_avoided  the electricity bill that stops arriving. Always
+///                    positive on a system that generates anything.
+///   net_of_payment   that, less what the system costs the household this
+///                    year. Frequently NEGATIVE on a thirty-year loan, which
+///                    a partner whose schema has no minus sign cannot accept —
+///                    so this setting can make most deals unsubmittable, and
+///                    the screen says so.
+enum SolarSubmissionSavingBasis {
+  utility_avoided
+  net_of_payment
+}
+
 enum SolarContractAdjustmentType {
   /// A fixed dollar amount, in cents, added to the customer's obligation to
   /// reach the contract value.
@@ -3711,6 +3750,17 @@ model SolarLender {
   /// the link behaviour unchanged, which is why this is three nullable columns
   /// and not a mode flag.
 
+  // ── WHAT THE PARTNER API IS TOLD ────────────────────────────────────────
+  // Which of several true figures this partner underwrites, and what it means
+  // by a saving. Both default to what every submission sent before they
+  // existed, so turning this column on re-maps nothing.
+
+  /// See `SolarSubmissionAmountBasis`. Decides `requestedAmount`.
+  submissionAmountBasis SolarSubmissionAmountBasis @default(contract_value)
+
+  /// See `SolarSubmissionSavingBasis`. Decides the two saving figures.
+  submissionSavingBasis SolarSubmissionSavingBasis @default(utility_avoided)
+
   /// Origin of the lender's partner API, e.g. "https://admin.amoscapitalfund.com".
   /// No trailing slash; the client appends "/api/v1/partner/...".
   apiBaseUrl      String?
@@ -3783,6 +3833,11 @@ model SolarLenderSubmission {
   /// Present only on success.
   referenceNumber String?
   applicationId   String?
+
+  /// Which figure produced `requestedAmount` on this attempt. Recorded rather
+  /// than inferred: the setting can be changed afterwards, and "what did we
+  /// actually ask them to fund, and on what basis" must stay answerable.
+  amountBasis String?
 
   actorName String?
   createdAt DateTime @default(now())

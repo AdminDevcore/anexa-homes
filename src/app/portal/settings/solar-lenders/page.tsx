@@ -57,6 +57,8 @@ export default async function SolarLendersPage({
       minBasePricePerBatteryCents: true, maxFinalPricePerBatteryCents: true,
       finalBatteryPriceMode: true,
       batteryRule: true,
+      submissionAmountBasis: true,
+      submissionSavingBasis: true,
       // The programme contribution and the wording that goes with it. Only an
       // admin ever sees this screen — see `canEdit` — and a rep sees the
       // resulting figures on the deal, read-only.
@@ -163,6 +165,8 @@ export default async function SolarLendersPage({
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
           batteryRule: l.batteryRule,
+          submissionAmountBasis: l.submissionAmountBasis,
+          submissionSavingBasis: l.submissionSavingBasis,
           contractAdjustmentEnabled: l.contractAdjustmentEnabled,
           contractAdjustmentType: l.contractAdjustmentType,
           contractAdjustmentCents: l.contractAdjustmentCents,

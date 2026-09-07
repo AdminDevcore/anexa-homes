@@ -95,7 +95,7 @@ export async function readLenderSubmission(
     return { mode: "link" };
   }
 
-  const quoted = await loadQuoted(leadId, companyId);
+  const quoted = await loadQuoted(leadId, companyId, lender.submissionSavingBasis);
 
   // Both sets at once. A rep who fixes the panel mapping only to be told about
   // the missing rate has been sent round the loop twice for one visit.
@@ -107,7 +107,7 @@ export async function readLenderSubmission(
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
 
-  const money = await loadMoney(leadId, companyId);
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis);
   if (money.problem) {
     return { mode: "api", lenderName: lender.name, ready: false, problems: [money.problem] };
   }
@@ -162,7 +162,7 @@ export async function readLenderPayloadPreview(
     return { mode: "link" };
   }
 
-  const quoted = await loadQuoted(leadId, companyId);
+  const quoted = await loadQuoted(leadId, companyId, lender.submissionSavingBasis);
   const problems = [
     ...preflightAmosSubmission(design.lead, asSubmitted(design), lender.name),
     ...savingsProblems(quoted.system),
@@ -171,7 +171,7 @@ export async function readLenderPayloadPreview(
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
 
-  const money = await loadMoney(leadId, companyId);
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis);
   if (money.problem) {
     return { mode: "api", lenderName: lender.name, ready: false, problems: [money.problem] };
   }
@@ -296,7 +296,7 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
   // build sees it, so the two can never disagree about what is being sent.
   const submitted = asSubmitted(design);
 
-  const quoted = await loadQuoted(leadId, companyId);
+  const quoted = await loadQuoted(leadId, companyId, lender.submissionSavingBasis);
 
   const problems = [
     ...preflightAmosSubmission(design.lead, submitted, lender.name),
@@ -311,7 +311,7 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     };
   }
 
-  const money = await loadMoney(leadId, companyId);
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis);
   if (money.problem) return fail(money.problem);
 
   const payload = buildAmosPayload(design.lead, submitted, {
@@ -330,7 +330,14 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
   });
 
   const log = (row: Omit<SubmissionLog, "payload">) =>
-    recordSubmission(companyId, leadId, lender, payload, fallbackRepName, row);
+    recordSubmission(
+      companyId, leadId, lender, payload, fallbackRepName,
+      // Recorded, not inferred: the lender's setting can be changed afterwards,
+      // and "what did we ask them to fund, and on what basis" has to stay
+      // answerable about THIS attempt.
+      lender.submissionAmountBasis,
+      row,
+    );
 
   try {
     const result = await submitToAmos({ baseUrl: lender.apiBaseUrl, apiKey }, payload);
@@ -416,6 +423,7 @@ async function recordSubmission(
   lender: { id: string; name: string },
   payload: AmosApplicationPayload,
   actorName: string,
+  amountBasis: string,
   row: Omit<SubmissionLog, "payload">,
 ) {
   try {
@@ -433,6 +441,7 @@ async function recordSubmission(
         message: row.message,
         referenceNumber: row.referenceNumber,
         applicationId: row.applicationId,
+        amountBasis,
         actorName,
       },
     });
@@ -474,8 +483,8 @@ export function lenderReference(designId: string, attempt: number): string {
  * FALLS BACK to SolarFinance when no proposal has been generated, which is the
  * only route that reaches here without one.
  */
-async function loadMoney(leadId: string, companyId: string) {
-  const quoted = await quotedFromProposal(leadId, companyId);
+async function loadMoney(leadId: string, companyId: string, basis: AmountBasis) {
+  const quoted = await quotedFromProposal(leadId, companyId, basis);
   if (quoted) return { problem: null, ...quoted };
 
   const finance = await prisma.solarFinance.findFirst({
@@ -516,6 +525,7 @@ async function loadMoney(leadId: string, companyId: string) {
 async function loadQuoted(
   leadId: string,
   companyId: string,
+  savingBasis: SavingBasis,
 ): Promise<{ system: AmosSystemFigures | null }> {
   const live = await prisma.solarProposal.findFirst({
     where: { leadId, companyId, supersededAt: null },
@@ -533,7 +543,7 @@ async function loadQuoted(
     | undefined;
   if (!snapshot?.savings) return { system: null };
 
-  const avoided = year1UtilityAvoided(snapshot.savings);
+  const avoided = year1Saving(snapshot.savings, savingBasis);
   if (avoided == null) return { system: null };
 
   return {
@@ -559,17 +569,39 @@ function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
+/** What a partner means by "estimated saving". */
+export type SavingBasis = "utility_avoided" | "net_of_payment";
+
 /**
- * Year one's avoided utility cost, defended against a hand-written snapshot.
+ * Year one's saving, on the basis this partner underwrites.
  *
- * `year1UtilityAvoidedCents` is the arithmetic and lives with the savings
- * model; this is the part that cannot trust its input, because the input is a
- * JSON column that has held eight schema versions.
+ * `utility_avoided` is the electricity bill that stops arriving:
+ * `year1UtilityAvoidedCents` is that arithmetic and lives with the savings
+ * model. `net_of_payment` goes on to subtract what the system costs the
+ * household this year, which on a thirty-year loan is routinely NEGATIVE — a
+ * true figure that a partner whose amount pattern has no minus sign cannot
+ * accept. `savingsProblems` refuses it rather than sending it, and the settings
+ * screen says so beside the option.
+ *
+ * This is the part that cannot trust its input: the input is a JSON column that
+ * has held eight schema versions.
  */
-function year1UtilityAvoided(savings: SavingsModel): number | null {
+function year1Saving(savings: SavingsModel, basis: SavingBasis): number | null {
   const y1 = Array.isArray(savings.years) ? savings.years[0] : null;
   if (!y1 || typeof y1.utilityCostCents !== "number") return null;
-  return Math.round(y1.utilityCostCents - postSolarUtilityCents(y1));
+  const avoided = y1.utilityCostCents - postSolarUtilityCents(y1);
+
+  // OPT IN EXPLICITLY. Anything that is not the net reading is the avoided
+  // one — the safe default, and the only one most partners can accept. Netting
+  // must never be what an unrecognised value falls through to: it is the branch
+  // that produces a negative figure and blocks the deal.
+  if (basis !== "net_of_payment") return Math.round(avoided);
+
+  // What solar costs the household this year, read off the row rather than
+  // rebuilt: the payment, the fee, the battery programme and any credit relief
+  // are already netted into it by the model that priced the document.
+  const solarCost = typeof y1.solarCostCents === "number" ? y1.solarCostCents : 0;
+  return Math.round(y1.utilityCostCents - solarCost);
 }
 
 /**
@@ -581,7 +613,7 @@ function year1UtilityAvoided(savings: SavingsModel): number | null {
  * below take over, which is the right reading of an older proposal rather than
  * a guess at one.
  */
-async function quotedFromProposal(leadId: string, companyId: string) {
+async function quotedFromProposal(leadId: string, companyId: string, basis: AmountBasis) {
   const live = await prisma.solarProposal.findFirst({
     where: { leadId, companyId, supersededAt: null },
     orderBy: { version: "desc" },
@@ -590,12 +622,68 @@ async function quotedFromProposal(leadId: string, companyId: string) {
   const financing = (live?.snapshot as { financing?: Record<string, unknown> } | null)?.financing;
   if (!financing) return null;
 
-  const amountCents = financing.financedAmountCents;
+  const amountCents = amountOnBasis(financing, basis);
   const termMonths = financing.loanTermMonths;
   if (typeof amountCents !== "number" || amountCents <= 0) return null;
   if (typeof termMonths !== "number" || termMonths <= 0) return null;
 
   return { amountCents, termMonths };
+}
+
+/**
+ * A snapshot money figure, or null when the document does not carry one.
+ *
+ * Distinct from `num` above, which reports a missing figure as zero: for the
+ * system figures that is the honest reading and `savingsProblems` refuses it,
+ * but an AMOUNT of zero and an amount the document never stated are different
+ * facts, and only one of them may fall back to the contract value.
+ */
+function cents(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Which of a document's several true amounts this partner underwrites. */
+export type AmountBasis = "contract_value" | "customer_obligation" | "after_credits";
+
+/**
+ * THE FIGURE THE PARTNER'S PAPER IS WRITTEN AT.
+ *
+ * Every branch reads the FROZEN document, never the live rows, so the answer is
+ * the one on the sheet in the household's hands whichever basis a partner uses.
+ *
+ * `contract_value` is what every submission sent before this was configurable,
+ * and is the fallback for each of the others: a document that cannot express
+ * the requested basis reports the contract value rather than guessing, and the
+ * caller's preflight is what refuses a figure that came out at zero.
+ */
+function amountOnBasis(financing: Record<string, unknown>, basis: AmountBasis): number | null {
+  const contract = cents(financing.financedAmountCents);
+  if (contract == null) return null;
+
+  if (basis === "customer_obligation") {
+    // Only a partner with a programme contribution has two numbers here. On
+    // every other deal the obligation IS the contract value, and the absent
+    // block is the document saying so rather than failing to mention it.
+    const adj = financing.lenderAdjustment as { customerObligationCents?: unknown } | null;
+    return cents(adj?.customerObligationCents) ?? contract;
+  }
+
+  if (basis === "after_credits") {
+    // The credits the document actually quotes, summed off the ladder rather
+    // than recomputed: a rate applied here would diverge from the page the
+    // household read the moment either changed. A document quoting none
+    // subtracts nothing.
+    const ladder = financing.creditLadder as { credits?: { amountCents?: unknown }[] } | null;
+    const credits = (ladder?.credits ?? []).reduce((n, c) => n + (cents(c.amountCents) ?? 0), 0);
+    return contract - credits;
+  }
+
+  // EVERY OTHER VALUE IS THE CONTRACT VALUE, including one this build does not
+  // recognise. The fallback has to be the figure that has always been sent and
+  // is right for almost every partner — an unknown basis quietly resolving to
+  // one of the smaller readings would understate a credit application, and a
+  // column can outlive the code that understands it.
+  return contract;
 }
 
 /** "10.7 kW · 26 x Qcells Q.PEAK 410 · 2 x Enphase IQ Battery 5P" */
@@ -718,6 +806,11 @@ async function loadDesign(leadId: string, companyId: string) {
           apiBaseUrl: true,
           apiKeyEncrypted: true,
           apiProductSlug: true,
+          // WHICH FIGURE THIS PARTNER UNDERWRITES, and what it means by a
+          // saving. Facts about the partner, so they travel with the lender row
+          // exactly as its key does.
+          submissionAmountBasis: true,
+          submissionSavingBasis: true,
         },
       },
       lead: {

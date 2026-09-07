@@ -59,6 +59,10 @@ export type LenderRow = {
    * every lender did before the column existed.
    */
   batteryRule: "optional" | "warn" | "required";
+  /** Which figure this partner's paper is written at — see the Submission tab. */
+  submissionAmountBasis: "contract_value" | "customer_obligation" | "after_credits";
+  /** What this partner means by "estimated saving". */
+  submissionSavingBasis: "utility_avoided" | "net_of_payment";
   /**
    * THE PROGRAMME CONTRIBUTION — the one setting on this screen that makes the
    * contract value and the customer's obligation two different numbers.
@@ -297,6 +301,8 @@ export function draftFrom(lender: LenderRow) {
     apiProductSlug: lender.apiProductSlug ?? "",
     creditInstructions: lender.creditInstructions ?? "",
     repPayMode: lender.repPayMode,
+    submissionAmountBasis: lender.submissionAmountBasis,
+    submissionSavingBasis: lender.submissionSavingBasis,
     batteryPayMode: lender.batteryPayMode,
     ppwMode: (lender.maxFinalPpwCents == null
       ? "normal"
