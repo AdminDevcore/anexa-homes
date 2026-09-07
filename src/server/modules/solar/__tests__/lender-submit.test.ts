@@ -10,21 +10,29 @@ vi.mock('@/server/lib/crypto', () => ({
 const designFindFirst = vi.fn()
 const financeFindFirst = vi.fn()
 const proposalFindFirst = vi.fn()
+const submissionCreate = vi.fn()
 vi.mock('@/server/db/client', () => ({
   prisma: {
     solarDesign: { findFirst: (...a: unknown[]) => designFindFirst(...a) },
     solarFinance: { findFirst: (...a: unknown[]) => financeFindFirst(...a) },
     solarProposal: { findFirst: (...a: unknown[]) => proposalFindFirst(...a) },
+    solarLenderSubmission: { create: (...a: unknown[]) => submissionCreate(...a) },
   },
 }))
 
 const submitToAmos = vi.fn()
+const validateWithAmos = vi.fn()
 vi.mock('../amos-client', async () => {
   const actual = await vi.importActual<typeof import('../amos-client')>('../amos-client')
-  return { ...actual, submitToAmos: (...a: unknown[]) => submitToAmos(...a) }
+  return {
+    ...actual,
+    submitToAmos: (...a: unknown[]) => submitToAmos(...a),
+    validateWithAmos: (...a: unknown[]) => validateWithAmos(...a),
+  }
 })
 
-const { submitDealToLender, readLenderSubmission } = await import('../lender-submit')
+const { submitDealToLender, readLenderSubmission, readLenderPayloadPreview, checkDealWithLender } =
+  await import('../lender-submit')
 const { AmosSubmissionError } = await import('../amos-client')
 
 const LEAD = {
@@ -111,6 +119,8 @@ beforeEach(() => {
   // proposal, so a deal without one is not a state a customer can reach — and
   // the lender's savings analysis has nowhere else to come from.
   proposalFindFirst.mockReset().mockResolvedValue({ snapshot: SNAPSHOT })
+  submissionCreate.mockReset().mockResolvedValue({})
+  validateWithAmos.mockReset().mockResolvedValue({ valid: true, problems: [] })
   submitToAmos.mockReset().mockResolvedValue({
     applicationId: 'app-1',
     referenceNumber: 'AMS-1042',
@@ -413,5 +423,107 @@ describe('readLenderSubmission', () => {
     const r = await readLenderSubmission('lead-1', 'co-1')
     expect(r).toMatchObject({ mode: 'api', ready: false })
     expect((r as { problems: string[] }).problems.join(' ')).toContain('phone')
+  })
+})
+
+/**
+ * SEEING WHAT THE LENDER IS TOLD, AND ASKING THEM BEFORE A CUSTOMER IS WATCHING.
+ *
+ * The integration ran for weeks with no way to read either. A refusal left a
+ * one-line string on the activity log; the payload and the partner's answer
+ * went to a server console nobody in the product can reach.
+ */
+describe('readLenderPayloadPreview', () => {
+  const args = ['lead-1', 'co-1', 'Anexa Homes'] as const
+
+  it('previews the SAME body the submission would send', async () => {
+    const preview = await readLenderPayloadPreview(...args)
+    await submitDealToLender({ leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true, fallbackRepName: 'Anexa Homes' })
+    const sent = submitToAmos.mock.calls[0]?.[1]
+
+    expect(preview).toMatchObject({ mode: 'api', ready: true })
+    // Occupancy is the one field nothing stores; the panel labels it.
+    expect((preview as { payload: unknown }).payload).toEqual(sent)
+  })
+
+  it('shows the blockers instead of a body when the deal cannot be sent', async () => {
+    proposalFindFirst.mockResolvedValue(null)
+    const preview = await readLenderPayloadPreview(...args)
+    expect(preview).toMatchObject({ mode: 'api', ready: false })
+    expect((preview as { problems: string[] }).problems.join(' ')).toContain('Generate one first')
+  })
+
+  it('says nothing at all for a lender with no direct submission', async () => {
+    designFindFirst.mockResolvedValue({ ...DESIGN, lender: { ...DESIGN.lender, apiKeyEncrypted: null } })
+    expect(await readLenderPayloadPreview(...args)).toEqual({ mode: 'link' })
+  })
+})
+
+describe('checkDealWithLender', () => {
+  const args = ['lead-1', 'co-1', 'Anexa Homes'] as const
+
+  it('asks the lender and NEVER submits', async () => {
+    const r = await checkDealWithLender(...args)
+    expect(r).toMatchObject({ ok: true, valid: true })
+    expect(validateWithAmos).toHaveBeenCalledTimes(1)
+    // The whole point: no application, no credit file, nothing to the customer.
+    expect(submitToAmos).not.toHaveBeenCalled()
+  })
+
+  it('carries their field paths through, so a rep fixes the right number', async () => {
+    validateWithAmos.mockResolvedValue({
+      valid: false,
+      problems: [{ code: 'invalid_request', field: 'system.estMonthlySaving', message: 'Number must be greater than or equal to 1' }],
+    })
+    const r = await checkDealWithLender(...args)
+    expect(r).toMatchObject({ ok: true, valid: false })
+    expect((r as { problems: string[] }).problems[0]).toBe(
+      'system.estMonthlySaving: Number must be greater than or equal to 1',
+    )
+  })
+
+  it('answers from our own preflight without troubling the lender', async () => {
+    proposalFindFirst.mockResolvedValue(null)
+    const r = await checkDealWithLender(...args)
+    expect(r).toMatchObject({ ok: true, valid: false })
+    expect(validateWithAmos).not.toHaveBeenCalled()
+  })
+})
+
+describe('the submission log', () => {
+  const input = { leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true, fallbackRepName: 'Anexa Homes' }
+
+  it('records the body that was sent and the reference that came back', async () => {
+    await submitDealToLender(input)
+    const row = submissionCreate.mock.calls[0]?.[0]?.data
+    expect(row).toMatchObject({ ok: true, referenceNumber: 'AMS-1042', applicationId: 'app-1', lenderName: 'Amos Capital Fund' })
+    expect(row.request).toEqual(submitToAmos.mock.calls[0]?.[1])
+  })
+
+  it('never lets the API key into the stored body', async () => {
+    await submitDealToLender(input)
+    const wire = JSON.stringify(submissionCreate.mock.calls[0]?.[0]?.data)
+    expect(wire).not.toContain('ak_live_secret')
+    expect(wire).not.toMatch(/authorization|bearer/i)
+  })
+
+  it('records a refusal with the lender’s own code and message', async () => {
+    submitToAmos.mockRejectedValue(new AmosSubmissionError('internal_error', 'Something went wrong on our side.', 500))
+    await submitDealToLender(input)
+    expect(submissionCreate.mock.calls[0]?.[0]?.data).toMatchObject({
+      ok: false, status: 500, code: 'internal_error',
+    })
+  })
+
+  it('never lets the bookkeeping cost the application', async () => {
+    // By the time the row is written the deal is already with the lender.
+    submissionCreate.mockRejectedValue(new Error('log table is gone'))
+    expect(await submitDealToLender(input)).toMatchObject({ ok: true, referenceNumber: 'AMS-1042' })
+  })
+
+  it('writes nothing when the deal never reached the network', async () => {
+    proposalFindFirst.mockResolvedValue(null)
+    await submitDealToLender(input)
+    expect(submissionCreate).not.toHaveBeenCalled()
   })
 })

@@ -1,13 +1,15 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { decryptField } from "@/server/lib/crypto";
 import {
   buildAmosPayload,
   preflightAmosSubmission,
   savingsProblems,
+  type AmosApplicationPayload,
   type AmosSystemFigures,
 } from "./amos-payload";
 import { postSolarUtilityCents, type SavingsModel } from "@/lib/solar-proposal";
-import { submitToAmos, AmosSubmissionError } from "./amos-client";
+import { submitToAmos, validateWithAmos, AmosSubmissionError, type AmosValidation } from "./amos-client";
 
 /**
  * Sending a priced deal into the lender's own system.
@@ -128,6 +130,124 @@ export async function readLenderSubmission(
   };
 }
 
+/**
+ * WHAT WOULD BE SENT, FOR SOMEBODY TO LOOK AT.
+ *
+ * The exact body `submitDealToLender` would post, built by the same function
+ * from the same rows — not a description of it, and not a second rendering that
+ * can drift. If this is wrong, the submission is wrong.
+ *
+ * `ownerOccupied` is the one field this cannot know: nothing stores it, it is
+ * asked at the moment of sending, and the preview says so rather than implying
+ * the answer is already on the deal.
+ *
+ * Read-only and safe on render, like `readLenderSubmission` beside it. The
+ * API key is not in the result and cannot be — it travels as a header.
+ */
+export type LenderPayloadPreview =
+  | { mode: "link" }
+  | { mode: "api"; lenderName: string; ready: false; problems: string[] }
+  | { mode: "api"; lenderName: string; ready: true; payload: AmosApplicationPayload };
+
+export async function readLenderPayloadPreview(
+  leadId: string,
+  companyId: string,
+  fallbackRepName: string,
+): Promise<LenderPayloadPreview> {
+  const design = await loadDesign(leadId, companyId);
+  if (!design?.lender) return { mode: "link" };
+
+  const { lender } = design;
+  if (!lender.apiBaseUrl || !lender.apiKeyEncrypted || !lender.apiProductSlug) {
+    return { mode: "link" };
+  }
+
+  const quoted = await loadQuoted(leadId, companyId);
+  const problems = [
+    ...preflightAmosSubmission(design.lead, asSubmitted(design), lender.name),
+    ...savingsProblems(quoted.system),
+  ];
+  if (problems.length > 0) {
+    return { mode: "api", lenderName: lender.name, ready: false, problems };
+  }
+
+  const money = await loadMoney(leadId, companyId);
+  if (money.problem) {
+    return { mode: "api", lenderName: lender.name, ready: false, problems: [money.problem] };
+  }
+
+  return {
+    mode: "api",
+    lenderName: lender.name,
+    ready: true,
+    payload: buildAmosPayload(design.lead, asSubmitted(design), {
+      productSlug: lender.apiProductSlug,
+      externalId: lenderReference(design.id, design.lenderSubmissionAttempt),
+      amountCents: money.amountCents,
+      termMonths: money.termMonths,
+      salesRepName: repName(design.lead.assignedRep) ?? fallbackRepName,
+      // The rep answers this at the moment of sending; the panel labels it.
+      ownerOccupied: true,
+      delivery: "in_person",
+      system: quoted.system!,
+    }),
+  };
+}
+
+/**
+ * Ask the lender whether this deal would be accepted, WITHOUT sending it.
+ *
+ * Their validation endpoint creates nothing — no application, no credit file,
+ * no email to the household — so this is safe to press as often as anybody
+ * likes, which is the whole reason it is worth having. See `validateWithAmos`.
+ *
+ * A deal that our OWN preflight refuses never reaches them: those problems are
+ * already the answer, and asking a partner to confirm what we can see from here
+ * is a request nobody needs to make.
+ */
+export type LenderCheckResult =
+  | { ok: true; lenderName: string; valid: boolean; problems: string[] }
+  | { ok: false; error: string };
+
+export async function checkDealWithLender(
+  leadId: string,
+  companyId: string,
+  fallbackRepName: string,
+): Promise<LenderCheckResult> {
+  const preview = await readLenderPayloadPreview(leadId, companyId, fallbackRepName);
+  if (preview.mode === "link") {
+    return { ok: false, error: "This deal's lender is not set up for direct submission." };
+  }
+  if (!preview.ready) {
+    return { ok: true, lenderName: preview.lenderName, valid: false, problems: preview.problems };
+  }
+
+  const design = await loadDesign(leadId, companyId);
+  const lender = design?.lender;
+  const apiKey = decryptField(lender?.apiKeyEncrypted);
+  if (!lender?.apiBaseUrl || !apiKey) {
+    return { ok: false, error: "This lender has no usable API credentials." };
+  }
+
+  try {
+    const result: AmosValidation = await validateWithAmos(
+      { baseUrl: lender.apiBaseUrl, apiKey },
+      preview.payload,
+    );
+    return {
+      ok: true,
+      lenderName: lender.name,
+      valid: result.valid,
+      // Their field paths carried through: "system.estMonthlySaving" is the
+      // difference between a rep fixing the right number and guessing.
+      problems: result.problems.map((p) => (p.field ? `${p.field}: ${p.message}` : p.message)),
+    };
+  } catch (e) {
+    if (e instanceof AmosSubmissionError) return { ok: false, error: e.message };
+    return { ok: false, error: "Could not reach the lender to check this deal." };
+  }
+}
+
 export type LenderSubmitInput = {
   leadId: string;
   companyId: string;
@@ -209,8 +329,19 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     system: quoted.system!,
   });
 
+  const log = (row: Omit<SubmissionLog, "payload">) =>
+    recordSubmission(companyId, leadId, lender, payload, fallbackRepName, row);
+
   try {
     const result = await submitToAmos({ baseUrl: lender.apiBaseUrl, apiKey }, payload);
+    await log({
+      ok: true,
+      status: 201,
+      code: null,
+      message: null,
+      referenceNumber: result.referenceNumber,
+      applicationId: result.applicationId,
+    });
     return {
       ok: true,
       referenceNumber: result.referenceNumber,
@@ -220,6 +351,14 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     };
   } catch (e) {
     if (e instanceof AmosSubmissionError) {
+      await log({
+        ok: false,
+        status: e.status ?? null,
+        code: e.code,
+        message: e.message,
+        referenceNumber: null,
+        applicationId: null,
+      });
       return {
         ok: false,
         error: e.message,
@@ -230,12 +369,75 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
             : "deal",
       };
     }
+    // The row records that an attempt was made and that nobody knows what
+    // happened to it — which is exactly the state somebody has to reconcile
+    // against the lender's portal.
+    await log({
+      ok: false,
+      status: null,
+      code: "unexpected",
+      message: "An unexpected error occurred; see the server log.",
+      referenceNumber: null,
+      applicationId: null,
+    });
     // Never surface an unexpected error verbatim: it can carry a connection
     // string or another company's identifiers.
     return fail(
       "Something went wrong sending this deal. Re-sending the same deal is safe.",
       "transient",
     );
+  }
+}
+
+type SubmissionLog = {
+  payload: AmosApplicationPayload;
+  ok: boolean;
+  status: number | null;
+  code: string | null;
+  message: string | null;
+  referenceNumber: string | null;
+  applicationId: string | null;
+};
+
+/**
+ * The record of one attempt, written whatever the outcome.
+ *
+ * NEVER LET THE BOOKKEEPING COST THE APPLICATION. By the time this runs the
+ * deal is already with the lender — or already refused by them — and neither
+ * fact changes because a log row would not insert. Same rule the qualify event
+ * beside it follows.
+ *
+ * The API key is not in `payload` and cannot be: it travels as an HTTP header
+ * and this column is written from the payload object, never from the request.
+ */
+async function recordSubmission(
+  companyId: string,
+  leadId: string,
+  lender: { id: string; name: string },
+  payload: AmosApplicationPayload,
+  actorName: string,
+  row: Omit<SubmissionLog, "payload">,
+) {
+  try {
+    await prisma.solarLenderSubmission.create({
+      data: {
+        companyId,
+        leadId,
+        lenderId: lender.id,
+        lenderName: lender.name,
+        externalId: payload.externalId,
+        request: payload as unknown as Prisma.InputJsonValue,
+        ok: row.ok,
+        status: row.status,
+        code: row.code,
+        message: row.message,
+        referenceNumber: row.referenceNumber,
+        applicationId: row.applicationId,
+        actorName,
+      },
+    });
+  } catch (e) {
+    console.error("[lender-submit] could not record the attempt", e);
   }
 }
 
