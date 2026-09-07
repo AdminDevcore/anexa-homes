@@ -122,3 +122,49 @@ export function mayInheritLiveLink(
   if (!previous?.publicToken) return false;
   return !previous.signedAt;
 }
+
+/**
+ * Whether a credit application may be started from THIS document.
+ *
+ * The rule used to be `!supersededAt`, said in two places, and the reasoning
+ * was sound: a replaced document quotes a price the deal is no longer written
+ * at, and no underwriter should be shown a figure nobody here would stand
+ * behind. What was wrong was the test, because `supersededAt` answers "is there
+ * a newer row" — which is not the same question.
+ *
+ * It comes apart on the one row the household is actually holding.
+ * `mayInheritLiveLink` above deliberately keeps the customer's live link on the
+ * version they SIGNED; an ordinary generate does not move a link at all, and a
+ * freshly generated version has no public token until it is sent. So the moment
+ * a rep builds a v14, the signed v13 the customer has open goes superseded, its
+ * QUALIFY button starts refusing, and the refusal tells them to "open the most
+ * recent one your representative sent you" — a document that does not exist at
+ * any address. The only door the deal had closes, silently, on the version
+ * everybody agreed to.
+ *
+ * So the question is asked properly: is this the document this deal is written
+ * at? Three ways it can be, and all three are the same claim:
+ *
+ *   not superseded — it is the current one.
+ *   approved       — somebody named it the version this deal sold.
+ *   signed         — the customer named it, which is the strongest claim of
+ *                    the three and also the oldest: signing has approved the
+ *                    version automatically only since 2026-08-26, and the
+ *                    documents signed before that never got the column.
+ *
+ * What this deliberately still refuses is the case the original rule was built
+ * for: a superseded draft nobody ever agreed to, which is the common shape,
+ * because generating a new version leaves the old link live.
+ *
+ * The figures sent to the lender come from whichever document this passed —
+ * see `submissionDocument` in lender-submit.ts. The two must stay in step: a
+ * document allowed to apply and then quoted from a different row is exactly
+ * the mismatch this guard exists to prevent.
+ */
+export function mayStartApplication(p: {
+  supersededAt: Date | string | null;
+  signedAt: Date | string | null;
+  approvedAt: Date | string | null;
+}): boolean {
+  return !p.supersededAt || !!p.signedAt || !!p.approvedAt;
+}

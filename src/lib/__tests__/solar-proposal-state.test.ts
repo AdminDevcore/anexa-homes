@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   solarProposalState,
   mayInheritLiveLink,
+  mayStartApplication,
   SOLAR_PROPOSAL_STATE_CTA,
   type SolarProposalStateInput,
 } from "@/lib/solar-proposal-state";
@@ -112,5 +113,62 @@ describe("a signature keeps the customer's link, not the whole builder", () => {
 
   it("has nothing to carry when this is the first version", () => {
     expect(mayInheritLiveLink(null)).toBe(false);
+  });
+});
+
+/**
+ * WHICH DOCUMENT MAY PUT A PRICE IN FRONT OF AN UNDERWRITER.
+ *
+ * The rule this replaces was "not superseded", which is a proxy for "this is
+ * what the deal is written at" — and the proxy breaks on precisely the row the
+ * customer holds. A signature pins the live link to the version that was
+ * signed (see `mayInheritLiveLink` above), so generating a v14 leaves the
+ * household on a signed, superseded v13 with no newer link in existence.
+ */
+describe("which document may start a credit application", () => {
+  it("lets the current document through", () => {
+    expect(
+      mayStartApplication({ supersededAt: null, signedAt: null, approvedAt: null })
+    ).toBe(true);
+  });
+
+  it("lets the version the customer SIGNED through, newer versions or not", () => {
+    expect(
+      mayStartApplication({
+        supersededAt: new Date(),
+        signedAt: new Date(),
+        approvedAt: null,
+      })
+    ).toBe(true);
+  });
+
+  it("lets the version an admin approved through", () => {
+    // Signing approves automatically, but approval predates nothing: an admin
+    // naming the version this deal sold is making the same claim by hand.
+    expect(
+      mayStartApplication({
+        supersededAt: new Date(),
+        signedAt: null,
+        approvedAt: new Date(),
+      })
+    ).toBe(true);
+  });
+
+  it("refuses a superseded draft nobody agreed to", () => {
+    // The rule that must survive: an ordinary generate does NOT move the
+    // customer's link, so a household can sit on a retracted price for weeks.
+    expect(
+      mayStartApplication({ supersededAt: new Date(), signedAt: null, approvedAt: null })
+    ).toBe(false);
+  });
+
+  it("reads dates that arrived as strings", () => {
+    expect(
+      mayStartApplication({
+        supersededAt: "2026-09-01T00:00:00Z",
+        signedAt: "2026-08-30T00:00:00Z",
+        approvedAt: null,
+      })
+    ).toBe(true);
   });
 });

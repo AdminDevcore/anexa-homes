@@ -43,11 +43,18 @@ import type { LenderCheckResult } from "@/server/modules/solar/lender-submit";
  */
 export function LenderPayloadInspector({
   leadId,
+  proposalId,
   lenderName,
   payload,
   problems,
 }: {
   leadId: string;
+  /**
+   * The version this panel sits on. Checked against the SAME document the body
+   * above was built from — asking the lender about a different version than the
+   * one on screen is a check whose answer means nothing.
+   */
+  proposalId: string;
   lenderName: string;
   /** Null when our own preflight already refuses the deal. */
   payload: unknown | null;
@@ -69,7 +76,7 @@ export function LenderPayloadInspector({
   async function runCheck() {
     setBusy(true);
     try {
-      setCheck(await checkDealWithLenderAction(leadId));
+      setCheck(await checkDealWithLenderAction(leadId, proposalId));
     } catch {
       setCheck({ ok: false, error: "Could not reach the lender." });
     } finally {

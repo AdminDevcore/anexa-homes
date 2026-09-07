@@ -70,6 +70,11 @@ export default async function PublicSolarProposalPage({
       // deal that is not submittable comes back null and the button stays the
       // lender's ordinary application link. Our preflight strings are written
       // for a rep and never reach this page.
+      //
+      // The whole row goes, not just the deal's ids: whether THIS version may
+      // start an application is a question about the document, and a signed one
+      // may even after a newer version exists — which is the state a household
+      // is left in every time a rep builds a v14. See `mayStartApplication`.
       qualifyOffer={await readProposalQualifyOffer(proposal, "customer")}
     />
   );

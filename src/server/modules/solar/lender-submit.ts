@@ -86,6 +86,8 @@ const fail = (error: string, kind: FailureKind = "deal"): LenderSubmitResult => 
 export async function readLenderSubmission(
   leadId: string,
   companyId: string,
+  /** The document being read, so the summary quotes the sheet on screen. */
+  proposalId?: string | null,
 ): Promise<LenderSubmissionStatus> {
   const design = await loadDesign(leadId, companyId);
   if (!design?.lender) return { mode: "link" };
@@ -100,6 +102,7 @@ export async function readLenderSubmission(
     companyId,
     lender.submissionSavingBasis,
     lender.submissionSavingHorizon,
+    proposalId,
   );
 
   // Both sets at once. A rep who fixes the panel mapping only to be told about
@@ -112,7 +115,7 @@ export async function readLenderSubmission(
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
 
-  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis);
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
   if (money.problem) {
     return { mode: "api", lenderName: lender.name, ready: false, problems: [money.problem] };
   }
@@ -163,6 +166,8 @@ export async function readLenderPayloadPreview(
    * the name it would really be sent.
    */
   fallbackRepName: string,
+  /** The version being previewed. The panel sits on one; it says which. */
+  proposalId?: string | null,
 ): Promise<LenderPayloadPreview> {
   const design = await loadDesign(leadId, companyId);
   if (!design?.lender) return { mode: "link" };
@@ -177,6 +182,7 @@ export async function readLenderPayloadPreview(
     companyId,
     lender.submissionSavingBasis,
     lender.submissionSavingHorizon,
+    proposalId,
   );
   const problems = [
     ...preflightAmosSubmission(design.lead, asSubmitted(design), lender.name),
@@ -186,7 +192,7 @@ export async function readLenderPayloadPreview(
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
 
-  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis);
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
   if (money.problem) {
     return { mode: "api", lenderName: lender.name, ready: false, problems: [money.problem] };
   }
@@ -234,8 +240,9 @@ export async function checkDealWithLender(
   leadId: string,
   companyId: string,
   fallbackRepName: string,
+  proposalId?: string | null,
 ): Promise<LenderCheckResult> {
-  const preview = await readLenderPayloadPreview(leadId, companyId, fallbackRepName);
+  const preview = await readLenderPayloadPreview(leadId, companyId, fallbackRepName, proposalId);
   if (preview.mode === "link") {
     return { ok: false, error: "This deal's lender is not set up for direct submission." };
   }
@@ -273,6 +280,15 @@ export type LenderSubmitInput = {
   leadId: string;
   companyId: string;
   /**
+   * The document the application is being started FROM.
+   *
+   * Both doors have one — a share token resolves exactly one proposal, and the
+   * rep presses on a version they have open — and the figures on the wire come
+   * off it. See `submissionDocument` for what happens without it, and for the
+   * signed-version bug that made this a parameter rather than a lookup.
+   */
+  proposalId?: string | null;
+  /**
    * Whether the applicant lives in the property. Anexa does not record it
    * anywhere and the lender requires it, so it is asked at submission time —
    * of the homeowner, on their own document, because it is a statement about
@@ -297,7 +313,10 @@ export type LenderSubmitInput = {
 };
 
 export async function submitDealToLender(input: LenderSubmitInput): Promise<LenderSubmitResult> {
-  const { leadId, companyId, ownerOccupied, fallbackRepName, submitterName = null } = input;
+  const {
+    leadId, companyId, ownerOccupied, fallbackRepName,
+    submitterName = null, proposalId = null,
+  } = input;
 
   const design = await loadDesign(leadId, companyId);
   if (!design) return fail("Deal not found.");
@@ -322,6 +341,7 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     companyId,
     lender.submissionSavingBasis,
     lender.submissionSavingHorizon,
+    proposalId,
   );
 
   const problems = [
@@ -337,7 +357,7 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     };
   }
 
-  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis);
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
   if (money.problem) return fail(money.problem);
 
   const payload = buildAmosPayload(design.lead, submitted, {
@@ -501,6 +521,54 @@ export function lenderReference(designId: string, attempt: number): string {
 }
 
 /**
+ * THE DOCUMENT THIS SUBMISSION SPEAKS FOR.
+ *
+ * Every figure the lender is told comes off one frozen proposal, and this is
+ * the single place that decides which — so the money, the savings analysis and
+ * the preflight can never be answers about three different sheets of paper.
+ *
+ * NAMED BY THE CALLER wherever there is one to name, which is both doors onto a
+ * submission and the rep's preview: all three live ON a proposal, and only they
+ * know which one was open. Re-deriving it from the deal is what went wrong. The
+ * derivation was `supersededAt: null` — "the current version" — and a customer
+ * who signs v13 and then has a v14 generated behind them keeps the live link on
+ * the SIGNED v13 (see `mayInheritLiveLink`). Pressing Qualify on the sheet they
+ * signed would have sent v14's price under v13's signature.
+ *
+ * SCOPED TO THE DEAL AND THE COMPANY even though the id is unique on its own.
+ * The id reaches here from a caller — a share token's row, a rep's page, a
+ * server action's argument — and a proposal belonging to another deal or
+ * another company must resolve to nothing rather than to itself.
+ *
+ * With no id, the deal answers for itself, and it answers with the version it
+ * SOLD at: the approved one — set by hand, and automatically by a signature —
+ * falling back to the current one where nothing has been approved. At most one
+ * row per lead can be approved (a partial unique index enforces it), so the
+ * ordering below picks that row when it exists and the newest live version
+ * otherwise. Plain "newest" is what is not on offer here: it is the reading
+ * that put an unsigned draft's price on a credit file.
+ */
+function submissionDocument(leadId: string, companyId: string, proposalId?: string | null) {
+  if (proposalId) {
+    return prisma.solarProposal.findFirst({
+      where: { id: proposalId, leadId, companyId },
+      select: { snapshot: true },
+    });
+  }
+  return prisma.solarProposal.findFirst({
+    where: { leadId, companyId, OR: [{ approvedAt: { not: null } }, { supersededAt: null }] },
+    orderBy: [
+      // NULLS LAST, explicitly: Postgres sorts nulls FIRST on a DESC order,
+      // which would hand every unapproved version priority over the one
+      // version somebody said this deal sold at.
+      { approvedAt: { sort: "desc", nulls: "last" } },
+      { version: "desc" },
+    ],
+    select: { snapshot: true },
+  });
+}
+
+/**
  * THE MONEY — READ OFF THE DOCUMENT THE CUSTOMER WAS SHOWN.
  *
  * The live proposal's FROZEN figures, not the live pricing rows. The lender has
@@ -521,8 +589,13 @@ export function lenderReference(designId: string, attempt: number): string {
  * FALLS BACK to SolarFinance when no proposal has been generated, which is the
  * only route that reaches here without one.
  */
-async function loadMoney(leadId: string, companyId: string, basis: AmountBasis) {
-  const quoted = await quotedFromProposal(leadId, companyId, basis);
+async function loadMoney(
+  leadId: string,
+  companyId: string,
+  basis: AmountBasis,
+  proposalId?: string | null,
+) {
+  const quoted = await quotedFromProposal(leadId, companyId, basis, proposalId);
   if (quoted) return { problem: null, ...quoted };
 
   const finance = await prisma.solarFinance.findFirst({
@@ -547,9 +620,9 @@ async function loadMoney(leadId: string, companyId: string, basis: AmountBasis) 
  * cannot move what has already been submitted, and the lender is told what the
  * sheet in the household's hands says rather than what the database says now.
  *
- * Superseded versions are excluded exactly as `quotedFromProposal` excludes
- * them: a replaced document describes a system this deal is no longer written
- * at, and its saving is the saving of a different quote.
+ * The SAME document the money comes off — see `submissionDocument`, which both
+ * go through. A payload quoting one version's price beside another version's
+ * saving is a payload nobody at either company can reconcile.
  *
  * NO FALLBACK TO THE LIVE ROWS, deliberately. There is no live savings model to
  * fall back TO — the comparison is worked out at generation and frozen — so the
@@ -565,12 +638,9 @@ async function loadQuoted(
   companyId: string,
   savingBasis: SavingBasis,
   savingHorizon: SavingHorizon,
+  proposalId?: string | null,
 ): Promise<{ system: AmosSystemFigures | null }> {
-  const live = await prisma.solarProposal.findFirst({
-    where: { leadId, companyId, supersededAt: null },
-    orderBy: { version: "desc" },
-    select: { snapshot: true },
-  });
+  const live = await submissionDocument(leadId, companyId, proposalId);
   const snapshot = live?.snapshot as
     | {
         system?: { year1ProductionKwh?: unknown };
@@ -691,20 +761,19 @@ function savingOnBasis(
 }
 
 /**
- * The amount and term the CURRENT document quotes, or null if it says neither.
+ * The amount and term this deal's document quotes, or null if it says neither.
  *
- * Superseded versions are excluded for the same reason `qualifyOnProposal`
- * refuses to submit from one: it quotes a price the deal is no longer written
- * at. A snapshot older than the field simply has no answer here and the rows
- * below take over, which is the right reading of an older proposal rather than
- * a guess at one.
+ * WHICH document is `submissionDocument`'s question, not this one's. A snapshot
+ * older than the field simply has no answer here and the rows below take over,
+ * which is the right reading of an older proposal rather than a guess at one.
  */
-async function quotedFromProposal(leadId: string, companyId: string, basis: AmountBasis) {
-  const live = await prisma.solarProposal.findFirst({
-    where: { leadId, companyId, supersededAt: null },
-    orderBy: { version: "desc" },
-    select: { snapshot: true },
-  });
+async function quotedFromProposal(
+  leadId: string,
+  companyId: string,
+  basis: AmountBasis,
+  proposalId?: string | null,
+) {
+  const live = await submissionDocument(leadId, companyId, proposalId);
   const financing = (live?.snapshot as { financing?: Record<string, unknown> } | null)?.financing;
   if (!financing) return null;
 

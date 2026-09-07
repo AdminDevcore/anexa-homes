@@ -27,6 +27,8 @@ const PROPOSAL = {
   companyId: 'co-1',
   version: 33,
   supersededAt: null as Date | null,
+  signedAt: null as Date | null,
+  approvedAt: null as Date | null,
   lead: { vertical: 'solar' as const },
 }
 
@@ -60,6 +62,24 @@ describe('qualifyOnProposalAsRep', () => {
     expect(submitDealToLender).not.toHaveBeenCalled()
   })
 
+  /**
+   * The rep's door and the customer's door agree, because they ask the same
+   * function. A rep sitting at the table with a signed document in front of
+   * them is the situation this door was built for, and a v14 generated
+   * afterwards must not take it away.
+   */
+  it('sends from the version the customer signed', async () => {
+    const res = await qualifyOnProposalAsRep(
+      { ...PROPOSAL, supersededAt: new Date('2026-09-05'), signedAt: new Date('2026-09-04') },
+      REP,
+      INPUT,
+    )
+    expect(res.ok).toBe(true)
+    expect(submitDealToLender).toHaveBeenCalledWith(
+      expect.objectContaining({ proposalId: 'prop-1' }),
+    )
+  })
+
   it('names the acting rep as BOTH the fallback and the submitter', async () => {
     // Two fields for one person here, because they are not the same fact: the
     // customer's own door has a fallback and no submitter at all. Delivery is
@@ -68,6 +88,9 @@ describe('qualifyOnProposalAsRep', () => {
     expect(submitDealToLender).toHaveBeenCalledWith({
       leadId: 'lead-1',
       companyId: 'co-1',
+      // The document that was open, so the amount sent is the one on the page
+      // the rep is looking at rather than the newest row on the deal.
+      proposalId: 'prop-1',
       ownerOccupied: true,
       fallbackRepName: 'Mustafa Joulani',
       submitterName: 'Mustafa Joulani',

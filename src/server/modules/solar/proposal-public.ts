@@ -47,6 +47,11 @@ export async function getPublicSolarProposal(token: string) {
         select: {
           id: true, leadId: true, companyId: true, version: true, status: true,
           sentAt: true, supersededAt: true, snapshot: true,
+          // Which version this deal SOLD at. Read on the public page because a
+          // superseded document may still start an application when it is the
+          // one that was agreed — see `mayStartApplication`. `signedAt` arrives
+          // with the signature block below.
+          approvedAt: true,
           showComparison: true, showPaymentOptions: true,
           ...SIGNATURE_SELECT,
           lead: { select: { vertical: true, email: true, phone: true } },
