@@ -390,6 +390,12 @@ export function LenderDetail({
           batteryRule: draft.batteryRule,
           submissionAmountBasis: draft.submissionAmountBasis,
           submissionSavingBasis: draft.submissionSavingBasis,
+          submissionSavingHorizon: draft.submissionSavingHorizon,
+          submissionRepNameBasis: draft.submissionRepNameBasis,
+          // Blank clears it, and a `fixed` partner with nothing typed falls
+          // back to the deal's rep rather than sending an empty name.
+          submissionRepName: draft.submissionRepName.trim() || null,
+          submissionDelivery: draft.submissionDelivery,
           contractAdjustmentEnabled: draft.adjustmentEnabled,
           contractAdjustmentType: "fixed",
           contractAdjustmentCents,
@@ -1062,6 +1068,10 @@ export function LenderDetail({
             draft={draft}
             onAmountBasis={(v) => set("submissionAmountBasis", v)}
             onSavingBasis={(v) => set("submissionSavingBasis", v)}
+            onSavingHorizon={(v) => set("submissionSavingHorizon", v)}
+            onRepNameBasis={(v) => set("submissionRepNameBasis", v)}
+            onRepName={(v) => set("submissionRepName", v)}
+            onDelivery={(v) => set("submissionDelivery", v)}
           />
         </TabsContent>
 

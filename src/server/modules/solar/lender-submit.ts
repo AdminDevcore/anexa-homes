@@ -8,7 +8,7 @@ import {
   type AmosApplicationPayload,
   type AmosSystemFigures,
 } from "./amos-payload";
-import { postSolarUtilityCents, type SavingsModel } from "@/lib/solar-proposal";
+import { postSolarUtilityCents, type SavingsModel, type SavingsYear } from "@/lib/solar-proposal";
 import { submitToAmos, validateWithAmos, AmosSubmissionError, type AmosValidation } from "./amos-client";
 
 /**
@@ -95,7 +95,12 @@ export async function readLenderSubmission(
     return { mode: "link" };
   }
 
-  const quoted = await loadQuoted(leadId, companyId, lender.submissionSavingBasis);
+  const quoted = await loadQuoted(
+    leadId,
+    companyId,
+    lender.submissionSavingBasis,
+    lender.submissionSavingHorizon,
+  );
 
   // Both sets at once. A rep who fixes the panel mapping only to be told about
   // the missing rate has been sent round the loop twice for one visit.
@@ -152,6 +157,11 @@ export type LenderPayloadPreview =
 export async function readLenderPayloadPreview(
   leadId: string,
   companyId: string,
+  /**
+   * Whoever is looking. Both callers are a signed-in rep, so this is the
+   * SUBMITTER as well as the fallback — a partner set to `submitter` previews
+   * the name it would really be sent.
+   */
   fallbackRepName: string,
 ): Promise<LenderPayloadPreview> {
   const design = await loadDesign(leadId, companyId);
@@ -162,7 +172,12 @@ export async function readLenderPayloadPreview(
     return { mode: "link" };
   }
 
-  const quoted = await loadQuoted(leadId, companyId, lender.submissionSavingBasis);
+  const quoted = await loadQuoted(
+    leadId,
+    companyId,
+    lender.submissionSavingBasis,
+    lender.submissionSavingHorizon,
+  );
   const problems = [
     ...preflightAmosSubmission(design.lead, asSubmitted(design), lender.name),
     ...savingsProblems(quoted.system),
@@ -185,10 +200,16 @@ export async function readLenderPayloadPreview(
       externalId: lenderReference(design.id, design.lenderSubmissionAttempt),
       amountCents: money.amountCents,
       termMonths: money.termMonths,
-      salesRepName: repName(design.lead.assignedRep) ?? fallbackRepName,
+      salesRepName: resolveRepName(
+        lender.submissionRepNameBasis,
+        lender.submissionRepName,
+        design.lead.assignedRep,
+        fallbackRepName,
+        fallbackRepName,
+      ),
       // The rep answers this at the moment of sending; the panel labels it.
       ownerOccupied: true,
-      delivery: "in_person",
+      delivery: lender.submissionDelivery,
       system: quoted.system!,
     }),
   };
@@ -259,24 +280,24 @@ export type LenderSubmitInput = {
    */
   ownerOccupied: boolean;
   /**
-   * Whether the response ALSO carries the completion link.
+   * Used only when the deal has no assigned rep of its own.
    *
-   * BOTH VALUES EMAIL THE CUSTOMER. The lender's invitation always emails, and
-   * texts too when a phone number is on file — there is no per-channel switch
-   * and no way to suppress delivery. `in_person` only adds the link to the
-   * response so a rep can hand over their own device.
-   *
-   * This matters for testing: there is no such thing as a silent submission.
-   * A smoke test reaches whoever is on the lead, so put your own email AND
-   * your own phone on it first.
+   * DISTINCT FROM THE SUBMITTER, which is why they are two fields. On the
+   * customer's own door nobody at the company pressed anything, and the
+   * fallback there is the company's name — sending that as "the person who
+   * submitted this" would name a homeowner's own click as a salesperson.
    */
-  delivery?: "in_person" | "customer";
-  /** Used only when the deal has no assigned rep of its own. */
   fallbackRepName: string;
+  /**
+   * Who pressed the button, where somebody at the company did. Null on the
+   * customer's door. Read only by a partner set to `submitter`; see
+   * `resolveRepName`.
+   */
+  submitterName?: string | null;
 };
 
 export async function submitDealToLender(input: LenderSubmitInput): Promise<LenderSubmitResult> {
-  const { leadId, companyId, ownerOccupied, delivery = "in_person", fallbackRepName } = input;
+  const { leadId, companyId, ownerOccupied, fallbackRepName, submitterName = null } = input;
 
   const design = await loadDesign(leadId, companyId);
   if (!design) return fail("Deal not found.");
@@ -296,7 +317,12 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
   // build sees it, so the two can never disagree about what is being sent.
   const submitted = asSubmitted(design);
 
-  const quoted = await loadQuoted(leadId, companyId, lender.submissionSavingBasis);
+  const quoted = await loadQuoted(
+    leadId,
+    companyId,
+    lender.submissionSavingBasis,
+    lender.submissionSavingHorizon,
+  );
 
   const problems = [
     ...preflightAmosSubmission(design.lead, submitted, lender.name),
@@ -319,11 +345,19 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     externalId: lenderReference(design.id, design.lenderSubmissionAttempt),
     amountCents: money.amountCents,
     termMonths: money.termMonths,
-    // The rep on the deal if there is one, otherwise whoever the caller named.
-    // The lender takes a typed name and maps it to a real login on their side.
-    salesRepName: repName(design.lead.assignedRep) ?? fallbackRepName,
+    // Whichever name THIS partner reconciles against — see `resolveRepName`.
+    salesRepName: resolveRepName(
+      lender.submissionRepNameBasis,
+      lender.submissionRepName,
+      design.lead.assignedRep,
+      submitterName,
+      fallbackRepName,
+    ),
     ownerOccupied,
-    delivery,
+    // The partner's own rule about who completes the application, not the
+    // caller's preference. Both doors used to state `in_person` and neither
+    // could be told otherwise.
+    delivery: lender.submissionDelivery,
     // Non-null by construction: `savingsProblems(null)` returns a problem, and
     // a non-empty problem list has already returned above.
     system: quoted.system!,
@@ -332,10 +366,12 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
   const log = (row: Omit<SubmissionLog, "payload">) =>
     recordSubmission(
       companyId, leadId, lender, payload, fallbackRepName,
-      // Recorded, not inferred: the lender's setting can be changed afterwards,
+      // Recorded, not inferred: the lender's settings can be changed afterwards,
       // and "what did we ask them to fund, and on what basis" has to stay
-      // answerable about THIS attempt.
+      // answerable about THIS attempt. The saving needs both halves — the same
+      // $2,900 is a different claim in year one than averaged over thirty.
       lender.submissionAmountBasis,
+      `${lender.submissionSavingBasis}/${lender.submissionSavingHorizon}`,
       row,
     );
 
@@ -424,6 +460,7 @@ async function recordSubmission(
   payload: AmosApplicationPayload,
   actorName: string,
   amountBasis: string,
+  savingBasis: string,
   row: Omit<SubmissionLog, "payload">,
 ) {
   try {
@@ -442,6 +479,7 @@ async function recordSubmission(
         referenceNumber: row.referenceNumber,
         applicationId: row.applicationId,
         amountBasis,
+        savingBasis,
         actorName,
       },
     });
@@ -526,6 +564,7 @@ async function loadQuoted(
   leadId: string,
   companyId: string,
   savingBasis: SavingBasis,
+  savingHorizon: SavingHorizon,
 ): Promise<{ system: AmosSystemFigures | null }> {
   const live = await prisma.solarProposal.findFirst({
     where: { leadId, companyId, supersededAt: null },
@@ -543,7 +582,7 @@ async function loadQuoted(
     | undefined;
   if (!snapshot?.savings) return { system: null };
 
-  const avoided = year1Saving(snapshot.savings, savingBasis);
+  const avoided = savingOnBasis(snapshot.savings, savingBasis, savingHorizon);
   if (avoided == null) return { system: null };
 
   return {
@@ -572,36 +611,83 @@ function num(v: unknown): number {
 /** What a partner means by "estimated saving". */
 export type SavingBasis = "utility_avoided" | "net_of_payment";
 
+/** Which year of a decades-long comparison that saving describes. */
+export type SavingHorizon = "year_one" | "term_average";
+
 /**
- * Year one's saving, on the basis this partner underwrites.
+ * ONE YEAR'S SAVING, on the basis this partner underwrites.
  *
- * `utility_avoided` is the electricity bill that stops arriving:
- * `year1UtilityAvoidedCents` is that arithmetic and lives with the savings
- * model. `net_of_payment` goes on to subtract what the system costs the
- * household this year, which on a thirty-year loan is routinely NEGATIVE — a
- * true figure that a partner whose amount pattern has no minus sign cannot
- * accept. `savingsProblems` refuses it rather than sending it, and the settings
- * screen says so beside the option.
+ * `utility_avoided` is the electricity bill that stops arriving.
+ * `net_of_payment` goes on to subtract what the system costs the household
+ * that year, which on a thirty-year loan is routinely NEGATIVE — a true figure
+ * that a partner whose amount pattern has no minus sign cannot accept.
+ * `savingsProblems` refuses it rather than sending it, and the settings screen
+ * says so beside the option.
  *
- * This is the part that cannot trust its input: the input is a JSON column that
- * has held eight schema versions.
+ * Returns null for a row the document cannot answer from, which is how an
+ * average knows to give up rather than to divide by a smaller number than it
+ * counted.
  */
-function year1Saving(savings: SavingsModel, basis: SavingBasis): number | null {
-  const y1 = Array.isArray(savings.years) ? savings.years[0] : null;
-  if (!y1 || typeof y1.utilityCostCents !== "number") return null;
-  const avoided = y1.utilityCostCents - postSolarUtilityCents(y1);
+function savingInYear(y: SavingsYear, basis: SavingBasis): number | null {
+  if (!y || typeof y.utilityCostCents !== "number") return null;
 
   // OPT IN EXPLICITLY. Anything that is not the net reading is the avoided
   // one — the safe default, and the only one most partners can accept. Netting
   // must never be what an unrecognised value falls through to: it is the branch
   // that produces a negative figure and blocks the deal.
-  if (basis !== "net_of_payment") return Math.round(avoided);
+  if (basis !== "net_of_payment") return y.utilityCostCents - postSolarUtilityCents(y);
 
-  // What solar costs the household this year, read off the row rather than
+  // What solar costs the household that year, read off the row rather than
   // rebuilt: the payment, the fee, the battery programme and any credit relief
   // are already netted into it by the model that priced the document.
-  const solarCost = typeof y1.solarCostCents === "number" ? y1.solarCostCents : 0;
-  return Math.round(y1.utilityCostCents - solarCost);
+  const solarCost = typeof y.solarCostCents === "number" ? y.solarCostCents : 0;
+  return y.utilityCostCents - solarCost;
+}
+
+/**
+ * The saving this partner is told, on its basis and over its horizon.
+ *
+ * TWO SETTINGS, ONE SUBTRACTION. The basis decides what comes off the utility
+ * bill; the horizon decides over how many years the same subtraction is read.
+ * `term_average` is emphatically not a second arithmetic — it is `savingInYear`
+ * applied to every row the document froze instead of only the first, which is
+ * why a proposal priced before the meter fee existed still reports the figure
+ * it was priced at in both readings. Averaging a stored total would have been
+ * one line shorter and would have bypassed `postSolarUtilityCents`.
+ *
+ * WHY THE HORIZON IS A PARTNER'S CHOICE. The comparison runs for the life of
+ * the loan and the utility side escalates every year, so year one is the
+ * SMALLEST of thirty true answers. A partner whose form asks what the household
+ * saves "per year" over the term means the average; one testing a first-year
+ * minimum means year one. Only they know which.
+ *
+ * FAILS SAFE TO YEAR ONE, in every direction: an unrecognised horizon, an
+ * empty or absent year list, a row the document cannot answer from. That is
+ * both the figure every submission carried before this existed and the smaller
+ * one — and overstating a saving on a credit application is the direction that
+ * does harm.
+ *
+ * This is the part that cannot trust its input: the input is a JSON column that
+ * has held eight schema versions.
+ */
+function savingOnBasis(
+  savings: SavingsModel,
+  basis: SavingBasis,
+  horizon: SavingHorizon,
+): number | null {
+  const years = Array.isArray(savings.years) ? savings.years : [];
+  const y1 = years[0] ? savingInYear(years[0], basis) : null;
+  if (y1 == null) return null;
+  if (horizon !== "term_average") return Math.round(y1);
+
+  // Every year or none. A horizon averaged over the rows that happened to parse
+  // is a figure with no stated meaning, and the document that could not answer
+  // for year seventeen is exactly the one nobody should be averaging.
+  const each = years.map((y) => savingInYear(y, basis));
+  if (each.length === 0 || each.some((v) => v == null)) return Math.round(y1);
+
+  const total = each.reduce((n: number, v) => n + (v as number), 0);
+  return Math.round(total / each.length);
 }
 
 /**
@@ -720,6 +806,52 @@ function repName(rep: { firstName: string; lastName: string } | null): string | 
   return name.length > 0 ? name : null;
 }
 
+/** Whose name this partner wants on the application as the seller. */
+export type RepNameBasis = "deal_rep" | "submitter" | "fixed";
+
+/**
+ * THE NAME ON THE APPLICATION, and it is not the same person to every partner.
+ *
+ * The lender takes a typed name and reconciles it on their side, which is why
+ * this matters more than it looks: a partner matching against its own approved
+ * roster refuses an application naming somebody not on it, and a partner
+ * matching against its portal logins refuses one naming somebody who has none.
+ * Both refusals arrive as a generic decline days later.
+ *
+ *   deal_rep   the rep the deal is assigned to, falling back to whoever caused
+ *              this submission. EXACTLY what was sent before this existed, and
+ *              what every partner keeps until somebody changes it.
+ *   submitter  the person who pressed the button, whatever the deal says. On
+ *              the customer's own door nobody at the company pressed anything,
+ *              so this reads as `deal_rep` there rather than naming a homeowner
+ *              as the seller.
+ *   fixed      one registered dealer contact, every time.
+ *
+ * FAILS SAFE TO `deal_rep` — on an unrecognised basis, and on a `fixed`
+ * partner whose name nobody has typed. An empty `salesRepName` is a field the
+ * lender rejects the whole application over, so a blank box must never become
+ * one; it falls through to the name that has always been sent instead.
+ */
+function resolveRepName(
+  basis: RepNameBasis,
+  fixedName: string | null,
+  assignedRep: { firstName: string; lastName: string } | null,
+  submitterName: string | null,
+  fallbackRepName: string,
+): string {
+  const dealRep = () => repName(assignedRep) ?? fallbackRepName;
+
+  if (basis === "fixed") {
+    const typed = (fixedName ?? "").trim();
+    return typed.length > 0 ? typed : dealRep();
+  }
+  if (basis === "submitter") {
+    const pressed = (submitterName ?? "").trim();
+    return pressed.length > 0 ? pressed : dealRep();
+  }
+  return dealRep();
+}
+
 const EQUIPMENT_SELECT = {
   manufacturer: true,
   model: true,
@@ -811,6 +943,12 @@ async function loadDesign(leadId: string, companyId: string) {
           // exactly as its key does.
           submissionAmountBasis: true,
           submissionSavingBasis: true,
+          submissionSavingHorizon: true,
+          // Whose name goes on it, and whether a rep may hand their device
+          // over. Facts about the partner for the same reason.
+          submissionRepNameBasis: true,
+          submissionRepName: true,
+          submissionDelivery: true,
         },
       },
       lead: {

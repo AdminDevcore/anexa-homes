@@ -104,11 +104,14 @@ export async function qualifyOnProposal(
       leadId: proposal.leadId,
       companyId: proposal.companyId,
       ownerOccupied: input.ownerOccupied,
-      // The household is holding the device the link has to come back to.
-      delivery: "in_person",
       // Only reached on a deal with no assigned rep. The lender takes a typed
       // name; "Anexa Homes" is truthful and is not somebody else's login.
       fallbackRepName: "Anexa Homes",
+      // NOBODY AT THE COMPANY PRESSED THIS. The household did, on their own
+      // document, so there is no submitter to name — a partner set to
+      // `submitter` falls back to the deal's rep here rather than filing a
+      // homeowner's own click as the salesperson.
+      submitterName: null,
     });
 
     if (!result.ok) {

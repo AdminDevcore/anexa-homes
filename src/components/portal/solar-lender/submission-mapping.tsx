@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Caution, ChoiceCards, Hint, Panel } from "@/components/portal/settings-kit/fields";
+import { Caution, ChoiceCards, Hint, Panel, TextField } from "@/components/portal/settings-kit/fields";
 import type { LenderRow } from "./types";
 
 /**
@@ -16,11 +16,22 @@ import type { LenderRow } from "./types";
  * So: every field on the wire, named, with the screen that owns its value.
  *
  * MOST OF IT IS NOT A CHOICE, and the table says so rather than offering a
- * dropdown per row. A first name has exactly one sensible source. The two rows
- * that ARE choices are choices because more than one figure is TRUE and only
- * the partner knows which one their paper is written at — and getting those
- * wrong is a six-figure misstatement on a credit application, which is
- * precisely why they belong on a settings screen instead of in a constant.
+ * dropdown per row. A first name has exactly one sensible source.
+ *
+ * THE BAR FOR BECOMING A SETTING is that more than one answer is TRUE and only
+ * the partner knows which of them their own paper is written at. Five rows
+ * clear it: the loan amount, what a saving means, which year that saving
+ * describes, whose name goes on as the seller, and whose device the household
+ * finishes on. Each was a constant in this file before it was a column, and
+ * each was silently RIGHT for the first partner and unknowable for the second.
+ *
+ * Rows that do NOT clear the bar stay stated, however tempting. Production is
+ * the instructive refusal: the quoted figure is held under the model on
+ * purpose, so the un-derated one is arguably also true — but the saving beside
+ * it is computed FROM the quoted figure, and a partner handed a production
+ * number that does not reconcile with the saving has been handed two different
+ * deals. Inverter quantity is the other: it is a fact about the hardware, not
+ * about the partner, and `inverterCount` already reasons it out from nameplate.
  *
  * The LIVE values are deliberately not here. A settings screen showing one
  * deal's numbers is a settings screen pretending to be a deal; the payload
@@ -31,11 +42,26 @@ export function SubmissionMapping({
   draft,
   onAmountBasis,
   onSavingBasis,
+  onSavingHorizon,
+  onRepNameBasis,
+  onRepName,
+  onDelivery,
 }: {
   lender: LenderRow;
-  draft: { submissionAmountBasis: LenderRow["submissionAmountBasis"]; submissionSavingBasis: LenderRow["submissionSavingBasis"] };
+  draft: {
+    submissionAmountBasis: LenderRow["submissionAmountBasis"];
+    submissionSavingBasis: LenderRow["submissionSavingBasis"];
+    submissionSavingHorizon: LenderRow["submissionSavingHorizon"];
+    submissionRepNameBasis: LenderRow["submissionRepNameBasis"];
+    submissionRepName: string;
+    submissionDelivery: LenderRow["submissionDelivery"];
+  };
   onAmountBasis: (v: LenderRow["submissionAmountBasis"]) => void;
   onSavingBasis: (v: LenderRow["submissionSavingBasis"]) => void;
+  onSavingHorizon: (v: LenderRow["submissionSavingHorizon"]) => void;
+  onRepNameBasis: (v: LenderRow["submissionRepNameBasis"]) => void;
+  onRepName: (v: string) => void;
+  onDelivery: (v: LenderRow["submissionDelivery"]) => void;
 }) {
   const wired = !!lender.apiBaseUrl && !!lender.apiProductSlug;
 
@@ -118,13 +144,132 @@ export function SubmissionMapping({
             rather than sent.
           </Caution>
         )}
+
+        <div className="pt-1">
+          <ChoiceCards
+            name={`saving-horizon-${lender.id}`}
+            legend="Which year that figure describes"
+            why={
+              <>
+                The comparison on the proposal runs for the life of the loan, and the electricity
+                it replaces gets more expensive every year — so a system’s “annual saving” is
+                thirty different true numbers, of which year one is the smallest.
+              </>
+            }
+            value={draft.submissionSavingHorizon}
+            onChange={onSavingHorizon}
+            columns={2}
+            options={[
+              {
+                value: "year_one",
+                label: "The first twelve months",
+                detail:
+                  "What every partner received before this setting existed. The smallest of the true answers, and the one to send where their form tests a first-year minimum.",
+              },
+              {
+                value: "term_average",
+                label: "Averaged over the whole term",
+                detail:
+                  "The same subtraction across every year the proposal compares, divided by the number of years. Larger than year one on any deal — utility rates escalate. Right where their form asks what the household saves per year over the life of the loan.",
+              },
+            ]}
+          />
+        </div>
+        {draft.submissionSavingHorizon === "term_average" && (
+          <Caution>
+            A BIGGER number than this partner has been sent before, on every deal. That is the
+            direction that does harm on a credit application, so check their form actually asks for
+            the lifetime average before leaving this on — and note the monthly figure moves with it,
+            since it is the annual one divided by twelve.
+          </Caution>
+        )}
+      </Panel>
+
+      <Panel title="Whose name goes on it">
+        <ChoiceCards
+          name={`rep-basis-${lender.id}`}
+          legend="The salesperson on the application"
+          why={
+            <>
+              The partner receives a typed name and reconciles it on their own side — against an
+              approved roster, or against their portal logins. A name they cannot place comes back
+              as a decline days later, with no indication that the name was the reason.
+            </>
+          }
+          value={draft.submissionRepNameBasis}
+          onChange={onRepNameBasis}
+          options={[
+            {
+              value: "deal_rep",
+              label: "The rep the deal is assigned to",
+              detail:
+                "Falling back to whoever caused the submission when a deal has no rep of its own. What every partner received before this setting existed.",
+            },
+            {
+              value: "submitter",
+              label: "Whoever sends it",
+              detail:
+                "The person who pressed the button, whatever the deal says. For a partner that matches the name against its own portal logins. When the HOUSEHOLD presses Qualify on their own document nobody here sent it, so those deals fall back to the deal’s rep.",
+            },
+            {
+              value: "fixed",
+              label: "One name, every time",
+              detail:
+                "The dealer contact registered with this partner, sent on every deal regardless of who sold it. For a partner that will not accept a name outside its own approved list.",
+            },
+          ]}
+        />
+        {draft.submissionRepNameBasis === "fixed" && (
+          <div className="mt-3">
+            <TextField
+              label="The name they are sent"
+              value={draft.submissionRepName}
+              onChange={onRepName}
+              placeholder="Jordan Ellis"
+              hint="Spell it exactly as this partner has it registered. Left blank, deals fall back to the rep on the deal rather than going out with an empty name — which is a field they refuse the whole application over."
+            />
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Who completes the application">
+        <ChoiceCards
+          name={`delivery-${lender.id}`}
+          legend="Where the customer finishes"
+          why={
+            <>
+              BOTH ANSWERS EMAIL AND TEXT THE HOUSEHOLD. The partner’s invitation always goes out
+              and there is no way to suppress it — there is no such thing as a silent submission,
+              which matters when you are testing. The only difference is whether the link also
+              comes back to us.
+            </>
+          }
+          value={draft.submissionDelivery}
+          onChange={onDelivery}
+          columns={2}
+          options={[
+            {
+              value: "in_person",
+              label: "On the rep’s device, there and then",
+              detail:
+                "The completion link comes back in the response, so a rep at the kitchen table can hand their own phone over. What every partner received before this setting existed.",
+            },
+            {
+              value: "customer",
+              label: "Only on the customer’s own device",
+              detail:
+                "The link is not returned to us; the household completes it from the email or text the partner sends. For a partner whose rules say the application must not be finished on the dealer’s device.",
+            },
+          ]}
+        />
       </Panel>
 
       <Panel title="Everything else on the application">
         <p className="text-sm text-muted-foreground">
           Fixed, because each has exactly one sensible source. Change the value on the screen that
           owns it — there is no separate mapping, so what a rep sees is always what the lender is
-          told.
+          told. Anything a partner could reasonably disagree with us about is a setting above
+          instead; a row is only listed here when the second answer would be a wrong one.
         </p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[34rem] text-sm">
@@ -164,7 +309,6 @@ const ROWS: { field: string; from: string; where: string }[] = [
   { field: "applicant.phone", from: "The lead's phone, digits only", where: "the deal" },
   { field: "property.line1 / city / state / postalCode", from: "The lead's address", where: "the deal" },
   { field: "property.ownerOccupied", from: "Answered when QUALIFY is pressed — stored nowhere", where: "the send dialog" },
-  { field: "salesRepName", from: "The deal's rep, or whoever pressed the button", where: "the deal" },
   { field: "productSlug", from: "This partner's product", where: "Details → Direct submission" },
   { field: "externalId", from: "The design's id, so a resend cannot open a second file", where: "“Start a new reference”" },
   { field: "termMonths", from: "The proposal's loan term", where: "Financing, then regenerate" },

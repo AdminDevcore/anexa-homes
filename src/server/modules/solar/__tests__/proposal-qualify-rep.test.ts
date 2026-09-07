@@ -60,14 +60,17 @@ describe('qualifyOnProposalAsRep', () => {
     expect(submitDealToLender).not.toHaveBeenCalled()
   })
 
-  it('submits with the handoff link and the acting rep as the fallback name', async () => {
+  it('names the acting rep as BOTH the fallback and the submitter', async () => {
+    // Two fields for one person here, because they are not the same fact: the
+    // customer's own door has a fallback and no submitter at all. Delivery is
+    // no longer stated by either door — it is the partner's rule now.
     await qualifyOnProposalAsRep(PROPOSAL, REP, INPUT)
     expect(submitDealToLender).toHaveBeenCalledWith({
       leadId: 'lead-1',
       companyId: 'co-1',
       ownerOccupied: true,
-      delivery: 'in_person',
       fallbackRepName: 'Mustafa Joulani',
+      submitterName: 'Mustafa Joulani',
     })
   })
 

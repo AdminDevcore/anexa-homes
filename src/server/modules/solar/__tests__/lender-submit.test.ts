@@ -83,9 +83,13 @@ const DESIGN = {
     apiKeyEncrypted: 'ENCRYPTED',
     apiProductSlug: 'solar-installation-financing',
     // What every lender row carries by default, and what every submission sent
-    // before either was configurable.
+    // before any of them was configurable.
     submissionAmountBasis: 'contract_value',
     submissionSavingBasis: 'utility_avoided',
+    submissionSavingHorizon: 'year_one',
+    submissionRepNameBasis: 'deal_rep',
+    submissionRepName: null,
+    submissionDelivery: 'in_person',
   },
   lead: LEAD,
 }
@@ -645,5 +649,227 @@ describe('the saving basis', () => {
     })
     await submitDealToLender(input)
     expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('3611.96')
+  })
+})
+
+/**
+ * WHICH YEAR THE SAVING DESCRIBES.
+ *
+ * Orthogonal to the basis above and easy to mistake for a rounding difference,
+ * which is exactly why it is pinned: the utility side escalates, so every year
+ * after the first is LARGER, and the average across a thirty-year term can be
+ * half as much again as year one. On a credit application that is the direction
+ * that does harm, so year one is both the default and every fallback.
+ */
+describe('the saving horizon', () => {
+  const input = { leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true, fallbackRepName: 'Anexa Homes' }
+  const lenderOn = (horizon: string) => ({
+    ...DESIGN,
+    lender: { ...DESIGN.lender, submissionSavingHorizon: horizon },
+  })
+
+  /** Two years, so an average is a different number from either of them. */
+  const TWO_YEARS = {
+    ...SNAPSHOT,
+    savings: {
+      years: [
+        { year: 1, utilityCostCents: 373_196, residualGridCents: 0, meterFeeCents: 12_000 },
+        { year: 2, utilityCostCents: 400_000, residualGridCents: 0, meterFeeCents: 12_000 },
+      ],
+    },
+  }
+
+  it('sends the first twelve months by default', async () => {
+    proposalFindFirst.mockResolvedValue({ snapshot: TWO_YEARS })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('3611.96')
+  })
+
+  it('averages every year the document froze when the partner asks for the term', async () => {
+    // ($3,611.96 + $3,880.00) / 2. Larger than year one, as it will be on any
+    // deal — which is the whole reason this is the partner's call and not ours.
+    designFindFirst.mockResolvedValue(lenderOn('term_average'))
+    proposalFindFirst.mockResolvedValue({ snapshot: TWO_YEARS })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('3745.98')
+  })
+
+  it('moves the monthly figure with it, from the same annual number', async () => {
+    designFindFirst.mockResolvedValue(lenderOn('term_average'))
+    proposalFindFirst.mockResolvedValue({ snapshot: TWO_YEARS })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estMonthlySaving).toBe('312.17')
+  })
+
+  it('reads the meter fee through the schema-safe reader in EVERY year, not just the first', async () => {
+    // A document priced before the meter fee was modelled has no key on its
+    // later rows. Averaging a stored total would have skipped this entirely.
+    designFindFirst.mockResolvedValue(lenderOn('term_average'))
+    proposalFindFirst.mockResolvedValue({
+      snapshot: {
+        ...SNAPSHOT,
+        savings: {
+          years: [
+            { year: 1, utilityCostCents: 373_196, residualGridCents: 0 },
+            { year: 2, utilityCostCents: 400_000, residualGridCents: 0 },
+          ],
+        },
+      },
+    })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('3865.98')
+  })
+
+  it('composes with the basis rather than replacing it', async () => {
+    // Net of what solar costs, averaged. Two settings, one subtraction.
+    designFindFirst.mockResolvedValue({
+      ...DESIGN,
+      lender: { ...DESIGN.lender, submissionSavingBasis: 'net_of_payment', submissionSavingHorizon: 'term_average' },
+    })
+    proposalFindFirst.mockResolvedValue({
+      snapshot: {
+        ...SNAPSHOT,
+        savings: {
+          years: [
+            { year: 1, utilityCostCents: 373_196, residualGridCents: 0, meterFeeCents: 12_000, solarCostCents: 300_000 },
+            { year: 2, utilityCostCents: 400_000, residualGridCents: 0, meterFeeCents: 12_000, solarCostCents: 300_000 },
+          ],
+        },
+      },
+    })
+    await submitDealToLender(input)
+    // (($3,731.96 − $3,000) + ($4,000 − $3,000)) / 2.
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('865.98')
+  })
+
+  it('falls back to year one on a horizon this build does not know', async () => {
+    designFindFirst.mockResolvedValue(lenderOn('some_future_horizon'))
+    proposalFindFirst.mockResolvedValue({ snapshot: TWO_YEARS })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('3611.96')
+  })
+
+  it('falls back to year one rather than averaging the rows that happened to parse', async () => {
+    // A horizon averaged over some of the years is a figure with no stated
+    // meaning, and it would be SMALLER or LARGER at random.
+    designFindFirst.mockResolvedValue(lenderOn('term_average'))
+    proposalFindFirst.mockResolvedValue({
+      snapshot: {
+        ...SNAPSHOT,
+        savings: {
+          years: [
+            { year: 1, utilityCostCents: 373_196, residualGridCents: 0, meterFeeCents: 12_000 },
+            { year: 2, residualGridCents: 0, meterFeeCents: 12_000 },
+          ],
+        },
+      },
+    })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('3611.96')
+  })
+
+  it('records the basis AND the horizon that produced the saving', async () => {
+    designFindFirst.mockResolvedValue(lenderOn('term_average'))
+    proposalFindFirst.mockResolvedValue({ snapshot: TWO_YEARS })
+    await submitDealToLender(input)
+    expect(submissionCreate.mock.calls[0]?.[0]?.data?.savingBasis).toBe('utility_avoided/term_average')
+  })
+})
+
+/**
+ * WHOSE NAME GOES ON THE APPLICATION.
+ *
+ * The partner reconciles a typed name on their own side — against an approved
+ * roster, or against their portal logins — and a name they cannot place comes
+ * back as a generic decline days later. Every branch here must produce a
+ * non-empty name: an empty one is a field they refuse the whole application on.
+ */
+describe('the rep name basis', () => {
+  const input = { leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true, fallbackRepName: 'Anexa Homes' }
+  const lenderOn = (basis: string, name: string | null = null) => ({
+    ...DESIGN,
+    lender: { ...DESIGN.lender, submissionRepNameBasis: basis, submissionRepName: name },
+  })
+  const sent = () => submitToAmos.mock.calls[0]?.[1]?.salesRepName
+
+  it('sends the deal’s own rep by default', async () => {
+    await submitDealToLender({ ...input, submitterName: 'Priya Shah' })
+    expect(sent()).toBe('Marco Diaz')
+  })
+
+  it('sends whoever pressed the button when the partner matches its own logins', async () => {
+    designFindFirst.mockResolvedValue(lenderOn('submitter'))
+    await submitDealToLender({ ...input, submitterName: 'Priya Shah' })
+    expect(sent()).toBe('Priya Shah')
+  })
+
+  it('never files a homeowner’s own click as the salesperson', async () => {
+    // The customer's door names no submitter, because nobody here pressed
+    // anything. That must read as the deal's rep, not as an empty name.
+    designFindFirst.mockResolvedValue(lenderOn('submitter'))
+    await submitDealToLender({ ...input, submitterName: null })
+    expect(sent()).toBe('Marco Diaz')
+  })
+
+  it('sends the registered dealer contact on a partner that will take no other', async () => {
+    designFindFirst.mockResolvedValue(lenderOn('fixed', 'Jordan Ellis'))
+    await submitDealToLender({ ...input, submitterName: 'Priya Shah' })
+    expect(sent()).toBe('Jordan Ellis')
+  })
+
+  it('never sends an empty name from a fixed partner nobody has filled in', async () => {
+    designFindFirst.mockResolvedValue(lenderOn('fixed', '   '))
+    await submitDealToLender(input)
+    expect(sent()).toBe('Marco Diaz')
+  })
+
+  it('falls back to the deal’s rep on a basis this build does not know', async () => {
+    designFindFirst.mockResolvedValue(lenderOn('some_future_basis'))
+    await submitDealToLender({ ...input, submitterName: 'Priya Shah' })
+    expect(sent()).toBe('Marco Diaz')
+  })
+
+  it('still reaches the caller’s fallback when the deal has no rep at all', async () => {
+    designFindFirst.mockResolvedValue({
+      ...lenderOn('fixed', ''),
+      lead: { ...LEAD, assignedRep: null },
+    })
+    await submitDealToLender(input)
+    expect(sent()).toBe('Anexa Homes')
+  })
+})
+
+/**
+ * WHO COMPLETES THE APPLICATION.
+ *
+ * Both answers email and text the household — there is no such thing as a
+ * silent submission. The only difference is whether the completion link comes
+ * back to us for a rep to hand their device over.
+ */
+describe('the delivery setting', () => {
+  const input = { leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true, fallbackRepName: 'Anexa Homes' }
+
+  it('lets a rep hand their own device over by default', async () => {
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.delivery).toBe('in_person')
+  })
+
+  it('obeys the partner whose rules say the household finishes on its own device', async () => {
+    designFindFirst.mockResolvedValue({
+      ...DESIGN,
+      lender: { ...DESIGN.lender, submissionDelivery: 'customer' },
+    })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.delivery).toBe('customer')
+  })
+
+  it('is the PARTNER’S rule, not the caller’s — neither door may override it', async () => {
+    designFindFirst.mockResolvedValue({
+      ...DESIGN,
+      lender: { ...DESIGN.lender, submissionDelivery: 'customer' },
+    })
+    // The rep's door exists for the device handoff and used to state it here.
+    await submitDealToLender({ ...input, submitterName: 'Priya Shah' })
+    expect(submitToAmos.mock.calls[0]?.[1]?.delivery).toBe('customer')
   })
 })
