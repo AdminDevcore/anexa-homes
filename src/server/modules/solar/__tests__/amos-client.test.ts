@@ -12,6 +12,13 @@ const payload = {
     postalCode: '78735',
     ownerOccupied: true,
   },
+  system: {
+    annualProductionKwh: 14200,
+    annualConsumptionKwh: 15800,
+    retailRatePerKwh: '0.233',
+    estMonthlySaving: '301.00',
+    estAnnualSaving: '3611.96',
+  },
   requestedAmount: '48750.00',
   termMonths: 300,
   salesRepName: 'Marco Diaz',

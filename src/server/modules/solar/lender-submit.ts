@@ -1,6 +1,12 @@
 import { prisma } from "@/server/db/client";
 import { decryptField } from "@/server/lib/crypto";
-import { buildAmosPayload, preflightAmosSubmission } from "./amos-payload";
+import {
+  buildAmosPayload,
+  preflightAmosSubmission,
+  savingsProblems,
+  type AmosSystemFigures,
+} from "./amos-payload";
+import { postSolarUtilityCents, type SavingsModel } from "@/lib/solar-proposal";
 import { submitToAmos, AmosSubmissionError } from "./amos-client";
 
 /**
@@ -87,7 +93,14 @@ export async function readLenderSubmission(
     return { mode: "link" };
   }
 
-  const problems = preflightAmosSubmission(design.lead, asSubmitted(design), lender.name);
+  const quoted = await loadQuoted(leadId, companyId);
+
+  // Both sets at once. A rep who fixes the panel mapping only to be told about
+  // the missing rate has been sent round the loop twice for one visit.
+  const problems = [
+    ...preflightAmosSubmission(design.lead, asSubmitted(design), lender.name),
+    ...savingsProblems(quoted.system),
+  ];
   if (problems.length > 0) {
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
@@ -163,7 +176,12 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
   // build sees it, so the two can never disagree about what is being sent.
   const submitted = asSubmitted(design);
 
-  const problems = preflightAmosSubmission(design.lead, submitted, lender.name);
+  const quoted = await loadQuoted(leadId, companyId);
+
+  const problems = [
+    ...preflightAmosSubmission(design.lead, submitted, lender.name),
+    ...savingsProblems(quoted.system),
+  ];
   if (problems.length > 0) {
     return {
       ok: false,
@@ -186,6 +204,9 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     salesRepName: repName(design.lead.assignedRep) ?? fallbackRepName,
     ownerOccupied,
     delivery,
+    // Non-null by construction: `savingsProblems(null)` returns a problem, and
+    // a non-empty problem list has already returned above.
+    system: quoted.system!,
   });
 
   try {
@@ -267,6 +288,86 @@ async function loadMoney(leadId: string, companyId: string) {
     return { problem: "This deal has no loan term yet. Choose one first." as const };
   }
   return { problem: null, amountCents, termMonths: finance.loanTermMonths };
+}
+
+/**
+ * THE SAVINGS ANALYSIS, READ OFF THE DOCUMENT THE CUSTOMER WAS SHOWN.
+ *
+ * Same source and same reasoning as the money above: the live proposal's frozen
+ * snapshot, never the pricing rows. A rep re-pricing a deal mid-application
+ * cannot move what has already been submitted, and the lender is told what the
+ * sheet in the household's hands says rather than what the database says now.
+ *
+ * Superseded versions are excluded exactly as `quotedFromProposal` excludes
+ * them: a replaced document describes a system this deal is no longer written
+ * at, and its saving is the saving of a different quote.
+ *
+ * NO FALLBACK TO THE LIVE ROWS, deliberately. There is no live savings model to
+ * fall back TO — the comparison is worked out at generation and frozen — so the
+ * alternative would be inventing a second arithmetic for a figure that lands on
+ * a credit application. A deal with no document is refused instead, in words a
+ * rep can act on. See `savingsProblems`.
+ *
+ * Returns null when nothing can be resolved, which that function turns into the
+ * blocking problem.
+ */
+async function loadQuoted(
+  leadId: string,
+  companyId: string,
+): Promise<{ system: AmosSystemFigures | null }> {
+  const live = await prisma.solarProposal.findFirst({
+    where: { leadId, companyId, supersededAt: null },
+    orderBy: { version: "desc" },
+    select: { snapshot: true },
+  });
+  const snapshot = live?.snapshot as
+    | {
+        system?: { year1ProductionKwh?: unknown };
+        energy?: { annualUsageKwh?: unknown };
+        assumptions?: { currentRateMillsPerKwh?: unknown };
+        savings?: SavingsModel;
+      }
+    | null
+    | undefined;
+  if (!snapshot?.savings) return { system: null };
+
+  const avoided = year1UtilityAvoided(snapshot.savings);
+  if (avoided == null) return { system: null };
+
+  return {
+    system: {
+      annualProductionKwh: num(snapshot.system?.year1ProductionKwh),
+      annualConsumptionKwh: num(snapshot.energy?.annualUsageKwh),
+      retailRateMillsPerKwh: num(snapshot.assumptions?.currentRateMillsPerKwh),
+      annualUtilityAvoidedCents: avoided,
+    },
+  };
+}
+
+/**
+ * A snapshot's own value, or zero.
+ *
+ * A JSON column is `unknown` however carefully it was written, and the fields
+ * read here have all been added over time — an older document is missing some
+ * of them. Zero is the honest reading of "this document does not say", and
+ * `savingsProblems` refuses every one of these figures at zero rather than
+ * sending it.
+ */
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/**
+ * Year one's avoided utility cost, defended against a hand-written snapshot.
+ *
+ * `year1UtilityAvoidedCents` is the arithmetic and lives with the savings
+ * model; this is the part that cannot trust its input, because the input is a
+ * JSON column that has held eight schema versions.
+ */
+function year1UtilityAvoided(savings: SavingsModel): number | null {
+  const y1 = Array.isArray(savings.years) ? savings.years[0] : null;
+  if (!y1 || typeof y1.utilityCostCents !== "number") return null;
+  return Math.round(y1.utilityCostCents - postSolarUtilityCents(y1));
 }
 
 /**
