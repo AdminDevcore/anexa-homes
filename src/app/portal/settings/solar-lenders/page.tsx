@@ -59,6 +59,10 @@ export default async function SolarLendersPage({
       batteryRule: true,
       submissionAmountBasis: true,
       submissionSavingBasis: true,
+      submissionSavingHorizon: true,
+      submissionRepNameBasis: true,
+      submissionRepName: true,
+      submissionDelivery: true,
       // The programme contribution and the wording that goes with it. Only an
       // admin ever sees this screen — see `canEdit` — and a rep sees the
       // resulting figures on the deal, read-only.
@@ -167,6 +171,10 @@ export default async function SolarLendersPage({
           batteryRule: l.batteryRule,
           submissionAmountBasis: l.submissionAmountBasis,
           submissionSavingBasis: l.submissionSavingBasis,
+          submissionSavingHorizon: l.submissionSavingHorizon,
+          submissionRepNameBasis: l.submissionRepNameBasis,
+          submissionRepName: l.submissionRepName,
+          submissionDelivery: l.submissionDelivery,
           contractAdjustmentEnabled: l.contractAdjustmentEnabled,
           contractAdjustmentType: l.contractAdjustmentType,
           contractAdjustmentCents: l.contractAdjustmentCents,

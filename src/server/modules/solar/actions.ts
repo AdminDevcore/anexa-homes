@@ -1315,6 +1315,12 @@ const lenderSchema = z.object({
     .enum(["contract_value", "customer_obligation", "after_credits"])
     .optional(),
   submissionSavingBasis: z.enum(["utility_avoided", "net_of_payment"]).optional(),
+  submissionSavingHorizon: z.enum(["year_one", "term_average"]).optional(),
+  // Whose name goes on as the seller, and whose device the household finishes
+  // on. Both are facts about the partner for the same reason the two above are.
+  submissionRepNameBasis: z.enum(["deal_rep", "submitter", "fixed"]).optional(),
+  submissionRepName: z.string().trim().max(120).nullable().optional(),
+  submissionDelivery: z.enum(["in_person", "customer"]).optional(),
 
   // ── The programme contribution ──────────────────────────────────────────
   // The only setting in this file that makes the contract value and the

@@ -63,6 +63,14 @@ export type LenderRow = {
   submissionAmountBasis: "contract_value" | "customer_obligation" | "after_credits";
   /** What this partner means by "estimated saving". */
   submissionSavingBasis: "utility_avoided" | "net_of_payment";
+  /** Which year of the comparison that saving describes. */
+  submissionSavingHorizon: "year_one" | "term_average";
+  /** Whose name this partner reconciles against as the seller. */
+  submissionRepNameBasis: "deal_rep" | "submitter" | "fixed";
+  /** The one name a `fixed` partner is sent. Null until somebody types it. */
+  submissionRepName: string | null;
+  /** Whether the completion link comes back for a rep to hand over. */
+  submissionDelivery: "in_person" | "customer";
   /**
    * THE PROGRAMME CONTRIBUTION — the one setting on this screen that makes the
    * contract value and the customer's obligation two different numbers.
@@ -303,6 +311,10 @@ export function draftFrom(lender: LenderRow) {
     repPayMode: lender.repPayMode,
     submissionAmountBasis: lender.submissionAmountBasis,
     submissionSavingBasis: lender.submissionSavingBasis,
+    submissionSavingHorizon: lender.submissionSavingHorizon,
+    submissionRepNameBasis: lender.submissionRepNameBasis,
+    submissionRepName: lender.submissionRepName ?? "",
+    submissionDelivery: lender.submissionDelivery,
     batteryPayMode: lender.batteryPayMode,
     ppwMode: (lender.maxFinalPpwCents == null
       ? "normal"

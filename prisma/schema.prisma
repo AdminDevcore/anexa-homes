@@ -3510,6 +3510,57 @@ enum SolarSubmissionSavingBasis {
   net_of_payment
 }
 
+/// WHICH YEAR'S SAVING, on a comparison that runs for decades.
+///
+///   year_one      the first twelve months. What every submission sent before
+///                 this existed, and the SMALLEST reading — the utility side
+///                 escalates, so every later year is larger.
+///   term_average  the same subtraction averaged across the whole comparison
+///                 horizon, which follows the loan term. The right answer for
+///                 a partner whose form asks what the household saves "a year"
+///                 over the life of the loan rather than in its first.
+///
+/// The default is deliberately the smaller figure. Overstating a saving on a
+/// credit application is the direction that does harm, so an unrecognised
+/// value falls back here rather than to the average — see `savingOnBasis`.
+enum SolarSubmissionSavingHorizon {
+  year_one
+  term_average
+}
+
+/// WHOSE NAME GOES ON THE APPLICATION AS THE SELLER.
+///
+/// Every partner asks for one and they do not mean the same person by it.
+///
+///   deal_rep   the rep assigned to the deal, falling back to whoever caused
+///              the submission. What was always sent.
+///   submitter  the person who pressed the button, whatever the deal says.
+///              For a partner that reconciles the name against its own portal
+///              logins rather than against a roster.
+///   fixed      one name typed on this partner, every time — the dealer
+///              contact some partners register and will not accept a deviation
+///              from. Falls back to `deal_rep` when nobody has typed one.
+enum SolarSubmissionRepNameBasis {
+  deal_rep
+  submitter
+  fixed
+}
+
+/// WHETHER THE RESPONSE CARRIES THE COMPLETION LINK.
+///
+/// BOTH VALUES EMAIL AND TEXT THE HOUSEHOLD — the partner's invitation always
+/// goes out and there is no way to suppress it. The only difference is whether
+/// the link ALSO comes back in the response, which is what lets a rep hand
+/// their own device to the customer sitting in front of them.
+///
+///   in_person  the link comes back. What was always sent.
+///   customer   it does not, for a partner whose rules say the household must
+///              complete the application on its own device.
+enum SolarSubmissionDelivery {
+  in_person
+  customer
+}
+
 enum SolarContractAdjustmentType {
   /// A fixed dollar amount, in cents, added to the customer's obligation to
   /// reach the contract value.
@@ -3761,6 +3812,23 @@ model SolarLender {
   /// See `SolarSubmissionSavingBasis`. Decides the two saving figures.
   submissionSavingBasis SolarSubmissionSavingBasis @default(utility_avoided)
 
+  /// See `SolarSubmissionSavingHorizon`. Decides WHICH YEAR those two figures
+  /// describe. Orthogonal to the basis above: both settings apply to the same
+  /// subtraction, one choosing what is subtracted and one over how long.
+  submissionSavingHorizon SolarSubmissionSavingHorizon @default(year_one)
+
+  /// See `SolarSubmissionRepNameBasis`. Decides `salesRepName`.
+  submissionRepNameBasis SolarSubmissionRepNameBasis @default(deal_rep)
+
+  /// The one name a `fixed` partner is sent, typed as they registered it.
+  /// Null on every other partner, and null on a `fixed` one nobody has filled
+  /// in — which resolves as `deal_rep` rather than sending an empty name.
+  submissionRepName String?
+
+  /// See `SolarSubmissionDelivery`. Decides whether a rep can hand their own
+  /// device over. Every existing partner keeps the in-person behaviour.
+  submissionDelivery SolarSubmissionDelivery @default(in_person)
+
   /// Origin of the lender's partner API, e.g. "https://admin.amoscapitalfund.com".
   /// No trailing slash; the client appends "/api/v1/partner/...".
   apiBaseUrl      String?
@@ -3838,6 +3906,12 @@ model SolarLenderSubmission {
   /// than inferred: the setting can be changed afterwards, and "what did we
   /// actually ask them to fund, and on what basis" must stay answerable.
   amountBasis String?
+
+  /// Which saving this attempt was told, as "basis/horizon" — the same reason
+  /// `amountBasis` is recorded beside it. The body carries the FIGURE, but the
+  /// settings that produced it can be changed afterwards, and a saving of
+  /// $2,900 means two different things depending on which year it describes.
+  savingBasis String?
 
   actorName String?
   createdAt DateTime @default(now())

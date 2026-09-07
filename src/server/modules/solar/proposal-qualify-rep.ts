@@ -72,14 +72,18 @@ export async function qualifyOnProposalAsRep(
       leadId: proposal.leadId,
       companyId: proposal.companyId,
       ownerOccupied: input.ownerOccupied,
-      // The completion link comes back in the response so the rep can hand
-      // their own device over — which is the situation this door exists for.
-      // The lender emails and texts the household regardless; there is no such
-      // thing as a silent submission. See LenderSubmitInput.
-      delivery: "in_person",
+      // Whether the completion link comes back in the response — so the rep
+      // can hand their own device over, which is the situation this door
+      // exists for — is now THIS PARTNER'S rule, read off the lender row. The
+      // lender emails and texts the household either way; there is no such
+      // thing as a silent submission. See SolarSubmissionDelivery.
+      //
       // Only reached on a deal with no assigned rep, and then the truthful
       // answer is the person who pressed the button.
       fallbackRepName: actor.fullName,
+      // Who that is, as its own fact: a partner set to `submitter` wants this
+      // name whether or not the deal has a rep of its own.
+      submitterName: actor.fullName,
     });
 
     if (!result.ok) {
