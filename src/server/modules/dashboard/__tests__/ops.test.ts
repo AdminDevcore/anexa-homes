@@ -104,23 +104,23 @@ describe("pipelineHealth", () => {
 
 describe("summariseTeam", () => {
   const nameOf = (id: string) => ({ "u-1": "Ana Reyes", "u-2": "Bo Chen" })[id] ?? "Unnamed";
-  const tally = (assignedRepId: string | null, status: LeadTally["status"], count: number): LeadTally => ({
+  const tally = (assignedRepId: string | null, won: boolean, count: number): LeadTally => ({
     assignedRepId,
-    status,
+    won,
     count,
   });
+  const roll = (input: Partial<Parameters<typeof summariseTeam>[0]>) =>
+    summariseTeam({ leads: [], projects: [], installs: [], nameOf, seeMoney: true, ...input });
 
   it("rolls per-rep appointments, wins, and close rate", () => {
-    const summary = summariseTeam(
-      [tally("u-1", "won", 3), tally("u-1", "open", 7), tally("u-2", "won", 1), tally("u-2", "lost", 3)],
-      [
+    const summary = roll({
+      leads: [tally("u-1", true, 3), tally("u-1", false, 7), tally("u-2", true, 1), tally("u-2", false, 3)],
+      projects: [
         { assignedRepId: "u-1", contractValue: 100_00 },
         { assignedRepId: "u-1", contractValue: 200_00 },
         { assignedRepId: "u-2", contractValue: 50_00 },
       ],
-      nameOf,
-      true,
-    );
+    });
     expect(summary.rows.map((r) => r.name)).toEqual(["Ana Reyes", "Bo Chen"]);
     expect(summary.rows[0]).toMatchObject({ appointments: 10, won: 3, closeRatePct: 30, soldCents: 300_00 });
     expect(summary.rows[1]).toMatchObject({ appointments: 4, won: 1, closeRatePct: 25, soldCents: 50_00 });
@@ -129,12 +129,9 @@ describe("summariseTeam", () => {
   // Unassigned deals are real appointments, so the scope-wide rate must include
   // them — but "Unassigned" is not a performer and gets no leaderboard row.
   it("counts unassigned deals in the scope rate but gives them no row", () => {
-    const summary = summariseTeam(
-      [tally("u-1", "won", 1), tally("u-1", "open", 1), tally(null, "open", 8)],
-      [],
-      nameOf,
-      true,
-    );
+    const summary = roll({
+      leads: [tally("u-1", true, 1), tally("u-1", false, 1), tally(null, false, 8)],
+    });
     expect(summary.totalLeads).toBe(10);
     expect(summary.wonLeads).toBe(1);
     expect(summary.closeRatePct).toBe(10);
@@ -142,26 +139,53 @@ describe("summariseTeam", () => {
   });
 
   it("withholds money from viewers who may not see it", () => {
-    const summary = summariseTeam(
-      [tally("u-1", "won", 1)],
-      [{ assignedRepId: "u-1", contractValue: 999_00 }],
-      nameOf,
-      false,
-    );
+    const summary = roll({
+      leads: [tally("u-1", true, 1)],
+      projects: [{ assignedRepId: "u-1", contractValue: 999_00 }],
+      seeMoney: false,
+    });
     expect(summary.rows[0].soldCents).toBeNull();
   });
 
   it("reports no close rate rather than 0% with no deals", () => {
-    expect(summariseTeam([], [], nameOf, true)).toMatchObject({ closeRatePct: null, rows: [] });
+    expect(roll({})).toMatchObject({ closeRatePct: null, rows: [] });
   });
 
   it("ranks by wins, then volume", () => {
-    const summary = summariseTeam(
-      [tally("u-1", "won", 1), tally("u-1", "open", 20), tally("u-2", "won", 5)],
-      [],
-      nameOf,
-      true,
-    );
+    const summary = roll({
+      leads: [tally("u-1", true, 1), tally("u-1", false, 20), tally("u-2", true, 5)],
+    });
     expect(summary.rows.map((r) => r.name)).toEqual(["Bo Chen", "Ana Reyes"]);
+  });
+
+  // An install is a job on the calendar, credited to the rep who sold it —
+  // counted whether or not that rep booked the appointment in this window.
+  it("credits installs to the rep on the deal", () => {
+    const summary = roll({
+      leads: [tally("u-1", true, 2)],
+      installs: [{ assignedRepId: "u-1" }, { assignedRepId: "u-1" }, { assignedRepId: "u-2" }],
+    });
+    expect(summary.totalInstalls).toBe(3);
+    expect(summary.rows.find((r) => r.userId === "u-1")?.installs).toBe(2);
+    expect(summary.rows.find((r) => r.userId === "u-2")?.installs).toBe(1);
+  });
+
+  it("counts an unassigned install in the total but on nobody's row", () => {
+    const summary = roll({ installs: [{ assignedRepId: null }] });
+    expect(summary.totalInstalls).toBe(1);
+    expect(summary.rows).toHaveLength(0);
+  });
+
+  // A rep who did nothing this month is exactly who the manager is looking for.
+  it("keeps rostered people who did nothing, at zero", () => {
+    const summary = roll({
+      leads: [tally("u-1", true, 1)],
+      include: [
+        { userId: "u-1", name: "Ana Reyes" },
+        { userId: "u-2", name: "Bo Chen" },
+      ],
+    });
+    expect(summary.rows.map((r) => r.name)).toEqual(["Ana Reyes", "Bo Chen"]);
+    expect(summary.rows[1]).toMatchObject({ appointments: 0, won: 0, installs: 0, closeRatePct: 0 });
   });
 });

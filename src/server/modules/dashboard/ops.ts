@@ -1,8 +1,9 @@
-import type { LeadStatus, Prisma, Role, Vertical } from "@prisma/client";
+import type { Prisma, Role, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { SessionUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { daysInStage, stageTiming } from "@/lib/stage-status";
+import { getSaleLine } from "@/server/modules/pipeline/sale-line";
 import { dashboardLeadWhere, dashboardProjectWhere } from "./scope";
 import { canSeeFinancials } from "./queries";
 
@@ -168,52 +169,72 @@ export type TeamRow = {
   appointments: number;
   won: number;
   closeRatePct: number;
+  /** Deals with an install date on the books. */
+  installs: number;
   /** Null when the viewer isn't allowed to see money. */
   soldCents: number | null;
 };
 
-export type LeadTally = { assignedRepId: string | null; status: LeadStatus; count: number };
+/**
+ * Won is decided by the deal's STAGE, not by `Lead.status` — see
+ * lib/sold-stage.ts. The caller resolves it because the rule is one query
+ * against the pipelines, not one per tally.
+ */
+export type LeadTally = { assignedRepId: string | null; won: boolean; count: number };
 export type ProjectTally = { assignedRepId: string | null; contractValue: number };
+/** One row per installed / scheduled job, already filtered by the caller. */
+export type InstallTally = { assignedRepId: string | null };
 
 export type TeamSummary = {
   totalLeads: number;
   wonLeads: number;
   /** Won ÷ appointments, company-wide within scope. Null when there are none. */
   closeRatePct: number | null;
+  totalInstalls: number;
   rows: TeamRow[];
 };
 
 /**
  * Roll the per-rep tallies into leaderboard rows plus the scope-wide close rate.
  *
- * Deals with no assigned rep still count toward the scope-wide rate — they are
+ * Deals with no assigned rep still count toward the scope-wide totals — they are
  * real appointments — but they get no row: "Unassigned" is not a performer, and
  * a leaderboard it can top is a leaderboard nobody reads.
+ *
+ * `include` seeds rows for people who must appear whatever they did, so a rep
+ * who booked nothing this month shows a line of zeroes rather than vanishing
+ * from the report a manager is using to find exactly that.
  */
-export function summariseTeam(
-  leads: LeadTally[],
-  projects: ProjectTally[],
-  nameOf: (userId: string) => string,
-  seeMoney: boolean,
-): TeamSummary {
+export function summariseTeam(input: {
+  leads: LeadTally[];
+  projects: ProjectTally[];
+  installs: InstallTally[];
+  nameOf: (userId: string) => string;
+  seeMoney: boolean;
+  include?: { userId: string; name: string }[];
+}): TeamSummary {
+  const { leads, projects, installs, nameOf, seeMoney, include } = input;
   let totalLeads = 0;
   let wonLeads = 0;
-  const byRep = new Map<string, { appointments: number; won: number; soldCents: number }>();
+  let totalInstalls = 0;
+  const byRep = new Map<string, { appointments: number; won: number; installs: number; soldCents: number }>();
   const entry = (id: string) => {
     const existing = byRep.get(id);
     if (existing) return existing;
-    const fresh = { appointments: 0, won: 0, soldCents: 0 };
+    const fresh = { appointments: 0, won: 0, installs: 0, soldCents: 0 };
     byRep.set(id, fresh);
     return fresh;
   };
 
+  for (const person of include ?? []) entry(person.userId);
+
   for (const lead of leads) {
     totalLeads += lead.count;
-    if (lead.status === "won") wonLeads += lead.count;
+    if (lead.won) wonLeads += lead.count;
     if (!lead.assignedRepId) continue;
     const rep = entry(lead.assignedRepId);
     rep.appointments += lead.count;
-    if (lead.status === "won") rep.won += lead.count;
+    if (lead.won) rep.won += lead.count;
   }
 
   for (const project of projects) {
@@ -221,13 +242,21 @@ export function summariseTeam(
     entry(project.assignedRepId).soldCents += project.contractValue;
   }
 
+  for (const job of installs) {
+    totalInstalls += 1;
+    if (!job.assignedRepId) continue;
+    entry(job.assignedRepId).installs += 1;
+  }
+
+  const named = new Map((include ?? []).map((p) => [p.userId, p.name]));
   const rows: TeamRow[] = [...byRep.entries()]
     .map(([userId, agg]) => ({
       userId,
-      name: nameOf(userId),
+      name: named.get(userId) ?? nameOf(userId),
       appointments: agg.appointments,
       won: agg.won,
       closeRatePct: agg.appointments > 0 ? (agg.won / agg.appointments) * 100 : 0,
+      installs: agg.installs,
       soldCents: seeMoney ? agg.soldCents : null,
     }))
     // Won first — that is the job. Volume breaks the tie.
@@ -237,6 +266,7 @@ export function summariseTeam(
     totalLeads,
     wonLeads,
     closeRatePct: totalLeads > 0 ? (wonLeads / totalLeads) * 100 : null,
+    totalInstalls,
     rows,
   };
 }
@@ -247,8 +277,11 @@ export type TeamOps = PipelineHealth &
   Turnaround & {
     closeRatePct: number | null;
     wonLeads: number;
+    totalInstalls: number;
     team: TeamRow[];
     canSeeFinancials: boolean;
+    /** The stage a deal counts as sold from, for the "what does Won mean" line. */
+    saleLineLabel: string | null;
   };
 
 export async function getTeamOps(user: SessionUser, vertical: Vertical): Promise<TeamOps> {
@@ -269,7 +302,7 @@ export async function getTeamOps(user: SessionUser, vertical: Vertical): Promise
     ],
   };
 
-  const [completedJobs, openLeads, leadTallies, projectRows] = await Promise.all([
+  const [completedJobs, openLeads, leadTallies, projectRows, installRows, saleLine] = await Promise.all([
     prisma.project.findMany({
       where: { AND: [projectWhere, { status: { in: ["completed", "closed"] } }, finishedInWindow] },
       select: { completedAt: true, installDate: true, lead: { select: { createdAt: true } } },
@@ -278,8 +311,10 @@ export async function getTeamOps(user: SessionUser, vertical: Vertical): Promise
       where: { AND: [leadWhere, { status: "open" }] },
       select: { createdAt: true, stageChangedAt: true, stage: { select: { targetDays: true } } },
     }),
+    // Grouped by STAGE, not status: which stages mean "sold" is a setting, and
+    // `Lead.status` is never written to `won` by anything in the app.
     prisma.lead.groupBy({
-      by: ["assignedRepId", "status"],
+      by: ["assignedRepId", "stageId"],
       where: leadWhere,
       _count: { _all: true },
     }),
@@ -289,6 +324,14 @@ export async function getTeamOps(user: SessionUser, vertical: Vertical): Promise
           select: { contractValue: true, lead: { select: { assignedRepId: true } } },
         })
       : Promise.resolve([] as { contractValue: number; lead: { assignedRepId: string | null } }[]),
+    // An install is a job with a date on the calendar — scheduled counts, which
+    // is the whole point of tracking it here. A cancelled job does not: its date
+    // is a booking nobody kept.
+    prisma.project.findMany({
+      where: { AND: [projectWhere, { status: { not: "cancelled" } }, { installDate: { not: null } }] },
+      select: { lead: { select: { assignedRepId: true } } },
+    }),
+    getSaleLine(user.companyId, vertical),
   ]);
 
   const repIds = [...new Set(leadTallies.map((t) => t.assignedRepId).filter((id): id is string => !!id))];
@@ -308,19 +351,26 @@ export async function getTeamOps(user: SessionUser, vertical: Vertical): Promise
     })),
   );
   const health = pipelineHealth(openLeads, now);
-  const team = summariseTeam(
-    leadTallies.map((t) => ({ assignedRepId: t.assignedRepId, status: t.status, count: t._count._all })),
-    projectRows.map((p) => ({ assignedRepId: p.lead.assignedRepId, contractValue: p.contractValue })),
-    (id) => nameById.get(id) ?? "Unnamed",
+  const team = summariseTeam({
+    leads: leadTallies.map((t) => ({
+      assignedRepId: t.assignedRepId,
+      won: t.stageId != null && saleLine.stageIds.has(t.stageId),
+      count: t._count._all,
+    })),
+    projects: projectRows.map((p) => ({ assignedRepId: p.lead.assignedRepId, contractValue: p.contractValue })),
+    installs: installRows.map((p) => ({ assignedRepId: p.lead.assignedRepId })),
+    nameOf: (id) => nameById.get(id) ?? "Unnamed",
     seeMoney,
-  );
+  });
 
   return {
     ...health,
     ...turnaround,
     closeRatePct: team.closeRatePct,
     wonLeads: team.wonLeads,
+    totalInstalls: team.totalInstalls,
     team: team.rows,
     canSeeFinancials: seeMoney,
+    saleLineLabel: saleLine.label,
   };
 }

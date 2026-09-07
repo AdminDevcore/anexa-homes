@@ -846,6 +846,13 @@ model PipelineStage {
   color                 String        @default("#A1A1AA")
   isWon                 Boolean       @default(false)
   isLost                Boolean       @default(false)
+  /// Where the SALE is booked: deals at or past this stage count as won on the
+  /// team leaderboard. Separate from `isWon`, which marks the end of the job
+  /// (Paid / System Activated) and is read by the backlog and cycle-time
+  /// reports — a company sells in month one and gets paid in month four, and
+  /// one flag cannot honestly mark both. Unset on every stage falls back to the
+  /// stage NAMED for the signature, then to `isWon`. See lib/sold-stage.ts.
+  countsAsSold          Boolean       @default(false)
   /// Whether we control completion (hard SLA) or are waiting on someone else
   /// (follow-up cadence). See StageType.
   stageType             StageType     @default(internally_owned)

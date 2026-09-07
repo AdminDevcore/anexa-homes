@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/client";
+import { getSaleLine } from "@/server/modules/pipeline/sale-line";
 import type { Period, RenderableReport, ResolvedScope } from "./builders";
 
 type ReportUser = { companyId: string; userId: string; role: string };
@@ -12,13 +13,15 @@ const pct = (n: number) => `${n.toFixed(1)}%`;
  * claim/estimated value as a fallback). Tells you which channels make money.
  */
 export async function buildLeadSourceReport(user: ReportUser, period: Period, scope: ResolvedScope): Promise<RenderableReport> {
-  void user;
   const inPeriod = { gte: period.from, lte: period.to };
+
+  // Won is the deal's STAGE, not `Lead.status` — see lib/sold-stage.ts.
+  const saleLine = await getSaleLine(user.companyId);
 
   const leads = await prisma.lead.findMany({
     where: { ...scope.leadWhere, createdAt: inPeriod },
     select: {
-      status: true,
+      stageId: true,
       value: true,
       claimPrice: true,
       source: { select: { name: true } },
@@ -32,7 +35,7 @@ export async function buildLeadSourceReport(user: ReportUser, period: Period, sc
     const name = l.source?.name ?? "Direct / unattributed";
     const e = bySource.get(name) ?? { leads: 0, won: 0, revenue: 0 };
     e.leads += 1;
-    if (l.status === "won") {
+    if (l.stageId && saleLine.stageIds.has(l.stageId)) {
       e.won += 1;
       e.revenue += l.project
         ? l.project.contractValue + l.project.supplementCents + l.project.deductibleCents

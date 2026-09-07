@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/client";
+import { wonLeadFilter } from "@/server/modules/pipeline/sale-line";
 import type { Period, RenderableReport, ResolvedScope } from "./builders";
 
 type ReportUser = { companyId: string; userId: string; role: string };
@@ -17,17 +18,23 @@ export async function buildFunnelReport(user: ReportUser, period: Period, scope:
   const leadWhere = scope.leadWhere;
   const now = Date.now();
 
+  // Won comes off the stage, not `Lead.status` — see lib/sold-stage.ts.
+  const isWon = await wonLeadFilter(user.companyId);
+
   const [created, appts, won, lost, junk, openLeads, defaultPipeline] = await Promise.all([
     prisma.lead.count({ where: { ...leadWhere, createdAt: inPeriod } }),
     prisma.lead.count({ where: { ...leadWhere, appointmentAt: inPeriod } }),
-    prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: inPeriod } }),
+    prisma.lead.count({ where: { ...leadWhere, ...isWon, createdAt: inPeriod } }),
     prisma.lead.count({ where: { ...leadWhere, status: "lost", createdAt: inPeriod } }),
     prisma.lead.count({ where: { ...leadWhere, status: "junk", createdAt: inPeriod } }),
     prisma.lead.findMany({ where: { ...leadWhere, status: "open" }, select: { stageId: true, value: true, claimPrice: true, stageChangedAt: true, createdAt: true } }),
     prisma.pipeline.findFirst({ where: { companyId: user.companyId }, orderBy: { isDefault: "desc" }, include: { stages: { orderBy: { position: "asc" }, select: { id: true, name: true } } } }),
   ]);
 
-  const closingRate = appts > 0 ? (won / appts) * 100 : 0;
+  // Won over the deals CREATED in the window, not over the ones whose
+  // appointment happened to fall in it. Those are two different sets of deals,
+  // and dividing one by the other produced rates over 100%.
+  const closingRate = created > 0 ? (won / created) * 100 : 0;
   const ageDays = (since: Date) => Math.max(0, Math.floor((now - since.getTime()) / DAY));
 
   // Current open pipeline grouped by stage (waterfall) with avg time-in-stage.
@@ -63,7 +70,7 @@ export async function buildFunnelReport(user: ReportUser, period: Period, scope:
       { label: "New leads", value: String(created), hint: "in period" },
       { label: "Appointments", value: String(appts), hint: "in period" },
       { label: "Won", value: String(won), tone: "pos", hint: "in period" },
-      { label: "Closing rate", value: pct(closingRate), hint: "won / appts" },
+      { label: "Closing rate", value: pct(closingRate), hint: "won / new leads" },
       { label: "Open pipeline", value: String(totalOpen), hint: "current" },
       { label: "Avg age in stage", value: `${avgAge}d`, tone: avgAge > 30 ? "neg" : undefined, hint: "open deals" },
     ],

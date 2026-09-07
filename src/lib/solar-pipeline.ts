@@ -89,6 +89,8 @@ export type SolarStageDef = {
   defaultBlocker?: BlockerParty;
   isWon?: boolean;
   isLost?: boolean;
+  /** Where the sale is booked — see lib/sold-stage.ts. */
+  countsAsSold?: boolean;
 };
 
 /**
@@ -149,6 +151,9 @@ export const SOLAR_SALES_STAGES: SolarStageDef[] = [
     ownerRole: "sales_rep",
     followUpDays: 2,
     defaultBlocker: "customer",
+    // The sale is booked here: everything past it counts as won on the team
+    // leaderboard, months before the lender funds it.
+    countsAsSold: true,
   },
 ];
 

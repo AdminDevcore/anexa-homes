@@ -14,7 +14,7 @@ const STAGES = [
   { key: "adjuster_meeting", name: "Adjuster Meeting Scheduled", color: "#A78BFA" },
   { key: "scope_received", name: "Scope Received", color: "#C084FC" },
   { key: "supplement_needed", name: "Supplement Needed", color: "#F472B6" },
-  { key: "contract_signed", name: "Contract Signed", color: "#FB923C" },
+  { key: "contract_signed", name: "Contract Signed", color: "#FB923C", countsAsSold: true },
   { key: "material_ordered", name: "Material Ordered", color: "#FBBF24" },
   { key: "scheduled", name: "Scheduled", color: "#FACC15" },
   { key: "in_production", name: "In Production", color: "#A3E635" },
@@ -195,6 +195,7 @@ async function main() {
           color: s.color,
           position: i,
           isWon: (s as { isWon?: boolean }).isWon ?? false,
+          countsAsSold: (s as { countsAsSold?: boolean }).countsAsSold ?? false,
           isLost: (s as { isLost?: boolean }).isLost ?? false,
         },
       })
@@ -224,6 +225,7 @@ async function main() {
           color: s.color,
           position: i,
           isWon: s.isWon ?? false,
+          countsAsSold: s.countsAsSold ?? false,
           // Solar stages carry their own SLA model: internally-owned stages get
           // a hard deadline that escalates to the owning department role;
           // externally-blocked stages get a follow-up cadence and NO deadline,

@@ -36,6 +36,7 @@ export default async function PipelineSettingsPage({
           initialStageId={one(params.stage)}
           stages={pipeline.stages.map((s) => ({
             id: s.id, name: s.name, color: s.color, isWon: s.isWon, isLost: s.isLost,
+            countsAsSold: s.countsAsSold,
             targetDays: s.targetDays, escalationDays: s.escalationDays, notificationRecipient: s.notificationRecipient,
             sendInApp: s.sendInApp, sendEmail: s.sendEmail, markOverdue: s.markOverdue,
             stageType: s.stageType, ownerRole: s.ownerRole, followUpDays: s.followUpDays,

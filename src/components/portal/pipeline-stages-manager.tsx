@@ -62,6 +62,7 @@ type Stage = {
   color: string;
   isWon: boolean;
   isLost: boolean;
+  countsAsSold: boolean;
   targetDays: number;
   escalationDays: number;
   notificationRecipient: string;
@@ -191,6 +192,7 @@ export function PipelineStagesManager({
 
 /** What a stage says about itself in one line. */
 function stageSubtitle(s: Stage): string {
+  if (s.countsAsSold) return "sold from here";
   if (s.isWon) return "won";
   if (s.isLost) return "lost";
   if (s.stageType === "externally_blocked") {
@@ -225,6 +227,7 @@ function StagePanel({
       color: stage.color,
       isWon: stage.isWon,
       isLost: stage.isLost,
+      countsAsSold: stage.countsAsSold,
       targetDays: stage.targetDays ? String(stage.targetDays) : "",
       escalationDays: stage.escalationDays ? String(stage.escalationDays) : "",
       recipient: (stage.notificationRecipient as Recipient) ?? "none",
@@ -259,6 +262,7 @@ function StagePanel({
         color: draft.color,
         isWon: draft.isWon,
         isLost: draft.isLost,
+        countsAsSold: draft.countsAsSold,
         targetDays: Math.max(0, parseInt(draft.targetDays || "0", 10) || 0),
         escalationDays: Math.max(0, parseInt(draft.escalationDays || "0", 10) || 0),
         notificationRecipient: draft.recipient,
@@ -292,6 +296,7 @@ function StagePanel({
             <Pill>
               #{index + 1} of {total}
             </Pill>
+            {stage.countsAsSold && <Pill tone="gold">Sold from here</Pill>}
             {stage.isWon && <Pill tone="gold">Won</Pill>}
             {stage.isLost && <Pill tone="warn">Lost</Pill>}
             {stage.isActionRequired && <Pill tone="warn">Action required</Pill>}
@@ -385,8 +390,14 @@ function StagePanel({
             </div>
             <FieldGrid columns={2}>
               <ToggleRow
+                label="Counts as sold"
+                description="The deal is won here. Every stage after it counts as won too, on the dashboard and on Team Performance."
+                checked={draft.countsAsSold}
+                onChange={(v) => set("countsAsSold", v)}
+              />
+              <ToggleRow
                 label="Won stage"
-                description="A deal reaching it counts as sold."
+                description="The job is finished — the end of the pipeline, not the signature. Read by the backlog and cycle-time reports."
                 checked={draft.isWon}
                 onChange={(v) => set("isWon", v)}
               />
@@ -401,6 +412,12 @@ function StagePanel({
               <Caution>
                 A stage cannot honestly be both won and lost — every report that counts one will
                 count the other.
+              </Caution>
+            )}
+            {draft.countsAsSold && draft.isLost && (
+              <Caution>
+                A lost stage never counts as sold, whatever this says — a cancelled deal is not a
+                win. Clear one of the two.
               </Caution>
             )}
           </Panel>
@@ -532,6 +549,7 @@ function AddStageDialog({
         color,
         isWon: false,
         isLost: false,
+        countsAsSold: false,
         targetDays: 0,
         escalationDays: 0,
         notificationRecipient: "none",
