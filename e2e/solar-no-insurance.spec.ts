@@ -461,10 +461,13 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     await expect(page.getByText("Sales rep", { exact: true })).toBeVisible();
     await expect(page.getByText("Utility provider", { exact: true })).toBeVisible();
 
-    // The stage opens on the pipeline's first stage rather than on "Select
-    // stage" — the server derives it either way, so a blank picker asked a rep
-    // to make a choice that had already been made for them.
+    // Stage is shown, not asked: a new appointment always enters at the front
+    // of the pipeline, and the server derives that from the appointment date
+    // whatever a picker said. There is no stage combobox on the create form —
+    // only Source, Sales rep, Setter, Priority and the required custom field.
     await expect(page.getByText("Select stage")).toHaveCount(0);
+    await expect(page.getByRole("combobox").filter({ hasText: /New Appointment/ })).toHaveCount(0);
+    await expect(page.getByTestId("lead-entry-stage")).toHaveText("New Appointment");
 
     // Same form, roofing workspace: the fields are back, and solar's are not.
     await page.getByRole("button", { name: "Switch workspace" }).click();

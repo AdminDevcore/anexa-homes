@@ -1,8 +1,5 @@
 import { prisma } from "@/server/db/client";
-
-// The "Appointment Set" stage key (roofing pipeline). Pipelines without one
-// (e.g. solar/water) simply keep everything in their first stage.
-const APPOINTMENT_SET_KEY = "appointment_set";
+import { APPOINTMENT_SET_KEY, entryStage } from "@/lib/pipeline-entry";
 
 /**
  * Appointments and the pipeline are the same records viewed two ways. The FRONT
@@ -15,7 +12,9 @@ const APPOINTMENT_SET_KEY = "appointment_set";
  * where it is — editing/clearing a date never drags a working job backwards.
  *
  * Pass the candidate stage the caller wants (form selection, or the lead's
- * current stage); we return the stage the lead should actually be in.
+ * current stage); we return the stage the lead should actually be in. The rule
+ * itself lives in `@/lib/pipeline-entry` so the intake form can show the rep
+ * the answer before they submit.
  */
 export async function resolveStageForAppointment(opts: {
   pipelineId: string | null;
@@ -40,5 +39,5 @@ export async function resolveStageForAppointment(opts: {
   const atFront = candidateStageId == null || frontIds.has(candidateStageId);
   if (!atFront) return candidateStageId;
 
-  return hasAppointment && apptSet ? apptSet.id : first.id;
+  return entryStage(stages, hasAppointment)?.id ?? candidateStageId;
 }

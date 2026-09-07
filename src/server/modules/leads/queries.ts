@@ -25,7 +25,9 @@ export async function getLeadFormOptions(companyId: string, vertical?: Vertical)
 
   return {
     sources: sources.map((s) => ({ id: s.id, name: s.name })),
-    stages: (pipeline?.stages ?? []).map((s) => ({ id: s.id, name: s.name })),
+    // The key travels with the stage: the intake form reads it to show the
+    // rep the entry stage the server is about to derive (see @/lib/pipeline-entry).
+    stages: (pipeline?.stages ?? []).map((s) => ({ id: s.id, name: s.name, key: s.key })),
     reps: reps.map((r) => ({ id: r.id, name: `${r.firstName} ${r.lastName}` })),
     // Every staff member is offerable as a setter. Deliberately not filtered to
     // canvassers: on a small team the person who knocks is often the same one

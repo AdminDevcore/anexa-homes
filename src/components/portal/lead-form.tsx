@@ -22,8 +22,10 @@ import {
   AddressAutocomplete,
   type ResolvedAddress,
 } from "@/components/portal/address-autocomplete";
+import { APPOINTMENT_SET_KEY, entryStage } from "@/lib/pipeline-entry";
 
 type Option = { id: string; name: string };
+type StageOption = Option & { key: string };
 type FieldDef = { id: string; key: string; label: string; type: string; options: string[]; required: boolean };
 
 type Initial = Partial<LeadInput> & { valueDollars?: string; appointmentDate?: string };
@@ -45,7 +47,8 @@ export function LeadForm({
   leadId?: string;
   initial?: Initial;
   sources: Option[];
-  stages: Option[];
+  /** In pipeline order. `key` is what identifies "Appointment Set". */
+  stages: StageOption[];
   reps: Option[];
   /** Who could have knocked this door. Solar only — see the Setter field. */
   setters: Option[];
@@ -86,12 +89,9 @@ export function LeadForm({
     state: initial?.state ?? "",
     zip: initial?.zip ?? "",
     sourceId: initial?.sourceId ?? "",
-    // Opens on the first stage of the pipeline rather than on "Select stage".
-    // The server already derives this — an appointment date lands the deal in
-    // "Appointment Set", no date keeps it in the first stage — so a blank
-    // picker was asking a rep to make a choice that had already been made for
-    // them, on the one field of the form they cannot get wrong.
-    stageId: initial?.stageId ?? (mode === "create" ? (stages[0]?.id ?? "") : ""),
+    // Only ever read in edit mode — a new appointment's stage is derived, not
+    // chosen (see `entry` below).
+    stageId: initial?.stageId ?? "",
     assignedRepId: initial?.assignedRepId ?? "",
     setterId: initial?.setterId ?? "",
     utilityProvider: initial?.utilityProvider ?? "",
@@ -115,6 +115,20 @@ export function LeadForm({
    * is hand-edited, so a coordinate can never outlive the house it belongs to.
    */
   const [picked, setPicked] = React.useState<ResolvedAddress | null>(null);
+
+  /**
+   * WHERE A NEW APPOINTMENT LANDS — shown, not asked.
+   *
+   * Creating a deal always enters it at the front of the pipeline, and which of
+   * the two front stages is settled by the appointment date alone: a date books
+   * it into "Appointment Set", a blank one keeps it in the first stage. The
+   * server has always derived exactly this and overwritten whatever the picker
+   * said, so the picker was offering a rep the whole pipeline to choose from
+   * and then throwing the answer away. Edit keeps its picker: a deal that
+   * already exists can need its stage corrected by hand.
+   */
+  const entry = mode === "create" ? entryStage(stages, Boolean(v.appointmentDate)) : null;
+  const apptSetStage = stages.find((st) => st.key === APPOINTMENT_SET_KEY) ?? null;
 
   function set<K extends keyof typeof v>(k: K, val: (typeof v)[K]) {
     if (k === "address" || k === "city" || k === "state" || k === "zip") setPicked(null);
@@ -165,7 +179,7 @@ export function LeadForm({
       state: v.state,
       zip: v.zip,
       sourceId: v.sourceId,
-      stageId: v.stageId,
+      stageId: entry ? entry.id : v.stageId,
       setterId: v.setterId,
       utilityProvider: isSolar ? v.utilityProvider : "",
       assignedRepId: v.assignedRepId,
@@ -257,7 +271,21 @@ export function LeadForm({
           {/* No product/vertical picker — the deal belongs to the active vertical
               workspace (switched from the top-right). */}
           <Field label="Stage">
-            <Picker value={v.stageId} onChange={(val) => set("stageId", val)} options={stages} placeholder="Select stage" />
+            {mode === "create" ? (
+              <>
+                <div
+                  data-testid="lead-entry-stage"
+                  className="flex h-9 w-full items-center rounded-md border border-input bg-muted/40 px-3 text-sm"
+                >
+                  {entry?.name ?? "—"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Every new appointment enters at the front of the pipeline. Move it from the deal once it progresses.
+                </p>
+              </>
+            ) : (
+              <Picker value={v.stageId} onChange={(val) => set("stageId", val)} options={stages} placeholder="Select stage" />
+            )}
           </Field>
           <Field label="Source">
             <Picker value={v.sourceId} onChange={(val) => set("sourceId", val)} options={sources} placeholder="Select source" />
@@ -326,8 +354,14 @@ export function LeadForm({
           )}
           <Field label="Appointment date & time">
             <Input type="datetime-local" value={v.appointmentDate} onChange={(e) => set("appointmentDate", e.target.value)} />
+            {/* Named the two stages by hand, and named roofing’s: solar has no
+                "Appointment Set" stage at all, so the old copy described a move
+                that never happens there. The Stage field above now shows the
+                live answer either way. */}
             <p className="text-xs text-muted-foreground">
-              Set a date and it moves to “Appointment Set”. Leave blank to keep it in “New Lead”.
+              {apptSetStage
+                ? `Set a date and it books into “${apptSetStage.name}”. Leave blank to keep it in “${stages[0]?.name ?? "the first stage"}”.`
+                : "The appointment you booked at the door. It shows on the calendar and drives reminders."}
             </p>
           </Field>
         </Grid>
