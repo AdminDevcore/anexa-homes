@@ -607,6 +607,31 @@ export function postSolarUtilityCents(y: SavingsYear): number {
 }
 
 /**
+ * THE UTILITY COST THE SYSTEM AVOIDS IN ITS FIRST YEAR.
+ *
+ *   what the utility would have charged  −  what they still charge
+ *
+ * The model's own `utilityCostAvoidedCents`, narrowed to year one: the same
+ * subtraction, over twelve months instead of the whole horizon. Read through
+ * `postSolarUtilityCents` so a document priced before the meter fee existed
+ * reports the figure it was priced at.
+ *
+ * DELIBERATELY GROSS. It does not subtract the loan payment, and it is not the
+ * household's net position — `netSavingsCents` is that, and on a thirty-year
+ * loan it is frequently negative in the early years, which is a fact this
+ * document already states plainly in the comparison chapter. This figure
+ * answers the narrower question a lender's savings analysis asks: how much of
+ * the electricity bill stops arriving.
+ *
+ * Null when the model has no years, which no generated snapshot has.
+ */
+export function year1UtilityAvoidedCents(savings: SavingsModel): number | null {
+  const y1 = savings.years[0];
+  if (!y1) return null;
+  return y1.utilityCostCents - postSolarUtilityCents(y1);
+}
+
+/**
  * What a battery programme paid in a given year, zero on any document priced
  * before programmes were modelled.
  *

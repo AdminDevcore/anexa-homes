@@ -78,15 +78,39 @@ const DESIGN = {
   lead: LEAD,
 }
 
+/**
+ * The savings analysis a generated proposal freezes, in the snapshot's own
+ * units. The lender requires all five and refuses a solar application without
+ * them, so a deal that HAS no document is not a submittable deal — which is why
+ * this is the default rather than the exception.
+ */
+const SNAPSHOT = {
+  financing: { financedAmountCents: 15018000, loanTermMonths: 360 },
+  system: { year1ProductionKwh: 17107 },
+  energy: { annualUsageKwh: 16017 },
+  assumptions: { currentRateMillsPerKwh: 233 },
+  savings: {
+    years: [{ year: 1, utilityCostCents: 373196, residualGridCents: 0, meterFeeCents: 12000 }],
+  },
+}
+
+/**
+ * The same document, generated before the financed amount was frozen onto it.
+ * Its savings analysis still stands — that is a different block — so these
+ * cases go on exercising the pricing-row fallback for the MONEY alone.
+ */
+const NO_FROZEN_MONEY = { ...SNAPSHOT, financing: {} }
+
 beforeEach(() => {
   decryptField.mockReset().mockReturnValue('ak_live_secret')
   designFindFirst.mockReset().mockResolvedValue(DESIGN)
   financeFindFirst
     .mockReset()
     .mockResolvedValue({ contractPriceCents: 5000000, downPaymentCents: 125000, loanTermMonths: 300 })
-  // No document by default, so the existing cases below exercise the pricing-row
-  // fallback. The frozen-snapshot path gets its own block.
-  proposalFindFirst.mockReset().mockResolvedValue(null)
+  // A generated document by default. Both doors onto a submission live ON a
+  // proposal, so a deal without one is not a state a customer can reach — and
+  // the lender's savings analysis has nowhere else to come from.
+  proposalFindFirst.mockReset().mockResolvedValue({ snapshot: SNAPSHOT })
   submitToAmos.mockReset().mockResolvedValue({
     applicationId: 'app-1',
     referenceNumber: 'AMS-1042',
@@ -123,6 +147,7 @@ describe('submitDealToLender', () => {
   })
 
   it('finances contract price LESS the down payment', async () => {
+    proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     await submitDealToLender(input)
     expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('48750.00')
   })
@@ -171,6 +196,7 @@ describe('submitDealToLender', () => {
   })
 
   it('refuses a deal with no financed amount', async () => {
+    proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     financeFindFirst.mockResolvedValue({
       contractPriceCents: 0,
       downPaymentCents: 0,
@@ -180,6 +206,7 @@ describe('submitDealToLender', () => {
   })
 
   it('refuses a deal with no term', async () => {
+    proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     financeFindFirst.mockResolvedValue({
       contractPriceCents: 5000000,
       downPaymentCents: 0,
@@ -243,18 +270,12 @@ describe('submitDealToLender', () => {
    * against a proposal that says $150,180.
    */
   it('asks the lender for the amount the live proposal quotes', async () => {
-    proposalFindFirst.mockResolvedValue({
-      snapshot: { financing: { financedAmountCents: 15018000, loanTermMonths: 360 } },
-    })
     await submitDealToLender(input)
     expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('150180.00')
     expect(submitToAmos.mock.calls[0]?.[1]?.termMonths).toBe(360)
   })
 
   it('reads only the version the customer can still open', async () => {
-    proposalFindFirst.mockResolvedValue({
-      snapshot: { financing: { financedAmountCents: 15018000, loanTermMonths: 360 } },
-    })
     await submitDealToLender(input)
     expect(proposalFindFirst.mock.calls[0]?.[0]?.where).toMatchObject({
       leadId: 'lead-1',
@@ -264,10 +285,77 @@ describe('submitDealToLender', () => {
   })
 
   it('falls back to the pricing rows on a snapshot too old to carry the figure', async () => {
-    proposalFindFirst.mockResolvedValue({ snapshot: { financing: { aprPct: 0 } } })
+    proposalFindFirst.mockResolvedValue({ snapshot: { ...SNAPSHOT, financing: { aprPct: 0 } } })
     await submitDealToLender(input)
     expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('48750.00')
     expect(submitToAmos.mock.calls[0]?.[1]?.termMonths).toBe(300)
+  })
+
+  /**
+   * THE SAVINGS ANALYSIS, ON THE WIRE, FROM THE FROZEN DOCUMENT.
+   *
+   * Amos's lending service required five figures on a solar deal and their
+   * intake API had fields for two, so every solar submission answered 500 and
+   * no payload could have succeeded. These pin the half that is ours: the
+   * figures come from the document the household was shown, in the lender's
+   * units, and a deal that cannot produce them never reaches the network.
+   */
+  it('sends the savings analysis the live proposal froze', async () => {
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system).toEqual({
+      annualProductionKwh: 17107,
+      annualConsumptionKwh: 16017,
+      retailRatePerKwh: '0.233',
+      // $3,731.96 the utility would have charged, less the $120 meter fee they
+      // still bill. Nothing residual on this roof.
+      estAnnualSaving: '3611.96',
+      // $3,611.96 over twelve months, rounded once.
+      estMonthlySaving: '301.00',
+    })
+  })
+
+  it('takes production from the DOCUMENT, not from a design re-drawn since', async () => {
+    // The saving is computed from the frozen figures, so production has to come
+    // from the same page. A lender handed 17,514 kWh beside a saving worked out
+    // on 17,107 has been handed two different deals.
+    designFindFirst.mockResolvedValue({ ...DESIGN, year1ProductionKwh: 17514 })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.annualProductionKwh).toBe(17107)
+  })
+
+  it('reads the meter fee through the schema-safe reader, not raw', async () => {
+    // A document generated before the fee was modelled has no such key. It must
+    // report the figure it was priced at, not NaN.
+    proposalFindFirst.mockResolvedValue({
+      snapshot: {
+        ...SNAPSHOT,
+        savings: { years: [{ year: 1, utilityCostCents: 373196, residualGridCents: 0 }] },
+      },
+    })
+    await submitDealToLender(input)
+    expect(submitToAmos.mock.calls[0]?.[1]?.system.estAnnualSaving).toBe('3731.96')
+  })
+
+  it('refuses a deal with no proposal instead of inventing a saving', async () => {
+    proposalFindFirst.mockResolvedValue(null)
+    const r = await submitDealToLender(input)
+    expect(r).toMatchObject({ ok: false, kind: 'deal' })
+    expect((r as { problems: string[] }).problems.join(' ')).toContain('Generate one first')
+    expect(submitToAmos).not.toHaveBeenCalled()
+  })
+
+  it('refuses a deal whose bill does not go down, before the network', async () => {
+    proposalFindFirst.mockResolvedValue({
+      snapshot: {
+        ...SNAPSHOT,
+        // The meter fee alone is more than the bill this system avoids.
+        savings: { years: [{ year: 1, utilityCostCents: 9000, residualGridCents: 0, meterFeeCents: 12000 }] },
+      },
+    })
+    const r = await submitDealToLender(input)
+    expect(r).toMatchObject({ ok: false, kind: 'deal' })
+    expect((r as { problems: string[] }).problems.join(' ')).toContain('no saving')
+    expect(submitToAmos).not.toHaveBeenCalled()
   })
 
   it('never surfaces an unexpected error verbatim', async () => {
@@ -290,6 +378,7 @@ describe('readLenderSubmission', () => {
   })
 
   it('reports ready with a server-built summary of what will be sent', async () => {
+    proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     const r = await readLenderSubmission('lead-1', 'co-1')
     expect(r).toMatchObject({ mode: 'api', lenderName: 'Amos Capital Fund', ready: true })
     // Built from the same rows the submission reads, so the household confirms
@@ -303,6 +392,7 @@ describe('readLenderSubmission', () => {
   })
 
   it('reports not-ready when the deal has no price yet', async () => {
+    proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     financeFindFirst.mockResolvedValue({
       contractPriceCents: 0,
       downPaymentCents: 0,

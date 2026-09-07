@@ -50,13 +50,54 @@ type EquipmentRef = {
 export type AmosDesignInput = {
   id: string
   systemSizeKwDc: number
-  year1ProductionKwh: number
-  annualUsageKwh: number | null
+  /**
+   * Production and usage USED TO LIVE HERE, read off the live design. They now
+   * arrive on the options as part of `AmosSystemFigures`, from the frozen
+   * proposal — because the saving is computed from the same three numbers, and
+   * a lender handed a production figure that does not reconcile with the saving
+   * beside it has been handed two different deals.
+   */
   moduleQty: number
   batteryQty: number
   module: EquipmentRef
   inverter: EquipmentRef
   battery: EquipmentRef
+}
+
+/**
+ * THE LENDER'S SAVINGS ANALYSIS: five figures, and all five are required.
+ *
+ * Amos will not underwrite a solar deal without them. Their intake calls the
+ * set "the savings analysis" and refuses the application by name when any is
+ * missing — which is how this was found: the API shipped requiring three
+ * figures its own request schema had no fields for, so every solar submission
+ * answered 500 and no payload could have succeeded.
+ *
+ * ALL FIVE COME FROM THE FROZEN PROPOSAL, never from the live rows. Same rule
+ * the money follows and for the same reason: a lender has to be told what the
+ * sheet in front of the household says, and a rep re-pricing mid-application
+ * must not be able to move it. See `loadQuoted`.
+ */
+export type AmosSystemFigures = {
+  /** Year one, as the document quotes it. */
+  annualProductionKwh: number
+  /** What the house uses, the denominator the offset was worked out against. */
+  annualConsumptionKwh: number
+  /**
+   * The retail rate the proposal was priced at, in TENTHS OF A CENT per kWh —
+   * `assumptions.currentRateMillsPerKwh`. 233 is $0.233/kWh.
+   *
+   * Kept in the snapshot's own unit all the way to the wire so there is exactly
+   * one conversion, in `ratePerKwhString`, with a test on it. A rate that
+   * crosses a boundary as "23.3" once and "0.233" the next is the shape of a
+   * hundredfold error on a credit application.
+   */
+  retailRateMillsPerKwh: number
+  /**
+   * Year-one utility cost the system avoids — see `year1UtilityAvoidedCents`.
+   * GROSS of the loan payment, which is what a savings analysis asks for.
+   */
+  annualUtilityAvoidedCents: number
 }
 
 export type AmosSubmitOptions = {
@@ -86,6 +127,8 @@ export type AmosSubmitOptions = {
    * your own phone on it first.
    */
   delivery?: 'in_person' | 'customer'
+  /** The savings analysis, resolved from the document the customer was shown. */
+  system: AmosSystemFigures
 }
 
 type EquipmentLine = {
@@ -106,7 +149,15 @@ export type AmosApplicationPayload = {
     postalCode: string
     ownerOccupied: boolean
   }
-  system?: { annualProductionKwh?: number; annualConsumptionKwh?: number }
+  system: {
+    annualProductionKwh: number
+    annualConsumptionKwh: number
+    /** Dollars per kWh, as a string: "0.233". */
+    retailRatePerKwh: string
+    /** Dollars, two decimals, both of them at least 1.00 — the lender's floor. */
+    estMonthlySaving: string
+    estAnnualSaving: string
+  }
   equipment?: EquipmentLine[]
   requestedAmount: string
   termMonths: number
@@ -176,6 +227,68 @@ export function preflightAmosSubmission(
   return problems
 }
 
+/**
+ * THE LENDER'S FLOOR ON A SAVING: one dollar a month, and one a year.
+ *
+ * Their schema rejects zero and cannot express a negative at all — the amount
+ * pattern has no minus sign in it. That is not an oversight on their part: the
+ * figure they are asking for is the electricity bill that stops arriving, which
+ * is positive on any system that generates anything.
+ */
+const LENDER_MIN_SAVING_CENTS = 100
+
+/**
+ * Everything about the SAVINGS ANALYSIS that would make a submission fail.
+ *
+ * Separate from `preflightAmosSubmission` because these five figures come from
+ * a different place — the frozen document rather than the deal's own rows — and
+ * a caller that has not resolved one yet has nothing to check. Each string is
+ * written to be shown to a rep verbatim, and every one of them names the thing
+ * to go and fix.
+ */
+export function savingsProblems(figures: AmosSystemFigures | null): string[] {
+  if (!figures) {
+    return [
+      'This deal has no generated proposal, and the lender will not take an application without ' +
+        'the savings figures a proposal works out. Generate one first.',
+    ]
+  }
+
+  const problems: string[] = []
+
+  if (figures.annualProductionKwh <= 0) {
+    problems.push('The proposal quotes no annual production. Draw the array and generate it again.')
+  }
+  if (figures.annualConsumptionKwh <= 0) {
+    problems.push(
+      "The proposal quotes no annual usage, so there is nothing to measure a saving against. " +
+        'Put the household’s usage on the Energy step and generate it again.',
+    )
+  }
+  if (figures.retailRateMillsPerKwh <= 0) {
+    problems.push(
+      'The proposal has no utility rate on it, which is what the saving is worked out from. ' +
+        'Set the rate on the Energy step and generate it again.',
+    )
+  }
+
+  // Checked on the MONTHLY figure as well as the annual one, because both cross
+  // the wire and the lender applies its floor to each: a year that clears a
+  // dollar by a hair divides into twelve months that do not.
+  const monthly = monthlyFrom(figures.annualUtilityAvoidedCents)
+  if (
+    figures.annualUtilityAvoidedCents < LENDER_MIN_SAVING_CENTS ||
+    monthly < LENDER_MIN_SAVING_CENTS
+  ) {
+    problems.push(
+      'This proposal shows no saving on the electricity bill, and the lender will not accept an ' +
+        'application without one. Check the usage, the rate and the array before sending it.',
+    )
+  }
+
+  return problems
+}
+
 /** The pieces of a design that become equipment lines, where they exist. */
 function equipmentToMap(design: AmosDesignInput): { what: string; ref: NonNullable<EquipmentRef> }[] {
   const out: { what: string; ref: NonNullable<EquipmentRef> }[] = []
@@ -229,6 +342,29 @@ function inverterCount(design: AmosDesignInput): number {
   return Math.min(design.moduleQty, Math.max(1, Math.ceil(arrayWatts / rated)))
 }
 
+/**
+ * A year's figure as the month the lender asks for.
+ *
+ * Rounded ONCE, from the annual number, so the two amounts on the wire are the
+ * same fact told twice rather than two independent roundings that fail to
+ * multiply back to one another.
+ */
+function monthlyFrom(annualCents: number): number {
+  return Math.round(annualCents / 12)
+}
+
+/**
+ * Tenths of a cent per kWh -> dollars per kWh, as a string: 233 -> "0.233".
+ *
+ * THREE DECIMALS, which is the precision the customer's own document prints
+ * ("Your current rate — $0.233 per kWh") and one more than money carries. A
+ * residential rate rounded to cents is 12% wrong at the bottom of the range,
+ * and this figure is an input to the lender's own arithmetic, not a display.
+ */
+function ratePerKwhString(mills: number): string {
+  return (mills / 1000).toFixed(3)
+}
+
 /** Integer cents -> a decimal string. Money never crosses the wire as a float. */
 function centsToDecimalString(cents: number): string {
   const whole = Math.trunc(cents / 100)
@@ -278,10 +414,14 @@ export function buildAmosPayload(
     line('battery', design.battery, design.batteryQty),
   ].filter((l): l is EquipmentLine => l !== null)
 
-  const system: AmosApplicationPayload['system'] = {}
-  if (design.year1ProductionKwh > 0) system.annualProductionKwh = design.year1ProductionKwh
-  if (design.annualUsageKwh && design.annualUsageKwh > 0) {
-    system.annualConsumptionKwh = design.annualUsageKwh
+  const f = opts.system
+  const monthlyAvoidedCents = monthlyFrom(f.annualUtilityAvoidedCents)
+  const system: AmosApplicationPayload['system'] = {
+    annualProductionKwh: f.annualProductionKwh,
+    annualConsumptionKwh: f.annualConsumptionKwh,
+    retailRatePerKwh: ratePerKwhString(f.retailRateMillsPerKwh),
+    estMonthlySaving: centsToDecimalString(monthlyAvoidedCents),
+    estAnnualSaving: centsToDecimalString(f.annualUtilityAvoidedCents),
   }
 
   return {
@@ -305,7 +445,12 @@ export function buildAmosPayload(
     // System size is deliberately absent: the lender derives DC nameplate from
     // panel wattage x count for any deal carrying a panel and ignores a
     // submitted figure. Sending ours would imply it is authoritative.
-    ...(Object.keys(system).length > 0 ? { system } : {}),
+    //
+    // The block itself is never omitted any more. It used to be dropped when
+    // production and usage were both zero, which is a shape their solar product
+    // refuses outright — see `savingsProblems`, which stops such a deal before
+    // a homeowner can press anything.
+    system,
     ...(equipment.length > 0 ? { equipment } : {}),
     requestedAmount: centsToDecimalString(opts.amountCents),
     termMonths: opts.termMonths,
