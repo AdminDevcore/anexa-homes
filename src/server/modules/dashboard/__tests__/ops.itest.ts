@@ -27,6 +27,7 @@ let managerId: string;
 let myRepId: string;
 let otherRepId: string;
 let stageId: string;
+let soldStageId: string;
 
 function session(userId: string, role: string): SessionUser {
   return { userId, companyId, role, permissions: {} } as unknown as SessionUser;
@@ -39,6 +40,8 @@ async function deal(opts: {
   status?: "open" | "won" | "lost";
   createdAt?: Date;
   stage?: boolean;
+  /** Parks the deal on the stage the pipeline books its sale at. */
+  sold?: boolean;
   stageChangedAt?: Date;
   job?: { contractValue: number; status: "completed" | "not_started"; completedAt?: Date; installDate?: Date };
 }) {
@@ -51,6 +54,7 @@ async function deal(opts: {
       assignedRepId: opts.repId,
       status: opts.status ?? "open",
       createdAt: opts.createdAt ?? daysAgo(60),
+      ...(opts.sold ? { stageId: soldStageId } : {}),
       ...(opts.stage ? { stageId, stageChangedAt: opts.stageChangedAt ?? daysAgo(3) } : {}),
     },
   });
@@ -106,6 +110,10 @@ beforeAll(async () => {
   stageId = (await db.pipelineStage.create({
     data: { pipelineId: pipeline.id, key: "s0", name: "Inspection", position: 0, targetDays: 7 },
   })).id;
+  // Won is decided by the stage, not by `Lead.status` — see lib/sold-stage.ts.
+  soldStageId = (await db.pipelineStage.create({
+    data: { pipelineId: pipeline.id, key: "s1", name: "Contract Signed", position: 1, countsAsSold: true },
+  })).id;
 
   // ---- The manager's team, roofing ----
   // Two won deals, one of which finished 30 days after the lead came in.
@@ -113,6 +121,7 @@ beforeAll(async () => {
     repId: myRepId,
     vertical: "roofing",
     status: "won",
+    sold: true,
     createdAt: daysAgo(60),
     job: { contractValue: 500_000, status: "completed", completedAt: daysAgo(30) },
   });
@@ -121,6 +130,7 @@ beforeAll(async () => {
     repId: myRepId,
     vertical: "roofing",
     status: "won",
+    sold: true,
     createdAt: daysAgo(40),
     job: { contractValue: 300_000, status: "completed", installDate: daysAgo(20) },
   });
@@ -133,6 +143,7 @@ beforeAll(async () => {
     repId: otherRepId,
     vertical: "roofing",
     status: "won",
+    sold: true,
     createdAt: daysAgo(365),
     job: { contractValue: 9_999_900, status: "completed", completedAt: daysAgo(1) },
   });
@@ -170,9 +181,25 @@ describe("getTeamOps", () => {
 
   it("closes the rate over the team's own deals", async () => {
     const ops = await runInVertical("roofing", () => getTeamOps(session(managerId, "manager"), "roofing"));
-    // 4 roofing deals for this team, 2 won.
+    // 4 roofing deals for this team, 2 of them parked at or past Contract Signed.
     expect(ops.wonLeads).toBe(2);
     expect(ops.closeRatePct).toBe(50);
+  });
+
+  // The bug this replaced: `Lead.status` has a `won` value that nothing in the
+  // app ever writes, so every won count read zero. Won comes off the STAGE.
+  it("names the stage the sale is booked at, and counts from it", async () => {
+    const ops = await runInVertical("roofing", () => getTeamOps(session(managerId, "manager"), "roofing"));
+    expect(ops.saleLineLabel).toBe("Contract Signed");
+    expect(ops.team[0].won).toBe(2);
+  });
+
+  // "As long as an install date is in there" — one of the two finished jobs
+  // carries one; the other was closed out with a completion date only.
+  it("counts a job as installed once it has an install date", async () => {
+    const ops = await runInVertical("roofing", () => getTeamOps(session(managerId, "manager"), "roofing"));
+    expect(ops.totalInstalls).toBe(1);
+    expect(ops.team[0].installs).toBe(1);
   });
 
   it("builds a leaderboard of the manager's reps and nobody else's", async () => {

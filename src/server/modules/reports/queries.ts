@@ -1,5 +1,6 @@
 import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { wonLeadFilter } from "@/server/modules/pipeline/sale-line";
 import { managerTeamUserFilter } from "@/server/rbac/policies";
 import { computeDealCommission } from "@/lib/commission";
 
@@ -178,7 +179,7 @@ export async function getReportData(user: { companyId: string; userId: string; r
     commissionAgg,
   ] = await Promise.all([
     prisma.lead.count({ where: leadWhere }),
-    prisma.lead.count({ where: { ...leadWhere, status: "won" } }),
+    prisma.lead.count({ where: { ...leadWhere, ...(await wonLeadFilter(companyId)) } }),
     prisma.project.findMany({
       where: projectWhere,
       select: { contractValue: true, status: true, lead: { select: { assignedRepId: true } } },

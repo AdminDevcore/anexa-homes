@@ -34,7 +34,7 @@ const STAGES = [
   { key: "adjuster_meeting", name: "Adjuster Meeting Scheduled", color: "#A78BFA" },
   { key: "scope_received", name: "Scope Received", color: "#C084FC" },
   { key: "supplement_needed", name: "Supplement Needed", color: "#F472B6" },
-  { key: "contract_signed", name: "Contract Signed", color: "#FB923C" },
+  { key: "contract_signed", name: "Contract Signed", color: "#FB923C", countsAsSold: true },
   { key: "material_ordered", name: "Material Ordered", color: "#FBBF24" },
   { key: "scheduled", name: "Scheduled", color: "#FACC15" },
   { key: "in_production", name: "In Production", color: "#A3E635" },
@@ -49,7 +49,7 @@ const SOLAR_STAGES = [
   { key: "new_appt", name: "New Appointment", color: "#FBBF24" },
   { key: "site_survey", name: "Site Survey", color: "#F59E0B" },
   { key: "proposal_sent", name: "Proposal Sent", color: "#F97316" },
-  { key: "contract_signed", name: "Contract Signed", color: "#FB923C" },
+  { key: "contract_signed", name: "Contract Signed", color: "#FB923C", countsAsSold: true },
   { key: "permitting", name: "Permitting", color: "#A78BFA" },
   { key: "install_scheduled", name: "Install Scheduled", color: "#60A5FA" },
   { key: "installed", name: "Installed", color: "#34D399" },
@@ -183,6 +183,7 @@ async function main() {
         color: s.color,
         position: i,
         isWon: (s as { isWon?: boolean }).isWon ?? false,
+        countsAsSold: (s as { countsAsSold?: boolean }).countsAsSold ?? false,
         isLost: (s as { isLost?: boolean }).isLost ?? false,
       },
       select: { key: true, id: true },
@@ -199,7 +200,11 @@ async function main() {
     for (let i = 0; i < defs.length; i++) {
       const s = defs[i];
       await prisma.pipelineStage.create({
-        data: { pipelineId: p.id, key: s.key, name: s.name, color: s.color, position: i, isWon: (s as { isWon?: boolean }).isWon ?? false },
+        data: {
+          pipelineId: p.id, key: s.key, name: s.name, color: s.color, position: i,
+          isWon: (s as { isWon?: boolean }).isWon ?? false,
+          countsAsSold: (s as { countsAsSold?: boolean }).countsAsSold ?? false,
+        },
       });
     }
     await prisma.pipelineStage.create({

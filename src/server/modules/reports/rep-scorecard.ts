@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/client";
+import { getSaleLine } from "@/server/modules/pipeline/sale-line";
 import type { Prisma } from "@prisma/client";
 import type { Period, RenderableReport, ResolvedScope } from "./builders";
 
@@ -19,10 +20,13 @@ export async function buildRepScorecardReport(user: ReportUser, period: Period, 
   const projectWhere: Prisma.ProjectWhereInput = { companyId: user.companyId, lead: leadWhere };
   const userScope = scope.userIds ? { in: scope.userIds } : undefined;
 
+  // Won is the deal's STAGE, not `Lead.status` — see lib/sold-stage.ts.
+  const saleLine = await getSaleLine(user.companyId);
+
   const [leads, projects, comms, openTasks] = await Promise.all([
     prisma.lead.findMany({
       where: { ...leadWhere, createdAt: inPeriod },
-      select: { status: true, assignedRep: { select: { id: true, firstName: true, lastName: true } } },
+      select: { stageId: true, assignedRep: { select: { id: true, firstName: true, lastName: true } } },
     }),
     prisma.project.findMany({
       where: { ...projectWhere, createdAt: inPeriod },
@@ -51,7 +55,7 @@ export async function buildRepScorecardReport(user: ReportUser, period: Period, 
     if (!l.assignedRep) continue;
     const r = ensure(l.assignedRep.id, nm(l.assignedRep));
     r.appts++;
-    if (l.status === "won") r.won++;
+    if (l.stageId && saleLine.stageIds.has(l.stageId)) r.won++;
   }
   for (const p of projects) {
     const ar = p.lead?.assignedRep;

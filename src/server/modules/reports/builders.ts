@@ -1,5 +1,6 @@
 import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { wonLeadFilter } from "@/server/modules/pipeline/sale-line";
 import { managerTeamUserFilter } from "@/server/rbac/policies";
 import { getCommissionLiability } from "./queries";
 import { ledgerVerticalFilter } from "./vertical-filter";
@@ -65,38 +66,12 @@ type ReportUser = { companyId: string; userId: string; role: Role };
 
 // ── Period ──────────────────────────────────────────────────────────────────
 
-export type Period = { from: Date; to: Date; label: string; preset: string };
-const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
-const endOfDay = (d: Date) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
-
-export function resolvePeriod(preset?: string, fromStr?: string, toStr?: string): Period {
-  const now = new Date();
-  if (preset === "custom" && fromStr && toStr) {
-    const from = startOfDay(new Date(fromStr));
-    const to = endOfDay(new Date(toStr));
-    if (!Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime())) {
-      return { from, to, label: `${fromStr} → ${toStr}`, preset: "custom" };
-    }
-  }
-  const to = endOfDay(now);
-  switch (preset) {
-    case "month":
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to, label: "This month", preset: "month" };
-    case "quarter": {
-      const q = Math.floor(now.getMonth() / 3);
-      return { from: new Date(now.getFullYear(), q * 3, 1), to, label: "This quarter", preset: "quarter" };
-    }
-    case "ytd":
-      return { from: new Date(now.getFullYear(), 0, 1), to, label: "Year to date", preset: "ytd" };
-    case "week":
-    default: {
-      const day = (now.getDay() + 6) % 7; // Monday = 0
-      const from = startOfDay(new Date(now));
-      from.setDate(now.getDate() - day);
-      return { from, to, label: "This week", preset: "week" };
-    }
-  }
-}
+// Lives in ./period so screens that are not Reports can share the window — the
+// Team Performance page needs it and is not a Report. Re-exported because every
+// report builder imports `Period` from here.
+import type { Period } from "./period";
+export { resolvePeriod } from "./period";
+export type { Period };
 
 // ── Scope (Company / Rep / Manager-team), permission-aware ───────────────────
 
@@ -283,9 +258,14 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
   // because it IS the pipeline, which makes it the honest input for a money
   // figure.
 
+  // Won is decided by the deal's STAGE — `Lead.status` has a `won` value that
+  // nothing in the app writes, so every count built on it read zero. See
+  // lib/sold-stage.ts.
+  const isWon = await wonLeadFilter(user.companyId);
+
   const [appts, won, soldAgg, activeProjects, txns, collectedAgg, liability, leadsBySource, wonBySource] = await Promise.all([
     prisma.lead.count({ where: { ...leadWhere, createdAt: inPeriod } }),
-    prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: inPeriod } }),
+    prisma.lead.count({ where: { ...leadWhere, ...isWon, createdAt: inPeriod } }),
     prisma.project.aggregate({ where: { ...projectWhere, createdAt: inPeriod }, _sum: { contractValue: true }, _count: { _all: true } }),
     prisma.project.findMany({
       where: { ...projectWhere, status: { notIn: ["cancelled"] } },
@@ -300,7 +280,7 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
     prisma.transaction.aggregate({ where: { companyId: user.companyId, amountCents: { gt: 0 }, ...txnProjectFilter }, _sum: { amountCents: true } }),
     getCommissionLiability(user.companyId, scope),
     prisma.lead.groupBy({ by: ["sourceId"], where: { ...leadWhere, createdAt: inPeriod }, _count: { _all: true } }),
-    prisma.lead.groupBy({ by: ["sourceId"], where: { ...leadWhere, status: "won", createdAt: inPeriod }, _count: { _all: true } }),
+    prisma.lead.groupBy({ by: ["sourceId"], where: { ...leadWhere, ...isWon, createdAt: inPeriod }, _count: { _all: true } }),
   ]);
 
   let moneyIn = 0, moneyOut = 0;
@@ -321,7 +301,7 @@ async function buildExecutive(user: ReportUser, period: Period, scope: ResolvedS
     const w = { gte: from, lte: to };
     const [a, wn, sold, btxns] = await Promise.all([
       prisma.lead.count({ where: { ...leadWhere, createdAt: w } }),
-      prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: w } }),
+      prisma.lead.count({ where: { ...leadWhere, ...isWon, createdAt: w } }),
       prisma.project.aggregate({ where: { ...projectWhere, createdAt: w }, _sum: { contractValue: true }, _count: { _all: true } }),
       prisma.transaction.findMany({ where: { companyId: user.companyId, date: w, ...txnProjectFilter }, select: { amountCents: true } }),
     ]);
@@ -410,7 +390,7 @@ async function buildOperations(user: ReportUser, period: Period, scope: Resolved
 
   const [appts, won, jobsSold, inProduction, completed, byStatus, projectsForRep] = await Promise.all([
     prisma.lead.count({ where: { ...leadWhere, createdAt: inPeriod } }),
-    prisma.lead.count({ where: { ...leadWhere, status: "won", createdAt: inPeriod } }),
+    prisma.lead.count({ where: { ...leadWhere, ...(await wonLeadFilter(user.companyId)), createdAt: inPeriod } }),
     prisma.project.count({ where: { ...projectWhere, createdAt: inPeriod } }),
     prisma.project.count({ where: { ...projectWhere, status: "in_production" } }),
     prisma.project.count({ where: { ...projectWhere, status: { in: ["completed", "closed"] } } }),

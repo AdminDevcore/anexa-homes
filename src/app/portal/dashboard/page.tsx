@@ -149,8 +149,8 @@ export default async function DashboardPage() {
           <div className="rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h3 className="font-semibold">Team Performance</h3>
-              <Link href="/portal/team" className="text-sm text-gold-muted hover:underline">
-                View team
+              <Link href="/portal/team/performance" className="text-sm text-gold-muted hover:underline">
+                View team performance
               </Link>
             </div>
             {ops.team.length === 0 ? (
@@ -166,6 +166,7 @@ export default async function DashboardPage() {
                       <th className="px-3 py-2.5 text-right font-medium">Appts</th>
                       <th className="px-3 py-2.5 text-right font-medium">Won</th>
                       <th className="px-3 py-2.5 text-right font-medium">Close</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Installs</th>
                       {ops.canSeeFinancials && (
                         <th className="px-5 py-2.5 text-right font-medium">Sold</th>
                       )}
@@ -182,6 +183,7 @@ export default async function DashboardPage() {
                         <td className="px-3 py-3 text-right tabular-nums">{row.appointments}</td>
                         <td className="px-3 py-3 text-right tabular-nums">{row.won}</td>
                         <td className="px-3 py-3 text-right tabular-nums">{pct(row.closeRatePct)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{row.installs}</td>
                         {ops.canSeeFinancials && (
                           <td className="px-5 py-3 text-right tabular-nums">
                             {row.soldCents == null ? "—" : fmt.money(row.soldCents, { compact: true })}
@@ -193,6 +195,16 @@ export default async function DashboardPage() {
                 </table>
               </div>
             )}
+            {/* What the two columns a manager will argue about actually count.
+                Without this, a Won of 0 reads as a broken page rather than as a
+                pipeline whose sale stage is set somewhere else. */}
+            <p className="border-t border-border px-5 py-3 text-xs text-muted-foreground">
+              All time · Won counts deals at or past{" "}
+              <Link href="/portal/settings/pipeline" className="underline underline-offset-2">
+                {ops.saleLineLabel ?? "the stage marked as sold"}
+              </Link>
+              . Installs count jobs with an install date on the calendar.
+            </p>
           </div>
         </section>
       )}

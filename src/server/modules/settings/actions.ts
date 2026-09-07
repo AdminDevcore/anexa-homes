@@ -34,6 +34,9 @@ const stageSchema = z.object({
   color: z.string().min(1).max(20),
   isWon: z.boolean().optional(),
   isLost: z.boolean().optional(),
+  /// Where the sale is booked. Omitted by callers that predate it (the solar
+  /// stage-model editor) and merged from the stored row rather than reset.
+  countsAsSold: z.boolean().optional(),
   // SLA / stage-duration settings.
   targetDays: z.number().int().min(0).max(3650).optional(),
   escalationDays: z.number().int().min(0).max(3650).optional(),
@@ -94,6 +97,7 @@ export async function addPipelineStageAction(pipelineId: string, input: z.infer<
       position: nextPos,
       isWon: parsed.data.isWon ?? false,
       isLost: parsed.data.isLost ?? false,
+      countsAsSold: parsed.data.countsAsSold ?? false,
       ...stageSlaData(parsed.data),
     },
     select: { id: true },
@@ -113,7 +117,7 @@ export async function updatePipelineStageAction(id: string, input: z.infer<typeo
     select: {
       id: true, stageType: true, ownerRole: true, followUpDays: true,
       isActionRequired: true, defaultBlocker: true, targetDays: true,
-      escalationDays: true, markOverdue: true,
+      escalationDays: true, markOverdue: true, countsAsSold: true,
     },
   });
   if (!stage) return fail("Stage not found.");
@@ -141,6 +145,9 @@ export async function updatePipelineStageAction(id: string, input: z.infer<typeo
       color: parsed.data.color,
       isWon: parsed.data.isWon ?? false,
       isLost: parsed.data.isLost ?? false,
+      // Kept, not reset, when the caller omitted it — the solar stage-model
+      // editor sends every field it knows about and knows nothing about this one.
+      countsAsSold: parsed.data.countsAsSold ?? stage.countsAsSold,
       ...merged,
     },
   });
