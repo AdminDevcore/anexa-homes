@@ -12,13 +12,6 @@ import { adderAmountCents, catalogueBasis } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
 import { readProposalQualifyOffer } from "@/server/modules/solar/proposal-qualify";
-import { readLenderPayloadPreview } from "@/server/modules/solar/lender-submit";
-import {
-  readLenderAttempts,
-  NO_LENDER_ATTEMPTS,
-} from "@/server/modules/solar/lender-submission-status";
-import { runInVertical, asActiveVertical } from "@/server/vertical/context";
-import { LenderPayloadInspector } from "@/components/portal/lender-payload-inspector";
 import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 import { mayStartApplication } from "@/lib/solar-proposal-state";
 
@@ -144,50 +137,6 @@ export default async function SolarProposalPreviewPage({
   const canQualify =
     can(user, "update", "Proposal") && can(user, "update", "Lead") && mayStartApplication(proposal);
 
-  /**
-   * THE APPLICATION BODY, FOR THE PERSON ABOUT TO SEND IT.
-   *
-   * Same permission pair as the button, because the payload carries the
-   * household's name, address, telephone number and the amount they are asking
-   * to borrow. It renders only on this page — the customer's copy is a
-   * different route and never resolves any of this.
-   *
-   * Superseded versions are included deliberately: reading why an OLD attempt
-   * was refused is most of what this panel is for, and it sends nothing.
-   *
-   * Run in the DEAL'S vertical, exactly as the qualify offer below is. Without
-   * it a roofing admin previewing a solar proposal — which this page explicitly
-   * supports — reads `SolarDesign` under the roofing scope, finds nothing, and
-   * the panel silently does not render. Not an error; just absent, which is the
-   * worst way for this to fail.
-   */
-  const payloadPreview =
-    can(user, "update", "Proposal") && can(user, "update", "Lead")
-      ? await runInVertical(asActiveVertical(proposal.lead.vertical), () =>
-          readLenderPayloadPreview(
-            proposal.leadId,
-            proposal.companyId,
-            user.fullName,
-            // THE VERSION ON SCREEN. The panel's whole promise is that it shows
-            // the body that would really be sent from this page, and the body
-            // is built from this document's frozen figures.
-            proposal.id,
-          ),
-        )
-      : { mode: "link" as const };
-
-  /**
-   * WHETHER THIS DOCUMENT HAS BEEN SUBMITTED, and how the partner answered.
-   *
-   * Server-side so the panel's headline is right on the first paint. Guarded by
-   * the same permission pair as the payload above: nobody who may not put this
-   * price in front of an underwriter needs to know whether somebody else did.
-   */
-  const lenderAttempts =
-    payloadPreview.mode === "api"
-      ? await readLenderAttempts(proposal.companyId, proposal.leadId)
-      : NO_LENDER_ATTEMPTS;
-
   return (
     <div className="min-h-screen bg-[#f6f3ee]">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 pt-6 print:hidden sm:px-6">
@@ -247,20 +196,6 @@ export default async function SolarProposalPreviewPage({
             </span>
           </div>
         </div>
-      )}
-
-      {payloadPreview.mode === "api" && (
-        <LenderPayloadInspector
-          leadId={proposal.leadId}
-          proposalId={proposal.id}
-          lenderName={payloadPreview.lenderName}
-          payload={payloadPreview.ready ? payloadPreview.payload : null}
-          problems={payloadPreview.ready ? [] : payloadPreview.problems}
-          // What happened to THIS version, not to the deal. A rep reading v14
-          // must not be told "sent" because v13 went last week — that is the
-          // exact confusion the per-attempt proposal id was added to end.
-          submitted={lenderAttempts.byProposal.get(proposal.id) ?? null}
-        />
       )}
 
       <SolarProposalView
