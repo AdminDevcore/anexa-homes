@@ -435,3 +435,89 @@ describe("the builder's quoted strip and the shelf above it price one deal", () 
     expect(bare.breakdown.basePriceCents - laden.breakdown.basePriceCents).toBeGreaterThan(200_000);
   });
 });
+
+/**
+ * THE SECOND PAYMENT — what the loan asks for once the household's federal
+ * credits are against it.
+ *
+ * The figure the customer's own document puts behind its tax-credit switch, so
+ * the arithmetic is checked by hand here for the same reason every other figure
+ * in this file is: a shelf quoting a payment the proposal will not print is a
+ * rep promising something on a laptop that the paperwork then withdraws.
+ */
+describe("compareOffers — the payment once the credits are applied", () => {
+  const CREDITS = {
+    rates: { itcPct: 30, energyCommunityPct: 10, domesticContentPct: 10 },
+    claims: { itc: true, energyCommunity: true, domesticContent: true },
+  };
+
+  it("quotes it on the contract less every credit the job earns", () => {
+    // $27,280 contract, 50% of it credited, leaves $13,640 — and $13,640 at
+    // 4.99% over 300 months amortises to half the payment beside it.
+    const [row] = compareOffers([loan()], { ...BASIS, credits: CREDITS });
+    expect(row.netCostAfterCreditsCents).toBe(1_364_000);
+    expect(row.creditsAppliedMonthlyCents).toBe(
+      loanPaymentCents({ principalCents: 1_364_000, aprPct: 4.99, termMonths: 300 })
+    );
+    expect(row.creditsAppliedMonthlyCents!).toBeLessThan(row.monthlyCents!);
+  });
+
+  it("follows the tick-boxes: an unclaimed bonus is a higher payment", () => {
+    const [all] = compareOffers([loan()], { ...BASIS, credits: CREDITS });
+    const [itcOnly] = compareOffers([loan()], {
+      ...BASIS,
+      credits: {
+        ...CREDITS,
+        claims: { itc: true, energyCommunity: false, domesticContent: false },
+      },
+    });
+    // 30% off rather than 50%, so more is left to finance.
+    expect(itcOnly.netCostAfterCreditsCents).toBe(1_909_600);
+    expect(itcOnly.creditsAppliedMonthlyCents!).toBeGreaterThan(all.creditsAppliedMonthlyCents!);
+  });
+
+  it("says nothing at all when the deal claims no credit", () => {
+    const [row] = compareOffers([loan()], {
+      ...BASIS,
+      credits: {
+        ...CREDITS,
+        claims: { itc: false, energyCommunity: false, domesticContent: false },
+      },
+    });
+    expect(row.creditsAppliedMonthlyCents).toBeNull();
+    expect(row.netCostAfterCreditsCents).toBeNull();
+  });
+
+  it("prices it off the PARTNER's contract, not the household's quote", () => {
+    // A programme writes the paper above the price and hands the remainder
+    // back, so the ladder lands on the quoted price again — the very figure
+    // the headline payment already came off. Two identical numbers under two
+    // names read as two different loans, so the line is dropped.
+    const [row] = compareOffers(
+      [
+        loan({
+          contractAdjustment: {
+            enabled: true,
+            fixedCents: 4_000_000,
+            label: "Participate Tax Program",
+            disclosure: "The programme contributes to the contract value.",
+            effectiveAt: null,
+          },
+        }),
+      ],
+      { ...BASIS, credits: CREDITS }
+    );
+    expect(row.creditsAppliedMonthlyCents).toBeNull();
+  });
+
+  it("is absent on a basis that carries no credits, as every column was before", () => {
+    const [row] = compareOffers([loan()], BASIS);
+    expect(row.creditsAppliedMonthlyCents).toBeNull();
+  });
+
+  it("never quotes one on cash, which has no payment for a credit to lower", () => {
+    const [cash] = compareOffers([{ kind: "cash" }], { ...BASIS, credits: CREDITS });
+    expect(cash.id).toBe(CASH_OFFER_ID);
+    expect(cash.creditsAppliedMonthlyCents).toBeNull();
+  });
+});

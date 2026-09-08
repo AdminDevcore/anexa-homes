@@ -45,14 +45,24 @@ import {
   reconcileContract,
   type LenderContractAdjustment,
 } from "@/lib/solar-contract-adjustment";
-import type { CreditClaims, CreditRates } from "@/lib/solar-credit-ladder";
+import {
+  buildCreditLadder,
+  type CreditClaims,
+  type CreditRates,
+} from "@/lib/solar-credit-ladder";
 import { applyDealRebateAction, removeDealRebateAction } from "@/server/modules/solar/storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { proposalVersionStanding } from "@/lib/solar-proposal-state";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
 import { FinanceOffers } from "@/components/portal/solar-finance-offers";
 import { SolarSharePanel } from "@/components/portal/solar-share-panel";
-import { factorQuote, factorMonthlyCents, hasPaymentFactor, formatFactor } from "@/lib/solar-loan";
+import {
+  factorQuote,
+  factorMonthlyCents,
+  hasPaymentFactor,
+  formatFactor,
+  programmeMonthlyCents,
+} from "@/lib/solar-loan";
 import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
@@ -1045,6 +1055,11 @@ export function SolarFinancePanel({
                 label: lenderProductLabel(p),
                 maxFinalPpwCents: l.maxFinalPpwCents,
                 finalPpwMode: l.finalPpwMode,
+                // Merged in for the same reason the ceiling is: the credits a
+                // column quotes are earned on the partner's contract, and a
+                // comparison should not need a second collection to find out
+                // what that partner writes its paper at.
+                contractAdjustment: l.contractAdjustment,
               },
             ]
           : [];
@@ -1092,6 +1107,10 @@ export function SolarFinancePanel({
     downPaymentCents: 0,
     basePpwCents,
     annualDegradationPct,
+    // What this job earns, live off the tick-boxes above — so unticking the
+    // domestic-content bonus moves every card's after-credit payment on the
+    // spot, exactly as it moves the ladder it was unticked on.
+    credits: { rates: creditRates, claims: creditClaims },
   };
 
   /**
@@ -1245,6 +1264,29 @@ export function SolarFinancePanel({
     livePrice?.breakdown.contractPriceCents ??
     null;
 
+  /**
+   * THE CREDITS THIS DEAL EARNS, as the card below and the document both draw
+   * them — resolved here because the strip now quotes a payment off the bottom
+   * of them.
+   *
+   * Same call, same inputs as `ContractValueCard`: one ladder on the screen, so
+   * the strip's second payment cannot be quoted on a net cost the card next to
+   * it is not showing.
+   */
+  const liveLadder =
+    isPurchase && livePrice
+      ? buildCreditLadder({
+          contractValueCents: liveAdjustment
+            ? liveAdjustment.lenderContractValueCents
+            : livePrice.breakdown.contractPriceCents,
+          quotedPriceCents: liveAdjustment
+            ? liveAdjustment.customerObligationCents
+            : livePrice.breakdown.contractPriceCents,
+          rates: creditRates,
+          claims: creditClaims,
+        })
+      : null;
+
   const quote = React.useMemo(() => {
     const contractNow = chosen ? documentPriceCents : null;
 
@@ -1263,6 +1305,9 @@ export function SolarFinancePanel({
         monthlyCents: leaseMonthlyCents(chosen.leaseRateCentsPerKwMonth, systemSizeKwDc),
         fromFactor: false,
         factors: null,
+        // A lease never owns the array, so it never claims a credit on one.
+        creditsAppliedMonthlyCents: null,
+        netCostAfterCreditsCents: null,
       };
     }
     if (product === "ppa") return null; // priced per kWh produced, not per month
@@ -1281,13 +1326,29 @@ export function SolarFinancePanel({
         termMonths: chosen.termMonths,
       });
     if (monthlyCents == null) return null;
+
+    /**
+     * The same terms, asked about what is left once the household claims its
+     * credits — the figure the proposal's tax-credit switch turns on.
+     *
+     * Dropped where it is not BELOW the payment above it: on a partner
+     * programme the ladder hands the remainder back and lands exactly on the
+     * price this payment already came off, and the same number twice under two
+     * names reads as a second, different loan.
+     */
+    const netMonthly =
+      liveLadder != null ? programmeMonthlyCents(chosen, liveLadder.netCostCents) : null;
+
     return {
       monthlyCents,
       /** True when the figure came off the sheet rather than out of a formula. */
       fromFactor: factors != null && factorMonthlyCents(factors) != null,
       factors,
+      creditsAppliedMonthlyCents:
+        netMonthly != null && netMonthly < monthlyCents ? netMonthly : null,
+      netCostAfterCreditsCents: liveLadder?.netCostCents ?? null,
     };
-  }, [chosen, product, isLoan, systemSizeKwDc, documentPriceCents]);
+  }, [chosen, product, isLoan, systemSizeKwDc, documentPriceCents, liveLadder]);
 
   /**
    * What the boxes above currently add up to. Purchase only — see solar-money.
@@ -1564,6 +1625,14 @@ export function SolarFinancePanel({
               <div className="font-display text-2xl font-semibold tabular-nums">
                 ${(quote.monthlyCents / 100).toFixed(2)}
               </div>
+              {/* Both payments, in the order the customer's own document says
+                  them: what they are quoted, and what it becomes once the
+                  credits this job earns are against the loan. */}
+              {quote.creditsAppliedMonthlyCents != null && (
+                <div className="text-[11px] font-medium tabular-nums text-emerald-700 dark:text-emerald-400">
+                  ${(quote.creditsAppliedMonthlyCents / 100).toFixed(2)}/mo with credits
+                </div>
+              )}
             </div>
           </div>
 

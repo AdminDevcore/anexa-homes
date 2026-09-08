@@ -85,6 +85,7 @@ function OfferCard({
   logoUrl,
   headline,
   headlineNote,
+  creditNote,
   capNote,
   capBroken,
   unpricedNote,
@@ -101,6 +102,16 @@ function OfferCard({
   logoUrl: string | null;
   headline: string | null;
   headlineNote: string | null;
+  /**
+   * THE SAME PAYMENT ONCE THE CREDITS THIS JOB EARNS ARE AGAINST THE LOAN.
+   *
+   * Under the quoted figure rather than instead of it, because the two are both
+   * true and the document says both: the proposal quotes the headline and its
+   * tax-credit switch shows this one. A card carrying only the lower number
+   * would have a rep promising a payment the customer's own page does not open
+   * on. Null wherever it would repeat the headline — see `CompareRow`.
+   */
+  creditNote: string | null;
   /** Set only where the lender's maximum price per watt moved this figure. */
   capNote: string | null;
   /** The cap could not be honoured — the adders alone are over it. */
@@ -186,6 +197,11 @@ function OfferCard({
                 {headlineNote}
               </div>
             )}
+            {creditNote && (
+              <div className="mt-0.5 text-[11px] font-medium tabular-nums text-emerald-700 dark:text-emerald-400">
+                {creditNote}
+              </div>
+            )}
             {capNote && (
               <div
                 className={cn(
@@ -225,6 +241,16 @@ const LINES: CompareLine[] = [
     hint: "Until the lender approves one.",
     lead: true,
     cell: (r) => (r.monthlyCents == null ? null : `${money2(r.monthlyCents)}/mo`),
+  },
+  {
+    // Directly under the payment it is a version of. Only the columns that
+    // actually earn credits carry it, and only where it is below the figure
+    // above — see `creditsAppliedMonthlyCents`.
+    key: "monthly-with-credits",
+    label: "With credits applied",
+    hint: "Once the federal credits this job earns are against the loan.",
+    cell: (r) =>
+      r.creditsAppliedMonthlyCents == null ? null : `${money2(r.creditsAppliedMonthlyCents)}/mo`,
   },
   {
     key: "monthly-without-paydown",
@@ -699,6 +725,11 @@ export function FinanceOffers({
         logoUrl={c.logoUrl}
         headline={headline}
         headlineNote={note}
+        creditNote={
+          row?.creditsAppliedMonthlyCents != null
+            ? `${money2(row.creditsAppliedMonthlyCents)}/mo with credits`
+            : null
+        }
         // On the shelf too, not only in the comparison below: the shelf is what
         // a rep reads first, and a monthly a third of its neighbours' with no
         // explanation attached reads as a mistake in the rate sheet.

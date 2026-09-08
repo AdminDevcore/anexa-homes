@@ -26,6 +26,8 @@
  * one.
  */
 
+import { loanPaymentCents } from "@/lib/solar-money";
+
 export type PaymentFactors = {
   /** Payment factor in millionths. 5712 = 0.005712 per dollar financed. */
   factorWithPaydownMicros?: number | null;
@@ -107,4 +109,43 @@ export function factorQuote(p: PaymentFactors, amountFinancedCents: number): Fac
  */
 export function factorMonthlyCents(q: FactorQuote): number | null {
   return q.withPaydownMonthlyCents ?? q.withoutPaydownMonthlyCents;
+}
+
+/**
+ * WHAT ONE PROGRAMME'S TERMS ASK FOR ON A GIVEN PRINCIPAL.
+ *
+ * A deal now quotes a payment on TWO principals — the contract the household
+ * signs, and what is left of it once the federal credits are against the loan —
+ * and the second one is only honest if it comes off the same rate sheet as the
+ * first. Derived any other way (a ratio of the headline, a fresh amortisation
+ * that ignores a published factor) the two figures imply two different loans on
+ * one screen, which is the failure this file already exists to prevent.
+ *
+ * The precedence is the one every payment on this product uses:
+ *   1. the rate sheet's published payment factor — it bakes in the dealer fee
+ *      and the promotional structure, so it does not equal (2)
+ *   2. our amortisation of the quoted APR and term
+ *
+ * Null on a principal of nothing: no money owed is not a payment of zero, it is
+ * no payment at all. `solar-proposal.ts` keeps its own copy of this because it
+ * has a third source above both — a real approval, scaled — that belongs to a
+ * generated document and to nothing else.
+ */
+export function programmeMonthlyCents(
+  terms: PaymentFactors & { aprPct: number | null; termMonths: number | null },
+  principalCents: number
+): number | null {
+  const principal = Math.round(principalCents);
+  if (principal <= 0) return null;
+
+  if (hasPaymentFactor(terms)) {
+    const m = factorMonthlyCents(factorQuote(terms, principal));
+    if (m != null) return m;
+  }
+
+  return loanPaymentCents({
+    principalCents: principal,
+    aprPct: terms.aprPct,
+    termMonths: terms.termMonths,
+  });
 }

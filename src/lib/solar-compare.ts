@@ -3,12 +3,25 @@ import {
   capStickerToFinalPpw,
   grossPpwFromNet,
   leaseMonthlyCents,
-  loanPaymentCents,
   pricePurchase,
   priceThirdParty,
   type FinalPpwMode,
 } from "@/lib/solar-money";
-import { factorQuote, factorMonthlyCents, hasPaymentFactor } from "@/lib/solar-loan";
+import {
+  factorQuote,
+  factorMonthlyCents,
+  hasPaymentFactor,
+  programmeMonthlyCents,
+} from "@/lib/solar-loan";
+import {
+  reconcileContract,
+  type LenderContractAdjustment,
+} from "@/lib/solar-contract-adjustment";
+import {
+  buildCreditLadder,
+  type CreditClaims,
+  type CreditRates,
+} from "@/lib/solar-credit-ladder";
 
 /**
  * Four ways to pay, priced against each other on one basis.
@@ -58,6 +71,17 @@ export type OfferProduct = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is that lender's ceiling or its flat price. */
   finalPpwMode: FinalPpwMode;
+  /**
+   * The publishing lender's contract programme, where it runs one.
+   *
+   * Carried for ONE reason: the credits are earned on whatever the partner's
+   * paper is written at, and on a programme deal that is above what the
+   * household was quoted. A column that took the credits off the quoted price
+   * instead would print an after-credit payment for a loan nobody is writing —
+   * see `creditsAppliedMonthlyCents` below. Absent on the partners that run no
+   * such programme, which is all of them until an admin configures one.
+   */
+  contractAdjustment?: LenderContractAdjustment | null;
   isActive: boolean;
 };
 
@@ -101,6 +125,16 @@ export type CompareBasis = {
   basePpwCents: number | null;
   /** Lease and PPA totals run across the term, so output has to decay. */
   annualDegradationPct: number;
+  /**
+   * The federal credits this JOB earns, and what the company states them at.
+   *
+   * On the basis rather than on each offer because they are a fact about the
+   * house and its equipment: the same roof in the same census tract earns the
+   * same bonus whoever funds it. Absent — a lease-only shelf, a caller that
+   * has not wired them — simply means no column quotes an after-credit
+   * payment, which is what every column did before 2026-09-08.
+   */
+  credits?: { rates: CreditRates; claims: CreditClaims } | null;
 };
 
 export type CompareRow = {
@@ -114,6 +148,20 @@ export type CompareRow = {
   monthlyCents: number | null;
   /** Loan only: what the payment becomes if the paydown is never applied. */
   monthlyWithoutPaydownCents: number | null;
+  /**
+   * WHAT THE PAYMENT BECOMES ONCE THIS HOUSEHOLD'S CREDITS ARE AGAINST IT.
+   *
+   * The ladder's bottom line run through the SAME terms as the payment beside
+   * it, which is the figure the proposal's tax-credit switch turns on. Null
+   * where it would say nothing: cash and the third-party products, a basis
+   * carrying no credits, a deal claiming none — and, deliberately, whenever it
+   * is not BELOW the headline. On a partner programme the ladder lands exactly
+   * on the price the headline payment already came off, and the same number
+   * printed twice under two names reads as a second, different loan.
+   */
+  creditsAppliedMonthlyCents: number | null;
+  /** The contract less those credits — what that payment is quoted on. */
+  netCostAfterCreditsCents: number | null;
   /** The lump sum the program expects, cents. Null when it has no paydown. */
   paydownCents: number | null;
   /** True when the payment came off a published factor, not our amortisation. */
@@ -219,6 +267,8 @@ function purchaseRow(
     ...meta,
     monthlyCents: null,
     monthlyWithoutPaydownCents: null,
+    creditsAppliedMonthlyCents: null,
+    netCostAfterCreditsCents: null,
     paydownCents: null,
     fromFactor: false,
     grossPpwCents,
@@ -249,13 +299,46 @@ function purchaseRow(
   const factors = hasPaymentFactor(p) ? factorQuote(p, financedCents) : null;
   const factorMonthly = factors ? factorMonthlyCents(factors) : null;
 
-  const monthlyCents =
-    factorMonthly ??
-    loanPaymentCents({
-      principalCents: financedCents,
-      aprPct: p.aprPct,
-      termMonths: p.termMonths,
-    });
+  const monthlyCents = programmeMonthlyCents(p, financedCents);
+
+  /**
+   * THE SECOND PAYMENT: the same programme, asked about what is left after the
+   * household claims the credits this job earns.
+   *
+   * Built through the partner's own reconciliation first, because the credits
+   * are earned on the CONTRACT and on a programme deal that is written above
+   * what the household was quoted. `buildCreditLadder` hands the remainder back
+   * as the signing incentive, so on those deals the bottom line is the quoted
+   * price again — the same figure `monthlyCents` above already came off, which
+   * is why the guard below drops the line rather than printing it twice.
+   *
+   * Identical arithmetic to `solar-proposal.ts`, on purpose: this is the figure
+   * the customer's document puts behind its tax-credit switch, and a shelf
+   * quoting a different one is how a rep promises a payment the proposal then
+   * refuses to print.
+   */
+  const reconciliation = reconcileContract({
+    customerObligationCents: priced.contractPriceCents,
+    adjustment: p.contractAdjustment,
+    lenderName: p.lenderName,
+  });
+  const ladder = basis.credits
+    ? buildCreditLadder({
+        contractValueCents: reconciliation
+          ? reconciliation.lenderContractValueCents
+          : priced.contractPriceCents,
+        quotedPriceCents: reconciliation
+          ? reconciliation.customerObligationCents
+          : priced.contractPriceCents,
+        rates: basis.credits.rates,
+        claims: basis.credits.claims,
+      })
+    : null;
+  const netMonthlyCents = ladder
+    ? programmeMonthlyCents(p, ladder.netCostCents - basis.downPaymentCents)
+    : null;
+  const creditsApplies =
+    netMonthlyCents != null && monthlyCents != null && netMonthlyCents < monthlyCents;
 
   const months = p.termMonths ?? 0;
   const total =
@@ -269,6 +352,8 @@ function purchaseRow(
     ...base,
     monthlyCents,
     monthlyWithoutPaydownCents: without,
+    creditsAppliedMonthlyCents: creditsApplies ? netMonthlyCents : null,
+    netCostAfterCreditsCents: creditsApplies ? ladder!.netCostCents : null,
     paydownCents: factors?.paydownCents ?? null,
     fromFactor: factorMonthly != null,
     totalPaidCents: total,
@@ -328,6 +413,10 @@ function thirdPartyRow(
     ...meta,
     monthlyCents,
     monthlyWithoutPaydownCents: null,
+    // A lease or PPA buys electricity. The household never owns the array, so
+    // it never claims a credit on one and there is no second payment to quote.
+    creditsAppliedMonthlyCents: null,
+    netCostAfterCreditsCents: null,
     paydownCents: null,
     fromFactor: false,
     // Electricity, not a system: no sticker, no fee, no contract price — and

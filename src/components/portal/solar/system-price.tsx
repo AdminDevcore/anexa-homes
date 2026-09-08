@@ -42,6 +42,20 @@ import {
  * The ladder on the right is therefore ALL PRE-FEE: base, plus adders, equals
  * GROSS — what Anexa keeps. The customer's final price lives in the footer,
  * where the quoted programme's fee is named next to it.
+ *
+ * THE HEADLINE IS THE GROSS, NOT THE BASE — 2026-09-08.
+ *
+ * It led with the base for as long as this card existed, on the reasoning that
+ * the base is the one figure a rep can move. But the card is called SYSTEM
+ * PRICE, and the price of the system is not the base: on a job carrying a
+ * $120,000 battery the two big numbers read "$1.93/W · $24,627" over a ladder
+ * ending in $144,627, and the figure a rep quotes for the system was the small
+ * one in the corner. Cash pays the gross. Every column on the shelf below is
+ * the gross with a fee on it. So the gross is what the card says first.
+ *
+ * The base did not go anywhere and is still the only thing on this card anybody
+ * can type: it is the line under the headline, it opens the same editor, and it
+ * is the first rung of the ladder that arrives at the figure above it.
  */
 export function SystemPriceCard({
   systemSizeKwDc,
@@ -220,6 +234,25 @@ export function SystemPriceCard({
   const grossPpw = grossCents != null && watts > 0 ? grossCents / watts : null;
 
   /**
+   * What the headline total is FOR, named by what is actually in it.
+   *
+   * "12.76 kW · before adders" belongs to the base and would be a lie over the
+   * gross; "12.76 kW" alone leaves a rep guessing which of the card's four
+   * figures this one is. So the note lists whatever this job put on top, and
+   * says so plainly on the deals — most of them — that put nothing.
+   */
+  const grossNote = (() => {
+    if (watts === 0) return "Needs an array to price";
+    const inside = [
+      allAdderCents > 0 ? "adders" : null,
+      batteryPriceCents > 0 ? "battery" : null,
+    ].filter(Boolean);
+    return `${systemSizeKwDc.toFixed(2)} kW · ${
+      inside.length === 0 ? "nothing on top of the base" : `${inside.join(" and ")} included`
+    }`;
+  })();
+
+  /**
    * What the homeowner actually signs on the programme this deal quotes.
    *
    * Priced through `pricePurchase` rather than by hand, because the adders have
@@ -338,17 +371,19 @@ export function SystemPriceCard({
       <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* THE PRICE IS A FIGURE UNTIL SOMEBODY ASKS TO CHANGE IT.
 
-            Two number boxes with plus and minus buttons on them announce, to
+            Number boxes with plus and minus buttons on them announce, to
             whoever is looking at the screen, that the price of this system is
             a thing anyone present can move. A rep turns this laptop around. So
             the price reads as a price, and the controls that move it appear
             when the rep clicks it — the same edit, one click further from a
             homeowner's eye.
 
-            Same number said the two ways it gets said out loud: a rep is
-            measured per watt, a homeowner hears a total. */}
+            The price of the system leads, said the two ways it gets said out
+            loud: a rep is measured per watt, a homeowner hears a total. The
+            base — the company's side of it, and the only thing here anybody
+            types — is the line underneath. */}
         <div
-          className="flex flex-wrap items-start gap-4"
+          className="space-y-3"
           onBlur={(e) => {
             // Collapse only when focus has actually LEFT the price block.
             // Tabbing from the $/W box to the total is still editing, and a
@@ -370,8 +405,30 @@ export function SystemPriceCard({
             }
           }}
         >
+          {/* THE PRICE OF THE SYSTEM, which is the gross — what this company
+              charges for this job, adders and battery included, before any
+              lender takes a cut of it. Cash pays exactly this.
+
+              Not editable, and not for want of a control: it is base × watts
+              plus the work on the deal, so the way to move it is to move one of
+              those. The base is directly underneath. */}
+          <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+            <PriceFigure
+              label="Gross $/W"
+              value={grossPpw == null ? "—" : `$${(Math.round(grossPpw) / 100).toFixed(2)}`}
+              note="per installed watt"
+              canEdit={false}
+            />
+            <PriceFigure
+              label="Gross total"
+              value={grossCents == null ? "—" : `$${Math.round(grossCents / 100).toLocaleString()}`}
+              note={grossNote}
+              canEdit={false}
+            />
+          </div>
+
           {editing ? (
-            <>
+            <div className="flex flex-wrap items-start gap-4">
               <div className="space-y-1.5">
                 <label
                   htmlFor="base-ppw"
@@ -463,32 +520,19 @@ export function SystemPriceCard({
               >
                 <Check className="size-3.5" /> Done
               </Button>
-            </>
+            </div>
           ) : (
-            <>
-              <PriceFigure
-                label="Base $/W"
-                value={basePpwCents == null ? "—" : `$${(basePpwCents / 100).toFixed(2)}`}
-                note="per installed watt"
-                canEdit={canEdit}
-                editLabel={`Edit the base price per watt${
-                  basePpwCents == null ? "" : `, currently $${(basePpwCents / 100).toFixed(2)} a watt`
-                }`}
-                onOpen={() => open("ppw")}
-              />
-              <PriceFigure
-                label="Base total"
-                value={
-                  baseTotalCents == null ? "—" : `$${Math.round(baseTotalCents / 100).toLocaleString()}`
-                }
-                note={
-                  watts === 0 ? "Needs an array to price" : `${systemSizeKwDc.toFixed(2)} kW · before adders`
-                }
-                canEdit={canEdit && watts > 0}
-                editLabel="Edit the base price as a total"
-                onOpen={() => open("total")}
-              />
-            </>
+            /* THE ONE FIGURE ON THIS CARD ANYBODY CAN TYPE, said the way a rep
+               says it — a rate and the money it comes to — and small, because
+               what Anexa keeps per watt is not the number a homeowner across
+               the table is meant to read off the screen. It opens the same
+               editor the two big figures used to. */
+            <BaseLine
+              basePpwCents={basePpwCents}
+              baseTotalCents={baseTotalCents}
+              canEdit={canEdit}
+              onOpen={() => open("ppw")}
+            />
           )}
         </div>
 
@@ -620,16 +664,22 @@ function PriceFigure({
   value: string;
   note: string;
   canEdit: boolean;
-  /** What a screen reader hears. The visible text is a bare number. */
-  editLabel: string;
-  onOpen: () => void;
+  /**
+   * What a screen reader hears. The visible text is a bare number.
+   *
+   * Optional along with `onOpen`, because since the gross became the headline
+   * this component draws DERIVED figures too — base × watts plus the work on
+   * the deal is not a box, and there is nothing for a pencil to open.
+   */
+  editLabel?: string;
+  onOpen?: () => void;
 }) {
   return (
     <div className="space-y-1.5">
       <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      {canEdit ? (
+      {canEdit && onOpen ? (
         <button
           type="button"
           aria-label={editLabel}
@@ -646,6 +696,56 @@ function PriceFigure({
       )}
       <p className="text-[11px] text-muted-foreground">{note}</p>
     </div>
+  );
+}
+
+/**
+ * The base, under the headline it is the first rung of.
+ *
+ * A BUTTON, and the same one the two big figures used to be: this is still the
+ * only way into editing the price, so it has to be reachable from a keyboard
+ * and announce itself as something that does something. Its accessible name is
+ * unchanged from when it was the headline — a rep and a spec both still ask for
+ * "the base price per watt", and the figure moving down the card did not change
+ * what it is called. Read-only users get the same line with nothing to press.
+ */
+function BaseLine({
+  basePpwCents,
+  baseTotalCents,
+  canEdit,
+  onOpen,
+}: {
+  basePpwCents: number | null;
+  baseTotalCents: number | null;
+  canEdit: boolean;
+  onOpen: () => void;
+}) {
+  const figure = (
+    <>
+      <span className="text-muted-foreground">Base</span>{" "}
+      <span className="font-medium tabular-nums text-foreground">
+        {basePpwCents == null ? "—" : `$${(basePpwCents / 100).toFixed(2)}/W`}
+        {baseTotalCents == null
+          ? ""
+          : ` · $${Math.round(baseTotalCents / 100).toLocaleString()}`}
+      </span>
+    </>
+  );
+
+  if (!canEdit) return <p className="text-xs">{figure}</p>;
+
+  return (
+    <button
+      type="button"
+      aria-label={`Edit the base price per watt${
+        basePpwCents == null ? "" : `, currently $${(basePpwCents / 100).toFixed(2)} a watt`
+      }`}
+      onClick={onOpen}
+      className="group -mx-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+    >
+      {figure}
+      <Pencil className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+    </button>
   );
 }
 
