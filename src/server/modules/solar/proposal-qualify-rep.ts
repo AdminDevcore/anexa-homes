@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/client";
 import { runInVertical, asActiveVertical } from "@/server/vertical/context";
 import type { Vertical } from "@prisma/client";
 import { submitDealToLender } from "./lender-submit";
+import { mayStartApplication } from "@/lib/solar-proposal-state";
 import type { QualifyResult } from "./proposal-qualify";
 
 /**
@@ -35,7 +36,8 @@ import type { QualifyResult } from "./proposal-qualify";
  *     writing "Customer" against both would make the activity log lie.
  *
  * Everything else — which lender, which key, which amount, which term — is
- * re-read from the deal by `submitDealToLender`, exactly as before. And the
+ * re-read by `submitDealToLender` from the deal and from the DOCUMENT this
+ * names, exactly as the customer's door does. And the
  * submission is still idempotent on the design id, so a rep pressing this after
  * the customer already pressed theirs returns the same application rather than
  * opening a second credit file.
@@ -51,15 +53,18 @@ export async function qualifyOnProposalAsRep(
     companyId: string;
     version: number;
     supersededAt: Date | null;
+    signedAt: Date | null;
+    approvedAt: Date | null;
     lead: { vertical: Vertical };
   },
   actor: RepActor,
   input: { ownerOccupied: boolean; ip: string | null },
 ): Promise<QualifyResult> {
-  // Same rule as the customer's door and for the same reason: a superseded
-  // document quotes a price the deal is no longer written at. Said in the words
-  // of somebody who can do something about it.
-  if (proposal.supersededAt) {
+  // Same rule as the customer's door, and literally the same function, so the
+  // two can never disagree about which document may be sent: a version that is
+  // not what this deal is written at quotes a price nobody would stand behind.
+  // Said here in the words of somebody who can do something about it.
+  if (!mayStartApplication(proposal)) {
     return {
       ok: false,
       error: `Proposal v${proposal.version} has been replaced by a newer version, so its price is not what this deal is written at any more. Open the current version and submit from there.`,
@@ -71,6 +76,9 @@ export async function qualifyOnProposalAsRep(
     const result = await submitDealToLender({
       leadId: proposal.leadId,
       companyId: proposal.companyId,
+      // The version the rep has open — which is the version the lender is
+      // quoted, and on a signed deal is not the newest row on the deal.
+      proposalId: proposal.id,
       ownerOccupied: input.ownerOccupied,
       // Whether the completion link comes back in the response — so the rep
       // can hand their own device over, which is the situation this door

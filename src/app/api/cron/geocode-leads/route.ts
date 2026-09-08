@@ -1,11 +1,13 @@
 import { prisma } from "@/server/db/client";
 import { resolveLeadLocation } from "@/server/modules/geo/resolve";
 import { runUnscoped } from "@/server/vertical/context";
+import { assertCronRequest } from "@/server/auth/cron";
 
 // Backfills lead map coordinates from their address, rooftop-first (Google,
 // falling back to free OSM Nominatim when no key is set). Picks leads that have
 // an address but haven't been geocoded yet, one batch per run. Covers existing
-// leads and any created since the last run. Vercel Cron calls with Bearer CRON_SECRET.
+// leads and any created since the last run. Vercel Cron calls with Bearer
+// CRON_SECRET, which is required — the route refuses when it is unset.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -14,10 +16,8 @@ const DELAY_MS = 1100; // Nominatim's ~1 req/sec policy; Google needs no such wa
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function handler(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
   try {
     // First pass (free, DB-only): inherit coordinates from a linked canvassing
     // knock. Covers deals converted from door-knocks with no geocodable street

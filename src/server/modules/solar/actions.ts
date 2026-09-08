@@ -13,7 +13,7 @@ import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
-import { dealRebateTotalCents } from "./storage";
+import { dealRebateTotalCents } from "./storage-queries";
 import { priceStorageStored } from "@/lib/solar-money";
 
 const fail = (error: string) => ({ ok: false as const, error });

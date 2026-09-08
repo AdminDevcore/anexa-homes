@@ -1,12 +1,14 @@
 import { prisma } from "@/server/db/client";
 import { nearestBuildingCentroid } from "@/server/modules/canvassing/addresses";
 import { runUnscoped } from "@/server/vertical/context";
+import { assertCronRequest } from "@/server/auth/cron";
 
 // Snaps existing house dots onto their OSM rooftop centroid so pins sit on the
 // house, not the street/parcel point. Processes not-knocked dots that have an
 // address and haven't been recentered yet, one throttled batch per run (Overpass
 // is free but rate-limited). Stamps recenteredAt either way so unmatched dots
-// aren't retried forever. Vercel Cron calls with Bearer CRON_SECRET.
+// aren't retried forever. Vercel Cron calls with Bearer CRON_SECRET, which is
+// required — the route refuses when it is unset.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -16,10 +18,8 @@ const MAX_SNAP_M = 40; // only move a dot if a rooftop is within ~40m
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function handler(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
   try {
     // Only the not-knocked "house" dots (rep-entered/converted pins are left as-is).
     const dots = await prisma.knock.findMany({

@@ -6,6 +6,10 @@ import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
 import { approverNames } from "@/server/modules/solar/proposal-approval";
+import {
+  readLenderAttempts,
+  versionLenderBadge,
+} from "@/server/modules/solar/lender-submission-status";
 import { SolarProposalBuilder } from "@/components/portal/solar-proposal-builder";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import { resolveLayoutAsset } from "@/server/modules/solar/layout-asset";
@@ -20,7 +24,7 @@ import {
   lenderAdderRules,
   listDealAdders,
 } from "@/server/modules/solar/adders";
-import { listBackupProfiles, listRebates, listDealRebates } from "@/server/modules/solar/storage";
+import { listBackupProfiles, listRebates, listDealRebates } from "@/server/modules/solar/storage-queries";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
@@ -186,6 +190,12 @@ export default async function SolarProposalBuilderPage({
   // Who approved the final version, for the badge on the version list. One row
   // at most — the database allows a single approved version per deal.
   const approverName = await approverNames(user.companyId, proposals);
+
+  // Which versions have been put in front of the finance partner, and how they
+  // answered. Read here so the version list can say it per row: "sent to the
+  // lender" is a claim about a PRICE, and a deal re-priced four times cannot
+  // make it without naming which of the four went.
+  const lenderAttempts = await readLenderAttempts(user.companyId, lead.id);
 
   // The panel the design is sized from, for the designer's live kW figure and
   // for true-scale panels. A catalogue entry with no dimensions falls back to a
@@ -520,6 +530,7 @@ export default async function SolarProposalBuilderPage({
           approvedParFileId: v.approvedParFileId,
           hasContractAdjustment: signedWithAdjustment.has(v.id),
           hasCreditSwitch: withCreditSwitch.has(v.id),
+          lender: versionLenderBadge(lenderAttempts, v.id),
         }))}
       />
     </div>

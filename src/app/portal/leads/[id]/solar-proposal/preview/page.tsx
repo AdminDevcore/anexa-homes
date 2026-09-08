@@ -13,9 +13,14 @@ import { brandingForRecord } from "@/server/branding/resolve";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
 import { readProposalQualifyOffer } from "@/server/modules/solar/proposal-qualify";
 import { readLenderPayloadPreview } from "@/server/modules/solar/lender-submit";
+import {
+  readLenderAttempts,
+  NO_LENDER_ATTEMPTS,
+} from "@/server/modules/solar/lender-submission-status";
 import { runInVertical, asActiveVertical } from "@/server/vertical/context";
 import { LenderPayloadInspector } from "@/components/portal/lender-payload-inspector";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { mayStartApplication } from "@/lib/solar-proposal-state";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Proposal preview" };
@@ -60,13 +65,22 @@ export default async function SolarProposalPreviewPage({
     orderBy: { version: "desc" },
     select: {
       id: true, version: true, snapshot: true, signedAt: true, supersededAt: true,
+      // The third column `mayStartApplication` reads — an admin naming the
+      // version this deal sold makes the same claim a signature does.
+      approvedAt: true,
       createdAt: true, showComparison: true, showPaymentOptions: true,
-      leadId: true, companyId: true, lead: { select: { vertical: true } },
+      leadId: true, companyId: true,
+      // `email`/`phone` complete the cover's address block on documents frozen
+      // before it existed — see `withCustomerContact`.
+      lead: { select: { vertical: true, email: true, phone: true } },
     },
   });
   if (!proposal) notFound();
 
-  const snapshot = proposal.snapshot as unknown as SolarProposalSnapshot;
+  const snapshot = withCustomerContact(
+    proposal.snapshot as unknown as SolarProposalSnapshot,
+    proposal.lead,
+  );
 
   // The snapshot stores the layout's FILE ID, not a URL, so the preview serves
   // it through the authenticated portal route — no share token is involved, and
@@ -115,14 +129,20 @@ export default async function SolarProposalPreviewPage({
    * the most normal thing to submit from, not the least, and reading an old
    * version is fine as long as it is still the price the deal is written at.
    *
-   * Superseded is the one that must refuse: `qualifyOnProposalAsRep` rejects it
-   * on the server, and a live button that always errors is worse than a note.
+   * A REPLACED version is the one that must refuse — but "replaced" is not
+   * `supersededAt`, and reading it that way is what made the sentence above
+   * false in practice. A signature pins the customer's live link to the version
+   * they signed, so generating a v14 marks that signed v13 superseded and this
+   * gate went out on precisely the document it says is the most normal thing to
+   * submit from. `mayStartApplication` asks the question this comment was
+   * already describing, and `qualifyOnProposalAsRep` refuses on the same
+   * function, so a live button that always errors stays impossible.
    *
    * Same permission pair as the adjust bar: somebody who may not change what
    * this deal is priced at may not put that price in front of an underwriter.
    */
   const canQualify =
-    can(user, "update", "Proposal") && can(user, "update", "Lead") && !proposal.supersededAt;
+    can(user, "update", "Proposal") && can(user, "update", "Lead") && mayStartApplication(proposal);
 
   /**
    * THE APPLICATION BODY, FOR THE PERSON ABOUT TO SEND IT.
@@ -144,9 +164,29 @@ export default async function SolarProposalPreviewPage({
   const payloadPreview =
     can(user, "update", "Proposal") && can(user, "update", "Lead")
       ? await runInVertical(asActiveVertical(proposal.lead.vertical), () =>
-          readLenderPayloadPreview(proposal.leadId, proposal.companyId, user.fullName),
+          readLenderPayloadPreview(
+            proposal.leadId,
+            proposal.companyId,
+            user.fullName,
+            // THE VERSION ON SCREEN. The panel's whole promise is that it shows
+            // the body that would really be sent from this page, and the body
+            // is built from this document's frozen figures.
+            proposal.id,
+          ),
         )
       : { mode: "link" as const };
+
+  /**
+   * WHETHER THIS DOCUMENT HAS BEEN SUBMITTED, and how the partner answered.
+   *
+   * Server-side so the panel's headline is right on the first paint. Guarded by
+   * the same permission pair as the payload above: nobody who may not put this
+   * price in front of an underwriter needs to know whether somebody else did.
+   */
+  const lenderAttempts =
+    payloadPreview.mode === "api"
+      ? await readLenderAttempts(proposal.companyId, proposal.leadId)
+      : NO_LENDER_ATTEMPTS;
 
   return (
     <div className="min-h-screen bg-[#f6f3ee]">
@@ -212,9 +252,14 @@ export default async function SolarProposalPreviewPage({
       {payloadPreview.mode === "api" && (
         <LenderPayloadInspector
           leadId={proposal.leadId}
+          proposalId={proposal.id}
           lenderName={payloadPreview.lenderName}
           payload={payloadPreview.ready ? payloadPreview.payload : null}
           problems={payloadPreview.ready ? [] : payloadPreview.problems}
+          // What happened to THIS version, not to the deal. A rep reading v14
+          // must not be told "sent" because v13 went last week — that is the
+          // exact confusion the per-attempt proposal id was added to end.
+          submitted={lenderAttempts.byProposal.get(proposal.id) ?? null}
         />
       )}
 
@@ -241,7 +286,15 @@ export default async function SolarProposalPreviewPage({
         // unbranded panel. This page is authenticated; the customer's is not,
         // and is handed the ready case or nothing at all.
         qualifyOffer={await readProposalQualifyOffer(
-          { leadId: proposal.leadId, companyId: proposal.companyId, lead: proposal.lead },
+          {
+            id: proposal.id,
+            leadId: proposal.leadId,
+            companyId: proposal.companyId,
+            supersededAt: proposal.supersededAt,
+            signedAt: proposal.signedAt,
+            approvedAt: proposal.approvedAt,
+            lead: proposal.lead,
+          },
           "rep",
         )}
         // AND THE DOOR IT PRESSES. Without this the button on this page is the

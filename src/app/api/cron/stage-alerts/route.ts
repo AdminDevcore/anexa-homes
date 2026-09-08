@@ -1,9 +1,10 @@
 import { runStageAlerts } from "@/server/modules/pipeline/stage-alerts";
 import { runChaseReminders } from "@/server/modules/pipeline/chase-reminders";
 import { runUnscoped } from "@/server/vertical/context";
+import { assertCronRequest } from "@/server/auth/cron";
 
 // Daily pipeline sweep. Vercel Cron calls this with
-// `Authorization: Bearer <CRON_SECRET>` when CRON_SECRET is set.
+// `Authorization: Bearer <CRON_SECRET>`. Refuses when CRON_SECRET is unset.
 //
 // Two passes, deliberately separate:
 //   runStageAlerts     — internally-owned stages: hard SLA, escalating to the
@@ -15,10 +16,8 @@ export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
   try {
     // Sweeps every vertical: each stage carries its own type, owner and cadence,
     // so roofing and solar are handled correctly by the same pass.

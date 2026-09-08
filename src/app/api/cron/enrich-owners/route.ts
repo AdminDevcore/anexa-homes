@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/client";
 import { getSkipTraceProvider, skipTraceEnabled, type OwnerResult } from "@/server/modules/skiptrace/provider";
 import { resolvePropertyValue } from "@/server/modules/property";
 import { runUnscoped } from "@/server/vertical/context";
+import { assertCronRequest } from "@/server/auth/cron";
 
 // Nightly house enrichment: for house dots not yet enriched, fills the PROPERTY
 // value + address (AVM provider) and the homeowner NAME / PHONE / EMAIL (skip-trace
@@ -9,7 +10,8 @@ import { runUnscoped } from "@/server/vertical/context";
 // whole map. THIS BILLS PER LOOKUP, so it's gated on a configured skip-trace
 // provider and a per-run cap (OWNER_ENRICH_BATCH, default 50). Stamps
 // ownerLookedUpAt either way so a no-match isn't retried forever.
-// Vercel Cron calls with Bearer CRON_SECRET.
+// Vercel Cron calls with Bearer CRON_SECRET, which is required — the route
+// refuses when it is unset.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -17,10 +19,8 @@ const DELAY_MS = 1500; // throttle the paid API
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function handler(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
   // Dormant unless a real skip-trace provider + key are configured (no accidental billing).
   if (!skipTraceEnabled()) {
     return Response.json({ ok: true, skipped: "no skip-trace provider configured" });

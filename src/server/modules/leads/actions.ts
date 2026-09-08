@@ -11,6 +11,7 @@ import { fireEvent } from "@/server/modules/notifications/engine";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 import { runAutomations } from "@/server/modules/automations/engine";
 import { getActiveVertical } from "@/server/auth/vertical";
+import { notifyProjectStatusChanged } from "@/server/modules/projects/status-events";
 
 /** Ensures the lead exists AND is within the user's row-level scope. */
 async function assertLeadInScope(userCompanyId: string, scope: Prisma.LeadWhereInput, leadId: string) {
@@ -223,7 +224,10 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
 
   const lead = await prisma.lead.findUnique({
     where: { id: parsed.data.leadId },
-    select: { id: true, pipelineId: true, project: { select: { id: true } } },
+    // `project.status` so the cancellation only announces a status change when
+    // one actually happened — cancelling an already-cancelled job should not
+    // notify a second time.
+    select: { id: true, pipelineId: true, project: { select: { id: true, status: true } } },
   });
   if (!lead?.pipelineId) return { ok: false as const, error: "This deal has no pipeline." };
 
@@ -269,6 +273,18 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
   ]);
 
   await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage });
+
+  // After the transaction commits, never inside it: a notification for a change
+  // that then rolled back is a lie.
+  if (lead.project) {
+    await notifyProjectStatusChanged({
+      companyId: user.companyId,
+      projectId: lead.project.id,
+      actorId: user.userId,
+      from: lead.project.status,
+      to: "cancelled",
+    });
+  }
 
   await fireEvent({
     companyId: user.companyId,

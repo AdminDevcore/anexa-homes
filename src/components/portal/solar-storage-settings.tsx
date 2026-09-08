@@ -53,9 +53,8 @@ import {
   deleteBackupProfileAction,
   saveRebateAction,
   deleteRebateAction,
-  type BackupProfileRow,
-  type RebateRow,
 } from "@/server/modules/solar/storage";
+import type { BackupProfileRow, RebateRow } from "@/server/modules/solar/storage-queries";
 
 /** kWh a two-Powerwall system holds, used only to preview hours in Settings. */
 const REFERENCE_KWH = 27;

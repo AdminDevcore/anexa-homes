@@ -77,6 +77,11 @@ import { SolarProposalStrip } from "@/components/portal/solar/proposal-strip";
 import { readSolarReadiness } from "@/server/modules/solar/readiness";
 import { estimatedSolarCommission } from "@/server/modules/payroll/solar-engine";
 import { approverNames } from "@/server/modules/solar/proposal-approval";
+import {
+  readLenderAttempts,
+  versionLenderBadge,
+  NO_LENDER_ATTEMPTS,
+} from "@/server/modules/solar/lender-submission-status";
 import { canGenerate } from "@/lib/solar-validation";
 import { solarProposalState } from "@/lib/solar-proposal-state";
 import { PropertyView } from "@/components/portal/property-view";
@@ -444,6 +449,14 @@ export default async function LeadDetailPage({
   // Who approved the final proposal, for the badge on the version list. One row
   // at most — the database allows a single approved version per deal.
   const approverName = await approverNames(user.companyId, solarProposals);
+
+  // Whether the finance partner has seen this deal, and at which price — a
+  // question the deal page could not answer at all until submissions started
+  // recording the document they spoke for. Only asked on a solar deal; the
+  // query is skipped entirely on roofing.
+  const lenderAttempts = isSolarDeal
+    ? await readLenderAttempts(user.companyId, lead.id)
+    : NO_LENDER_ATTEMPTS;
 
   /**
    * The interconnection and permitting half of the System info slide.
@@ -1734,6 +1747,7 @@ export default async function LeadDetailPage({
                       // the same reason the line above is: the row is about a
                       // document that already exists. Mirrors `copiesFor`.
                       hasCreditSwitch: hasCreditSwitch(v.snapshot),
+                      lender: versionLenderBadge(lenderAttempts, v.id),
                     }))}
                   />
                 </Card>

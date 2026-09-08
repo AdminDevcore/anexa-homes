@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import type { ActionContext, AutomationActionModule, StepResult } from "../types";
+import { notifyProjectStatusChanged } from "@/server/modules/projects/status-events";
 
 const STATUSES = [
   "not_started",
@@ -61,6 +62,17 @@ export const setProjectStatusAction: AutomationActionModule = {
         leadId: ctx.leadId,
         projectId: project.id,
       },
+    });
+
+    // `actorId: null` — an automation is not a person, matching the activity
+    // line above. The early return further up already guarantees this only runs
+    // on a real transition.
+    await notifyProjectStatusChanged({
+      companyId: ctx.companyId,
+      projectId: project.id,
+      actorId: null,
+      from: project.status,
+      to: parsed.data.status,
     });
 
     return { type: "set_project_status", ok: true, detail: `Set to ${parsed.data.status}.` };

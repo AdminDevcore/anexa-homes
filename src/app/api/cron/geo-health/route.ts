@@ -4,6 +4,7 @@ import { checkGeoProviders } from "@/server/modules/geo/health";
 import { sendEmail } from "@/server/modules/notifications/delivery";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
+import { assertCronRequest } from "@/server/auth/cron";
 
 /**
  * The address-lookup watchdog.
@@ -33,10 +34,8 @@ const DEDUPE_DAYS = 3;
 const ALERT_TITLE = "⚠️ Address lookup";
 
 async function handler(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
 
   try {
     const health = await checkGeoProviders();

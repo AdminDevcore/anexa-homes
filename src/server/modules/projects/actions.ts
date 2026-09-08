@@ -15,6 +15,7 @@ import { fireEvent } from "@/server/modules/notifications/engine";
 import { getQcChecklistTemplate } from "@/server/modules/settings/queries";
 
 import { brandingForCompany } from "@/server/branding/resolve";
+import { notifyProjectStatusChanged } from "./status-events";
 function fail(error: string) {
   return { ok: false as const, error };
 }
@@ -134,6 +135,13 @@ export async function updateProjectAction(input: z.infer<typeof editSchema>) {
   if (!(await projectInScope(user, d.projectId))) return fail("Project not found.");
   const toDate = (s?: string) => (s ? new Date(s) : null);
 
+  // Read before the write: this dialog saves the whole job at once and usually
+  // does not move the status, so only an actual transition should notify.
+  const before = await prisma.project.findUnique({
+    where: { id: d.projectId },
+    select: { status: true },
+  });
+
   try {
     const updated = await prisma.project.update({
       where: { id: d.projectId },
@@ -177,6 +185,13 @@ export async function updateProjectAction(input: z.infer<typeof editSchema>) {
         actorId: user.userId,
         projectId: d.projectId,
       },
+    });
+    await notifyProjectStatusChanged({
+      companyId: user.companyId,
+      projectId: d.projectId,
+      actorId: user.userId,
+      from: before?.status,
+      to: d.status as ProjectStatus,
     });
     revalidatePath(`/portal/leads/${updated.leadId}`);
     revalidatePath(`/portal/projects/${d.projectId}`);

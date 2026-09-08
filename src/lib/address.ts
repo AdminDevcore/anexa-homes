@@ -36,3 +36,20 @@ export function addressContains(q: string) {
   const contains = { contains: q, mode: "insensitive" as const };
   return [{ address: contains }, { city: contains }, { state: contains }, { zip: contains }];
 }
+
+/**
+ * "1903 N Depot St, Victoria, TX 77901" — an address as it is WRITTEN, not as
+ * it is searched.
+ *
+ * The difference from `addressSearchText` is the punctuation, and the
+ * punctuation is the whole point: joining all four parts with commas gives
+ * "Victoria, TX, 77901", which is the one place a US address never takes one
+ * and reads as machine output on a document a homeowner is handed.
+ */
+export function formatMailingAddress(parts: AddressParts | null | undefined): string {
+  if (!parts) return "";
+  const street = parts.address?.trim();
+  const city = parts.city?.trim();
+  const region = [parts.state?.trim(), parts.zip?.trim()].filter(Boolean).join(" ");
+  return [street, city, region].filter(Boolean).join(", ");
+}

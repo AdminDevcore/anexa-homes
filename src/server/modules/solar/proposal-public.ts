@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { runUnscoped, runInVertical, asActiveVertical } from "@/server/vertical/context";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ActiveVertical } from "@/lib/vertical";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
 import { isSignatureImage } from "@/lib/signature-image";
@@ -47,9 +47,14 @@ export async function getPublicSolarProposal(token: string) {
         select: {
           id: true, leadId: true, companyId: true, version: true, status: true,
           sentAt: true, supersededAt: true, snapshot: true,
+          // Which version this deal SOLD at. Read on the public page because a
+          // superseded document may still start an application when it is the
+          // one that was agreed — see `mayStartApplication`. `signedAt` arrives
+          // with the signature block below.
+          approvedAt: true,
           showComparison: true, showPaymentOptions: true,
           ...SIGNATURE_SELECT,
-          lead: { select: { vertical: true, email: true } },
+          lead: { select: { vertical: true, email: true, phone: true } },
         },
       })
   );
@@ -58,7 +63,17 @@ export async function getPublicSolarProposal(token: string) {
   // and either one being wrong should close the door rather than open it.
   if (!PUBLICLY_READABLE.includes(proposal.status as (typeof PUBLICLY_READABLE)[number])) return null;
   if (!proposal.sentAt) return null;
-  return { ...proposal, snapshot: proposal.snapshot as unknown as SolarProposalSnapshot };
+  return {
+    ...proposal,
+    // Documents frozen before the cover had a "Prepared for" block get the
+    // household's contact details filled in on the way out, and nothing else.
+    // See `withCustomerContact` for why this one field is allowed to and the
+    // rest of the snapshot is not.
+    snapshot: withCustomerContact(
+      proposal.snapshot as unknown as SolarProposalSnapshot,
+      proposal.lead,
+    ),
+  };
 }
 
 /** First-view tracking. Best effort — never blocks the render. */

@@ -4,8 +4,9 @@ import * as React from "react";
 import {
   CheckCircle2,
   ChevronDown,
+  Circle,
   Loader2,
-  ScrollText,
+  Send,
   TriangleAlert,
   XCircle,
 } from "lucide-react";
@@ -19,42 +20,69 @@ import {
 import type { LenderCheckResult } from "@/server/modules/solar/lender-submit";
 
 /**
- * WHAT THE LENDER IS ACTUALLY BEING TOLD ABOUT THIS DEAL.
+ * HAS THIS GONE TO THE LENDER, OR NOT?
  *
- * Built because for the whole life of the integration there was no way to see
- * it. A submission left a one-line error string on the activity log; the
- * payload and the partner's own answer went to a server console nobody in the
- * product can read. When their intake spent three weeks refusing every solar
- * deal, finding out why meant decrypting the lender's API key and replaying the
- * request by hand.
+ * That is the whole headline, and it took a rewrite to get there. The panel
+ * started life as a diagnostic — the exact JSON body, a validation button and
+ * the full attempt history, all unfolded at once — built because for the whole
+ * life of the integration there was no way to see what the partner was being
+ * told. It answered a question nobody on the sales floor was asking. What they
+ * open a proposal wanting to know is one bit: did it go.
  *
- * Three things, in the order somebody needs them:
+ * So the bit is the panel. A line, an icon, a date and the partner's reference
+ * — readable without opening anything.
+ *
+ * The diagnostic is kept, one fold down, because the reason it was built has
+ * not gone away: when their intake spends three weeks refusing every solar
+ * deal, finding out why used to mean decrypting the lender's API key and
+ * replaying the request by hand. What changed is that it no longer greets
+ * somebody who came here to read a document. Inside the fold, in the order
+ * somebody debugging needs them:
  *
  *   1. CHECK. Their validation endpoint runs the full schema and every product
  *      rule and writes NOTHING — no application, no credit file, no email to
  *      the household. Every refusal it surfaces is one a customer never
  *      watches happen.
- *   2. THE BODY. The exact JSON, from the same function that sends it. Not a
- *      summary of the payload; the payload.
- *   3. THE HISTORY. Every previous attempt with the partner's own reply.
- *
- * Collapsed by default. This is a diagnostic, and a proposal preview is a page
- * somebody opens to read a document.
+ *   2. THE HISTORY. Every previous attempt with the partner's own reply.
+ *   3. THE BODY. The exact JSON, from the same function that sends it — folded
+ *      again, because it is the one thing here that is never skim-read.
  */
 export function LenderPayloadInspector({
   leadId,
+  proposalId,
   lenderName,
   payload,
   problems,
+  submitted,
 }: {
   leadId: string;
+  /**
+   * The version this panel sits on. Checked against the SAME document the body
+   * above was built from — asking the lender about a different version than the
+   * one on screen is a check whose answer means nothing.
+   */
+  proposalId: string;
   lenderName: string;
   /** Null when our own preflight already refuses the deal. */
   payload: unknown | null;
   /** Our blockers, when there are any. Shown instead of the check button. */
   problems: string[];
+  /**
+   * WHAT HAPPENED TO THIS VERSION, resolved on the server so the headline is
+   * right on the first paint. Null means no attempt has been recorded for this
+   * document — which is not the same as "this deal has never been submitted",
+   * and the line says so rather than claiming the stronger thing.
+   */
+  submitted: {
+    ok: boolean;
+    at: string;
+    referenceNumber: string | null;
+    message: string | null;
+    actorName: string | null;
+  } | null;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [showBody, setShowBody] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [check, setCheck] = React.useState<LenderCheckResult | null>(null);
   const [log, setLog] = React.useState<SubmissionLogRow[] | null>(null);
@@ -69,7 +97,7 @@ export function LenderPayloadInspector({
   async function runCheck() {
     setBusy(true);
     try {
-      setCheck(await checkDealWithLenderAction(leadId));
+      setCheck(await checkDealWithLenderAction(leadId, proposalId));
     } catch {
       setCheck({ ok: false, error: "Could not reach the lender." });
     } finally {
@@ -79,26 +107,74 @@ export function LenderPayloadInspector({
     }
   }
 
+  /**
+   * The one line. Four states, and each is a different thing to do next:
+   * fix it, send it, wait, or ring the partner about a refusal.
+   */
+  const headline = submitted
+    ? submitted.ok
+      ? {
+          tone: "sent" as const,
+          icon: <CheckCircle2 className="size-4 text-emerald-600" />,
+          label: `Sent to ${lenderName}`,
+          detail: [
+            new Date(submitted.at).toLocaleDateString(undefined, {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            }),
+            submitted.referenceNumber ? `ref ${submitted.referenceNumber}` : null,
+            submitted.actorName,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        }
+      : {
+          tone: "refused" as const,
+          icon: <XCircle className="size-4 text-red-600" />,
+          label: `${lenderName} did not accept it`,
+          detail: submitted.message ?? "See the attempts below.",
+        }
+    : problems.length > 0
+      ? {
+          tone: "blocked" as const,
+          icon: <TriangleAlert className="size-4 text-amber-600" />,
+          label: "Not sent — this deal cannot go yet",
+          detail: `${problems.length} thing${problems.length === 1 ? "" : "s"} to fix first`,
+        }
+      : {
+          tone: "unsent" as const,
+          icon: <Circle className="size-4 text-muted-foreground" />,
+          label: `Not sent to ${lenderName}`,
+          detail: "Nothing has been submitted for this version.",
+        };
+
   return (
     <div className="mx-auto max-w-5xl px-4 pb-6 print:hidden sm:px-6">
-      <div className="overflow-hidden rounded-lg border bg-white">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm hover:bg-muted/40"
-          aria-expanded={open}
-        >
-          <ScrollText className="size-4 text-muted-foreground" />
-          <span className="font-medium">What gets sent to {lenderName}</span>
-          <span className="text-xs text-muted-foreground">
-            {problems.length > 0
-              ? `${problems.length} blocker${problems.length === 1 ? "" : "s"}`
-              : "the exact application body"}
-          </span>
-          <ChevronDown
-            className={cn("ml-auto size-4 text-muted-foreground transition-transform", open && "rotate-180")}
-          />
-        </button>
+      <div
+        className={cn(
+          "overflow-hidden rounded-lg border bg-white",
+          headline.tone === "sent" && "border-emerald-300",
+          headline.tone === "refused" && "border-red-300",
+          headline.tone === "blocked" && "border-amber-300"
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
+          {headline.icon}
+          <span className="font-medium">{headline.label}</span>
+          <span className="text-xs text-muted-foreground">{headline.detail}</span>
+          {/* The way in for somebody who has to know WHY, kept quiet enough
+              that nobody else has to read past it. */}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            aria-expanded={open}
+          >
+            {open ? "Hide details" : "Details"}
+            <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+          </button>
+        </div>
 
         {open && (
           <div className="space-y-4 border-t p-4">
@@ -130,22 +206,36 @@ export function LenderPayloadInspector({
 
             {check && <CheckResult result={check} />}
 
+            <SubmissionHistory rows={log} />
+
+            {/* FOLDED AGAIN. The payload is the most useful thing in here to
+                the one person debugging the integration and the least useful
+                to everybody else, and unfolded it was ninety lines of JSON
+                between a rep and the answer they came for. */}
             {payload != null && (
               <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => setShowBody((v) => !v)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                  aria-expanded={showBody}
+                >
+                  <ChevronDown className={cn("size-3.5 transition-transform", showBody && "rotate-180")} />
                   The application body
-                </h4>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Built by the same function that sends it. Occupancy is answered at the moment of
-                  sending and is shown here as yes.
-                </p>
-                <pre className="mt-2 max-h-96 overflow-auto rounded-md bg-neutral-900 p-3 text-xs leading-relaxed text-neutral-100">
-                  {JSON.stringify(payload, null, 2)}
-                </pre>
+                </button>
+                {showBody && (
+                  <>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Built by the same function that sends it. Occupancy is answered at the moment
+                      of sending and is shown here as yes.
+                    </p>
+                    <pre className="mt-2 max-h-96 overflow-auto rounded-md bg-neutral-900 p-3 text-xs leading-relaxed text-neutral-100">
+                      {JSON.stringify(payload, null, 2)}
+                    </pre>
+                  </>
+                )}
               </div>
             )}
-
-            <SubmissionHistory rows={log} />
           </div>
         )}
       </div>
@@ -197,7 +287,11 @@ function SubmissionHistory({ rows }: { rows: SubmissionLogRow[] | null }) {
     return <p className="text-xs text-muted-foreground">Loading previous attempts…</p>;
   }
   if (rows.length === 0) {
-    return <p className="text-xs text-muted-foreground">No submission has been attempted yet.</p>;
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Send className="size-3.5" /> No submission has been attempted on this deal.
+      </p>
+    );
   }
   return (
     <div>

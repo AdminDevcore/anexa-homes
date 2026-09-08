@@ -44,7 +44,12 @@ export async function qualifyFromPortalAction(input: {
       leadId: true,
       companyId: true,
       version: true,
+      // The three columns `mayStartApplication` reads. A signed or approved
+      // version is the one this deal is written at even after a newer one
+      // exists, and without these it would look like any other stale draft.
       supersededAt: true,
+      signedAt: true,
+      approvedAt: true,
       lead: { select: { vertical: true } },
     },
   });

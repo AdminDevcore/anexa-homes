@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { assertCronRequest } from "@/server/auth/cron";
 
 // Ingest endpoint for the external MRMS-MESH worker. Accepts a day's hail-swath
 // polygons (GeoJSON-style, [lng,lat]) + size tier, stores them as StormSwath
-// rows (replace-by-day). Machine auth via Bearer CRON_SECRET.
+// rows (replace-by-day). Machine auth via Bearer CRON_SECRET, which is required
+// — the route refuses when it is unset.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -28,10 +30,8 @@ function bboxOf(rings: [number, number][][]) {
 }
 
 export async function POST(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
 
   let body: { date?: string; source?: string; features?: Feature[] };
   try {

@@ -31,6 +31,8 @@ const PROPOSAL = {
   companyId: 'co-1',
   version: 3,
   supersededAt: null as Date | null,
+  signedAt: null as Date | null,
+  approvedAt: null as Date | null,
   lead: { vertical: 'solar' as const },
 }
 
@@ -101,6 +103,51 @@ describe('readProposalQualifyOffer', () => {
       problems: ['The customer has no phone number on file.'],
     })
   })
+
+  /**
+   * A BUTTON THAT ALWAYS ERRORS IS WORSE THAN NO BUTTON.
+   *
+   * The offer used to answer only "is this deal submittable", never "may THIS
+   * document submit" — so a household on a superseded draft was handed the
+   * automatic control and an error the moment they pressed it. They get the
+   * lender's ordinary application link instead, which is a road that works.
+   */
+  it('offers nothing on a document that may not start an application', async () => {
+    readLenderSubmission.mockResolvedValue({
+      mode: 'api',
+      lenderName: 'Amos Capital Fund',
+      ready: true,
+      summary: SUMMARY,
+    })
+    const stale = { ...PROPOSAL, supersededAt: new Date() }
+    expect(await readProposalQualifyOffer(stale, 'customer')).toBeNull()
+  })
+
+  it('tells a REP why the button is not live on a stale version', async () => {
+    readLenderSubmission.mockResolvedValue({
+      mode: 'api',
+      lenderName: 'Amos Capital Fund',
+      ready: true,
+      summary: SUMMARY,
+    })
+    const offer = await readProposalQualifyOffer(
+      { ...PROPOSAL, supersededAt: new Date() },
+      'rep',
+    )
+    expect(offer).toMatchObject({ state: 'blocked' })
+    expect((offer as { problems: string[] }).problems.join(' ')).toContain('replaced')
+  })
+
+  it('still offers the automatic route on the signed version', async () => {
+    readLenderSubmission.mockResolvedValue({
+      mode: 'api',
+      lenderName: 'Amos Capital Fund',
+      ready: true,
+      summary: SUMMARY,
+    })
+    const signed = { ...PROPOSAL, supersededAt: new Date(), signedAt: new Date() }
+    expect(await readProposalQualifyOffer(signed, 'customer')).toMatchObject({ state: 'ready' })
+  })
 })
 
 describe('qualifyOnProposal', () => {
@@ -120,8 +167,44 @@ describe('qualifyOnProposal', () => {
   it('re-reads the deal on the server rather than trusting the page', async () => {
     await qualifyOnProposal(PROPOSAL, input)
     expect(submitDealToLender).toHaveBeenCalledWith(
-      expect.objectContaining({ leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true }),
+      expect.objectContaining({
+        leadId: 'lead-1',
+        companyId: 'co-1',
+        ownerOccupied: true,
+        // WHICH DOCUMENT was pressed, so the lender is quoted this sheet's
+        // figures rather than whatever version happens to be newest.
+        proposalId: 'prop-1',
+      }),
     )
+  })
+
+  /**
+   * THE CASE THE WHOLE CHANGE EXISTS FOR.
+   *
+   * The customer signs v13; the rep then generates a v14. `mayInheritLiveLink`
+   * deliberately keeps the live link on the SIGNED row, so the household is
+   * still holding v13 — now superseded — and a freshly generated v14 has no
+   * public token at all. Refusing here told them to "open the most recent one
+   * your representative sent you", which did not exist, and closed the only
+   * door the deal had.
+   */
+  it('submits from the version the customer signed, newer versions or not', async () => {
+    const r = await qualifyOnProposal(
+      { ...PROPOSAL, supersededAt: new Date('2026-09-05'), signedAt: new Date('2026-09-04') },
+      input,
+    )
+    expect(r).toMatchObject({ ok: true, referenceNumber: 'AMS-1042' })
+    expect(submitDealToLender).toHaveBeenCalledWith(
+      expect.objectContaining({ proposalId: 'prop-1' }),
+    )
+  })
+
+  it('submits from a version an admin approved as the one this deal sold', async () => {
+    const r = await qualifyOnProposal(
+      { ...PROPOSAL, supersededAt: new Date('2026-09-05'), approvedAt: new Date('2026-09-04') },
+      input,
+    )
+    expect(r).toMatchObject({ ok: true })
   })
 
   it('refuses a superseded document without calling the lender', async () => {

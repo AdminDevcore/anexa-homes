@@ -3,6 +3,7 @@ import { runInVertical, asActiveVertical } from "@/server/vertical/context";
 import type { Vertical } from "@prisma/client";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
 import { readLenderSubmission, submitDealToLender } from "./lender-submit";
+import { mayStartApplication } from "@/lib/solar-proposal-state";
 
 /**
  * The homeowner's Qualify button, and what stands behind it.
@@ -36,11 +37,41 @@ import { readLenderSubmission, submitDealToLender } from "./lender-submit";
  *                blockers are exactly what somebody needs to see.
  */
 export async function readProposalQualifyOffer(
-  proposal: { leadId: string; companyId: string; lead: { vertical: Vertical } },
+  proposal: {
+    id: string;
+    leadId: string;
+    companyId: string;
+    supersededAt: Date | null;
+    signedAt: Date | null;
+    approvedAt: Date | null;
+    lead: { vertical: Vertical };
+  },
   audience: "customer" | "rep",
 ): Promise<QualifyOffer | null> {
+  /**
+   * WHETHER THIS DOCUMENT MAY APPLY AT ALL, asked before the deal is asked
+   * anything.
+   *
+   * It used to be asked only at the press, by `qualifyOnProposal` below, which
+   * meant a household reading a stale version was handed the automatic control
+   * and an error the instant they used it. A button that cannot succeed is
+   * worse than no button: the plain application link underneath is a road that
+   * still works, and returning null is what puts them on it.
+   */
+  if (!mayStartApplication(proposal)) {
+    return audience === "customer"
+      ? null
+      : {
+          state: "blocked",
+          lenderName: null,
+          problems: [
+            "This version has been replaced and is not the one this deal is written at. Open the current version, or the version the customer signed.",
+          ],
+        };
+  }
+
   const status = await runInVertical(asActiveVertical(proposal.lead.vertical), () =>
-    readLenderSubmission(proposal.leadId, proposal.companyId),
+    readLenderSubmission(proposal.leadId, proposal.companyId, proposal.id),
   );
 
   if (status.mode === "link") return null;
@@ -82,14 +113,18 @@ export async function qualifyOnProposal(
     companyId: string;
     version: number;
     supersededAt: Date | null;
+    signedAt: Date | null;
+    approvedAt: Date | null;
     lead: { vertical: Vertical };
   },
   input: { ownerOccupied: boolean; ip: string | null },
 ): Promise<QualifyResult> {
-  // A superseded document quotes a price the deal is no longer written at.
-  // Submitting from one would put a figure in front of an underwriter that
-  // nobody in this company would stand behind.
-  if (proposal.supersededAt) {
+  // A document that is not the one this deal is written at quotes a price
+  // nobody in this company would stand behind, and it must not reach an
+  // underwriter. Which documents those are is `mayStartApplication`'s question
+  // — notably NOT "anything superseded", which closed this door on the very
+  // version the customer signed.
+  if (!mayStartApplication(proposal)) {
     return {
       ok: false,
       error:
@@ -103,6 +138,10 @@ export async function qualifyOnProposal(
     const result = await submitDealToLender({
       leadId: proposal.leadId,
       companyId: proposal.companyId,
+      // THE SHEET IN THEIR HANDS. Every other fact is re-read from the deal,
+      // but which document they were reading is a fact only this call knows,
+      // and it is the one the price has to come from.
+      proposalId: proposal.id,
       ownerOccupied: input.ownerOccupied,
       // Only reached on a deal with no assigned rep. The lender takes a typed
       // name; "Anexa Homes" is truthful and is not somebody else's login.

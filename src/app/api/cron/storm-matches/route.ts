@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { recomputeStormMatches } from "@/server/modules/storm/matches";
+import { assertCronRequest } from "@/server/auth/cron";
 
 // Safety-net daily recompute of storm→property matches across all companies
 // (imports already recompute inline; this catches new/geocoded leads + knocks).
@@ -7,10 +8,8 @@ export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
   try {
     const companies = await prisma.company.findMany({ select: { id: true } });
     let leadMatches = 0;

@@ -2,18 +2,18 @@ import { prisma } from "@/server/db/client";
 import { getStormConfig } from "@/server/modules/storm/config";
 import { importSpcDay } from "@/server/modules/storm/import-spc";
 import { recomputeStormMatches } from "@/server/modules/storm/matches";
+import { assertCronRequest } from "@/server/auth/cron";
 
 // Daily SPC storm-report ingest. Pulls today's (rolling alias) and yesterday's
 // (finalized) hail/wind/tornado reports for every company, within each company's
-// search region, then recomputes property matches. Vercel Cron + Bearer CRON_SECRET.
+// search region, then recomputes property matches. Vercel Cron + Bearer CRON_SECRET
+// (required — the route refuses when it is unset).
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = assertCronRequest(req);
+  if (denied) return denied;
   try {
     const companies = await prisma.company.findMany({ select: { id: true } });
     const today = new Date();

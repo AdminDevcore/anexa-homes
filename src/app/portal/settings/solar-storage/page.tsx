@@ -3,7 +3,7 @@ import { requireUser } from "@/server/auth/session";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
-import { listBackupProfiles, listRebates } from "@/server/modules/solar/storage";
+import { listBackupProfiles, listRebates } from "@/server/modules/solar/storage-queries";
 import { SolarStorageSettings } from "@/components/portal/solar-storage-settings";
 
 export const dynamic = "force-dynamic";

@@ -320,13 +320,52 @@ describe('submitDealToLender', () => {
     expect(submitToAmos.mock.calls[0]?.[1]?.termMonths).toBe(360)
   })
 
-  it('reads only the version the customer can still open', async () => {
-    await submitDealToLender(input)
-    expect(proposalFindFirst.mock.calls[0]?.[0]?.where).toMatchObject({
+  /**
+   * WHICH DOCUMENT THE MONEY COMES OFF.
+   *
+   * Named by the caller, because both doors onto a submission live ON a
+   * proposal and only the caller knows which one was open. Resolving it here
+   * from the deal was the bug: a customer signs v13, a rep generates a v14,
+   * `mayInheritLiveLink` keeps the live link on the SIGNED v13 — and the
+   * household pressing Qualify on the sheet they signed would have had v14's
+   * price sent under their signature.
+   *
+   * Scoped to the lead AND the company even though the id is unique: the id
+   * arrives from a caller, and a row that is not this deal's must not resolve.
+   */
+  it('reads the money off the document that was named', async () => {
+    await submitDealToLender({ ...input, proposalId: 'prop-13' })
+    expect(proposalFindFirst.mock.calls[0]?.[0]?.where).toEqual({
+      id: 'prop-13',
       leadId: 'lead-1',
       companyId: 'co-1',
-      supersededAt: null,
     })
+  })
+
+  it('falls back to the version this deal SOLD at when none was named', async () => {
+    await submitDealToLender(input)
+    const where = proposalFindFirst.mock.calls[0]?.[0]?.where
+    // The approved version — set by hand, and automatically by a signature —
+    // or the current one where nothing has been approved. Never "newest" on
+    // its own, which is what put an unsigned draft's price on a credit file.
+    expect(where).toEqual({
+      leadId: 'lead-1',
+      companyId: 'co-1',
+      OR: [{ approvedAt: { not: null } }, { supersededAt: null }],
+    })
+    expect(proposalFindFirst.mock.calls[0]?.[0]?.orderBy).toEqual([
+      { approvedAt: { sort: 'desc', nulls: 'last' } },
+      { version: 'desc' },
+    ])
+  })
+
+  it('asks the same document for the savings as for the money', async () => {
+    // Two reads, one rule. A payload quoting v13's price beside v14's saving
+    // is a payload nobody can reconcile.
+    await submitDealToLender({ ...input, proposalId: 'prop-13' })
+    const wheres = proposalFindFirst.mock.calls.map((c) => c[0]?.where)
+    expect(wheres.length).toBeGreaterThan(1)
+    for (const w of wheres) expect(w).toEqual({ id: 'prop-13', leadId: 'lead-1', companyId: 'co-1' })
   })
 
   it('falls back to the pricing rows on a snapshot too old to carry the figure', async () => {

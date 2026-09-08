@@ -279,7 +279,8 @@ export function QualifyAction({
         </span>
         <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-50 p-3">
           <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-900">
-            <ShieldAlert className="size-3.5" /> The customer cannot apply to {offer.lenderName} yet
+            <ShieldAlert className="size-3.5" /> The customer cannot apply to{" "}
+            {offer.lenderName ?? "the lender"} yet
           </p>
           <ul className="mt-1.5 space-y-1 text-xs text-amber-900/80">
             {offer.problems.map((p) => (

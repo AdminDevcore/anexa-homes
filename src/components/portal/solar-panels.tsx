@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Loader2, TriangleAlert, CircleAlert, Sun, ImageUp, Trash2, BadgeCheck, ExternalLink, Maximize2,
-  ChevronDown,
+  ChevronDown, Send,
 } from "lucide-react";
 import type { FinanceProduct, MountType } from "@prisma/client";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,7 @@ import {
 import type { CreditClaims, CreditRates } from "@/lib/solar-credit-ladder";
 import { applyDealRebateAction, removeDealRebateAction } from "@/server/modules/solar/storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
+import { proposalVersionStanding } from "@/lib/solar-proposal-state";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
 import { FinanceOffers } from "@/components/portal/solar-finance-offers";
 import { SolarSharePanel } from "@/components/portal/solar-share-panel";
@@ -1752,6 +1753,21 @@ export type ProposalVersion = {
    * generated for somebody else, or disappear from one that has it.
    */
   hasContractAdjustment?: boolean;
+  /**
+   * WHETHER THIS VERSION WENT TO THE LENDER, and how they answered.
+   *
+   * Absent on a version nobody has submitted, and also on one submitted before
+   * attempts recorded which document they spoke for — see the `proposalId`
+   * column on SolarLenderSubmission. Both read the same way here: no badge,
+   * which claims nothing rather than claiming the wrong thing.
+   */
+  lender?: {
+    name: string;
+    ok: boolean;
+    at: string;
+    referenceNumber: string | null;
+    message: string | null;
+  } | null;
 };
 
 export function SolarProposalGate({
@@ -2065,6 +2081,7 @@ export function ProposalVersionList({
         {shown.map((v) => {
           const isApproved = !!v.approvedAt;
           const busy = busyId === v.id;
+          const standing = proposalVersionStanding(v);
           return (
             <li
               key={v.id}
@@ -2076,22 +2093,16 @@ export function ProposalVersionList({
               )}
             >
               <span className="font-medium">v{v.version}</span>
+              {/* Where this document stands, in one word. The precedence — and
+                  why "sent" and "viewed" both read as pending — is argued in
+                  proposalVersionStanding. */}
               <span
                 className={cn(
                   "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                  v.signedAt
-                    ? "bg-emerald-100 text-emerald-700"
-                    : v.supersededAt
-                      ? "bg-muted text-muted-foreground"
-                      : "bg-sky-100 text-sky-700"
+                  STANDING_TONE[standing.tone]
                 )}
               >
-                {/* SIGNED OUTRANKS SUPERSEDED. Both are true of a version the
-                    customer signed and a rep built a v14 after, and this badge
-                    used to report only the second — a signed proposal quietly
-                    losing the one word on the row that says a human agreed to
-                    it. Same reasoning as the Approved badge below. */}
-                {v.signedAt ? "signed" : v.supersededAt ? "superseded" : v.status}
+                {standing.label}
               </span>
               {v.signedAt && v.supersededAt && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -2106,6 +2117,33 @@ export function ProposalVersionList({
               {isApproved && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
                   <BadgeCheck className="size-3" /> Approved
+                </span>
+              )}
+
+              {/* WHETHER THE LENDER GOT THIS ONE. A deal re-priced four times
+                  can only have been submitted at one of those prices, and
+                  "sent to the lender" said of the DEAL cannot say which. Said
+                  of the row, it can. Its own badge for the same reason Approved
+                  is: it is a different claim from where the customer's
+                  signature stands, and both are true at once on a live deal. */}
+              {v.lender && (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    v.lender.ok
+                      ? "bg-indigo-100 text-indigo-700"
+                      : "bg-red-100 text-red-700"
+                  )}
+                  title={
+                    v.lender.ok
+                      ? `Submitted ${new Date(v.lender.at).toLocaleString()}${
+                          v.lender.referenceNumber ? ` · ref ${v.lender.referenceNumber}` : ""
+                        }`
+                      : v.lender.message ?? "The lender did not accept this submission."
+                  }
+                >
+                  {v.lender.ok ? <Send className="size-3" /> : <TriangleAlert className="size-3" />}
+                  {v.lender.ok ? `Sent to ${v.lender.name}` : `${v.lender.name} refused it`}
                 </span>
               )}
 
@@ -2353,3 +2391,16 @@ function RebatePanel({
     </section>
   );
 }
+
+/**
+ * Badge tones for a version's standing. Kept beside the list rather than
+ * imported from the deal card's own map: they answer different questions —
+ * that one is about the DEAL, this one about one document — and a shared table
+ * would tie the two to each other's palette for no reason.
+ */
+const STANDING_TONE: Record<"neutral" | "progress" | "ready" | "done", string> = {
+  neutral: "bg-muted text-muted-foreground",
+  progress: "bg-sky-100 text-sky-700",
+  ready: "bg-amber-100 text-amber-800",
+  done: "bg-emerald-100 text-emerald-700",
+};

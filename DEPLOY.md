@@ -35,24 +35,38 @@ git push -u origin HEAD            # pushes the current branch
 | `STORAGE_S3_BUCKET` | your bucket name |
 | `AWS_REGION` | bucket region |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | S3 credentials (or R2 equivalents) |
+| `CRON_SECRET` | **required** — `openssl rand -base64 32`. Bearer token for every `/api/cron/*` entry in `vercel.json` and for `POST /api/storm/swaths/ingest`. **Fails closed:** unset ⇒ all of them 503 and no scheduled work runs. |
+| `LENDER_WEBHOOK_SECRET` | required if any lender posts credit decisions — also fails closed |
 | `RESEND_API_KEY` + `NOTIFY_EMAIL_FROM` | (optional) email — invites, pay stubs, 1099 |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | (optional) SMS |
 | `NLR_API_KEY` | (optional, solar) real production figures — see below |
 
-⚠️ **Do NOT set in prod:** `DEV_AUTH_BYPASS` and `NEXT_PUBLIC_DEMO_MODE` — these are
-dev-only and would be a security hole live.
+⚠️ **Do NOT set in prod:** `NEXT_PUBLIC_DEMO_MODE` — it shows the shared-password
+quick-login block on /login and would be a security hole live. (It is additionally
+guarded in code: `server/auth/demo-accounts.ts` refuses to enable demo mode whenever
+`VERCEL` is set.)
 
 4. Deploy.
 
-## 5. Apply migrations to the prod DB (once, and after each schema change)
-The build runs `prisma generate` but NOT migrations (so preview builds never touch
-prod). Run migrations explicitly against the prod DB:
+## 5. Migrations
+**The production build applies them itself.** `npm run build` starts with
+`node scripts/prod-migrate.mjs`, which runs `prisma migrate deploy` and then asserts
+with `migrate status` — so code can never reach production ahead of its schema, and a
+failed migration fails the build with the previous deployment still serving.
+
+It only ever touches the database when `VERCEL_ENV === "production"`, so preview builds
+and local `npm run build` skip it entirely. It also rebuilds the connection URL for the
+**session** pooler (`:5432`), because Supabase's transaction pooler (`:6543`) cannot run
+migrations.
+
+The one thing to keep in mind: the migration lands a few seconds BEFORE the new code goes
+live, so ship a **destructive** change (dropping a column the outgoing build still selects)
+as two deploys — stop reading it, then drop it.
+
+First-time only, to create the demo company/users:
 ```bash
-DATABASE_URL="<neon-url>" npx prisma migrate deploy
-# first-time only, to create the demo company/users:
-DATABASE_URL="<neon-url>" pnpm db:seed     # OPTIONAL — skip for a clean prod start
+DATABASE_URL="<prod-url>" pnpm db:seed     # OPTIONAL — skip for a clean prod start
 ```
-Re-run `migrate deploy` whenever new migrations land.
 
 ## 6. First login
 - If you seeded: the seeded accounts (`owner@anexahomes.com` … / `Passw0rd!`).

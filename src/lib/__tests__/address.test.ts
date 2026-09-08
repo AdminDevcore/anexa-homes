@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addressSearchText, addressContains } from "@/lib/address";
+import { addressSearchText, addressContains, formatMailingAddress } from "@/lib/address";
 import { matchesAppointmentQuery } from "@/lib/appointment-filters";
 
 const oak = { address: "1420 Oak St", city: "Plano", state: "TX", zip: "75024" };
@@ -18,6 +18,23 @@ describe("addressSearchText", () => {
   it("is an empty string, never null, when there is no address at all", () => {
     expect(addressSearchText(null)).toBe("");
     expect(addressSearchText({})).toBe("");
+  });
+});
+
+describe("formatMailingAddress", () => {
+  it("writes the state and ZIP as one field, with no comma between them", () => {
+    expect(formatMailingAddress(oak)).toBe("1420 Oak St, Plano, TX 75024");
+  });
+
+  it("does not leave a dangling comma when a part is missing", () => {
+    expect(formatMailingAddress({ ...oak, city: null })).toBe("1420 Oak St, TX 75024");
+    expect(formatMailingAddress({ ...oak, state: null, zip: null })).toBe("1420 Oak St, Plano");
+    expect(formatMailingAddress({ ...oak, address: "  " })).toBe("Plano, TX 75024");
+  });
+
+  it("is an empty string, never null, with nothing to write", () => {
+    expect(formatMailingAddress(null)).toBe("");
+    expect(formatMailingAddress({})).toBe("");
   });
 });
 

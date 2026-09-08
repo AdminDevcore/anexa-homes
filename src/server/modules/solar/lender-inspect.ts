@@ -31,7 +31,16 @@ const denied = { ok: false as const, error: "Not allowed." };
  * likes. That is the entire value: every refusal it surfaces is one a customer
  * never watches happen.
  */
-export async function checkDealWithLenderAction(leadId: string): Promise<LenderCheckResult> {
+export async function checkDealWithLenderAction(
+  leadId: string,
+  /**
+   * Which version to check. Arrives from the browser and is never trusted as
+   * authorization — `submissionDocument` scopes it to this lead and this
+   * company, so an id belonging to somebody else's deal resolves to nothing
+   * and the deal answers for itself instead.
+   */
+  proposalId?: string | null,
+): Promise<LenderCheckResult> {
   const user = await requireUser();
   if (!can(user, "update", "Lead") || !can(user, "update", "Proposal")) return denied;
 
@@ -45,7 +54,7 @@ export async function checkDealWithLenderAction(leadId: string): Promise<LenderC
   // so an admin sitting in the roofing workspace would otherwise read no design
   // at all and be told this deal has no direct submission.
   return runInVertical(asActiveVertical(lead.vertical), () =>
-    checkDealWithLender(leadId, user.companyId, user.fullName),
+    checkDealWithLender(leadId, user.companyId, user.fullName, proposalId),
   );
 }
 

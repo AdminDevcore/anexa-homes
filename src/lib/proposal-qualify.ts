@@ -29,7 +29,13 @@ export type QualifyOffer =
     }
   | {
       state: "blocked";
-      lenderName: string;
+      /**
+       * NULL when the block is about the DOCUMENT rather than the deal — a
+       * version that has been replaced is refused before the deal's lender is
+       * ever looked up, because which partner would have taken it is not the
+       * point and reading it would be a query asked for a sentence.
+       */
+      lenderName: string | null;
       /**
        * Why it cannot be sent, in the words the preflight uses. REP-FACING
        * ONLY — the customer's copy is never handed this shape, and the server

@@ -5,14 +5,17 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import type { BackupProfile } from "@/lib/solar-storage";
 
 /**
- * The two company lists a storage quote is built from: what a battery is asked
- * to carry, and whose money comes off the price.
+ * Editing the two company lists a storage quote is built from — what a battery
+ * is asked to carry, and whose money comes off the price — and applying a
+ * rebate to one deal.
  *
- * Both are SCOPED models (`vertical`), so any caller outside a portal session
- * must wrap these in `runInVertical("solar", …)`.
+ * MUTATIONS ONLY, and every one of them resolves the company from
+ * `requireUser()`. Nothing here takes a `companyId` argument, because every
+ * export of a `"use server"` module is an endpoint the browser can call with
+ * whatever id it likes. The reads that do take one live in `storage-queries.ts`
+ * — the same split as `readiness.ts`, `adders.ts` and `layout-asset.ts`.
  */
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -20,27 +23,6 @@ const fail = (error: string) => ({ ok: false as const, error });
 // ---------------------------------------------------------------------------
 // Backup load profiles
 // ---------------------------------------------------------------------------
-
-export type BackupProfileRow = BackupProfile & { isActive: boolean };
-
-/**
- * The company's load profiles.
- *
- * `activeOnly` for anything a customer will read — a retired profile must not
- * appear on a proposal. The settings screen passes false so it can show and
- * revive one.
- */
-export async function listBackupProfiles(
-  companyId: string,
-  activeOnly = true
-): Promise<BackupProfileRow[]> {
-  const rows = await prisma.solarBackupProfile.findMany({
-    where: { companyId, ...(activeOnly ? { isActive: true } : {}) },
-    orderBy: [{ rank: "asc" }, { loadWatts: "asc" }],
-    select: { id: true, name: true, loadWatts: true, rank: true, isActive: true },
-  });
-  return rows;
-}
 
 const profileSchema = z.object({
   id: z.string().uuid().optional(),
@@ -119,23 +101,6 @@ export async function deleteBackupProfileAction(input: unknown) {
 // ---------------------------------------------------------------------------
 // Rebates
 // ---------------------------------------------------------------------------
-
-export type RebateRow = {
-  id: string;
-  name: string;
-  amountCents: number;
-  perBattery: boolean;
-  rank: number;
-  isActive: boolean;
-};
-
-export async function listRebates(companyId: string, activeOnly = true): Promise<RebateRow[]> {
-  return prisma.solarRebate.findMany({
-    where: { companyId, ...(activeOnly ? { isActive: true } : {}) },
-    orderBy: [{ rank: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, amountCents: true, perBattery: true, rank: true, isActive: true },
-  });
-}
 
 const rebateSchema = z.object({
   id: z.string().uuid().optional(),
@@ -228,41 +193,6 @@ export async function deleteRebateAction(input: unknown) {
 // Rebates on ONE deal
 // ---------------------------------------------------------------------------
 
-export type DealRebateRow = {
-  rebateId: string;
-  name: string;
-  qty: number;
-  amountCents: number;
-  /** amountCents x qty. The figure the price card subtracts. */
-  totalCents: number;
-};
-
-export async function listDealRebates(companyId: string, leadId: string): Promise<DealRebateRow[]> {
-  const rows = await prisma.solarDealRebate.findMany({
-    where: { companyId, leadId },
-    orderBy: { createdAt: "asc" },
-    select: {
-      rebateId: true,
-      qty: true,
-      amountCents: true,
-      rebate: { select: { name: true } },
-    },
-  });
-  return rows.map((r) => ({
-    rebateId: r.rebateId,
-    name: r.rebate.name,
-    qty: r.qty,
-    amountCents: r.amountCents,
-    totalCents: r.amountCents * r.qty,
-  }));
-}
-
-/** Σ(amount × qty). The single number both pricing functions take. */
-export async function dealRebateTotalCents(companyId: string, leadId: string): Promise<number> {
-  const rows = await listDealRebates(companyId, leadId);
-  return rows.reduce((n, r) => n + r.totalCents, 0);
-}
-
 /**
  * Apply a rebate to a deal.
  *
@@ -272,7 +202,8 @@ export async function dealRebateTotalCents(companyId: string, leadId: string): P
  * was shown is the number they were shown.
  *
  * `qty` follows the design's battery count on a per-battery rebate and is
- * refreshed whenever the count changes — see `syncDealRebateQuantities`.
+ * refreshed whenever the count changes — see `syncDealRebateQuantities` in
+ * `storage-queries.ts`.
  */
 export async function applyDealRebateAction(input: unknown) {
   const user = await requireUser();
@@ -327,24 +258,4 @@ export async function removeDealRebateAction(input: unknown) {
   });
   revalidatePath(`/portal/leads/${parsed.data.leadId}/solar-proposal`);
   return { ok: true as const };
-}
-
-/**
- * Re-count the per-battery rebates on a deal after the battery quantity moves.
- *
- * Without this a rep who applies a $500-per-battery rebate on two batteries and
- * then adds a third keeps quoting $1,000 — a rebate silently one battery short,
- * on a price nobody re-reads. The AMOUNT stays frozen; only the count follows.
- */
-export async function syncDealRebateQuantities(companyId: string, leadId: string, batteryQty: number) {
-  const rows = await prisma.solarDealRebate.findMany({
-    where: { companyId, leadId },
-    select: { id: true, qty: true, rebate: { select: { perBattery: true } } },
-  });
-  const qty = Math.max(1, batteryQty);
-  await Promise.all(
-    rows
-      .filter((r) => r.rebate.perBattery && r.qty !== qty)
-      .map((r) => prisma.solarDealRebate.update({ where: { id: r.id }, data: { qty } }))
-  );
 }

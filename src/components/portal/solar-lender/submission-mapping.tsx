@@ -13,7 +13,11 @@ import type { LenderRow } from "./types";
  * admin asking "does the loan amount go over before or after the tax credit"
  * had no way to answer it short of reading the source.
  *
- * So: every field on the wire, named, with the screen that owns its value.
+ * So: every field on the wire, named, with the screen that owns its value —
+ * INCLUDING the ones the settings below decide. A list of "everything else"
+ * that leaves out the loan amount and the saving is not a list anybody can
+ * check a partner's setup against, so the settings appear in the table too,
+ * marked, reading back whichever answer this partner is configured to give.
  *
  * MOST OF IT IS NOT A CHOICE, and the table says so rather than offering a
  * dropdown per row. A first name has exactly one sensible source.
@@ -37,6 +41,16 @@ import type { LenderRow } from "./types";
  * deal's numbers is a settings screen pretending to be a deal; the payload
  * inspector on a proposal's preview shows the real body for the real deal.
  */
+/** The unsaved state of this tab, as the detail screen holds it. */
+export type SubmissionDraft = {
+  submissionAmountBasis: LenderRow["submissionAmountBasis"];
+  submissionSavingBasis: LenderRow["submissionSavingBasis"];
+  submissionSavingHorizon: LenderRow["submissionSavingHorizon"];
+  submissionRepNameBasis: LenderRow["submissionRepNameBasis"];
+  submissionRepName: string;
+  submissionDelivery: LenderRow["submissionDelivery"];
+};
+
 export function SubmissionMapping({
   lender,
   draft,
@@ -48,14 +62,7 @@ export function SubmissionMapping({
   onDelivery,
 }: {
   lender: LenderRow;
-  draft: {
-    submissionAmountBasis: LenderRow["submissionAmountBasis"];
-    submissionSavingBasis: LenderRow["submissionSavingBasis"];
-    submissionSavingHorizon: LenderRow["submissionSavingHorizon"];
-    submissionRepNameBasis: LenderRow["submissionRepNameBasis"];
-    submissionRepName: string;
-    submissionDelivery: LenderRow["submissionDelivery"];
-  };
+  draft: SubmissionDraft;
   onAmountBasis: (v: LenderRow["submissionAmountBasis"]) => void;
   onSavingBasis: (v: LenderRow["submissionSavingBasis"]) => void;
   onSavingHorizon: (v: LenderRow["submissionSavingHorizon"]) => void;
@@ -264,12 +271,15 @@ export function SubmissionMapping({
         />
       </Panel>
 
-      <Panel title="Everything else on the application">
+
+      <Panel title="Everything on the application">
         <p className="text-sm text-muted-foreground">
-          Fixed, because each has exactly one sensible source. Change the value on the screen that
-          owns it — there is no separate mapping, so what a rep sees is always what the lender is
-          told. Anything a partner could reasonably disagree with us about is a setting above
-          instead; a row is only listed here when the second answer would be a wrong one.
+          Every field on the wire, in the order the body carries them. The five marked{" "}
+          <span className="font-medium text-foreground">above</span> are the settings on this tab —
+          they are listed here too so the whole application can be read in one place. The rest are
+          fixed, because each has exactly one sensible source: change the value on the screen that
+          owns it. There is no separate mapping, so what a rep sees is always what the lender is
+          told.
         </p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[34rem] text-sm">
@@ -281,11 +291,22 @@ export function SubmissionMapping({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {ROWS.map((r) => (
+              {wireRows(draft).map((r) => (
                 <tr key={r.field} className="align-top">
                   <td className="py-2 pr-4 font-mono text-xs">{r.field}</td>
                   <td className="py-2 pr-4">{r.from}</td>
-                  <td className="py-2 text-muted-foreground">{r.where}</td>
+                  <td className="py-2 text-muted-foreground">
+                    {r.setting ? (
+                      <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+                        <span className="rounded border border-solar/40 bg-solar/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground/80">
+                          above
+                        </span>
+                        <span>{r.where}</span>
+                      </span>
+                    ) : (
+                      r.where
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -301,22 +322,90 @@ export function SubmissionMapping({
   );
 }
 
-/** Every field on the wire that is not a setting above. */
-const ROWS: { field: string; from: string; where: string }[] = [
-  { field: "applicant.firstName", from: "The lead's first name", where: "the deal" },
-  { field: "applicant.lastName", from: "The lead's last name", where: "the deal" },
-  { field: "applicant.email", from: "The lead's email, lowercased", where: "the deal" },
-  { field: "applicant.phone", from: "The lead's phone, digits only", where: "the deal" },
-  { field: "property.line1 / city / state / postalCode", from: "The lead's address", where: "the deal" },
-  { field: "property.ownerOccupied", from: "Answered when QUALIFY is pressed — stored nowhere", where: "the send dialog" },
-  { field: "productSlug", from: "This partner's product", where: "Details → Direct submission" },
-  { field: "externalId", from: "The design's id, so a resend cannot open a second file", where: "“Start a new reference”" },
-  { field: "termMonths", from: "The proposal's loan term", where: "Financing, then regenerate" },
-  { field: "equipment[].brand / model", from: "This partner's own name for the item", where: "the Equipment tab" },
-  { field: "equipment[].quantity — panels", from: "The panel count on the roof drawing", where: "the designer" },
-  { field: "equipment[].quantity — inverters", from: "Array watts ÷ the item's rated watts", where: "Solar Equipment → Rated W" },
-  { field: "equipment[].quantity — batteries", from: "The battery count on the design", where: "the designer" },
-  { field: "system.annualProductionKwh", from: "The proposal's year-one production", where: "the designer, then regenerate" },
-  { field: "system.annualConsumptionKwh", from: "The proposal's annual usage", where: "Energy, then regenerate" },
-  { field: "system.retailRatePerKwh", from: "The proposal's utility rate, in dollars per kWh", where: "Energy, then regenerate" },
-];
+type WireRow = {
+  field: string;
+  from: string;
+  where: string;
+  /** True where a panel above decides it, and `where` names that panel. */
+  setting?: boolean;
+};
+
+/**
+ * EVERY FIELD ON THE WIRE, in the order the request body carries them.
+ *
+ * The settings above are in this table too, marked. They used to be excluded on
+ * the reasoning that a row asking a question does not also need a line stating
+ * it — but the effect was a section titled "everything else" that omitted the
+ * loan amount and the saving, so the one question an admin brings to this
+ * screen ("what exactly does this partner receive?") had no single answer on
+ * it. A field configured somewhere is still a field on the application.
+ *
+ * WHAT A SETTING ROW SAYS IN "FROM" IS THE ANSWER THIS PARTNER IS CONFIGURED TO
+ * GIVE, not a deal's number: it moves with the controls above and is equally
+ * true of a partner with no deals yet. The live figures stay off this screen —
+ * the payload inspector on a proposal's preview shows the real body.
+ */
+function wireRows(draft: SubmissionDraft): WireRow[] {
+  const AMOUNT = "“The amount they are asked to fund”";
+  const SAVING = "“What they mean by a saving”";
+  const SELLER = "“Whose name goes on it”";
+  const DEVICE = "“Who completes the application”";
+
+  const savingBasis =
+    draft.submissionSavingBasis === "net_of_payment"
+      ? "The bill the proposal says stops arriving, less what the system costs"
+      : "The electricity bill the proposal says stops arriving";
+  const savingHorizon =
+    draft.submissionSavingHorizon === "term_average"
+      ? ", averaged over every year it compares"
+      : ", in the first twelve months";
+
+  const fixedName = draft.submissionRepName.trim();
+  const seller =
+    draft.submissionRepNameBasis === "fixed"
+      ? fixedName.length > 0
+        ? `Always “${fixedName}”, whoever sold it`
+        : "No name typed yet, so the deal's rep is still sent"
+      : draft.submissionRepNameBasis === "submitter"
+        ? "Whoever pressed the button — the deal's rep where the household pressed it"
+        : "The rep the deal is assigned to";
+
+  return [
+    { field: "externalId", from: "The design's id, so a resend cannot open a second file", where: "“Start a new reference”" },
+    { field: "productSlug", from: "This partner's product", where: "Details → Direct submission" },
+    { field: "applicant.firstName", from: "The lead's first name", where: "the deal" },
+    { field: "applicant.lastName", from: "The lead's last name", where: "the deal" },
+    { field: "applicant.email", from: "The lead's email, lowercased", where: "the deal" },
+    { field: "applicant.phone", from: "The lead's phone, digits only", where: "the deal" },
+    { field: "property.line1 / city / state / postalCode", from: "The lead's address", where: "the deal" },
+    { field: "property.ownerOccupied", from: "Answered when QUALIFY is pressed — stored nowhere", where: "the send dialog" },
+    { field: "system.annualProductionKwh", from: "The proposal's year-one production", where: "the designer, then regenerate" },
+    { field: "system.annualConsumptionKwh", from: "The proposal's annual usage", where: "Energy, then regenerate" },
+    { field: "system.retailRatePerKwh", from: "The proposal's utility rate, in dollars per kWh", where: "Energy, then regenerate" },
+    { field: "system.estAnnualSaving", from: `${savingBasis}${savingHorizon}`, where: SAVING, setting: true },
+    { field: "system.estMonthlySaving", from: "The annual figure above ÷ 12, rounded once so the two agree", where: SAVING, setting: true },
+    { field: "equipment[].brand / model", from: "This partner's own name for the item", where: "the Equipment tab" },
+    { field: "equipment[].quantity — panels", from: "The panel count on the roof drawing", where: "the designer" },
+    { field: "equipment[].quantity — inverters", from: "Array watts ÷ the item's rated watts", where: "Solar Equipment → Rated W" },
+    { field: "equipment[].quantity — batteries", from: "The battery count on the design", where: "the designer" },
+    { field: "requestedAmount", from: amountFrom(draft.submissionAmountBasis), where: AMOUNT, setting: true },
+    { field: "termMonths", from: "The proposal's loan term", where: "Financing, then regenerate" },
+    { field: "salesRepName", from: seller, where: SELLER, setting: true },
+    {
+      field: "delivery",
+      from:
+        draft.submissionDelivery === "customer"
+          ? "Only the partner's own email and text reach the household"
+          : "The completion link comes back, for the rep's own device",
+      where: DEVICE,
+      setting: true,
+    },
+  ];
+}
+
+/** The figure this partner is currently configured to be asked for. */
+function amountFrom(basis: SubmissionDraft["submissionAmountBasis"]): string {
+  if (basis === "customer_obligation") return "What the proposal says the household owes";
+  if (basis === "after_credits") return "The contract value, less the credits the proposal quotes";
+  return "The proposal's contract value, before any tax credit";
+}

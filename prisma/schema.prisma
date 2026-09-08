@@ -3885,6 +3885,22 @@ model SolarLenderSubmission {
   /// The reference this attempt was filed under — see `lenderReference`.
   externalId String
 
+  /// WHICH DOCUMENT THIS ATTEMPT SPOKE FOR.
+  ///
+  /// Every figure on the wire comes off one frozen proposal — see
+  /// `submissionDocument` — and until this column existed the row did not say
+  /// which. A deal re-priced four times could show "sent to the lender" with no
+  /// way to answer the only question that follows: sent at WHICH price. It is
+  /// what lets the version list say "sent to Amos" against v13 and nothing
+  /// against v14.
+  ///
+  /// A PLAIN COLUMN, not a relation. `SolarProposal` is vertical-scoped and
+  /// this model is not; a foreign key between them would put a scoped read
+  /// inside every submission query for no gain here. Null on every attempt
+  /// recorded before the column existed, which reads honestly as "this deal was
+  /// submitted, but not attributably to a version".
+  proposalId String?
+
   /// What we sent. Frozen: re-reading the deal later answers a different
   /// question from "what did the underwriter actually receive".
   request Json
@@ -3917,6 +3933,7 @@ model SolarLenderSubmission {
   createdAt DateTime @default(now())
 
   @@index([companyId, leadId, createdAt])
+  @@index([companyId, proposalId])
   @@map("solar_lender_submissions")
 }
 
