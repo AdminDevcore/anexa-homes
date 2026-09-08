@@ -2,7 +2,47 @@
 
 import * as React from "react";
 import { Caution, ChoiceCards, Hint, Panel, TextField } from "@/components/portal/settings-kit/fields";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { FIELD_SOURCES, WIRE_FIELDS, type FieldKind } from "@/server/modules/solar/lender-field-map";
 import type { LenderRow } from "./types";
+
+/** What a row is set to. Absent from the draft entirely means "built-in". */
+export type FieldMapDraft = Record<string, { sourceKey: string | null; literal: string }>;
+
+/** The sentinel the picker uses for "let the built-in source stand". */
+export const BUILT_IN = "__default__";
+/** ...and for "I will type the value myself". */
+export const CONSTANT = "__constant__";
+
+/**
+ * WHICH OPTION A ROW IS SHOWING.
+ *
+ * Its own function because getting it wrong is invisible: derived from the
+ * literal being non-empty, choosing “A constant I type…” stored an empty one,
+ * which read back as built-in — so the select snapped shut on the old value and
+ * the box to type in never appeared. ABSENCE is built-in; a row with no source
+ * is a constant, typed or not yet.
+ */
+export function rowSelection(
+  entry: { sourceKey: string | null; literal: string } | undefined,
+): string {
+  if (!entry) return BUILT_IN;
+  // The literal wins where a row somehow carries both, because that is what
+  // `applyFieldMap` sends. The save action stores one or the other, so this is
+  // unreachable today — and a screen that disagreed with the wire about which
+  // half was live is exactly the bug nobody would think to look for.
+  if (entry.literal.trim() !== "") return CONSTANT;
+  return entry.sourceKey === null ? CONSTANT : entry.sourceKey;
+}
 
 /**
  * WHAT THIS PARTNER'S API IS TOLD, AND WHERE EACH FIGURE COMES FROM.
@@ -46,6 +86,7 @@ export function SubmissionMapping({
   onRepNameBasis,
   onRepName,
   onDelivery,
+  onFieldMap,
 }: {
   lender: LenderRow;
   draft: {
@@ -55,6 +96,7 @@ export function SubmissionMapping({
     submissionRepNameBasis: LenderRow["submissionRepNameBasis"];
     submissionRepName: string;
     submissionDelivery: LenderRow["submissionDelivery"];
+    fieldMap: FieldMapDraft;
   };
   onAmountBasis: (v: LenderRow["submissionAmountBasis"]) => void;
   onSavingBasis: (v: LenderRow["submissionSavingBasis"]) => void;
@@ -62,8 +104,11 @@ export function SubmissionMapping({
   onRepNameBasis: (v: LenderRow["submissionRepNameBasis"]) => void;
   onRepName: (v: string) => void;
   onDelivery: (v: LenderRow["submissionDelivery"]) => void;
+  /** The whole map, replaced — see `setLenderFieldMapAction` for why. */
+  onFieldMap: (next: FieldMapDraft) => void;
 }) {
   const wired = !!lender.apiBaseUrl && !!lender.apiProductSlug;
+  const mapped = Object.keys(draft.fieldMap).length;
 
   return (
     <div className="space-y-4">
@@ -265,32 +310,58 @@ export function SubmissionMapping({
       </Panel>
 
       <Panel title="Everything else on the application">
-        <p className="text-sm text-muted-foreground">
-          Fixed, because each has exactly one sensible source. Change the value on the screen that
-          owns it — there is no separate mapping, so what a rep sees is always what the lender is
-          told. Anything a partner could reasonably disagree with us about is a setting above
-          instead; a row is only listed here when the second answer would be a wrong one.
-        </p>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Each of these has a sensible built-in source, and leaving them alone is right for
+            almost every partner: what a rep sees on the deal is what the lender is told. Where
+            this one wants something else in a box, point it at another value or type a constant —
+            it takes effect on the next submission.
+          </p>
+          {mapped > 0 && (
+            <button
+              type="button"
+              onClick={() => onFieldMap({})}
+              className="shrink-0 text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            >
+              Reset all {mapped} to built-in
+            </button>
+          )}
+        </div>
+
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[34rem] text-sm">
+          <table className="w-full min-w-[46rem] text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="py-2 pr-4 font-medium">They receive</th>
-                <th className="py-2 pr-4 font-medium">From</th>
-                <th className="py-2 font-medium">Changed on</th>
+                <th className="py-2 pr-4 font-medium">Fed from</th>
+                <th className="py-2 font-medium">Value</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {ROWS.map((r) => (
-                <tr key={r.field} className="align-top">
-                  <td className="py-2 pr-4 font-mono text-xs">{r.field}</td>
-                  <td className="py-2 pr-4">{r.from}</td>
-                  <td className="py-2 text-muted-foreground">{r.where}</td>
-                </tr>
+              {WIRE_FIELDS.map((f) => (
+                <MappingRow
+                  key={f.field}
+                  field={f}
+                  entry={draft.fieldMap[f.field]}
+                  onChange={(next) => {
+                    const copy = { ...draft.fieldMap };
+                    // An absent key IS "built-in" — see the draft's own note.
+                    if (next === null) delete copy[f.field];
+                    else copy[f.field] = next;
+                    onFieldMap(copy);
+                  }}
+                />
               ))}
             </tbody>
           </table>
         </div>
+
+        <Hint>
+          The list of values you can point at is fixed, and that is what keeps the promise below:
+          a mapping cannot name a column, only one of these. Three boxes are deliberately absent —
+          the loan amount and the two saving figures — because their true readings are the settings
+          above, and a typed constant there would be a fabricated figure on every deal.
+        </Hint>
         <Hint>
           Nothing else crosses the wire. No social security number, no date of birth and no consent
           flag — authorising a credit pull has to be the customer’s own act, captured on the
@@ -301,22 +372,113 @@ export function SubmissionMapping({
   );
 }
 
-/** Every field on the wire that is not a setting above. */
-const ROWS: { field: string; from: string; where: string }[] = [
-  { field: "applicant.firstName", from: "The lead's first name", where: "the deal" },
-  { field: "applicant.lastName", from: "The lead's last name", where: "the deal" },
-  { field: "applicant.email", from: "The lead's email, lowercased", where: "the deal" },
-  { field: "applicant.phone", from: "The lead's phone, digits only", where: "the deal" },
-  { field: "property.line1 / city / state / postalCode", from: "The lead's address", where: "the deal" },
-  { field: "property.ownerOccupied", from: "Answered when QUALIFY is pressed — stored nowhere", where: "the send dialog" },
-  { field: "productSlug", from: "This partner's product", where: "Details → Direct submission" },
-  { field: "externalId", from: "The design's id, so a resend cannot open a second file", where: "“Start a new reference”" },
-  { field: "termMonths", from: "The proposal's loan term", where: "Financing, then regenerate" },
-  { field: "equipment[].brand / model", from: "This partner's own name for the item", where: "the Equipment tab" },
-  { field: "equipment[].quantity — panels", from: "The panel count on the roof drawing", where: "the designer" },
-  { field: "equipment[].quantity — inverters", from: "Array watts ÷ the item's rated watts", where: "Solar Equipment → Rated W" },
-  { field: "equipment[].quantity — batteries", from: "The battery count on the design", where: "the designer" },
-  { field: "system.annualProductionKwh", from: "The proposal's year-one production", where: "the designer, then regenerate" },
-  { field: "system.annualConsumptionKwh", from: "The proposal's annual usage", where: "Energy, then regenerate" },
-  { field: "system.retailRatePerKwh", from: "The proposal's utility rate, in dollars per kWh", where: "Energy, then regenerate" },
-];
+/**
+ * ONE BOX, AND WHERE IT IS FED FROM.
+ *
+ * The picker offers only sources of the SAME SHAPE as the box — a panel count
+ * cannot be dropped into a surname — because the alternative is an admin
+ * choosing something that looks accepted and is silently ignored at send time.
+ * The server refuses the mismatch too; this just means nobody can pick one.
+ */
+function MappingRow({
+  field,
+  entry,
+  onChange,
+}: {
+  field: (typeof WIRE_FIELDS)[number];
+  entry: { sourceKey: string | null; literal: string } | undefined;
+  onChange: (next: { sourceKey: string | null; literal: string } | null) => void;
+}) {
+  /**
+   * A ROW PRESENT WITH NO SOURCE IS "A CONSTANT", EVEN BEFORE ONE IS TYPED.
+   *
+   * Deriving this from the literal being non-empty instead made the picker
+   * un-selectable: choosing “A constant I type…” stored an empty one, which
+   * read back as built-in, and the select snapped shut on the old value before
+   * anybody could type. Absence is built-in; presence is the override.
+   */
+  const selected = rowSelection(entry);
+  const usingConstant = selected === CONSTANT;
+  const groups = groupedSources(field.kind);
+  const builtIn = SOURCE_LABEL.get(field.defaultSource) ?? field.defaultSource;
+
+  return (
+    <tr className="align-top">
+      <td className="py-2 pr-4 font-mono text-xs">
+        {field.field}
+        {!field.required && (
+          <span className="ml-1.5 font-sans text-[10px] uppercase tracking-wide text-muted-foreground">
+            optional
+          </span>
+        )}
+      </td>
+      <td className="py-2 pr-4">
+        <Select
+          value={selected}
+          onValueChange={(v) => {
+            if (v === BUILT_IN) return onChange(null);
+            if (v === CONSTANT) return onChange({ sourceKey: null, literal: entry?.literal ?? "" });
+            onChange({ sourceKey: v, literal: "" });
+          }}
+        >
+          <SelectTrigger className="h-8 w-full min-w-[15rem] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={BUILT_IN}>{builtIn} (built-in)</SelectItem>
+            {groups.map((g) => (
+              <SelectGroup key={g.group}>
+                <SelectLabel>{g.group}</SelectLabel>
+                {g.sources.map((src) => (
+                  <SelectItem key={src.key} value={src.key}>
+                    {src.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+            <SelectGroup>
+              <SelectLabel>Or</SelectLabel>
+              <SelectItem value={CONSTANT}>A constant I type…</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </td>
+      <td className="py-2 text-muted-foreground">
+        {usingConstant ? (
+          <Input
+            className="h-8 text-xs"
+            value={entry?.literal ?? ""}
+            placeholder={PLACEHOLDER[field.kind]}
+            aria-label={`The constant sent as ${field.field}`}
+            onChange={(e) => onChange({ sourceKey: null, literal: e.target.value })}
+          />
+        ) : selected === BUILT_IN ? (
+          <span className="text-xs">Changed on {field.changedOn}</span>
+        ) : (
+          <span className="text-xs italic">Overridden — no longer read from {field.changedOn}</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+const SOURCE_LABEL = new Map(FIELD_SOURCES.map((s) => [s.key, s.label]));
+
+/** The compatible sources, in the order the catalogue lists their groups. */
+function groupedSources(kind: FieldKind) {
+  const out: { group: string; sources: typeof FIELD_SOURCES }[] = [];
+  for (const src of FIELD_SOURCES) {
+    if (src.kind !== kind) continue;
+    const last = out.find((g) => g.group === src.group);
+    if (last) last.sources.push(src);
+    else out.push({ group: src.group, sources: [src] });
+  }
+  return out;
+}
+
+const PLACEHOLDER: Record<FieldKind, string> = {
+  string: "Typed exactly as they expect it",
+  number: "A whole number",
+  boolean: "yes or no",
+  rate: "$0.233 per kWh",
+};

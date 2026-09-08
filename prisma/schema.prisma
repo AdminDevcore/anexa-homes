@@ -382,13 +382,15 @@ model Company {
   solarMilestones          SolarMilestone[]
   solarDealAdders          SolarDealAdder[]
   solarLenders             SolarLender[]
+  solarLenderFieldMap      SolarLenderFieldMap[]
   solarLenderProducts      SolarLenderProduct[]
   dealFeedPosts            DealFeedPost[]
   projectAssignees         ProjectAssignee[]
 
-  solarDealComps SolarDealComp[]
+  solarDealComps     SolarDealComp[]
   chargebacks        Chargeback[]
   payrollAdjustments PayrollAdjustment[]
+
   @@map("companies")
 }
 
@@ -471,16 +473,16 @@ model CompanySettings {
 }
 
 model User {
-  id                          String     @id @default(uuid())
+  id                          String               @id @default(uuid())
   companyId                   String
-  company                     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company                     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   email                       String
   passwordHash                String?
   firstName                   String
   lastName                    String
   phone                       String?
-  role                        Role       @default(sales_rep)
-  status                      UserStatus @default(active)
+  role                        Role                 @default(sales_rep)
+  status                      UserStatus           @default(active)
   avatarUrl                   String?
   title                       String?
   // Sequential employee number per company (join order). Formatted on display as
@@ -490,7 +492,7 @@ model User {
   commissionSplitPct          Float?
   // Company-provided-lead comp is EITHER a percentage of the pool OR a flat lead
   // fee deducted from the rep's self-gen commission. providedLeadType picks which.
-  providedLeadType            String     @default("percentage") // "percentage" | "flat"
+  providedLeadType            String               @default("percentage") // "percentage" | "flat"
   // Rep's share (%) when the COMPANY provided the lead (percentage mode).
   providedLeadSplitPct        Float?
   // Flat lead/marketing fee (cents) subtracted from the rep's self-gen commission (flat mode).
@@ -546,7 +548,7 @@ model User {
   /// than inferred from which amount happens to be non-null: "nothing
   /// configured" and "a take of zero" are different answers and a nullable pair
   /// cannot tell them apart. Exactly one method — never both.
-  solarLeadAdjustMode         SolarLeadAdjustMode @default(none)
+  solarLeadAdjustMode         SolarLeadAdjustMode  @default(none)
   /// The COMPANY's flat deduction from this rep's solar commission on a
   /// company-provided lead, cents. Read only when solarLeadAdjustMode = flat.
   solarCompanyLeadFlatCents   Int?
@@ -557,25 +559,25 @@ model User {
   // Verticals this user may open and switch between. New users start in Roofing
   // only; the super admin grants Solar explicitly. Retired values on existing
   // rows are filtered out by allowedVerticals() and can never surface.
-  verticals                   Vertical[] @default([roofing]) @map("industries")
+  verticals                   Vertical[]           @default([roofing]) @map("industries")
   // For canvassers: the sales rep they're assigned to. Their knocks, leads, and
   // appointments auto-assign to (and are visible by) this rep.
   salesRepId                  String?
-  salesRep                    User?      @relation("RepCanvassers", fields: [salesRepId], references: [id], onDelete: SetNull)
-  canvassers                  User[]     @relation("RepCanvassers")
+  salesRep                    User?                @relation("RepCanvassers", fields: [salesRepId], references: [id], onDelete: SetNull)
+  canvassers                  User[]               @relation("RepCanvassers")
   // For sales reps: the sales manager they report to. The manager sees this rep's
   // deals, canvassing, tasks, and commissions — and nothing outside their team.
   managerId                   String?
-  manager                     User?      @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
-  reports                     User[]     @relation("ManagerReports")
-  permissions                 Json       @default("{}") // per-user permission overrides
-  sessionVersion              Int        @default(1)
+  manager                     User?                @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  reports                     User[]               @relation("ManagerReports")
+  permissions                 Json                 @default("{}") // per-user permission overrides
+  sessionVersion              Int                  @default(1)
   lastLoginAt                 DateTime?
   // Soft delete: set (with status=disabled) to remove from the roster while
   // keeping the row so historical deals keep showing the rep's name.
   deletedAt                   DateTime?
-  createdAt                   DateTime   @default(now())
-  updatedAt                   DateTime   @updatedAt
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
 
   leadsAssigned   Lead[]               @relation("LeadAssignedRep")
   leadsSet        Lead[]               @relation("LeadSetter")
@@ -598,27 +600,27 @@ model User {
   passwordResets  PasswordResetToken[]
   notifications   Notification[]
 
-  conversationsCreated Conversation[]       @relation("ConversationCreator")
-  conversationMembers  ConversationMember[] @relation("ConvMemberUser")
-  messagesSent         Message[]            @relation("MessageSender")
-  knocks               Knock[]              @relation("KnockRep")
-  territoriesAssigned  Territory[]          @relation("TerritoryRep")
-  territoriesCreated   Territory[]          @relation("TerritoryCreator")
-  onboarding           UserOnboarding?
-  proposalsCreated     Proposal[]           @relation("ProposalCreatedBy")
-  reviewsApproved      Review[]             @relation("ReviewApprover")
-  feedPosts            DealFeedPost[]       @relation("FeedAuthor")
-  projectAssignments   ProjectAssignee[]    @relation("ProjectAssignee")
+  conversationsCreated    Conversation[]       @relation("ConversationCreator")
+  conversationMembers     ConversationMember[] @relation("ConvMemberUser")
+  messagesSent            Message[]            @relation("MessageSender")
+  knocks                  Knock[]              @relation("KnockRep")
+  territoriesAssigned     Territory[]          @relation("TerritoryRep")
+  territoriesCreated      Territory[]          @relation("TerritoryCreator")
+  onboarding              UserOnboarding?
+  proposalsCreated        Proposal[]           @relation("ProposalCreatedBy")
+  reviewsApproved         Review[]             @relation("ReviewApprover")
+  feedPosts               DealFeedPost[]       @relation("FeedAuthor")
+  projectAssignments      ProjectAssignee[]    @relation("ProjectAssignee")
+  solarDealComps          SolarDealComp[]      @relation("SolarDealCompRep")
+  solarDealCompsTakenFrom SolarDealComp[]      @relation("SolarDealCompReassignedFrom")
+  chargebacks             Chargeback[]         @relation("ChargebackUser")
+  payrollAdjustments      PayrollAdjustment[]  @relation("PayrollAdjustmentUser")
 
   @@unique([companyId, email])
   @@unique([companyId, employeeNo])
   @@index([companyId, role, status])
   @@index([companyId, salesRepId])
   @@index([companyId, managerId])
-  solarDealComps        SolarDealComp[] @relation("SolarDealCompRep")
-  solarDealCompsTakenFrom SolarDealComp[] @relation("SolarDealCompReassignedFrom")
-  chargebacks        Chargeback[]        @relation("ChargebackUser")
-  payrollAdjustments PayrollAdjustment[] @relation("PayrollAdjustmentUser")
   @@map("users")
 }
 
@@ -1038,30 +1040,30 @@ model Lead {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project            Project?
-  claims             Claim[]
-  roofMeasurements   RoofMeasurement[]
-  tasks              Task[]
-  noteEntries        Note[]
-  files              FileAsset[]
-  documentPackages   DocumentPackage[]
-  activityLogs       ActivityLog[]
-  stageEvents        LeadStageEvent[]
-  knocks             Knock[]             @relation("KnockLead")
-  scope              ScopeOfWork?
-  estimate           Estimate?
-  proposals          Proposal[]
-  solarDesign        SolarDesign?
-  solarDealRebates   SolarDealRebate[]
-  solarFinance       SolarFinance?
-  creditApplications CreditApplication[]
-  solarProposals     SolarProposal[]
+  project                Project?
+  claims                 Claim[]
+  roofMeasurements       RoofMeasurement[]
+  tasks                  Task[]
+  noteEntries            Note[]
+  files                  FileAsset[]
+  documentPackages       DocumentPackage[]
+  activityLogs           ActivityLog[]
+  stageEvents            LeadStageEvent[]
+  knocks                 Knock[]                 @relation("KnockLead")
+  scope                  ScopeOfWork?
+  estimate               Estimate?
+  proposals              Proposal[]
+  solarDesign            SolarDesign?
+  solarDealRebates       SolarDealRebate[]
+  solarFinance           SolarFinance?
+  creditApplications     CreditApplication[]
+  solarProposals         SolarProposal[]
   solarLenderSubmissions SolarLenderSubmission[]
-  solarMilestones    SolarMilestone[]
-  solarDealComp    SolarDealComp?
-  solarDealAdders    SolarDealAdder[]
-  feedPosts          DealFeedPost[]
-  automationRuns     AutomationRun[]
+  solarMilestones        SolarMilestone[]
+  solarDealComp          SolarDealComp?
+  solarDealAdders        SolarDealAdder[]
+  feedPosts              DealFeedPost[]
+  automationRuns         AutomationRun[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -1988,12 +1990,12 @@ model Commission {
   updatedAt                   DateTime            @updatedAt
 
   payrollItems PayrollItem[]
+  chargebacks  Chargeback[]
 
   // One commission per (project, recipient, rule) — guards against duplicate generation.
   @@unique([projectId, userId, ruleId])
   @@index([companyId, userId, status])
   @@index([companyId, projectId])
-  chargebacks Chargeback[]
   @@map("commissions")
 }
 
@@ -2106,16 +2108,16 @@ model CommissionOverride {
 }
 
 model PayrollRun {
-  id          String        @id @default(uuid())
-  companyId   String
-  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  label       String
-  periodStart DateTime
-  periodEnd   DateTime
-  status      PayrollStatus @default(draft)
-  notes       String?
-  approvedAt  DateTime?
-  paidAt      DateTime?
+  id            String        @id @default(uuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label         String
+  periodStart   DateTime
+  periodEnd     DateTime
+  status        PayrollStatus @default(draft)
+  notes         String?
+  approvedAt    DateTime?
+  paidAt        DateTime?
   /// When this run was FINALISED. Once set the run is historically immutable:
   /// no commission may enter it, no amount may change, no adjustment may be
   /// added or edited. Anything found afterwards goes to the next run or through
@@ -2123,14 +2125,14 @@ model PayrollRun {
   /// rewriting it makes every earlier statement unverifiable.
   finalizedAt   DateTime?
   finalizedById String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
-  items PayrollItem[]
+  items                PayrollItem[]
+  adjustments          PayrollAdjustment[]
+  chargebackRecoveries ChargebackRecovery[]
 
   @@index([companyId, status])
-  adjustments        PayrollAdjustment[]
-  chargebackRecoveries ChargebackRecovery[]
   @@map("payroll_runs")
 }
 
@@ -3013,11 +3015,11 @@ model Proposal {
 // work with no external object store. Keyed by the same storage key the S3/local
 // drivers use, so switching drivers later needs no call-site changes.
 model StoredFile {
-  key         String   @id
+  key         String    @id
   data        Bytes
   size        Int
   contentType String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   /// When these bytes were first observed with no FileAsset row pointing at
   /// them — the start of the 30-day retention window, not the age of the file.
   ///
@@ -3829,6 +3831,10 @@ model SolarLender {
   /// device over. Every existing partner keeps the in-person behaviour.
   submissionDelivery SolarSubmissionDelivery @default(in_person)
 
+  /// Fields an admin has pointed somewhere other than their built-in source.
+  /// Empty on every partner until somebody maps one. See SolarLenderFieldMap.
+  fieldMap SolarLenderFieldMap[]
+
   /// Origin of the lender's partner API, e.g. "https://admin.amoscapitalfund.com".
   /// No trailing slash; the client appends "/api/v1/partner/...".
   apiBaseUrl      String?
@@ -3874,11 +3880,11 @@ model SolarLender {
 /// and never can be — it travels as a header, and this column is populated from
 /// the payload object, not from the fetch.
 model SolarLenderSubmission {
-  id        String  @id @default(uuid())
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  leadId    String
-  lead      Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  id         String  @id @default(uuid())
+  companyId  String
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId     String
+  lead       Lead    @relation(fields: [leadId], references: [id], onDelete: Cascade)
   /// Null only if the lender row is deleted afterwards; the name is kept below.
   lenderId   String?
   lenderName String
@@ -4006,6 +4012,52 @@ model SolarLenderProduct {
 /// Explicit join rather than an implicit relation so an approval can carry its
 /// own facts later (approval date, AVL document reference) without a migration
 /// that rewrites the relation.
+/// ONE BOX ON A PARTNER'S APPLICATION, POINTED SOMEWHERE ELSE.
+///
+/// The Submission tab states what feeds every field on the wire. Five of those
+/// rows are settings because more than one figure is true; the rest had exactly
+/// one sensible source and were therefore decided in code — which is right
+/// until a partner wants something else in a box, and then it is a deploy.
+///
+/// A row here overrides one field for one partner: either another Anexa value
+/// (`sourceKey`, from the whitelist in `lender-field-map.ts`) or a constant the
+/// admin typed (`literal`). NO ROW MEANS NO OVERRIDE, which is the state every
+/// partner starts in and the reason this table changes nothing by existing.
+///
+/// The whitelist is the point. A mapping cannot name an arbitrary column, so
+/// the promise under the table — no social security number, no date of birth,
+/// no consent flag ever crosses the wire — survives making the mapping
+/// editable.
+model SolarLenderFieldMap {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  lenderId String
+  lender   SolarLender @relation(fields: [lenderId], references: [id], onDelete: Cascade)
+
+  /// The partner's own field path — "applicant.email". One row per field.
+  /// Text rather than an enum: the set is owned by `WIRE_FIELDS`, and a field
+  /// added there must not need a migration to become mappable.
+  wireField String
+
+  /// Which whitelisted Anexa value feeds it. Null when a constant is typed.
+  /// A key this build no longer knows resolves to nothing, and the built-in
+  /// source stands — never an empty box on a credit application.
+  sourceKey String?
+
+  /// The constant, as typed. Parsed per the field's kind at send time; one that
+  /// cannot be read is refused on the rep's screen rather than sent.
+  literal String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([lenderId, wireField])
+  @@index([companyId])
+  @@map("solar_lender_field_map")
+}
+
 model SolarEquipmentLender {
   equipmentId String
   equipment   SolarEquipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
@@ -4328,8 +4380,8 @@ model SolarDesign {
   /// The lender this system is being designed for. Drives which equipment the
   /// selectors offer: only items on that lender's approved-vendor list.
   /// Null = no lender chosen yet, so nothing is filtered.
-  lenderId           String?
-  lender             SolarLender?    @relation(fields: [lenderId], references: [id], onDelete: SetNull)
+  lenderId String?
+  lender   SolarLender? @relation(fields: [lenderId], references: [id], onDelete: SetNull)
 
   /// How many times this deal has been given a FRESH reference at the lender.
   ///
@@ -4348,19 +4400,19 @@ model SolarDesign {
   /// precisely how a household ends up with two applications in its name.
   ///
   /// Retries AFTER a bump are idempotent among themselves, exactly as before.
-  lenderSubmissionAttempt Int @default(0)
-  moduleId           String?
-  module             SolarEquipment? @relation("DesignModule", fields: [moduleId], references: [id], onDelete: SetNull)
-  moduleQty          Int             @default(0)
-  inverterId         String?
-  inverter           SolarEquipment? @relation("DesignInverter", fields: [inverterId], references: [id], onDelete: SetNull)
-  batteryId          String?
-  battery            SolarEquipment? @relation("DesignBattery", fields: [batteryId], references: [id], onDelete: SetNull)
-  batteryQty         Int             @default(0)
-  systemSizeKwDc     Float           @default(0)
-  systemSizeKwAc     Float           @default(0)
-  year1ProductionKwh Int             @default(0)
-  offsetPct          Float           @default(0)
+  lenderSubmissionAttempt Int             @default(0)
+  moduleId                String?
+  module                  SolarEquipment? @relation("DesignModule", fields: [moduleId], references: [id], onDelete: SetNull)
+  moduleQty               Int             @default(0)
+  inverterId              String?
+  inverter                SolarEquipment? @relation("DesignInverter", fields: [inverterId], references: [id], onDelete: SetNull)
+  batteryId               String?
+  battery                 SolarEquipment? @relation("DesignBattery", fields: [batteryId], references: [id], onDelete: SetNull)
+  batteryQty              Int             @default(0)
+  systemSizeKwDc          Float           @default(0)
+  systemSizeKwAc          Float           @default(0)
+  year1ProductionKwh      Int             @default(0)
+  offsetPct               Float           @default(0)
   /// WHICH MODEL produced `year1ProductionKwh`. "pvwatts" when NREL simulated
   /// this site's own planes against its weather record; null when the figure is
   /// the company's market-average yield scaled by the clear-sky ratio, which is
@@ -4369,12 +4421,12 @@ model SolarDesign {
   /// Stored because the customer's proposal lists the assumptions its numbers
   /// came from, and "1,450 kWh per kW per year" is a false sentence on a
   /// document whose production did not come from that figure.
-  yieldSource        String?
+  yieldSource             String?
   /// The NSRDB station that answered, for the record on the document.
-  yieldStation       String?
+  yieldStation            String?
   /// How many arrays were simulated. Fewer than all of them means the rest kept
   /// the market average, and the proposal says so rather than implying more.
-  yieldArrays        Int             @default(0)
+  yieldArrays             Int             @default(0)
 
   // ── Plan-set artifacts (FileAsset ids, plain columns) ───────────────────
   planSetFileId    String?
@@ -4982,11 +5034,11 @@ model SolarDealComp {
 
   /// The frozen terms — the same four rates `Commission` carries, resolved once
   /// at signing. "redline" | "per_watt" | "battery_redline" | "battery_flat".
-  basis                       String
-  redlineCentsPerWatt         Int?
-  millsPerWatt                Int?
-  redlinePerBatteryCents      Int?
-  perBatteryFlatCents         Int?
+  basis                  String
+  redlineCentsPerWatt    Int?
+  millsPerWatt           Int?
+  redlinePerBatteryCents Int?
+  perBatteryFlatCents    Int?
 
   /// When the customer signed — the moment these terms stopped being editable.
   signedAt DateTime
@@ -4996,17 +5048,17 @@ model SolarDealComp {
   /// has decided yet, and the engine pays as self-generated in the meantime
   /// because taking money off a rep on an undecided classification is the wrong
   /// way round.
-  companyProvidedLead   Boolean?
+  companyProvidedLead  Boolean?
   /// WHICH adjustment applies, copied off the rep when the classification was
   /// finalised. Snapshotted rather than read live so moving a rep from a
   /// percentage to a flat deduction next quarter cannot reprice a funded deal.
-  leadAdjustMode        SolarLeadAdjustMode @default(none)
+  leadAdjustMode       SolarLeadAdjustMode @default(none)
   /// The COMPANY's take percentage. Read only when leadAdjustMode = percentage.
-  companyLeadTakePct    Float?
+  companyLeadTakePct   Float?
   /// The COMPANY's flat deduction, cents. Read only when leadAdjustMode = flat.
-  companyLeadFlatCents  Int?
-  leadClassFinalizedAt  DateTime?
-  leadClassFinalizedBy  String?
+  companyLeadFlatCents Int?
+  leadClassFinalizedAt DateTime?
+  leadClassFinalizedBy String?
 
   /// ── Compensation could not be resolved at signing ───────────────────────
   /// TRUE means this deal sold without usable pay terms — no assigned rep, or a
@@ -5080,11 +5132,11 @@ model Chargeback {
   commissionId String?
   commission   Commission? @relation(fields: [commissionId], references: [id], onDelete: SetNull)
   /// Denormalised so the record still reads correctly if the commission goes.
-  projectId String?
-  leadId    String?
+  projectId    String?
+  leadId       String?
   /// Who owes it back. A rep, or a MANAGER whose override rode on the same deal.
-  userId String
-  user   User   @relation("ChargebackUser", fields: [userId], references: [id])
+  userId       String
+  user         User        @relation("ChargebackUser", fields: [userId], references: [id])
 
   amountCents Int              @default(0)
   reason      ChargebackReason
@@ -5092,7 +5144,7 @@ model Chargeback {
   status      ChargebackStatus @default(pending)
 
   requestedById String
-  requestedAt   DateTime @default(now())
+  requestedAt   DateTime  @default(now())
   approvedById  String?
   approvedAt    DateTime?
   rejectedById  String?
@@ -5154,14 +5206,14 @@ model PayrollAdjustment {
   payrollRunId String
   payrollRun   PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
   /// Who is paid (or docked).
-  userId String
-  user   User   @relation("PayrollAdjustmentUser", fields: [userId], references: [id])
+  userId       String
+  user         User       @relation("PayrollAdjustmentUser", fields: [userId], references: [id])
 
-  kind PayrollAdjustmentKind
+  kind        PayrollAdjustmentKind
   /// SIGNED cents: positive adds, negative deducts. The sign and `kind` are kept
   /// consistent by the action that writes it, so a report can sum this column
   /// directly without asking what kind each row is.
-  amountCents Int    @default(0)
+  amountCents Int                   @default(0)
   reason      String
 
   /// Optional deal association, for an adjustment that belongs to one job.

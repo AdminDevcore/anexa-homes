@@ -15,6 +15,7 @@ import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
 import { dealRebateTotalCents } from "./storage";
 import { priceStorageStored } from "@/lib/solar-money";
+import { FIELD_SOURCES, WIRE_FIELDS } from "./lender-field-map";
 
 const fail = (error: string) => ({ ok: false as const, error });
 const ok = () => ({ ok: true as const });
@@ -1764,6 +1765,78 @@ export async function setLenderAdderRulesAction(
   ]);
   revalidatePath("/portal/settings/solar-lenders");
   return { ok: true as const, count: data.filter((d) => d.financedOnTop).length };
+}
+
+/**
+ * THE HAND-WRITTEN FIELD MAPPING FOR ONE PARTNER.
+ *
+ * The whole set, replacing whatever was there: the screen holds every row and
+ * saves them together, so a row that has gone back to its built-in source is
+ * an ABSENCE here, and merging would leave it overridden forever.
+ *
+ * Every wireField and sourceKey is checked against the catalogue in
+ * `lender-field-map.ts` rather than trusted. That catalogue is what keeps a
+ * mapping from naming an arbitrary column, and a server action that took the
+ * browser's word for it would hand that guarantee to anyone who can post.
+ */
+export async function setLenderFieldMapAction(
+  lenderId: string,
+  entries: { wireField: string; sourceKey: string | null; literal: string | null }[]
+) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+
+  const lender = await prisma.solarLender.findFirst({
+    where: { companyId: user.companyId, id: lenderId },
+    select: { id: true },
+  });
+  if (!lender) return fail("Not found.");
+
+  const fields = new Map(WIRE_FIELDS.map((f) => [f.field, f]));
+  const sources = new Map(FIELD_SOURCES.map((s) => [s.key, s]));
+
+  const seen = new Set<string>();
+  const data: { companyId: string; lenderId: string; wireField: string; sourceKey: string | null; literal: string | null }[] = [];
+
+  for (const e of entries) {
+    const def = fields.get(e.wireField);
+    if (!def || seen.has(e.wireField)) continue;
+
+    const literal = (e.literal ?? "").trim();
+    if (literal.length > 200) return fail(`The constant for “${e.wireField}” is too long.`);
+
+    // A source of the wrong SHAPE is refused here rather than silently ignored
+    // at send time: an admin who picked it deserves to be told, and the row
+    // would otherwise sit on the screen looking like it did something.
+    const source = e.sourceKey ? sources.get(e.sourceKey) : null;
+    if (e.sourceKey && !source) return fail(`“${e.sourceKey}” is not a value this build can send.`);
+    if (source && source.kind !== def.kind) {
+      return fail(`“${source.label}” cannot fill “${def.field}” — the two are different kinds of value.`);
+    }
+
+    // Neither half filled in is the row saying "leave it alone", and the
+    // absence of a row is how that is stored.
+    if (!source && literal === "") continue;
+
+    seen.add(e.wireField);
+    data.push({
+      companyId: user.companyId,
+      lenderId,
+      // The constant wins where both are present, and `applyFieldMap` reads it
+      // the same way — so what is stored cannot mean one thing here and another
+      // at submission time.
+      sourceKey: literal === "" ? (source?.key ?? null) : null,
+      literal: literal === "" ? null : literal,
+      wireField: e.wireField,
+    });
+  }
+
+  await prisma.$transaction([
+    prisma.solarLenderFieldMap.deleteMany({ where: { lenderId, companyId: user.companyId } }),
+    ...(data.length ? [prisma.solarLenderFieldMap.createMany({ data, skipDuplicates: true })] : []),
+  ]);
+  revalidatePath("/portal/settings/solar-lenders");
+  return { ok: true as const, count: data.length };
 }
 
 // ---------------------------------------------------------------------------

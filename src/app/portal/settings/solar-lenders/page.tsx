@@ -63,6 +63,10 @@ export default async function SolarLendersPage({
       submissionRepNameBasis: true,
       submissionRepName: true,
       submissionDelivery: true,
+      /// Only the boxes somebody has actually re-pointed. The screen fills the
+      /// rest in from the catalogue, so a field added in code shows up here
+      /// without a backfill.
+      fieldMap: { select: { wireField: true, sourceKey: true, literal: true } },
       // The programme contribution and the wording that goes with it. Only an
       // admin ever sees this screen — see `canEdit` — and a rep sees the
       // resulting figures on the deal, read-only.
@@ -175,6 +179,7 @@ export default async function SolarLendersPage({
           submissionRepNameBasis: l.submissionRepNameBasis,
           submissionRepName: l.submissionRepName,
           submissionDelivery: l.submissionDelivery,
+          fieldMap: l.fieldMap,
           contractAdjustmentEnabled: l.contractAdjustmentEnabled,
           contractAdjustmentType: l.contractAdjustmentType,
           contractAdjustmentCents: l.contractAdjustmentCents,
