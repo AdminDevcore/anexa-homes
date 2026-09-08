@@ -14,7 +14,7 @@ import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
 import { dealRebateTotalCents } from "./storage-queries";
-import { priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
+import { priceStorageStored } from "@/lib/solar-money";
 import { FIELD_SOURCES, WIRE_FIELDS } from "./lender-field-map";
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -666,9 +666,6 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       lenderId: true,
       systemType: true,
       batteryQty: true,
-      // What the catalogue sells this battery for — the price the deal falls
-      // back to when nobody has typed one. See `batteryChargeCents`.
-      battery: { select: { priceCents: true } },
       // The partner's per-battery rule, read off the LENDER rather than the
       // programme row — the same place the $/W ceiling is read from.
       lender: {
@@ -699,24 +696,9 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   // and priced the contract without the extra work in it.
   const adders = await resolveAdderTotal(user.companyId, f.leadId);
 
-  /**
-   * WHAT THE STORAGE ADDS TO THIS CONTRACT.
-   *
-   * The rep's own per-battery price where the deal carries one, else the
-   * catalogue's — the rule lives in `batteryChargeCents` so that this save, the
-   * builder that called it, the proposal and payroll cannot disagree about one
-   * house. Zero on a storage-only deal, which is priced per battery below.
-   */
-  const batteryPriceCents = batteryChargeCents({
-    systemType: design?.systemType,
-    batteryQty: design?.batteryQty,
-    dealPerBatteryCents: f.stickerPricePerBatteryCents,
-    cataloguePerBatteryCents: design?.battery?.priceCents ?? null,
-  });
-
   // Every product-specific column is gated on the product — see
   // financeRowForProduct for why "most of them" was a customer-facing defect.
-  const rowData = financeRowForProduct({ ...f, ...adders, batteryPriceCents }, {
+  const rowData = financeRowForProduct({ ...f, ...adders }, {
     systemSizeKwDc: design?.systemSizeKwDc ?? 0,
     assumptions,
     lenderProduct: toLenderProductTerms(lenderProduct),
@@ -750,25 +732,9 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 
   const data = {
     ...rowData,
-    /**
-     * WHAT ONE BATTERY SELLS FOR ON THIS DEAL — on either kind of deal.
-     *
-     * It used to be zeroed on anything that was not storage-only, because
-     * nothing else read it. Something else reads it now: a battery beside an
-     * array is charged for on top of the per-watt price, and this is where a
-     * rep's own figure for it lives. Wiping it here would throw that price away
-     * on the next save of the financing step and quietly re-quote the deal at
-     * the catalogue's.
-     *
-     * Still zeroed on a deal with NO battery at all, which is the case the old
-     * rule was really about: a deal switched back to solar-only must not keep a
-     * price per battery nothing reads.
-     */
-    stickerPricePerBatteryCents: isStorage
-      ? storageSticker
-      : (design?.batteryQty ?? 0) > 0
-        ? (f.stickerPricePerBatteryCents ?? 0)
-        : 0,
+    // Zeroed on a PV deal rather than left stale: a deal switched from storage
+    // back to solar must not keep a price per battery nothing reads.
+    stickerPricePerBatteryCents: isStorage ? storageSticker : 0,
     // The $/W sticker is meaningless on storage and would be read as one.
     ...(isStorage ? { grossPpwCents: 0 } : {}),
     ...(storagePrice ? { contractPriceCents: storagePrice.breakdown.contractPriceCents } : {}),
