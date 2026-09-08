@@ -1,7 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Caution, ChoiceCards, Hint, Panel, TextField } from "@/components/portal/settings-kit/fields";
+import {
+  Caution,
+  ChoiceCards,
+  Hint,
+  InfoTip,
+  Panel,
+  TextField,
+} from "@/components/portal/settings-kit/fields";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -125,47 +132,6 @@ export function SubmissionMapping({
           address and product are filled in on Details.
         </Caution>
       )}
-
-      <Panel title="The amount they are asked to fund">
-        <ChoiceCards
-          name={`amount-basis-${lender.id}`}
-          legend="Which figure is the loan amount"
-          value={draft.submissionAmountBasis}
-          onChange={onAmountBasis}
-          options={[
-            {
-              value: "contract_value",
-              label: "The contract value",
-              detail:
-                "What this partner's own paper is written at, including any programme contribution, and BEFORE any tax credit. What every lender received before this setting existed, and right for almost all of them.",
-            },
-            {
-              value: "customer_obligation",
-              label: "What the household owes",
-              detail:
-                "The customer's own price. Identical to the contract value on a partner with no programme contribution — and a six-figure understatement on one that has. Choose this only if their paper really is written at the household's number.",
-            },
-            {
-              value: "after_credits",
-              label: "Contract value less the tax credits",
-              detail:
-                "The federal credits the proposal quotes, subtracted. Unusual: a homeowner claims those on their own return months later, so most partners lend the whole amount and are repaid early instead.",
-            },
-          ]}
-        />
-        {draft.submissionAmountBasis !== "contract_value" && (
-          <Caution>
-            This is not the figure this partner was sent before. Check it against a signed contract
-            before the next deal goes out — the amount on a credit application is the one number
-            nobody downstream re-reads. Every submission records which basis produced it.
-          </Caution>
-        )}
-        <Hint>
-          The figure itself is frozen when a proposal is generated, so changing this affects the
-          NEXT submission, not a proposal already sent. To see the exact body for a deal, open its
-          proposal preview and expand “What gets sent”.
-        </Hint>
-      </Panel>
 
       <Panel title="What they mean by a saving">
         <ChoiceCards
@@ -323,6 +289,8 @@ export function SubmissionMapping({
             rep sees on the deal is what the lender is told. Where this one wants something else,
             point it at another value or type a constant — it takes effect on the next submission.
             The rows with no box are still sent; they are decided where the right-hand column says.
+            The amount they are asked to fund is chosen on its own row: not a mapping, a choice
+            between figures the proposal already worked out.
           </p>
           {mapped > 0 && (
             <button
@@ -345,35 +313,53 @@ export function SubmissionMapping({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {wireInventory().map((row) =>
-                row.mapped ? (
-                  <MappingRow
-                    key={row.field}
-                    field={row.mapped}
-                    entry={draft.fieldMap[row.field]}
-                    onChange={(next) => {
-                      const copy = { ...draft.fieldMap };
-                      // An absent key IS "built-in" — see the draft's own note.
-                      if (next === null) delete copy[row.field];
-                      else copy[row.field] = next;
-                      onFieldMap(copy);
-                    }}
-                  />
-                ) : (
-                  <StatedRow key={row.field} field={row.stated} />
-                ),
-              )}
+              {wireInventory().map((row) => {
+                if (row.mapped) {
+                  return (
+                    <MappingRow
+                      key={row.field}
+                      field={row.mapped}
+                      entry={draft.fieldMap[row.field]}
+                      onChange={(next) => {
+                        const copy = { ...draft.fieldMap };
+                        // An absent key IS "built-in" — see the draft's own note.
+                        if (next === null) delete copy[row.field];
+                        else copy[row.field] = next;
+                        onFieldMap(copy);
+                      }}
+                    />
+                  );
+                }
+                // The one row that answers itself rather than naming a panel.
+                if (row.stated.control === "amount-basis") {
+                  return (
+                    <AmountBasisRow
+                      key={row.field}
+                      field={row.stated}
+                      value={draft.submissionAmountBasis}
+                      onChange={onAmountBasis}
+                    />
+                  );
+                }
+                return <StatedRow key={row.field} field={row.stated} />;
+              })}
             </tbody>
           </table>
         </div>
 
         <Hint>
           The list of values you can point at is fixed, and that is what keeps the promise below: a
-          mapping cannot name a column, only one of these. The rows with no box are deliberately
-          without one — the loan amount and the two saving figures because a typed constant there
-          would be a fabricated figure on every deal, the equipment names because the Equipment tab
+          mapping cannot name a column, only one of these. Nothing here can be typed freehand except
+          a constant — the loan amount offers three readings the document computed and no fourth,
+          and the two saving figures offer none at all, because a figure typed into any of them is a
+          fabricated one on every deal. The equipment names have no box because the Equipment tab
           maps them against this partner’s own approved-vendor list, and the rest because they are
           already the settings above.
+        </Hint>
+        <Hint>
+          The amount, the savings and the system are frozen when a proposal is generated, so
+          changing a basis affects the NEXT submission, not a proposal already sent. To see the
+          exact body for a deal, open its proposal preview and expand “What gets sent”.
         </Hint>
         <Hint>
           Nothing else crosses the wire. No social security number, no date of birth and no consent
@@ -382,6 +368,117 @@ export function SubmissionMapping({
         </Hint>
       </Panel>
     </div>
+  );
+}
+
+/**
+ * THE THREE TRUE READINGS OF THE LOAN AMOUNT.
+ *
+ * Kept out of the row so the same words serve the picker, the line under it and
+ * the explanation behind the "why" — one wording for one figure. `detail` is
+ * the sentence the old cards printed under each choice, unchanged.
+ */
+const AMOUNT_BASES: {
+  value: LenderRow["submissionAmountBasis"];
+  label: string;
+  detail: string;
+}[] = [
+  {
+    value: "contract_value",
+    label: "The contract value",
+    detail:
+      "What this partner's own paper is written at, including any programme contribution, and BEFORE any tax credit. What every lender received before this setting existed, and right for almost all of them.",
+  },
+  {
+    value: "customer_obligation",
+    label: "What the household owes",
+    detail:
+      "The customer's own price. Identical to the contract value on a partner with no programme contribution — and a six-figure understatement on one that has. Choose this only if their paper really is written at the household's number.",
+  },
+  {
+    value: "after_credits",
+    label: "Contract value less the tax credits",
+    detail:
+      "The federal credits the proposal quotes, subtracted. Unusual: a homeowner claims those on their own return months later, so most partners lend the whole amount and are repaid early instead.",
+  },
+];
+
+/**
+ * THE LOAN AMOUNT, CHOSEN ON THE ROW THAT NAMES IT.
+ *
+ * The one field that is neither mappable nor decided elsewhere. It had a panel
+ * of its own at the top of this tab, which put the question two screenfuls
+ * above the row that asked it — and the row answered "SET ABOVE", which is a
+ * direction rather than an answer. Same three readings, same words, in the
+ * place a person looking for the loan amount actually looks.
+ *
+ * It is still NOT a mapping: the picker offers three figures the document
+ * computed and no way to type a fourth, because a constant here is a fabricated
+ * credit application on every deal. That is why it does not go through
+ * `MappingRow`, which would put "A constant I type…" at the bottom of the list.
+ */
+function AmountBasisRow({
+  field,
+  value,
+  onChange,
+}: {
+  field: StatedField;
+  value: LenderRow["submissionAmountBasis"];
+  onChange: (v: LenderRow["submissionAmountBasis"]) => void;
+}) {
+  const chosen = AMOUNT_BASES.find((b) => b.value === value);
+
+  return (
+    <tr className="align-top">
+      <td className="py-2 pr-4 font-mono text-xs">
+        <span className="flex items-center gap-1.5">
+          {field.field}
+          <InfoTip label="the amount they are asked to fund">
+            <p className="mb-1.5 font-medium text-foreground">
+              A deal has more than one true amount, and only this partner knows which one their
+              paper is written at.
+            </p>
+            {AMOUNT_BASES.map((b) => (
+              <p key={b.value} className="mt-1.5">
+                <span className="font-medium text-foreground">{b.label}.</span> {b.detail}
+              </p>
+            ))}
+          </InfoTip>
+        </span>
+      </td>
+      <td className="py-2 pr-4">
+        <Select value={value} onValueChange={(v) => onChange(v as typeof value)}>
+          <SelectTrigger
+            className="h-8 w-full min-w-[15rem] text-xs"
+            aria-label="The amount they are asked to fund"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectLabel>Which figure is the loan amount</SelectLabel>
+              {AMOUNT_BASES.map((b) => (
+                <SelectItem key={b.value} value={b.value}>
+                  {b.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </td>
+      <td className="py-2 text-muted-foreground">
+        <p className="text-xs">{chosen?.detail ?? field.fedFrom}</p>
+        {value !== "contract_value" && (
+          <div className="mt-1.5">
+            <Caution>
+              This is not the figure this partner was sent before. Check it against a signed
+              contract before the next deal goes out — the amount on a credit application is the one
+              number nobody downstream re-reads. Every submission records which basis produced it.
+            </Caution>
+          </div>
+        )}
+      </td>
+    </tr>
   );
 }
 

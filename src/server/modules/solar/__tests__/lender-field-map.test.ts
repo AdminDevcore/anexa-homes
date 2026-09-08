@@ -381,4 +381,23 @@ describe('wireInventory', () => {
       expect(!!row.mapped).toBe(!row.stated)
     }
   })
+
+  it('lets the amount choose its own basis, on the row that names it', () => {
+    // It had a panel of its own at the top of the tab and answered "SET ABOVE"
+    // here, which is a direction rather than an answer. The chooser is in the
+    // row now — and it is still NOT a mapping, because a typed constant on a
+    // credit application's amount is a fabricated one on every deal.
+    const row = wireInventory().find((r) => r.field === 'requestedAmount')
+
+    expect(row?.mapped).toBeUndefined()
+    expect(row?.stated?.control).toBe('amount-basis')
+  })
+
+  it('never badges a row as “set above” when the row itself decides it', () => {
+    // The badge points at a panel by name. A row carrying both would send a
+    // reader up the tab looking for a heading that is not there any more.
+    for (const f of STATED_FIELDS) {
+      if (f.control) expect(f.setting).toBeUndefined()
+    }
+  })
 })

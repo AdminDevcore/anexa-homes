@@ -30,7 +30,10 @@ import type { AmosApplicationPayload } from "./amos-payload";
  * NOT MAPPABLE IS NOT THE SAME AS NOT SENT, and the screen used to say the
  * second by omission: it listed only the boxes below and called that the
  * application, so eleven fields the partner really does receive were nowhere on
- * it. They are in `STATED_FIELDS` and render as ordinary rows with no picker.
+ * it. They are in `STATED_FIELDS` and render as ordinary rows with no picker —
+ * except the amount, which carries its own basis chooser in the row: not
+ * mappable still, because the choice is between figures the document computed,
+ * but no longer a badge pointing at a panel somewhere further up the tab.
  *
  * Everything else is here. A row that names a source this build does not know
  * FALLS BACK to the built-in one rather than sending nothing — same rule the
@@ -246,6 +249,20 @@ export type StatedField = {
   changedOn: string;
   /** True where a panel above decides it, and `changedOn` names that panel. */
   setting?: boolean;
+  /**
+   * A SETTING THIS ROW CARRIES ITSELF, instead of a badge pointing elsewhere.
+   *
+   * The amount is the only one so far. It is not mappable — its three readings
+   * are figures the document computed, and a typed constant there is a
+   * fabricated credit application — but it is still a CHOICE, and it spent its
+   * first life in a panel of its own at the top of the tab, two screenfuls from
+   * the row that named it and answered it with "set above". A reader who found
+   * the row had found the wrong thing.
+   *
+   * Rows carrying one render their own control rather than a badge, so
+   * `setting` is left off: no panel above decides it any more.
+   */
+  control?: "amount-basis";
 };
 
 export const STATED_FIELDS: StatedField[] = [
@@ -305,9 +322,9 @@ export const STATED_FIELDS: StatedField[] = [
   },
   {
     field: "requestedAmount",
-    fedFrom: "The figure the proposal quotes, on the basis chosen above",
-    changedOn: "“The amount they are asked to fund”",
-    setting: true,
+    fedFrom: "The figure the proposal quotes, on the basis chosen in this row",
+    changedOn: "here",
+    control: "amount-basis",
   },
   {
     field: "salesRepName",
