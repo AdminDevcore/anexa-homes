@@ -229,13 +229,13 @@ export const STATED_FIELDS: StatedField[] = [
   {
     field: "system.estAnnualSaving",
     fedFrom: "The saving the proposal works out, on the basis and horizon chosen above",
-    changedOn: "\u201CWhat they mean by a saving\u201D",
+    changedOn: "“What they mean by a saving”",
     setting: true,
   },
   {
     field: "system.estMonthlySaving",
-    fedFrom: "The annual figure \u00F7 12, rounded once so the two agree",
-    changedOn: "\u201CWhat they mean by a saving\u201D",
+    fedFrom: "The annual saving ÷ 12, rounded once so the two agree",
+    changedOn: "“What they mean by a saving”",
     setting: true,
   },
   {
@@ -271,19 +271,19 @@ export const STATED_FIELDS: StatedField[] = [
   {
     field: "requestedAmount",
     fedFrom: "The figure the proposal quotes, on the basis chosen above",
-    changedOn: "\u201CThe amount they are asked to fund\u201D",
+    changedOn: "“The amount they are asked to fund”",
     setting: true,
   },
   {
     field: "salesRepName",
     fedFrom: "The seller chosen above",
-    changedOn: "\u201CWhose name goes on it\u201D",
+    changedOn: "“Whose name goes on it”",
     setting: true,
   },
   {
     field: "delivery",
     fedFrom: "Whose device the household finishes on, chosen above",
-    changedOn: "\u201CWho completes the application\u201D",
+    changedOn: "“Who completes the application”",
     setting: true,
   },
 ];

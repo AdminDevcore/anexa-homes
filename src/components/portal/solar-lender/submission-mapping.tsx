@@ -315,7 +315,7 @@ export function SubmissionMapping({
         />
       </Panel>
 
-      <Panel title="Everything else on the application">
+      <Panel title="Everything on the application">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="max-w-3xl text-sm text-muted-foreground">
             The whole application, in the order the body carries it. Each row with a box has a
