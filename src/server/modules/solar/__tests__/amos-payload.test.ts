@@ -407,3 +407,91 @@ describe('buildAmosPayload', () => {
     )
   })
 })
+
+/**
+ * THE THREE OPTIONAL FIELDS THE LENDER ACCEPTS AND WE USED NOT TO SEND.
+ *
+ * Each is optional on their contract and each has a consequence on their side
+ * of the wire, which is why they are worth the code: without an escalation
+ * figure their own disclosure line prints blank and their contract preflight
+ * refuses the send, so a deal they ACCEPTED stalls later over a box nobody was
+ * asked for.
+ *
+ * The rule every one of them follows: OMIT, never send empty. Their validator
+ * reads a present-but-blank box as an answer and a missing key as silence.
+ */
+describe('the optional fields', () => {
+  it('sends the utility rise as a percentage string', () => {
+    const p = buildAmosPayload(lead, design, {
+      ...opts,
+      system: { ...figures, utilityEscalationPct: 3.5 },
+    })
+    expect(p.system.utilityEscalation).toBe('3.5')
+  })
+
+  it('sends a flat-rate assumption rather than dropping it', () => {
+    // ZERO IS AN ANSWER. A company that assumes rates hold flat is saying
+    // something, and dropping it substitutes the lender's house rate for a
+    // deliberate assumption — a different, larger saving on their paper.
+    const p = buildAmosPayload(lead, design, {
+      ...opts,
+      system: { ...figures, utilityEscalationPct: 0 },
+    })
+    expect(p.system.utilityEscalation).toBe('0')
+  })
+
+  it('says nothing when the document never carried an escalation', () => {
+    expect(buildAmosPayload(lead, design, opts).system).not.toHaveProperty('utilityEscalation')
+    expect(
+      buildAmosPayload(lead, design, { ...opts, system: { ...figures, utilityEscalationPct: null } })
+        .system,
+    ).not.toHaveProperty('utilityEscalation')
+  })
+
+  it('refuses an escalation outside what the lender accepts, rather than clamping it', () => {
+    // A clamp would send a figure the proposal never used. Their fallback is a
+    // stated house rate, which is a better answer than a fabricated one.
+    for (const bad of [-1, 10.5, 400, Number.NaN]) {
+      expect(
+        buildAmosPayload(lead, design, { ...opts, system: { ...figures, utilityEscalationPct: bad } })
+          .system,
+      ).not.toHaveProperty('utilityEscalation')
+    }
+  })
+
+  it('sends the utility that bills the property', () => {
+    const p = buildAmosPayload(lead, design, { ...opts, utilityProvider: '  Oncor  ' })
+    expect(p.property.utilityProvider).toBe('Oncor')
+  })
+
+  it('omits the utility rather than sending an empty one', () => {
+    expect(buildAmosPayload(lead, design, opts).property).not.toHaveProperty('utilityProvider')
+    expect(
+      buildAmosPayload(lead, design, { ...opts, utilityProvider: '   ' }).property,
+    ).not.toHaveProperty('utilityProvider')
+  })
+
+  it('recognises the language the lender has, however it was typed', () => {
+    for (const said of ['Spanish', 'spanish', 'Español', 'espanol', 'ES', ' es ']) {
+      expect(
+        buildAmosPayload({ ...lead, preferredLanguage: said }, design, opts).applicant
+          .languagePreference,
+      ).toBe('es')
+    }
+    expect(
+      buildAmosPayload({ ...lead, preferredLanguage: 'English' }, design, opts).applicant
+        .languagePreference,
+    ).toBe('en')
+  })
+
+  it('says nothing about a language the lender does not have', () => {
+    // Their field is an enum and an unrecognised member is a 422 on the WHOLE
+    // application. A Vietnamese-speaking household is not a reason to refuse a
+    // loan — they land on the lender's English default, as they did before.
+    for (const said of ['Vietnamese', 'Tagalog', '', null, undefined]) {
+      expect(
+        buildAmosPayload({ ...lead, preferredLanguage: said }, design, opts).applicant,
+      ).not.toHaveProperty('languagePreference')
+    }
+  })
+})

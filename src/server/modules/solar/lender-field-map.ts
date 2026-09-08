@@ -66,6 +66,14 @@ export type FieldMapContext = {
   };
   productSlug: string;
   ownerOccupied: boolean;
+  /**
+   * The two names a deal holds for "who supplies the electricity", and they are
+   * different questions: `utilityProvider` is the wires company the partner
+   * files interconnection with, `electricProvider` is the retailer that sends
+   * the bill. Deregulated Texas is exactly where they come apart.
+   */
+  utilityProvider: string | null;
+  electricProvider: string | null;
   system: {
     annualProductionKwh: number;
     annualConsumptionKwh: number;
@@ -129,6 +137,20 @@ export const FIELD_SOURCES: FieldSource[] = [
         .join(", "),
   },
   { key: "deal.ownerOccupied", label: "The occupancy answer given at send", group: "The property", kind: "boolean", resolve: (c) => c.ownerOccupied },
+  {
+    key: "property.utilityProvider",
+    label: "The utility on the deal",
+    group: "The property",
+    kind: "string",
+    resolve: (c) => text(c.utilityProvider) || null,
+  },
+  {
+    key: "property.electricProvider",
+    label: "The retailer that bills them",
+    group: "The property",
+    kind: "string",
+    resolve: (c) => text(c.electricProvider) || null,
+  },
 
   // ── People ─────────────────────────────────────────────────────────────
   { key: "people.dealRep", label: "The seller, as this partner's name setting resolves it", group: "People", kind: "string", resolve: (c) => c.repName },
@@ -186,6 +208,7 @@ export const WIRE_FIELDS: WireField[] = [
   { field: "property.state", kind: "string", defaultSource: "property.state", changedOn: "the deal", required: true, preflightsOn: "state" },
   { field: "property.postalCode", kind: "string", defaultSource: "property.postalCode", changedOn: "the deal", required: true, preflightsOn: "zip" },
   { field: "property.ownerOccupied", kind: "boolean", defaultSource: "deal.ownerOccupied", changedOn: "the send dialog", required: true },
+  { field: "property.utilityProvider", kind: "string", defaultSource: "property.utilityProvider", changedOn: "Energy, then regenerate", required: false },
   { field: "productSlug", kind: "string", defaultSource: "lender.productSlug", changedOn: "Details → Direct submission", required: true },
   { field: "externalId", kind: "string", defaultSource: "design.reference", changedOn: "“Start a new reference”", required: true },
   { field: "termMonths", kind: "number", defaultSource: "finance.termMonths", changedOn: "Financing, then regenerate", required: true },
@@ -237,6 +260,18 @@ export const STATED_FIELDS: StatedField[] = [
     fedFrom: "The annual saving ÷ 12, rounded once so the two agree",
     changedOn: "“What they mean by a saving”",
     setting: true,
+  },
+  {
+    field: "system.utilityEscalation",
+    fedFrom:
+      "The annual utility rise the proposal's own comparison escalated at, so the two reconcile",
+    changedOn: "Solar Settings, then regenerate",
+  },
+  {
+    field: "applicant.languagePreference",
+    fedFrom:
+      "The customer's preferred language, where it is one this partner has (English or Spanish)",
+    changedOn: "the deal",
   },
   {
     field: "equipment.panel.brand",
@@ -308,16 +343,19 @@ const WIRE_ORDER: string[] = [
   "applicant.lastName",
   "applicant.email",
   "applicant.phone",
+  "applicant.languagePreference",
   "property.line1",
   "property.city",
   "property.state",
   "property.postalCode",
   "property.ownerOccupied",
+  "property.utilityProvider",
   "system.annualProductionKwh",
   "system.annualConsumptionKwh",
   "system.retailRatePerKwh",
   "system.estMonthlySaving",
   "system.estAnnualSaving",
+  "system.utilityEscalation",
   "equipment.panel.brand",
   "equipment.panel.model",
   "equipment.panel.quantity",
@@ -483,6 +521,14 @@ function write(p: AmosApplicationPayload, def: WireField, v: Resolved) {
     case "property.state": p.property.state = s(); return;
     case "property.postalCode": p.property.postalCode = s(); return;
     case "property.ownerOccupied": p.property.ownerOccupied = v === true; return;
+    // Omitted rather than blanked: an empty box is an answer to their
+    // validator and silence is what a deal with no utility on it means.
+    case "property.utilityProvider": {
+      const t = s().trim();
+      if (t === "") delete p.property.utilityProvider;
+      else p.property.utilityProvider = t.slice(0, 120);
+      return;
+    }
     case "productSlug": p.productSlug = s(); return;
     case "externalId": p.externalId = s(); return;
     case "termMonths": p.termMonths = n(); return;

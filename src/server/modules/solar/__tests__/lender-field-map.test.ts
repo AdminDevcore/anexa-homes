@@ -37,6 +37,8 @@ const CTX: FieldMapContext = {
   },
   productSlug: 'solar-installation-financing',
   ownerOccupied: true,
+  utilityProvider: 'Oncor Electric Delivery',
+  electricProvider: 'Reliant Energy',
   system: { annualProductionKwh: 14200, annualConsumptionKwh: 15800, retailRateMillsPerKwh: 233 },
   termMonths: 360,
 }
@@ -286,6 +288,9 @@ describe('parseLiteral', () => {
  * adding a field to the body and forgetting the screen fails here.
  */
 describe('wireInventory', () => {
+  // MAXIMAL on purpose. Every optional field is populated, because the point of
+  // the assertion is that the screen names the fullest body we can produce —
+  // a fixture that omits them would let an unlisted optional field pass.
   const LEAD = {
     firstName: 'Dana',
     lastName: 'Reyes',
@@ -295,6 +300,7 @@ describe('wireInventory', () => {
     city: 'Austin',
     state: 'TX',
     zip: '78735',
+    preferredLanguage: 'Spanish',
   }
 
   // Every equipment kind present, so all three brand/model pairs reach the wire.
@@ -315,11 +321,13 @@ describe('wireInventory', () => {
     termMonths: 360,
     salesRepName: 'Marco Diaz',
     ownerOccupied: true,
+    utilityProvider: 'Oncor Electric Delivery',
     system: {
       annualProductionKwh: 14200,
       annualConsumptionKwh: 15800,
       retailRateMillsPerKwh: 233,
       annualUtilityAvoidedCents: 361196,
+      utilityEscalationPct: 3.5,
     },
   }
 

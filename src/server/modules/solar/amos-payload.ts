@@ -24,6 +24,15 @@ export type AmosLeadInput = {
   city: string | null
   state: string | null
   zip: string | null
+  /**
+   * What the household would rather be spoken to in, free text, because which
+   * languages a company serves is business config here rather than an enum.
+   *
+   * The lender's own field is a two-value enum, so `languageFor` translates and
+   * SENDS NOTHING it cannot recognise — their default is English either way,
+   * and an unrecognised value is a 422 on the whole application.
+   */
+  preferredLanguage?: string | null
 }
 
 type EquipmentRef = {
@@ -98,6 +107,21 @@ export type AmosSystemFigures = {
    * GROSS of the loan payment, which is what a savings analysis asks for.
    */
   annualUtilityAvoidedCents: number
+  /**
+   * THE ANNUAL UTILITY RISE THE COMPARISON ASSUMES, as a percentage: 3.5.
+   *
+   * Optional on the lender's contract and the reason to send it anyway is on
+   * THEIR side of the wire, not ours: with no figure of their own their
+   * disclosure line prints blank and their contract preflight refuses the send,
+   * so a deal that was accepted stalls later for a field nobody was asked for.
+   *
+   * `assumptions.utilityEscalationPct` on the frozen snapshot — the same
+   * assumption that escalated every year of the saving beside it, so the two
+   * reconcile. Null on a document too old to carry one; we then say nothing and
+   * their house rate stands, which is the honest reading of a document that
+   * does not state it.
+   */
+  utilityEscalationPct?: number | null
 }
 
 export type AmosSubmitOptions = {
@@ -127,6 +151,15 @@ export type AmosSubmitOptions = {
    * your own phone on it first.
    */
   delivery?: 'in_person' | 'customer'
+  /**
+   * Who bills the household for electricity, as the deal records it.
+   *
+   * Free text to the lender and matched loosely on their side, so a name that
+   * is not on their curated list degrades rather than failing. They use it for
+   * the interconnection paperwork after the sale, which is why it is worth
+   * sending even imperfectly.
+   */
+  utilityProvider?: string | null
   /** The savings analysis, resolved from the document the customer was shown. */
   system: AmosSystemFigures
 }
@@ -141,13 +174,22 @@ type EquipmentLine = {
 export type AmosApplicationPayload = {
   externalId: string
   productSlug: string
-  applicant: { firstName: string; lastName: string; email: string; phone: string }
+  applicant: {
+    firstName: string
+    lastName: string
+    email: string
+    phone: string
+    /** Which language the lender emails and texts this household in. */
+    languagePreference?: 'en' | 'es'
+  }
   property: {
     line1: string
     city: string
     state: string
     postalCode: string
     ownerOccupied: boolean
+    /** Who bills them for electricity. Omitted rather than sent empty. */
+    utilityProvider?: string
   }
   system: {
     annualProductionKwh: number
@@ -157,6 +199,8 @@ export type AmosApplicationPayload = {
     /** Dollars, two decimals, both of them at least 1.00 — the lender's floor. */
     estMonthlySaving: string
     estAnnualSaving: string
+    /** Percent per year, as a string: "3.5". "0" is a real answer. */
+    utilityEscalation?: string
   }
   equipment?: EquipmentLine[]
   requestedAmount: string
@@ -375,6 +419,57 @@ function ratePerKwhString(mills: number): string {
   return (mills / 1000).toFixed(3)
 }
 
+/**
+ * THE LENDER'S TWO LANGUAGES, out of our free-text one.
+ *
+ * Their field is an enum and an unrecognised member is a 422 on the WHOLE
+ * application, so this recognises rather than translates: anything it does not
+ * know returns undefined and the field is left off, which lands the household
+ * on their English default — the same place they were before this was sent at
+ * all. A Vietnamese-speaking customer is not a reason to refuse a loan.
+ *
+ * Deliberately generous about how the word was typed, because this box is a rep
+ * typing what somebody said at a door: "Spanish", "spanish", "Español",
+ * "espanol", "ES" are all the same answer.
+ */
+function languageFor(raw: string | null | undefined): 'en' | 'es' | undefined {
+  const t = (raw ?? '')
+    .trim()
+    .toLowerCase()
+    // Strip the accents so "español" and "espanol" are one answer.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  if (t === '') return undefined
+  if (/^(es|esp|spa|spanish|espanol|castellano)$/.test(t)) return 'es'
+  if (/^(en|eng|english|ingles)$/.test(t)) return 'en'
+  return undefined
+}
+
+/**
+ * The utility rise as the lender wants it: a percentage string, "0" to "10".
+ *
+ * Zero is a real answer and must survive — a company that assumes rates hold
+ * flat is saying something, and dropping it would silently substitute their
+ * house rate for a deliberate assumption. Anything outside their range, or not
+ * a number at all, is left off instead of clamped: a clamp would send a figure
+ * the proposal never used, and their fallback is a stated rate rather than a
+ * blank.
+ *
+ * Two decimals at most, trailing zeros trimmed, so 3.5 goes as "3.5".
+ */
+function escalationString(pct: number | null | undefined): string | undefined {
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) return undefined
+  if (pct < 0 || pct > 10) return undefined
+  return String(Number(pct.toFixed(2)))
+}
+
+/** Their box is 120 characters; ours is unbounded. Omitted rather than blank. */
+function utilityProviderString(raw: string | null | undefined): string | undefined {
+  const t = (raw ?? '').trim()
+  if (t === '') return undefined
+  return t.slice(0, 120)
+}
+
 /** Integer cents -> a decimal string. Money never crosses the wire as a float. */
 function centsToDecimalString(cents: number): string {
   const whole = Math.trunc(cents / 100)
@@ -426,13 +521,21 @@ export function buildAmosPayload(
 
   const f = opts.system
   const monthlyAvoidedCents = monthlyFrom(f.annualUtilityAvoidedCents)
+  const escalation = escalationString(f.utilityEscalationPct)
   const system: AmosApplicationPayload['system'] = {
     annualProductionKwh: f.annualProductionKwh,
     annualConsumptionKwh: f.annualConsumptionKwh,
     retailRatePerKwh: ratePerKwhString(f.retailRateMillsPerKwh),
     estMonthlySaving: centsToDecimalString(monthlyAvoidedCents),
     estAnnualSaving: centsToDecimalString(f.annualUtilityAvoidedCents),
+    // Every optional field is OMITTED rather than sent empty. Their validator
+    // reads a present-but-blank box as an answer and a missing one as silence,
+    // and silence is what we mean.
+    ...(escalation !== undefined ? { utilityEscalation: escalation } : {}),
   }
+
+  const language = languageFor(lead.preferredLanguage)
+  const utilityProvider = utilityProviderString(opts.utilityProvider)
 
   return {
     // Re-sending the same reference returns the same application instead of
@@ -444,6 +547,7 @@ export function buildAmosPayload(
       lastName: lead.lastName.trim(),
       email: (lead.email ?? '').trim().toLowerCase(),
       phone: (lead.phone ?? '').replace(/[\s()\-.]/g, ''),
+      ...(language !== undefined ? { languagePreference: language } : {}),
     },
     property: {
       line1: (lead.address ?? '').trim(),
@@ -451,6 +555,7 @@ export function buildAmosPayload(
       state: (lead.state ?? '').trim().toUpperCase(),
       postalCode: (lead.zip ?? '').trim(),
       ownerOccupied: opts.ownerOccupied,
+      ...(utilityProvider !== undefined ? { utilityProvider } : {}),
     },
     // System size is deliberately absent: the lender derives DC nameplate from
     // panel wattage x count for any deal carrying a panel and ignores a

@@ -173,6 +173,7 @@ export async function readLenderSubmission(
           salesRepName: "",
           ownerOccupied: true,
           delivery: lender.submissionDelivery,
+          utilityProvider: design.utilityProvider,
           system: quoted.system!,
         }),
         entries,
@@ -301,6 +302,7 @@ export async function readLenderPayloadPreview(
     salesRepName: repName,
     ownerOccupied: true,
     delivery: lender.submissionDelivery,
+    utilityProvider: design.utilityProvider,
     system: quoted.system!,
   });
 
@@ -506,6 +508,7 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     // caller's preference. Both doors used to state `in_person` and neither
     // could be told otherwise.
     delivery: lender.submissionDelivery,
+    utilityProvider: design.utilityProvider,
     // Non-null by construction: `savingsProblems(null)` returns a problem, and
     // a non-empty problem list has already returned above.
     system: quoted.system!,
@@ -810,7 +813,7 @@ async function loadQuoted(
     | {
         system?: { year1ProductionKwh?: unknown };
         energy?: { annualUsageKwh?: unknown };
-        assumptions?: { currentRateMillsPerKwh?: unknown };
+        assumptions?: { currentRateMillsPerKwh?: unknown; utilityEscalationPct?: unknown };
         savings?: SavingsModel;
       }
     | null
@@ -826,8 +829,17 @@ async function loadQuoted(
       annualConsumptionKwh: num(snapshot.energy?.annualUsageKwh),
       retailRateMillsPerKwh: num(snapshot.assumptions?.currentRateMillsPerKwh),
       annualUtilityAvoidedCents: avoided,
+      // NOT `num`: zero is a real assumption here and "the document does not
+      // say" is a different fact, which the payload turns into silence rather
+      // than into a flat-rate claim the proposal never made.
+      utilityEscalationPct: pct(snapshot.assumptions?.utilityEscalationPct),
     },
   };
+}
+
+/** A snapshot percentage, or null where the document never carried one. */
+function pct(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 /**
@@ -1063,7 +1075,7 @@ async function loadFieldMap(companyId: string, lenderId: string) {
  * admin one number in the mapping and send another.
  */
 function mapContext(
-  design: { id: string; systemSizeKwDc: number; moduleQty: number; batteryQty: number; lead: { firstName: string; lastName: string; email: string | null; phone: string | null; address: string | null; city: string | null; state: string | null; zip: string | null } },
+  design: { id: string; systemSizeKwDc: number; moduleQty: number; batteryQty: number; utilityProvider: string | null; electricProvider: string | null; lead: { firstName: string; lastName: string; email: string | null; phone: string | null; address: string | null; city: string | null; state: string | null; zip: string | null } },
   submitted: Parameters<typeof inverterCount>[0],
   args: {
     reference: string;
@@ -1091,6 +1103,8 @@ function mapContext(
     },
     productSlug: args.productSlug,
     ownerOccupied: args.ownerOccupied,
+    utilityProvider: design.utilityProvider,
+    electricProvider: design.electricProvider,
     system: {
       annualProductionKwh: args.system.annualProductionKwh,
       annualConsumptionKwh: args.system.annualConsumptionKwh,
@@ -1221,6 +1235,12 @@ async function loadDesign(leadId: string, companyId: string) {
       moduleQty: true,
       batteryQty: true,
       lenderSubmissionAttempt: true,
+      /// Who bills the household. Optional to the partner and used for their
+      /// interconnection paperwork, so it is worth sending even loosely matched.
+      /// Both, because they are different questions and a mapping may point the
+      /// partner's one box at either — see `FieldMapContext`.
+      utilityProvider: true,
+      electricProvider: true,
       /**
        * Each item's own name AND every partner's name for it.
        *
@@ -1262,6 +1282,9 @@ async function loadDesign(leadId: string, companyId: string) {
           city: true,
           state: true,
           zip: true,
+          /// Free text here, a two-value enum there — `languageFor` recognises
+          /// what it can and sends nothing it cannot.
+          preferredLanguage: true,
           assignedRep: { select: { firstName: true, lastName: true } },
         },
       },
