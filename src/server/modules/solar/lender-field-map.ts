@@ -24,6 +24,13 @@ import type { AmosApplicationPayload } from "./amos-payload";
  *   equipment brand/model  the Equipment tab maps these per item, against that
  *                          partner's approved-vendor list, which is where the
  *                          matching actually has to happen.
+ *   delivery               whose device the household finishes on, which is
+ *                          already the setting above and has two answers.
+ *
+ * NOT MAPPABLE IS NOT THE SAME AS NOT SENT, and the screen used to say the
+ * second by omission: it listed only the boxes below and called that the
+ * application, so eleven fields the partner really does receive were nowhere on
+ * it. They are in `STATED_FIELDS` and render as ordinary rows with no picker.
  *
  * Everything else is here. A row that names a source this build does not know
  * FALLS BACK to the built-in one rather than sending nothing — same rule the
@@ -189,6 +196,182 @@ export const WIRE_FIELDS: WireField[] = [
   { field: "equipment.inverter.quantity", kind: "number", defaultSource: "system.inverterCount", changedOn: "Solar Equipment → Rated W", required: false },
   { field: "equipment.battery.quantity", kind: "number", defaultSource: "system.batteryCount", changedOn: "the designer", required: false },
 ];
+
+/**
+ * THE FIELDS THAT CROSS THE WIRE WITH NO BOX ON THIS SCREEN.
+ *
+ * Listed anyway, and that is the whole point of them. The table held only the
+ * mappable rows while calling itself the application, so an admin looking for
+ * the panel brand — or the loan amount, or the saving — found nothing there and
+ * had no way to tell whether we send it at all. ELEVEN of the wire's fields
+ * were invisible. A field nobody may re-point is still a field the partner
+ * receives.
+ *
+ * They carry no picker for the reasons in this module's header, which is the
+ * distinction the screen has to make: not "we don't send this" but "this is
+ * decided somewhere a constant cannot fabricate it".
+ *
+ * `setting` marks the ones a panel on this same tab decides; the rest belong to
+ * another screen, and `changedOn` names it either way.
+ */
+export type StatedField = {
+  /** The partner's own path, spelled as `WIRE_FIELDS` spells its own. */
+  field: string;
+  /** What fills it, in the words the third column of that table uses. */
+  fedFrom: string;
+  /** Where somebody goes to change it. */
+  changedOn: string;
+  /** True where a panel above decides it, and `changedOn` names that panel. */
+  setting?: boolean;
+};
+
+export const STATED_FIELDS: StatedField[] = [
+  {
+    field: "system.estAnnualSaving",
+    fedFrom: "The saving the proposal works out, on the basis and horizon chosen above",
+    changedOn: "\u201CWhat they mean by a saving\u201D",
+    setting: true,
+  },
+  {
+    field: "system.estMonthlySaving",
+    fedFrom: "The annual figure \u00F7 12, rounded once so the two agree",
+    changedOn: "\u201CWhat they mean by a saving\u201D",
+    setting: true,
+  },
+  {
+    field: "equipment.panel.brand",
+    fedFrom: "This partner's own name for the panel, or ours where nobody has mapped it",
+    changedOn: "the Equipment tab",
+  },
+  {
+    field: "equipment.panel.model",
+    fedFrom: "This partner's own model for the panel, or ours where nobody has mapped it",
+    changedOn: "the Equipment tab",
+  },
+  {
+    field: "equipment.inverter.brand",
+    fedFrom: "This partner's own name for the inverter, or ours where nobody has mapped it",
+    changedOn: "the Equipment tab",
+  },
+  {
+    field: "equipment.inverter.model",
+    fedFrom: "This partner's own model for the inverter, or ours where nobody has mapped it",
+    changedOn: "the Equipment tab",
+  },
+  {
+    field: "equipment.battery.brand",
+    fedFrom: "This partner's own name for the battery, or ours where nobody has mapped it",
+    changedOn: "the Equipment tab",
+  },
+  {
+    field: "equipment.battery.model",
+    fedFrom: "This partner's own model for the battery, or ours where nobody has mapped it",
+    changedOn: "the Equipment tab",
+  },
+  {
+    field: "requestedAmount",
+    fedFrom: "The figure the proposal quotes, on the basis chosen above",
+    changedOn: "\u201CThe amount they are asked to fund\u201D",
+    setting: true,
+  },
+  {
+    field: "salesRepName",
+    fedFrom: "The seller chosen above",
+    changedOn: "\u201CWhose name goes on it\u201D",
+    setting: true,
+  },
+  {
+    field: "delivery",
+    fedFrom: "Whose device the household finishes on, chosen above",
+    changedOn: "\u201CWho completes the application\u201D",
+    setting: true,
+  },
+];
+
+/**
+ * THE ORDER THE REQUEST BODY CARRIES THEM, which is the order to read them in.
+ *
+ * `WIRE_FIELDS` is ordered for the server's convenience and `STATED_FIELDS` is
+ * a second list entirely, so neither one is a reading of the application. This
+ * is: the same walk as `buildAmosPayload`, so a body printed beside this screen
+ * lines up row for row.
+ *
+ * A NAME MISSING FROM HERE IS STILL RENDERED, at the end — see `wireInventory`.
+ * Ordering is a nicety; a field silently disappearing off the screen is the
+ * defect this whole inventory exists to stop, and a third list to keep in sync
+ * must not be able to cause it.
+ */
+const WIRE_ORDER: string[] = [
+  "externalId",
+  "productSlug",
+  "applicant.firstName",
+  "applicant.lastName",
+  "applicant.email",
+  "applicant.phone",
+  "property.line1",
+  "property.city",
+  "property.state",
+  "property.postalCode",
+  "property.ownerOccupied",
+  "system.annualProductionKwh",
+  "system.annualConsumptionKwh",
+  "system.retailRatePerKwh",
+  "system.estMonthlySaving",
+  "system.estAnnualSaving",
+  "equipment.panel.brand",
+  "equipment.panel.model",
+  "equipment.panel.quantity",
+  "equipment.inverter.brand",
+  "equipment.inverter.model",
+  "equipment.inverter.quantity",
+  "equipment.battery.brand",
+  "equipment.battery.model",
+  "equipment.battery.quantity",
+  "requestedAmount",
+  "termMonths",
+  "salesRepName",
+  "delivery",
+];
+
+/** One line of the application: a box to re-point, or a figure decided elsewhere. */
+export type InventoryRow =
+  | { field: string; mapped: WireField; stated?: undefined }
+  | { field: string; mapped?: undefined; stated: StatedField };
+
+/**
+ * EVERY FIELD ON THE WIRE, mappable or not, in body order.
+ *
+ * Anything neither list knows about cannot appear, and anything `WIRE_ORDER`
+ * has not been told about appears at the end rather than not at all.
+ */
+export function wireInventory(): InventoryRow[] {
+  const mapped = new Map(WIRE_FIELDS.map((f) => [f.field, f]));
+  const stated = new Map(STATED_FIELDS.map((f) => [f.field, f]));
+
+  const rows: InventoryRow[] = [];
+  const seen = new Set<string>();
+  const take = (name: string) => {
+    if (seen.has(name)) return;
+    const m = mapped.get(name);
+    if (m) {
+      seen.add(name);
+      rows.push({ field: name, mapped: m });
+      return;
+    }
+    const s = stated.get(name);
+    if (s) {
+      seen.add(name);
+      rows.push({ field: name, stated: s });
+    }
+  };
+
+  for (const name of WIRE_ORDER) take(name);
+  // The safety net: a field added to either list and forgotten here still shows.
+  for (const f of WIRE_FIELDS) take(f.field);
+  for (const f of STATED_FIELDS) take(f.field);
+
+  return rows;
+}
 
 const FIELD_BY_NAME = new Map(WIRE_FIELDS.map((f) => [f.field, f]));
 

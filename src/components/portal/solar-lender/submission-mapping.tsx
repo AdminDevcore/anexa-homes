@@ -12,7 +12,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FIELD_SOURCES, WIRE_FIELDS, type FieldKind } from "@/server/modules/solar/lender-field-map";
+import {
+  FIELD_SOURCES,
+  WIRE_FIELDS,
+  wireInventory,
+  type FieldKind,
+  type StatedField,
+} from "@/server/modules/solar/lender-field-map";
 import type { LenderRow } from "./types";
 
 /** What a row is set to. Absent from the draft entirely means "built-in". */
@@ -312,10 +318,11 @@ export function SubmissionMapping({
       <Panel title="Everything else on the application">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="max-w-3xl text-sm text-muted-foreground">
-            Each of these has a sensible built-in source, and leaving them alone is right for
-            almost every partner: what a rep sees on the deal is what the lender is told. Where
-            this one wants something else in a box, point it at another value or type a constant —
-            it takes effect on the next submission.
+            The whole application, in the order the body carries it. Each row with a box has a
+            sensible built-in source and leaving it alone is right for almost every partner: what a
+            rep sees on the deal is what the lender is told. Where this one wants something else,
+            point it at another value or type a constant — it takes effect on the next submission.
+            The rows with no box are still sent; they are decided where the right-hand column says.
           </p>
           {mapped > 0 && (
             <button
@@ -338,29 +345,35 @@ export function SubmissionMapping({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {WIRE_FIELDS.map((f) => (
-                <MappingRow
-                  key={f.field}
-                  field={f}
-                  entry={draft.fieldMap[f.field]}
-                  onChange={(next) => {
-                    const copy = { ...draft.fieldMap };
-                    // An absent key IS "built-in" — see the draft's own note.
-                    if (next === null) delete copy[f.field];
-                    else copy[f.field] = next;
-                    onFieldMap(copy);
-                  }}
-                />
-              ))}
+              {wireInventory().map((row) =>
+                row.mapped ? (
+                  <MappingRow
+                    key={row.field}
+                    field={row.mapped}
+                    entry={draft.fieldMap[row.field]}
+                    onChange={(next) => {
+                      const copy = { ...draft.fieldMap };
+                      // An absent key IS "built-in" — see the draft's own note.
+                      if (next === null) delete copy[row.field];
+                      else copy[row.field] = next;
+                      onFieldMap(copy);
+                    }}
+                  />
+                ) : (
+                  <StatedRow key={row.field} field={row.stated} />
+                ),
+              )}
             </tbody>
           </table>
         </div>
 
         <Hint>
-          The list of values you can point at is fixed, and that is what keeps the promise below:
-          a mapping cannot name a column, only one of these. Three boxes are deliberately absent —
-          the loan amount and the two saving figures — because their true readings are the settings
-          above, and a typed constant there would be a fabricated figure on every deal.
+          The list of values you can point at is fixed, and that is what keeps the promise below: a
+          mapping cannot name a column, only one of these. The rows with no box are deliberately
+          without one — the loan amount and the two saving figures because a typed constant there
+          would be a fabricated figure on every deal, the equipment names because the Equipment tab
+          maps them against this partner’s own approved-vendor list, and the rest because they are
+          already the settings above.
         </Hint>
         <Hint>
           Nothing else crosses the wire. No social security number, no date of birth and no consent
@@ -369,6 +382,43 @@ export function SubmissionMapping({
         </Hint>
       </Panel>
     </div>
+  );
+}
+
+/**
+ * A FIELD THE PARTNER RECEIVES THAT NOBODY MAY RE-POINT HERE.
+ *
+ * It looks like the rows around it on purpose, minus the control. The table
+ * used to leave these out altogether, which reads as "we do not send this" —
+ * the report that started this was an admin who could not find the panel brand
+ * and had no way to learn whether it went at all.
+ *
+ * The badge carries the distinction the row has to make in one glance: SET
+ * ABOVE means a panel on this same tab decides it, FIXED means another screen
+ * does. Both are answerable; neither is answerable here.
+ */
+function StatedRow({ field }: { field: StatedField }) {
+  return (
+    <tr className="align-top">
+      <td className="py-2 pr-4 font-mono text-xs">{field.field}</td>
+      <td className="py-2 pr-4">
+        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span
+            className={
+              field.setting
+                ? "shrink-0 rounded border border-solar/40 bg-solar/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground/80"
+                : "shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+            }
+          >
+            {field.setting ? "set above" : "fixed"}
+          </span>
+          <span>{field.fedFrom}</span>
+        </span>
+      </td>
+      <td className="py-2 text-muted-foreground">
+        <span className="text-xs">Changed on {field.changedOn}</span>
+      </td>
+    </tr>
   );
 }
 

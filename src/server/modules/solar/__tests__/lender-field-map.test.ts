@@ -5,11 +5,13 @@ import {
   mappingProblems,
   parseLiteral,
   suppliedByMapping,
+  STATED_FIELDS,
   WIRE_FIELDS,
+  wireInventory,
   type FieldMapContext,
   type FieldMapEntry,
 } from '../lender-field-map'
-import type { AmosApplicationPayload } from '../amos-payload'
+import { buildAmosPayload, type AmosApplicationPayload } from '../amos-payload'
 
 const CTX: FieldMapContext = {
   lead: {
@@ -268,5 +270,107 @@ describe('parseLiteral', () => {
 
   it('strips the thousands separators a person types', () => {
     expect(parseLiteral('14,200', 'number')).toBe(14200)
+  })
+})
+
+/**
+ * THE SCREEN MUST NAME EVERY FIELD THE WIRE CARRIES.
+ *
+ * The Submission tab listed only the mappable boxes and titled itself the
+ * application, so eleven fields — the panel and inverter brands, the loan
+ * amount, both savings, the seller, the delivery — were invisible on it. An
+ * admin reading that table could not tell "we don't send this" from "you can't
+ * change it here", which is the difference the whole tab exists to publish.
+ *
+ * Asserted against a payload BUILT BY `buildAmosPayload`, never a fixture, so
+ * adding a field to the body and forgetting the screen fails here.
+ */
+describe('wireInventory', () => {
+  const LEAD = {
+    firstName: 'Dana',
+    lastName: 'Reyes',
+    email: 'dana@example.com',
+    phone: '5125550143',
+    address: '4120 Sage Hollow Dr',
+    city: 'Austin',
+    state: 'TX',
+    zip: '78735',
+  }
+
+  // Every equipment kind present, so all three brand/model pairs reach the wire.
+  const DESIGN = {
+    id: 'design-abc',
+    systemSizeKwDc: 10.66,
+    moduleQty: 26,
+    batteryQty: 2,
+    module: { manufacturer: 'Qcells', model: 'Q.PEAK' },
+    inverter: { manufacturer: 'Enphase', model: 'IQ8PLUS', ratingW: 7600 },
+    battery: { manufacturer: 'Tesla', model: 'Powerwall 3' },
+  }
+
+  const OPTS = {
+    productSlug: 'solar-installation-financing',
+    externalId: 'design-abc-1',
+    amountCents: 15018000,
+    termMonths: 360,
+    salesRepName: 'Marco Diaz',
+    ownerOccupied: true,
+    system: {
+      annualProductionKwh: 14200,
+      annualConsumptionKwh: 15800,
+      retailRateMillsPerKwh: 233,
+      annualUtilityAvoidedCents: 361196,
+    },
+  }
+
+  /**
+   * Leaf paths of a payload, spelled the way the screen spells them.
+   *
+   * `equipment` is an array on the wire and three named rows on the screen, so
+   * each line is read back through its own `kind`. That `kind` is the line's
+   * label rather than a value anybody sets, and is the one leaf with no row.
+   */
+  function wirePaths(value: unknown, prefix = ''): string[] {
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => {
+        const kind = (item as { kind?: string }).kind ?? 'unknown'
+        return wirePaths(item, `${prefix}.${kind}`)
+      })
+    }
+    if (value && typeof value === 'object') {
+      return Object.entries(value).flatMap(([k, v]) =>
+        wirePaths(v, prefix ? `${prefix}.${k}` : k),
+      )
+    }
+    return [prefix]
+  }
+
+  it('names every field a real submission puts on the wire', () => {
+    const payload = buildAmosPayload(LEAD, DESIGN, OPTS)
+    const named = new Set(wireInventory().map((r) => r.field))
+
+    const unnamed = wirePaths(payload)
+      .filter((p) => !p.endsWith('.kind'))
+      .filter((p) => !named.has(p))
+
+    expect(unnamed).toEqual([])
+  })
+
+  it('lists every field exactly once, box or no box', () => {
+    const rows = wireInventory()
+    const seen = rows.map((r) => r.field)
+
+    expect(new Set(seen).size).toBe(seen.length)
+    for (const f of WIRE_FIELDS) expect(seen).toContain(f.field)
+    for (const f of STATED_FIELDS) expect(seen).toContain(f.field)
+    expect(rows).toHaveLength(WIRE_FIELDS.length + STATED_FIELDS.length)
+  })
+
+  it('gives a box to the mappable rows and none to the stated ones', () => {
+    for (const row of wireInventory()) {
+      // Exactly one side, so the table can never render a picker for a figure
+      // the settings above decide — nor drop a row for want of one.
+      expect(!!row.mapped).toBe(!row.stated)
+    }
   })
 })
