@@ -35,6 +35,12 @@ export type FinanceInput = {
   adderTotalCents?: number;
   /** The adders financed ON TOP of it — a roof on a flat-rate partner. */
   onTopAdderTotalCents?: number;
+  /**
+   * The storage on this job, at its catalogue price, already resolved by
+   * `batteryChargeCents`. Rides on top exactly as a roof does, so it is added
+   * to the contract below and kept out of the ceiling solve above it.
+   */
+  batteryPriceCents?: number;
   rateMillsPerKwh?: number | null;
   monthlyPaymentCents?: number | null;
   escalatorPct?: number | null;
@@ -180,6 +186,7 @@ export function financeRowForProduct(
       dealerFeePct,
       adderTotalCents: f.adderTotalCents ?? 0,
       onTopAdderTotalCents: f.onTopAdderTotalCents ?? 0,
+      batteryPriceCents: f.batteryPriceCents ?? 0,
     });
     contractPriceCents = breakdown.contractPriceCents;
   }

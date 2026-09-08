@@ -7,6 +7,7 @@ import {
   apportionCents,
   capStickerToFinalPpw,
   priceStoredPurchase,
+  batteryChargeCents,
   grossPpwFromNet,
   basePpwFromSticker,
   underBaseFloor,
@@ -1137,5 +1138,147 @@ describe("capping is safe to do twice, which is what lets generation re-cap", ()
     expect(pricePurchase({
       product: "loan", stickerPpwCents: fixed.stickerPpwCents, adderTotalCents: 0, ...AMOS,
     }).contractPriceCents).toBe(6_050_000); // 11 kW × $5.50/W
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The battery is a priced thing, not a spec line
+// ---------------------------------------------------------------------------
+describe("a battery is charged for, at what the catalogue sells one for", () => {
+  const TEN_KW = { systemSizeKwDc: 10, dealerFeePct: 18 };
+  const POWERWALL = 4_000_000; // $40,000
+
+  it("moves the contract by the battery's own price, exactly", () => {
+    // The defect this exists for: a $40,000 Powerwall attached to a 10 kW
+    // system, and a contract value that did not move a cent. A rate per watt
+    // is a price for an array, and no arithmetic over installed watts can
+    // charge for storage.
+    const without = pricePurchase({
+      ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 0,
+    });
+    const with_ = pricePurchase({
+      ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 0,
+      batteryPriceCents: POWERWALL,
+    });
+    expect(with_.contractPriceCents - without.contractPriceCents).toBe(POWERWALL);
+    expect(with_.batteryPriceCents).toBe(POWERWALL);
+  });
+
+  it("passes the whole battery price through to the company, taking no fee on it", () => {
+    // At face on both sides of the fee: the customer pays the catalogue price
+    // and the company keeps it. Grossing it up on a 65% programme would put
+    // $114,285 on the contract for a $40,000 battery.
+    const p = pricePurchase({
+      product: "loan", systemSizeKwDc: 10, stickerPpwCents: 550, dealerFeePct: 65,
+      adderTotalCents: 0, batteryPriceCents: POWERWALL,
+    });
+    expect(p.contractPriceCents).toBe(5_500_000 + POWERWALL);
+    expect(p.dealerFeeCents).toBe(0.65 * 5_500_000); // nothing on the battery
+    expect(p.grossPriceCents).toBe(0.35 * 5_500_000 + POWERWALL);
+  });
+
+  it("keeps the battery out of the base, so it pays no rep overage", () => {
+    // Priced from the catalogue to cover its own cost, exactly like an adder.
+    // A redline measured on a base carrying $40,000 of hardware would pay the
+    // rep for the manufacturer's margin.
+    const p = pricePurchase({
+      ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 0,
+      batteryPriceCents: POWERWALL,
+    });
+    expect(p.basePriceCents).toBe(2_870_000);
+    expect(p.basePpwCents).toBeCloseTo(287, 0);
+  });
+
+  it("rides ABOVE a flat partner's rate, like a roof does", () => {
+    // Amos sells at a flat $5.50/W. The battery is not part of what that rate
+    // is a price FOR, so it is excluded from the ceiling solve and added after.
+    const cap = capStickerToFinalPpw({
+      stickerPpwCents: 857, maxFinalPpwCents: 550, mode: "flat",
+      systemSizeKwDc: 10, dealerFeePct: 65, adderTotalCents: 0,
+    });
+    const priced = pricePurchase({
+      product: "loan", systemSizeKwDc: 10, stickerPpwCents: cap.stickerPpwCents,
+      dealerFeePct: 65, adderTotalCents: 0, batteryPriceCents: POWERWALL,
+    });
+    expect(priced.baseStickerCents).toBe(5_500_000);
+    expect(priced.contractPriceCents).toBe(5_500_000 + POWERWALL);
+  });
+
+  it("keeps the customer's own breakdown adding up to its total", () => {
+    // The lines a homeowner reads with a calculator: system, plus work, plus
+    // battery, less any rebate, equals the number they sign.
+    for (const battery of [0, 1, 99, POWERWALL, 9_999_999]) {
+      const p = pricePurchase({
+        product: "loan", systemSizeKwDc: 11.3, stickerPpwCents: 550, dealerFeePct: 65,
+        adderTotalCents: 233_333, onTopAdderTotalCents: 700_000,
+        batteryPriceCents: battery, rebateTotalCents: 50_000,
+      });
+      expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
+      expect(
+        p.baseStickerCents + p.adderStickerCents + p.batteryPriceCents - p.rebateStickerCents
+      ).toBe(p.contractPriceCents);
+      expect(p.batteryPriceCents).toBe(battery);
+    }
+  });
+
+  it("prices every deal that has no battery exactly as it did before", () => {
+    const before = pricePurchase({
+      ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 145_000,
+    });
+    const after = pricePurchase({
+      ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 145_000,
+      batteryPriceCents: 0,
+    });
+    expect(after).toEqual(before);
+  });
+});
+
+describe("batteryChargeCents decides which price, times how many", () => {
+  it("uses the catalogue when the deal has not been priced", () => {
+    expect(
+      batteryChargeCents({
+        systemType: "pv_storage", batteryQty: 2,
+        dealPerBatteryCents: 0, cataloguePerBatteryCents: 4_000_000,
+      })
+    ).toBe(8_000_000);
+  });
+
+  it("lets the deal's own price win, so a catalogue edit cannot move a quote", () => {
+    expect(
+      batteryChargeCents({
+        systemType: "pv_storage", batteryQty: 1,
+        dealPerBatteryCents: 3_500_000, cataloguePerBatteryCents: 4_000_000,
+      })
+    ).toBe(3_500_000);
+  });
+
+  it("charges nothing on a storage-only deal, where the battery IS the system", () => {
+    // Billing it here as well would put one Powerwall on the contract twice.
+    expect(
+      batteryChargeCents({
+        systemType: "storage", batteryQty: 2,
+        dealPerBatteryCents: 0, cataloguePerBatteryCents: 4_000_000,
+      })
+    ).toBe(0);
+  });
+
+  it("charges nothing when there is no battery, whatever the catalogue says", () => {
+    for (const qty of [0, null, undefined]) {
+      expect(
+        batteryChargeCents({
+          systemType: "pv", batteryQty: qty,
+          dealPerBatteryCents: 0, cataloguePerBatteryCents: 4_000_000,
+        })
+      ).toBe(0);
+    }
+  });
+
+  it("survives a catalogue row with no price on it", () => {
+    expect(
+      batteryChargeCents({
+        systemType: "pv_storage", batteryQty: 3,
+        dealPerBatteryCents: null, cataloguePerBatteryCents: null,
+      })
+    ).toBe(0);
   });
 });

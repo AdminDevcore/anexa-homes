@@ -746,6 +746,18 @@ export type SnapshotFinancing = {
      */
     showcase?: boolean;
   }[];
+  /**
+   * THE BATTERY AS A PRICE, frozen with the rest of them.
+   *
+   * Its own row rather than folded into `adderTotalCents`, because a household
+   * looking at a $40,000 line is entitled to be told it is the battery. Absent
+   * on every document generated before storage was charged for, which reads as
+   * none — exactly what those documents were priced with.
+   */
+  batteryPriceCents?: number;
+  /** What that money buys, named the way the System chapter names it. */
+  batteryLabel?: string;
+  batteryQty?: number;
   finalPpwCents: number | null;
   /** Lease/PPA only. */
   monthlyPaymentCents: number | null;
@@ -1315,8 +1327,14 @@ export type SolarProposalSnapshot = {
  *     worked out from the partner's contract; the federal credits and the
  *     derived signing incentive bring it back to the quoted price on a page of
  *     their own. A revision-2 document quoted the obligation from page one.
+ * 4 — the BATTERY became a priced line. Storage on a deal with an array had
+ *     never reached a contract: the price was a rate per watt, a Powerwall has
+ *     no watts of its own, and the catalogue figure beside it in Settings was
+ *     read by nothing. From here it rides on top at its catalogue price, like a
+ *     roof does. Every document at revision 3 or below was quoted with the
+ *     storage given away.
  */
-export const PRICING_CALCULATION_VERSION = 3;
+export const PRICING_CALCULATION_VERSION = 4;
 
 /** The standing non-binding-estimate wording. Shown on every proposal. */
 export const ESTIMATE_DISCLAIMER =
@@ -1343,6 +1361,18 @@ export type ProposalFinanceInput = {
    * document said $0, because only the deal screen knew the unit was a battery.
    */
   stickerPricePerBatteryCents?: number;
+  /**
+   * WHAT THE BATTERIES ADD TO THIS PRICE — the catalogue figure times the count
+   * on the roof, resolved by `batteryChargeCents` before it gets here.
+   *
+   * Carried on the finance input rather than read off the design, because it is
+   * a PRICE and every option in the menu is priced separately: the battery is on
+   * the roof whichever way the household pays, so cash, loan and every
+   * alternative charge for it, each on its own terms.
+   *
+   * Zero on a storage-ONLY deal, where the battery is the system above.
+   */
+  batteryPriceCents?: number;
   dealerFeePct: number;
   /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
@@ -1416,6 +1446,8 @@ function priceOption(args: {
     annualUsageKwh: number;
     /** How many batteries. The UNIT a storage deal is priced by. */
     batteryQty: number;
+    /** What they are, for the priced line on the customer's cost sheet. */
+    batteryLabel?: string | null;
   };
   /**
    * What this deal sells, and therefore which ladder prices it. Solar counts
@@ -1499,6 +1531,7 @@ function priceOption(args: {
           dealerFeePct: finance.dealerFeePct,
           adderTotalCents: finance.adderTotalCents,
           onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
+          batteryPriceCents: finance.batteryPriceCents ?? 0,
         });
 
   const thirdParty = !isPurchase
@@ -1911,6 +1944,24 @@ function priceOption(args: {
           };
         })()
       : {}),
+    /**
+     * THE BATTERY, PRICED AND NAMED.
+     *
+     * Only where it costs something, and only spread in — the snapshot is
+     * asserted to hold no undefined anywhere, and a key that is not there is
+     * the honest way to say "this document charged for no storage".
+     *
+     * Frozen with its LABEL and its COUNT beside the money, like every other
+     * line here: swapping the catalogue's default battery next month must not
+     * rewrite what this household was quoted, or what for.
+     */
+    ...(purchase && purchase.batteryPriceCents > 0
+      ? {
+          batteryPriceCents: purchase.batteryPriceCents,
+          batteryQty: design.batteryQty,
+          ...(design.batteryLabel ? { batteryLabel: design.batteryLabel } : {}),
+        }
+      : {}),
     // DERIVED FROM THE PRINTED TOTAL, not carried over from the ladder.
     // "$5.50/W · $125,000" is two figures that do not divide into each other,
     // which is the single failure this file has been bitten by most often —
@@ -2092,6 +2143,16 @@ export function buildProposalSnapshot(args: {
     moduleQty: number;
     inverterLabel: string | null;
     batteryLabel: string | null;
+    /**
+     * How many batteries are on the job.
+     *
+     * On the DESIGN because that is whose fact it is. The storage block also
+     * carries the count, but it is built only for storage-ONLY documents, and
+     * a battery is charged for — and named — on a deal with an array as well.
+     * Optional so that every caller written before storage was priced still
+     * compiles: those fall back to the storage block, exactly as before.
+     */
+    batteryQty?: number;
     mountType: string;
     utilityProvider: string | null;
     avgMonthlyBillCents: number | null;
@@ -2194,10 +2255,18 @@ export function buildProposalSnapshot(args: {
       systemSizeKwDc: design.systemSizeKwDc,
       year1ProductionKwh: design.year1ProductionKwh,
       annualUsageKwh: design.annualUsageKwh,
-      // Read off the storage block rather than taken as a second argument: it
-      // is the same count the backup table was built from, and two ways to say
-      // how many batteries are on this job is one way for them to disagree.
-      batteryQty: args.storage?.batteryQty ?? 0,
+      // The DESIGN's count, falling back to the storage block for a caller that
+      // fills only that. It was read off the storage block alone, on the sound
+      // reasoning that it is the same count the backup table was built from —
+      // but that block exists only on a storage-ONLY document, and a battery
+      // beside an array is charged for and named on the cost sheet, so the
+      // count has to survive on a deal that has no such block.
+      batteryQty: design.batteryQty ?? args.storage?.batteryQty ?? 0,
+      // From the DESIGN, not from the storage block: that block is built only
+      // for storage-ONLY deals, and the line this names is charged on a deal
+      // that has an array as well. Same string either way — both are
+      // `solarEquipmentLabel` over the same catalogue row.
+      batteryLabel: design.batteryLabel,
     },
     systemType,
     // Likewise the rebates: the lines the customer reads on the cost chapter

@@ -451,9 +451,14 @@ function SolarPvProposalView({
    * does not move at all.
    */
   const priceMoved = quotedTotal != null && quotedTotal !== quotedTotalCents(f);
+  // The battery comes off the total alongside the adders wherever the system
+  // price is derived rather than read: it is a line of its own on the sheet, so
+  // leaving it inside the system price would print it twice and leave the rows
+  // above the total adding up to more than the total.
+  const pricedSeparatelyCents = (f.adderTotalCents ?? 0) + (f.batteryPriceCents ?? 0);
   const systemPriceCents = priceMoved
-    ? quotedTotal - (f.adderTotalCents ?? 0)
-    : (f.basePriceCents ?? (quotedTotal != null ? quotedTotal - (f.adderTotalCents ?? 0) : null));
+    ? quotedTotal - pricedSeparatelyCents
+    : (f.basePriceCents ?? (quotedTotal != null ? quotedTotal - pricedSeparatelyCents : null));
   const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
 

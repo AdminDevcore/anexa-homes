@@ -60,7 +60,7 @@ import {
   SolarActivityFeed,
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
-import { priceStoredPurchase } from "@/lib/solar-money";
+import { priceStoredPurchase, batteryChargeCents } from "@/lib/solar-money";
 import { leadStageTimeline } from "@/server/modules/pipeline/stage-history-queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
@@ -380,7 +380,9 @@ export default async function LeadDetailPage({
               },
             },
             inverter: { select: { manufacturer: true, model: true } },
-            battery: { select: { manufacturer: true, model: true } },
+            // `priceCents` because the storage is money on this contract, not
+            // only a name on the System slide — see `batteryChargeCents`.
+            battery: { select: { manufacturer: true, model: true, priceCents: true } },
           },
         }),
         prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
@@ -579,6 +581,15 @@ export default async function LeadDetailPage({
           dealerFeePct: solarFinance.dealerFeePct,
           adderTotalCents: solarFinance.adderTotalCents,
           onTopAdderTotalCents: solarFinance.onTopAdderTotalCents,
+          // The storage rides on top of the rate, so it is on this ladder too.
+          // Left out, this card would quote a deal $40,000 under the proposal
+          // the household is holding.
+          batteryPriceCents: batteryChargeCents({
+            systemType: solarDesign.systemType,
+            batteryQty: solarDesign.batteryQty,
+            dealPerBatteryCents: solarFinance.stickerPricePerBatteryCents,
+            cataloguePerBatteryCents: solarDesign.battery?.priceCents ?? null,
+          }),
           maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
           finalPpwMode: designLenderRow?.finalPpwMode,
         })

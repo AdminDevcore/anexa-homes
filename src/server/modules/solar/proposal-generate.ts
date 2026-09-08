@@ -21,6 +21,7 @@ import {
   capStickerToFinalUnit,
   pricePurchase,
   priceStoragePurchase,
+  batteryChargeCents,
 } from "@/lib/solar-money";
 import { contractReconciles, monthlyReconciles } from "@/lib/solar-contract-adjustment";
 import { ladderReconciles } from "@/lib/solar-credit-ladder";
@@ -241,7 +242,10 @@ export async function generateProposalVersion(
           },
         },
         inverter: { select: { id: true, manufacturer: true, model: true, ratingW: true, specSheetUrl: true, photoKey: true, photoUpdatedAt: true } },
-        battery: { select: { id: true, manufacturer: true, model: true, ratingW: true, specSheetUrl: true, photoKey: true, photoUpdatedAt: true } },
+        // `priceCents` is what the catalogue sells one battery for, and it is
+        // read here because it is a PRICE on this contract — see
+        // `batteryChargeCents`. Every other field on this select is description.
+        battery: { select: { id: true, manufacturer: true, model: true, ratingW: true, priceCents: true, specSheetUrl: true, photoKey: true, photoUpdatedAt: true } },
       },
     }),
     prisma.solarFinance.findUnique({ where: { leadId } }),
@@ -386,6 +390,24 @@ export async function generateProposalVersion(
   const isStorage = design.systemType === "storage";
 
   /**
+   * WHAT THE STORAGE ADDS TO THIS CONTRACT.
+   *
+   * Resolved ONCE here and handed to every price below — the capped re-price,
+   * the alternatives menu and the frozen snapshot — because they are three
+   * routes to the same document and a battery counted on two of them is a
+   * document that does not add up.
+   *
+   * Zero on a storage-only deal: there the battery is the system and the
+   * per-battery ladder below already charges for it.
+   */
+  const batteryPriceCents = batteryChargeCents({
+    systemType: design.systemType,
+    batteryQty: design.batteryQty,
+    dealPerBatteryCents: finance.stickerPricePerBatteryCents,
+    cataloguePerBatteryCents: design.battery?.priceCents ?? null,
+  });
+
+  /**
    * Somebody else's money, off this contract. Read once, because it is priced
    * into the contract AND printed as its own line on the customer's document —
    * two readings of the same rows is two chances for them to disagree.
@@ -402,23 +424,47 @@ export async function generateProposalVersion(
     // rides above it and is added back by `pricePurchase` below.
     adderTotalCents: finance.adderTotalCents,
   });
-  if (capped.capped) {
-    finance.grossPpwCents = capped.stickerPpwCents;
-    finance.contractPriceCents = pricePurchase({
-      product: "loan",
+  /**
+   * PRICED UNCONDITIONALLY, WRITTEN BACK WHEN SOMETHING MOVED.
+   *
+   * This used to run only when the ceiling bit — a cap that lowered the sticker
+   * was the only way the stored contract could be out of date. It is not, and
+   * the storage is the case that proved it: a battery is charged for on top of
+   * the rate, so a deal whose $/W never moved an inch can still owe $40,000
+   * more than the row says. Under a FLAT partner the sticker is already at the
+   * published figure, `capped` is false, and the write-back never ran — leaving
+   * the deal screen quoting $55,000 beside a document quoting $95,000.
+   *
+   * So the contract is re-priced every time and the row is corrected whenever
+   * either figure has actually changed. An unconditional write would touch
+   * every row on every generation for nothing.
+   */
+  if (!isStorage && (finance.product === "cash" || finance.product === "loan")) {
+    const stickerPpwCents = capped.capped ? capped.stickerPpwCents : finance.grossPpwCents;
+    const contractPriceCents = pricePurchase({
+      product: finance.product,
       systemSizeKwDc: design.systemSizeKwDc,
-      stickerPpwCents: capped.stickerPpwCents,
+      stickerPpwCents,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      batteryPriceCents,
     }).contractPriceCents;
-    await prisma.solarFinance.update({
-      where: { leadId },
-      data: {
-        grossPpwCents: finance.grossPpwCents,
-        contractPriceCents: finance.contractPriceCents,
-      },
-    });
+
+    if (
+      stickerPpwCents !== finance.grossPpwCents ||
+      contractPriceCents !== finance.contractPriceCents
+    ) {
+      finance.grossPpwCents = stickerPpwCents;
+      finance.contractPriceCents = contractPriceCents;
+      await prisma.solarFinance.update({
+        where: { leadId },
+        data: {
+          grossPpwCents: finance.grossPpwCents,
+          contractPriceCents: finance.contractPriceCents,
+        },
+      });
+    }
   }
 
   /**
@@ -720,6 +766,7 @@ export async function generateProposalVersion(
     })),
     adderTotalCents: finance.adderTotalCents,
     onTopAdderTotalCents: finance.onTopAdderTotalCents,
+    batteryPriceCents,
     assumptions,
     targetNetPpwCents: assumptions.targetNetPpwCents,
   });
@@ -807,6 +854,7 @@ export async function generateProposalVersion(
       moduleQty: design.moduleQty,
       inverterLabel: label(design.inverter),
       batteryLabel: label(design.battery),
+      batteryQty: design.batteryQty,
       mountType: design.mountType,
       utilityProvider: design.utilityProvider,
       avgMonthlyBillCents: design.avgMonthlyBillCents,
@@ -834,6 +882,7 @@ export async function generateProposalVersion(
       // The unit a storage deal is actually priced by. Without it the document
       // prices the whole system at zero installed watts — see the field's note.
       stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+      batteryPriceCents,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,

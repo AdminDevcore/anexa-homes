@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { Db } from "@/server/db/types";
-import { priceStoredPurchase, priceStorageStored } from "@/lib/solar-money";
+import { priceStoredPurchase, priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
 import {
   resolveSolarPay,
   solarRepPayCents,
@@ -50,6 +50,9 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
         systemSizeKwDc: true,
         systemType: true,
         batteryQty: true,
+        // The catalogue price of the storage, because it is on the contract an
+        // override is a percentage OF. See `batteryChargeCents`.
+        battery: { select: { priceCents: true } },
         lender: {
           select: {
             repPayMode: true,
@@ -116,6 +119,17 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
           dealerFeePct: finance.dealerFeePct,
           adderTotalCents: finance.adderTotalCents,
           onTopAdderTotalCents: finance.onTopAdderTotalCents,
+          // ON THE CONTRACT, OUT OF THE BASE. A manager's override is a
+          // percentage of what the household signs, and they signed for the
+          // battery; a rep's redline is measured on `basePriceCents`, which the
+          // battery deliberately stays out of — it is priced from the catalogue
+          // to cover its own cost, exactly like an adder.
+          batteryPriceCents: batteryChargeCents({
+            systemType: design.systemType,
+            batteryQty: design.batteryQty,
+            dealPerBatteryCents: finance.stickerPricePerBatteryCents,
+            cataloguePerBatteryCents: design.battery?.priceCents ?? null,
+          }),
           maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
           finalPpwMode: design.lender?.finalPpwMode,
         }).breakdown

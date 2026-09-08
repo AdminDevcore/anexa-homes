@@ -318,6 +318,15 @@ export function SolarProposalBuilder({
               finance={finance}
               systemType={systemType}
               batteryQty={storage.batteryQty}
+              /* What the storage on this job costs, and what it is. Resolved
+                 from the same list the Storage step picks from, so switching
+                 the battery there moves the price here. */
+              batteryLabel={
+                storage.batteries.find((b) => b.id === storage.batteryId)?.label ?? null
+              }
+              batteryUnitPriceCents={
+                storage.batteries.find((b) => b.id === storage.batteryId)?.priceCents ?? 0
+              }
               rebateCatalogue={rebateCatalogue}
               dealRebates={dealRebates}
               canEdit={canEditDeal}

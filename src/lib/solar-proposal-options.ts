@@ -129,6 +129,17 @@ export type AlternativesInput = {
   approvedLenderIds: string[] | null;
   design: { systemSizeKwDc: number };
   /**
+   * WHAT THE STORAGE ON THIS JOB ADDS, already resolved — see
+   * `batteryChargeCents`.
+   *
+   * Carried onto EVERY alternative, not just the quoted option: the battery is
+   * on the roof whichever way the household pays, and a menu that charged for
+   * it on the loan and not in the cash column would be comparing two different
+   * houses. Zero on a storage-only deal, where the battery is the unit the
+   * whole menu is already priced by.
+   */
+  batteryPriceCents?: number;
+  /**
    * What the deal sells, and therefore what the menu is priced by the unit of.
    * Absent means `pv`, which is what every caller written before storage is.
    */
@@ -224,6 +235,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         adders: input.adders,
         adderTotalCents: input.adderTotalCents,
         onTopAdderTotalCents: input.onTopAdderTotalCents,
+        batteryPriceCents: input.batteryPriceCents ?? 0,
       }),
     });
   }
@@ -358,6 +370,12 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         dealerFeePct: row.dealerFeePct,
         adderTotalCents: row.adderTotalCents,
         onTopAdderTotalCents: row.onTopAdderTotalCents,
+        // At the same price on every programme. The battery does not get more
+        // expensive because the money is dearer — it rides on top of whatever
+        // the partner's paper says, at what the catalogue sells one for.
+        ...(input.batteryPriceCents && input.batteryPriceCents > 0
+          ? { batteryPriceCents: input.batteryPriceCents }
+          : {}),
         ...(row.adderTotalCents + row.onTopAdderTotalCents > 0
           ? { adders: input.adders }
           : {}),
@@ -414,10 +432,13 @@ function purchaseFinance(a: {
   adders: { label: string; amountCents: number; financedOnTop?: boolean }[];
   adderTotalCents: number;
   onTopAdderTotalCents: number;
+  /** The storage on the job, at its catalogue price. Zero where there is none. */
+  batteryPriceCents: number;
 }): ProposalFinanceInput {
   return {
     product: a.product,
     grossPpwCents: a.grossPpwCents,
+    ...(a.batteryPriceCents > 0 ? { batteryPriceCents: a.batteryPriceCents } : {}),
     ...(a.stickerPricePerBatteryCents == null
       ? {}
       : { stickerPricePerBatteryCents: a.stickerPricePerBatteryCents }),

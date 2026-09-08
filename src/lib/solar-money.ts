@@ -238,6 +238,31 @@ export type PurchaseInput = {
    */
   onTopAdderTotalCents?: number;
   /**
+   * THE BATTERY, at what the catalogue sells one for, times how many are on
+   * the roof. Zero on a deal without storage, and on a storage-ONLY deal —
+   * there the battery IS the system and climbs the ladder as the unit being
+   * counted, which is `priceStoragePurchase`. See `batteryChargeCents`.
+   *
+   * A per-watt rate is a price for an ARRAY. A Powerwall is not cheaper because
+   * the roof next to it is small, and nothing in `$/W × watts` can charge for
+   * one — so a rep who attached a $40,000 battery to a 10 kW system watched the
+   * contract value not move, and the company gave the battery away on every
+   * such deal.
+   *
+   * It rides ON TOP, exactly as a roof does on a flat-rate partner: at face
+   * value, not grossed up, and outside the ceiling in `capStickerToFinalPpw`.
+   * The reasoning is the same one written out at `pricePurchase` — the
+   * catalogue figure is what the customer pays for the hardware, so a fee taken
+   * out of it would leave the company holding less than the battery cost. At a
+   * 65% programme, grossing it up instead would put $114,285 on the contract
+   * for a $40,000 battery, which is not a price anybody would sign.
+   *
+   * OUT OF `basePriceCents`, therefore out of the rep's redline: the battery is
+   * priced from the catalogue to cover its own cost, exactly like an adder, and
+   * paying overage on it would pay a rep for the manufacturer's margin.
+   */
+  batteryPriceCents?: number;
+  /**
    * The manufacturer's or utility's money on this deal, at its face value,
    * before any dealer fee.
    *
@@ -267,7 +292,14 @@ export type PurchaseBreakdown = {
   /** Of that, the part financed on top of the partner's price. */
   onTopAdderTotalCents: number;
 
-  /** GROSS — base + adders, still before the cut. What the company keeps. */
+  /**
+   * THE BATTERY at its catalogue price. On top, at face, both sides of the fee
+   * — so it appears here unchanged and adds itself to gross and to the
+   * contract alike. Zero on every deal without one.
+   */
+  batteryPriceCents: number;
+
+  /** GROSS — base + adders + battery, still before the cut. What we keep. */
   grossPriceCents: number;
   /** Gross per installed watt. */
   grossPpwCents: number;
@@ -288,8 +320,11 @@ export type PurchaseBreakdown = {
    * What the customer pays for the extra work: the ordinary adders grossed up
    * by the fee, PLUS the on-top ones at their own price. "Additional work".
    *
-   * `baseStickerCents + adderStickerCents === contractPriceCents` always, which
-   * is the invariant the customer's own breakdown is printed from.
+   * `baseStickerCents + adderStickerCents + batteryPriceCents === contractPriceCents`
+   * always, which is the invariant the customer's own breakdown is printed
+   * from. The battery is in that sum at its own price for the same reason an
+   * on-top adder is: it is a line the household pays, and a breakdown missing
+   * one is a breakdown that does not reach its own total.
    */
   adderStickerCents: number;
 
@@ -301,7 +336,8 @@ export type PurchaseBreakdown = {
    *
    * Subtracting it at face from a grossed-up total leaves a breakdown short of
    * its own bottom line, in front of a homeowner with a calculator. The
-   * invariant is `baseSticker + adderSticker − rebateSticker === contract`, and
+   * invariant is
+   * `baseSticker + adderSticker + battery − rebateSticker === contract`, and
    * that is the line they add up.
    */
   rebateStickerCents: number;
@@ -337,6 +373,8 @@ export type UnitPriceInput = {
   dealerFeePct: number;
   adderTotalCents: number;
   onTopAdderTotalCents?: number;
+  /** See `PurchaseInput.batteryPriceCents`. */
+  batteryPriceCents?: number;
   /** See `PurchaseInput.rebateTotalCents`. */
   rebateTotalCents?: number;
   equipmentCostCents?: number;
@@ -348,6 +386,7 @@ export type UnitPriceBreakdown = {
   basePerUnitCents: number;
   adderTotalCents: number;
   onTopAdderTotalCents: number;
+  batteryPriceCents: number;
   rebateTotalCents: number;
   grossPriceCents: number;
   grossPerUnitCents: number;
@@ -365,6 +404,7 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   const insideAdderCents = Math.round(input.adderTotalCents);
   const onTopAdderTotalCents = Math.round(input.onTopAdderTotalCents ?? 0);
   const adderTotalCents = insideAdderCents + onTopAdderTotalCents;
+  const batteryPriceCents = Math.max(0, Math.round(input.batteryPriceCents ?? 0));
   const rebateTotalCents = Math.max(0, Math.round(input.rebateTotalCents ?? 0));
 
   // A fee at or above 100% has no honest gross-up — it divides by zero or goes
@@ -387,8 +427,14 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   // sum to the number at the bottom of their agreement.
   const rebateStickerCents = up(rebateTotalCents);
 
-  const contractPriceCents = baseStickerCents + adderStickerCents - rebateStickerCents;
-  const grossPriceCents = basePriceCents + adderTotalCents - rebateTotalCents;
+  // The battery is added to BOTH sides at its own price — the customer pays the
+  // catalogue figure and the company keeps all of it — so the fee below, which
+  // is the difference between them, is untouched by it. That is the whole
+  // meaning of "on top".
+  const contractPriceCents =
+    baseStickerCents + adderStickerCents + batteryPriceCents - rebateStickerCents;
+  const grossPriceCents =
+    basePriceCents + adderTotalCents + batteryPriceCents - rebateTotalCents;
 
   // Subtracted rather than recomputed as `contract × f`: gross + fee has to
   // equal final EXACTLY, because a customer reads those three lines and adds
@@ -405,6 +451,7 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
     basePerUnitCents: per(basePriceCents),
     adderTotalCents,
     onTopAdderTotalCents,
+    batteryPriceCents,
     rebateTotalCents,
     grossPriceCents,
     grossPerUnitCents: per(grossPriceCents),
@@ -426,6 +473,7 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
  *
  *     BASE      what the rep prices the system at, before any lender's cut
  *   + ADDERS    the extra work, at its catalogue price, likewise before the cut
+ *   + BATTERY   the storage on the job, at what the catalogue sells one for
  *   = GROSS     what the company keeps
  *   + FEE       the lender's cut
  *   = FINAL     what the customer signs
@@ -451,6 +499,11 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
  * `capStickerToFinalPpw` — is not measured against the partner's ceiling at
  * all. It is a pass-through: the customer borrows it, the company keeps it.
  *
+ * A BATTERY IS PRICED THE SAME WAY, and for a plainer reason: a rate per watt
+ * is a price for an array, and no arithmetic over installed watts can charge
+ * for a Powerwall. It rides on top at its catalogue price on every deal that is
+ * not storage-only — see `batteryPriceCents`.
+ *
  * Cash has no lender and therefore no fee; passing one is rejected rather than
  * silently applied, because a cash deal quoted with a dealer fee is simply
  * overpriced. Cash prices an on-top adder identically to an ordinary one, there
@@ -467,6 +520,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     dealerFeePct: input.dealerFeePct,
     adderTotalCents: input.adderTotalCents,
     onTopAdderTotalCents: input.onTopAdderTotalCents,
+    batteryPriceCents: input.batteryPriceCents,
     rebateTotalCents: input.rebateTotalCents,
     equipmentCostCents: input.equipmentCostCents,
   });
@@ -476,6 +530,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     basePpwCents: u.basePerUnitCents,
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
+    batteryPriceCents: u.batteryPriceCents,
     rebateTotalCents: u.rebateTotalCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: u.grossPerUnitCents,
@@ -873,6 +928,58 @@ export function priceStoredPurchase(input: PurchaseInput & {
 // them.
 // ---------------------------------------------------------------------------
 
+/**
+ * WHAT THE BATTERIES ON THIS DEAL ADD TO THE CONTRACT.
+ *
+ * One function because it is asked in nine places — the builder as a rep types,
+ * the price card, the lender comparison shelf, the finance save, generation,
+ * the frozen snapshot, the deal page, payroll — and nine copies of "which price,
+ * times how many, and does this deal charge for it at all" is nine chances for
+ * two screens to quote one house differently.
+ *
+ * WHICH PRICE. The deal's own figure wins where it has one, because a rep may
+ * type over it and a quote already given must not move when somebody edits the
+ * catalogue next week. Zero on the deal means nobody has priced it, which is
+ * exactly when the catalogue is the honest answer — the same rule the adders
+ * follow, and the reason `SolarEquipment.priceCents` on a battery had never
+ * reached a single contract until this existed.
+ *
+ * STORAGE-ONLY DEALS CHARGE NOTHING HERE, and that is not an omission: there
+ * the battery IS the system, `priceStoragePurchase` counts it as the unit, and
+ * adding it again on top would bill one Powerwall twice.
+ */
+export function batteryChargeCents(input: {
+  /** The deal's shape. Only `storage` is excluded. */
+  systemType: "pv" | "pv_storage" | "storage" | null | undefined;
+  batteryQty: number | null | undefined;
+  /** The deal's own price for ONE battery. Zero or null means unpriced. */
+  dealPerBatteryCents: number | null | undefined;
+  /** The catalogue's price for one, used when the deal has none. */
+  cataloguePerBatteryCents: number | null | undefined;
+}): number {
+  if (input.systemType === "storage") return 0;
+  const qty = Math.max(0, Math.round(input.batteryQty ?? 0));
+  if (qty <= 0) return 0;
+  return qty * perBatteryPriceCents(input);
+}
+
+/**
+ * The price of ONE battery on this deal: what was typed, else the catalogue.
+ *
+ * Split out from the total above because the two screens that let a rep change
+ * it — the price card and the storage step — show the per-battery figure, and
+ * they have to seed their box from the same rule the contract is priced with or
+ * the box reads $0 beside a contract carrying $40,000.
+ */
+export function perBatteryPriceCents(input: {
+  dealPerBatteryCents: number | null | undefined;
+  cataloguePerBatteryCents: number | null | undefined;
+}): number {
+  const own = Math.round(input.dealPerBatteryCents ?? 0);
+  if (own > 0) return own;
+  return Math.max(0, Math.round(input.cataloguePerBatteryCents ?? 0));
+}
+
 export type StoragePriceInput = {
   product: "cash" | "loan";
   batteryQty: number;
@@ -962,6 +1069,10 @@ export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
     basePpwCents: 0,
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
+    // Always zero out of `priceStoragePurchase`: on a storage-only deal the
+    // battery is the SYSTEM, counted in `basePriceCents`, and charging for it
+    // again on top would bill the household twice for one Powerwall.
+    batteryPriceCents: u.batteryPriceCents,
     rebateTotalCents: u.rebateTotalCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: 0,

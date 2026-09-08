@@ -323,7 +323,7 @@ describe("what the snapshot freezes", () => {
   it("records the version of the shape and of the arithmetic", () => {
     const s = build({ contractAdjustment: PARTICIPATE });
     expect(s.schemaVersion).toBe(8);
-    expect(s.calculationVersion).toBe(3);
+    expect(s.calculationVersion).toBe(4);
   });
 
   it("keeps the disclosure with its figures already in it", () => {

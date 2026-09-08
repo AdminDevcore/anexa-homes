@@ -285,6 +285,27 @@ export function ChapterCost({ doc }: { doc: Doc }) {
             <DarkRow k="Additional work" v={usd(f.adderTotalCents)} />
           ))}
 
+        {/*
+          THE BATTERY, on its own row.
+
+          Not folded into "Additional work": a household looking at $40,000 is
+          entitled to be told it is the battery, and the System chapter has
+          already named the same hardware two pages earlier. Only on documents
+          that charged for one — absent, not zero, on every other.
+        */}
+        {isPurchase && f.batteryPriceCents != null && f.batteryPriceCents > 0 && (
+          <DarkRow
+            k={
+              f.batteryLabel
+                ? f.batteryQty && f.batteryQty > 1
+                  ? `${f.batteryLabel} × ${f.batteryQty}`
+                  : f.batteryLabel
+                : "Battery storage"
+            }
+            v={usd(f.batteryPriceCents)}
+          />
+        )}
+
         {/* THE TOTAL — the household's own, and only where it says something
             the system-price row does not. See `showTotal`. It was labelled
             "Total contract price" and carried the contract's own figure until

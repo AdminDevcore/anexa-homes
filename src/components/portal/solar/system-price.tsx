@@ -49,6 +49,9 @@ export function SystemPriceCard({
   defaultPpwCents,
   adderTotalCents,
   onTopAdderTotalCents = 0,
+  batteryPriceCents = 0,
+  batteryLabel = null,
+  batteryQty = 0,
   quotedFeePct,
   quotedMaxFinalPpwCents,
   quotedFinalPpwMode,
@@ -78,6 +81,19 @@ export function SystemPriceCard({
    * says so, and one that does not has none.
    */
   onTopAdderTotalCents?: number;
+  /**
+   * WHAT THE STORAGE ON THIS JOB ADDS, at its catalogue price.
+   *
+   * A rung of its own rather than a share of the adders, because it answers a
+   * question a rep is asked out loud — "what am I charging them for the
+   * battery?" — and because it is priced by a different rule: a rate per watt
+   * is a price for an array, so the battery rides on top of it exactly as a
+   * roof does on a flat-rate partner. Zero on a deal without one.
+   */
+  batteryPriceCents?: number;
+  /** What it is, and how many, for the rung's own label. */
+  batteryLabel?: string | null;
+  batteryQty?: number;
   /** The dealer fee on the programme this deal is quoted on. Null on cash. */
   quotedFeePct: number | null;
   /**
@@ -195,7 +211,11 @@ export function SystemPriceCard({
   // differs is which side of the partner's ceiling it is paid out of, not
   // whether it is paid.
   const allAdderCents = adderTotalCents + onTopAdderTotalCents;
-  const grossCents = baseTotalCents == null ? null : baseTotalCents + allAdderCents;
+  // The battery is kept whole here for the same reason a roof financed on top
+  // is: it is money the company keeps, and what differs is only which side of
+  // the partner's ceiling it is paid out of.
+  const grossCents =
+    baseTotalCents == null ? null : baseTotalCents + allAdderCents + batteryPriceCents;
   const adderPpw = watts > 0 ? allAdderCents / watts : 0;
   const grossPpw = grossCents != null && watts > 0 ? grossCents / watts : null;
 
@@ -246,6 +266,7 @@ export function SystemPriceCard({
           dealerFeePct: quotedFeePct ?? 0,
           adderTotalCents,
           onTopAdderTotalCents,
+          batteryPriceCents,
         })
       : null;
   const customerContract = customerPriced?.contractPriceCents ?? null;
@@ -477,6 +498,17 @@ export function SystemPriceCard({
         <dl className="self-center rounded-lg bg-muted/50 p-3 text-sm">
           <Rung label="Base" ppw={basePpwCents} total={baseTotalCents} />
           <Rung label="Adders" ppw={watts > 0 ? adderPpw : null} total={allAdderCents} muted />
+          {/* Only where there is one. A "$0" battery rung on the four deals in
+              five that have no storage is a row a rep has to read to learn
+              nothing. */}
+          {batteryPriceCents > 0 && (
+            <Rung
+              label={batteryQty > 1 ? `Battery × ${batteryQty}` : "Battery"}
+              ppw={null}
+              total={batteryPriceCents}
+              muted
+            />
+          )}
           <Rung
             label="Gross"
             ppw={grossPpw}
@@ -541,6 +573,18 @@ export function SystemPriceCard({
               <>
                 That includes ${Math.round(onTopAdderTotalCents / 100).toLocaleString()} of work
                 financed on top of the rate.{" "}
+              </>
+            )}
+            {/* Said for the same reason the roof is: this is the other figure
+                on the card that sits ABOVE the partner's published rate, and a
+                rep reading "$5.50/W flat" beside "$9.50/W" is entitled to know
+                which of the two the household signs, and why. */}
+            {batteryPriceCents > 0 && (
+              <>
+                It also includes ${Math.round(batteryPriceCents / 100).toLocaleString()} for the
+                {batteryLabel ? ` ${batteryLabel}` : " battery"}
+                {batteryQty > 1 ? ` × ${batteryQty}` : ""}, priced from the catalogue and added on
+                top of the rate.{" "}
               </>
             )}
             Cash pays the gross.

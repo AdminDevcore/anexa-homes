@@ -81,6 +81,12 @@ export type CompareBasis = {
    * that quoted a different job per lender would not be a comparison.
    */
   onTopAdderTotalCents: number;
+  /**
+   * The storage on this job, at its catalogue price — the same figure on every
+   * column, for the same reason the on-top adders are. A battery does not cost
+   * more because the money is dearer.
+   */
+  batteryPriceCents?: number;
   downPaymentCents: number;
   /**
    * The deal's base price per watt, cents — what the company charges BEFORE any
@@ -205,6 +211,7 @@ function purchaseRow(
           dealerFeePct,
           adderTotalCents: basis.adderTotalCents,
           onTopAdderTotalCents: basis.onTopAdderTotalCents,
+          batteryPriceCents: basis.batteryPriceCents ?? 0,
         })
       : null;
 

@@ -254,7 +254,9 @@ export default async function SolarProposalBuilderPage({
         ],
       },
       orderBy: [{ isDefault: "desc" }, { manufacturer: "asc" }, { model: "asc" }],
-      select: { id: true, manufacturer: true, model: true, ratingW: true, isDefault: true, isActive: true },
+      // `priceCents` is money on the contract, not decoration: a battery beside
+      // an array is charged for on top of the per-watt price.
+      select: { id: true, manufacturer: true, model: true, ratingW: true, priceCents: true, isDefault: true, isActive: true },
     }),
     listBackupProfiles(user.companyId),
   ]);
@@ -371,6 +373,7 @@ export default async function SolarProposalBuilderPage({
             id: b.id,
             label: solarEquipmentLabel(b),
             ratingW: b.ratingW,
+            priceCents: b.priceCents,
             // Which one the company standardised on. A retired battery a deal
             // still names is in this list, and it is not the standard.
             isDefault: b.isDefault && b.isActive,

@@ -15,6 +15,12 @@ export type StorageEquipmentOption = {
   ratingW: number | null;
   /** The company's standard battery — the one starred on the catalogue. */
   isDefault?: boolean;
+  /**
+   * What the catalogue sells ONE of these for. The price a deal charges for
+   * storage unless somebody has typed another on the deal itself — see
+   * `batteryChargeCents`.
+   */
+  priceCents?: number;
 };
 
 export type SolarStorageView = {

@@ -35,6 +35,7 @@ import {
   leaseMonthlyCents,
   priceStoredPurchase,
   priceStorageStored,
+  batteryChargeCents,
   type YieldAssumptions,
   type FinalPpwMode,
 } from "@/lib/solar-money";
@@ -777,6 +778,8 @@ export function SolarFinancePanel({
   defaultBasePpwCents,
   systemType,
   batteryQty,
+  batteryLabel,
+  batteryUnitPriceCents,
   rebateCatalogue,
   dealRebates,
   adderCatalogue,
@@ -813,6 +816,18 @@ export function SolarFinancePanel({
    */
   systemType: "pv" | "pv_storage" | "storage";
   batteryQty: number;
+  /** What the storage on this deal is, for the line that charges for it. */
+  batteryLabel: string | null;
+  /**
+   * What the catalogue sells ONE of them for.
+   *
+   * On a deal with an array this is a PRICE ON THE CONTRACT: a rate per watt is
+   * a price for an array and cannot charge for a battery, so the storage rides
+   * on top at this figure — see `batteryChargeCents`. On a storage-only deal it
+   * is nothing of the kind: there the battery is the system, and the price per
+   * battery is the box the rep types in below.
+   */
+  batteryUnitPriceCents: number;
   /** Rebates the company offers. Applies to any deal carrying a battery. */
   rebateCatalogue: { id: string; name: string; amountCents: number; perBattery: boolean }[];
   /** The ones on THIS deal, amounts already frozen at apply time. */
@@ -911,6 +926,21 @@ export function SolarFinancePanel({
       : (finance?.grossPpwCents ?? 0);
     if (stored > 0) return Math.round(stored * (1 - (finance?.dealerFeePct ?? 0) / 100));
     return systemType === "storage" ? null : defaultBasePpwCents;
+  });
+
+  /**
+   * WHAT THE STORAGE ADDS TO THIS CONTRACT, live.
+   *
+   * The deal's own per-battery price where somebody typed one, else the
+   * catalogue's — the same resolver the save and the proposal use, so the
+   * figure on this screen is the figure that gets written. Zero on a
+   * storage-only deal, where the battery is the system priced in the box above.
+   */
+  const batteryPriceCents = batteryChargeCents({
+    systemType,
+    batteryQty,
+    dealPerBatteryCents: finance?.stickerPricePerBatteryCents,
+    cataloguePerBatteryCents: batteryUnitPriceCents,
   });
 
   /**
@@ -1053,6 +1083,10 @@ export function SolarFinancePanel({
     year1ProductionKwh,
     adderTotalCents,
     onTopAdderTotalCents,
+    // The same battery on every column: it is the same house whichever partner
+    // funds it, and a strip that charged for storage on one card and not the
+    // next would be comparing two different jobs.
+    batteryPriceCents,
     // Always nothing down. Solar here is sold financed in full — see the
     // financing section below for why a down-payment box no longer exists.
     downPaymentCents: 0,
@@ -1166,13 +1200,14 @@ export function SolarFinancePanel({
       dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
       adderTotalCents,
       onTopAdderTotalCents,
+      batteryPriceCents,
       rebateTotalCents,
       maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
       finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
     });
   }, [
     isPurchase, isStorage, batteryQty, product, systemSizeKwDc, stickerPpwCents, feePct,
-    adderTotalCents, onTopAdderTotalCents, rebateTotalCents,
+    adderTotalCents, onTopAdderTotalCents, batteryPriceCents, rebateTotalCents,
     quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
     quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
   ]);
@@ -1380,6 +1415,9 @@ export function SolarFinancePanel({
         defaultPpwCents={defaultBasePpwCents}
         adderTotalCents={adderTotalCents}
         onTopAdderTotalCents={onTopAdderTotalCents}
+        batteryPriceCents={batteryPriceCents}
+        batteryLabel={batteryLabel}
+        batteryQty={batteryQty}
         quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
         // The ceiling belongs to the partner, so it is read off the LENDER the
         // chosen programme was published by — never off the programme row — and
