@@ -38,6 +38,7 @@ import {
   setSolarLenderActiveAction,
   deleteSolarLenderAction,
   setLenderAdderRulesAction,
+  setLenderFieldMapAction,
 } from "@/server/modules/solar/actions";
 import { SubmissionMapping } from "./submission-mapping";
 import type { AdderRuleOption, LenderRow, PricingMode } from "./types";
@@ -108,6 +109,21 @@ function NotPriced({ label, children }: { label: string; children: React.ReactNo
  * who they are, what they charge, what they finance, what rides on top, and
  * the wording that reaches a customer. One Save at the bottom commits the lot.
  */
+/**
+ * A mapping as a comparable string, keys in a fixed order.
+ *
+ * Object key order survives a spread, so a row edited and then set back would
+ * otherwise leave the Save button lit for a map that is identical to the saved
+ * one.
+ */
+function stableMap(m: Record<string, { sourceKey: string | null; literal: string }>): string {
+  return JSON.stringify(
+    Object.keys(m)
+      .sort()
+      .map((k) => [k, m[k].sourceKey ?? "", m[k].literal.trim()])
+  );
+}
+
 export function LenderDetail({
   lender,
   canEdit,
@@ -162,10 +178,16 @@ export function LenderDetail({
   const savedDraft = draftFrom(lender);
   const savedRules = resolvedAdderRules(lender, adderCatalogue);
   const savedEquip = equipmentNameDraftFrom(lender);
-  const fieldsDirty = JSON.stringify(draft) !== JSON.stringify(savedDraft);
+  // The field mapping is compared on its own and EXCLUDED from the lender row's
+  // comparison: it lives in its own table, so a changed mapping must not make
+  // the row look dirty and provoke a pointless write of values nobody touched.
+  const { fieldMap: draftMap, ...draftRow } = draft;
+  const { fieldMap: savedMap, ...savedRow } = savedDraft;
+  const fieldsDirty = JSON.stringify(draftRow) !== JSON.stringify(savedRow);
+  const mapDirty = stableMap(draftMap) !== stableMap(savedMap);
   const addersDirty = adderCatalogue.some((a) => adderDraft[a.id] !== savedRules[a.id]);
   const equipDirty = JSON.stringify(equipDraft) !== JSON.stringify(savedEquip);
-  const dirty = fieldsDirty || addersDirty || equipDirty;
+  const dirty = fieldsDirty || addersDirty || equipDirty || mapDirty;
 
   const set = <K extends keyof typeof draft>(k: K, v: (typeof draft)[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
@@ -425,7 +447,27 @@ export function LenderDetail({
       }
 
       /**
-       * Third write, same Save. The names live on the approval rows, which
+       * Third write, same Save. The mapping is its own table too, and is sent
+       * WHOLE — a row returned to its built-in source is an absence, and a
+       * merge would leave it overridden for ever. See setLenderFieldMapAction.
+       */
+      if (mapDirty) {
+        const res = await setLenderFieldMapAction(
+          lender.id,
+          Object.entries(draftMap).map(([wireField, v]) => ({
+            wireField,
+            sourceKey: v.sourceKey,
+            literal: v.literal.trim() || null,
+          }))
+        );
+        if (!res.ok) {
+          toast.error(res.error, { duration: 9000 });
+          return;
+        }
+      }
+
+      /**
+       * Fourth write, same Save. The names live on the approval rows, which
        * belong to neither the lender nor the catalogue on their own, so they
        * cannot ride along on either update.
        */
@@ -1072,6 +1114,7 @@ export function LenderDetail({
             onRepNameBasis={(v) => set("submissionRepNameBasis", v)}
             onRepName={(v) => set("submissionRepName", v)}
             onDelivery={(v) => set("submissionDelivery", v)}
+            onFieldMap={(next) => set("fieldMap", next)}
           />
         </TabsContent>
 

@@ -3,11 +3,19 @@ import { prisma } from "@/server/db/client";
 import { decryptField } from "@/server/lib/crypto";
 import {
   buildAmosPayload,
+  inverterCount,
   preflightAmosSubmission,
   savingsProblems,
   type AmosApplicationPayload,
   type AmosSystemFigures,
 } from "./amos-payload";
+import {
+  applyFieldMap,
+  mappingProblems,
+  suppliedByMapping,
+  type FieldMapContext,
+  type FieldMapEntry,
+} from "./lender-field-map";
 import { postSolarUtilityCents, type SavingsModel, type SavingsYear } from "@/lib/solar-proposal";
 import { submitToAmos, validateWithAmos, AmosSubmissionError, type AmosValidation } from "./amos-client";
 
@@ -105,17 +113,45 @@ export async function readLenderSubmission(
     proposalId,
   );
 
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
+  const { entries, companyName } = await loadFieldMap(companyId, lender.id);
+
+  const submitted = asSubmitted(design);
+  const ctx =
+    quoted.system && !money.problem
+      ? mapContext(design, submitted, {
+          reference: lenderReference(design.id, design.lenderSubmissionAttempt),
+          productSlug: lender.apiProductSlug,
+          repName: resolveRepName(
+            lender.submissionRepNameBasis,
+            lender.submissionRepName,
+            design.lead.assignedRep,
+            null,
+            "",
+          ),
+          submitterName: null,
+          companyName,
+          ownerOccupied: true,
+          system: quoted.system,
+          termMonths: money.termMonths,
+        })
+      : null;
+
   // Both sets at once. A rep who fixes the panel mapping only to be told about
   // the missing rate has been sent round the loop twice for one visit.
   const problems = [
-    ...preflightAmosSubmission(design.lead, asSubmitted(design), lender.name),
+    ...preflightAmosSubmission(
+      design.lead,
+      submitted,
+      lender.name,
+      ctx ? suppliedByMapping(entries, ctx) : undefined,
+    ),
     ...savingsProblems(quoted.system),
+    ...(ctx ? mappingProblems(entries, ctx) : []),
   ];
   if (problems.length > 0) {
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
-
-  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
   if (money.problem) {
     return { mode: "api", lenderName: lender.name, ready: false, problems: [money.problem] };
   }
@@ -123,15 +159,42 @@ export async function readLenderSubmission(
   // Built on the SERVER from the same rows the submission reads, so the
   // confirmation shows what will actually be sent rather than whatever the
   // browser happened to be holding.
+  //
+  // THROUGH THE MAPPING, for the same reason. A confirmation that reads the
+  // lead while the wire carries an override is a confirmation of a different
+  // application, and this one is shown to a homeowner about to press a button.
+  const shown = ctx
+    ? applyFieldMap(
+        buildAmosPayload(design.lead, submitted, {
+          productSlug: lender.apiProductSlug,
+          externalId: lenderReference(design.id, design.lenderSubmissionAttempt),
+          amountCents: money.amountCents,
+          termMonths: money.termMonths,
+          salesRepName: "",
+          ownerOccupied: true,
+          delivery: lender.submissionDelivery,
+          system: quoted.system!,
+        }),
+        entries,
+        ctx,
+      )
+    : null;
+
   return {
     mode: "api",
     lenderName: lender.name,
     ready: true,
     summary: {
-      customer: `${design.lead.firstName} ${design.lead.lastName}`.trim(),
-      property: [design.lead.address, design.lead.city, design.lead.state, design.lead.zip]
-        .filter(Boolean)
-        .join(", "),
+      customer: shown
+        ? `${shown.applicant.firstName} ${shown.applicant.lastName}`.trim()
+        : `${design.lead.firstName} ${design.lead.lastName}`.trim(),
+      property: shown
+        ? [shown.property.line1, shown.property.city, shown.property.state, shown.property.postalCode]
+            .filter(Boolean)
+            .join(", ")
+        : [design.lead.address, design.lead.city, design.lead.state, design.lead.zip]
+            .filter(Boolean)
+            .join(", "),
       system: describeSystem(design),
       financing: `${usd(money.amountCents)} over ${money.termMonths} months`,
     },
@@ -184,40 +247,71 @@ export async function readLenderPayloadPreview(
     lender.submissionSavingHorizon,
     proposalId,
   );
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
+  const { entries, companyName } = await loadFieldMap(companyId, lender.id);
+
+  const submitted = asSubmitted(design);
+  const reference = lenderReference(design.id, design.lenderSubmissionAttempt);
+  const repName = resolveRepName(
+    lender.submissionRepNameBasis,
+    lender.submissionRepName,
+    design.lead.assignedRep,
+    fallbackRepName,
+    fallbackRepName,
+  );
+
+  // The preview answers the occupancy question `true`, and the panel labels it
+  // as the one field the rep still supplies — so the mapping sees the same.
+  const ctx =
+    quoted.system && !money.problem
+      ? mapContext(design, submitted, {
+          reference,
+          productSlug: lender.apiProductSlug,
+          repName,
+          submitterName: fallbackRepName,
+          companyName,
+          ownerOccupied: true,
+          system: quoted.system,
+          termMonths: money.termMonths,
+        })
+      : null;
+
   const problems = [
-    ...preflightAmosSubmission(design.lead, asSubmitted(design), lender.name),
+    ...preflightAmosSubmission(
+      design.lead,
+      submitted,
+      lender.name,
+      ctx ? suppliedByMapping(entries, ctx) : undefined,
+    ),
     ...savingsProblems(quoted.system),
+    ...(ctx ? mappingProblems(entries, ctx) : []),
   ];
   if (problems.length > 0) {
     return { mode: "api", lenderName: lender.name, ready: false, problems };
   }
-
-  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
   if (money.problem) {
     return { mode: "api", lenderName: lender.name, ready: false, problems: [money.problem] };
   }
+
+  const payload = buildAmosPayload(design.lead, submitted, {
+    productSlug: lender.apiProductSlug,
+    externalId: reference,
+    amountCents: money.amountCents,
+    termMonths: money.termMonths,
+    salesRepName: repName,
+    ownerOccupied: true,
+    delivery: lender.submissionDelivery,
+    system: quoted.system!,
+  });
 
   return {
     mode: "api",
     lenderName: lender.name,
     ready: true,
-    payload: buildAmosPayload(design.lead, asSubmitted(design), {
-      productSlug: lender.apiProductSlug,
-      externalId: lenderReference(design.id, design.lenderSubmissionAttempt),
-      amountCents: money.amountCents,
-      termMonths: money.termMonths,
-      salesRepName: resolveRepName(
-        lender.submissionRepNameBasis,
-        lender.submissionRepName,
-        design.lead.assignedRep,
-        fallbackRepName,
-        fallbackRepName,
-      ),
-      // The rep answers this at the moment of sending; the panel labels it.
-      ownerOccupied: true,
-      delivery: lender.submissionDelivery,
-      system: quoted.system!,
-    }),
+    // The mapping is applied HERE, on the finished body, so the inspector shows
+    // the overrides rather than the defaults they replaced. If this preview is
+    // wrong, the submission is wrong — that is the whole point of it.
+    payload: ctx ? applyFieldMap(payload, entries, ctx) : payload,
   };
 }
 
@@ -344,9 +438,51 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     proposalId,
   );
 
+  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
+  const { entries, companyName } = await loadFieldMap(companyId, lender.id);
+
+  // Recorded on the attempt so the deal can afterwards say WHICH version went
+  // to the lender — "sent" against v13 and nothing against the v14 built after
+  // it. Resolved through `submissionDocument`, the same function the figures
+  // came through, because the fallback path picks a document nobody named.
+  const submittedProposalId = await resolveSubmissionProposalId(leadId, companyId, proposalId);
+
+  const reference = lenderReference(design.id, design.lenderSubmissionAttempt);
+  // Whichever name THIS partner reconciles against — see `resolveRepName`.
+  const repName = resolveRepName(
+    lender.submissionRepNameBasis,
+    lender.submissionRepName,
+    design.lead.assignedRep,
+    submitterName,
+    fallbackRepName,
+  );
+
+  const ctx =
+    quoted.system && !money.problem
+      ? mapContext(design, submitted, {
+          reference,
+          productSlug: lender.apiProductSlug,
+          repName,
+          submitterName,
+          companyName,
+          ownerOccupied,
+          system: quoted.system,
+          termMonths: money.termMonths,
+        })
+      : null;
+
   const problems = [
-    ...preflightAmosSubmission(design.lead, submitted, lender.name),
+    ...preflightAmosSubmission(
+      design.lead,
+      submitted,
+      lender.name,
+      // A box the mapping fills is not a box the deal has to.
+      ctx ? suppliedByMapping(entries, ctx) : undefined,
+    ),
     ...savingsProblems(quoted.system),
+    // A constant nobody can read would otherwise be a blank required field and
+    // a refusal from the partner in words nobody here can act on.
+    ...(ctx ? mappingProblems(entries, ctx) : []),
   ];
   if (problems.length > 0) {
     return {
@@ -357,28 +493,14 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     };
   }
 
-  const money = await loadMoney(leadId, companyId, lender.submissionAmountBasis, proposalId);
   if (money.problem) return fail(money.problem);
 
-  // Recorded on the attempt so the deal can afterwards say WHICH version went
-  // to the lender — "sent" against v13 and nothing against the v14 built after
-  // it. Resolved through `submissionDocument`, the same function the figures
-  // came through, because the fallback path picks a document nobody named.
-  const submittedProposalId = await resolveSubmissionProposalId(leadId, companyId, proposalId);
-
-  const payload = buildAmosPayload(design.lead, submitted, {
+  const built = buildAmosPayload(design.lead, submitted, {
     productSlug: lender.apiProductSlug,
-    externalId: lenderReference(design.id, design.lenderSubmissionAttempt),
+    externalId: reference,
     amountCents: money.amountCents,
     termMonths: money.termMonths,
-    // Whichever name THIS partner reconciles against — see `resolveRepName`.
-    salesRepName: resolveRepName(
-      lender.submissionRepNameBasis,
-      lender.submissionRepName,
-      design.lead.assignedRep,
-      submitterName,
-      fallbackRepName,
-    ),
+    salesRepName: repName,
     ownerOccupied,
     // The partner's own rule about who completes the application, not the
     // caller's preference. Both doors used to state `in_person` and neither
@@ -388,6 +510,11 @@ export async function submitDealToLender(input: LenderSubmitInput): Promise<Lend
     // a non-empty problem list has already returned above.
     system: quoted.system!,
   });
+
+  // The hand-written mapping, last. `entries` is empty on every partner nobody
+  // has mapped, and an empty list returns the body untouched — so the ordinary
+  // submission is what it always was, down to the object identity.
+  const payload = ctx ? applyFieldMap(built, entries, ctx) : built;
 
   const log = (row: Omit<SubmissionLog, "payload">) =>
     recordSubmission(
@@ -904,6 +1031,73 @@ function describeSystem(design: {
 /** Cents to "$48,750" — whole dollars; the cents are noise at this size. */
 function usd(cents: number): string {
   return `$${Math.round(cents / 100).toLocaleString("en-US")}`;
+}
+
+/**
+ * THE HAND-WRITTEN MAPPING FOR THIS PARTNER, AND THE COMPANY NAME IT CAN READ.
+ *
+ * Empty on every partner nobody has mapped, which is all of them until somebody
+ * changes one — and an empty list makes `applyFieldMap` a no-op, so the ordinary
+ * submission is byte-for-byte what it was.
+ *
+ * Scoped to the company the CALLER resolved, like everything else in this file.
+ */
+async function loadFieldMap(companyId: string, lenderId: string) {
+  const [rows, company] = await Promise.all([
+    prisma.solarLenderFieldMap.findMany({
+      where: { companyId, lenderId },
+      select: { wireField: true, sourceKey: true, literal: true },
+    }),
+    prisma.company.findFirst({ where: { id: companyId }, select: { name: true } }),
+  ]);
+  return { entries: rows as FieldMapEntry[], companyName: company?.name ?? "" };
+}
+
+/**
+ * Everything a mapping is allowed to read, assembled from what the submission
+ * already resolved.
+ *
+ * Built from the SAME values the payload was built from — the frozen document's
+ * figures, the rep name this partner's setting produced, the reference this
+ * attempt is filed under. A context that recomputed any of them could show an
+ * admin one number in the mapping and send another.
+ */
+function mapContext(
+  design: { id: string; systemSizeKwDc: number; moduleQty: number; batteryQty: number; lead: { firstName: string; lastName: string; email: string | null; phone: string | null; address: string | null; city: string | null; state: string | null; zip: string | null } },
+  submitted: Parameters<typeof inverterCount>[0],
+  args: {
+    reference: string;
+    productSlug: string;
+    repName: string;
+    submitterName: string | null;
+    companyName: string;
+    ownerOccupied: boolean;
+    system: AmosSystemFigures;
+    termMonths: number;
+  },
+): FieldMapContext {
+  return {
+    lead: design.lead,
+    repName: args.repName,
+    submitterName: args.submitterName,
+    companyName: args.companyName,
+    design: {
+      id: design.id,
+      reference: args.reference,
+      systemSizeKwDc: design.systemSizeKwDc,
+      moduleQty: design.moduleQty,
+      inverterQty: inverterCount(submitted),
+      batteryQty: design.batteryQty,
+    },
+    productSlug: args.productSlug,
+    ownerOccupied: args.ownerOccupied,
+    system: {
+      annualProductionKwh: args.system.annualProductionKwh,
+      annualConsumptionKwh: args.system.annualConsumptionKwh,
+      retailRateMillsPerKwh: args.system.retailRateMillsPerKwh,
+    },
+    termMonths: args.termMonths,
+  };
 }
 
 /** The deal's rep, as the lender wants it: a typed name, or nothing. */

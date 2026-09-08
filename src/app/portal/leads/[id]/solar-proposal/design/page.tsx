@@ -96,8 +96,21 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
     orderBy: [{ isDefault: "desc" }, { manufacturer: "asc" }, { model: "asc" }],
     select: {
       id: true, kind: true, manufacturer: true, model: true, ratingW: true, widthMm: true, heightMm: true,
+      isDefault: true, isActive: true,
     },
   });
+
+  /**
+   * The starred inverter, for a design that has not named one yet.
+   *
+   * Off the list already loaded rather than a second query, and it is not a
+   * suggestion: `recomputeDesignFigures` writes exactly this onto the design
+   * the next time anything on the deal is saved. Showing it is the picker
+   * agreeing with the deal instead of reading "Not set" for a slot that is
+   * about to be filled.
+   */
+  const defaultInverterId =
+    equipment.find((e) => e.kind === "inverter" && e.isDefault && e.isActive)?.id ?? null;
   const optionsOf = (kind: "module" | "inverter" | "battery") =>
     equipment
       .filter((e) => e.kind === kind)
@@ -105,6 +118,11 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         id: e.id,
         label: [e.manufacturer, e.model].filter(Boolean).join(" ") || e.model,
         ratingW: e.ratingW,
+        // Which one the company standardised on, said on the OPTION rather
+        // than left to the sort order — "first in the list" is not a fact a rep
+        // sitting on a customer's sofa can read. A starred item that has since
+        // been retired is not the standard any more, so both have to hold.
+        isDefault: e.isDefault && e.isActive,
         // Only a module is drawn, so only a module's size matters.
         ...(kind === "module" ? { sized: e.widthMm != null && e.heightMm != null } : {}),
       }));
@@ -162,12 +180,13 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         inverter: optionsOf("inverter"),
         battery: optionsOf("battery"),
       }}
+      defaultBatteryQty={settings.defaultBatteryQty}
       chosen={{
         // The design's own module if it names one, otherwise whatever the
         // catalogue default resolved to — so the picker shows the panel the
         // figures were actually computed with.
         moduleId: design?.moduleId ?? sizingModule?.id ?? null,
-        inverterId: design?.inverterId ?? null,
+        inverterId: design?.inverterId ?? defaultInverterId,
         batteryId: design?.batteryId ?? null,
         batteryQty: design?.batteryQty ?? 0,
       }}

@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "./settings";
-import { resolveSizingModule } from "./sizing";
+import { resolveSizingModule, resolveDesignInverter } from "./sizing";
 import { applyAutoAdders, recomputeAdderTotal } from "./adders";
 import { planeFor, resolvePlaneYields } from "./pvwatts";
 import { groundPlanesFor, resolveRoofPlanes } from "./roof-planes";
@@ -31,6 +31,12 @@ import { effectiveUsageKwh } from "@/lib/solar-energy";
  *
  * Writes `moduleQty`, `systemSizeKwDc`, `year1ProductionKwh`, `offsetPct` and
  * the record of which yield model answered — never anything a rep typed.
+ *
+ * ALSO the place the catalogue's starred hardware lands on the deal, for both
+ * the module and the inverter. Here rather than at the seven places a design
+ * row gets created, because that is seven chances to forget one — and the
+ * inverter WAS forgotten at all seven, which is how a company that had starred
+ * an inverter still sent deals to its lender with the slot empty.
  */
 export async function recomputeDesignFigures(companyId: string, leadId: string) {
   const [lead, design] = await Promise.all([
@@ -45,6 +51,7 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
       select: {
         layoutBlocks: true,
         moduleId: true,
+        inverterId: true,
         annualUsageKwh: true,
         usageAdjustmentKwh: true,
         mountType: true,
@@ -55,7 +62,10 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
 
   const stored: LayoutBlock[] = parseLayoutBlocks(design.layoutBlocks);
   const assumptions = await getSolarSettings(companyId);
-  const module_ = await resolveSizingModule(companyId, design.moduleId);
+  const [module_, inverter] = await Promise.all([
+    resolveSizingModule(companyId, design.moduleId),
+    resolveDesignInverter(companyId, design.inverterId),
+  ]);
   const arrayType = design.mountType === "ground" ? ("ground" as const) : ("roof" as const);
 
   /**
@@ -161,6 +171,10 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
       // Only when one resolved. Writing null here would unpick a module a rep
       // chose the moment the catalogue has no default to fall back to.
       ...(module_ ? { moduleId: module_.id } : {}),
+      // Same rule, same reason — and it resolves to whatever the design already
+      // names before it ever looks at the star, so this can only ever FILL an
+      // empty slot. It never re-points a deal at this year's product.
+      ...(inverter ? { inverterId: inverter.id } : {}),
       systemSizeKwDc: totals.systemSizeKwDc,
       year1ProductionKwh: totals.year1ProductionKwh,
       offsetPct: computedOffset,

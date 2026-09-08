@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, ChevronDown, Compass, Crosshair, Eraser, Hand, Loader2, MapPin, Maximize2,
   Minus, MousePointer2, Move, Pentagon, Plus, Layers, RotateCcw, RotateCw, Ruler,
-  Scissors, Search, Square, Sun, Trash2, Wand2, ZoomIn, ZoomOut,
+  Scissors, Search, Square, Star, Sun, Trash2, Wand2, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -134,6 +134,15 @@ export type EquipOption = {
   ratingW: number | null;
   /** Modules only: whether it carries a physical size to draw at true scale. */
   sized?: boolean;
+  /**
+   * The catalogue's standard choice for this kind.
+   *
+   * Said on the OPTION rather than left to the sort order, which is how it was
+   * said before: "first in the list" is not a fact a rep can read. A rep about
+   * to pick hardware on a customer's sofa should be able to see which one the
+   * company actually sells without opening Settings.
+   */
+  isDefault?: boolean;
 };
 
 /**
@@ -336,6 +345,7 @@ export function SolarLayoutDesigner({
   moduleMm,
   moduleRatingW,
   catalogue,
+  defaultBatteryQty,
   chosen,
   annualUsageKwh,
   measuredYields,
@@ -361,6 +371,12 @@ export function SolarLayoutDesigner({
   moduleRatingW: number | null;
   /** Everything this company sells, for the three pickers in the top bar. */
   catalogue: { module: EquipOption[]; inverter: EquipOption[]; battery: EquipOption[] };
+  /**
+   * How many batteries the company's standard offer is, for the one-click
+   * "add the standard battery" on an empty slot. Only ever reaches a slot with
+   * nothing in it — a count a rep has set is never overwritten from here.
+   */
+  defaultBatteryQty: number;
   /** What this design already names. Null in a slot means nothing chosen. */
   chosen: {
     moduleId: string | null;
@@ -2849,6 +2865,7 @@ export function SolarLayoutDesigner({
                 }`
               : "Choose a module"
           }
+          defaultBatteryQty={defaultBatteryQty}
           onChange={(patch) => void pickEquipment(patch)}
         />
       </header>
@@ -3970,6 +3987,7 @@ function SystemPicker({
   disabled,
   busy,
   summary,
+  defaultBatteryQty,
   onChange,
 }: {
   catalogue: { module: EquipOption[]; inverter: EquipOption[]; battery: EquipOption[] };
@@ -3977,8 +3995,11 @@ function SystemPicker({
   disabled: boolean;
   busy: boolean;
   summary: string;
+  /** How many of the standard battery a storage deal starts with. */
+  defaultBatteryQty: number;
   onChange: (patch: Partial<{ moduleId: string | null; inverterId: string | null; batteryId: string | null; batteryQty: number }>) => void;
 }) {
+  const defaultBattery = catalogue.battery.find((b) => b.isDefault) ?? null;
   return (
     <details className="group relative shrink-0">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white hover:bg-white/10">
@@ -3994,6 +4015,26 @@ function SystemPicker({
         <EquipPicker label="Module" options={catalogue.module} value={equip.moduleId} disabled={disabled} onChange={(id) => onChange({ moduleId: id })} />
         <EquipPicker label="Inverter" options={catalogue.inverter} value={equip.inverterId} disabled={disabled} onChange={(id) => onChange({ inverterId: id })} />
         <EquipPicker label="Battery" options={catalogue.battery} value={equip.batteryId} disabled={disabled} onChange={(id) => onChange({ batteryId: id })} />
+        {/* THE STANDARD BATTERY, in one click, on an empty slot only.
+            A deal set to solar + storage is given it automatically the moment
+            somebody answers that question — but a deal that has been sitting on
+            that answer since before the catalogue had a standard battery never
+            passed through that moment, and nothing else would ever offer it. */}
+        {!equip.batteryId && defaultBattery && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() =>
+              onChange({ batteryId: defaultBattery.id, batteryQty: defaultBatteryQty })
+            }
+            className="flex w-full items-center gap-1.5 rounded-md border border-solar/40 bg-solar/10 px-2 py-1.5 text-left text-xs text-white hover:bg-solar/20 disabled:opacity-50"
+          >
+            <Star className="size-3.5 shrink-0 text-solar" aria-hidden />
+            <span className="min-w-0 truncate">
+              Add {defaultBatteryQty} × {defaultBattery.label}
+            </span>
+          </button>
+        )}
         {/* HOW MANY OF THEM. Only once there is a battery to count — a
             quantity box beside an empty slot is a question with no meaning.
             It matters beyond the equipment list: the battery programme pays
@@ -4173,6 +4214,7 @@ function EquipPicker({
           <option key={o.id} className="text-black" value={o.id}>
             {o.label}
             {o.ratingW ? ` · ${o.ratingW} W` : ""}
+            {o.isDefault ? " · standard" : ""}
           </option>
         ))}
       </select>

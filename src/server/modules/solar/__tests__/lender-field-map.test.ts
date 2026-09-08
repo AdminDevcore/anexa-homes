@@ -1,0 +1,272 @@
+import { describe, expect, it } from 'vitest'
+import {
+  applyFieldMap,
+  FIELD_SOURCES,
+  mappingProblems,
+  parseLiteral,
+  suppliedByMapping,
+  WIRE_FIELDS,
+  type FieldMapContext,
+  type FieldMapEntry,
+} from '../lender-field-map'
+import type { AmosApplicationPayload } from '../amos-payload'
+
+const CTX: FieldMapContext = {
+  lead: {
+    firstName: 'Dana',
+    lastName: 'Reyes',
+    email: 'Dana@Example.com ',
+    phone: '(512) 555-0143',
+    address: '4120 Sage Hollow Dr',
+    city: 'Austin',
+    state: 'tx',
+    zip: '78735',
+  },
+  repName: 'Marco Diaz',
+  submitterName: 'Priya Shah',
+  companyName: 'Anexa Homes',
+  design: {
+    id: 'design-abc',
+    reference: 'design-abc-1',
+    systemSizeKwDc: 10.66,
+    moduleQty: 26,
+    inverterQty: 2,
+    batteryQty: 0,
+  },
+  productSlug: 'solar-installation-financing',
+  ownerOccupied: true,
+  system: { annualProductionKwh: 14200, annualConsumptionKwh: 15800, retailRateMillsPerKwh: 233 },
+  termMonths: 360,
+}
+
+/** What `buildAmosPayload` produces for that deal, before any mapping. */
+const BASE: AmosApplicationPayload = {
+  externalId: 'design-abc-1',
+  productSlug: 'solar-installation-financing',
+  applicant: { firstName: 'Dana', lastName: 'Reyes', email: 'dana@example.com', phone: '5125550143' },
+  property: { line1: '4120 Sage Hollow Dr', city: 'Austin', state: 'TX', postalCode: '78735', ownerOccupied: true },
+  system: {
+    annualProductionKwh: 14200,
+    annualConsumptionKwh: 15800,
+    retailRatePerKwh: '0.233',
+    estMonthlySaving: '301.00',
+    estAnnualSaving: '3611.96',
+  },
+  equipment: [
+    { kind: 'panel', brand: 'Qcells', model: 'Q.PEAK', quantity: 26 },
+    { kind: 'inverter', brand: 'Enphase', model: 'IQ8PLUS', quantity: 2 },
+  ],
+  requestedAmount: '150180.00',
+  termMonths: 360,
+  salesRepName: 'Marco Diaz',
+  delivery: 'in_person',
+}
+
+const map = (...entries: FieldMapEntry[]) => entries
+const at = (wireField: string, sourceKey: string | null, literal: string | null = null) => ({
+  wireField,
+  sourceKey,
+  literal,
+})
+
+describe('the mapping catalogue', () => {
+  it('gives every mappable box a built-in source that exists', () => {
+    // The default is what an unmapped partner sends. A field whose default
+    // names a source nobody defined would be a silently empty box.
+    const keys = new Set(FIELD_SOURCES.map((s) => s.key))
+    for (const f of WIRE_FIELDS) expect(keys, f.field).toContain(f.defaultSource)
+  })
+
+  it('gives every box a built-in source of its own shape', () => {
+    const byKey = new Map(FIELD_SOURCES.map((s) => [s.key, s]))
+    for (const f of WIRE_FIELDS) expect(byKey.get(f.defaultSource)?.kind, f.field).toBe(f.kind)
+  })
+
+  it('offers NOTHING that could carry identity documents', () => {
+    // The promise printed under the table — no social security number, no date
+    // of birth, no consent flag — is kept by the whitelist and nothing else.
+    const forbidden = /ssn|social|birth|dob|consent|password|licen[sc]e|passport/i
+    for (const s of FIELD_SOURCES) expect(s.key + ' ' + s.label).not.toMatch(forbidden)
+  })
+
+  it('names every box exactly once', () => {
+    const seen = new Set(WIRE_FIELDS.map((f) => f.field))
+    expect(seen.size).toBe(WIRE_FIELDS.length)
+  })
+})
+
+describe('applyFieldMap', () => {
+  it('changes nothing at all when nobody has mapped anything', () => {
+    expect(applyFieldMap(BASE, [], CTX)).toBe(BASE)
+  })
+
+  it('points a box at another Anexa value', () => {
+    const out = applyFieldMap(BASE, map(at('applicant.firstName', 'lead.fullName')), CTX)
+    expect(out.applicant.firstName).toBe('Dana Reyes')
+  })
+
+  it('sends a constant an admin typed', () => {
+    const out = applyFieldMap(BASE, map(at('productSlug', null, ' dealer-direct-25 ')), CTX)
+    expect(out.productSlug).toBe('dealer-direct-25')
+  })
+
+  it('prefers the constant when a row carries both', () => {
+    const out = applyFieldMap(BASE, map(at('applicant.email', 'lead.email', 'apps@partner.test')), CTX)
+    expect(out.applicant.email).toBe('apps@partner.test')
+  })
+
+  it('never mutates the body it was handed', () => {
+    const before = JSON.parse(JSON.stringify(BASE))
+    applyFieldMap(BASE, map(at('applicant.firstName', 'company.name')), CTX)
+    expect(BASE).toEqual(before)
+  })
+
+  it('leaves the built-in value alone when the source is one this build lost', () => {
+    // A row outlives the code that understands it. The box must keep what the
+    // builder put there rather than going out empty.
+    const out = applyFieldMap(BASE, map(at('applicant.email', 'lead.someFutureField')), CTX)
+    expect(out.applicant.email).toBe('dana@example.com')
+  })
+
+  it('refuses a source of the wrong shape rather than coercing it', () => {
+    // A number in a name box is how "26" ends up on a credit application.
+    const out = applyFieldMap(BASE, map(at('applicant.lastName', 'system.panelCount')), CTX)
+    expect(out.applicant.lastName).toBe('Reyes')
+  })
+
+  it('ignores a box this build no longer has', () => {
+    expect(() => applyFieldMap(BASE, map(at('applicant.middleName', 'lead.firstName')), CTX)).not.toThrow()
+  })
+
+  it('leaves the built-in value alone when the mapped source is empty on THIS deal', () => {
+    const out = applyFieldMap(BASE, map(at('applicant.phone', 'people.submitter')), {
+      ...CTX,
+      submitterName: '   ',
+    })
+    expect(out.applicant.phone).toBe('5125550143')
+  })
+
+  it('rounds a number rather than sending a fraction', () => {
+    const out = applyFieldMap(BASE, map(at('termMonths', null, '299.6')), CTX)
+    expect(out.termMonths).toBe(300)
+  })
+
+  it('reads yes and no for a flag, and nothing else', () => {
+    expect(applyFieldMap(BASE, map(at('property.ownerOccupied', null, 'no')), CTX).property.ownerOccupied).toBe(false)
+    // Unreadable: the answer the rep actually gave stands.
+    expect(applyFieldMap(BASE, map(at('property.ownerOccupied', null, 'maybe')), CTX).property.ownerOccupied).toBe(true)
+  })
+
+  it('keeps the rate to one conversion, in dollars, three decimals', () => {
+    const out = applyFieldMap(BASE, map(at('system.retailRatePerKwh', null, '$0.1875')), CTX)
+    expect(out.system.retailRatePerKwh).toBe('0.188')
+  })
+
+  it('refuses a rate off by a factor of a hundred in either direction', () => {
+    // "23.3" for $0.233, and "0.00233". Both are typos, and both are the shape
+    // of a lender underwriting a wildly wrong bill.
+    expect(applyFieldMap(BASE, map(at('system.retailRatePerKwh', null, '23.3')), CTX).system.retailRatePerKwh).toBe('0.233')
+    expect(applyFieldMap(BASE, map(at('system.retailRatePerKwh', null, '0.00233')), CTX).system.retailRatePerKwh).toBe('0.233')
+  })
+
+  it('sets a quantity on a line that is actually being sent', () => {
+    const out = applyFieldMap(BASE, map(at('equipment.inverter.quantity', null, '1')), CTX)
+    expect(out.equipment?.find((l) => l.kind === 'inverter')?.quantity).toBe(1)
+  })
+
+  it('never invents a line for hardware the deal does not have', () => {
+    // The partner matches every line against its approved-vendor list, so a
+    // battery quantity with no battery on the design is a 422 waiting to happen.
+    const out = applyFieldMap(BASE, map(at('equipment.battery.quantity', null, '2')), CTX)
+    expect(out.equipment?.some((l) => l.kind === 'battery')).toBe(false)
+  })
+
+  it('drops a line mapped to nothing rather than sending a zero', () => {
+    const out = applyFieldMap(BASE, map(at('equipment.inverter.quantity', null, '0')), CTX)
+    expect(out.equipment?.some((l) => l.kind === 'inverter')).toBe(false)
+    expect(out.equipment?.some((l) => l.kind === 'panel')).toBe(true)
+  })
+
+  it('applies several at once', () => {
+    const out = applyFieldMap(
+      BASE,
+      map(
+        at('applicant.firstName', 'lead.fullName'),
+        at('property.line1', 'property.oneLine'),
+        at('externalId', null, 'ANEXA-0042'),
+      ),
+      CTX,
+    )
+    expect(out.applicant.firstName).toBe('Dana Reyes')
+    expect(out.property.line1).toBe('4120 Sage Hollow Dr, Austin, TX 78735')
+    expect(out.externalId).toBe('ANEXA-0042')
+  })
+
+  it('cannot reach the loan amount or the saving, whatever it is told', () => {
+    // Those are the amount-basis and saving-basis settings, which choose between
+    // figures the DOCUMENT computed. A typed constant here would be a fabricated
+    // credit application on every deal.
+    const out = applyFieldMap(
+      BASE,
+      map(at('requestedAmount', null, '1.00'), at('system.estAnnualSaving', null, '99999.00')),
+      CTX,
+    )
+    expect(out.requestedAmount).toBe('150180.00')
+    expect(out.system.estAnnualSaving).toBe('3611.96')
+  })
+})
+
+describe('suppliedByMapping', () => {
+  it('stops the deal being blocked over a value the partner is no longer told', () => {
+    const supplied = suppliedByMapping(map(at('applicant.email', null, 'apps@partner.test')), CTX)
+    expect(supplied.has('email')).toBe(true)
+  })
+
+  it('keeps the original blocker when the override resolves to nothing', () => {
+    // Otherwise a mapping that silently does nothing would ALSO silently
+    // disable the check that would have caught the empty box.
+    const supplied = suppliedByMapping(map(at('applicant.email', 'people.submitter')), {
+      ...CTX,
+      submitterName: null,
+    })
+    expect(supplied.has('email')).toBe(false)
+  })
+
+  it('says nothing about boxes the deal never checked', () => {
+    expect(suppliedByMapping(map(at('externalId', null, 'X-1')), CTX).size).toBe(0)
+  })
+})
+
+describe('mappingProblems', () => {
+  it('names a constant nobody can read, on a required box', () => {
+    const problems = mappingProblems(map(at('termMonths', null, 'three hundred')), CTX)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('termMonths')
+    expect(problems[0]).toContain('a number')
+  })
+
+  it('explains a rate in the units the box takes', () => {
+    expect(mappingProblems(map(at('system.retailRatePerKwh', null, '23.3')), CTX)[0]).toContain('$0.01 and $2.00')
+  })
+
+  it('is silent about a mapping that reads fine', () => {
+    expect(mappingProblems(map(at('termMonths', null, '300')), CTX)).toEqual([])
+  })
+
+  it('is silent about an empty constant, which is just "not mapped"', () => {
+    expect(mappingProblems(map(at('termMonths', null, '   ')), CTX)).toEqual([])
+  })
+})
+
+describe('parseLiteral', () => {
+  it('reads nothing out of an empty box rather than a zero', () => {
+    // Zero is a value somebody meant. A blank is not.
+    expect(parseLiteral('', 'number')).toBeNull()
+    expect(parseLiteral('   ', 'string')).toBeNull()
+    expect(parseLiteral('0', 'number')).toBe(0)
+  })
+
+  it('strips the thousands separators a person types', () => {
+    expect(parseLiteral('14,200', 'number')).toBe(14200)
+  })
+})

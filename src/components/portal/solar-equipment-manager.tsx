@@ -33,6 +33,7 @@ import {
   upsertSolarEquipmentAction,
 } from "@/server/modules/solar/actions";
 import { HardwarePanel, HARDWARE_TABS, type HardwareTab } from "./solar-equipment/hardware-panel";
+import { DefaultsPanel, defaultsSummary } from "./solar-equipment/defaults-panel";
 import { AdderPanel, ADDER_TABS, type AdderTab } from "./solar-equipment/adder-panel";
 import {
   KINDS,
@@ -45,6 +46,16 @@ import {
 } from "./solar-equipment/types";
 
 export type { Item, AdderItem, Lender } from "./solar-equipment/types";
+
+/**
+ * The rail row that is not a catalogue item.
+ *
+ * A sentinel rather than a separate piece of state, so selection stays one
+ * string: the URL, the highlight and the panel all read the same value, and
+ * there is no way to be on the defaults AND on a module at once. Not a valid
+ * cuid, so it can never collide with a real id.
+ */
+const DEFAULTS_ID = "defaults";
 
 /**
  * The whole solar catalogue — hardware and adders — behind one rail.
@@ -64,6 +75,7 @@ export function SolarEquipmentManager({
   adders,
   lenders,
   canEdit,
+  defaultBatteryQty,
   initialItemId,
   initialTab,
 }: {
@@ -71,6 +83,8 @@ export function SolarEquipmentManager({
   adders: AdderItem[];
   lenders: Lender[];
   canEdit: boolean;
+  /** How many batteries a storage deal starts with — edited on the defaults panel. */
+  defaultBatteryQty: number;
   /** Read on the SERVER — see the note on the page. */
   initialItemId?: string | null;
   initialTab?: string | null;
@@ -87,14 +101,26 @@ export function SolarEquipmentManager({
     [items, adders]
   );
 
+  /**
+   * The screen OPENS on the defaults, not on the first module.
+   *
+   * "Which panel does a design start with?" is a question about the catalogue,
+   * and it used to be answerable only by opening items one at a time looking
+   * for a gold star. It is now the first thing in the rail and the first thing
+   * on the screen. A link that names an item — the one every deep link and
+   * every reload carries — still lands on that item.
+   */
   const firstLive = everything.find((e) => e.active) ?? everything[0] ?? null;
   const [selectedId, setSelectedId] = React.useState<string | null>(
-    () => initialItemId ?? firstLive?.id ?? null
+    () => initialItemId ?? DEFAULTS_ID
   );
 
+  const showDefaults = selectedId === DEFAULTS_ID;
   const selectedItem = items.find((i) => i.id === selectedId) ?? null;
   const selectedAdder = adders.find((a) => a.id === selectedId) ?? null;
-  const fallback = selectedItem || selectedAdder ? null : firstLive;
+  // An id that matches nothing — a deleted item still named in the URL — falls
+  // back to the first live row rather than an empty panel.
+  const fallback = showDefaults || selectedItem || selectedAdder ? null : firstLive;
   const openItem = selectedItem ?? items.find((i) => i.id === fallback?.id) ?? null;
   const openAdder = selectedAdder ?? adders.find((a) => a.id === fallback?.id) ?? null;
 
@@ -108,7 +134,7 @@ export function SolarEquipmentManager({
     ? (tab as AdderTab)
     : "details";
 
-  const idInUrl = openItem?.id ?? openAdder?.id ?? null;
+  const idInUrl = showDefaults ? DEFAULTS_ID : (openItem?.id ?? openAdder?.id ?? null);
   React.useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     if (idInUrl) p.set("item", idInUrl);
@@ -175,6 +201,23 @@ export function SolarEquipmentManager({
           searchPlaceholder="Find equipment or an adder"
           showSearch={items.length + adders.length > 6}
         >
+          {/* Not filtered by the search box: it is the answer to a question
+              about the catalogue, not a row in it, and losing it while looking
+              for a panel is how it became unfindable in the first place. */}
+          <RailGroup>Catalogue</RailGroup>
+          <RailRow
+            title="Default equipment"
+            subtitle={defaultsSummary(items)}
+            mark={
+              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-gold/10 text-gold">
+                <Star className="size-3.5" aria-hidden />
+              </span>
+            }
+            selected={showDefaults}
+            onSelect={() => setSelectedId(DEFAULTS_ID)}
+            needsWork={!items.some((i) => i.isDefault)}
+          />
+
           {KINDS.map((k) => {
             const mine = items.filter((i) => i.kind === k.value && i.isActive && hit(itemName(i)));
             if (mine.length === 0) return null;
@@ -251,7 +294,15 @@ export function SolarEquipmentManager({
           </Hint>
         )}
 
-        {openItem && (
+        {showDefaults && (
+          <DefaultsPanel
+            items={items}
+            defaultBatteryQty={defaultBatteryQty}
+            canEdit={canEdit}
+          />
+        )}
+
+        {!showDefaults && openItem && (
           <HardwarePanel
             // Keyed so switching items remounts the panel: a draft belongs to
             // the item it was seeded from.
@@ -265,7 +316,7 @@ export function SolarEquipmentManager({
           />
         )}
 
-        {openAdder && (
+        {!showDefaults && openAdder && (
           <AdderPanel
             key={openAdder.id}
             adder={openAdder}

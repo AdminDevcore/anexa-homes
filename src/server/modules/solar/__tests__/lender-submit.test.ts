@@ -11,12 +11,17 @@ const designFindFirst = vi.fn()
 const financeFindFirst = vi.fn()
 const proposalFindFirst = vi.fn()
 const submissionCreate = vi.fn()
+/** The hand-written field mapping. Empty on a partner nobody has mapped. */
+const fieldMapFindMany = vi.fn()
+const companyFindFirst = vi.fn()
 vi.mock('@/server/db/client', () => ({
   prisma: {
     solarDesign: { findFirst: (...a: unknown[]) => designFindFirst(...a) },
     solarFinance: { findFirst: (...a: unknown[]) => financeFindFirst(...a) },
     solarProposal: { findFirst: (...a: unknown[]) => proposalFindFirst(...a) },
     solarLenderSubmission: { create: (...a: unknown[]) => submissionCreate(...a) },
+    solarLenderFieldMap: { findMany: (...a: unknown[]) => fieldMapFindMany(...a) },
+    company: { findFirst: (...a: unknown[]) => companyFindFirst(...a) },
   },
 }))
 
@@ -155,6 +160,10 @@ beforeEach(() => {
   // the lender's savings analysis has nowhere else to come from.
   proposalFindFirst.mockReset().mockResolvedValue({ snapshot: SNAPSHOT })
   submissionCreate.mockReset().mockResolvedValue({})
+  // No overrides is the default state of every partner, and the state in which
+  // every other test in this file must go on describing today's behaviour.
+  fieldMapFindMany.mockReset().mockResolvedValue([])
+  companyFindFirst.mockReset().mockResolvedValue({ name: 'Anexa Homes' })
   validateWithAmos.mockReset().mockResolvedValue({ valid: true, problems: [] })
   submitToAmos.mockReset().mockResolvedValue({
     applicationId: 'app-1',
@@ -910,5 +919,133 @@ describe('the delivery setting', () => {
     // The rep's door exists for the device handoff and used to state it here.
     await submitDealToLender({ ...input, submitterName: 'Priya Shah' })
     expect(submitToAmos.mock.calls[0]?.[1]?.delivery).toBe('customer')
+  })
+})
+
+/**
+ * THE HAND-WRITTEN MAPPING, THROUGH THE REAL SUBMISSION.
+ *
+ * `lender-field-map.test.ts` proves the mapping itself. These prove it is
+ * actually WIRED — that the rows are read, the context carries this deal's own
+ * figures, and the body that reaches the partner is the mapped one. A mapping
+ * that works perfectly and is never applied looks identical on a settings
+ * screen.
+ */
+describe('the field mapping', () => {
+  const input = { leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true, fallbackRepName: 'Anexa Homes' }
+  const sent = () => submitToAmos.mock.calls[0]?.[1]
+
+  it('sends the built-in value when nobody has mapped anything', async () => {
+    await submitDealToLender(input)
+    expect(sent()?.applicant.email).toBe('dana@example.com')
+  })
+
+  it('scopes the mapping to the company AND the lender on the deal', async () => {
+    await submitDealToLender(input)
+    expect(fieldMapFindMany.mock.calls[0]?.[0]?.where).toEqual({ companyId: 'co-1', lenderId: 'lender-1' })
+  })
+
+  it('sends a constant an admin typed instead of the deal’s own value', async () => {
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'applicant.email', sourceKey: null, literal: 'applications@partner.test' },
+    ])
+    await submitDealToLender(input)
+    expect(sent()?.applicant.email).toBe('applications@partner.test')
+  })
+
+  it('points a box at another value on the same deal', async () => {
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'applicant.firstName', sourceKey: 'lead.fullName', literal: null },
+    ])
+    await submitDealToLender(input)
+    expect(sent()?.applicant.firstName).toBe('Dana Reyes')
+  })
+
+  it('reads THIS deal’s figures, not a recomputed set', async () => {
+    // The mapping context must carry the frozen document's production, the same
+    // number the payload beside it carries.
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'system.annualConsumptionKwh', sourceKey: 'system.annualProductionKwh', literal: null },
+    ])
+    await submitDealToLender(input)
+    expect(sent()?.system.annualConsumptionKwh).toBe(sent()?.system.annualProductionKwh)
+    expect(sent()?.system.annualConsumptionKwh).toBe(17107)
+  })
+
+  it('carries the reference the attempt is actually filed under', async () => {
+    designFindFirst.mockResolvedValue({ ...DESIGN, lenderSubmissionAttempt: 2 })
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'productSlug', sourceKey: 'design.reference', literal: null },
+    ])
+    await submitDealToLender(input)
+    expect(sent()?.productSlug).toBe('design-abc-2')
+    expect(sent()?.externalId).toBe('design-abc-2')
+  })
+
+  it('stops blocking the deal over a value the partner is no longer told', async () => {
+    // No email on the lead is normally a hard blocker. Once the box is fed from
+    // somewhere else, the lead's own email is not the question any more.
+    designFindFirst.mockResolvedValue({ ...DESIGN, lead: { ...LEAD, email: null } })
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'applicant.email', sourceKey: null, literal: 'applications@partner.test' },
+    ])
+    const r = await submitDealToLender(input)
+    expect(r.ok).toBe(true)
+    expect(sent()?.applicant.email).toBe('applications@partner.test')
+  })
+
+  it('keeps the blocker when the override resolves to nothing on this deal', async () => {
+    designFindFirst.mockResolvedValue({ ...DESIGN, lead: { ...LEAD, email: null } })
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'applicant.email', sourceKey: 'people.submitter', literal: null },
+    ])
+    const r = await submitDealToLender({ ...input, submitterName: null })
+    expect(r).toMatchObject({ ok: false, kind: 'deal' })
+    expect(r.ok === false && r.problems).toContain('The customer has no email address on file.')
+    expect(submitToAmos).not.toHaveBeenCalled()
+  })
+
+  it('refuses a constant nobody can read, before the network', async () => {
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'termMonths', sourceKey: null, literal: 'three hundred' },
+    ])
+    const r = await submitDealToLender(input)
+    expect(r).toMatchObject({ ok: false, kind: 'deal' })
+    expect(submitToAmos).not.toHaveBeenCalled()
+  })
+
+  it('records the MAPPED body, which is the one that was sent', async () => {
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'applicant.phone', sourceKey: null, literal: '5125550199' },
+    ])
+    await submitDealToLender(input)
+    const request = submissionCreate.mock.calls[0]?.[0]?.data?.request
+    expect(request.applicant.phone).toBe('5125550199')
+  })
+
+  it('previews exactly what would be sent, mapping and all', async () => {
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'applicant.lastName', sourceKey: null, literal: 'Reyes-Whitfield' },
+    ])
+    const preview = await readLenderPayloadPreview('lead-1', 'co-1', 'Rep Name')
+    expect(preview.mode === 'api' && preview.ready && preview.payload.applicant.lastName).toBe('Reyes-Whitfield')
+  })
+
+  it('shows the customer the mapped address on the confirmation, not the lead’s', async () => {
+    // The summary is what a homeowner reads before pressing. It has to describe
+    // the application that will actually be filed.
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'property.city', sourceKey: null, literal: 'Round Rock' },
+    ])
+    const status = await readLenderSubmission('lead-1', 'co-1')
+    expect(status.mode === 'api' && status.ready && status.summary.property).toContain('Round Rock')
+  })
+
+  it('cannot be made to send an amount nobody priced', async () => {
+    fieldMapFindMany.mockResolvedValue([
+      { wireField: 'requestedAmount', sourceKey: null, literal: '1.00' },
+    ])
+    await submitDealToLender(input)
+    expect(sent()?.requestedAmount).toBe('150180.00')
   })
 })

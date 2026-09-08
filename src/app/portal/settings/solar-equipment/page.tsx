@@ -6,6 +6,7 @@ import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-he
 import { prisma } from "@/server/db/client";
 import { SolarEquipmentManager } from "@/components/portal/solar-equipment-manager";
 import { catalogueBasis } from "@/server/modules/solar/adders";
+import { getSolarSettings } from "@/server/modules/solar/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,12 @@ export default async function SolarEquipmentPage({
     select: { id: true, name: true, isActive: true, rank: true, notes: true },
   });
 
+  // For the defaults panel: how many batteries a storage deal starts with. It
+  // used to live two screens away under Solar Settings, which is why nobody
+  // found it — it is a fact about the battery you standardised on, so it now
+  // sits beside the field that names it.
+  const settings = await getSolarSettings(user.companyId);
+
   const items = await prisma.solarEquipment.findMany({
     where: { companyId: user.companyId },
     // Sellable first, then newest AVL year, so the current list leads.
@@ -46,11 +53,12 @@ export default async function SolarEquipmentPage({
     <div className="space-y-6">
       <SettingsScreenHeader
         section="solar_equipment"
-        description="What reps can pick from when they build a system. Adders are rank-ordered, so the ones you want sold lead."
+        description="What reps can pick from when they build a system, and what a new design starts on. Adders are rank-ordered, so the ones you want sold lead."
       />
       <SolarEquipmentManager
         canEdit={can(user, "update", "Settings")}
         lenders={lenders}
+        defaultBatteryQty={settings.defaultBatteryQty}
         initialItemId={one(params.item)}
         initialTab={one(params.tab)}
         items={items

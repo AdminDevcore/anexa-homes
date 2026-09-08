@@ -2,7 +2,47 @@
 
 import * as React from "react";
 import { Caution, ChoiceCards, Hint, Panel, TextField } from "@/components/portal/settings-kit/fields";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { FIELD_SOURCES, WIRE_FIELDS, type FieldKind } from "@/server/modules/solar/lender-field-map";
 import type { LenderRow } from "./types";
+
+/** What a row is set to. Absent from the draft entirely means "built-in". */
+export type FieldMapDraft = Record<string, { sourceKey: string | null; literal: string }>;
+
+/** The sentinel the picker uses for "let the built-in source stand". */
+export const BUILT_IN = "__default__";
+/** ...and for "I will type the value myself". */
+export const CONSTANT = "__constant__";
+
+/**
+ * WHICH OPTION A ROW IS SHOWING.
+ *
+ * Its own function because getting it wrong is invisible: derived from the
+ * literal being non-empty, choosing “A constant I type…” stored an empty one,
+ * which read back as built-in — so the select snapped shut on the old value and
+ * the box to type in never appeared. ABSENCE is built-in; a row with no source
+ * is a constant, typed or not yet.
+ */
+export function rowSelection(
+  entry: { sourceKey: string | null; literal: string } | undefined,
+): string {
+  if (!entry) return BUILT_IN;
+  // The literal wins where a row somehow carries both, because that is what
+  // `applyFieldMap` sends. The save action stores one or the other, so this is
+  // unreachable today — and a screen that disagreed with the wire about which
+  // half was live is exactly the bug nobody would think to look for.
+  if (entry.literal.trim() !== "") return CONSTANT;
+  return entry.sourceKey === null ? CONSTANT : entry.sourceKey;
+}
 
 /**
  * WHAT THIS PARTNER'S API IS TOLD, AND WHERE EACH FIGURE COMES FROM.
@@ -13,11 +53,7 @@ import type { LenderRow } from "./types";
  * admin asking "does the loan amount go over before or after the tax credit"
  * had no way to answer it short of reading the source.
  *
- * So: every field on the wire, named, with the screen that owns its value —
- * INCLUDING the ones the settings below decide. A list of "everything else"
- * that leaves out the loan amount and the saving is not a list anybody can
- * check a partner's setup against, so the settings appear in the table too,
- * marked, reading back whichever answer this partner is configured to give.
+ * So: every field on the wire, named, with the screen that owns its value.
  *
  * MOST OF IT IS NOT A CHOICE, and the table says so rather than offering a
  * dropdown per row. A first name has exactly one sensible source.
@@ -41,16 +77,6 @@ import type { LenderRow } from "./types";
  * deal's numbers is a settings screen pretending to be a deal; the payload
  * inspector on a proposal's preview shows the real body for the real deal.
  */
-/** The unsaved state of this tab, as the detail screen holds it. */
-export type SubmissionDraft = {
-  submissionAmountBasis: LenderRow["submissionAmountBasis"];
-  submissionSavingBasis: LenderRow["submissionSavingBasis"];
-  submissionSavingHorizon: LenderRow["submissionSavingHorizon"];
-  submissionRepNameBasis: LenderRow["submissionRepNameBasis"];
-  submissionRepName: string;
-  submissionDelivery: LenderRow["submissionDelivery"];
-};
-
 export function SubmissionMapping({
   lender,
   draft,
@@ -60,17 +86,29 @@ export function SubmissionMapping({
   onRepNameBasis,
   onRepName,
   onDelivery,
+  onFieldMap,
 }: {
   lender: LenderRow;
-  draft: SubmissionDraft;
+  draft: {
+    submissionAmountBasis: LenderRow["submissionAmountBasis"];
+    submissionSavingBasis: LenderRow["submissionSavingBasis"];
+    submissionSavingHorizon: LenderRow["submissionSavingHorizon"];
+    submissionRepNameBasis: LenderRow["submissionRepNameBasis"];
+    submissionRepName: string;
+    submissionDelivery: LenderRow["submissionDelivery"];
+    fieldMap: FieldMapDraft;
+  };
   onAmountBasis: (v: LenderRow["submissionAmountBasis"]) => void;
   onSavingBasis: (v: LenderRow["submissionSavingBasis"]) => void;
   onSavingHorizon: (v: LenderRow["submissionSavingHorizon"]) => void;
   onRepNameBasis: (v: LenderRow["submissionRepNameBasis"]) => void;
   onRepName: (v: string) => void;
   onDelivery: (v: LenderRow["submissionDelivery"]) => void;
+  /** The whole map, replaced — see `setLenderFieldMapAction` for why. */
+  onFieldMap: (next: FieldMapDraft) => void;
 }) {
   const wired = !!lender.apiBaseUrl && !!lender.apiProductSlug;
+  const mapped = Object.keys(draft.fieldMap).length;
 
   return (
     <div className="space-y-4">
@@ -271,47 +309,59 @@ export function SubmissionMapping({
         />
       </Panel>
 
+      <Panel title="Everything else on the application">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Each of these has a sensible built-in source, and leaving them alone is right for
+            almost every partner: what a rep sees on the deal is what the lender is told. Where
+            this one wants something else in a box, point it at another value or type a constant —
+            it takes effect on the next submission.
+          </p>
+          {mapped > 0 && (
+            <button
+              type="button"
+              onClick={() => onFieldMap({})}
+              className="shrink-0 text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            >
+              Reset all {mapped} to built-in
+            </button>
+          )}
+        </div>
 
-      <Panel title="Everything on the application">
-        <p className="text-sm text-muted-foreground">
-          Every field on the wire, in the order the body carries them. The five marked{" "}
-          <span className="font-medium text-foreground">above</span> are the settings on this tab —
-          they are listed here too so the whole application can be read in one place. The rest are
-          fixed, because each has exactly one sensible source: change the value on the screen that
-          owns it. There is no separate mapping, so what a rep sees is always what the lender is
-          told.
-        </p>
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[34rem] text-sm">
+          <table className="w-full min-w-[46rem] text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <th className="py-2 pr-4 font-medium">They receive</th>
-                <th className="py-2 pr-4 font-medium">From</th>
-                <th className="py-2 font-medium">Changed on</th>
+                <th className="py-2 pr-4 font-medium">Fed from</th>
+                <th className="py-2 font-medium">Value</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {wireRows(draft).map((r) => (
-                <tr key={r.field} className="align-top">
-                  <td className="py-2 pr-4 font-mono text-xs">{r.field}</td>
-                  <td className="py-2 pr-4">{r.from}</td>
-                  <td className="py-2 text-muted-foreground">
-                    {r.setting ? (
-                      <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
-                        <span className="rounded border border-solar/40 bg-solar/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-foreground/80">
-                          above
-                        </span>
-                        <span>{r.where}</span>
-                      </span>
-                    ) : (
-                      r.where
-                    )}
-                  </td>
-                </tr>
+              {WIRE_FIELDS.map((f) => (
+                <MappingRow
+                  key={f.field}
+                  field={f}
+                  entry={draft.fieldMap[f.field]}
+                  onChange={(next) => {
+                    const copy = { ...draft.fieldMap };
+                    // An absent key IS "built-in" — see the draft's own note.
+                    if (next === null) delete copy[f.field];
+                    else copy[f.field] = next;
+                    onFieldMap(copy);
+                  }}
+                />
               ))}
             </tbody>
           </table>
         </div>
+
+        <Hint>
+          The list of values you can point at is fixed, and that is what keeps the promise below:
+          a mapping cannot name a column, only one of these. Three boxes are deliberately absent —
+          the loan amount and the two saving figures — because their true readings are the settings
+          above, and a typed constant there would be a fabricated figure on every deal.
+        </Hint>
         <Hint>
           Nothing else crosses the wire. No social security number, no date of birth and no consent
           flag — authorising a credit pull has to be the customer’s own act, captured on the
@@ -322,90 +372,113 @@ export function SubmissionMapping({
   );
 }
 
-type WireRow = {
-  field: string;
-  from: string;
-  where: string;
-  /** True where a panel above decides it, and `where` names that panel. */
-  setting?: boolean;
-};
-
 /**
- * EVERY FIELD ON THE WIRE, in the order the request body carries them.
+ * ONE BOX, AND WHERE IT IS FED FROM.
  *
- * The settings above are in this table too, marked. They used to be excluded on
- * the reasoning that a row asking a question does not also need a line stating
- * it — but the effect was a section titled "everything else" that omitted the
- * loan amount and the saving, so the one question an admin brings to this
- * screen ("what exactly does this partner receive?") had no single answer on
- * it. A field configured somewhere is still a field on the application.
- *
- * WHAT A SETTING ROW SAYS IN "FROM" IS THE ANSWER THIS PARTNER IS CONFIGURED TO
- * GIVE, not a deal's number: it moves with the controls above and is equally
- * true of a partner with no deals yet. The live figures stay off this screen —
- * the payload inspector on a proposal's preview shows the real body.
+ * The picker offers only sources of the SAME SHAPE as the box — a panel count
+ * cannot be dropped into a surname — because the alternative is an admin
+ * choosing something that looks accepted and is silently ignored at send time.
+ * The server refuses the mismatch too; this just means nobody can pick one.
  */
-function wireRows(draft: SubmissionDraft): WireRow[] {
-  const AMOUNT = "“The amount they are asked to fund”";
-  const SAVING = "“What they mean by a saving”";
-  const SELLER = "“Whose name goes on it”";
-  const DEVICE = "“Who completes the application”";
+function MappingRow({
+  field,
+  entry,
+  onChange,
+}: {
+  field: (typeof WIRE_FIELDS)[number];
+  entry: { sourceKey: string | null; literal: string } | undefined;
+  onChange: (next: { sourceKey: string | null; literal: string } | null) => void;
+}) {
+  /**
+   * A ROW PRESENT WITH NO SOURCE IS "A CONSTANT", EVEN BEFORE ONE IS TYPED.
+   *
+   * Deriving this from the literal being non-empty instead made the picker
+   * un-selectable: choosing “A constant I type…” stored an empty one, which
+   * read back as built-in, and the select snapped shut on the old value before
+   * anybody could type. Absence is built-in; presence is the override.
+   */
+  const selected = rowSelection(entry);
+  const usingConstant = selected === CONSTANT;
+  const groups = groupedSources(field.kind);
+  const builtIn = SOURCE_LABEL.get(field.defaultSource) ?? field.defaultSource;
 
-  const savingBasis =
-    draft.submissionSavingBasis === "net_of_payment"
-      ? "The bill the proposal says stops arriving, less what the system costs"
-      : "The electricity bill the proposal says stops arriving";
-  const savingHorizon =
-    draft.submissionSavingHorizon === "term_average"
-      ? ", averaged over every year it compares"
-      : ", in the first twelve months";
-
-  const fixedName = draft.submissionRepName.trim();
-  const seller =
-    draft.submissionRepNameBasis === "fixed"
-      ? fixedName.length > 0
-        ? `Always “${fixedName}”, whoever sold it`
-        : "No name typed yet, so the deal's rep is still sent"
-      : draft.submissionRepNameBasis === "submitter"
-        ? "Whoever pressed the button — the deal's rep where the household pressed it"
-        : "The rep the deal is assigned to";
-
-  return [
-    { field: "externalId", from: "The design's id, so a resend cannot open a second file", where: "“Start a new reference”" },
-    { field: "productSlug", from: "This partner's product", where: "Details → Direct submission" },
-    { field: "applicant.firstName", from: "The lead's first name", where: "the deal" },
-    { field: "applicant.lastName", from: "The lead's last name", where: "the deal" },
-    { field: "applicant.email", from: "The lead's email, lowercased", where: "the deal" },
-    { field: "applicant.phone", from: "The lead's phone, digits only", where: "the deal" },
-    { field: "property.line1 / city / state / postalCode", from: "The lead's address", where: "the deal" },
-    { field: "property.ownerOccupied", from: "Answered when QUALIFY is pressed — stored nowhere", where: "the send dialog" },
-    { field: "system.annualProductionKwh", from: "The proposal's year-one production", where: "the designer, then regenerate" },
-    { field: "system.annualConsumptionKwh", from: "The proposal's annual usage", where: "Energy, then regenerate" },
-    { field: "system.retailRatePerKwh", from: "The proposal's utility rate, in dollars per kWh", where: "Energy, then regenerate" },
-    { field: "system.estAnnualSaving", from: `${savingBasis}${savingHorizon}`, where: SAVING, setting: true },
-    { field: "system.estMonthlySaving", from: "The annual figure above ÷ 12, rounded once so the two agree", where: SAVING, setting: true },
-    { field: "equipment[].brand / model", from: "This partner's own name for the item", where: "the Equipment tab" },
-    { field: "equipment[].quantity — panels", from: "The panel count on the roof drawing", where: "the designer" },
-    { field: "equipment[].quantity — inverters", from: "Array watts ÷ the item's rated watts", where: "Solar Equipment → Rated W" },
-    { field: "equipment[].quantity — batteries", from: "The battery count on the design", where: "the designer" },
-    { field: "requestedAmount", from: amountFrom(draft.submissionAmountBasis), where: AMOUNT, setting: true },
-    { field: "termMonths", from: "The proposal's loan term", where: "Financing, then regenerate" },
-    { field: "salesRepName", from: seller, where: SELLER, setting: true },
-    {
-      field: "delivery",
-      from:
-        draft.submissionDelivery === "customer"
-          ? "Only the partner's own email and text reach the household"
-          : "The completion link comes back, for the rep's own device",
-      where: DEVICE,
-      setting: true,
-    },
-  ];
+  return (
+    <tr className="align-top">
+      <td className="py-2 pr-4 font-mono text-xs">
+        {field.field}
+        {!field.required && (
+          <span className="ml-1.5 font-sans text-[10px] uppercase tracking-wide text-muted-foreground">
+            optional
+          </span>
+        )}
+      </td>
+      <td className="py-2 pr-4">
+        <Select
+          value={selected}
+          onValueChange={(v) => {
+            if (v === BUILT_IN) return onChange(null);
+            if (v === CONSTANT) return onChange({ sourceKey: null, literal: entry?.literal ?? "" });
+            onChange({ sourceKey: v, literal: "" });
+          }}
+        >
+          <SelectTrigger className="h-8 w-full min-w-[15rem] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={BUILT_IN}>{builtIn} (built-in)</SelectItem>
+            {groups.map((g) => (
+              <SelectGroup key={g.group}>
+                <SelectLabel>{g.group}</SelectLabel>
+                {g.sources.map((src) => (
+                  <SelectItem key={src.key} value={src.key}>
+                    {src.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+            <SelectGroup>
+              <SelectLabel>Or</SelectLabel>
+              <SelectItem value={CONSTANT}>A constant I type…</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </td>
+      <td className="py-2 text-muted-foreground">
+        {usingConstant ? (
+          <Input
+            className="h-8 text-xs"
+            value={entry?.literal ?? ""}
+            placeholder={PLACEHOLDER[field.kind]}
+            aria-label={`The constant sent as ${field.field}`}
+            onChange={(e) => onChange({ sourceKey: null, literal: e.target.value })}
+          />
+        ) : selected === BUILT_IN ? (
+          <span className="text-xs">Changed on {field.changedOn}</span>
+        ) : (
+          <span className="text-xs italic">Overridden — no longer read from {field.changedOn}</span>
+        )}
+      </td>
+    </tr>
+  );
 }
 
-/** The figure this partner is currently configured to be asked for. */
-function amountFrom(basis: SubmissionDraft["submissionAmountBasis"]): string {
-  if (basis === "customer_obligation") return "What the proposal says the household owes";
-  if (basis === "after_credits") return "The contract value, less the credits the proposal quotes";
-  return "The proposal's contract value, before any tax credit";
+const SOURCE_LABEL = new Map(FIELD_SOURCES.map((s) => [s.key, s.label]));
+
+/** The compatible sources, in the order the catalogue lists their groups. */
+function groupedSources(kind: FieldKind) {
+  const out: { group: string; sources: typeof FIELD_SOURCES }[] = [];
+  for (const src of FIELD_SOURCES) {
+    if (src.kind !== kind) continue;
+    const last = out.find((g) => g.group === src.group);
+    if (last) last.sources.push(src);
+    else out.push({ group: src.group, sources: [src] });
+  }
+  return out;
 }
+
+const PLACEHOLDER: Record<FieldKind, string> = {
+  string: "Typed exactly as they expect it",
+  number: "A whole number",
+  boolean: "yes or no",
+  rate: "$0.233 per kWh",
+};

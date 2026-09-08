@@ -72,6 +72,13 @@ export type LenderRow = {
   /** Whether the completion link comes back for a rep to hand over. */
   submissionDelivery: "in_person" | "customer";
   /**
+   * Boxes on this partner's application pointed somewhere other than their
+   * built-in source. EMPTY on every partner nobody has mapped, and the screen
+   * renders the full table from the catalogue either way — a row here is an
+   * override, not a field.
+   */
+  fieldMap: { wireField: string; sourceKey: string | null; literal: string | null }[];
+  /**
    * THE PROGRAMME CONTRIBUTION — the one setting on this screen that makes the
    * contract value and the customer's obligation two different numbers.
    *
@@ -315,6 +322,13 @@ export function draftFrom(lender: LenderRow) {
     submissionRepNameBasis: lender.submissionRepNameBasis,
     submissionRepName: lender.submissionRepName ?? "",
     submissionDelivery: lender.submissionDelivery,
+    /**
+     * Keyed by field, so a row the admin has cleared is an ABSENT key rather
+     * than a row that has to be remembered as deleted. Saved as a list.
+     */
+    fieldMap: Object.fromEntries(
+      lender.fieldMap.map((m) => [m.wireField, { sourceKey: m.sourceKey, literal: m.literal ?? "" }])
+    ) as Record<string, { sourceKey: string | null; literal: string }>,
     batteryPayMode: lender.batteryPayMode,
     ppwMode: (lender.maxFinalPpwCents == null
       ? "normal"

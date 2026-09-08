@@ -177,15 +177,25 @@ export function preflightAmosSubmission(
   design: AmosDesignInput,
   /** Named in the mapping problems, which send somebody to this partner's screen. */
   lenderName = 'This lender',
+  /**
+   * Boxes a hand-written field mapping now fills, so the deal is not blocked
+   * over a value the partner is no longer told.
+   *
+   * Empty for every partner nobody has mapped, which is the default and was the
+   * only behaviour before mappings existed. See `suppliedByMapping` — only an
+   * override that actually RESOLVES gets in here, so a mapping that comes out
+   * empty leaves its original blocker exactly where it was.
+   */
+  supplied: ReadonlySet<string> = new Set(),
 ): string[] {
   const problems: string[] = []
 
-  if (!lead.email?.trim()) problems.push('The customer has no email address on file.')
-  if (!lead.phone?.trim()) problems.push('The customer has no phone number on file.')
-  if (!lead.address?.trim()) problems.push('The property has no street address.')
-  if (!lead.city?.trim()) problems.push('The property has no city.')
-  if (!lead.state?.trim()) problems.push('The property has no state.')
-  if (!lead.zip?.trim()) problems.push('The property has no ZIP code.')
+  if (!supplied.has('email') && !lead.email?.trim()) problems.push('The customer has no email address on file.')
+  if (!supplied.has('phone') && !lead.phone?.trim()) problems.push('The customer has no phone number on file.')
+  if (!supplied.has('address') && !lead.address?.trim()) problems.push('The property has no street address.')
+  if (!supplied.has('city') && !lead.city?.trim()) problems.push('The property has no city.')
+  if (!supplied.has('state') && !lead.state?.trim()) problems.push('The property has no state.')
+  if (!supplied.has('zip') && !lead.zip?.trim()) problems.push('The property has no ZIP code.')
 
   if (!design.module) {
     problems.push('The design has no panel selected.')
@@ -334,7 +344,7 @@ function describe(ref: NonNullable<EquipmentRef>): string {
  * the guess this system has always made; filling the rated watts in on the
  * equipment item is what turns it into an answer.
  */
-function inverterCount(design: AmosDesignInput): number {
+export function inverterCount(design: AmosDesignInput): number {
   const rated = design.inverter?.ratingW
   if (!rated || rated <= 0) return design.moduleQty
   const arrayWatts = design.systemSizeKwDc * 1000

@@ -6,7 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { getSolarSettings } from "./settings";
-import { resolveSizingModule } from "./sizing";
+import { resolveDesignBattery, resolveSizingModule } from "./sizing";
 import { recomputeDesignFigures } from "./recompute";
 import { canGenerate } from "@/lib/solar-validation";
 import { readSolarReadiness } from "./readiness";
@@ -15,6 +15,7 @@ import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
 import { dealRebateTotalCents } from "./storage-queries";
 import { priceStorageStored } from "@/lib/solar-money";
+import { FIELD_SOURCES, WIRE_FIELDS } from "./lender-field-map";
 
 const fail = (error: string) => ({ ok: false as const, error });
 const ok = () => ({ ok: true as const });
@@ -1027,6 +1028,93 @@ export async function setDefaultSolarEquipmentAction(id: string, isDefault: bool
 }
 
 /**
+ * The three defaults, set together, on one screen.
+ *
+ * `setDefaultSolarEquipmentAction` above is the one-click version and stays —
+ * but it can only be reached from the overflow menu of the item you are already
+ * looking at, which meant the only way to ANSWER "what does a new design start
+ * on?" was to open all 104 items and look for stars. A company setting up its
+ * approved-vendor list for the year is answering that question three times, so
+ * it gets one panel that shows all three answers at once and writes them
+ * together.
+ *
+ * `undefined` for a kind leaves that default exactly where it is; `null` clears
+ * it. One transaction, because demoting the incumbent and promoting the
+ * successor must not be separable — the partial unique index refuses two, and a
+ * failure between the two halves would leave the kind with no default at all.
+ *
+ * The battery count rides along because it is the same decision: a company that
+ * standardises on two Powerwalls is saying one thing, not two, and splitting it
+ * across two screens is what made the count invisible in the first place.
+ */
+const equipmentDefaultsSchema = z.object({
+  moduleId: z.string().min(1).nullish(),
+  inverterId: z.string().min(1).nullish(),
+  batteryId: z.string().min(1).nullish(),
+  defaultBatteryQty: z.number().int().min(1).max(20).optional(),
+});
+
+export async function setSolarEquipmentDefaultsAction(
+  input: z.infer<typeof equipmentDefaultsSchema>
+) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+  const parsed = equipmentDefaultsSchema.safeParse(input);
+  if (!parsed.success) return fail("Those defaults could not be read.");
+  const { moduleId, inverterId, batteryId, defaultBatteryQty } = parsed.data;
+
+  const picks: [string | null | undefined, "module" | "inverter" | "battery"][] = [
+    [moduleId, "module"],
+    [inverterId, "inverter"],
+    [batteryId, "battery"],
+  ];
+
+  // Every id has to be OUR catalogue, the right kind, and still sellable. A
+  // retired product as the default is the one state `setSolarEquipmentActive`
+  // exists to prevent: it would put a product nobody can pick on every new
+  // design.
+  for (const [id, kind] of picks) {
+    if (!id) continue;
+    const found = await prisma.solarEquipment.findFirst({
+      where: { companyId: user.companyId, id, kind },
+      select: { id: true, isActive: true },
+    });
+    if (!found) return fail(`That ${kind} is not in your catalogue.`);
+    if (!found.isActive) {
+      return fail(`A retired ${kind} cannot be the default. Make it sellable again first.`);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const [id, kind] of picks) {
+      if (id === undefined) continue;
+      await tx.solarEquipment.updateMany({
+        where: {
+          companyId: user.companyId,
+          kind,
+          isDefault: true,
+          ...(id ? { NOT: { id } } : {}),
+        },
+        data: { isDefault: false },
+      });
+      if (id) await tx.solarEquipment.update({ where: { id }, data: { isDefault: true } });
+    }
+
+    if (defaultBatteryQty !== undefined) {
+      await tx.solarSettings.upsert({
+        where: { companyId: user.companyId },
+        create: { companyId: user.companyId, defaultBatteryQty },
+        update: { defaultBatteryQty },
+      });
+    }
+  });
+
+  revalidatePath("/portal/settings/solar-equipment");
+  revalidatePath("/portal/settings/solar");
+  return ok();
+}
+
+/**
  * How many designs still point at this catalogue item.
  *
  * The three foreign keys are ON DELETE SET NULL, which is the quiet failure
@@ -1679,6 +1767,78 @@ export async function setLenderAdderRulesAction(
   return { ok: true as const, count: data.filter((d) => d.financedOnTop).length };
 }
 
+/**
+ * THE HAND-WRITTEN FIELD MAPPING FOR ONE PARTNER.
+ *
+ * The whole set, replacing whatever was there: the screen holds every row and
+ * saves them together, so a row that has gone back to its built-in source is
+ * an ABSENCE here, and merging would leave it overridden forever.
+ *
+ * Every wireField and sourceKey is checked against the catalogue in
+ * `lender-field-map.ts` rather than trusted. That catalogue is what keeps a
+ * mapping from naming an arbitrary column, and a server action that took the
+ * browser's word for it would hand that guarantee to anyone who can post.
+ */
+export async function setLenderFieldMapAction(
+  lenderId: string,
+  entries: { wireField: string; sourceKey: string | null; literal: string | null }[]
+) {
+  const user = await requireUser();
+  if (!can(user, "update", "Settings")) return fail("Not allowed.");
+
+  const lender = await prisma.solarLender.findFirst({
+    where: { companyId: user.companyId, id: lenderId },
+    select: { id: true },
+  });
+  if (!lender) return fail("Not found.");
+
+  const fields = new Map(WIRE_FIELDS.map((f) => [f.field, f]));
+  const sources = new Map(FIELD_SOURCES.map((s) => [s.key, s]));
+
+  const seen = new Set<string>();
+  const data: { companyId: string; lenderId: string; wireField: string; sourceKey: string | null; literal: string | null }[] = [];
+
+  for (const e of entries) {
+    const def = fields.get(e.wireField);
+    if (!def || seen.has(e.wireField)) continue;
+
+    const literal = (e.literal ?? "").trim();
+    if (literal.length > 200) return fail(`The constant for “${e.wireField}” is too long.`);
+
+    // A source of the wrong SHAPE is refused here rather than silently ignored
+    // at send time: an admin who picked it deserves to be told, and the row
+    // would otherwise sit on the screen looking like it did something.
+    const source = e.sourceKey ? sources.get(e.sourceKey) : null;
+    if (e.sourceKey && !source) return fail(`“${e.sourceKey}” is not a value this build can send.`);
+    if (source && source.kind !== def.kind) {
+      return fail(`“${source.label}” cannot fill “${def.field}” — the two are different kinds of value.`);
+    }
+
+    // Neither half filled in is the row saying "leave it alone", and the
+    // absence of a row is how that is stored.
+    if (!source && literal === "") continue;
+
+    seen.add(e.wireField);
+    data.push({
+      companyId: user.companyId,
+      lenderId,
+      // The constant wins where both are present, and `applyFieldMap` reads it
+      // the same way — so what is stored cannot mean one thing here and another
+      // at submission time.
+      sourceKey: literal === "" ? (source?.key ?? null) : null,
+      literal: literal === "" ? null : literal,
+      wireField: e.wireField,
+    });
+  }
+
+  await prisma.$transaction([
+    prisma.solarLenderFieldMap.deleteMany({ where: { lenderId, companyId: user.companyId } }),
+    ...(data.length ? [prisma.solarLenderFieldMap.createMany({ data, skipDuplicates: true })] : []),
+  ]);
+  revalidatePath("/portal/settings/solar-lenders");
+  return { ok: true as const, count: data.length };
+}
+
 // ---------------------------------------------------------------------------
 // Credit applications
 // ---------------------------------------------------------------------------
@@ -1738,9 +1898,20 @@ const systemTypeSchema = z.object({
  * would quietly inherit the kilowatt-hours of an array nobody is installing.
  * This is the one place that can be sure, so it clears them here.
  *
- * Switching AWAY from storage clears nothing. The roof was never drawn, so
- * there is nothing stale to remove, and the battery stays because a
- * solar-plus-storage deal wants it.
+ * THE BATTERY FOLLOWS THE ANSWER, because this control IS the question "does
+ * this deal have storage on it". Moving to solar + storage or storage only puts
+ * the catalogue's default battery in an EMPTY slot, at the company's standard
+ * quantity — the same rule the module and the inverter already follow, applied
+ * at the one moment a rep has actually said storage is part of the sale. A slot
+ * that already names a battery is never touched: swapping in a default over a
+ * rep's own pick is not a default. And a company that has starred no battery
+ * gets nothing, exactly as before.
+ *
+ * Moving to solar-only TAKES THE BATTERY OFF, count and all. It used to stay,
+ * on the reasoning that only the array went stale — but a battery on a deal
+ * quoting panels only is the same class of lie: `proposal-generate` reads the
+ * slot whatever the system type says, so the document would price storage the
+ * rep has just declared is not being sold.
  */
 export async function setSolarSystemTypeAction(input: unknown) {
   const user = await requireUser();
@@ -1751,15 +1922,23 @@ export async function setSolarSystemTypeAction(input: unknown) {
 
   const design = await prisma.solarDesign.findFirst({
     where: { leadId, companyId: user.companyId },
-    select: { id: true, systemType: true },
+    select: { id: true, systemType: true, batteryId: true, batteryQty: true },
   });
   if (!design) return fail("This deal has no design yet.");
   if (design.systemType === systemType) return ok();
+
+  const battery = await resolveDesignBattery(
+    user.companyId,
+    systemType,
+    design.batteryId,
+    design.batteryQty
+  );
 
   await prisma.solarDesign.update({
     where: { id: design.id },
     data: {
       systemType,
+      ...battery,
       ...(systemType === "storage"
         ? {
             systemSizeKwDc: 0,
