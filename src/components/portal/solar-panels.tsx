@@ -40,11 +40,7 @@ import {
   type FinalPpwMode,
 } from "@/lib/solar-money";
 import { SystemPriceCard, StoragePriceCard } from "@/components/portal/solar/system-price";
-import { ContractValueCard } from "@/components/portal/solar/contract-value";
-import {
-  reconcileContract,
-  type LenderContractAdjustment,
-} from "@/lib/solar-contract-adjustment";
+import { CreditClaimsCard } from "@/components/portal/solar/credit-claims";
 import {
   buildCreditLadder,
   type CreditClaims,
@@ -740,17 +736,6 @@ export type LenderOption = {
    * cut, cents. Null — nearly every lender — means no floor.
    */
   minBasePpwCents: number | null;
-  /**
-   * This partner's programme contribution, if it runs one — the only thing on a
-   * lender that makes the contract value and the customer's obligation two
-   * different numbers.
-   *
-   * READ-ONLY HERE. Nothing on the financing step writes it: it is a term of
-   * the partner's programme, set once in Settings by somebody with permission
-   * to change settings, and a rep sees the figures it produces without a
-   * control to move them. Absent on every lender that has none configured.
-   */
-  contractAdjustment: LenderContractAdjustment | null;
 };
 
 export type LenderProductOption = {
@@ -1055,11 +1040,6 @@ export function SolarFinancePanel({
                 label: lenderProductLabel(p),
                 maxFinalPpwCents: l.maxFinalPpwCents,
                 finalPpwMode: l.finalPpwMode,
-                // Merged in for the same reason the ceiling is: the credits a
-                // column quotes are earned on the partner's contract, and a
-                // comparison should not need a second collection to find out
-                // what that partner writes its paper at.
-                contractAdjustment: l.contractAdjustment,
               },
             ]
           : [];
@@ -1239,49 +1219,30 @@ export function SolarFinancePanel({
    * because both sides compute them the same way.
    */
   /**
-   * THE PRICE THE DOCUMENT WILL QUOTE — the partner's contract value where
-   * there is one, the priced figure where there is not.
+   * THE PRICE THE DOCUMENT WILL QUOTE.
    *
-   * The same resolution `priceOption` makes at generation, made here so the
-   * strip in front of a rep cannot disagree with the proposal. The last time
-   * this screen priced a partner's deal by its own arithmetic instead of the
-   * server's it quoted $67,896 under a shelf of cards saying $60,500 — see
+   * The same figure `priceOption` arrives at during generation, read here so
+   * the strip in front of a rep cannot disagree with the proposal. The last
+   * time this screen priced a partner's deal by its own arithmetic instead of
+   * the server's it quoted $67,896 under a shelf of cards saying $60,500 — see
    * `livePrice` above, which exists because of exactly that.
-   *
-   * Loan only, for the same reason the card below is: a cash deal has no
-   * partner advancing a contract for a contribution to sit on.
    */
-  const liveAdjustment =
-    isLoan && livePrice
-      ? reconcileContract({
-          customerObligationCents: livePrice.breakdown.contractPriceCents,
-          adjustment: quotedLender?.contractAdjustment ?? null,
-          lenderName: quotedLender?.name ?? null,
-        })
-      : null;
-  const documentPriceCents =
-    liveAdjustment?.lenderContractValueCents ??
-    livePrice?.breakdown.contractPriceCents ??
-    null;
+  const documentPriceCents = livePrice?.breakdown.contractPriceCents ?? null;
 
   /**
    * THE CREDITS THIS DEAL EARNS, as the card below and the document both draw
    * them — resolved here because the strip now quotes a payment off the bottom
    * of them.
    *
-   * Same call, same inputs as `ContractValueCard`: one ladder on the screen, so
+   * Same call, same inputs as `CreditClaimsCard`: one ladder on the screen, so
    * the strip's second payment cannot be quoted on a net cost the card next to
    * it is not showing.
    */
   const liveLadder =
     isPurchase && livePrice
       ? buildCreditLadder({
-          contractValueCents: liveAdjustment
-            ? liveAdjustment.lenderContractValueCents
-            : livePrice.breakdown.contractPriceCents,
-          quotedPriceCents: liveAdjustment
-            ? liveAdjustment.customerObligationCents
-            : livePrice.breakdown.contractPriceCents,
+          contractValueCents: livePrice.breakdown.contractPriceCents,
+          quotedPriceCents: livePrice.breakdown.contractPriceCents,
           rates: creditRates,
           claims: creditClaims,
         })
@@ -1501,32 +1462,13 @@ export function SolarFinancePanel({
       />
       )}
 
-      {/* WHEN THE CONTRACT AND THE CUSTOMER'S OBLIGATION ARE DIFFERENT
-          NUMBERS. Directly under the price, because it is about the price —
-          and only on the partners that run such a programme, which renders
-          nothing at all on every other deal. */}
+      {/* WHAT THIS PROPOSAL CLAIMS ON THE HOUSEHOLD'S TAX RETURN. Directly
+          under the price, because the credits come off the price — and on
+          every purchase deal, because every purchase deal makes the claim. */}
       {isPurchase && livePrice && (
-        <ContractValueCard
+        <CreditClaimsCard
           leadId={leadId}
-          lenderName={quotedLender?.name ?? null}
-          // Only a loan carries one: cash has no lender advancing a contract
-          // for a contribution to come off, which is the same line the
-          // generated document draws.
-          adjustment={isLoan ? (quotedLender?.contractAdjustment ?? null) : null}
-          systemSizeKwDc={systemSizeKwDc}
-          // A storage job has no installed watts for a rate to be per, and its
-          // breakdown carries no such figure — narrowed on the key rather than
-          // on `isStorage`, which the type system cannot see through.
-          customerFinalPpwCents={
-            "finalPpwCents" in livePrice.breakdown
-              ? Math.round(livePrice.breakdown.finalPpwCents)
-              : null
-          }
-          adderStickerCents={livePrice.breakdown.adderStickerCents}
           customerContractCents={livePrice.breakdown.contractPriceCents}
-          monthlyCents={quote?.monthlyCents ?? null}
-          termMonths={chosen?.termMonths ?? null}
-          aprPct={chosen?.aprPct ?? null}
           creditRates={creditRates}
           claims={creditClaims}
           canEdit={canEdit}
@@ -1850,16 +1792,6 @@ export type ProposalVersion = {
    * opens on carries a credits-applied scenario beside the one at par.
    */
   hasCreditSwitch?: boolean;
-  /**
-   * Whether the version this row is about froze a contract adjustment — a
-   * partner whose paper is written for more than the household owes.
-   *
-   * Read off the SNAPSHOT rather than off the deal's current lender, because
-   * the row is about a document that already exists: changing lenders on the
-   * deal tomorrow must not make a submission summary appear against a version
-   * generated for somebody else, or disappear from one that has it.
-   */
-  hasContractAdjustment?: boolean;
   /**
    * WHETHER THIS VERSION WENT TO THE LENDER, and how they answered.
    *
@@ -2337,23 +2269,6 @@ export function ProposalVersionList({
                     )}
                   </span>
                 )
-              )}
-
-              {/* THE FUNDER'S PROCESSING DOCUMENT, on the signed row it
-                  describes. Not a second proposal — see
-                  ParticipateSubmissionSummary — which is why it is worded as a
-                  summary and sits apart from "PDF in Proposal", the link to the
-                  customer's actual signed copy. */}
-              {v.signedAt && v.hasContractAdjustment && (
-                <a
-                  href={`/api/solar/proposals/${v.id}/submission`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs underline underline-offset-2"
-                  title="An internal summary for the finance partner. Not the document the customer signed."
-                >
-                  Submission summary
-                </a>
               )}
 
               {canEdit && !v.sentAt && !v.supersededAt && (

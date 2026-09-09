@@ -992,13 +992,10 @@ function amountOnBasis(financing: Record<string, unknown>, basis: AmountBasis): 
   const contract = cents(financing.financedAmountCents);
   if (contract == null) return null;
 
-  if (basis === "customer_obligation") {
-    // Only a partner with a programme contribution has two numbers here. On
-    // every other deal the obligation IS the contract value, and the absent
-    // block is the document saying so rather than failing to mention it.
-    const adj = financing.lenderAdjustment as { customerObligationCents?: unknown } | null;
-    return cents(adj?.customerObligationCents) ?? contract;
-  }
+  // `customer_obligation` falls through to the contract value: a document
+  // quotes ONE price, and what the household owes is what the paper is written
+  // at. The member survives on the enum for the partner that one day writes
+  // its paper differently, and resolves to the same figure until then.
 
   if (basis === "after_credits") {
     // The credits the document actually quotes, summed off the ladder rather

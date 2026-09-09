@@ -14,10 +14,6 @@ import {
   programmeMonthlyCents,
 } from "@/lib/solar-loan";
 import {
-  reconcileContract,
-  type LenderContractAdjustment,
-} from "@/lib/solar-contract-adjustment";
-import {
   buildCreditLadder,
   type CreditClaims,
   type CreditRates,
@@ -71,17 +67,6 @@ export type OfferProduct = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is that lender's ceiling or its flat price. */
   finalPpwMode: FinalPpwMode;
-  /**
-   * The publishing lender's contract programme, where it runs one.
-   *
-   * Carried for ONE reason: the credits are earned on whatever the partner's
-   * paper is written at, and on a programme deal that is above what the
-   * household was quoted. A column that took the credits off the quoted price
-   * instead would print an after-credit payment for a loan nobody is writing —
-   * see `creditsAppliedMonthlyCents` below. Absent on the partners that run no
-   * such programme, which is all of them until an admin configures one.
-   */
-  contractAdjustment?: LenderContractAdjustment | null;
   isActive: boolean;
 };
 
@@ -305,31 +290,15 @@ function purchaseRow(
    * THE SECOND PAYMENT: the same programme, asked about what is left after the
    * household claims the credits this job earns.
    *
-   * Built through the partner's own reconciliation first, because the credits
-   * are earned on the CONTRACT and on a programme deal that is written above
-   * what the household was quoted. `buildCreditLadder` hands the remainder back
-   * as the signing incentive, so on those deals the bottom line is the quoted
-   * price again — the same figure `monthlyCents` above already came off, which
-   * is why the guard below drops the line rather than printing it twice.
-   *
    * Identical arithmetic to `solar-proposal.ts`, on purpose: this is the figure
    * the customer's document puts behind its tax-credit switch, and a shelf
    * quoting a different one is how a rep promises a payment the proposal then
    * refuses to print.
    */
-  const reconciliation = reconcileContract({
-    customerObligationCents: priced.contractPriceCents,
-    adjustment: p.contractAdjustment,
-    lenderName: p.lenderName,
-  });
   const ladder = basis.credits
     ? buildCreditLadder({
-        contractValueCents: reconciliation
-          ? reconciliation.lenderContractValueCents
-          : priced.contractPriceCents,
-        quotedPriceCents: reconciliation
-          ? reconciliation.customerObligationCents
-          : priced.contractPriceCents,
+        contractValueCents: priced.contractPriceCents,
+        quotedPriceCents: priced.contractPriceCents,
         rates: basis.credits.rates,
         claims: basis.credits.claims,
       })

@@ -1356,94 +1356,7 @@ const lenderSchema = z.object({
   submissionRepNameBasis: z.enum(["deal_rep", "submitter", "fixed"]).optional(),
   submissionRepName: z.string().trim().max(120).nullable().optional(),
   submissionDelivery: z.enum(["in_person", "customer"]).optional(),
-
-  // ── The programme contribution ──────────────────────────────────────────
-  // The only setting in this file that makes the contract value and the
-  // customer's obligation two different numbers. See SolarLender's own note.
-
-  /** Whether this partner's paper carries a contribution at all. */
-  contractAdjustmentEnabled: z.boolean().optional(),
-  /** How it is worked out. One member today — see SolarContractAdjustmentType. */
-  contractAdjustmentType: z.enum(["fixed"]).optional(),
-  /**
-   * The fixed figure, cents. $1 to $5,000,000, and bounded for exactly the
-   * reason the $/W cap is: every value outside that band is a typo, and a typo
-   * here does not fail a form, it silently writes a contract value. Somebody
-   * meaning $70,000 and typing it in dollars-as-cents would put $700 on the
-   * paper; somebody slipping a zero would put $700,000.
-   */
-  contractAdjustmentCents: z.number().int().min(100).max(5_000_000_00).nullable().optional(),
-  /**
-   * What the customer's document calls it. NOT defaulted anywhere — see the
-   * column's note. Length-capped because it is printed on a table row.
-   */
-  contractAdjustmentLabel: z.string().trim().max(120).nullable().optional(),
-  /** The reconciliation paragraph, as a template. See `renderDisclosure`. */
-  contractAdjustmentDisclosure: z.string().trim().max(4000).nullable().optional(),
-  /**
-   * When the programme starts applying. Blank clears it, meaning "already
-   * running".
-   *
-   * Wrapped the same way `urlField` is, and for the same reason: an
-   * `.optional().transform()` chain is a ZodEffects, and an effects-typed key
-   * is REQUIRED on the object even when its value may be undefined — which
-   * would force every caller that does not touch dates to send one.
-   */
-  contractAdjustmentEffectiveAt: z.optional(
-    z
-      .string()
-      .trim()
-      .max(40)
-      .nullable()
-      .transform((v) => (v ? new Date(v) : null))
-      .refine(
-        (d) => d === null || !Number.isNaN(d.getTime()),
-        "The effective date is not a date."
-      )
-  ),
-  /** What the household ends up owning, in this partner's own words. */
-  ownershipDisclosure: z.string().trim().max(4000).nullable().optional(),
 });
-
-/**
- * The fields whose change is worth a line in the audit trail, and how each one
- * reads in it.
- *
- * ONLY the money and the wording. A rename, a rank or a notes edit is ordinary
- * housekeeping; these six decide what a contract says a household owes, and
- * "who changed the adjustment, from what, to what, and when" is the question
- * somebody will be asked to answer about them.
- */
-const AUDITED_LENDER_FIELDS = [
-  ["contractAdjustmentEnabled", "adjustment enabled"],
-  ["contractAdjustmentType", "adjustment type"],
-  ["contractAdjustmentCents", "adjustment amount"],
-  ["contractAdjustmentLabel", "customer-facing label"],
-  ["contractAdjustmentDisclosure", "customer disclosure"],
-  ["contractAdjustmentEffectiveAt", "effective date"],
-  ["ownershipDisclosure", "ownership wording"],
-] as const;
-
-type AuditedField = (typeof AUDITED_LENDER_FIELDS)[number][0];
-
-/** How one previous-or-new value reads on an audit line. */
-function auditValue(field: AuditedField, value: unknown): string {
-  if (value === null || value === undefined || value === "") return "not set";
-  if (field === "contractAdjustmentCents" && typeof value === "number") {
-    return (value / 100).toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    });
-  }
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  const s = String(value);
-  // The disclosure runs to four thousand characters; an audit line is read at a
-  // glance, so it records THAT the wording moved and keeps enough to recognise
-  // which wording it was.
-  return s.length > 120 ? `${s.slice(0, 117)}…` : s;
-}
 
 /**
  * Add or rename a lender.
@@ -1456,11 +1369,8 @@ function auditValue(field: AuditedField, value: unknown): string {
 export async function upsertSolarLenderAction(
   id: string | null,
   /**
-   * `z.input`, not `z.infer`. The effective date arrives as the string a date
-   * input produces and is TRANSFORMED into a Date by the schema, so the output
-   * type is not the shape a caller can send — typing the parameter as the
-   * output would oblige the browser to construct a Date and post it across a
-   * server-action boundary that does not carry one.
+   * `z.input`, not `z.infer`. The link fields are TRANSFORMED by the schema —
+   * see `urlField` — so the output type is not the shape a caller can send.
    */
   input: z.input<typeof lenderSchema>
 ) {
@@ -1484,43 +1394,6 @@ export async function upsertSolarLenderAction(
   if (clash) return fail(`"${d.name}" is already in your lender list.`);
 
   /**
-   * A contribution cannot be switched on half-configured.
-   *
-   * Refused HERE as well as at the readiness gate, and the two are not the same
-   * check doing the same job. Readiness stops a broken programme reaching a
-   * customer's document; this stops it being SAVED, so an admin finds out while
-   * they are still looking at the form rather than a rep does, on a deal, a
-   * fortnight later. Both are needed: a lender saved complete can be made
-   * incomplete by nothing this action sees — a partial update from elsewhere,
-   * a restored row — and the deal-side gate is what catches that.
-   */
-  if (d.contractAdjustmentEnabled) {
-    const amount =
-      d.contractAdjustmentCents ??
-      (id
-        ? (
-            await prisma.solarLender.findFirst({
-              where: { companyId: user.companyId, id },
-              select: { contractAdjustmentCents: true },
-            })
-          )?.contractAdjustmentCents ?? null
-        : null);
-    if (amount == null || amount <= 0) {
-      return fail("Set the adjustment amount before switching the contract adjustment on.");
-    }
-    if (!d.contractAdjustmentLabel?.trim()) {
-      return fail(
-        "A contract adjustment needs a customer-facing label — the approved term for it, exactly as the customer's proposal should read."
-      );
-    }
-    if (!d.contractAdjustmentDisclosure?.trim()) {
-      return fail(
-        "A contract adjustment needs a customer disclosure explaining who is responsible for which amount."
-      );
-    }
-  }
-
-  /**
    * The row this call ended up writing. Returned so the caller can OPEN what it
    * just created — adding a partner is the first step of setting one up, and a
    * screen that leaves you on whoever was already selected makes you go and
@@ -1537,94 +1410,21 @@ export async function upsertSolarLenderAction(
      */
     const existing = await prisma.solarLender.findFirst({
       where: { companyId: user.companyId, id },
-      select: {
-        id: true,
-        name: true,
-        contractAdjustmentEnabled: true,
-        contractAdjustmentType: true,
-        contractAdjustmentCents: true,
-        contractAdjustmentLabel: true,
-        contractAdjustmentDisclosure: true,
-        contractAdjustmentEffectiveAt: true,
-        ownershipDisclosure: true,
-      },
+      select: { id: true },
     });
     if (!existing) return fail("Not found.");
     await prisma.solarLender.update({ where: { id }, data: d });
-    await logLenderAdjustmentChanges(user, { id, name: d.name }, existing, d);
     savedId = id;
   } else {
     const created = await prisma.solarLender.create({
       data: { companyId: user.companyId, ...d },
       select: { id: true },
     });
-    // A lender created with a contribution already on it is a change from
-    // nothing, and is recorded as one. Skipped entirely for the ordinary case,
-    // so adding a lender does not write an audit row saying nothing happened.
-    if (d.contractAdjustmentEnabled) {
-      await logLenderAdjustmentChanges(user, { id: created.id, name: d.name }, null, d);
-    }
     savedId = created.id;
   }
   revalidatePath("/portal/settings/solar-equipment");
   revalidatePath("/portal/settings/solar-lenders");
   return { ...ok(), id: savedId as string };
-}
-
-/**
- * Who changed a lender's contribution, from what, to what, and when.
- *
- * ONE ActivityLog row per save, listing every audited field that actually
- * moved — not one row per field, which would bury a single edit under seven
- * lines, and not one row per save regardless, which would fill the log with
- * "nothing changed".
- *
- * Company-scoped with NO lead: this is a settings change and belongs to no
- * deal. Which proposal it was applied to is answered from the other end — every
- * generated version records the figure it was built with on its own event, and
- * carries the frozen reconciliation in its snapshot.
- */
-async function logLenderAdjustmentChanges(
-  user: { companyId: string; userId: string; fullName: string },
-  lender: { id: string; name: string },
-  before: Partial<Record<AuditedField, unknown>> | null,
-  after: Partial<Record<AuditedField, unknown>>
-): Promise<void> {
-  const changes = AUDITED_LENDER_FIELDS.flatMap(([field, label]) => {
-    // A key the form did not send is a field nobody touched, which is different
-    // from one set to null. `undefined` therefore means "unchanged" and is
-    // skipped rather than recorded as a clearing.
-    if (!(field in after) || after[field] === undefined) return [];
-    const from = before ? before[field] : null;
-    const to = after[field];
-    const same =
-      from instanceof Date && to instanceof Date
-        ? from.getTime() === to.getTime()
-        : (from ?? null) === (to ?? null);
-    if (same) return [];
-    return [
-      {
-        field,
-        label,
-        from: auditValue(field, from),
-        to: auditValue(field, to),
-      },
-    ];
-  });
-  if (changes.length === 0) return;
-
-  await prisma.activityLog.create({
-    data: {
-      companyId: user.companyId,
-      type: "system",
-      vertical: "solar",
-      message:
-        `${user.fullName} changed ${lender.name}'s contract adjustment — ` +
-        changes.map((c) => `${c.label}: ${c.from} → ${c.to}`).join("; "),
-      actorId: user.userId,
-      metadata: { lenderId: lender.id, lenderName: lender.name, changes },
-    },
-  });
 }
 
 /**

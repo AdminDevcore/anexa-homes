@@ -114,14 +114,6 @@ export default async function SolarProposalBuilderPage({
         maxFinalPricePerBatteryCents: true, minBasePricePerBatteryCents: true,
         finalBatteryPriceMode: true,
         finalPpwMode: true,
-        // The programme contribution, so the financing step can show a rep
-        // both prices before anything is generated. Read-only on that screen —
-        // it is set in Settings and no control on the deal touches it.
-        contractAdjustmentEnabled: true,
-        contractAdjustmentCents: true,
-        contractAdjustmentLabel: true,
-        contractAdjustmentDisclosure: true,
-        contractAdjustmentEffectiveAt: true,
       },
     }),
     // EVERY lender's rate sheet, not just the chosen one's: the Financing step
@@ -151,38 +143,17 @@ export default async function SolarProposalBuilderPage({
   ]);
 
   /**
-   * Which SIGNED version froze a contract adjustment, so the row can offer the
-   * funder's submission summary.
-   *
-   * Read from the snapshot, and only for signed versions. A set rather than a
-   * single row because a deal can now hold more than one: a signature no longer
-   * closes the deal to new versions, and a household that signs, adds a battery
-   * and signs again has two. The alternative, asking the deal's current lender,
-   * would answer a different question: a lender changed after signature would
-   * make the link appear against a document generated for somebody else.
-   */
-  const snapshotFacts = await prisma.solarProposal.findMany({
-    where: { companyId: user.companyId, leadId: lead.id },
-    select: { id: true, signedAt: true, snapshot: true },
-  });
-  const signedWithAdjustment = new Set(
-    snapshotFacts
-      .filter((p) => {
-        if (!p.signedAt) return false;
-        const financing = (p.snapshot as { financing?: { lenderAdjustment?: unknown } } | null)
-          ?.financing;
-        return !!financing?.lenderAdjustment;
-      })
-      .map((p) => p.id)
-  );
-  /**
    * Which versions have two readings to file — the option the document opens on
    * carries a credits-applied scenario beside the one at par.
    *
-   * Off the SNAPSHOT, like the set above: the row is about a document that
-   * already exists, and re-pricing the deal tomorrow must not change how many
-   * copies a version generated today is supposed to have.
+   * Off the SNAPSHOT: the row is about a document that already exists, and
+   * re-pricing the deal tomorrow must not change how many copies a version
+   * generated today is supposed to have.
    */
+  const snapshotFacts = await prisma.solarProposal.findMany({
+    where: { companyId: user.companyId, leadId: lead.id },
+    select: { id: true, snapshot: true },
+  });
   const withCreditSwitch = new Set(
     snapshotFacts.filter((p) => hasCreditSwitch(p.snapshot)).map((p) => p.id)
   );
@@ -410,19 +381,6 @@ export default async function SolarProposalBuilderPage({
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
-          // Null when this partner runs no programme, which reads through to
-          // the card rendering nothing at all.
-          contractAdjustment: l.contractAdjustmentEnabled
-            ? {
-                enabled: true,
-                fixedCents: l.contractAdjustmentCents,
-                label: l.contractAdjustmentLabel,
-                disclosure: l.contractAdjustmentDisclosure,
-                // Serialised at the server/client boundary, like every other
-                // date this page hands over.
-                effectiveAt: l.contractAdjustmentEffectiveAt?.toISOString() ?? null,
-              }
-            : null,
         }))}
         lenderId={design?.lenderId ?? null}
         lenderProducts={lenderProducts.map((p) => ({
@@ -535,7 +493,6 @@ export default async function SolarProposalBuilderPage({
           approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
           approvedFileId: v.approvedFileId,
           approvedParFileId: v.approvedParFileId,
-          hasContractAdjustment: signedWithAdjustment.has(v.id),
           hasCreditSwitch: withCreditSwitch.has(v.id),
           lender: versionLenderBadge(lenderAttempts, v.id),
         }))}

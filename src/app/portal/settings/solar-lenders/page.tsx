@@ -67,16 +67,6 @@ export default async function SolarLendersPage({
       /// rest in from the catalogue, so a field added in code shows up here
       /// without a backfill.
       fieldMap: { select: { wireField: true, sourceKey: true, literal: true } },
-      // The programme contribution and the wording that goes with it. Only an
-      // admin ever sees this screen — see `canEdit` — and a rep sees the
-      // resulting figures on the deal, read-only.
-      contractAdjustmentEnabled: true,
-      contractAdjustmentType: true,
-      contractAdjustmentCents: true,
-      contractAdjustmentLabel: true,
-      contractAdjustmentDisclosure: true,
-      contractAdjustmentEffectiveAt: true,
-      ownershipDisclosure: true,
       /// What this partner does with each adder, where it has overruled the
       /// catalogue. Absent ids fall back to the catalogue's own answer.
       adderRules: { select: { equipmentId: true, financedOnTop: true } },
@@ -180,17 +170,6 @@ export default async function SolarLendersPage({
           submissionRepName: l.submissionRepName,
           submissionDelivery: l.submissionDelivery,
           fieldMap: l.fieldMap,
-          contractAdjustmentEnabled: l.contractAdjustmentEnabled,
-          contractAdjustmentType: l.contractAdjustmentType,
-          contractAdjustmentCents: l.contractAdjustmentCents,
-          contractAdjustmentLabel: l.contractAdjustmentLabel,
-          contractAdjustmentDisclosure: l.contractAdjustmentDisclosure,
-          // Serialised at the boundary: this is a server component handing a
-          // client one its props, and a Date crossing that line is the kind of
-          // thing that works until the payload is streamed.
-          contractAdjustmentEffectiveAt:
-            l.contractAdjustmentEffectiveAt?.toISOString().slice(0, 10) ?? null,
-          ownershipDisclosure: l.ownershipDisclosure,
           adderRules: Object.fromEntries(
             l.adderRules.map((r) => [r.equipmentId, r.financedOnTop])
           ),

@@ -3305,9 +3305,8 @@ model SolarSettings {
   /// constants: the base credit has already stepped down twice and the two
   /// bonuses were invented in 2022.
   ///
-  /// They are quoted ONLY on a deal whose lender carries a contract
-  /// adjustment — see `SolarLender.contractAdjustmentEnabled`. Nothing else in
-  /// the product quotes an incentive, and setting these does not change that.
+  /// They decide the credit ladder printed under the price on every purchase
+  /// proposal, and nothing else in the product quotes an incentive.
   creditItcPct             Float  @default(30)
   creditEnergyCommunityPct Float  @default(10)
   creditDomesticContentPct Float  @default(10)
@@ -3464,15 +3463,6 @@ enum SolarFinalPpwMode {
   flat
 }
 
-/// How a partner's programme contribution is worked out.
-///
-/// ONE MEMBER, on purpose. Participate's contribution is a fixed dollar figure
-/// and nothing in the requirement is a percentage — but "fixed" is a claim about
-/// the number in `contractAdjustmentCents`, and a column that never says so
-/// leaves the next programme to be read through the same integer with a
-/// different meaning. A one-member enum is the cheapest way for the figure to
-/// state what kind of figure it is; a second member later is a migration that
-/// adds a value rather than one that re-reads existing rows.
 /// WHICH FIGURE A PARTNER UNDERWRITES.
 ///
 /// A priced solar deal carries several defensible "amounts" and they can differ
@@ -3480,12 +3470,13 @@ enum SolarFinalPpwMode {
 /// PARTNER, not about the deal, so it belongs on the lender row rather than in
 /// code:
 ///
-///   contract_value       the value the partner's own paper is written at,
-///                        including any programme contribution. What every
-///                        lender received before this column existed.
-///   customer_obligation  what the household is actually liable for. Correct
-///                        for a partner with no programme contribution, and a
-///                        SIX-FIGURE understatement for one that has one.
+///   contract_value       the value the partner's own paper is written at.
+///                        What every lender received before this column
+///                        existed.
+///   customer_obligation  what the household is actually liable for. The same
+///                        figure as the contract value on every partner today,
+///                        and a member kept for one that writes its paper
+///                        otherwise.
 ///   after_credits        the contract value less the federal credits the
 ///                        proposal quotes. Only correct where a partner
 ///                        underwrites the post-incentive balance, which is
@@ -3561,12 +3552,6 @@ enum SolarSubmissionRepNameBasis {
 enum SolarSubmissionDelivery {
   in_person
   customer
-}
-
-enum SolarContractAdjustmentType {
-  /// A fixed dollar amount, in cents, added to the customer's obligation to
-  /// reach the contract value.
-  fixed
 }
 
 /// Whether a partner's paper will fund an array with no battery on it.
@@ -3681,87 +3666,6 @@ model SolarLender {
   /// SolarLenderBatteryRule. `warn` is the default and is what every lender did
   /// before the column existed.
   batteryRule SolarLenderBatteryRule @default(warn)
-
-  // ── The programme contribution ──────────────────────────────────────────
-  //
-  // THE ONE PLACE IN THIS APPLICATION WHERE THE CONTRACT AND THE CUSTOMER'S
-  // OBLIGATION ARE DIFFERENT NUMBERS.
-  //
-  // Every other partner writes paper for exactly what the homeowner owes:
-  // `SolarFinance.contractPriceCents` is both figures at once, which is why
-  // nothing above this block can express the difference. A prepaid-lease
-  // programme like Participate cannot be said that way — its contract is
-  // written at one value, a fixed programme contribution comes off it, and the
-  // household's obligation is what is left:
-  //
-  //     customer obligation   $48,400   (8.80 kW at the quoted $5.50/W)
-  //   + programme adjustment  $70,000   (this partner's fixed figure)
-  //   = contract value       $118,400
-  //
-  // ADDITIVE, AND ONLY ADDITIVE. The customer's price is priced exactly as it
-  // always was and is never overwritten: the adjustment produces a SECOND
-  // number that sits beside it. Payment, savings, payback and price per watt
-  // keep reading the obligation, because that is the money the household is
-  // actually liable for.
-
-  /// Whether this partner's paper carries a programme contribution at all.
-  /// FALSE for every lender until somebody turns it on, which is why this
-  /// migration re-prices nothing.
-  contractAdjustmentEnabled Boolean @default(false)
-
-  /// How the adjustment is worked out. One member today — see the enum. A
-  /// column rather than an implicit "it is always fixed" so a percentage
-  /// programme later is a new member and not a re-reading of the figure below.
-  contractAdjustmentType SolarContractAdjustmentType @default(fixed)
-
-  /// The fixed figure, in cents. 7_000_000 = $70,000. NULL with the flag on is
-  /// a half-configured programme and BLOCKS generation rather than quietly
-  /// adjusting by nothing — see validateFinance.
-  contractAdjustmentCents Int?
-
-  /// What the customer's document calls it — "Participate Program Contribution".
-  ///
-  /// REQUIRED once the flag is on, and deliberately not defaulted to anything.
-  /// The wording on this line is a legal characterisation of somebody else's
-  /// money: calling it a discount, a rebate, an incentive or a tax credit when
-  /// it is none of those is the single most expensive sentence this document
-  /// could print. So the app has no opinion, and an admin states the approved
-  /// term before a proposal can quote it.
-  contractAdjustmentLabel String?
-
-  /// The paragraph that reconciles the three figures for the homeowner.
-  ///
-  /// A TEMPLATE, not prose with numbers in it. `{contractValue}`,
-  /// `{adjustment}`, `{customerObligation}`, `{label}` and `{lender}` are
-  /// substituted at generation and frozen — see renderDisclosure. Hard-coding
-  /// the sentence, or the dollar figures inside it, is what this column exists
-  /// to prevent. Required with the flag on, for the same reason the label is.
-  contractAdjustmentDisclosure String?
-
-  /// The date this programme starts applying, or NULL for "already running".
-  ///
-  /// The ONLY sense of "effective date" this settings architecture can honestly
-  /// support. Nothing here is versioned — a lender row holds one set of terms —
-  /// so there is no way to keep an old figure alive alongside a new one, and
-  /// pretending otherwise would be a scheduling engine with no schedule. What
-  /// this DOES buy is the real case: configure the programme in advance and
-  /// have it start on the first, with every proposal generated before that date
-  /// quoting no adjustment at all. Retroactivity is impossible either way — a
-  /// generated proposal is frozen — so the date only ever gates the future.
-  contractAdjustmentEffectiveAt DateTime?
-
-  /// What the homeowner actually gets, in this partner's own words.
-  ///
-  /// The proposal's closing paragraph tells a household it owns the system
-  /// outright and that it transfers with the house. That is true of a LOAN and
-  /// is not true of a prepaid lease, and it was written into the document as
-  /// generic solar-loan language with nothing able to override it. Set this and
-  /// it replaces that sentence for this partner's deals; leave it null and the
-  /// document reads exactly as it does today.
-  ///
-  /// Frozen into the snapshot like everything else, so editing it tomorrow does
-  /// not rewrite a document somebody has already signed.
-  ownershipDisclosure String?
 
   /// Where YOUR team runs credit for this partner — the dealer portal login.
   /// Rep-facing only: it never reaches a customer-facing document.
@@ -4545,7 +4449,7 @@ model SolarFinance {
   /// system and because a deal nobody has looked at yet should quote the
   /// ordinary case — but the two bonuses are conditional (a census tract, a
   /// sourcing threshold) and a rep who knows this job does not qualify unticks
-  /// them. Read only where the lender carries a contract adjustment.
+  /// them.
   claimItc             Boolean @default(true)
   claimEnergyCommunity Boolean @default(true)
   claimDomesticContent Boolean @default(true)

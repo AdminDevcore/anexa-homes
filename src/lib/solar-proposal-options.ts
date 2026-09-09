@@ -2,7 +2,6 @@ import type { FinanceProduct } from "@prisma/client";
 import { financeRowForProduct } from "./solar-finance-row";
 import { lenderProductLabel } from "./solar-lender-product";
 import type { ProposalAlternative, ProposalFinanceInput } from "./solar-proposal";
-import type { LenderContractAdjustment } from "./solar-contract-adjustment";
 import {
   basePpwFromSticker,
   grossPpwFromNet,
@@ -73,18 +72,6 @@ export type CatalogueProgramme = {
     /** The same rule, counted in batteries, for a job with no array. */
     maxFinalPricePerBatteryCents?: number | null;
     finalBatteryPriceMode?: FinalPpwMode;
-    /**
-     * This partner's programme contribution, if it runs one.
-     *
-     * ON THE LENDER, and carried per option for the same reason its ceiling is:
-     * the menu offers several partners at once, and a contribution resolved
-     * once for the document would print Participate's reconciliation underneath
-     * a GoodLeap loan. Absent on every partner that has none configured, which
-     * is all of them until an admin turns one on.
-     */
-    contractAdjustment?: LenderContractAdjustment | null;
-    /** This partner's own wording about what the household ends up owning. */
-    ownershipDisclosure?: string | null;
   };
 };
 
@@ -347,9 +334,6 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
       lenderLogoUrl: p.lender.logoUrl,
       lenderApplyUrl: p.lender.applyUrl,
       lenderProductLabel: lenderProductLabel(p),
-      // The partner's own programme travels with the option it belongs to.
-      contractAdjustment: p.lender.contractAdjustment ?? null,
-      ownershipNote: p.lender.ownershipDisclosure ?? null,
       loanFactors:
         p.product === "loan"
           ? {

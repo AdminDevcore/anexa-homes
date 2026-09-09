@@ -79,23 +79,6 @@ export type LenderRow = {
    */
   fieldMap: { wireField: string; sourceKey: string | null; literal: string | null }[];
   /**
-   * THE PROGRAMME CONTRIBUTION — the one setting on this screen that makes the
-   * contract value and the customer's obligation two different numbers.
-   *
-   * Off on every lender until somebody turns it on. The label and the
-   * disclosure carry no defaults on purpose: what the money is CALLED is a
-   * legal characterisation, and the app is not entitled to pick one.
-   */
-  contractAdjustmentEnabled: boolean;
-  contractAdjustmentType: "fixed";
-  contractAdjustmentCents: number | null;
-  contractAdjustmentLabel: string | null;
-  contractAdjustmentDisclosure: string | null;
-  /** ISO date (YYYY-MM-DD), or null for "already running". */
-  contractAdjustmentEffectiveAt: string | null;
-  /** What the household ends up owning, in this partner's own words. */
-  ownershipDisclosure: string | null;
-  /**
    * This partner's answer, per adder, to "on top of your $/W or out of it?".
    * Keyed by catalogue id. An id that is ABSENT has no rule and falls back to
    * the catalogue — which is a different thing from a rule of `false`.
@@ -235,27 +218,6 @@ export function batteryPriceToCents(s: string): number | null | "invalid" {
 export const batteryPriceToDollars = (cents: number | null) =>
   cents == null ? "" : String(Math.round(cents / 100));
 
-/**
- * The programme contribution, typed in whole dollars.
- *
- * A third range, for the same reason there is already a second: this figure is
- * $70,000 where a battery is $13,000 and a watt is $5.50, and a validator wide
- * enough to accept all three accepts every typo as well. $1 to $5,000,000.
- *
- * The three-way return matters as much here as on the cap: `null` turns the
- * contribution off, `"invalid"` is a mistake to report. Collapsing them would
- * let a slipped keystroke quietly stop a partner's contract being adjusted at
- * all, and the deals generated afterwards would simply look ordinary.
- */
-export function adjustmentToCents(s: string): number | null | "invalid" {
-  const t = s.trim().replace(/^\$/, "").replace(/,/g, "");
-  if (t === "") return null;
-  const n = Number(t);
-  if (!Number.isFinite(n)) return "invalid";
-  const cents = Math.round(n * 100);
-  return cents >= 100 && cents <= 5_000_000_00 ? cents : "invalid";
-}
-
 /** Whole dollars, as this screen writes money everywhere else. */
 export const money = (cents: number) =>
   (cents / 100).toLocaleString("en-US", {
@@ -341,15 +303,6 @@ export function draftFrom(lender: LenderRow) {
     maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
     minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
     batteryRule: lender.batteryRule,
-    adjustmentEnabled: lender.contractAdjustmentEnabled,
-    adjustmentAmount:
-      lender.contractAdjustmentCents == null
-        ? ""
-        : String(Math.round(lender.contractAdjustmentCents / 100)),
-    adjustmentLabel: lender.contractAdjustmentLabel ?? "",
-    adjustmentDisclosure: lender.contractAdjustmentDisclosure ?? "",
-    adjustmentEffectiveAt: lender.contractAdjustmentEffectiveAt ?? "",
-    ownershipDisclosure: lender.ownershipDisclosure ?? "",
   };
 }
 

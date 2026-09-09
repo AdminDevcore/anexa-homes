@@ -23,7 +23,7 @@ import {
   priceStoragePurchase,
   batteryChargeCents,
 } from "@/lib/solar-money";
-import { contractReconciles, monthlyReconciles } from "@/lib/solar-contract-adjustment";
+import { monthlyReconciles } from "@/lib/solar-loan";
 import { ladderReconciles } from "@/lib/solar-credit-ladder";
 import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { mayInheritLiveLink } from "@/lib/solar-proposal-state";
@@ -46,14 +46,6 @@ import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
 
 const fail = (error: string) => ({ ok: false as const, error });
 
-/** Money for an audit line, where whole dollars are what a person reads. */
-const usd = (cents: number) =>
-  (cents / 100).toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
-
 /**
  * The first way this finished document contradicts itself, or null.
  *
@@ -66,29 +58,6 @@ function reconciliationProblem(snapshot: SolarProposalSnapshot): string | null {
   for (const option of snapshot.options ?? []) {
     const f = option.financing;
     const where = option.quoted ? "This deal" : `The "${option.label}" option`;
-
-    const adjustment = f.lenderAdjustment;
-    if (adjustment) {
-      if (
-        !contractReconciles({
-          label: adjustment.label,
-          adjustmentCents: adjustment.adjustmentCents,
-          customerObligationCents: adjustment.customerObligationCents,
-          lenderContractValueCents: adjustment.lenderContractValueCents,
-          disclosure: adjustment.disclosure,
-        })
-      ) {
-        return `${where} does not reconcile: the adjusted contract value is not the customer's price plus the ${adjustment.label}.`;
-      }
-      // The contract value and the price on the cost chapter are supposed to be
-      // the SAME number said twice. They used to be the obligation instead —
-      // reversed 2026-08-29 when the document moved onto the contract, because
-      // the payment is written on the paper the household signs. If they ever
-      // part, the document is arguing with itself about what was signed for.
-      if (adjustment.lenderContractValueCents !== (f.contractPriceCents ?? 0)) {
-        return `${where} shows a contract value that does not match its own printed price.`;
-      }
-    }
 
     /**
      * THE LADDER, checked on every option that carries one.
@@ -103,12 +72,6 @@ function reconciliationProblem(snapshot: SolarProposalSnapshot): string | null {
     if (ladder) {
       if (!ladderReconciles(ladder)) {
         return `${where} shows a credit breakdown whose rows do not add up to the amount it says the customer pays.`;
-      }
-      if (adjustment && ladder.contractValueCents !== adjustment.lenderContractValueCents) {
-        return `${where} works its credits out from a different contract value than the one it prints.`;
-      }
-      if (adjustment && ladder.quotedPriceCents !== adjustment.customerObligationCents) {
-        return `${where} measures its incentive against a price it does not quote anywhere.`;
       }
     }
 
@@ -329,45 +292,9 @@ export async function generateProposalVersion(
             // directions, so a document generated without it would quote a
             // cheap deal under the price list its own lender publishes.
             finalPpwMode: true,
-            /**
-             * The partner's programme contribution and the wording that goes
-             * with it, read HERE and frozen with everything else.
-             *
-             * The alternative — a customer's copy that looked the figure up at
-             * render time — would let an admin editing Settings next month
-             * change the contract value printed on a document a household has
-             * already signed, which is exactly what the snapshot exists to stop.
-             */
-            contractAdjustmentEnabled: true,
-            contractAdjustmentType: true,
-            contractAdjustmentCents: true,
-            contractAdjustmentLabel: true,
-            contractAdjustmentDisclosure: true,
-            contractAdjustmentEffectiveAt: true,
-            /// What the household ends up owning, in this partner's own words.
-            ownershipDisclosure: true,
           },
         })
       : null;
-
-  /**
-   * The partner's programme, in the shape the pricing code reads.
-   *
-   * Assembled once and used three times — the reconciliation on the document,
-   * the readiness gate below, and the audit line — because three readings of
-   * the same six columns is three chances for them to disagree about whether
-   * this deal carries a contribution.
-   */
-  const dealAdjustment = dealLender
-    ? {
-        enabled: dealLender.contractAdjustmentEnabled,
-        type: dealLender.contractAdjustmentType,
-        fixedCents: dealLender.contractAdjustmentCents,
-        label: dealLender.contractAdjustmentLabel,
-        disclosure: dealLender.contractAdjustmentDisclosure,
-        effectiveAt: dealLender.contractAdjustmentEffectiveAt,
-      }
-    : null;
 
   /**
    * The deal's own price, held to the partner's ceiling one last time.
@@ -585,16 +512,6 @@ export async function generateProposalVersion(
           // does not fund, in a document nobody can correct afterwards.
           maxFinalPpwCents: true,
           finalPpwMode: true,
-          // …and the same argument for the programme contribution: the menu is
-          // frozen, so an option offered without its partner's reconciliation
-          // is a document that shows one contract value on the quoted option
-          // and none on the identical partner one row down.
-          contractAdjustmentEnabled: true,
-          contractAdjustmentCents: true,
-          contractAdjustmentLabel: true,
-          contractAdjustmentDisclosure: true,
-          contractAdjustmentEffectiveAt: true,
-          ownershipDisclosure: true,
         },
       },
     },
@@ -737,14 +654,6 @@ export async function generateProposalVersion(
           finalPpwMode: p.lender.finalPpwMode,
           maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
           finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
-          contractAdjustment: {
-            enabled: p.lender.contractAdjustmentEnabled,
-            fixedCents: p.lender.contractAdjustmentCents,
-            label: p.lender.contractAdjustmentLabel,
-            disclosure: p.lender.contractAdjustmentDisclosure,
-            effectiveAt: p.lender.contractAdjustmentEffectiveAt,
-          },
-          ownershipDisclosure: p.lender.ownershipDisclosure,
         },
       })
     ),
@@ -921,18 +830,12 @@ export async function generateProposalVersion(
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
     lenderProductLabel: quotedProductLabel,
-    // The partner's programme, read above and reconciled inside the snapshot.
-    // Only a loan carries one: cash has no lender advancing anything, and a
-    // lease or PPA has no system price for a contribution to come off.
-    contractAdjustment: finance.product === "loan" ? dealAdjustment : null,
     /**
      * The federal credits: the company's percentages and the wording, and the
      * answers this job gave about which of them it earns.
      *
-     * Passed unconditionally. Whether a ladder is DRAWN is decided inside the
-     * snapshot by whether that option's partner carries a contract adjustment,
-     * so a menu offering Participate alongside a GoodLeap loan puts the ladder
-     * under exactly one of them without the caller having to know which.
+     * Passed unconditionally: every purchase option draws a ladder, and a
+     * lease or PPA owns nothing and therefore claims nothing.
      */
     creditRates: assumptions.creditRates,
     creditIncentiveLabel: assumptions.creditIncentiveLabel,
@@ -942,7 +845,6 @@ export async function generateProposalVersion(
       energyCommunity: finance.claimEnergyCommunity,
       domesticContent: finance.claimDomesticContent,
     },
-    ownershipNote: finance.product === "loan" ? (dealLender?.ownershipDisclosure ?? null) : null,
     alternatives,
     // How the deal's own terms read in the menu. The catalogue row's own label
     // when it was quoted from one, so the option a homeowner picks is findable
@@ -1076,28 +978,7 @@ export async function generateProposalVersion(
             type: "generated",
             actorId: user.userId,
             actorName: user.fullName,
-            /**
-             * WHICH SETTING WAS APPLIED TO THIS DOCUMENT.
-             *
-             * The snapshot already holds the three figures, so the money is
-             * recoverable from the row itself. What the audit trail needs on
-             * top of that is the SENTENCE — that at this moment, this partner's
-             * programme was on and stood at this amount — so that a change made
-             * in Settings a fortnight later can be read against the documents
-             * generated either side of it without opening two blobs of JSON.
-             */
-            detail: [
-              `v${version}`,
-              finance.product,
-              snapshot.financing.lenderAdjustment
-                ? `${snapshot.financing.lenderAdjustment.label} ${usd(
-                    snapshot.financing.lenderAdjustment.adjustmentCents
-                  )} · contract ${usd(snapshot.financing.lenderAdjustment.lenderContractValueCents)} · customer ${usd(
-                    snapshot.financing.lenderAdjustment.customerObligationCents
-                  )}`
-                : null,
-              carried ? "live link kept" : null,
-            ]
+            detail: [`v${version}`, finance.product, carried ? "live link kept" : null]
               .filter(Boolean)
               .join(" · "),
           },

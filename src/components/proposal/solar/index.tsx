@@ -348,23 +348,11 @@ function SolarPvProposalView({
 
   const isPurchase = f.product === "cash" || f.product === "loan";
   /**
-   * The reconciliation between what this partner's contract is written at and
-   * what the household owes — frozen at generation, on the option the reader is
-   * currently looking at.
-   *
-   * Read off the OPTION, not off the snapshot, so switching the payment menu
-   * from a partner that runs such a programme to one that does not takes the
-   * whole section with it. Undefined on every document generated before this
-   * existed, and null on every deal whose partner runs no such programme, which
-   * is almost all of them — and either way, nothing below renders.
-   */
-  const adjustment = f.lenderAdjustment ?? null;
-  /**
    * The ladder from the contract down to what the household actually pays.
    *
-   * Read off the OPTION for the same reason the reconciliation is. Undefined on
-   * every document generated before this existed and null on every deal without
-   * such a partner — either way the cost chapter simply prints the price.
+   * Read off the OPTION, not off the snapshot, so switching the payment menu
+   * moves the ladder with it. Undefined on every document generated before this
+   * existed — either way the cost chapter simply prints the price.
    */
   const ladder = f.creditLadder ?? null;
   /**
@@ -554,7 +542,6 @@ function SolarPvProposalView({
         }
       : null,
     isPurchase,
-    adjustment,
     ladder,
     systemPriceCents,
     quotedTotalCents: quotedTotal,

@@ -488,28 +488,6 @@ describe("compareOffers — the payment once the credits are applied", () => {
     expect(row.netCostAfterCreditsCents).toBeNull();
   });
 
-  it("prices it off the PARTNER's contract, not the household's quote", () => {
-    // A programme writes the paper above the price and hands the remainder
-    // back, so the ladder lands on the quoted price again — the very figure
-    // the headline payment already came off. Two identical numbers under two
-    // names read as two different loans, so the line is dropped.
-    const [row] = compareOffers(
-      [
-        loan({
-          contractAdjustment: {
-            enabled: true,
-            fixedCents: 4_000_000,
-            label: "Participate Tax Program",
-            disclosure: "The programme contributes to the contract value.",
-            effectiveAt: null,
-          },
-        }),
-      ],
-      { ...BASIS, credits: CREDITS }
-    );
-    expect(row.creditsAppliedMonthlyCents).toBeNull();
-  });
-
   it("is absent on a basis that carries no credits, as every column was before", () => {
     const [row] = compareOffers([loan()], BASIS);
     expect(row.creditsAppliedMonthlyCents).toBeNull();

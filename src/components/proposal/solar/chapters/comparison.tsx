@@ -29,7 +29,7 @@ import type { Doc } from "./doc";
  * both are here.
  */
 export function ChapterComparison({ doc }: { doc: Doc }) {
-  const { s, sv, f, lifetime } = doc;
+  const { s, sv, lifetime } = doc;
 
   return (
     <Plate
@@ -77,7 +77,7 @@ export function ChapterComparison({ doc }: { doc: Doc }) {
             surface="card"
             label={lifetime.label}
             value={usd(lifetime.cents)}
-            note={lifetimeNote(lifetime, s.energy.utilityProvider, !!f.ownershipNote)}
+            note={lifetimeNote(lifetime, s.energy.utilityProvider)}
             accent={lifetime.tone === "good"}
           />
           <div className="mt-5 border-t border-neutral-900/12 pt-5">

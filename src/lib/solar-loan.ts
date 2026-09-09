@@ -149,3 +149,71 @@ export function programmeMonthlyCents(
     termMonths: terms.termMonths,
   });
 }
+
+/**
+ * Whether a quoted monthly payment was worked out from the money the customer
+ * actually owes.
+ *
+ * The failure this exists to catch is a payment amortised from a DIFFERENT
+ * PRINCIPAL than the one the document says is being financed — a page quoting
+ * $328.89 a month on a balance the household is told is $48,400.
+ *
+ * A RATIO TO THE PRINCIPAL CANNOT SEPARATE THOSE, which is why this reads the
+ * terms as well. $328.89 over 360 months is 2.4x a $48,400 principal, and a
+ * perfectly ordinary thirty-year loan at 10% is 3.2x — so any bound wide enough
+ * to admit the real loan admits the mistake. Measured against the STATED APR
+ * and term the two separate cleanly: at 0% the most those terms can ask for is
+ * $134.44, and $328.89 is two and a half times a figure that has no interest in
+ * it to be explained by.
+ *
+ * A COARSE GUARD, deliberately, and not a re-derivation of the lender's own
+ * arithmetic. A published payment factor carries a dealer fee and a promotional
+ * structure and legitimately comes out above a straight amortisation of the
+ * same principal — which is exactly why the factor outranks it everywhere else
+ * — so the ceiling leaves a third of headroom above the amortised figure. What
+ * it will not admit is a payment taken from a different principal altogether.
+ *
+ * THE PAYDOWN IS SUBTRACTED FIRST. On a programme structured around one, the
+ * quoted monthly is the WITH-paydown figure and repays the principal less the
+ * paydown — so a floor measured against the whole principal would reject every
+ * such product. Null paydown, which is most of them, subtracts nothing.
+ *
+ * Null `monthlyCents` is not a failure: a cash deal has no payment, and a loan
+ * with no quotable terms is caught by its own rule rather than by this one.
+ */
+export function monthlyReconciles(input: {
+  financedAmountCents: number;
+  aprPct?: number | null;
+  termMonths: number | null | undefined;
+  monthlyCents: number | null | undefined;
+  /** The lump the quoted payment assumes will be applied. Usually none. */
+  paydownCents?: number | null;
+}): boolean {
+  const monthly = input.monthlyCents;
+  const term = input.termMonths;
+  if (monthly == null) return true;
+  if (!term || term <= 0) return true;
+
+  const financed = input.financedAmountCents;
+  if (financed <= 0) return monthly <= 0;
+
+  // What the quoted payment is actually repaying.
+  const paydown = Math.max(0, Math.min(input.paydownCents ?? 0, financed));
+  const repaid = financed - paydown;
+  if (repaid <= 0) return true;
+
+  // THE FLOOR: a payment cannot repay less than the money it is repaying.
+  // A tenth of slack for the re-amortisation a paydown causes mid-term.
+  if (monthly * term < repaid * 0.9) return false;
+
+  // THE CEILING: what these terms, on this principal, can honestly cost — plus
+  // a third for a factor's fee and structure. A dollar of absolute slack keeps
+  // a tiny principal from failing on rounding alone.
+  const amortised = loanPaymentCents({
+    principalCents: repaid,
+    aprPct: input.aprPct ?? 0,
+    termMonths: term,
+  });
+  if (amortised == null) return true;
+  return monthly <= amortised * 1.35 + 100;
+}

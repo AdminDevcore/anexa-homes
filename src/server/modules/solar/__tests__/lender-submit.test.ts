@@ -123,22 +123,15 @@ const SNAPSHOT = {
 const NO_FROZEN_MONEY = { ...SNAPSHOT, financing: {} }
 
 /**
- * The same deal on a partner that carries a programme contribution. Three true
- * amounts, six figures apart:
- *   contract value      $167,120   what the partner's paper is written at
- *   customer obligation  $87,120   what the household is liable for
- *   less the credits     $83,560   contract value minus $83,560 of credits
+ * The same deal with the federal credits quoted on it. Two true amounts:
+ *   contract value      $167,120   what the paper is written at
+ *   less the credits     $83,560   the same figure minus $83,560 of credits
  */
-const PARTICIPATE = {
+const WITH_CREDITS = {
   ...SNAPSHOT,
   financing: {
     ...SNAPSHOT.financing,
     financedAmountCents: 16_712_000,
-    lenderAdjustment: {
-      lenderContractValueCents: 16_712_000,
-      customerObligationCents: 8_712_000,
-      adjustmentCents: 8_000_000,
-    },
     creditLadder: {
       credits: [
         { key: 'itc', amountCents: 5_013_600 },
@@ -622,17 +615,17 @@ describe('the amount basis', () => {
   const input = { leadId: 'lead-1', companyId: 'co-1', ownerOccupied: true, fallbackRepName: 'Anexa Homes' }
   const lenderOn = (basis: string) => ({ ...DESIGN, lender: { ...DESIGN.lender, submissionAmountBasis: basis } })
 
-  beforeEach(() => proposalFindFirst.mockResolvedValue({ snapshot: PARTICIPATE }))
+  beforeEach(() => proposalFindFirst.mockResolvedValue({ snapshot: WITH_CREDITS }))
 
   it('sends the contract value by default — what the partner’s paper is written at', async () => {
     await submitDealToLender(input)
     expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('167120.00')
   })
 
-  it('sends the household’s own obligation when the partner is set to it', async () => {
+  it('reads the household’s obligation as the contract value', async () => {
     designFindFirst.mockResolvedValue(lenderOn('customer_obligation'))
     await submitDealToLender(input)
-    expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('87120.00')
+    expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('167120.00')
   })
 
   it('subtracts the credits the DOCUMENT quotes, not a rate applied here', async () => {
@@ -648,13 +641,6 @@ describe('the amount basis', () => {
     designFindFirst.mockResolvedValue(lenderOn('some_future_basis'))
     await submitDealToLender(input)
     expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('167120.00')
-  })
-
-  it('reads the obligation as the contract value where no programme applies', async () => {
-    designFindFirst.mockResolvedValue(lenderOn('customer_obligation'))
-    proposalFindFirst.mockResolvedValue({ snapshot: SNAPSHOT })
-    await submitDealToLender(input)
-    expect(submitToAmos.mock.calls[0]?.[1]?.requestedAmount).toBe('150180.00')
   })
 
   it('records which basis produced the amount, on the attempt itself', async () => {

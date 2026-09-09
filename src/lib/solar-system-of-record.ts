@@ -114,10 +114,7 @@ export function resolveReportedSystem({
       // honest reading of "there is a battery on this deal".
       batteryQty: system.battery?.qty ?? (system.batteryLabel ? 1 : 0),
       product: financing.product,
-      // The obligation where the document carries one — see the field's note.
-      // Absent on every ordinary deal, where the two are the same number.
-      contractPriceCents:
-        financing.lenderAdjustment?.customerObligationCents ?? financing.contractPriceCents,
+      contractPriceCents: financing.contractPriceCents,
       monthlyPaymentCents: financing.monthlyPaymentCents,
       rateMillsPerKwh: financing.rateMillsPerKwh,
     };

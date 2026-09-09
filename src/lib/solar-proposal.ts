@@ -15,11 +15,6 @@ import {
   type ThirdPartyBreakdown,
 } from "./solar-money";
 import {
-  reconcileContract,
-  type ContractReconciliation,
-  type LenderContractAdjustment,
-} from "./solar-contract-adjustment";
-import {
   buildCreditLadder,
   CREDIT_RATES_DEFAULT,
   type CreditClaims,
@@ -267,7 +262,7 @@ export type SavingsModel = {
   vppCreditTotalCents: number;
   /**
    * The credits and incentive, once, in year one. Zero on every deal that
-   * quotes none — which is every deal without a contract adjustment.
+   * quotes none.
    */
   creditReliefTotalCents: number;
   /** First year in which cumulative savings turn positive; null if never. */
@@ -837,25 +832,12 @@ export type SnapshotFinancing = {
    */
   financedAmountCents?: number | null;
   /**
-   * THE CONTRACT VALUE, WHERE IT DIFFERS FROM WHAT THE CUSTOMER OWES.
-   * v6 and later, and null on every deal that is not on such a partner —
-   * which is all of them until an admin configures one.
+   * WHAT THE HOUSEHOLD ACTUALLY PAYS ONCE THEIR CREDITS ARE CLAIMED. v7 and
+   * later, on every purchase option that claims one.
    *
-   * Three figures that must add up, frozen together with the wording that
-   * explains them. Nothing else on the document reads it: the payment, the
-   * financed amount, the savings, the payback and the price per watt are all
-   * worked out from `contractPriceCents`, which is the household's actual
-   * obligation and is not touched by any of this.
-   */
-  lenderAdjustment?: SnapshotContractAdjustment | null;
-  /**
-   * WHAT THE HOUSEHOLD ACTUALLY PAYS. v7 and later, and present only on an
-   * option whose partner carries a contract adjustment.
-   *
-   * The contract above, less the federal credits it earns, less the incentive
-   * that makes up whatever difference is left — ending on the price the system
-   * was quoted at. Its own chapter on the document, because it is the answer to
-   * the only question a $125,000 contract raises.
+   * The price, less the federal credits it earns — a block of its own under
+   * the price on the cost chapter, because it is the answer to the question
+   * every solar price raises.
    *
    * Structurally `CreditLadder`; frozen here because statute moves and a
    * document a customer signed has to keep showing the ladder it was signed
@@ -863,24 +845,13 @@ export type SnapshotFinancing = {
    */
   creditLadder?: CreditLadder | null;
   /**
-   * The monthly once that ladder has been applied, cents. v7 and later.
+   * LEGACY. The monthly once the ladder had been applied, cents.
    *
-   * Derived through the same terms and the same function as the headline
-   * payment — see `monthlyOn` — so the two figures on this document can never
-   * imply two different loans. Null on cash and on every deal with no ladder.
+   * Written between v7 and 2026-09-09 for a funder summary that no longer
+   * exists; nothing writes it now. The key stays so documents that carry one
+   * still parse — see `itcEstimateCents` below for the same arrangement.
    */
   netMonthlyPaymentCents?: number | null;
-  /**
-   * What the homeowner ends up owning, in this partner's own words. v6 and
-   * later.
-   *
-   * The closing paragraph of the savings chapter tells a household it owns the
-   * system outright and that it transfers with the house. True of a loan, false
-   * of a prepaid lease, and until this key existed the document had no way to
-   * say anything else. Null keeps the generic sentence, which is what every
-   * document already issued carries.
-   */
-  ownershipNote?: string | null;
   /**
    * Legacy incentive fields. No credit is quoted anywhere in the product, so
    * these are always null on anything generated now; the keys stay so that
@@ -889,27 +860,6 @@ export type SnapshotFinancing = {
   itcEstimateCents: number | null;
   itcPct: number | null;
   stateIncentiveNote: string | null;
-};
-
-/**
- * The contract reconciliation, frozen onto one option of one document.
- *
- * Structurally `ContractReconciliation` — same three figures, same wording —
- * but declared here as its own type because this one is JSON in a database
- * column that has to keep parsing for as long as the proposal exists. The
- * computation may be refactored; this shape may not.
- */
-export type SnapshotContractAdjustment = {
-  /** The approved customer-facing term, as it stood on the day. */
-  label: string;
-  /** The partner's contribution, cents. */
-  adjustmentCents: number;
-  /** What the household owes — the same figure as `contractPriceCents`. */
-  customerObligationCents: number;
-  /** What the partner's paper is written at. */
-  lenderContractValueCents: number;
-  /** The reconciliation paragraph, its figures already substituted in. */
-  disclosure: string;
 };
 
 /**
@@ -1072,12 +1022,9 @@ export type SolarProposalSnapshot = {
    * v5 adds the system type and the storage block — a battery makes no
    * kilowatt-hours, so a document about one is argued from backup hours,
    * programme earnings and a time-of-use spread instead of from production.
-   * v6 splits the contract value from the customer's obligation: the financed
-   * amount, the partner's programme contribution and its reconciliation, the
-   * lender's product name, and the partner's own ownership wording.
-   * v7 quotes the CONTRACT rather than the obligation, and adds the credit
-   * ladder that brings it back down — the federal credits, the derived signing
-   * incentive, the net cost and the payment the household ends up on.
+   * v6 adds the financed amount and the lender's product name.
+   * v7 adds the credit ladder under the price — the federal credits the system
+   * earns and the net cost once they are claimed.
    * v8 models each option's horizon TWICE — with the household's credits
    * claimed and without — so the document's tax-credit switch moves the
    * year-by-year table with the headline instead of only the headline.
@@ -1419,16 +1366,6 @@ export type ProposalAlternative = {
   loanFactors?: PaymentFactors | null;
   /** The rate-sheet row's own name, frozen for the funder's paperwork. */
   lenderProductLabel?: string | null;
-  /**
-   * This partner's programme contribution, as configured. Carried per
-   * ALTERNATIVE and not once for the document, because the menu offers several
-   * partners and only some of them run such a programme — a contribution
-   * resolved once and applied to every option would put Participate's
-   * reconciliation under a GoodLeap loan.
-   */
-  contractAdjustment?: LenderContractAdjustment | null;
-  /** This partner's ownership wording, if it publishes one. */
-  ownershipNote?: string | null;
 };
 
 /**
@@ -1469,21 +1406,13 @@ function priceOption(args: {
   loanFactors: PaymentFactors | null;
   lenderProductLabel?: string | null;
   /**
-   * This partner's programme contribution, as an admin configured it. Resolved
-   * into the frozen three-figure reconciliation below, or into nothing.
-   */
-  contractAdjustment?: LenderContractAdjustment | null;
-  /**
    * The company's federal-credit percentages, and which of them THIS deal
-   * earns. Read only where a contract adjustment exists, because that is the
-   * only structure the product quotes a credit on at all.
+   * earns.
    */
   creditRates?: CreditRates | null;
   creditClaims?: CreditClaims | null;
   creditIncentiveLabel?: string | null;
   creditDisclaimer?: string | null;
-  /** This partner's ownership wording, where it publishes one. */
-  ownershipNote?: string | null;
   /** When the document is being made — the date an effective date is read against. */
   now?: Date;
   assumptions: SolarAssumptions;
@@ -1549,50 +1478,16 @@ function priceOption(args: {
       )
     : undefined;
 
-  /**
-   * THE CONTRACT VALUE, WHERE THIS PARTNER'S PAPER IS WRITTEN FOR MORE THAN THE
-   * SYSTEM WAS PRICED AT.
-   *
-   * Resolved from `purchase.contractPriceCents` — the price the ladder above
-   * computed — and then, unlike every other figure in this file, fed BACK into
-   * what the document quotes. That is the whole of the 2026-08-29 change and it
-   * reverses the rule this block shipped with that morning.
-   *
-   * WHY IT REVERSED. The contribution is not money coming off the household's
-   * bill; it is money added to the paper so the federal credits are earned on
-   * the larger figure. A household on this programme signs for $125,000, is
-   * billed a payment on $125,000, claims fifty percent of $125,000 and lands —
-   * after the credits and the incentive that makes up the difference — on the
-   * $55,000 they were quoted. Quoting them a payment on $55,000 from the first
-   * page described a loan nobody was writing. The ladder that gets them back
-   * down is `creditLadder` below, and it is a chapter of its own.
-   *
-   * Null on every deal whose partner has no such programme, which is all of
-   * them until an admin configures one, and on lease and PPA, which have no
-   * system price for a contribution to sit on. Null means NOTHING here changes:
-   * `documentPriceCents` falls through to the price it always was.
-   */
-  const reconciliation: ContractReconciliation | null = purchase
-    ? reconcileContract({
-        customerObligationCents: purchase.contractPriceCents,
-        adjustment: args.contractAdjustment,
-        lenderName: args.lender,
-        at: args.now,
-      })
-    : null;
 
   /**
    * THE ONE PRICE THIS DOCUMENT QUOTES.
    *
-   * The contract value where there is one, the ordinary price where there is
-   * not — resolved once, here, and read by the total, the price per watt, the
+   * Resolved once, here, and read by the total, the price per watt, the
    * principal, the payment and the twenty-five years. One figure in one place
    * is the only defence against the failure this codebase keeps re-learning:
    * two numbers on one page that do not divide into each other.
    */
-  const documentPriceCents = reconciliation
-    ? reconciliation.lenderContractValueCents
-    : (purchase?.contractPriceCents ?? 0);
+  const documentPriceCents = purchase?.contractPriceCents ?? 0;
 
   /**
    * What a payment factor gets applied to: the price above, less anything the
@@ -1602,29 +1497,17 @@ function priceOption(args: {
   const loanPrincipalCents = documentPriceCents - (finance.downPaymentCents ?? 0);
 
   /**
-   * WHAT THE HOUSEHOLD ACTUALLY PAYS, once the credits and the incentive are
-   * taken off the contract above.
+   * WHAT THE HOUSEHOLD ACTUALLY PAYS, once their federal credits are claimed.
    *
-   * Only ever built where there is a reconciliation, because only there is the
-   * contract bigger than the price and only there is there a remainder to hand
-   * back. On every other deal this is null and the document quotes no credit at
-   * all — which is what the product has always done.
+   * Built on every purchase deal; null on lease and PPA, which own nothing and
+   * therefore claim nothing. The price goes in on both sides — the ladder is
+   * the price with the credits taken off it, and `buildCreditLadder` drops the
+   * incentive row on its own rather than printing a zero.
    */
   const creditLadder: CreditLadder | null = purchase
     ? buildCreditLadder({
         contractValueCents: documentPriceCents,
-        // THE LADDER'S TARGET — where it has to land after the credits.
-        //
-        // On a programme deal, the household's own obligation, which is below
-        // the contract and is what the remainder gets handed back to reach. On
-        // an ordinary deal the two ARE the same figure: nothing is being handed
-        // back, the ladder is the price with the credits taken off it, and
-        // `buildCreditLadder` drops the incentive row rather than printing a
-        // zero. Passing the price to both sides is what makes that degenerate
-        // case fall out of the same arithmetic instead of a second branch.
-        quotedPriceCents: reconciliation
-          ? reconciliation.customerObligationCents
-          : documentPriceCents,
+        quotedPriceCents: documentPriceCents,
         rates: args.creditRates ?? CREDIT_RATES_DEFAULT,
         claims: args.creditClaims,
         incentiveLabel: args.creditIncentiveLabel,
@@ -1632,16 +1515,6 @@ function priceOption(args: {
       })
     : null;
 
-  /**
-   * THE LADDER ON A PARTNER PROGRAMME, and null everywhere else.
-   *
-   * Nothing customer-facing reads this any more — both readings of the document
-   * come off `creditLadder` above. It survives for the FUNDER's own summary,
-   * which prints "monthly once the credits are applied" beside the contract it
-   * is submitting, and that sentence is only true where a programme applies
-   * them as a matter of course.
-   */
-  const programmeLadder: CreditLadder | null = reconciliation ? creditLadder : null;
   const loanFactorQuote =
     finance.product === "loan" && args.loanFactors && hasPaymentFactor(args.loanFactors)
       ? factorQuote(args.loanFactors, loanPrincipalCents)
@@ -1723,25 +1596,10 @@ function priceOption(args: {
    * and on lease and PPA, which have no ladder at all.
    *
    * This is the figure the switch turns ON, and it exists on every purchase
-   * deal. What follows it — `netMonthlyCents` — is the same number on a
-   * programme deal, kept apart only because the funder's summary may print it
-   * and the customer's document may not read it.
+   * deal.
    */
   const creditsAppliedMonthlyCents = creditLadder
     ? monthlyOn(creditLadder.netCostCents - (finance.downPaymentCents ?? 0))
-    : null;
-
-  /**
-   * THE SAME PAYMENT, for the FUNDER's paperwork only.
-   *
-   * Identical arithmetic to the figure above and identical to it in value on
-   * every programme deal — the two differ only in where they may be read. This
-   * one reaches `netMonthlyPaymentCents` on the snapshot, which the submission
-   * summary prints as "monthly once the credits are applied"; the customer's
-   * own document reads the scenario, never this.
-   */
-  const netMonthlyCents = programmeLadder
-    ? monthlyOn(programmeLadder.netCostCents - (finance.downPaymentCents ?? 0))
     : null;
 
   /**
@@ -1872,10 +1730,7 @@ function priceOption(args: {
 
   const financing: SnapshotFinancing = {
     product: finance.product,
-    // THE PRICE THE DOCUMENT QUOTES — the partner's contract value where there
-    // is one. Identical to `purchase.contractPriceCents` on every deal without
-    // a contract adjustment, which is all of them until an admin configures a
-    // partner that runs one.
+    // THE PRICE THE DOCUMENT QUOTES.
     contractPriceCents: purchase ? documentPriceCents : null,
     // Null on storage rather than the row's zero: there are no installed watts
     // for a rate to be per, and a renderer handed 0 prints "$0.00/W".
@@ -1965,8 +1820,7 @@ function priceOption(args: {
     // DERIVED FROM THE PRINTED TOTAL, not carried over from the ladder.
     // "$5.50/W · $125,000" is two figures that do not divide into each other,
     // which is the single failure this file has been bitten by most often —
-    // see the cap-at-pricing note in solar-money. Where there is no adjustment
-    // this is byte-identical to `purchase.finalPpwCents`.
+    // see the cap-at-pricing note in solar-money.
     finalPpwCents:
       purchase && !isStorage
         ? design.systemSizeKwDc > 0
@@ -2016,51 +1870,20 @@ function priceOption(args: {
      * The money the payment is actually taken from.
      *
      * Written for a purchase only, and set to the same principal the factor and
-     * the amortisation above were handed — one figure, resolved once. On a
-     * partner carrying a programme contribution this is the household's
-     * obligation and NOT the contract value, which is the entire point: it is
-     * the number Section 1 of the customer's document prints under "Amount
-     * financed", directly above a payment that has to divide into it.
+     * the amortisation above were handed — one figure, resolved once. It is
+     * the number the customer's document prints under "Amount financed",
+     * directly above a payment that has to divide into it.
      */
     ...(purchase ? { financedAmountCents: loanPrincipalCents } : {}),
-    /**
-     * The reconciliation, frozen. Read by exactly one block of the customer's
-     * document and by the funder's submission summary; by nothing that computes
-     * a payment, a saving or a rate.
-     */
-    ...(reconciliation
-      ? {
-          lenderAdjustment: {
-            label: reconciliation.label,
-            adjustmentCents: reconciliation.adjustmentCents,
-            customerObligationCents: reconciliation.customerObligationCents,
-            lenderContractValueCents: reconciliation.lenderContractValueCents,
-            disclosure: reconciliation.disclosure,
-          },
-        }
-      : {}),
     /**
      * THE ONE PAGE THAT SAYS WHAT THE HOUSEHOLD ACTUALLY PAYS, frozen.
      *
      * Statute moves and a company's percentages move with it; a document a
      * customer signed has to keep showing the ladder it was signed against.
-     * Absent on every deal without a contract adjustment and on every document
-     * generated before this existed — both of which render no such chapter.
+     * Absent on lease and PPA, and on every document generated before this
+     * existed — both of which render no such block.
      */
     ...(creditLadder ? { creditLadder } : {}),
-    /**
-     * The payment once the credits and the incentive are applied — the figure
-     * the ladder's own page prints, and the one the household ends up on.
-     *
-     * Resolved through the SAME function as the headline payment, on a smaller
-     * principal, so the two can never be derived two different ways. Null where
-     * there is no ladder, no loan, or no terms to derive anything from.
-     */
-    ...(netMonthlyCents != null ? { netMonthlyPaymentCents: netMonthlyCents } : {}),
-    // What the household ends up owning, in this partner's words. Absent leaves
-    // the document's own sentence standing, which is what every proposal
-    // generated before this key carries.
-    ...(args.ownershipNote?.trim() ? { ownershipNote: args.ownershipNote.trim() } : {}),
     // Always null: no incentive is quoted, so nothing to record. Kept as
     // keys rather than dropped so older snapshots stay type-compatible.
     itcEstimateCents: null,
@@ -2103,9 +1926,8 @@ function priceOption(args: {
               : finance.product === "loan"
                 ? (creditsAppliedMonthlyCents ?? financing.loanMonthlyPaymentCents)
                 : monthlyCents,
-          // The price the household lands on. `quotedPriceCents` is the ladder's
-          // target: the customer's own obligation on a programme deal, and the
-          // price itself where there is no second figure to reconcile.
+          // The price the household lands on — the ladder's own target, which
+          // is the price this system was quoted at.
           totalCents: creditLadder ? creditLadder.quotedPriceCents : null,
           // What the loan is carrying once the credits are against it — the
           // very principal `creditsAppliedMonthlyCents` was quoted on, so the
@@ -2180,27 +2002,15 @@ export function buildProposalSnapshot(args: {
   /** The quoted rate-sheet row's own name, for the funder's paperwork. */
   lenderProductLabel?: string | null;
   /**
-   * The quoted partner's programme contribution, as configured in Settings.
-   *
-   * Read at generation and reconciled here, so the three figures a household is
-   * shown are frozen with everything else on the document. Editing the figure
-   * in Settings tomorrow moves nothing already generated — the same trade every
-   * other number in this snapshot makes.
-   */
-  contractAdjustment?: LenderContractAdjustment | null;
-  /**
    * The federal credits, as the company states them and as this deal earns
    * them. Document-wide rather than per option: the statute does not change
    * between two rows of a payment menu, and neither does whether this roof
-   * sits in an energy community. Which options SHOW a ladder is decided by
-   * whether that option's partner carries a contract adjustment.
+   * sits in an energy community.
    */
   creditRates?: CreditRates | null;
   creditClaims?: CreditClaims | null;
   creditIncentiveLabel?: string | null;
   creditDisclaimer?: string | null;
-  /** The quoted partner's ownership wording, where it publishes one. */
-  ownershipNote?: string | null;
   /**
    * The other ways this customer may pay, already resolved and authorised by
    * the caller. Empty is the ordinary case and reads exactly as it always did.
@@ -2292,8 +2102,6 @@ export function buildProposalSnapshot(args: {
     lenderApplyUrl: args.lenderApplyUrl ?? null,
     loanFactors: args.loanFactors ?? null,
     lenderProductLabel: args.lenderProductLabel ?? null,
-    contractAdjustment: args.contractAdjustment ?? null,
-    ownershipNote: args.ownershipNote ?? null,
     now: args.now,
   });
 
@@ -2325,25 +2133,6 @@ export function buildProposalSnapshot(args: {
   const seen = new Set([options[0].key]);
   for (const alt of args.alternatives ?? []) {
     if (seen.has(alt.key)) continue;
-    /**
-     * NO CASH ROW ON A DEAL QUOTED AGAINST A PARTNER'S CONTRACT VALUE.
-     *
-     * Every other row in the menu is compared by its MONTHLY, which is the
-     * like-for-like figure; cash is the one row that shows a raw price, and on
-     * a programme deal the two prices are not describing the same offer. The
-     * loan quotes the partner's contract — $128,080, which the credits then
-     * bring back down — while cash is priced at the company's own net rate,
-     * $31,680. Printed on the same strip they read as a $96,400 mark-up for
-     * borrowing, which is not what either figure means, and a homeowner has no
-     * way to tell that from the page.
-     *
-     * Decided HERE rather than in `proposalAlternatives` because it turns on
-     * the RESOLVED reconciliation — a programme that is switched off, still
-     * misconfigured or not yet effective produces no adjustment and the cash
-     * row belongs back on the menu. That answer only exists once the option has
-     * been priced.
-     */
-    if (alt.finance.product === "cash" && quoted.financing.lenderAdjustment) continue;
     seen.add(alt.key);
     const priced = priceOption({
       ...shared,
@@ -2353,12 +2142,7 @@ export function buildProposalSnapshot(args: {
       lenderApplyUrl: alt.lenderApplyUrl ?? null,
       loanFactors: alt.loanFactors ?? null,
       lenderProductLabel: alt.lenderProductLabel ?? null,
-      // Each option carries its OWN partner's programme, so a household
-      // switching from Participate to a GoodLeap loan in the menu sees the
-      // reconciliation disappear with the partner it belongs to.
-      contractAdjustment: alt.contractAdjustment ?? null,
-      ownershipNote: alt.ownershipNote ?? null,
-      now: args.now,
+        now: args.now,
     });
     options.push({
       key: alt.key,

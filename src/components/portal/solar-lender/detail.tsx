@@ -15,9 +15,6 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,11 +26,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { basePpwFromSticker } from "@/lib/solar-money";
 import {
-  reconcileContract,
-  DISCLOSURE_TOKENS,
-  DISCLOSURE_TEMPLATE_SUGGESTION,
-} from "@/lib/solar-contract-adjustment";
-import {
   upsertSolarLenderAction,
   setSolarLenderActiveAction,
   deleteSolarLenderAction,
@@ -43,7 +35,6 @@ import {
 import { SubmissionMapping } from "./submission-mapping";
 import type { AdderRuleOption, LenderRow, PricingMode } from "./types";
 import {
-  adjustmentToCents,
   batteryPriceToCents,
   draftFrom,
   money,
@@ -56,7 +47,6 @@ import {
   ChoiceCards,
   Figure,
   Hint,
-  InfoTip,
   MoneyField,
   Panel,
   Pill,
@@ -73,7 +63,7 @@ import {
   type EquipmentNameDraft,
 } from "./equipment-names";
 
-export const LENDER_TABS = ["details", "pricing", "rates", "adders", "equipment", "submission", "legal"] as const;
+export const LENDER_TABS = ["details", "pricing", "rates", "adders", "equipment", "submission"] as const;
 export type LenderTab = (typeof LENDER_TABS)[number];
 
 /** The example job every "what does this mean" line on the Pricing tab is worked on. */
@@ -229,82 +219,6 @@ export function LenderDetail({
   const floorUnreachable =
     capBasePpwCents != null && floorCents != null && floorCents > capBasePpwCents;
 
-  /**
-   * The disclosure as a homeowner will actually read it, with figures in it.
-   *
-   * THE POINT OF THE WHOLE TAB. An admin typing `{contractValue}` into a
-   * textarea has no way to tell what the sentence comes out as, and the
-   * sentence with the numbers in it is the thing they are approving — a
-   * template that reads fine and renders "A $70,000 reduces…" is a mistake
-   * nobody catches until it is on somebody's paper.
-   *
-   * Worked on THIS partner's own price where it has one, because that is what
-   * its deals actually quote at. A partner that publishes none gets a round,
-   * plainly-labelled illustrative price instead: an example that is obviously
-   * an example beats one that could be mistaken for a quote.
-   */
-  const adjustmentPreview = React.useMemo(() => {
-    if (!draft.adjustmentEnabled) return null;
-    const cents = adjustmentToCents(draft.adjustmentAmount);
-    if (cents === "invalid" || cents == null) return null;
-    const label = draft.adjustmentLabel.trim();
-    const template = draft.adjustmentDisclosure.trim();
-    if (!label || !template) return null;
-
-    const PREVIEW_KW = 8.8;
-    const obligationCents =
-      draftPpwCents != null ? Math.round(PREVIEW_KW * 1000 * draftPpwCents) : 100_000_00;
-
-    const r = reconcileContract({
-      customerObligationCents: obligationCents,
-      adjustment: { enabled: true, fixedCents: cents, label, disclosure: template },
-      lenderName: draft.name.trim() || lender.name,
-    });
-    if (!r) return null;
-
-    // THE TWO FIGURES THE CUSTOMER'S DOCUMENT NO LONGER BREAKS OUT.
-    //
-    // Since 2026-08-29 the proposal quotes the contract value whole — one
-    // system price — and the federal credits bring it down on the following
-    // chapter. The contribution and the obligation are not rows on it any
-    // more. They are still tokens here, because the funder's own paperwork and
-    // some programmes' approved wording legitimately state them; but an admin
-    // who reaches for {adjustment} out of habit puts back, in a sentence,
-    // exactly the breakdown the page stopped printing. So it is flagged, in
-    // the preview, where they can see the sentence it produces — not blocked,
-    // because whether a programme must disclose its own contribution is a
-    // question about that programme's agreement and not ours to answer.
-    //
-    // Read off the RENDERED paragraph rather than the template, so a figure
-    // typed by hand is caught as well as one substituted in.
-    const leaks: string[] = [];
-    if (r.disclosure.includes(money(r.adjustmentCents))) {
-      leaks.push(`${money(r.adjustmentCents)} contribution`);
-    }
-    if (r.disclosure.includes(money(r.customerObligationCents))) {
-      leaks.push(`${money(r.customerObligationCents)} obligation`);
-    }
-
-    return {
-      exampleLabel:
-        draftPpwCents != null
-          ? `${PREVIEW_KW.toFixed(2)} kW at $${(draftPpwCents / 100).toFixed(2)}/W`
-          : "on an example $100,000 customer price",
-      heading: `${draft.name.trim() || lender.name} — ${label}`,
-      contractValue: money(r.lenderContractValueCents),
-      disclosure: r.disclosure,
-      leaks,
-    };
-  }, [
-    draft.adjustmentEnabled,
-    draft.adjustmentAmount,
-    draft.adjustmentLabel,
-    draft.adjustmentDisclosure,
-    draft.name,
-    lender.name,
-    draftPpwCents,
-  ]);
-
   type ActionResult = { ok: boolean; error?: string; message?: string };
   const act = async (fn: () => Promise<ActionResult>, fallback: string): Promise<ActionResult> => {
     setBusy(true);
@@ -360,32 +274,6 @@ export function LenderDetail({
       return toast.error("Min base $/battery has to be between $500 and $100,000, or blank for no floor.");
     }
 
-    // The contribution, in whole dollars. Caught here so the message names the
-    // box: this is the one figure on the screen that writes itself onto a
-    // contract, and a silent NaN would switch the programme on with nothing
-    // behind it.
-    const contractAdjustmentCents = adjustmentToCents(draft.adjustmentAmount);
-    if (contractAdjustmentCents === "invalid") {
-      return toast.error(
-        "The contract adjustment has to be an amount between $1 and $5,000,000, or blank for none."
-      );
-    }
-    if (draft.adjustmentEnabled) {
-      if (contractAdjustmentCents == null) {
-        return toast.error("Set the adjustment amount before switching the contract adjustment on.");
-      }
-      if (!draft.adjustmentLabel.trim()) {
-        return toast.error(
-          "Give the adjustment the approved customer-facing label — exactly the words the proposal should print."
-        );
-      }
-      if (!draft.adjustmentDisclosure.trim()) {
-        return toast.error(
-          "Write the customer disclosure — the paragraph that says who is responsible for which amount."
-        );
-      }
-    }
-
     setBusy(true);
     try {
       if (fieldsDirty) {
@@ -418,13 +306,6 @@ export function LenderDetail({
           // back to the deal's rep rather than sending an empty name.
           submissionRepName: draft.submissionRepName.trim() || null,
           submissionDelivery: draft.submissionDelivery,
-          contractAdjustmentEnabled: draft.adjustmentEnabled,
-          contractAdjustmentType: "fixed",
-          contractAdjustmentCents,
-          contractAdjustmentLabel: draft.adjustmentLabel.trim() || null,
-          contractAdjustmentDisclosure: draft.adjustmentDisclosure.trim() || null,
-          contractAdjustmentEffectiveAt: draft.adjustmentEffectiveAt.trim() || null,
-          ownershipDisclosure: draft.ownershipDisclosure.trim() || null,
         });
         if (!res.ok) {
           toast.error(res.error, { duration: 9000 });
@@ -557,13 +438,6 @@ export function LenderDetail({
                 how this partner pays a rep is as true on the rate sheet as it is
                 on the identity form, and the box could only say it on one tab. */}
             <Pill>{draft.repPayMode === "per_watt" ? "Fixed $/W" : "Redline"}</Pill>
-            {lender.contractAdjustmentEnabled && (
-              <Pill tone="solar">
-                {lender.contractAdjustmentLabel?.trim() || "Contract adjustment"}
-                {lender.contractAdjustmentCents != null &&
-                  ` +${money(lender.contractAdjustmentCents)}`}
-              </Pill>
-            )}
             {lender.batteryRule === "required" && <Pill tone="warn">Battery required</Pill>}
           </div>
         </div>
@@ -660,12 +534,6 @@ export function LenderDetail({
               answer the same question — what leaves Anexa and under whose
               name — and an admin looking for one is looking for the other. */}
           <TabsTrigger value="submission">Submission</TabsTrigger>
-          <TabsTrigger value="legal">
-            Disclosures
-            {lender.contractAdjustmentEnabled && (
-              <span className="size-1.5 rounded-full bg-solar" aria-hidden />
-            )}
-          </TabsTrigger>
         </TabsList>
 
         {/* ── DETAILS ──────────────────────────────────────────────────── */}
@@ -1116,203 +984,6 @@ export function LenderDetail({
             onDelivery={(v) => set("submissionDelivery", v)}
             onFieldMap={(next) => set("fieldMap", next)}
           />
-        </TabsContent>
-
-        <TabsContent value="legal" className="space-y-4">
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className="space-y-4">
-              {/* ── THE PROGRAMME CONTRIBUTION ──────────────────────────
-                  The only setting on this screen where the contract and the
-                  customer's obligation stop being the same number. Everything
-                  on Pricing says what a homeowner pays; this says what the
-                  partner's paper is written at on top of it. */}
-              <Panel
-                tone="accent"
-                title="Contract adjustment"
-                description="For a partner whose contract is written for MORE than the customer owes — a prepaid-lease programme where a fixed contribution comes off the contract value. Off on every other lender, and off is what changes nothing."
-                action={
-                  <label className="flex items-center gap-2 text-xs font-medium">
-                    <Switch
-                      checked={draft.adjustmentEnabled}
-                      onCheckedChange={(v) => set("adjustmentEnabled", v)}
-                      aria-label="Contract adjustment enabled"
-                    />
-                    {draft.adjustmentEnabled ? "On" : "Off"}
-                  </label>
-                }
-              >
-                {draft.adjustmentEnabled ? (
-                  <>
-                    {/* One member today. Shown as a stated fact rather than as a
-                        select with nothing to choose — a dropdown with one option
-                        is a question that wastes somebody's time. */}
-                    <Hint>
-                      Adjustment type:{" "}
-                      <span className="font-medium text-foreground">Fixed dollar amount</span>
-                    </Hint>
-                    <MoneyField
-                      id={`ld-${lender.id}-adjustment`}
-                      label="Fixed contract adjustment"
-                      placeholder="70000"
-                      value={draft.adjustmentAmount}
-                      onChange={(v) => set("adjustmentAmount", v)}
-                      invalid={adjustmentToCents(draft.adjustmentAmount) === "invalid"}
-                    />
-                    <TextField
-                      label="Customer-facing label — the approved term, printed as typed"
-                      placeholder="Participate Program Contribution"
-                      value={draft.adjustmentLabel}
-                      onChange={(v) => set("adjustmentLabel", v)}
-                      hint="Whatever is typed here is what the customer's proposal prints. Do not call it a discount, a rebate, an incentive or a tax credit unless that is the approved term for this programme — they are different claims about who owes what."
-                    />
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <Label className="text-xs" htmlFor={`ld-${lender.id}-disclosure`}>
-                          Customer disclosure — the paragraph that reconciles the figures
-                        </Label>
-                        <InfoTip label="customer disclosure">
-                          The figures are substituted in at generation, so no dollar amount is typed
-                          here:{" "}
-                          {DISCLOSURE_TOKENS.map((t, i) => (
-                            <React.Fragment key={t.token}>
-                              {i > 0 && ", "}
-                              <code className="rounded bg-muted px-1 py-px">{t.token}</code> {t.means}
-                            </React.Fragment>
-                          ))}
-                          .
-                        </InfoTip>
-                      </div>
-                      <Textarea
-                        id={`ld-${lender.id}-disclosure`}
-                        rows={5}
-                        value={draft.adjustmentDisclosure}
-                        placeholder={DISCLOSURE_TEMPLATE_SUGGESTION}
-                        onChange={(e) => set("adjustmentDisclosure", e.target.value)}
-                      />
-                      <div className="flex flex-wrap items-center gap-x-2">
-                        <Hint className="flex-1">
-                          Tokens:{" "}
-                          {DISCLOSURE_TOKENS.map((t, i) => (
-                            <React.Fragment key={t.token}>
-                              {i > 0 && " "}
-                              <code className="rounded bg-muted px-1 py-px">{t.token}</code>
-                            </React.Fragment>
-                          ))}
-                        </Hint>
-                        {draft.adjustmentDisclosure.trim() === "" && (
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              set("adjustmentDisclosure", DISCLOSURE_TEMPLATE_SUGGESTION)
-                            }
-                          >
-                            Start from the suggested wording
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="text-xs" htmlFor={`ld-${lender.id}-effective`}>
-                        Effective from
-                      </Label>
-                      <Input
-                        id={`ld-${lender.id}-effective`}
-                        type="date"
-                        value={draft.adjustmentEffectiveAt}
-                        onChange={(e) => set("adjustmentEffectiveAt", e.target.value)}
-                      />
-                      <Hint>
-                        Blank means it is already running. A future date configures the programme now
-                        and starts it then — proposals generated before it quote no adjustment at
-                        all. Nothing here is ever retroactive: a generated proposal is frozen, so
-                        changing any of this moves only versions made afterwards.
-                      </Hint>
-                    </div>
-                  </>
-                ) : (
-                  <Hint>
-                    Switch this on only for a programme whose agreement says the contract is written
-                    for more than the household owes.
-                  </Hint>
-                )}
-              </Panel>
-
-              {/* Kept OUTSIDE the enabled branch. A partner can publish its own
-                  ownership wording without running a contribution, and the
-                  sentence this replaces — "you own it outright, and it transfers
-                  with the house" — is on every financed proposal whether or not
-                  any money is being adjusted. */}
-              <Panel
-                title="What the customer ends up owning"
-                description="In this partner's own words. Leave blank and the proposal keeps its own sentence: that the customer owns the system outright, it carries its manufacturer warranties, and it transfers with the house. That is true of a loan. Write something here for any product where it is not."
-              >
-                <Textarea
-                  id={`ld-${lender.id}-ownership`}
-                  aria-label="What the customer ends up owning"
-                  rows={4}
-                  value={draft.ownershipDisclosure}
-                  placeholder="Ownership, term, transfer on sale, and any buyout — as this product actually works."
-                  onChange={(e) => set("ownershipDisclosure", e.target.value)}
-                />
-              </Panel>
-            </div>
-
-            {/* The preview is the point of this tab. An admin typing tokens into
-                a textarea cannot otherwise tell what a homeowner will read, and
-                the sentence they are approving is the sentence with the numbers
-                in it. Beside the textarea now rather than under it, so the two
-                are read together.
-
-                IT MIRRORS THE DOCUMENT, and the document changed on 2026-08-29:
-                it prints one system price at the contract value, then the
-                programme's name and paragraph. It showed three rows here —
-                contract value, less the contribution, equals the obligation —
-                for as long as the page did. A preview of a page that no longer
-                exists is worse than no preview, because somebody approves
-                wording against it. */}
-            <div className="xl:sticky xl:top-4 xl:self-start">
-              {adjustmentPreview ? (
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    What the customer reads — {adjustmentPreview.exampleLabel}
-                  </p>
-                  <div className="mt-3 flex items-baseline justify-between gap-4 border-t border-border pt-2 text-sm font-semibold">
-                    <span>System price</span>
-                    <span className="tabular-nums">{adjustmentPreview.contractValue}</span>
-                  </div>
-                  <p className="mt-4 text-[11px] font-medium uppercase tracking-wide text-foreground">
-                    {adjustmentPreview.heading}
-                  </p>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    {adjustmentPreview.disclosure}
-                  </p>
-                  {adjustmentPreview.leaks.length > 0 && (
-                    <div className="mt-3">
-                      <Caution>
-                        This wording states the {adjustmentPreview.leaks.join(" and the ")} in prose.
-                        The proposal itself no longer breaks the price down that way — it quotes the{" "}
-                        {adjustmentPreview.contractValue} contract whole and the federal credits
-                        bring it down on the following page. Keep these figures only if this
-                        programme&rsquo;s agreement requires them to be disclosed.
-                      </Caution>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-border p-6 text-center">
-                  <p className="text-xs text-muted-foreground">
-                    {draft.adjustmentEnabled
-                      ? "Fill in the amount, the label and the disclosure and the customer's paragraph is previewed here, with this partner's own figures in it."
-                      : "Nothing is added to this partner's contract, so a customer reads the ordinary proposal."}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
         </TabsContent>
       </Tabs>
 

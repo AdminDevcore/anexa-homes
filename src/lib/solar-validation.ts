@@ -5,11 +5,6 @@ import {
   type SolarAssumptions,
 } from "./solar-money";
 import { resolveUtilityRateMills } from "./solar-energy";
-import {
-  adjustmentIsEffective,
-  contractAdjustmentProblems,
-  type LenderContractAdjustment,
-} from "./solar-contract-adjustment";
 
 /**
  * Guard rails on a solar design and its pricing.
@@ -181,16 +176,6 @@ export type FinanceForValidation = {
    * quoted before any approval comes back. See `factorQuote`.
    */
   hasPaymentFactor?: boolean;
-  /**
-   * This deal's LENDER programme contribution, as configured in Settings.
-   *
-   * Here rather than on the assumptions for the same reason the margin floor
-   * is: it belongs to the partner this one deal was designed for, and a company
-   * with two partners has two different answers at the same time. Undefined —
-   * every caller written before this existed, and every cash deal — is read as
-   * "no programme", which blocks and warns about nothing.
-   */
-  contractAdjustment?: LenderContractAdjustment | null;
 };
 
 export type CustomerForValidation = {
@@ -243,14 +228,6 @@ const DESIGN_HREF = (leadId: string) => builderHref(leadId, "design");
 const FINANCE_HREF = (leadId: string) => builderHref(leadId, "financing");
 /** Not deal-scoped: the catalogue is company-wide, and so is its fix. */
 const EQUIPMENT_HREF = "/portal/settings/solar-equipment";
-/** Likewise the lender list — a partner's terms are not a property of one deal. */
-const LENDERS_HREF = "/portal/settings/solar-lenders";
-
-/** "no amount is set and no label is set" — a list a person reads aloud. */
-function andList(parts: string[]): string {
-  if (parts.length <= 1) return parts[0] ?? "";
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-}
 
 // ---------------------------------------------------------------------------
 // Design
@@ -493,52 +470,6 @@ export function validateFinance(
     issues.push({ severity: "block", code, group, field, message, action: to });
   const warn = (code: string, group: IssueGroup, field: string, message: string) =>
     issues.push({ severity: "warn", code, group, field, message, action: to });
-
-  /**
-   * A PARTNER'S PROGRAMME CONTRIBUTION, CONFIGURED HALFWAY.
-   *
-   * Asked before anything about the price, and asked of every product, because
-   * a switch turned on with no amount behind it fails in the worst possible
-   * direction: `reconcileContract` returns nothing, the document generates
-   * cleanly, and it simply omits the reconciliation a household is entitled to
-   * see. Nobody gets an error; the paper is just quietly wrong.
-   *
-   * All three parts are required together and none of them has a default. The
-   * amount because a contribution of nothing is not a contribution. The label
-   * and the disclosure because naming somebody else's money is a legal
-   * characterisation — "contribution", "discount", "incentive" and "tax credit"
-   * are four different claims about who is liable for what — and the app is not
-   * entitled to pick one on an admin's behalf.
-   *
-   * The fix is in Settings, not on this deal, so the action link goes there.
-   */
-  const adjustmentProblems = contractAdjustmentProblems(f.contractAdjustment);
-  if (adjustmentProblems.length > 0) {
-    issues.push({
-      severity: "block",
-      code: "pricing.adjustment_incomplete",
-      group: "pricing",
-      field: "contractAdjustment",
-      message: `This lender's contract adjustment is switched on but ${andList(adjustmentProblems)}. A proposal cannot quote a programme it cannot describe.`,
-      action: { label: "Open lender settings", href: LENDERS_HREF },
-    });
-  } else if (
-    f.contractAdjustment?.enabled &&
-    f.product !== "loan" &&
-    adjustmentIsEffective(f.contractAdjustment)
-  ) {
-    // Configured correctly, and silently inapplicable. Only a loan has a
-    // lender advancing a contract for a contribution to come off; quoting this
-    // deal as cash, a lease or a PPA drops the programme, and a rep who
-    // switched product without noticing should be told rather than left to
-    // find out from a document with no reconciliation on it.
-    warn(
-      "pricing.adjustment_not_applied",
-      "pricing",
-      "product",
-      `${f.contractAdjustment.label?.trim() || "This lender's contract adjustment"} applies to financed deals only, so this ${f.product} proposal will not show it.`
-    );
-  }
 
   /**
    * A storage deal's price is per battery, and so is everything guarding it.

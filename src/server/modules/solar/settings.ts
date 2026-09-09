@@ -63,9 +63,8 @@ export type SolarSettingsView = SolarAssumptions & {
   ///
   /// STATUTE, which is why they are data: the base credit has already stepped
   /// down twice and both bonuses were invented in 2022. Not SolarAssumptions —
-  /// they reach no pricing calculation at all. They are quoted on exactly one
-  /// structure, a lender carrying a contract adjustment, and on every other
-  /// deal the product still quotes no incentive of any kind.
+  /// they reach no pricing calculation at all. They decide what the credit
+  /// ladder on the cost chapter is worked out with, and nothing else.
   creditRates: CreditRates;
   /// What the remainder between the after-credit figure and the quoted price
   /// is CALLED. The figure itself is always derived; see solar-credit-ladder.

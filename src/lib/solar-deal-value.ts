@@ -29,23 +29,6 @@ export type SolarPriceSource = {
   monthlyPaymentCents: number | null;
   /** PPA only: price per kWh, in tenths of a cent. */
   rateMillsPerKwh: number | null;
-  /**
-   * The programme reconciliation, where this partner writes its paper above the
-   * price the system was sold at.
-   *
-   * PRESENT ONLY ON A HANDFUL OF DEALS, and the reason this field exists at all
-   * is that `contractPriceCents` changed meaning on 2026-08-29. It used to be
-   * the household's obligation; it is now the contract, because that is what
-   * the document quotes and what the payment comes off. A pipeline that
-   * followed it would report a 10 kW job as a $125,000 deal — more than twice
-   * what the company sold, and summed across a board that is a forecast nobody
-   * can act on.
-   *
-   * So the pipeline reads the OBLIGATION: the price the rep quoted, which is
-   * what the company is owed and what every other deal's value already means.
-   * Absent on every snapshot without such a partner, which changes nothing.
-   */
-  lenderAdjustment?: { customerObligationCents: number } | null;
 };
 
 export type SolarDealValue =
@@ -74,13 +57,8 @@ export function solarDealValue(src: SolarPriceSource | null | undefined): SolarD
   if (src.product === "lease") {
     return src.monthlyPaymentCents ? { kind: "monthly", cents: src.monthlyPaymentCents } : NONE;
   }
-  // Cash, loan, and a deal with no product decided yet: all priced as a total —
-  // and on a programme partner, the total the COMPANY sold rather than the one
-  // its paper is written at. See `lenderAdjustment` above.
-  const cents = src.lenderAdjustment
-    ? src.lenderAdjustment.customerObligationCents
-    : src.contractPriceCents;
-  return cents ? { kind: "total", cents } : NONE;
+  // Cash, loan, and a deal with no product decided yet: all priced as a total.
+  return src.contractPriceCents ? { kind: "total", cents: src.contractPriceCents } : NONE;
 }
 
 /**

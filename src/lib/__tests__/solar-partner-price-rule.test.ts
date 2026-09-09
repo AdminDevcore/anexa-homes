@@ -106,12 +106,6 @@ const ALLOWED_ADDER_SPLIT: Record<string, string> = {
   // sticker, a roof financed on top included. It prices nothing.
   "src/components/proposal/solar/chapters/cost.tsx":
     "renders the snapshot's combined sticker figure",
-  // The funder's submission summary, and the same argument word for word: every
-  // figure on it is read off the frozen snapshot, where `adderTotalCents` is
-  // already `purchase.adderStickerCents` — the whole of the extra work at
-  // sticker, a roof financed on top included. It prices nothing.
-  "src/components/proposal/solar/submission-summary.tsx":
-    "renders the snapshot's combined sticker figure",
 };
 
 describe("no screen loses a roof that is financed on top", () => {

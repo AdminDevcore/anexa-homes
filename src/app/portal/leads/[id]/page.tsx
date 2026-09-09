@@ -940,9 +940,6 @@ export default async function LeadDetailPage({
               contractPriceCents: latestSnapshot.financing.contractPriceCents,
               monthlyPaymentCents: latestSnapshot.financing.monthlyPaymentCents,
               rateMillsPerKwh: latestSnapshot.financing.rateMillsPerKwh,
-              // The pipeline reports what the company sold, not what a
-              // programme partner's paper is written at. See solar-deal-value.
-              lenderAdjustment: latestSnapshot.financing.lenderAdjustment ?? null,
             })
           : ({ kind: "none" } as const);
         if (quoted.kind !== "none" && latestProposal) {
@@ -1747,16 +1744,12 @@ export default async function LeadDetailPage({
                       approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
                       approvedFileId: v.approvedFileId,
                       approvedParFileId: v.approvedParFileId,
-                      hasContractAdjustment:
-                        !!v.signedAt &&
-                        !!(v.snapshot as { financing?: { lenderAdjustment?: unknown } } | null)
-                          ?.financing?.lenderAdjustment,
                       // Whether this document has two readings to file — the
                       // option it opens on carries a credits-applied scenario,
                       // and it is not the battery-only deck, which has no
-                      // switch and reads its deal one way. Off the SNAPSHOT for
-                      // the same reason the line above is: the row is about a
-                      // document that already exists. Mirrors `copiesFor`.
+                      // switch and reads its deal one way. Off the SNAPSHOT:
+                      // the row is about a document that already exists.
+                      // Mirrors `copiesFor`.
                       hasCreditSwitch: hasCreditSwitch(v.snapshot),
                       lender: versionLenderBadge(lenderAttempts, v.id),
                     }))}

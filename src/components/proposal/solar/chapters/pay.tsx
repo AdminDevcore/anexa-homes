@@ -96,21 +96,6 @@ export function ChapterPay({
             </p>
           )}
 
-          {/* WHAT THE HOUSEHOLD ENDS UP OWNING, in this partner's own words.
-              Here because a rep can switch the comparison chapter off, and a
-              claim about ownership, term, transfer and buyout is not something
-              a document may lose along with a table. */}
-          {f.ownershipNote && (
-            <div className="break-inside-avoid">
-              <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
-                What you own
-              </h3>
-              <p className="mt-2 text-[0.8rem] leading-relaxed text-neutral-600">
-                {f.ownershipNote}
-              </p>
-            </div>
-          )}
-
           {options.length > 1 && showPaymentOptions && (
             <div className="break-inside-avoid">
               <AlternativesStrip
@@ -207,19 +192,18 @@ export function ChapterPay({
               "Rate",
               f.rateMillsPerKwh != null ? perKwh(f.rateMillsPerKwh) : null,
             ],
-            /* WHAT THE PAYMENT DIVIDES INTO. Shown only where it says something
-               the price chapter does not: on a deal carrying a programme
-               contribution, and on the rare deal with money down. Elsewhere it
-               is the total price again under a second name. */
             /* WHAT THE PAYMENT DIVIDES INTO, under the scenario on screen —
                `doc.financedAmountCents`, never the snapshot's own field, which
-               is the contract whichever way the switch is thrown. It printed
-               $128,080 beside a $161.33 payment until 2026-08-30. */
+               is the full price whichever way the switch is thrown. It printed
+               $128,080 beside a $161.33 payment until 2026-08-30.
+
+               Shown only where it says something the price chapter does not:
+               with the credits applied, and on the rare deal with money down.
+               Elsewhere it is the total price again under a second name. */
             [
               "Amount financed",
               doc.financedAmountCents != null &&
-              (doc.adjustment != null ||
-                doc.financedAmountCents !== f.contractPriceCents)
+              doc.financedAmountCents !== f.contractPriceCents
                 ? usd(doc.financedAmountCents)
                 : null,
             ],

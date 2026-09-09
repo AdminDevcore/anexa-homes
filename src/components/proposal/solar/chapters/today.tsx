@@ -34,7 +34,7 @@ export function ChapterToday({
    */
   showComparison: boolean;
 }) {
-  const { s, sv, lifetime, f } = doc;
+  const { s, sv, lifetime } = doc;
   const utility = s.energy.utilityProvider ?? "your utility";
 
   return (
@@ -82,7 +82,7 @@ export function ChapterToday({
           <LifetimeBlock
             label={lifetime.label}
             value={usd(lifetime.cents)}
-            note={lifetimeNote(lifetime, s.energy.utilityProvider, !!f.ownershipNote)}
+            note={lifetimeNote(lifetime, s.energy.utilityProvider)}
             accent={lifetime.tone === "good"}
           />
         </div>

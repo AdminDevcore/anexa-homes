@@ -114,34 +114,19 @@ export function lifetimeFigure(savings: SavingsModel): LifetimeFigure {
 /**
  * The sentence under the lifetime figure. Different argument, same numbers.
  *
- * `hasOwnershipNote` says whether this deal's PARTNER publishes its own wording
- * about what the household ends up with. When it does, the generic ownership
- * claim below is DROPPED rather than replaced: that sentence asserts outright
- * ownership and a transfer with the house, which is true of a loan and false of
- * a prepaid lease, and the partner's own wording is printed once — on the cost
- * chapter, which renders whether or not a rep has switched this one off. Saying
- * it in both places would put the same paragraph on the document twice.
- *
- * What is left is a complete and true sentence on its own, which is why this is
- * a drop and not a gap.
- *
- * Absent — every deal until a partner publishes wording, and every document
- * already issued — keeps the generic sentence exactly as it reads today.
+ * The ownership claim is only made where the years do not pay the system back:
+ * a household reading that the bill they avoid falls short is owed the other
+ * half of what they got for the money. Where the figure is a saving the number
+ * has already made the argument.
  */
-export function lifetimeNote(
-  f: LifetimeFigure,
-  utilityName: string | null,
-  hasOwnershipNote?: boolean
-): string {
+export function lifetimeNote(f: LifetimeFigure, utilityName: string | null): string {
   const utility = utilityName ?? "your utility";
   if (f.negative) {
-    const lead =
+    return (
       `Over ${f.label.match(/\d+/)?.[0] ?? "25"} years the utility bill you avoid does not fully ` +
-      `cover the system.`;
-    return hasOwnershipNote
-      ? lead
-      : `${lead} You own it outright, it carries its manufacturer warranties, and it ` +
-        `transfers with the house if you sell.`;
+      `cover the system. You own it outright, it carries its manufacturer warranties, and it ` +
+      `transfers with the house if you sell.`
+    );
   }
   const payback =
     f.paybackYear != null ? ` On the assumptions listed, it pays for itself in year ${f.paybackYear}.` : "";

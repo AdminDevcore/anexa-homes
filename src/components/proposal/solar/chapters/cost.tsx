@@ -25,23 +25,18 @@ import type { Doc } from "./doc";
 function LadderBar({
   contractCents,
   netCents,
-  netLabel,
   creditCents,
   incentiveCents,
 }: {
   contractCents: number;
   netCents: number;
-  /** What the remainder IS — an obligation on a programme deal, a net cost on
-      an ordinary one. The bar takes it from the caller rather than deciding,
-      for the same reason the table's rows do: see `programmeLadder`. */
-  netLabel: string;
   creditCents: number;
   incentiveCents: number;
 }) {
   if (contractCents <= 0) return null;
   const seg = (cents: number) => `${Math.max(0, (cents / contractCents) * 100)}%`;
   const parts = [
-    { key: "net", label: netLabel, cents: netCents, className: "bg-white" },
+    { key: "net", label: "Net cost", cents: netCents, className: "bg-white" },
     { key: "credit", label: "Tax credits", cents: creditCents, className: "bg-[var(--proposal-accent)]" },
     {
       key: "incentive",
@@ -116,31 +111,14 @@ function LadderBar({
  * dollars a watt. A household can check every one of those four figures against
  * the last quote they were given, and that is the point of them.
  *
- * On a deal carrying a programme contribution the contract is written for more
- * than that price, and the reconciliation is a SECOND BLOCK underneath: the
- * contract, the federal credits earned on it, the incentive that hands back the
- * remainder, and the price above arrived at again from the other direction.
- *
- * THAT ORDER IS THE 2026-08-30 CHANGE and it is worth recording why, because
- * this page has now been through three arrangements. Until 2026-08-29 it added
- * the contribution to the system price as a line item — $70,000 added to a
- * $58,080 system — which is arithmetic a reader can check and the one reading
- * of the deal that is both intuitive and false. So the contribution went inside
- * the price and the page opened on the contract instead, whole, with the
- * credits bringing it down. That fixed the false reading and introduced a
- * quieter one: the page now opened on "System price $118,400 · $13.45 per watt"
- * for a household quoted $48,400 at $5.50, a figure matching nothing they had
- * been told and nothing they could compare against another quote — the market
- * is three to six dollars a watt — with every credit under it reading as an
- * apology for the number above rather than as the mechanism.
- *
- * The price leads. The contract keeps its block, in full, and nothing is
- * hidden: the same five figures are printed, in the same order, under a heading
- * that says what they are. The funder's submission summary still leads with the
- * contract, because that is the number its file reviewer is checking.
+ * THE PRICE LEADS, and the federal credits are a SECOND BLOCK underneath it:
+ * what the system earns back, and what it nets to once the household claims
+ * them on their own return. That order is deliberate — a page that opened on
+ * an after-credit figure would put the number a household compares against
+ * another quote second, behind one they cannot.
  */
 export function ChapterCost({ doc }: { doc: Doc }) {
-  const { f, ladder, adjustment, isPurchase, systemPriceCents, showcased, credits } = doc;
+  const { f, ladder, isPurchase, systemPriceCents, showcased, credits } = doc;
   const { quotedTotalCents: totalCents, quotedPpwCents: ppwCents } = doc;
 
   const creditTotal = ladder ? ladder.credits.reduce((n, c) => n + c.amountCents, 0) : 0;
@@ -155,34 +133,13 @@ export function ChapterCost({ doc }: { doc: Doc }) {
    * page. The switch says what the WHOLE document assumes, and a block of
    * credit arithmetic is exactly that assumption written out.
    *
-   * OFF the sheet is the price and nothing else: system price, per watt, and
-   * the partner's own disclosure in the rail — which stays, because it names
-   * the contract the next sheet's amount financed comes off, and orphaning
-   * that figure is a worse document than showing where it comes from.
+   * OFF the sheet is the price and nothing else: system price and per watt.
    *
    * `credits == null` is a document with NO switch — an option with nothing to
    * claim, or a proposal generated before both scenarios were frozen. There is
    * no control to obey, so those print the ladder exactly as they always did.
    */
   const showLadder = ladder != null && (credits == null || credits.on);
-
-  /**
-   * IS THE TOP OF THE LADDER A CONTRACT, OR JUST THE PRICE?
-   *
-   * On a programme deal the paper is written for more than the household was
-   * quoted, the credits are earned on that larger figure, and the last row
-   * lands back on the price at the top of this sheet — the block is the
-   * mechanism by which a $125,000 contract becomes a $55,000 obligation, and
-   * "Contract value / What you pay" is exactly what those rows are.
-   *
-   * On an ordinary deal there is no second figure. The credits are worked out
-   * on the price itself and the bottom row is not what the household hands
-   * over — it is what the system NETS to once their own return pays them back.
-   * Printing "Contract value" over their own price, and "What you pay" over a
-   * number they will never write a cheque for, would be the same block telling
-   * two different lies. Same arithmetic, same rows, honest labels.
-   */
-  const programmeLadder = adjustment != null;
 
   /**
    * Whether the total gets a row of its own.
@@ -203,58 +160,14 @@ export function ChapterCost({ doc }: { doc: Doc }) {
       eyebrow="Your investment"
       title="What the system costs"
       lede={
-        !showLadder ? undefined : programmeLadder ? (
-          <>
-            Your price is at the top. Underneath it is the contract the system is financed against,
-            and every credit that brings it back down to that price.
-          </>
-        ) : (
+        showLadder ? (
           <>
             Your price is at the top. Underneath it are the federal credits this system earns and
             what it costs you once they are claimed.
           </>
-        )
+        ) : undefined
       }
       tone="dark"
-      rail={
-        <div className="space-y-6">
-          {/* THE PROGRAMME THIS DEAL WENT OUT ON, NAMED. Every word is the
-              administrator's; the app supplies the layout. */}
-          {adjustment && (
-            <div className="break-inside-avoid">
-              <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
-                {f.lender ? `${f.lender} — ${adjustment.label}` : adjustment.label}
-              </h3>
-              <p className="mt-2.5 text-[0.8rem] leading-relaxed text-neutral-400">
-                {adjustment.disclosure}
-              </p>
-              {/* A statement about THIS PAGE's arithmetic — the sentence that
-                  says which figure the payment came off, checkable by the
-                  reader against the rows beside it.
-
-                  IT FOLLOWS THE SWITCH, because since 2026-08-30 so does the
-                  payment. With the credits unclaimed the loan carries the
-                  contract; with them applied it carries what is left, and the
-                  next page's amount financed says the same number. A fixed
-                  sentence naming the contract was simply false in one of the
-                  two states. */}
-              <p className="mt-2 text-[0.8rem] leading-relaxed text-neutral-500">
-                {credits?.on && ladder ? (
-                  <>
-                    The payment and amount financed on the next page are calculated from the{" "}
-                    {usd(ladder.netCostCents)} left after your credits are applied.
-                  </>
-                ) : (
-                  <>
-                    The payment and amount financed on the next page are calculated from the{" "}
-                    {usd(adjustment.lenderContractValueCents)} contract.
-                  </>
-                )}
-              </p>
-            </div>
-          )}
-        </div>
-      }
     >
       {/* ── the price, checkable row by row ───────────────────────────── */}
       <dl className="break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
@@ -344,27 +257,22 @@ export function ChapterCost({ doc }: { doc: Doc }) {
       {showLadder && ladder && (
         <section className="mt-6 break-inside-avoid">
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
-            {programmeLadder ? "How it is financed" : "What your tax credits are worth"}
+            What your tax credits are worth
           </h3>
-          {/* NO PARAGRAPH HERE. The rail beside this block already carries the
-              partner's own disclosure naming the programme and the contract,
-              and the rows below are the arithmetic. A third telling of the same
-              thing cost thirty pixels the sheet does not have. */}
+          {/* NO PARAGRAPH HERE. The heading says what the block is and the rows
+              below are the arithmetic; a sentence between them costs thirty
+              pixels the sheet does not have. */}
           <div className="mt-4">
             <LadderBar
               contractCents={ladder.contractValueCents}
               netCents={ladder.netCostCents}
-              netLabel={programmeLadder ? "What you pay" : "Net cost"}
               creditCents={creditTotal}
               incentiveCents={ladder.incentiveCents}
             />
           </div>
 
           <dl className="mt-4 break-inside-avoid divide-y divide-white/10 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
-            <DarkRow
-              k={programmeLadder ? "Contract value" : "Your price"}
-              v={usd(ladder.contractValueCents)}
-            />
+            <DarkRow k="Your price" v={usd(ladder.contractValueCents)} />
             {ladder.credits.map((c) => (
               <DarkRow
                 key={c.key}
@@ -385,11 +293,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
             {ladder.incentiveCents > 0 && (
               <DarkRow k={ladder.incentiveLabel} v={`−${usd(ladder.incentiveCents)}`} muted />
             )}
-            <DarkRow
-              k={programmeLadder ? "What you pay" : "Your net cost after credits"}
-              v={usd(ladder.netCostCents)}
-              strong
-            />
+            <DarkRow k="Your net cost after credits" v={usd(ladder.netCostCents)} strong />
           </dl>
 
           {/* THE CAVEAT, in the company's own words, and never optional under a

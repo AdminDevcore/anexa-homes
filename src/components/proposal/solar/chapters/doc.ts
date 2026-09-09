@@ -2,7 +2,6 @@ import type {
   SolarProposalSnapshot,
   ProposalPaymentOption,
   SnapshotFinancing,
-  SnapshotContractAdjustment,
   SavingsModel,
   VppCredit,
 } from "@/lib/solar-proposal";
@@ -60,22 +59,19 @@ export type Doc = {
     reliefCents: number;
   } | null;
   isPurchase: boolean;
-  /** The partner's contract reconciliation, where the deal carries one. */
-  adjustment: SnapshotContractAdjustment | null;
-  /** The contract → credits → net cost ladder, where the deal carries one. */
+  /** The price → credits → net cost ladder, where the deal claims any. */
   ladder: CreditLadder | null;
   /** What the cost table calls the system price. See the view for why. */
   systemPriceCents: number | null;
   /**
-   * THE TOTAL THE HOUSEHOLD IS QUOTED — the contract on an ordinary deal, the
-   * customer's own price on one carrying a programme contribution. The figure
-   * every customer-facing surface means when it says "the price".
+   * THE TOTAL THE HOUSEHOLD IS QUOTED — the figure every customer-facing
+   * surface means when it says "the price".
    */
   quotedTotalCents: number | null;
   /** That price per installed watt, derived from it. Null on storage. */
   quotedPpwCents: number | null;
   /**
-   * What the loan is carrying under the scenario on screen — the contract with
+   * What the loan is carrying under the scenario on screen — the price with
    * the credits unclaimed, the balance left once they have been applied. The
    * principal the payment beside it was quoted on, so the two divide.
    */
