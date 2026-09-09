@@ -13,7 +13,6 @@ import { readSolarReadiness } from "./readiness";
 import { financeRowForProduct } from "@/lib/solar-finance-row";
 import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
 import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
-import { dealRebateTotalCents } from "./storage-queries";
 import { priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
 import { FIELD_SOURCES, WIRE_FIELDS } from "./lender-field-map";
 
@@ -742,7 +741,6 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
           dealerFeePct: f.product === "cash" ? 0 : (rowData.dealerFeePct ?? 0),
           adderTotalCents: adders.adderTotalCents,
           onTopAdderTotalCents: adders.onTopAdderTotalCents,
-          rebateTotalCents: await dealRebateTotalCents(user.companyId, f.leadId),
           maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
           finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
         })

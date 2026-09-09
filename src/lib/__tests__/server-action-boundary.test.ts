@@ -140,13 +140,17 @@ describe("server-action boundary", () => {
     ).toEqual([]);
   });
 
-  it("the five helpers that caused this guard are no longer server actions", () => {
+  it("the helpers that caused this guard are no longer server actions", () => {
     const storage = readFileSync(
       join(REPO_ROOT, "src/server/modules/solar/storage.ts"),
       "utf8"
     );
     expect(isUseServerModule(storage)).toBe(true);
     const names = exportedFunctions(storage).map((f) => f.name);
+    // The rebate four were DELETED with the rebate catalogue itself, so they
+    // are gone from the codebase rather than merely moved. `listBackupProfiles`
+    // is the one that still exists, in `storage-queries.ts` where a caller
+    // supplies the id it already resolved from the session.
     for (const gone of [
       "listBackupProfiles",
       "listRebates",
@@ -157,14 +161,7 @@ describe("server-action boundary", () => {
       expect(names, `${gone} must not be exported from a "use server" module`).not.toContain(gone);
     }
     // …and the mutations a browser legitimately calls are still there.
-    for (const kept of [
-      "saveBackupProfileAction",
-      "deleteBackupProfileAction",
-      "saveRebateAction",
-      "deleteRebateAction",
-      "applyDealRebateAction",
-      "removeDealRebateAction",
-    ]) {
+    for (const kept of ["saveBackupProfileAction", "deleteBackupProfileAction"]) {
       expect(names).toContain(kept);
     }
   });

@@ -340,11 +340,9 @@ export function SolarStorageProposalView({
            * A breakdown that ADDS UP, because a homeowner reads it with a
            * calculator.
            *
-           * The system alone, then the extra work, then whatever somebody else
-           * is paying, then the line at the bottom. This used to lead with the
-           * contract price and subtract the rebates BENEATH it — and the
-           * contract is already net of them, so the rebate came off twice on
-           * screen and the figure the customer signs appeared nowhere.
+           * The system alone, then the extra work, then the line at the bottom
+           * — which is the figure the customer signs, printed where they can
+           * add up to it rather than derived somewhere off the page.
            */
           <SpecList
             items={[
@@ -358,15 +356,10 @@ export function SolarStorageProposalView({
                     React.ReactNode,
                   ][])
                 : []),
-              ...(st?.rebates.length
-                ? st.rebates.map(
-                    (r) => [`${r.name}${r.qty > 1 ? ` × ${r.qty}` : ""}`, `−${usd(r.totalCents)}`] as [string, React.ReactNode]
-                  )
-                : []),
               // Only where something sits between the two. On a plain battery
               // deal the system price IS the total, and printing the same
               // figure twice under two names reads as two charges.
-              ...(quoted.financing.adderTotalCents || st?.rebates.length
+              ...(quoted.financing.adderTotalCents
                 ? ([["Your total", usd(quoted.financing.contractPriceCents ?? 0)]] as [
                     string,
                     React.ReactNode,

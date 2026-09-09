@@ -16,8 +16,11 @@ import { SETUP_CHECKS, checksFor } from "@/server/modules/settings/workspace-hea
  * `solar_storage_lenders`, `solar_storage_redline` — and the hub, which finds a
  * gap's card by key, silently dropped all three. A key here is a card id, and
  * workspace-health.test.ts is what holds the two lists to each other.
+ *
+ * The backup-profile gap lands on `solar_settings`: the profiles live on that
+ * screen's Backup tab since the Storage card was deleted.
  */
-const STORAGE_CHECKS = ["solar_storage", "solar_lenders", "solar_pay"];
+const STORAGE_CHECKS = ["solar_settings", "solar_lenders", "solar_pay"];
 
 describe("workspace setup checks", () => {
   it("has no duplicate keys — a gap lands on its card by key", () => {

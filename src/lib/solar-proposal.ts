@@ -1075,7 +1075,6 @@ export type SolarProposalSnapshot = {
       cyclesPerDay: number;
       roundTripEfficiencyPct: number;
     } | null;
-    rebates: { name: string; qty: number; amountCents: number; totalCents: number }[];
   } | null;
   generatedAt: string;
   /** Who generated it — recorded on the document, not shown to the customer. */
@@ -1393,12 +1392,6 @@ function priceOption(args: {
    * every figure by zero watts and quotes the household nothing.
    */
   systemType: "pv" | "pv_storage" | "storage";
-  /**
-   * Somebody else's money, already off the contract. Passed to EVERY option for
-   * the same reason the VPP credits are: the rebate belongs to the equipment,
-   * not to the way it is paid for.
-   */
-  rebateTotalCents: number;
   finance: ProposalFinanceInput;
   lender: string | null;
   lenderLogoUrl: string | null;
@@ -1450,7 +1443,6 @@ function priceOption(args: {
             dealerFeePct: finance.dealerFeePct,
             adderTotalCents: finance.adderTotalCents,
             onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
-            rebateTotalCents: args.rebateTotalCents,
           })
         )
       : pricePurchase({
@@ -2079,9 +2071,6 @@ export function buildProposalSnapshot(args: {
       batteryLabel: design.batteryLabel,
     },
     systemType,
-    // Likewise the rebates: the lines the customer reads on the cost chapter
-    // are the lines the contract was priced from, summed once, here.
-    rebateTotalCents: (args.storage?.rebates ?? []).reduce((n, r) => n + r.totalCents, 0),
     assumptions: a,
     currentRateMillsPerKwh,
     vppCredits,

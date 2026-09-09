@@ -1206,17 +1206,17 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
 
   it("keeps the customer's own breakdown adding up to its total", () => {
     // The lines a homeowner reads with a calculator: system, plus work, plus
-    // battery, less any rebate, equals the number they sign.
+    // battery, equals the number they sign.
     for (const battery of [0, 1, 99, POWERWALL, 9_999_999]) {
       const p = pricePurchase({
         product: "loan", systemSizeKwDc: 11.3, stickerPpwCents: 550, dealerFeePct: 65,
         adderTotalCents: 233_333, onTopAdderTotalCents: 700_000,
-        batteryPriceCents: battery, rebateTotalCents: 50_000,
+        batteryPriceCents: battery,
       });
       expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
-      expect(
-        p.baseStickerCents + p.adderStickerCents + p.batteryPriceCents - p.rebateStickerCents
-      ).toBe(p.contractPriceCents);
+      expect(p.baseStickerCents + p.adderStickerCents + p.batteryPriceCents).toBe(
+        p.contractPriceCents
+      );
       expect(p.batteryPriceCents).toBe(battery);
     }
   });

@@ -4,6 +4,7 @@ import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { SettingsScreenHeader } from "@/components/portal/settings-kit/screen-header";
 import { getSolarSettings } from "@/server/modules/solar/settings";
+import { listBackupProfiles } from "@/server/modules/solar/storage-queries";
 import { SolarSettingsForm } from "@/components/portal/solar-settings-form";
 import { StageModelManager } from "@/components/portal/stage-model-manager";
 import { prisma } from "@/server/db/client";
@@ -26,8 +27,11 @@ export default async function SolarSettingsPage({
   const vertical = await getActiveVertical(user);
   if (vertical !== "solar") redirect("/portal/settings");
 
-  const [settings, pipeline] = await Promise.all([
+  const [settings, profiles, pipeline] = await Promise.all([
     getSolarSettings(user.companyId),
+    // Retired rows included: the Backup tab has to be able to show and revive
+    // one, which a customer-facing read never does.
+    listBackupProfiles(user.companyId, false),
     prisma.pipeline.findFirst({
       where: { companyId: user.companyId },
       orderBy: { isDefault: "desc" },
@@ -39,11 +43,12 @@ export default async function SolarSettingsPage({
     <div className="space-y-6">
       <SettingsScreenHeader
         section="solar_settings"
-        description="Assumptions every quote is built from, the guard rails a rep cannot quote outside of, and who owns each pipeline stage."
+        description="Assumptions every quote is built from, what a battery is asked to carry, the guard rails a rep cannot quote outside of, and who owns each pipeline stage."
       />
 
       <SolarSettingsForm
         settings={settings}
+        profiles={profiles}
         initialTab={one(params.tab)}
         stageModel={
           pipeline ? (

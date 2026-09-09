@@ -267,7 +267,7 @@ export function validateDesign(
         field: "backupProfile",
         message:
           "No backup load profiles, so the proposal cannot say how long this battery lasts.",
-        action: { label: "Open storage settings", href: "/portal/settings/solar-storage" },
+        action: { label: "Open backup profiles", href: "/portal/settings/solar?tab=backup" },
       });
     }
     if (d.annualUsageKwh == null || d.annualUsageKwh <= 0) {

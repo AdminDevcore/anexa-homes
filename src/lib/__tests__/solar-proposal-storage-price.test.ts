@@ -47,7 +47,6 @@ const STORAGE = {
   usableKwh: 27,
   backup: [{ name: "Essentials", loadWatts: 750, hours: 36 }],
   tou: null,
-  rebates: [],
 };
 
 const build = (over: Partial<Parameters<typeof buildProposalSnapshot>[0]> = {}) =>
@@ -107,18 +106,6 @@ describe("a storage proposal is priced by the battery", () => {
       },
     }).financing;
     expect(f.contractPriceCents).toBe(1_800_000);
-  });
-
-  it("takes the rebate off the contract once, not twice", () => {
-    // The renderer prints the rebate as its own line beneath the system price,
-    // so the contract has to be the figure AFTER it — a document that showed a
-    // net contract and then subtracted the rebate again under it is short of
-    // its own bottom line by the rebate.
-    const f = build({
-      storage: { ...STORAGE, rebates: [{ name: "TXU storage", qty: 2, amountCents: 50_000, totalCents: 100_000 }] },
-    }).financing;
-    expect(f.basePriceCents).toBe(1_800_000);
-    expect(f.contractPriceCents).toBe(1_700_000);
   });
 
   it("prices the extra work on top of the batteries", () => {

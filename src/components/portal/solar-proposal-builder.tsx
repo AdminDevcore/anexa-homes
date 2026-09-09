@@ -159,17 +159,12 @@ export function SolarProposalBuilder({
   hasLayout,
   systemType,
   storage,
-  rebateCatalogue,
-  dealRebates,
 }: {
   leadId: string;
   /** What this deal sells. Reshapes the steps and every panel under them. */
   systemType: SolarSystemType;
   /** Step three's inputs on a storage deal. Ignored on every other kind. */
   storage: SolarStorageView;
-  /** Rebates the company offers, and the ones already on this deal. */
-  rebateCatalogue: { id: string; name: string; amountCents: number; perBattery: boolean }[];
-  dealRebates: { rebateId: string; name: string; qty: number; amountCents: number; totalCents: number }[];
   /**
    * Which step to open on. The readiness report links straight to the screen
    * that fixes each finding, so "Open financing" has to land ON financing
@@ -327,8 +322,6 @@ export function SolarProposalBuilder({
               batteryUnitPriceCents={
                 storage.batteries.find((b) => b.id === storage.batteryId)?.priceCents ?? 0
               }
-              rebateCatalogue={rebateCatalogue}
-              dealRebates={dealRebates}
               canEdit={canEditDeal}
               lenders={lenders}
               lenderId={lenderId}

@@ -29,7 +29,7 @@ import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { mayInheritLiveLink } from "@/lib/solar-proposal-state";
 import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
-import { listBackupProfiles, listDealRebates, dealRebateTotalCents } from "./storage-queries";
+import { listBackupProfiles } from "./storage-queries";
 import { usableKwh, backupTable, touSavings } from "@/lib/solar-storage";
 import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
 
@@ -334,13 +334,6 @@ export async function generateProposalVersion(
     cataloguePerBatteryCents: design.battery?.priceCents ?? null,
   });
 
-  /**
-   * Somebody else's money, off this contract. Read once, because it is priced
-   * into the contract AND printed as its own line on the customer's document —
-   * two readings of the same rows is two chances for them to disagree.
-   */
-  const rebateTotalCents = isStorage ? await dealRebateTotalCents(user.companyId, leadId) : 0;
-
   const capped = capStickerToFinalPpw({
     stickerPpwCents: finance.grossPpwCents,
     maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
@@ -420,7 +413,6 @@ export async function generateProposalVersion(
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,
-      rebateTotalCents,
     });
 
     // Written back for the same reason the per-watt block writes back: the deal
@@ -567,10 +559,7 @@ export async function generateProposalVersion(
   const storage = await (async () => {
     if (design.systemType !== "storage") return null;
 
-    const [profiles, rebates] = await Promise.all([
-      listBackupProfiles(user.companyId),
-      listDealRebates(user.companyId, leadId),
-    ]);
+    const profiles = await listBackupProfiles(user.companyId);
 
     const kwh = usableKwh(design.battery?.ratingW ?? null, design.batteryQty);
 
@@ -620,12 +609,6 @@ export async function generateProposalVersion(
               roundTripEfficiencyPct: assumptions.touRoundTripEfficiency,
             }
           : null,
-      rebates: rebates.map((r) => ({
-        name: r.name,
-        qty: r.qty,
-        amountCents: r.amountCents,
-        totalCents: r.totalCents,
-      })),
     };
   })();
 

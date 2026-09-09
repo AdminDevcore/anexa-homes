@@ -24,7 +24,7 @@ import {
   lenderAdderRules,
   listDealAdders,
 } from "@/server/modules/solar/adders";
-import { listBackupProfiles, listRebates, listDealRebates } from "@/server/modules/solar/storage-queries";
+import { listBackupProfiles } from "@/server/modules/solar/storage-queries";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
@@ -232,11 +232,6 @@ export default async function SolarProposalBuilderPage({
     listBackupProfiles(user.companyId),
   ]);
 
-  const [rebateCatalogue, dealRebates] = await Promise.all([
-    listRebates(user.companyId),
-    listDealRebates(user.companyId, lead.id),
-  ]);
-
   const battery = design?.batteryId
     ? await prisma.solarEquipment.findFirst({
         where: { id: design.batteryId, companyId: user.companyId },
@@ -352,8 +347,6 @@ export default async function SolarProposalBuilderPage({
           defaultQty: settings.defaultBatteryQty,
           profiles: backupProfiles,
         }}
-        rebateCatalogue={rebateCatalogue}
-        dealRebates={dealRebates}
         initialStep={
           step === "energy" || step === "design" || step === "financing" || step === "generate"
             ? step

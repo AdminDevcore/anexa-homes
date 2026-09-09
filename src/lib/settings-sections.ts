@@ -15,7 +15,7 @@ import {
   Sun,
   PanelsTopLeft,
   Landmark,
-  Zap, BatteryCharging, PenLine } from "lucide-react";
+  Zap, PenLine } from "lucide-react";
 import type { ActiveVertical } from "./vertical";
 
 /**
@@ -79,7 +79,6 @@ export type SettingsSectionKey =
   | "solar_lenders"
   | "solar_providers"
   | "solar_equipment"
-  | "solar_storage"
   | "solar_pay";
 
 export type SettingsSection = {
@@ -347,16 +346,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     href: "/portal/team",
     group: "solar",
     keywords: ["commission", "redline", "split", "payout", "pay", "battery", "storage"],
-    verticals: ["solar"],
-  },
-  {
-    icon: BatteryCharging,
-    key: "solar_storage",
-    title: "Storage",
-    body: "Backup load profiles a battery's runtime is worked out from, and the rebates that come off a price.",
-    href: "/portal/settings/solar-storage",
-    group: "solar",
-    keywords: ["battery", "backup", "powerwall", "rebate", "storage", "outage"],
     verticals: ["solar"],
   },
 ];

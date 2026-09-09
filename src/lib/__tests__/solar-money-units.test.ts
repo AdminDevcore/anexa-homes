@@ -6,9 +6,8 @@ import { priceUnits, pricePurchase } from "@/lib/solar-money";
  *
  * These are the storage numbers from the spec's worked example, asserted here
  * rather than on a screen: two Powerwalls at a $13,000 base through a 25%
- * programme, a main-panel upgrade, and a per-battery rebate the company passes
- * through. Every rule `pricePurchase` keeps has to keep holding when the thing
- * being counted stops being watts.
+ * programme, plus a main-panel upgrade. Every rule `pricePurchase` keeps has to
+ * keep holding when the thing being counted stops being watts.
  */
 describe("priceUnits", () => {
   // base 13_000_00 / 0.75 = 17_333_33 cents a battery, fee included.
@@ -18,29 +17,18 @@ describe("priceUnits", () => {
     stickerPerUnitCents: 17_333_33,
     dealerFeePct: 25,
     adderTotalCents: 2_700_00,
-    rebateTotalCents: 1_000_00,
   };
 
   it("prices two batteries the way the spec's worked example does", () => {
     const b = priceUnits(TWO_BATTERIES);
-    expect(b.contractPriceCents).toBe(36_933_33);
-    expect(b.grossPriceCents).toBe(27_699_99);
+    expect(b.contractPriceCents).toBe(38_266_66);
+    expect(b.grossPriceCents).toBe(28_699_99);
     expect(b.dealerFeeCents).toBe(b.contractPriceCents - b.grossPriceCents);
   });
 
   it("keeps the invariant a homeowner checks with a calculator", () => {
     const b = priceUnits(TWO_BATTERIES);
-    expect(b.baseStickerCents + b.adderStickerCents - b.rebateStickerCents).toBe(
-      b.contractPriceCents
-    );
-  });
-
-  it("takes the rebate off gross at face and off the contract grossed up", () => {
-    const without = priceUnits({ ...TWO_BATTERIES, rebateTotalCents: 0 });
-    const with_ = priceUnits(TWO_BATTERIES);
-    expect(with_.grossPriceCents).toBe(without.grossPriceCents - 1_000_00);
-    // The customer's side carries the fee the company no longer collects on it.
-    expect(with_.contractPriceCents).toBe(without.contractPriceCents - 1_333_33);
+    expect(b.baseStickerCents + b.adderStickerCents).toBe(b.contractPriceCents);
   });
 
   it("an on-top adder does not gross up and does not move the base", () => {
@@ -109,25 +97,12 @@ describe("pricePurchase still prices PV exactly as it did", () => {
     onTopAdderTotalCents: 0,
   };
 
-  it("is unchanged with no rebate", () => {
+  it("keeps the lines the customer adds up equal to the total", () => {
     const b = pricePurchase(pv);
     expect(b.systemWatts).toBe(10_140);
     expect(b.baseStickerCents).toBe(10_140 * 350);
     expect(b.baseStickerCents + b.adderStickerCents).toBe(b.contractPriceCents);
     expect(b.grossPriceCents + b.dealerFeeCents).toBe(b.contractPriceCents);
-  });
-
-  it("reports a zero rebate rather than leaving the field undefined", () => {
-    const b = pricePurchase(pv);
-    expect(b.rebateTotalCents).toBe(0);
-    expect(b.rebateStickerCents).toBe(0);
-  });
-
-  it("takes a rebate off gross before the fee when one is applied", () => {
-    const without = pricePurchase(pv);
-    const with_ = pricePurchase({ ...pv, rebateTotalCents: 1_000_00 });
-    expect(with_.grossPriceCents).toBe(without.grossPriceCents - 1_000_00);
-    expect(with_.contractPriceCents).toBeLessThan(without.contractPriceCents);
   });
 
   it("still keeps the per-watt rates it always reported", () => {
@@ -322,9 +297,8 @@ describe("priceStoragePurchase", () => {
       stickerPricePerBatteryCents: 17_333_33,
       dealerFeePct: 25,
       adderTotalCents: 2_700_00,
-      rebateTotalCents: 1_000_00,
     });
     expect(b.units).toBe(2);
-    expect(b.contractPriceCents).toBe(36_933_33);
+    expect(b.contractPriceCents).toBe(38_266_66);
   });
 });

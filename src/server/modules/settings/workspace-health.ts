@@ -156,9 +156,12 @@ export const SETUP_CHECKS: Check[] = [
     // and `solar_storage_redline`, they were filtered out of the grid AND out
     // of the "N settings have never been set up" count — a warning about silent
     // failure, failing silently. The key is the card; the label says what it is.
-    key: "solar_storage",
+    //
+    // The card is Solar Settings now: the profiles moved onto its Backup tab
+    // when the Storage screen was deleted, so the key followed them.
+    key: "solar_settings",
     label: "Backup load profiles",
-    href: "/portal/settings/solar-storage",
+    href: "/portal/settings/solar",
     hint: "A storage proposal cannot say how long the battery lasts, so readiness blocks it from generating at all.",
     severity: "silent",
     verticals: ["solar"],

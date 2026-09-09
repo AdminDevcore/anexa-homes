@@ -262,17 +262,6 @@ export type PurchaseInput = {
    * paying overage on it would pay a rep for the manufacturer's margin.
    */
   batteryPriceCents?: number;
-  /**
-   * The manufacturer's or utility's money on this deal, at its face value,
-   * before any dealer fee.
-   *
-   * Optional and zero by default, so every deal priced before rebates existed
-   * prices byte-identically to before. Comes off GROSS: the company is passing
-   * somebody else's money through, so it reduces what the company keeps and the
-   * lender's cut is then taken on the lower final — which is why the payment
-   * amortises the smaller number.
-   */
-  rebateTotalCents?: number;
   /** Our hard cost, for the margin basis. */
   equipmentCostCents?: number;
 };
@@ -328,20 +317,6 @@ export type PurchaseBreakdown = {
    */
   adderStickerCents: number;
 
-  /** The rebate at face — what came off gross. Zero when none is applied. */
-  rebateTotalCents: number;
-  /**
-   * The rebate as the CUSTOMER'S breakdown subtracts it — grossed up by the
-   * same fee everything else is.
-   *
-   * Subtracting it at face from a grossed-up total leaves a breakdown short of
-   * its own bottom line, in front of a homeowner with a calculator. The
-   * invariant is
-   * `baseSticker + adderSticker + battery − rebateSticker === contract`, and
-   * that is the line they add up.
-   */
-  rebateStickerCents: number;
-
   /** Gross minus our cost. Only meaningful when cost is known. */
   marginCents: number;
 };
@@ -375,8 +350,6 @@ export type UnitPriceInput = {
   onTopAdderTotalCents?: number;
   /** See `PurchaseInput.batteryPriceCents`. */
   batteryPriceCents?: number;
-  /** See `PurchaseInput.rebateTotalCents`. */
-  rebateTotalCents?: number;
   equipmentCostCents?: number;
 };
 
@@ -387,7 +360,6 @@ export type UnitPriceBreakdown = {
   adderTotalCents: number;
   onTopAdderTotalCents: number;
   batteryPriceCents: number;
-  rebateTotalCents: number;
   grossPriceCents: number;
   grossPerUnitCents: number;
   dealerFeeCents: number;
@@ -395,7 +367,6 @@ export type UnitPriceBreakdown = {
   finalPerUnitCents: number;
   baseStickerCents: number;
   adderStickerCents: number;
-  rebateStickerCents: number;
   marginCents: number;
 };
 
@@ -405,7 +376,6 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   const onTopAdderTotalCents = Math.round(input.onTopAdderTotalCents ?? 0);
   const adderTotalCents = insideAdderCents + onTopAdderTotalCents;
   const batteryPriceCents = Math.max(0, Math.round(input.batteryPriceCents ?? 0));
-  const rebateTotalCents = Math.max(0, Math.round(input.rebateTotalCents ?? 0));
 
   // A fee at or above 100% has no honest gross-up — it divides by zero or goes
   // negative. Standing the fee down beats putting an Infinity in front of a
@@ -423,18 +393,12 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   // AFTER that gross-up, at face: the partner advances them and keeps nothing
   // of them, so there is no cut for the customer's price to have to cover.
   const adderStickerCents = up(insideAdderCents) + onTopAdderTotalCents;
-  // The rebate grossed up by that same fee, so the customer's three lines still
-  // sum to the number at the bottom of their agreement.
-  const rebateStickerCents = up(rebateTotalCents);
-
   // The battery is added to BOTH sides at its own price — the customer pays the
   // catalogue figure and the company keeps all of it — so the fee below, which
   // is the difference between them, is untouched by it. That is the whole
   // meaning of "on top".
-  const contractPriceCents =
-    baseStickerCents + adderStickerCents + batteryPriceCents - rebateStickerCents;
-  const grossPriceCents =
-    basePriceCents + adderTotalCents + batteryPriceCents - rebateTotalCents;
+  const contractPriceCents = baseStickerCents + adderStickerCents + batteryPriceCents;
+  const grossPriceCents = basePriceCents + adderTotalCents + batteryPriceCents;
 
   // Subtracted rather than recomputed as `contract × f`: gross + fee has to
   // equal final EXACTLY, because a customer reads those three lines and adds
@@ -452,7 +416,6 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
     adderTotalCents,
     onTopAdderTotalCents,
     batteryPriceCents,
-    rebateTotalCents,
     grossPriceCents,
     grossPerUnitCents: per(grossPriceCents),
     dealerFeeCents,
@@ -460,7 +423,6 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
     finalPerUnitCents: per(contractPriceCents),
     baseStickerCents,
     adderStickerCents,
-    rebateStickerCents,
     marginCents,
   };
 }
@@ -521,7 +483,6 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     adderTotalCents: input.adderTotalCents,
     onTopAdderTotalCents: input.onTopAdderTotalCents,
     batteryPriceCents: input.batteryPriceCents,
-    rebateTotalCents: input.rebateTotalCents,
     equipmentCostCents: input.equipmentCostCents,
   });
   return {
@@ -531,7 +492,6 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
     batteryPriceCents: u.batteryPriceCents,
-    rebateTotalCents: u.rebateTotalCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: u.grossPerUnitCents,
     dealerFeeCents: u.dealerFeeCents,
@@ -539,7 +499,6 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     finalPpwCents: u.finalPerUnitCents,
     baseStickerCents: u.baseStickerCents,
     adderStickerCents: u.adderStickerCents,
-    rebateStickerCents: u.rebateStickerCents,
     marginCents: u.marginCents,
   };
 }
@@ -923,7 +882,7 @@ export function priceStoredPurchase(input: PurchaseInput & {
 //
 // A battery makes no kilowatt-hours, so there are no installed watts for a rate
 // to be per. It is still the same ladder: a rate times a countable thing, plus
-// adders, less a rebate, grossed up by the partner's fee. The unit is a
+// adders, grossed up by the partner's fee. The unit is a
 // battery, and these two functions are the per-watt pair with that unit in
 // them.
 // ---------------------------------------------------------------------------
@@ -988,7 +947,6 @@ export type StoragePriceInput = {
   dealerFeePct: number;
   adderTotalCents: number;
   onTopAdderTotalCents?: number;
-  rebateTotalCents?: number;
   equipmentCostCents?: number;
 };
 
@@ -1001,7 +959,6 @@ export function priceStoragePurchase(input: StoragePriceInput): UnitPriceBreakdo
     dealerFeePct: input.dealerFeePct,
     adderTotalCents: input.adderTotalCents,
     onTopAdderTotalCents: input.onTopAdderTotalCents,
-    rebateTotalCents: input.rebateTotalCents,
     equipmentCostCents: input.equipmentCostCents,
   });
 }
@@ -1073,7 +1030,6 @@ export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
     // battery is the SYSTEM, counted in `basePriceCents`, and charging for it
     // again on top would bill the household twice for one Powerwall.
     batteryPriceCents: u.batteryPriceCents,
-    rebateTotalCents: u.rebateTotalCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: 0,
     dealerFeeCents: u.dealerFeeCents,
@@ -1081,7 +1037,6 @@ export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
     finalPpwCents: 0,
     baseStickerCents: u.baseStickerCents,
     adderStickerCents: u.adderStickerCents,
-    rebateStickerCents: u.rebateStickerCents,
     marginCents: u.marginCents,
   };
 }

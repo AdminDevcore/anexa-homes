@@ -374,7 +374,6 @@ model Company {
   solarProviders           SolarProvider[]
   solarDesigns             SolarDesign[]
   solarBackupProfiles      SolarBackupProfile[]
-  solarRebates             SolarRebate[]
   solarFinance             SolarFinance[]
   creditApplications       CreditApplication[]
   solarProposals           SolarProposal[]
@@ -1067,7 +1066,6 @@ model Lead {
   estimate               Estimate?
   proposals              Proposal[]
   solarDesign            SolarDesign?
-  solarDealRebates       SolarDealRebate[]
   solarFinance           SolarFinance?
   creditApplications     CreditApplication[]
   solarProposals         SolarProposal[]
@@ -5229,58 +5227,3 @@ model SolarBackupProfile {
   @@map("solar_backup_profiles")
 }
 
-/// Manufacturer or utility money the company passes through to the customer.
-///
-/// Priced once here so two reps cannot quote the same rebate at two amounts.
-/// Applies to any deal carrying a battery, storage-only or solar-plus-storage —
-/// a Tesla rebate is a Tesla rebate either way — and nothing is applied by
-/// default, so every deal in flight prices exactly as it did.
-model SolarRebate {
-  id          String   @id @default(uuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  /// Isolated per vertical: this row belongs to exactly one workspace.
-  vertical    Vertical @default(solar)
-  name        String
-  amountCents Int
-  /// True when the amount is per battery rather than per job.
-  perBattery  Boolean  @default(false)
-  isActive    Boolean  @default(true)
-  rank        Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  deals SolarDealRebate[]
-
-  @@unique([companyId, name])
-  @@index([companyId, isActive])
-  @@map("solar_rebates")
-}
-
-/// One rebate as applied to one deal.
-model SolarDealRebate {
-  id          String      @id @default(uuid())
-  companyId   String
-  /// Isolated per vertical: this row belongs to exactly one workspace.
-  vertical    Vertical    @default(solar)
-  leadId      String
-  lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  rebateId    String
-  /// Restrict, not Cascade: deleting a catalogue rebate that is priced into a
-  /// live deal would silently move that deal's contract. The settings screen
-  /// refuses the delete and says how many deals hold it.
-  rebate      SolarRebate @relation(fields: [rebateId], references: [id], onDelete: Restrict)
-  qty         Int         @default(1)
-  /**
-   * The amount COPIED off the catalogue when the rebate was applied.
-   * Editing a rebate in Settings must not move a price a rep has already
-   * quoted, for the same reason the proposal snapshot freezes everything else:
-   * the number the customer was shown is the number they were shown.
-   */
-  amountCents Int
-  createdAt   DateTime    @default(now())
-
-  @@unique([leadId, rebateId])
-  @@index([companyId, leadId])
-  @@map("solar_deal_rebates")
-}

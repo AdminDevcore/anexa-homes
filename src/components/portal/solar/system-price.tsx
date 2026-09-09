@@ -829,7 +829,6 @@ export function StoragePriceCard({
   quotedLabel,
   adderTotalCents,
   onTopAdderTotalCents = 0,
-  rebateTotalCents = 0,
   canEdit,
   onChange,
 }: {
@@ -843,7 +842,6 @@ export function StoragePriceCard({
   quotedLabel: string | null;
   adderTotalCents: number;
   onTopAdderTotalCents?: number;
-  rebateTotalCents?: number;
   canEdit: boolean;
   onChange: (cents: number | null) => void;
 }) {
@@ -872,7 +870,6 @@ export function StoragePriceCard({
           dealerFeePct: fee,
           adderTotalCents,
           onTopAdderTotalCents,
-          rebateTotalCents,
         });
 
   // Measured on what SURVIVES the partner's rule, not on what was typed. Under
@@ -927,9 +924,6 @@ export function StoragePriceCard({
           />
           {breakdown.adderStickerCents !== 0 && (
             <Row label="Additional work" value={money(breakdown.adderStickerCents)} />
-          )}
-          {breakdown.rebateStickerCents > 0 && (
-            <Row label="Rebate" value={`−${money(breakdown.rebateStickerCents)}`} />
           )}
           <Row label="What we keep" value={money(breakdown.grossPriceCents)} muted />
           {breakdown.dealerFeeCents !== 0 && (

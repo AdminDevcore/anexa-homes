@@ -46,7 +46,6 @@ import {
   type CreditClaims,
   type CreditRates,
 } from "@/lib/solar-credit-ladder";
-import { applyDealRebateAction, removeDealRebateAction } from "@/server/modules/solar/storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { proposalVersionStanding } from "@/lib/solar-proposal-state";
 import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
@@ -775,8 +774,6 @@ export function SolarFinancePanel({
   batteryQty,
   batteryLabel,
   batteryUnitPriceCents,
-  rebateCatalogue,
-  dealRebates,
   adderCatalogue,
   adderLines,
   systemSizeKwDc,
@@ -823,10 +820,6 @@ export function SolarFinancePanel({
    * battery is the box the rep types in below.
    */
   batteryUnitPriceCents: number;
-  /** Rebates the company offers. Applies to any deal carrying a battery. */
-  rebateCatalogue: { id: string; name: string; amountCents: number; perBattery: boolean }[];
-  /** The ones on THIS deal, amounts already frozen at apply time. */
-  dealRebates: { rebateId: string; name: string; qty: number; amountCents: number; totalCents: number }[];
   /** The adders this company sells, for the rep to pick from. */
   adderCatalogue: AdderOption[];
   /** The lines already on this deal. The total is derived from them. */
@@ -960,18 +953,6 @@ export function SolarFinancePanel({
     adderLines, finance?.adderTotalCents, finance?.onTopAdderTotalCents, systemSizeKwDc,
   ]);
   const { adderTotalCents, onTopAdderTotalCents } = adderSplit;
-
-  /**
-   * The manufacturer's money on this deal, at face.
-   *
-   * Zero on every deal with none applied, which is every deal in flight — so
-   * the arithmetic below is byte-identical to what it was before rebates
-   * existed unless somebody has deliberately put one on.
-   */
-  const rebateTotalCents = React.useMemo(
-    () => dealRebates.reduce((n, r) => n + r.totalCents, 0),
-    [dealRebates]
-  );
 
   /**
    * The fee this deal is quoted under, and the sticker the base grosses up to.
@@ -1185,7 +1166,6 @@ export function SolarFinancePanel({
         dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
         adderTotalCents,
         onTopAdderTotalCents,
-        rebateTotalCents,
         maxFinalPricePerBatteryCents: quotedLender?.maxFinalPricePerBatteryCents ?? null,
         finalBatteryPriceMode: quotedLender?.finalBatteryPriceMode ?? "cap",
       });
@@ -1200,13 +1180,12 @@ export function SolarFinancePanel({
       adderTotalCents,
       onTopAdderTotalCents,
       batteryPriceCents,
-      rebateTotalCents,
       maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
       finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
     });
   }, [
     isPurchase, isStorage, batteryQty, product, systemSizeKwDc, stickerPpwCents, feePct,
-    adderTotalCents, onTopAdderTotalCents, batteryPriceCents, rebateTotalCents,
+    adderTotalCents, onTopAdderTotalCents, batteryPriceCents,
     quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
     quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
   ]);
@@ -1426,7 +1405,6 @@ export function SolarFinancePanel({
           quotedLabel={quotedLender?.name ?? null}
           adderTotalCents={adderTotalCents}
           onTopAdderTotalCents={onTopAdderTotalCents}
-          rebateTotalCents={rebateTotalCents}
           canEdit={canEdit}
           onChange={setBasePpwCents}
         />
@@ -1487,23 +1465,6 @@ export function SolarFinancePanel({
         systemWatts={Math.round(systemSizeKwDc * 1000)}
         storedTotalCents={(finance?.adderTotalCents ?? 0) + (finance?.onTopAdderTotalCents ?? 0)}
       />
-
-      {/* The manufacturer's money. Below the adders because it is the other
-          thing that moves the contract total, and above the shelf because the
-          payment on every card down there is amortising the number it leaves.
-
-          Available on ANY deal carrying a battery, not only storage-only ones:
-          a Tesla rebate is a Tesla rebate either way. Nothing is applied
-          automatically, so a deal nobody has touched prices exactly as it did
-          before rebates existed. */}
-      {batteryQty > 0 && rebateCatalogue.length > 0 && (
-        <RebatePanel
-          leadId={leadId}
-          canEdit={canEdit}
-          catalogue={rebateCatalogue}
-          applied={dealRebates}
-        />
-      )}
 
       {/* The rate sheets ARE the interface. Four abstract product types used to
           sit here instead, which put the actual offers two dropdowns deep and
@@ -2315,102 +2276,6 @@ export function ProposalVersionList({
         )}
       </ul>
     </div>
-  );
-}
-
-/**
- * The rebates on this deal.
- *
- * A rebate comes off GROSS, before the lender's cut: the company is passing
- * somebody else's money through, so the fee is then taken on the lower final
- * and the payment amortises the smaller number. The customer's breakdown
- * subtracts it grossed up by that same fee, which is what keeps
- * `base + work − rebate` equal to the contract exactly.
- *
- * The amount is FROZEN when applied. Editing the catalogue tomorrow cannot move
- * a price quoted today — re-applying is the only thing that refreshes it, and
- * that takes a deliberate click.
- */
-function RebatePanel({
-  leadId,
-  canEdit,
-  catalogue,
-  applied,
-}: {
-  leadId: string;
-  canEdit: boolean;
-  catalogue: { id: string; name: string; amountCents: number; perBattery: boolean }[];
-  applied: { rebateId: string; name: string; qty: number; amountCents: number; totalCents: number }[];
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = React.useState(false);
-  const on = new Set(applied.map((a) => a.rebateId));
-
-  async function toggle(rebateId: string, add: boolean) {
-    setBusy(true);
-    try {
-      const res = add
-        ? await applyDealRebateAction({ leadId, rebateId })
-        : await removeDealRebateAction({ leadId, rebateId });
-      if (!res.ok) return toast.error(res.error);
-      router.refresh();
-    } catch {
-      toast.error("Could not change the rebate.");
-    } finally {
-      // In a finally: a throw must not latch the panel shut.
-      setBusy(false);
-    }
-  }
-
-  const total = applied.reduce((n, a) => n + a.totalCents, 0);
-
-  return (
-    <section className="space-y-3 rounded-xl border border-border bg-card p-5">
-      <div>
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Rebates
-        </h4>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Manufacturer or utility money passed through. Comes off before the lender&rsquo;s fee, so
-          the amount financed and the monthly payment both drop.
-        </p>
-      </div>
-
-      <ul className="divide-y divide-border">
-        {catalogue.map((r) => {
-          const line = applied.find((a) => a.rebateId === r.id);
-          return (
-            <li key={r.id} className="flex flex-wrap items-center gap-3 py-2.5">
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={on.has(r.id)}
-                disabled={!canEdit || busy}
-                aria-label={`Apply ${r.name}`}
-                onChange={(e) => void toggle(r.id, e.target.checked)}
-              />
-              <span className="text-sm">{r.name}</span>
-              <span className="text-xs text-muted-foreground">
-                {line
-                  ? `${line.qty} × $${(line.amountCents / 100).toLocaleString("en-US")}`
-                  : `$${(r.amountCents / 100).toLocaleString("en-US")}${r.perBattery ? " per battery" : ""}`}
-              </span>
-              {line && (
-                <span className="ml-auto text-sm font-medium tabular-nums">
-                  −${(line.totalCents / 100).toLocaleString("en-US")}
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-
-      {total > 0 && (
-        <p className="border-t border-border pt-2 text-right text-sm font-semibold tabular-nums">
-          −${(total / 100).toLocaleString("en-US")} off this deal
-        </p>
-      )}
-    </section>
   );
 }
 
