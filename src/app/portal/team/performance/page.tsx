@@ -4,6 +4,7 @@ import { ArrowLeft, Users, Target, Hammer, TrendingUp } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { PageHeader, StatCard } from "@/components/portal/ui";
 import { TeamPerformanceControls } from "@/components/portal/team-performance-controls";
+import { TeamPerformanceTeams } from "@/components/portal/team-performance-teams";
 import { canSeeTeamOps } from "@/server/modules/dashboard/ops";
 import { getTeamPerformance } from "@/server/modules/dashboard/team-performance";
 import { resolvePeriod } from "@/server/modules/reports/period";
@@ -36,6 +37,22 @@ export default async function TeamPerformancePage({
   const period = resolvePeriod(str(sp.period) || "month", str(sp.from), str(sp.to));
   const vertical = await getActiveVertical(user);
   const data = await getTeamPerformance(user, vertical, period);
+
+  // Individuals or sales teams. Same numbers, same window — the team view just
+  // adds its members' rows up, so switching can never change a total.
+  const byTeam = str(sp.view) === "team";
+  // Carry the window across the switch: changing what you're looking at should
+  // never quietly reset when you're looking at it.
+  const windowParams = new URLSearchParams({ period: period.preset });
+  if (period.preset === "custom") {
+    windowParams.set("from", str(sp.from));
+    windowParams.set("to", str(sp.to));
+  }
+  const viewHref = (view: "rep" | "team") => {
+    const p = new URLSearchParams(windowParams);
+    if (view === "team") p.set("view", "team");
+    return `/portal/team/performance?${p.toString()}`;
+  };
 
   const pct = (n: number | null) => (n == null ? "—" : `${Math.round(n)}%`);
   const money = (cents: number | null) => (cents == null ? "—" : fmt.money(cents, { compact: true }));
@@ -103,15 +120,38 @@ export default async function TeamPerformancePage({
       </div>
 
       <div className="rounded-xl border border-border bg-card">
-        <div className="border-b border-border px-5 py-4">
-          <h2 className="font-semibold">By rep</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Appointments and wins count deals CREATED in this period, so the close rate is one
-            cohort. Installs count jobs whose install date falls in it.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="font-semibold">{byTeam ? "By team" : "By rep"}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {byTeam
+                ? "Every sales manager's team — the manager, their reps, and the canvassers under those reps. Open a team to see who is in it."
+                : "Appointments and wins count deals CREATED in this period, so the close rate is one cohort. Installs count jobs whose install date falls in it."}
+            </p>
+          </div>
+          {/* Links, not buttons: the view belongs in the URL so a manager can
+              send "look at the teams this month" to somebody else. */}
+          <div className="flex shrink-0 gap-1 rounded-full border border-border p-0.5">
+            <Link
+              href={viewHref("rep")}
+              aria-current={byTeam ? undefined : "page"}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${byTeam ? "text-muted-foreground hover:bg-muted" : "bg-gold/10 text-gold-muted"}`}
+            >
+              By rep
+            </Link>
+            <Link
+              href={viewHref("team")}
+              aria-current={byTeam ? "page" : undefined}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${byTeam ? "bg-gold/10 text-gold-muted" : "text-muted-foreground hover:bg-muted"}`}
+            >
+              By team
+            </Link>
+          </div>
         </div>
 
-        {data.rows.length === 0 ? (
+        {byTeam ? (
+          <TeamPerformanceTeams teams={data.teams} canSeeFinancials={data.canSeeFinancials} />
+        ) : data.rows.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-muted-foreground">
             Nobody on the roster carried a deal in this period.
           </p>

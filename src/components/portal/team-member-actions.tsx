@@ -41,7 +41,7 @@ export function TeamMemberActions({
   currentSalesRepId: string | null;
   reps: { id: string; name: string }[];
   currentManagerId: string | null;
-  managers: { id: string; name: string }[];
+  managers: { id: string; name: string; teamName: string | null }[];
   roles: { value: string; label: string }[];
   assignableRoles: string[];
   isSuperAdmin: boolean;
@@ -162,7 +162,11 @@ export function TeamMemberActions({
             <SelectTrigger className="w-full"><SelectValue placeholder="Unassigned" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Unassigned</SelectItem>
-              {managers.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+              {/* The team is what a rep is actually being put ON, so it is named
+                  here rather than left for the profile page to reveal. */}
+              {managers.map((m) => (
+                <SelectItem key={m.id} value={m.id}>{m.teamName ? `${m.name} — ${m.teamName}` : m.name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <p className="text-[11px] text-muted-foreground">

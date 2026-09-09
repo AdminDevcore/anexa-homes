@@ -485,6 +485,19 @@ model User {
   status                      UserStatus           @default(active)
   avatarUrl                   String?
   title                       String?
+  /// The name a sales manager's team goes by ("Team Alpha", "Team Kings").
+  ///
+  /// Only a MANAGER carries one, and `setTeamNameAction` enforces it. A team is
+  /// already a manager plus the reps who report to them (User.managerId) and the
+  /// canvassers under those reps, so the name lives on the person the team hangs
+  /// off rather than in a table of its own — there is nothing a Team row would
+  /// hold that this column doesn't. Cleared when somebody is moved out of the
+  /// manager role, so a stale name can never label a team with nobody in it.
+  ///
+  /// Nullable and unconstrained: every existing manager starts without one, and
+  /// a team with no name still reads as "<Manager>'s team" everywhere it is
+  /// shown — see `teamNameOf`.
+  teamName                    String?
   // Sequential employee number per company (join order). Formatted on display as
   // <recordPrefix><5-digit>, e.g. AH-00001. Lower = earlier hire = higher rank.
   employeeNo                  Int?

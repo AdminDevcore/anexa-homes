@@ -149,9 +149,18 @@ export default async function DashboardPage() {
           <div className="rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h3 className="font-semibold">Team Performance</h3>
-              <Link href="/portal/team/performance" className="text-sm text-gold-muted hover:underline">
-                View team performance
-              </Link>
+              {/* Two doors into the same screen. The card below is per person;
+                  "By team" is the same numbers added up by sales team, which is
+                  how a floor is actually run. */}
+              <div className="flex items-center gap-3 text-sm">
+                <Link href="/portal/team/performance?period=month&view=team" className="text-gold-muted hover:underline">
+                  By team
+                </Link>
+                <span aria-hidden className="text-border">|</span>
+                <Link href="/portal/team/performance" className="text-gold-muted hover:underline">
+                  View team performance
+                </Link>
+              </div>
             </div>
             {ops.team.length === 0 ? (
               <p className="px-5 py-8 text-center text-sm text-muted-foreground">

@@ -13,7 +13,7 @@ import { formatEmployeeNo } from "@/lib/employee";
 import { initials } from "@/lib/format";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { TeamMemberActions } from "@/components/portal/team-member-actions";
-import { CommissionOverrides } from "@/components/portal/commission-overrides";
+import { MemberTeamCard } from "@/components/portal/member-team-card";
 import { MemberPayStructure } from "@/components/portal/member-pay-structure";
 import { RepVendorLink } from "@/components/portal/rep-vendor-link";
 import { prisma } from "@/server/db/client";
@@ -142,6 +142,13 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                     </span>
                   )}
                   <span className="rounded-full bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold-muted">{detail.roleLabel}</span>
+                  {/* Which team they're on — their own if they're the manager,
+                      otherwise the one they sit under. */}
+                  {detail.team && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground" title="Sales team">
+                      <Users2 className="size-3" /> {detail.team}
+                    </span>
+                  )}
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium capitalize ${STATUS_STYLES[detail.status] ?? "bg-muted text-muted-foreground"}`}>{detail.status}</span>
                 </div>
               </div>
@@ -236,64 +243,46 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
             </div>
           )}
 
-          {/* Reporting relationship (canvasser → rep → manager) */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h3 className="flex items-center gap-2 font-semibold"><Users2 className="size-4 text-muted-foreground" /> Reporting</h3>
-
-            {/* Who this person reports to */}
-            {detail.role === "canvasser" && (
-              <p className="mt-2 text-sm">
-                <span className="text-muted-foreground">Reports to (sales rep): </span>
-                {detail.salesRepName ? <span className="font-medium">{detail.salesRepName}</span> : <span className="text-muted-foreground">Unassigned</span>}
-                <span className="mt-1 block text-xs text-muted-foreground">Their knocks, leads, and appointments auto-assign to this rep.</span>
-              </p>
-            )}
-            {detail.role === "sales_rep" && (
-              <p className="mt-2 text-sm">
-                <span className="text-muted-foreground">Reports to (sales manager): </span>
-                {detail.managerName ? <span className="font-medium">{detail.managerName}</span> : <span className="text-muted-foreground">Unassigned</span>}
-                <span className="mt-1 block text-xs text-muted-foreground">This manager can see everything this rep&apos;s team does.</span>
-              </p>
-            )}
-
-            {/* Reps reporting to a manager */}
-            {detail.reports.length > 0 && (
-              <div className="mt-3 border-t border-border pt-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Sales reps reporting to {detail.firstName} ({detail.reports.length})
-                </p>
-                <ul className="mt-2 flex flex-wrap gap-1.5">
-                  {detail.reports.map((r) => (
-                    <li key={r.id}>
-                      <Link href={`/portal/team/${r.id}`} className="inline-flex rounded-full bg-muted px-2.5 py-1 text-xs font-medium hover:bg-muted/70">{r.name}</Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Canvassers reporting to a rep */}
-            {detail.canvassers.length > 0 && (
-              <div className="mt-3 border-t border-border pt-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Canvassers reporting to {detail.firstName} ({detail.canvassers.length})
-                </p>
-                <ul className="mt-2 flex flex-wrap gap-1.5">
-                  {detail.canvassers.map((c) => (
-                    <li key={c.id}>
-                      <Link href={`/portal/team/${c.id}`} className="inline-flex rounded-full bg-muted px-2.5 py-1 text-xs font-medium hover:bg-muted/70">{c.name}</Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {detail.role === "manager" && detail.reports.length === 0 && (
-              <p className="mt-2 text-sm text-muted-foreground">
-                No reps assigned. Assign sales reps to this manager from each rep&apos;s profile so their team&apos;s work shows up here.
-              </p>
-            )}
-          </div>
+          {/* Team — who is under them, who they report to, and what they earn
+              off each of those people. One card on purpose: see
+              components/portal/member-team-card.tsx. */}
+          <MemberTeamCard
+            member={{ id: detail.id, firstName: detail.firstName, role: detail.role, teamName: detail.teamName }}
+            canEdit={canEdit}
+            reportsTo={
+              detail.role === "canvasser"
+                ? { roleLabel: "Sales rep", name: detail.salesRepName, team: detail.team }
+                : detail.role === "sales_rep"
+                  ? { roleLabel: "Sales manager", name: detail.managerName, team: detail.team }
+                  : null
+            }
+            reports={detail.reports}
+            canvassers={detail.canvassers}
+            overrides={overrideRows.map((o) => ({
+              id: o.id,
+              sourceId: o.sourceId,
+              sourceName: `${o.source.firstName} ${o.source.lastName}`.trim(),
+              // Retired verticals are pinned to the default so a legacy row
+              // still renders somewhere real instead of an empty group.
+              vertical: isActiveVertical(o.vertical) ? o.vertical : DEFAULT_VERTICAL,
+              // A legacy roofing row on `job_cost` or `margin` has no override
+              // basis either engine pays on; it reads as a percentage, which
+              // is what it already behaved as, rather than crashing the sheet.
+              type: o.type === "flat" || o.type === "ppw" ? o.type : "percentage",
+              percent: o.percent,
+              flatAmount: o.flatAmount,
+              perWattMills: o.perWattMills,
+            }))}
+            candidates={overrideCandidates.map((c) => ({
+              id: c.id,
+              name: `${c.firstName} ${c.lastName}`.trim(),
+              // Only the sides this person works: an override on a workspace
+              // they can't sell in would never pay, so it isn't offered.
+              verticals: userVerticals(c),
+            }))}
+            verticals={liveVerticals}
+            showOverrides={showOverrides}
+          />
 
           {/* Activity rollups (privileged or self) */}
           {showFull && (
@@ -339,37 +328,6 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
 
           {showRepVendor && (
             <RepVendorLink userId={detail.id} vendors={companyVendors} currentVendorId={linkedVendor?.id ?? null} />
-          )}
-
-          {showOverrides && (
-            <CommissionOverrides
-              beneficiaryId={detail.id}
-              beneficiaryName={detail.firstName}
-              overrides={overrideRows.map((o) => ({
-                id: o.id,
-                sourceId: o.sourceId,
-                sourceName: `${o.source.firstName} ${o.source.lastName}`.trim(),
-                // Retired verticals are pinned to the default so a legacy row
-                // still renders somewhere real instead of an empty group.
-                vertical: isActiveVertical(o.vertical) ? o.vertical : DEFAULT_VERTICAL,
-                // A legacy roofing row on `job_cost` or `margin` has no override
-                // basis either engine pays on; it reads as a percentage, which
-                // is what it already behaved as, rather than crashing the sheet.
-                type: o.type === "flat" || o.type === "ppw" ? o.type : "percentage",
-                percent: o.percent,
-                flatAmount: o.flatAmount,
-                perWattMills: o.perWattMills,
-              }))}
-              candidates={overrideCandidates.map((c) => ({
-                id: c.id,
-                name: `${c.firstName} ${c.lastName}`.trim(),
-                // Only the sides this person works: an override on a workspace
-                // they can't sell in would never pay, so it isn't offered.
-                verticals: userVerticals(c),
-              }))}
-              verticals={liveVerticals}
-              canEdit={canEdit}
-            />
           )}
 
           {showFull && (

@@ -94,6 +94,44 @@ export async function deleteCommissionOverrideAction(id: string) {
   return { ok: true as const };
 }
 
+// --- Team name (a sales manager's team) -------------------------------------
+
+const teamNameSchema = z.object({
+  userId: z.string().min(1),
+  // Trimmed, and empty means "no name" rather than an empty string, so a team
+  // is either named or it isn't — nothing renders as a blank chip.
+  teamName: z.string().trim().max(60).nullable(),
+});
+
+/**
+ * Name (or rename) a sales manager's team.
+ *
+ * Only a manager may hold one: a team is a manager plus their reps, so naming
+ * anybody else's would create a label with nobody under it. Renaming is free
+ * and retroactive — the name is read live everywhere, never copied onto a deal
+ * — so "Team Alpha" becoming "Team Kings" moves the whole history with it.
+ */
+export async function setTeamNameAction(input: z.infer<typeof teamNameSchema>) {
+  const me = await requireUser();
+  if (!can(me, "update", "User")) return fail("Not allowed.");
+  const parsed = teamNameSchema.safeParse(input);
+  if (!parsed.success) return fail("Team names are up to 60 characters.");
+  const { userId, teamName } = parsed.data;
+
+  const target = await prisma.user.findFirst({
+    where: { id: userId, companyId: me.companyId },
+    select: { id: true, role: true },
+  });
+  if (!target) return fail("User not found.");
+  if (target.role !== "manager") return fail("Only a sales manager can have a team.");
+
+  await prisma.user.update({ where: { id: target.id }, data: { teamName: teamName || null } });
+  revalidatePath("/portal/team");
+  revalidatePath(`/portal/team/${target.id}`);
+  revalidatePath("/portal/team/performance");
+  return { ok: true as const };
+}
+
 const ROLE_VALUES = ["super_admin", "admin", "manager", "sales_rep", "canvasser", "marketing", "installer", "accounting"] as const;
 const STATUS_VALUES = ["active", "invited", "suspended", "disabled"] as const;
 
@@ -191,10 +229,16 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
 
   const roleChanged = role != null && role !== target.role;
   const statusChanged = status != null;
+  // Moving somebody out of the manager role takes their team's name with them.
+  // Leaving it behind would keep labelling a team on the leaderboard that no
+  // longer has a manager — and would silently come back if they were ever
+  // promoted again, under a name nobody remembers choosing.
+  const clearTeamName = roleChanged && role !== "manager";
   await prisma.user.update({
     where: { id: target.id },
     data: {
       ...(role ? { role } : {}),
+      ...(clearTeamName ? { teamName: null } : {}),
       ...(title !== undefined ? { title } : {}),
       ...(status ? { status } : {}),
       ...(commissionSplitPct !== undefined ? { commissionSplitPct } : {}),

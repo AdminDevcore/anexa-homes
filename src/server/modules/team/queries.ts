@@ -35,7 +35,34 @@ export type TeamMember = {
   employeeNo: number | null;
   createdAt: string;
   lastLoginAt: string | null;
+  /**
+   * The team this person BELONGS to, already resolved — a manager's own team
+   * name, a rep's manager's, a canvasser's rep's manager's. Null when they sit
+   * under nobody (or under a manager who hasn't named their team yet), which
+   * the roster shows as a dash rather than inventing a label.
+   *
+   * Deliberately NOT called `teamName`: that is the raw column, and only a
+   * manager has one. This is the resolved answer to "whose team are they on".
+   */
+  team: string | null;
 };
+
+/**
+ * The team a person belongs to. A manager IS their team; everyone below
+ * inherits it up the same chain the RBAC scope walks down —
+ * canvasser → rep → manager (see managerTeamUserFilter in rbac/policies.ts).
+ * Kept as one function so the roster, the profile and the leaderboard can never
+ * disagree about who is on whose team.
+ */
+export function teamNameOf(u: {
+  role: string;
+  teamName: string | null;
+  manager?: { teamName: string | null } | null;
+  salesRep?: { manager?: { teamName: string | null } | null } | null;
+}): string | null {
+  if (u.role === "manager") return u.teamName;
+  return u.manager?.teamName ?? u.salesRep?.manager?.teamName ?? null;
+}
 
 export async function getTeamMembers(viewer: { companyId: string; userId: string; role: Role }): Promise<TeamMember[]> {
   const companyId = viewer.companyId;
@@ -57,6 +84,9 @@ export async function getTeamMembers(viewer: { companyId: string; userId: string
     select: {
       id: true, firstName: true, lastName: true, email: true, phone: true,
       role: true, title: true, status: true, avatarUrl: true, employeeNo: true, createdAt: true, lastLoginAt: true,
+      teamName: true,
+      manager: { select: { teamName: true } },
+      salesRep: { select: { manager: { select: { teamName: true } } } },
     },
   });
   return users.map((u) => ({
@@ -74,6 +104,7 @@ export async function getTeamMembers(viewer: { companyId: string; userId: string
     employeeNo: u.employeeNo,
     createdAt: u.createdAt.toISOString(),
     lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
+    team: teamNameOf(u),
   }));
 }
 
@@ -129,6 +160,16 @@ export function rolePermissionSummary(role: Role): RolePermission[] {
   });
 }
 
+/** Somebody in a person's downline, as the Team card lists them. */
+export type TeamPerson = { id: string; name: string; role: string; roleLabel: string; status: string };
+/**
+ * A rep on a manager's team, with the canvassers who sit under that rep.
+ * Two levels because a manager's team IS two levels deep — the RBAC scope
+ * reaches canvassers through their rep (managerTeamUserFilter), so the Team
+ * card has to show the same people the manager can actually see.
+ */
+export type TeamReport = TeamPerson & { canvassers: TeamPerson[] };
+
 export type UserDetail = TeamMember & {
   commissionSplitPct: number | null;
   providedLeadType: string;
@@ -146,14 +187,20 @@ export type UserDetail = TeamMember & {
   solarCompanyLeadTakePct: number | null;
   solarCompanyLeadFlatCents: number | null;
   verticals: import("@prisma/client").Vertical[];
+  /**
+   * This manager's OWN team name — the raw column, null on everybody else.
+   * `team` (from TeamMember) is the team they belong to; for a manager the two
+   * are the same string, and for anyone else only `team` is filled.
+   */
+  teamName: string | null;
   // Canvasser → rep reporting.
   salesRepId: string | null;
   salesRepName: string | null;
-  canvassers: { id: string; name: string }[]; // who reports to this user (if a rep)
+  canvassers: TeamPerson[]; // who reports to this user (if a rep)
   // Rep → manager reporting.
   managerId: string | null;
   managerName: string | null;
-  reports: { id: string; name: string }[]; // reps reporting to this user (if a manager)
+  reports: TeamReport[]; // reps reporting to this user (if a manager)
   permissions: RolePermission[];
   activity: {
     assignedLeads: number;
@@ -191,10 +238,21 @@ export async function getAssignableManagers(companyId: string, excludeUserId?: s
       ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
     },
     orderBy: [{ firstName: "asc" }],
-    select: { id: true, firstName: true, lastName: true },
+    select: { id: true, firstName: true, lastName: true, teamName: true },
   });
-  return mgrs.map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName}`.trim() }));
+  // The team name rides along so the picker reads "Cheyenne — Team Alpha".
+  // Two managers with similar names are told apart by the team, which is the
+  // thing the person assigning a rep is actually thinking in.
+  return mgrs.map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName}`.trim(), teamName: m.teamName }));
 }
+
+const asPerson = (u: { id: string; firstName: string; lastName: string; role: Role; status: string }): TeamPerson => ({
+  id: u.id,
+  name: `${u.firstName} ${u.lastName}`.trim(),
+  role: u.role,
+  roleLabel: roleLabel(u.role),
+  status: u.status,
+});
 
 export async function getUserDetail(companyId: string, userId: string): Promise<UserDetail | null> {
   const u = await prisma.user.findFirst({
@@ -216,10 +274,11 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
       solarCompanyLeadTakePct: true,
       solarCompanyLeadFlatCents: true,
       verticals: true,
+      teamName: true,
       salesRepId: true,
-      salesRep: { select: { firstName: true, lastName: true } },
+      salesRep: { select: { firstName: true, lastName: true, manager: { select: { teamName: true } } } },
       managerId: true,
-      manager: { select: { firstName: true, lastName: true } },
+      manager: { select: { firstName: true, lastName: true, teamName: true } },
     },
   });
   if (!u) return null;
@@ -231,8 +290,21 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
     prisma.knock.count({ where: { companyId, repId: userId, appointmentAt: { not: null } } }),
     prisma.knock.count({ where: { companyId, repId: userId, disposition: { not: "not_knocked" } } }),
     prisma.commission.aggregate({ where: { companyId, userId }, _count: true, _sum: { amount: true } }),
-    prisma.user.findMany({ where: { companyId, salesRepId: userId }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
-    prisma.user.findMany({ where: { companyId, managerId: userId }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
+    prisma.user.findMany({ where: { companyId, salesRepId: userId, deletedAt: null }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true, role: true, status: true } }),
+    prisma.user.findMany({
+      where: { companyId, managerId: userId, deletedAt: null },
+      orderBy: { firstName: "asc" },
+      select: {
+        id: true, firstName: true, lastName: true, role: true, status: true,
+        // The second level of the team: a manager sees these people's work
+        // through their rep, so the card lists them where the scope puts them.
+        canvassers: {
+          where: { deletedAt: null },
+          orderBy: { firstName: "asc" },
+          select: { id: true, firstName: true, lastName: true, role: true, status: true },
+        },
+      },
+    }),
   ]);
 
   return {
@@ -264,12 +336,14 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
     solarCompanyLeadTakePct: u.solarCompanyLeadTakePct,
     solarCompanyLeadFlatCents: u.solarCompanyLeadFlatCents,
     verticals: u.verticals,
+    team: teamNameOf(u),
+    teamName: u.teamName,
     salesRepId: u.salesRepId,
     salesRepName: u.salesRep ? `${u.salesRep.firstName} ${u.salesRep.lastName}`.trim() : null,
-    canvassers: canvassers.map((c) => ({ id: c.id, name: `${c.firstName} ${c.lastName}`.trim() })),
+    canvassers: canvassers.map(asPerson),
     managerId: u.managerId,
     managerName: u.manager ? `${u.manager.firstName} ${u.manager.lastName}`.trim() : null,
-    reports: reports.map((r) => ({ id: r.id, name: `${r.firstName} ${r.lastName}`.trim() })),
+    reports: reports.map((r) => ({ ...asPerson(r), canvassers: r.canvassers.map(asPerson) })),
     permissions: rolePermissionSummary(u.role),
     activity: {
       assignedLeads,

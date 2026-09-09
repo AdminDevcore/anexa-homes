@@ -22,11 +22,13 @@ type Member = {
   avatarUrl: string | null;
   employeeNo: number | null;
   createdAt: string;
+  /** The sales team they're on — a manager's own, or their manager's. */
+  team: string | null;
 };
 
 const ROLE_ORDER = ["super_admin", "admin", "manager", "sales_rep", "canvasser", "marketing", "installer", "accounting"];
 const roleRank = (r: string) => { const i = ROLE_ORDER.indexOf(r); return i === -1 ? 99 : i; };
-type SortCol = "name" | "role" | "title" | "status" | "createdAt";
+type SortCol = "name" | "role" | "team" | "title" | "status" | "createdAt";
 
 const STATUS_STYLES: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-700",
@@ -34,6 +36,87 @@ const STATUS_STYLES: Record<string, string> = {
   suspended: "bg-amber-100 text-amber-700",
   disabled: "bg-red-100 text-red-700",
 };
+
+/**
+ * Header cell and body row live at module scope, not inside TeamClient.
+ * Declaring a component during render remounts it on every keystroke in the
+ * search box — react-hooks/static-components is an error in this repo for
+ * exactly that reason. Everything they used to close over is a prop now.
+ */
+function Th({
+  col,
+  children,
+  className,
+  active,
+  onSort,
+}: {
+  col: SortCol;
+  children: React.ReactNode;
+  className?: string;
+  active: boolean;
+  onSort: (col: SortCol) => void;
+}) {
+  return (
+    <th className={cn("px-4 py-2.5 text-left font-semibold", className)}>
+      <button onClick={() => onSort(col)} className="inline-flex items-center gap-1 hover:text-foreground">
+        {children}<ArrowUpDown className={cn("size-3", active ? "text-foreground" : "text-muted-foreground/40")} />
+      </button>
+    </th>
+  );
+}
+
+function Row({
+  m,
+  recordPrefix,
+  formatDate,
+  onOpen,
+}: {
+  m: Member;
+  recordPrefix: string;
+  formatDate: (d: string) => string;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <tr onClick={() => onOpen(m.id)} className="cursor-pointer hover:bg-muted/50">
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <Avatar className="size-8 border border-border">
+            {m.avatarUrl && <AvatarImage src={m.avatarUrl} alt={m.name} />}
+            <AvatarFallback className="bg-foreground text-[10px] font-semibold text-background">{initials(m.name)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 font-medium">
+              {m.name}
+              {m.employeeNo != null && (
+                <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-neutral-500" title="Employee # — rank by join order">
+                  {formatEmployeeNo(recordPrefix, m.employeeNo)}
+                </span>
+              )}
+            </div>
+            <div className="truncate text-xs text-muted-foreground">{m.email}</div>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-2.5">
+        <span className="rounded-full bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold-muted">{m.roleLabel}</span>
+      </td>
+      {/* Which sales team they're on. A manager's own; everybody else's comes
+          down the chain from theirs. */}
+      <td className="hidden px-4 py-2.5 text-sm md:table-cell">
+        {m.team ? (
+          <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">{m.team}</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="hidden px-4 py-2.5 text-sm text-muted-foreground lg:table-cell">{m.title ?? "—"}</td>
+      <td className="px-4 py-2.5">
+        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium capitalize", STATUS_STYLES[m.status] ?? "bg-muted text-muted-foreground")}>{m.status}</span>
+      </td>
+      <td className="hidden px-4 py-2.5 text-sm text-muted-foreground tabular-nums xl:table-cell">{formatDate(m.createdAt)}</td>
+    </tr>
+  );
+}
 
 export function TeamClient({ members, roles }: { members: Member[]; roles: { value: string; label: string }[] }) {
   const fmt = useFormat();
@@ -50,7 +133,9 @@ export function TeamClient({ members, roles }: { members: Member[]; roles: { val
     if (statusF !== "all" && m.status !== statusF) return false;
     if (q.trim()) {
       const s = q.toLowerCase();
-      if (!m.name.toLowerCase().includes(s) && !m.email.toLowerCase().includes(s)) return false;
+      // Team included on purpose: "team alpha" is how a manager finds their own
+      // people on this list, and it is the only handle they'd think to type.
+      if (!m.name.toLowerCase().includes(s) && !m.email.toLowerCase().includes(s) && !(m.team ?? "").toLowerCase().includes(s)) return false;
     }
     return true;
   });
@@ -74,50 +159,12 @@ export function TeamClient({ members, roles }: { members: Member[]; roles: { val
       })).filter((g) => g.members.length > 0)
     : [];
 
+  const openMember = React.useCallback((id: string) => router.push(`/portal/team/${id}`), [router]);
+
   function toggleSort(col: SortCol) {
     setGrouped(false);
     setSort((s) => (s.col === col ? { col, dir: (s.dir * -1) as 1 | -1 } : { col, dir: 1 }));
   }
-
-  const Th = ({ col, children, className }: { col: SortCol; children: React.ReactNode; className?: string }) => (
-    <th className={cn("px-4 py-2.5 text-left font-semibold", className)}>
-      <button onClick={() => toggleSort(col)} className="inline-flex items-center gap-1 hover:text-foreground">
-        {children}<ArrowUpDown className={cn("size-3", !grouped && sort.col === col ? "text-foreground" : "text-muted-foreground/40")} />
-      </button>
-    </th>
-  );
-
-  const Row = ({ m }: { m: Member }) => (
-    <tr onClick={() => router.push(`/portal/team/${m.id}`)} className="cursor-pointer hover:bg-muted/50">
-      <td className="px-4 py-2.5">
-        <div className="flex items-center gap-2.5">
-          <Avatar className="size-8 border border-border">
-            {m.avatarUrl && <AvatarImage src={m.avatarUrl} alt={m.name} />}
-            <AvatarFallback className="bg-foreground text-[10px] font-semibold text-background">{initials(m.name)}</AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 font-medium">
-              {m.name}
-              {m.employeeNo != null && (
-                <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-neutral-500" title="Employee # — rank by join order">
-                  {formatEmployeeNo(branding.recordPrefix, m.employeeNo)}
-                </span>
-              )}
-            </div>
-            <div className="truncate text-xs text-muted-foreground">{m.email}</div>
-          </div>
-        </div>
-      </td>
-      <td className="px-4 py-2.5">
-        <span className="rounded-full bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold-muted">{m.roleLabel}</span>
-      </td>
-      <td className="hidden px-4 py-2.5 text-sm text-muted-foreground md:table-cell">{m.title ?? "—"}</td>
-      <td className="px-4 py-2.5">
-        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium capitalize", STATUS_STYLES[m.status] ?? "bg-muted text-muted-foreground")}>{m.status}</span>
-      </td>
-      <td className="hidden px-4 py-2.5 text-sm text-muted-foreground tabular-nums xl:table-cell">{fmt.date(m.createdAt)}</td>
-    </tr>
-  );
 
   return (
     <div className="space-y-3">
@@ -156,29 +203,30 @@ export function TeamClient({ members, roles }: { members: Member[]; roles: { val
         <table className="w-full text-sm">
           <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
             <tr>
-              <Th col="name">Name</Th>
-              <Th col="role">Role</Th>
-              <Th col="title" className="hidden md:table-cell">Title</Th>
-              <Th col="status">Status</Th>
-              <Th col="createdAt" className="hidden xl:table-cell">Joined</Th>
+              <Th col="name" active={!grouped && sort.col === "name"} onSort={toggleSort}>Name</Th>
+              <Th col="role" active={!grouped && sort.col === "role"} onSort={toggleSort}>Role</Th>
+              <Th col="team" className="hidden md:table-cell" active={!grouped && sort.col === "team"} onSort={toggleSort}>Team</Th>
+              <Th col="title" className="hidden lg:table-cell" active={!grouped && sort.col === "title"} onSort={toggleSort}>Title</Th>
+              <Th col="status" active={!grouped && sort.col === "status"} onSort={toggleSort}>Status</Th>
+              <Th col="createdAt" className="hidden xl:table-cell" active={!grouped && sort.col === "createdAt"} onSort={toggleSort}>Joined</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {filtered.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">No team members match.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">No team members match.</td></tr>
             )}
             {grouped
               ? groups.map((g) => (
                   <React.Fragment key={g.role}>
                     <tr className="bg-muted/30">
-                      <td colSpan={5} className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      <td colSpan={6} className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {g.label} <span className="ml-1 rounded-full bg-background px-1.5 py-0.5 tabular-nums">{g.members.length}</span>
                       </td>
                     </tr>
-                    {g.members.map((m) => <Row key={m.id} m={m} />)}
+                    {g.members.map((m) => <Row key={m.id} m={m} recordPrefix={branding.recordPrefix} formatDate={fmt.date} onOpen={openMember} />)}
                   </React.Fragment>
                 ))
-              : sorted.map((m) => <Row key={m.id} m={m} />)}
+              : sorted.map((m) => <Row key={m.id} m={m} recordPrefix={branding.recordPrefix} formatDate={fmt.date} onOpen={openMember} />)}
           </tbody>
         </table>
       </div>
