@@ -61,6 +61,9 @@ import {
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
 import { priceStoredPurchase, batteryChargeCents } from "@/lib/solar-money";
+import { buildCreditLadder, type CreditLadder } from "@/lib/solar-credit-ladder";
+import { resolveSignToday } from "@/lib/solar-sign-today";
+import { getSolarSettings } from "@/server/modules/solar/settings";
 import { leadStageTimeline } from "@/server/modules/pipeline/stage-history-queries";
 import { PageHeader } from "@/components/portal/ui";
 import { NoteForm } from "@/components/portal/note-form";
@@ -426,6 +429,11 @@ export default async function LeadDetailPage({
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
             maxFinalPpwCents: true, finalPpwMode: true,
+            // The partner's own closing-credit rule. Read for the same reason
+            // the ceiling above it is: the credit ladder on this page has to
+            // be the one the builder and the document draw, and two of the
+            // three rules put a figure on it that no column of the deal holds.
+            signTodayMode: true, signTodayFixedCents: true, signTodayCapPpwCents: true,
           },
         }),
       ])
@@ -568,6 +576,16 @@ export default async function LeadDetailPage({
     : null;
 
   /**
+   * The company's credit percentages, for the ladder below.
+   *
+   * Read here rather than passed in because they are STATUTE and they live in
+   * Settings, not on the deal: the 30% is the same 30% for every job in the
+   * company on the day it is quoted. What varies per deal is which of the three
+   * a job actually earns, and that is on the finance row.
+   */
+  const solarSettings = isSolarDeal ? await getSolarSettings(user.companyId) : null;
+
+  /**
    * What the deal would sign for at TODAY'S design, priced exactly the way the
    * builder prices it. Hoisted out of the money card because two things need
    * it now: that card's price ladder, and the drift report below.
@@ -595,6 +613,69 @@ export default async function LeadDetailPage({
         })
       : null;
 
+  /**
+   * THE SECOND PRICE ON THIS DEAL: what is left of that once the household
+   * claims the federal credits this job earns.
+   *
+   * It is not decoration under the contract. Since the credits started driving
+   * the payment, the loan is written against what survives this ladder — so a
+   * card showing only the contract shows a price that no payment quoted
+   * anywhere on the deal, on the shelf or on the customer's own document
+   * divides into.
+   *
+   * SAME CALL, SAME INPUTS as the builder's Credits & incentives card and as
+   * generation itself: `buildCreditLadder` over the price this page has just
+   * derived, the tick-boxes on the finance row and the percentages in Settings.
+   * Anything else here would be a fourth derivation of a figure three surfaces
+   * already agree on.
+   *
+   * Null on a lease, a PPA and on a deal claiming nothing — see the module: a
+   * ladder with no rungs is not a ladder of zeroes, it is no ladder.
+   */
+  /** Which of the three THIS address and THIS equipment earn. One object, so
+   *  the closing credit and the ladder it lands on read the same deal. */
+  const solarCreditClaims = solarFinance
+    ? {
+        itc: solarFinance.claimItc,
+        energyCommunity: solarFinance.claimEnergyCommunity,
+        domesticContent: solarFinance.claimDomesticContent,
+      }
+    : null;
+
+  const workingLadder: CreditLadder | null =
+    workingPrice && solarFinance && solarSettings && solarCreditClaims
+      ? buildCreditLadder({
+          // The same figure on both sides, exactly as the builder passes it:
+          // the deal page prices what the customer signs, so there is no
+          // programme adjustment above it for an incentive rung to hand back.
+          contractValueCents: workingPrice.breakdown.contractPriceCents,
+          quotedPriceCents: workingPrice.breakdown.contractPriceCents,
+          rates: solarSettings.creditRates,
+          claims: solarCreditClaims,
+          incentiveLabel: solarSettings.creditIncentiveLabel,
+          signTodayCreditCents: resolveSignToday({
+            rule: designLenderRow
+              ? {
+                  mode: designLenderRow.signTodayMode,
+                  fixedCents: designLenderRow.signTodayFixedCents,
+                  capPpwCents: designLenderRow.signTodayCapPpwCents,
+                }
+              : null,
+            // THE SAME FOUR INPUTS the builder's card, the shelf and generation
+            // pass — the array and the storage at sticker, and the credits this
+            // job claims. A partner's cap is measured on what the household is
+            // left holding, so a deal page that passed only the array would
+            // print a closing credit the builder next door disagrees with.
+            systemPriceCents: workingPrice.breakdown.baseStickerCents,
+            batteryPriceCents: workingPrice.breakdown.batteryPriceCents,
+            systemWatts: workingPrice.breakdown.systemWatts,
+            creditRates: solarSettings.creditRates,
+            creditClaims: solarCreditClaims,
+            typedCents: solarFinance.signTodayCreditCents,
+          }).cents,
+        })
+      : null;
+
   const equipLabel = (e: { manufacturer: string | null; model: string } | null | undefined) =>
     e ? `${e.manufacturer ? `${e.manufacturer} ` : ""}${e.model}` : null;
 
@@ -613,6 +694,7 @@ export default async function LeadDetailPage({
         product: solarFinance?.product ?? null,
         contractPriceCents:
           workingPrice?.breakdown.contractPriceCents ?? solarFinance?.contractPriceCents ?? null,
+        netAfterCreditsCents: workingLadder?.netCostCents ?? null,
         monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
       }
@@ -874,6 +956,16 @@ export default async function LeadDetailPage({
           }),
           fmt.money
         ),
+        /**
+         * The SAME document's price with the credits off it — read out of the
+         * ladder that document was signed against, never re-derived from
+         * today's percentages. A tile reporting version 35 has to report
+         * version 35's arithmetic; statute moves, and so do the tick-boxes.
+         *
+         * Null on a lease, a PPA, a deal claiming nothing, and on any proposal
+         * generated before the ladder existed.
+         */
+        netAfterCreditsCents: reportedSystem.netAfterCreditsCents,
       },
       /** Empty unless the drawing has moved since that version was frozen. */
       drift: systemDriftRows,
@@ -926,6 +1018,33 @@ export default async function LeadDetailPage({
       finalPpwMode: dealLender?.finalPpwMode ?? "cap",
       cappedByLender: priced?.cap.capped ?? false,
       lenderName: dealLender?.name ?? null,
+      /**
+       * THE LADDER'S SECOND HALF, on the same rungs and from the same
+       * derivation as everything above it: today's design, today's tick-boxes.
+       *
+       * It ends the breakdown rather than starting a card of its own because
+       * it IS the rest of this ladder — the price the household actually
+       * finances, arrived at by taking the credits off the line above. Split
+       * onto its own card it would read as a different deal's arithmetic.
+       */
+      credits: workingLadder
+        ? {
+            lines: workingLadder.credits.map((c) => ({
+              key: c.key,
+              label: c.label,
+              pct: c.pct,
+              amountCents: c.amountCents,
+            })),
+            signTodayCents: workingLadder.signTodayCents,
+            signTodayLabel: workingLadder.signTodayLabel,
+            netCostCents: workingLadder.netCostCents,
+            // Zero on a storage-only job, which has no installed watts for a
+            // rate to be per — the same rule `purchaseFromUnits` follows, and
+            // for the same reason: a $/W derived from a battery count is a
+            // figure somebody would eventually quote out loud.
+            netPpwCents: watts > 0 ? Math.round(workingLadder.netCostCents / watts) : 0,
+          }
+        : null,
     };
   })();
 

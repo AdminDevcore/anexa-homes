@@ -60,6 +60,22 @@ export type DesignSystem = {
    * every such deal, every time, for a design nobody had touched.
    */
   contractPriceCents: number | null;
+  /**
+   * THE SAME SYSTEM WITH THE HOUSEHOLD'S CREDITS OFF IT, cents.
+   *
+   * Purchase only, and null wherever this deal claims nothing — a lease and a
+   * PPA own no array and therefore earn no credit, and neither does a deal a
+   * rep has unticked every box on.
+   *
+   * It is the SECOND price on a solar deal and it belongs beside the first for
+   * the same reason the contract does: since the credits started driving the
+   * payment, what the household finances is what is left after them, so a card
+   * showing only the contract shows a price no payment on the page divides
+   * into. `buildCreditLadder` is the only thing that produces it — on a frozen
+   * proposal it is read out of the ladder the customer's own document was
+   * signed against, never recomputed.
+   */
+  netAfterCreditsCents: number | null;
   monthlyPaymentCents: number | null;
   rateMillsPerKwh: number | null;
 };
@@ -115,6 +131,12 @@ export function resolveReportedSystem({
       batteryQty: system.battery?.qty ?? (system.batteryLabel ? 1 : 0),
       product: financing.product,
       contractPriceCents: financing.contractPriceCents,
+      // THE LADDER THE DOCUMENT WAS SIGNED AGAINST, not today's rates and not
+      // today's tick-boxes. Statute moves and a rep can untick a bonus after
+      // the signature; neither changes what the household was handed. Absent on
+      // every snapshot before v7, which reports no net at all rather than one
+      // worked out from figures that were not in force.
+      netAfterCreditsCents: financing.creditLadder?.netCostCents ?? null,
       monthlyPaymentCents: financing.monthlyPaymentCents,
       rateMillsPerKwh: financing.rateMillsPerKwh,
     };
@@ -187,6 +209,21 @@ export function systemDrift(
     "cents",
     reported.contractPriceCents,
     design.contractPriceCents,
+    whole
+  );
+  // AND THE OTHER PRICE. This one moves for a second reason the row above does
+  // not: the credits a deal claims are tick-boxes on the finance row, so a rep
+  // who unticks the domestic-content bonus after signing changes what the deal
+  // says the household nets without touching the drawing or the price. Left
+  // unreported, the tile reads the frozen ladder while the card's own
+  // breakdown re-derives a live one, and the deal shows two "after credits"
+  // figures with nothing on screen saying why.
+  add(
+    "netAfterCredits",
+    "After credits",
+    "cents",
+    reported.netAfterCreditsCents,
+    design.netAfterCreditsCents,
     whole
   );
   return rows;

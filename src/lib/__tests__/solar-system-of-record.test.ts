@@ -53,6 +53,7 @@ const DESIGN: DesignSystem = {
   batteryQty: 0,
   product: "loan",
   contractPriceCents: 5808000,
+  netAfterCreditsCents: null,
   monthlyPaymentCents: null,
   rateMillsPerKwh: null,
 };
@@ -136,6 +137,62 @@ describe("systemDrift", () => {
     expect(by.moduleQty).toMatchObject({ proposed: 25, working: 24, unit: "count" });
     expect(by.year1ProductionKwh).toMatchObject({ proposed: 15397, working: 12219, unit: "kwh" });
     expect(by.contractPrice).toMatchObject({ proposed: 6050000, working: 5808000, unit: "cents" });
+  });
+
+  /**
+   * The second price moves for a reason the first one does not.
+   *
+   * The credits a deal claims are tick-boxes on the finance row, so a rep who
+   * unticks the domestic-content bonus a week after the signature changes what
+   * the deal says the household nets without touching the drawing or the price.
+   * The tile reports the ladder the document was signed against and the card's
+   * own breakdown re-derives a live one; unreported, that is two "after
+   * credits" figures on one screen with nothing saying why.
+   */
+  it("names the after-credits figure when the credits claimed have moved", () => {
+    const withLadder = {
+      ...SNAPSHOT,
+      financing: { ...(SNAPSHOT.financing as object), creditLadder: { netCostCents: 2722500 } },
+    } as unknown as SolarProposalSnapshot;
+    const design: DesignSystem = {
+      ...DESIGN,
+      // The drawing is untouched — only the tick-boxes moved.
+      sizeKwDc: 11,
+      moduleQty: 25,
+      year1ProductionKwh: 15397,
+      offsetPct: 109.9785714285714,
+      batteryLabel: "Tesla 1707000-21-y",
+      batteryQty: 2,
+      contractPriceCents: 6050000,
+      netAfterCreditsCents: 3327500,
+    };
+    const reported = resolveReportedSystem({
+      proposal: { ...PROPOSAL, snapshot: withLadder },
+      design,
+    })!;
+    expect(reported.netAfterCreditsCents).toBe(2722500);
+
+    const rows = systemDrift(reported, design);
+    expect(rows.map((r) => r.key)).toEqual(["netAfterCredits"]);
+    expect(rows[0]).toMatchObject({
+      label: "After credits",
+      unit: "cents",
+      proposed: 2722500,
+      working: 3327500,
+    });
+  });
+
+  it("says nothing about a net the document never carried", () => {
+    // v6 and earlier froze no ladder. "The document does not say" is not the
+    // same claim as "nothing was claimed", and neither is a change.
+    const reported = resolveReportedSystem({
+      proposal: { ...PROPOSAL, snapshot: SNAPSHOT },
+      design: { ...DESIGN, netAfterCreditsCents: 3327500 },
+    })!;
+    expect(reported.netAfterCreditsCents).toBeNull();
+    expect(
+      systemDrift(reported, { ...DESIGN, netAfterCreditsCents: 3327500 }).map((r) => r.key)
+    ).not.toContain("netAfterCredits");
   });
 
   it("says nothing when the design still matches the proposal", () => {

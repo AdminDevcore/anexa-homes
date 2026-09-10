@@ -84,6 +84,21 @@ export type SystemMoney = {
     batteryQty: number;
     /** Already money-formatted: a lease reads "/mo", a PPA "/kWh". */
     priceLabel: string;
+    /**
+     * THE SECOND PRICE ON THE SAME DOCUMENT, cents: what is left of it once
+     * the household claims the federal credits this job earns.
+     *
+     * It sits under the contract on the cost tile rather than replacing it,
+     * because both are true and a deal has to be able to state either — the
+     * contract is what gets signed, submitted and paid commission on, and the
+     * net is what the household finances and what every payment quoted on this
+     * deal is worked out from.
+     *
+     * Null on a lease and a PPA, which own nothing and claim nothing; on a deal
+     * a rep has unticked every credit on; and on any proposal frozen before the
+     * ladder existed, where the honest answer is that the document does not say.
+     */
+    netAfterCreditsCents: number | null;
   };
   /**
    * What has moved on the drawing since that version was frozen. Empty on a
@@ -121,6 +136,24 @@ export type SystemMoney = {
   /** True when that rule is what set this price, rather than the base. */
   cappedByLender: boolean;
   lenderName: string | null;
+  /**
+   * The credits this deal claims and what it leaves the household paying —
+   * the rest of the price ladder, on today's design and today's tick-boxes.
+   *
+   * Null wherever there is nothing to claim. `buildCreditLadder` returns no
+   * ladder rather than a ladder of zeroes, and this follows it: a run of "$0"
+   * credit rows on a cash deal claiming none is a page inventing an argument.
+   */
+  credits: {
+    lines: { key: string; label: string; pct: number; amountCents: number }[];
+    /** The rep's own closing money on this job. Zero shows no row. */
+    signTodayCents: number;
+    signTodayLabel: string;
+    /** The bottom line: the price with all of it taken off. */
+    netCostCents: number;
+    /** That, per installed watt. Zero on a storage job, which has none. */
+    netPpwCents: number;
+  } | null;
 };
 
 /**
@@ -185,7 +218,25 @@ export function SolarSystemMoneyPanel({
               value={`${money.reported.year1ProductionKwh.toLocaleString()} kWh`}
             />
             <Metric label="Offset" value={`${Math.round(money.reported.offsetPct)}%`} />
-            <Metric label="System cost" value={money.reported.priceLabel} accent />
+            {/* TWO PRICES, ONE TILE. The contract leads because it is what was
+                signed and what everything downstream — the lender's file, the
+                deal's value, the rep's commission — is measured on. The net
+                follows it because it is what the household actually pays and
+                what the payment on their document is quoted from, and a rep
+                asked "so what does it cost them" should not have to open the
+                proposal to answer. Dropped where the two are the same figure:
+                on a deal claiming nothing there is no ladder at all, the field
+                is null, and the tile is the one number it has always been. */}
+            <Metric
+              label="System cost"
+              value={money.reported.priceLabel}
+              accent
+              sub={
+                money.reported.netAfterCreditsCents != null
+                  ? `${usd(money.reported.netAfterCreditsCents)} after credits`
+                  : undefined
+              }
+            />
           </div>
 
           <DriftNotice rows={money.drift} />
@@ -266,6 +317,50 @@ export function SolarSystemMoneyPanel({
                       {usdc(money.finalPpwCents)}/W · {usd(money.contractPriceCents)}
                     </dd>
                   </div>
+                  {/*
+                    THE LADDER DOES NOT END AT THE CONTRACT ANY MORE.
+
+                    The credits come off the price and the household finances
+                    what is left, so the contract is the price they SIGN and the
+                    net is the price they PAY — and a breakdown that stopped at
+                    the first was quoting a rep a figure that no payment on the
+                    deal, on the shelf or on the customer's own document divides
+                    into. Same rungs, same arithmetic, same order the builder's
+                    card and the proposal both draw them in.
+
+                    These rows change nothing downstream: the contract above is
+                    still what the lender is submitted, what the deal is valued
+                    at and what the rep is paid on.
+                  */}
+                  {money.credits && (
+                    <>
+                      {money.credits.lines.map((c) => (
+                        <SpecRow
+                          key={c.key}
+                          k={`${c.label} (${c.pct}%)`}
+                          v={`−${usd(c.amountCents)}`}
+                        />
+                      ))}
+                      {/* Only where a rep actually offered one. A "$0 sign
+                          today credit" is a discount the reader can see was
+                          considered and withheld. */}
+                      {money.credits.signTodayCents > 0 && (
+                        <SpecRow
+                          k={money.credits.signTodayLabel}
+                          v={`−${usd(money.credits.signTodayCents)}`}
+                        />
+                      )}
+                      <div className="flex items-center justify-between gap-4 py-1.5 font-semibold">
+                        <dt>After credits</dt>
+                        <dd className="tabular-nums text-solar">
+                          {money.credits.netPpwCents > 0 && (
+                            <>{usdc(money.credits.netPpwCents)}/W · </>
+                          )}
+                          {usd(money.credits.netCostCents)}
+                        </dd>
+                      </div>
+                    </>
+                  )}
                 </dl>
                 {/* The one thing left that a rep still cannot read off the
                     rungs: the battery is a catalogue PRICE, not a rate over
@@ -275,6 +370,18 @@ export function SolarSystemMoneyPanel({
                   <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
                     The battery is billed at its catalogue price, on top of what the array itself
                     is priced per watt.
+                  </p>
+                )}
+                {/* WHAT THE NET IS AND IS NOT. Two prices on one ladder invite
+                    exactly one misreading — that we invoice the lower one — and
+                    it is the misreading that ends up in front of a homeowner.
+                    Said here, once, rather than hinted at on the row. */}
+                {money.credits && (
+                  <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                    The credits are claimed on the household&rsquo;s own federal return, not
+                    taken off our invoice. The contract stays{" "}
+                    {usd(money.contractPriceCents)} — the net is what they finance, and what the
+                    payment on their proposal is quoted from.
                   </p>
                 )}
                 {/* WHICH SYSTEM THIS LADDER PRICED. The rungs are the company's
@@ -662,7 +769,24 @@ function DriftNotice({ rows }: { rows: SystemDriftRow[] }) {
   );
 }
 
-function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+/**
+ * One figure in the strip, with an optional second reading UNDER it.
+ *
+ * The sub-line sits between the value and the label rather than beside the
+ * value: a tile is read top-down, and the whole point of the second figure is
+ * that it is a consequence of the first, not an alternative to it.
+ */
+function Metric({
+  label,
+  value,
+  accent,
+  sub,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  sub?: string;
+}) {
   return (
     <div className="bg-card px-3 py-2.5">
       <div
@@ -673,6 +797,11 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
       >
         {value}
       </div>
+      {sub && (
+        <div className="truncate text-[11px] font-medium tabular-nums text-muted-foreground">
+          {sub}
+        </div>
+      )}
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
     </div>
   );
