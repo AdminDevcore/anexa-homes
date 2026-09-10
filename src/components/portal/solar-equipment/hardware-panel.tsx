@@ -5,13 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Archive,
   BatteryCharging,
   Check,
   MoreHorizontal,
   PanelsTopLeft,
   Plug,
-  RotateCcw,
   Star,
   Trash2,
 } from "lucide-react";
@@ -25,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  ActiveSwitch,
   Caution,
   FieldGrid,
   Hint,
@@ -197,7 +196,7 @@ export function HardwarePanel({
             <h2 className="truncate font-display text-xl font-semibold tracking-tight">
               {itemName(item)}
             </h2>
-            {!item.isActive && <Pill>Retired</Pill>}
+            {!item.isActive && !canEdit && <Pill>Retired</Pill>}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {item.isDefault && (
@@ -219,6 +218,21 @@ export function HardwarePanel({
             )}
           </div>
         </div>
+
+        {canEdit && (
+          <ActiveSwitch
+            label={`In use — ${itemName(item)}`}
+            checked={item.isActive}
+            disabled={busy}
+            hint="Retired: hidden from new designs, kept on the deals that already have it."
+            onChange={(v) =>
+              void act(
+                () => setSolarEquipmentActiveAction(item.id, v),
+                v ? "Sellable again" : "Retired"
+              )
+            }
+          />
+        )}
 
         {canEdit && (
           <DropdownMenu>
@@ -248,25 +262,6 @@ export function HardwarePanel({
                     : `Make the default ${meta.one} — one per kind`}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem
-                onSelect={() =>
-                  void act(
-                    () => setSolarEquipmentActiveAction(item.id, !item.isActive),
-                    item.isActive ? "Retired" : "Sellable again"
-                  )
-                }
-              >
-                {item.isActive ? (
-                  <>
-                    <Archive className="size-4" /> Retire — hidden from new designs, kept on
-                    existing deals
-                  </>
-                ) : (
-                  <>
-                    <RotateCcw className="size-4" /> Make sellable again
-                  </>
-                )}
-              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={async () => {

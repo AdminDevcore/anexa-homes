@@ -3,14 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  Archive,
-  ChevronDown,
-  ChevronUp,
-  MoreHorizontal,
-  RotateCcw,
-  Trash2,
-} from "lucide-react";
+import { ChevronDown, ChevronUp, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -20,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  ActiveSwitch,
   Caution,
   ChoiceCards,
   FieldGrid,
@@ -200,7 +194,7 @@ export function AdderPanel({
             <h2 className="truncate font-display text-xl font-semibold tracking-tight">
               {adder.label}
             </h2>
-            {!adder.isActive && <Pill>Retired</Pill>}
+            {!adder.isActive && !canEdit && <Pill>Retired</Pill>}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Pill tone="gold">
@@ -244,6 +238,21 @@ export function AdderPanel({
         )}
 
         {canEdit && (
+          <ActiveSwitch
+            label={`In use — ${adder.label}`}
+            checked={adder.isActive}
+            disabled={busy}
+            hint="Retired: hidden from new designs, kept on the quotes that already carry it."
+            onChange={(v) =>
+              void act(
+                () => setSolarEquipmentActiveAction(adder.id, v),
+                v ? "Sellable again" : "Retired"
+              )
+            }
+          />
+        )}
+
+        {canEdit && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -256,25 +265,6 @@ export function AdderPanel({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
-              <DropdownMenuItem
-                onSelect={() =>
-                  void act(
-                    () => setSolarEquipmentActiveAction(adder.id, !adder.isActive),
-                    adder.isActive ? "Retired" : "Sellable again"
-                  )
-                }
-              >
-                {adder.isActive ? (
-                  <>
-                    <Archive className="size-4" /> Retire — hidden from new designs, kept on
-                    existing quotes
-                  </>
-                ) : (
-                  <>
-                    <RotateCcw className="size-4" /> Make sellable again
-                  </>
-                )}
-              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={async () => {

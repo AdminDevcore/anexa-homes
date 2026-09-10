@@ -567,6 +567,48 @@ export function ToggleRow({
   );
 }
 
+/**
+ * The in-use switch that sits in a panel header.
+ *
+ * Retiring a thing is a state, not an errand. It is reversible, it is the
+ * answer to "can a rep still pick this?", and it was buried in a "..." menu
+ * where it read like a delete you had to go hunting for. So it reads as what
+ * it is — a switch showing where the thing stands, with the one line somebody
+ * wants before flipping it: what happens to the deals that already name it.
+ */
+export function ActiveSwitch({
+  label,
+  checked,
+  onChange,
+  hint,
+  disabled,
+}: {
+  /** Names the control for a screen reader — "In use — Oncor Electric Delivery". */
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  /** What retiring it does to work already sold. Written to read true either way. */
+  hint?: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1">
+      <div className="flex items-center gap-2">
+        <span className={cn("text-sm font-medium", !checked && "text-muted-foreground")}>
+          {checked ? "In use" : "Retired"}
+        </span>
+        <Switch
+          checked={checked}
+          onCheckedChange={onChange}
+          disabled={disabled}
+          aria-label={label}
+        />
+      </div>
+      {hint && <Hint className="max-w-[15rem] text-right">{hint}</Hint>}
+    </div>
+  );
+}
+
 /** Two or three fields that belong on one line where the window allows it. */
 export function FieldGrid({
   columns = 2,

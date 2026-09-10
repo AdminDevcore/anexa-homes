@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Archive, Check, Loader2, MoreHorizontal, Plus, Undo2, Zap } from "lucide-react";
+import { Check, Loader2, Plus, Zap } from "lucide-react";
 import type { FinanceProduct, SolarProviderKind } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,14 +19,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/portal/ui";
 import {
+  ActiveSwitch,
   Caution,
   ChoiceCards,
   FieldGrid,
@@ -343,7 +338,7 @@ function ProviderPanel({
             <h2 className="truncate font-display text-xl font-semibold tracking-tight">
               {row.name}
             </h2>
-            {!row.active && <Pill>Retired</Pill>}
+            {!row.active && !canEdit && <Pill>Retired</Pill>}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Pill>{row.kind === "utility" ? "Utility" : "Retail provider"}</Pill>
@@ -362,38 +357,18 @@ function ProviderPanel({
         </div>
 
         {canEdit && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                disabled={busy}
-                aria-label={`More for ${row.name}`}
-              >
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem
-                onSelect={() =>
-                  void act(
-                    () => setSolarProviderActiveAction(row.id, !row.active),
-                    row.active ? "Retired" : "Back in use"
-                  )
-                }
-              >
-                {row.active ? (
-                  <>
-                    <Archive className="size-4" /> Retire — deals already naming it keep working
-                  </>
-                ) : (
-                  <>
-                    <Undo2 className="size-4" /> Put back in use
-                  </>
-                )}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ActiveSwitch
+            label={`In use — ${row.name}`}
+            checked={row.active}
+            disabled={busy}
+            hint="Retired: reps stop seeing it, and the deals already naming it keep working."
+            onChange={(v) =>
+              void act(
+                () => setSolarProviderActiveAction(row.id, v),
+                v ? "Back in use" : "Retired"
+              )
+            }
+          />
         )}
       </header>
 
