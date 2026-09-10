@@ -160,6 +160,56 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               <Detail icon={Calendar} label="Joined" value={fmt.date(detail.createdAt)} />
               <Detail icon={Clock} label="Last active" value={detail.lastLoginAt ? fmt.date(detail.lastLoginAt) : "Never"} />
             </div>
+
+            {/* Onboarding & payroll PII — restricted to owner/admin/accounting/self.
+                Sits in the profile card, under the rep's own details: it is the same
+                person's record, not a separate subject. */}
+            {canViewOnboarding && (
+              <div className="mt-5 border-t border-border pt-5">
+                <div className="mb-4 flex items-center gap-2">
+                  <ShieldCheck className="size-4 text-gold" />
+                  <h2 className="font-display text-base font-semibold">Onboarding &amp; Payroll</h2>
+                  {onboarding?.completedAt ? (
+                    <span className="ml-auto rounded-full border bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium">Completed</span>
+                  ) : (
+                    <span className="ml-auto rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">Pending</span>
+                  )}
+                </div>
+                {onboarding ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Detail icon={Users2} label="Legal name" value={[onboarding.legalFirstName, onboarding.legalMiddleName, onboarding.legalLastName].filter(Boolean).join(" ") || "—"} />
+                    <Detail icon={Calendar} label="Date of birth" value={onboarding.dateOfBirth ? fmt.date(new Date(onboarding.dateOfBirth)) : "—"} />
+                    <Detail icon={Lock} label="SSN" value={onboarding.ssnMasked ?? "—"} />
+                    <Detail icon={MapPin} label="Address" value={[onboarding.address, onboarding.city, onboarding.state, onboarding.zip].filter(Boolean).join(", ") || "—"} />
+                    <Detail icon={Landmark} label="Bank" value={`${onboarding.bankName ?? "—"}${onboarding.accountType ? ` · ${onboarding.accountType}` : ""}`} />
+                    <Detail icon={Users2} label="Name on account" value={onboarding.accountHolderName ?? "—"} />
+                    <Detail icon={Lock} label="Account" value={`${onboarding.accountMasked ?? "—"}${onboarding.routingNumber ? ` · rtg ${onboarding.routingNumber}` : ""}`} />
+                    <Detail icon={MapPin} label="Address on account" value={onboarding.accountAddress ?? "—"} />
+                    <Detail icon={FileText} label="Tax class" value={onboarding.taxClassification ? onboarding.taxClassification.replace(/_/g, " ") : "—"} />
+                    <Detail icon={Lock} label="EIN" value={onboarding.einMasked ?? "—"} />
+                    <div className="flex flex-wrap gap-2 pt-1 sm:col-span-2">
+                      {onboarding.idPhotoFileId && (
+                        <a href={`/portal/files/${onboarding.idPhotoFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> License front</a>
+                      )}
+                      {onboarding.idPhotoBackFileId && (
+                        <a href={`/portal/files/${onboarding.idPhotoBackFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> License back</a>
+                      )}
+                      {onboarding.ssnCardFileId && (
+                        <a href={`/portal/files/${onboarding.ssnCardFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> SS card front</a>
+                      )}
+                      {onboarding.ssnCardBackFileId && (
+                        <a href={`/portal/files/${onboarding.ssnCardBackFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> SS card back</a>
+                      )}
+                      {onboarding.voidedCheckFileId && (
+                        <a href={`/portal/files/${onboarding.voidedCheckFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> Voided check</a>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Onboarding not started yet.</p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Pay structure — both verticals, side by side. `isRep` is wording
@@ -193,54 +243,6 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               }}
               perWattLenders={perWattLenders.map((l) => l.name)}
             />
-          )}
-
-          {/* Onboarding & payroll PII — restricted to owner/admin/accounting/self */}
-          {canViewOnboarding && (
-            <div className="rounded-xl border border-border bg-card p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <ShieldCheck className="size-4 text-gold" />
-                <h2 className="font-display text-lg font-semibold">Onboarding &amp; Payroll</h2>
-                {onboarding?.completedAt ? (
-                  <span className="ml-auto rounded-full border bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium">Completed</span>
-                ) : (
-                  <span className="ml-auto rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium">Pending</span>
-                )}
-              </div>
-              {onboarding ? (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Detail icon={Users2} label="Legal name" value={[onboarding.legalFirstName, onboarding.legalMiddleName, onboarding.legalLastName].filter(Boolean).join(" ") || "—"} />
-                  <Detail icon={Calendar} label="Date of birth" value={onboarding.dateOfBirth ? fmt.date(new Date(onboarding.dateOfBirth)) : "—"} />
-                  <Detail icon={Lock} label="SSN" value={onboarding.ssnMasked ?? "—"} />
-                  <Detail icon={MapPin} label="Address" value={[onboarding.address, onboarding.city, onboarding.state, onboarding.zip].filter(Boolean).join(", ") || "—"} />
-                  <Detail icon={Landmark} label="Bank" value={`${onboarding.bankName ?? "—"}${onboarding.accountType ? ` · ${onboarding.accountType}` : ""}`} />
-                  <Detail icon={Users2} label="Name on account" value={onboarding.accountHolderName ?? "—"} />
-                  <Detail icon={Lock} label="Account" value={`${onboarding.accountMasked ?? "—"}${onboarding.routingNumber ? ` · rtg ${onboarding.routingNumber}` : ""}`} />
-                  <Detail icon={MapPin} label="Address on account" value={onboarding.accountAddress ?? "—"} />
-                  <Detail icon={FileText} label="Tax class" value={onboarding.taxClassification ? onboarding.taxClassification.replace(/_/g, " ") : "—"} />
-                  <Detail icon={Lock} label="EIN" value={onboarding.einMasked ?? "—"} />
-                  <div className="flex flex-wrap gap-2 pt-1 sm:col-span-2">
-                    {onboarding.idPhotoFileId && (
-                      <a href={`/portal/files/${onboarding.idPhotoFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> License front</a>
-                    )}
-                    {onboarding.idPhotoBackFileId && (
-                      <a href={`/portal/files/${onboarding.idPhotoBackFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> License back</a>
-                    )}
-                    {onboarding.ssnCardFileId && (
-                      <a href={`/portal/files/${onboarding.ssnCardFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> SS card front</a>
-                    )}
-                    {onboarding.ssnCardBackFileId && (
-                      <a href={`/portal/files/${onboarding.ssnCardBackFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> SS card back</a>
-                    )}
-                    {onboarding.voidedCheckFileId && (
-                      <a href={`/portal/files/${onboarding.voidedCheckFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"><Paperclip className="size-3.5" /> Voided check</a>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">Onboarding not started yet.</p>
-              )}
-            </div>
           )}
 
           {/* Team — who is under them, who they report to, and what they earn
