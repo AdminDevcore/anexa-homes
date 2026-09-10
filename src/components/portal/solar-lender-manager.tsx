@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LenderMark } from "@/components/ui/lender-mark";
+import type { CreditRates } from "@/lib/solar-credit-ladder";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +54,7 @@ export function SolarLenderManager({
   sellableEquipment,
   canEdit,
   targetNetPpwCents,
+  creditRates,
   adderCatalogue,
   initialLenderId,
   initialTab,
@@ -62,6 +64,7 @@ export function SolarLenderManager({
   canEdit: boolean;
   /** From Solar Settings. Null = the sticker is not derived from a dealer fee. */
   targetNetPpwCents: number | null;
+  creditRates: CreditRates;
   /** The sellable adders every lender is asked to rule on. */
   adderCatalogue: AdderRuleOption[];
   /**
@@ -193,6 +196,7 @@ export function SolarLenderManager({
           canEdit={canEdit}
           sellableEquipment={sellableEquipment}
           targetNetPpwCents={targetNetPpwCents}
+          creditRates={creditRates}
           adderCatalogue={adderCatalogue}
           tab={tab}
           onTabChange={setTab}

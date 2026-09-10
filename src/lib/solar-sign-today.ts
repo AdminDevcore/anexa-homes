@@ -12,15 +12,32 @@
  *   fixed      The partner gives a figure. Automatic on every deal written on
  *              it: not editable, not removable. It is the partner's offer, and
  *              a rep who could switch it off could quietly keep it.
- *   above_cap  Whatever the system is priced ABOVE the partner's cap. Derived,
- *              never typed — price the job above the cap and the excess is the
- *              household's; price it at or under and there is nothing to give.
+ *   above_cap  Whatever the household NETS above the partner's cap. Derived,
+ *              never typed — land them over the cap and the excess is theirs;
+ *              land at or under it and there is nothing to give.
  *
- * MEASURED ON THE SYSTEM PRICE, which is the array at sticker with the fee in
- * it and adders and battery excluded. Adders are work the household is being
- * charged for and a battery is hardware at its catalogue price; neither is
- * margin anyone can hand back. A cap read against the whole contract would
- * turn a $120,000 Powerwall order into a $120,000 discount.
+ * MEASURED ON WHAT THE HOUSEHOLD ACTUALLY PAYS, which is the array and the
+ * storage at sticker, less the federal credits this job claims. Two decisions
+ * are packed into that sentence and both were asked for:
+ *
+ *   AFTER THE CREDITS, because a cap of $5.50/W is a promise about the figure
+ *   a household ends up on, and the figure they end up on is the one their own
+ *   return leaves behind. Measured before the credits, a partner selling at a
+ *   flat $5.50/W can never be above its own cap by a cent — the flat price
+ *   pins the array at exactly the cap and the rule is dead on arrival.
+ *
+ *   THE BATTERY IS IN, THE ADDERS ARE NOT. Storage is most of what a household
+ *   signs for on a deal that has it, and a per-watt promise that steps around
+ *   $120,000 of it is not a promise about anything. Adders are separate work
+ *   the household asked for, and they raise the price and stay raised — that
+ *   is the exception, stated in those words, and it holds here for free
+ *   because `systemPriceCents` is the array alone and adders were never passed.
+ *
+ * THE HAZARD THIS CREATES, named rather than quietly guarded: a job claiming
+ * NO credits is measured at its sticker, and on a big storage order that is a
+ * six-figure derived credit. `SIGN_TODAY_MAX_CENTS` is the only thing holding
+ * it, and the ladder clamps again at whatever is actually left. A partner that
+ * writes storage should be given a cap it can live with on an unclaimed deal.
  *
  * ONE FUNCTION, because the figure is asked for in five places — the credits
  * card as a rep works, the live ladder beside it, every column of the
@@ -31,6 +48,12 @@
  *
  * PURE. Cents in, cents out, no I/O and no React.
  */
+
+import {
+  claimedCreditRate,
+  type CreditClaims,
+  type CreditRates,
+} from "./solar-credit-ladder";
 
 /** The three answers. Mirrors `SolarSignTodayMode` in the schema. */
 export type SignTodayMode = "none" | "fixed" | "above_cap";
@@ -84,8 +107,20 @@ export function resolveSignToday(input: {
   rule: SignTodayRule | null | undefined;
   /** The array at sticker, fee included, adders and battery excluded. Cents. */
   systemPriceCents: number;
+  /**
+   * The storage on the job at its catalogue price, cents. Zero or absent on a
+   * deal without one. Measured alongside the array — see the module docblock.
+   */
+  batteryPriceCents?: number | null;
   /** Installed watts, for the per-watt cap. Zero on a storage-only job. */
   systemWatts: number;
+  /**
+   * The company's stated percentages and which of them THIS job earns, so the
+   * cap can be measured on what the household nets. Absent means none claimed,
+   * which measures the sticker — the behaviour that predates this rule.
+   */
+  creditRates?: CreditRates | null;
+  creditClaims?: CreditClaims | null;
   /** What the rep typed on the deal. Only consulted under `none`. */
   typedCents: number | null | undefined;
 }): SignToday {
@@ -109,8 +144,15 @@ export function resolveSignToday(input: {
     if (capPpwCents == null || !(input.systemWatts > 0)) {
       return { ...NOTHING, source: "above_cap", editable: false, capPpwCents };
     }
+    // What the household signs for, of the two lines this cap is measured over.
+    const stickerCents =
+      Math.round(input.systemPriceCents) + Math.max(0, Math.round(input.batteryPriceCents ?? 0));
+    // …and what is left of it once their own return has paid them back.
+    const nettedCents = Math.round(
+      stickerCents * (1 - claimedCreditRate(input.creditRates, input.creditClaims))
+    );
     const allowed = Math.round(capPpwCents * input.systemWatts);
-    const excess = clamp(Math.round(input.systemPriceCents) - allowed);
+    const excess = clamp(nettedCents - allowed);
     return { cents: excess, source: "above_cap", editable: false, capPpwCents };
   }
 

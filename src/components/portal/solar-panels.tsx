@@ -1266,7 +1266,14 @@ export function SolarFinancePanel({
     // The resolver answers "nothing" to that, which is the right answer: a
     // Powerwall order is hardware at catalogue price, not margin.
     systemPriceCents: arrayPrice?.baseStickerCents ?? 0,
+    // Storage counts: the household signs for it, and a per-watt promise that
+    // steps around it is not a promise about the figure they land on.
+    batteryPriceCents: arrayPrice?.batteryPriceCents ?? 0,
     systemWatts: arrayPrice?.systemWatts ?? 0,
+    // The live tick-boxes, so the figure moves the moment a rep unticks a
+    // bonus this job does not earn.
+    creditRates,
+    creditClaims,
     typedCents: signTodayCreditCents,
   });
 

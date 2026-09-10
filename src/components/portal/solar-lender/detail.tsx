@@ -44,6 +44,7 @@ import {
   signTodayToCents,
 } from "./types";
 import type { SignTodayMode } from "@/lib/solar-sign-today";
+import { claimedCreditRate, type CreditRates } from "@/lib/solar-credit-ladder";
 import {
   Caution,
   ChoiceCards,
@@ -121,6 +122,7 @@ export function LenderDetail({
   canEdit,
   sellableEquipment,
   targetNetPpwCents,
+  creditRates,
   adderCatalogue,
   tab,
   onTabChange,
@@ -130,6 +132,7 @@ export function LenderDetail({
   canEdit: boolean;
   sellableEquipment: number;
   targetNetPpwCents: number | null;
+  creditRates: CreditRates;
   adderCatalogue: AdderRuleOption[];
   tab: LenderTab;
   onTabChange: (t: LenderTab) => void;
@@ -217,6 +220,23 @@ export function LenderDetail({
     const c = ppwToCents(draft.signTodayCapPpw);
     return c === "invalid" ? null : c;
   }, [draft.signTodayCapPpw]);
+
+  /**
+   * WHAT A HOUSEHOLD IS STILL HOLDING, per watt, on this partner's own price.
+   *
+   * The cap is measured on what they NET, so an example worked on the sticker
+   * would tell an admin the opposite of what the rule does — which is exactly
+   * how a flat $5.50/W partner ended up with a $5.50/W cap that could never
+   * pay out. All three credits, because that is what a deal claims until a rep
+   * unticks one; a job earning fewer nets more and hands back more.
+   */
+  const nettedPpwCents = React.useMemo(
+    () =>
+      draftPpwCents == null
+        ? null
+        : Math.round(draftPpwCents * (1 - claimedCreditRate(creditRates, null))),
+    [draftPpwCents, creditRates]
+  );
 
   const floorCents = React.useMemo(() => {
     const c = ppwToCents(draft.minBasePpw);
@@ -813,9 +833,9 @@ export function LenderDetail({
 
               {/* WHAT THIS PARTNER HANDS BACK FOR SIGNING TODAY.
                   Under the price panel because it is measured against the
-                  price: the cap rule gives away whatever the SYSTEM is sold
-                  above a figure, and an admin setting that has to be able to
-                  see the $/W this partner charges while they type it. */}
+                  price: the cap rule gives away whatever the household is left
+                  NETTING above a figure, and an admin setting that has to be
+                  able to see the $/W this partner charges while they type it. */}
               <Panel
                 title="Sign today credit"
                 description="What a household is handed back for signing today. It comes off what they NET once the federal credits are claimed — never off the price, the payment, the contract or the rep's commission."
@@ -827,8 +847,9 @@ export function LenderDetail({
                     <>
                       Most partners leave it to the rep, who types what he is offering on the deal.
                       A partner that gives a set figure gives it on every deal written on them; a
-                      partner that gives away the overage hands back whatever the system was priced
-                      above their cap, so the credit grows the higher the deal is sold.
+                      partner that gives away the overage hands back whatever the household is
+                      still holding above their cap once the federal credits are claimed, so the
+                      credit grows the higher the deal is sold.
                     </>
                   }
                   value={draft.signTodayMode}
@@ -847,7 +868,8 @@ export function LenderDetail({
                     {
                       value: "above_cap",
                       label: "Everything above a cap",
-                      detail: "Whatever the system is priced over the figure below. Derived, never typed.",
+                      detail:
+                        "Whatever the household still owes above the figure below, once their credits are claimed. Derived, never typed.",
                     },
                   ]}
                 />
@@ -874,7 +896,7 @@ export function LenderDetail({
                       value={draft.signTodayCapPpw}
                       onChange={(v) => set("signTodayCapPpw", v)}
                       invalid={ppwToCents(draft.signTodayCapPpw) === "invalid"}
-                      hint="Measured on the system alone — adders and batteries are not margin."
+                      hint="Measured on the system AND its storage, after the credits the job claims. Adders are the exception: they raise the price and stay raised."
                     />
                     {/* WORKED, but only where there is a price to work it on.
                         A partner that publishes its own $/W has one; a partner
@@ -883,20 +905,26 @@ export function LenderDetail({
                         and a figure invented against an assumed price is the
                         kind of number that gets quoted at a kitchen table. */}
                     {signTodayCapCents != null &&
-                      (draftPpwCents != null ? (
-                        <Figure
-                          label={`A ${EXAMPLE_KW} kW system at $${ppwToDollars(draftPpwCents)}/W hands back`}
-                          tone={draftPpwCents > signTodayCapCents ? "gold" : "plain"}
-                          value={money(
-                            Math.max(0, (draftPpwCents - signTodayCapCents) * EXAMPLE_KW * 1000)
-                          )}
-                        />
+                      (draftPpwCents != null && nettedPpwCents != null ? (
+                        <>
+                          <Figure
+                            label={`A ${EXAMPLE_KW} kW system at $${ppwToDollars(draftPpwCents)}/W nets $${ppwToDollars(nettedPpwCents)}/W and hands back`}
+                            tone={nettedPpwCents > signTodayCapCents ? "gold" : "plain"}
+                            value={money(
+                              Math.max(0, (nettedPpwCents - signTodayCapCents) * EXAMPLE_KW * 1000)
+                            )}
+                          />
+                          <Hint>
+                            Storage is measured with the array, so a job carrying batteries lands
+                            higher than this and hands back more. Adders never are.
+                          </Hint>
+                        </>
                       ) : (
                         <Hint>
                           This partner prices the ordinary way, so what each deal hands back
-                          depends on what it was sold at: every cent a watt above $
-                          {ppwToDollars(signTodayCapCents)}/W goes back to the household. A{" "}
-                          {EXAMPLE_KW} kW job sold a dime a watt over the cap returns{" "}
+                          depends on what it was sold at: every cent a watt the household still
+                          nets above ${ppwToDollars(signTodayCapCents)}/W goes back to them. A{" "}
+                          {EXAMPLE_KW} kW job netting a dime a watt over the cap returns{" "}
                           <span className="font-medium tabular-nums text-foreground">
                             {money(10 * EXAMPLE_KW * 1000)}
                           </span>

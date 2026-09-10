@@ -134,6 +134,7 @@ export default async function SolarLendersPage({
         canEdit={can(user, "update", "Settings")}
         sellableEquipment={sellable}
         targetNetPpwCents={settings.targetNetPpwCents}
+        creditRates={settings.creditRates}
         adderCatalogue={adders.map((a) => ({
           id: a.id,
           label: [a.manufacturer, a.model].filter(Boolean).join(" ") || a.model,

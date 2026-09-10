@@ -435,8 +435,8 @@ function SignTodayField({
       ? `${who} gives this on every deal. Not yours to change or remove.`
       : signToday.source === "above_cap"
         ? signToday.capPpwCents == null
-          ? `${who} gives away whatever the system is priced above a cap, but no cap is set — Settings → Lenders.`
-          : `${who} hands back whatever the system is priced above ${usdc(signToday.capPpwCents)}/W — so the higher this deal is sold, the more comes back.`
+          ? `${who} gives away whatever the household still nets above a cap, but no cap is set — Settings → Lenders.`
+          : `${who} hands back whatever this household still owes above ${usdc(signToday.capPpwCents)}/W once their credits are claimed. The array and its storage are measured; the adders are not.`
         : "Your own credit for signing today. Comes off what they net, never off the price.";
   return (
     <div

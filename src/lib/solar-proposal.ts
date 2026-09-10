@@ -1544,7 +1544,14 @@ function priceOption(args: {
   const signToday = resolveSignToday({
     rule: args.signTodayRule,
     systemPriceCents: purchase?.baseStickerCents ?? 0,
+    // The storage rides on top at catalogue price and the household signs for
+    // it, so the cap is measured over it too. See `solar-sign-today`.
+    batteryPriceCents: purchase?.batteryPriceCents ?? 0,
     systemWatts: purchase?.systemWatts ?? 0,
+    // The same percentages and the same tick-boxes the ladder below is built
+    // from, so the rung and the net cost it lands on cannot disagree.
+    creditRates: args.creditRates ?? CREDIT_RATES_DEFAULT,
+    creditClaims: args.creditClaims,
     typedCents: args.signTodayTypedCents,
   });
 

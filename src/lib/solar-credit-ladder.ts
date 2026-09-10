@@ -204,6 +204,42 @@ function usablePct(pct: number | null | undefined): number | null {
 }
 
 /**
+ * WHAT FRACTION OF THE PRICE THE CREDITS PAY BACK, on this job.
+ *
+ * The ladder itself never needs this — it works in cents, line by line. It is
+ * here for `resolveSignToday`, which measures a partner's per-watt cap against
+ * what the household actually NETS and therefore has to know how much of the
+ * sticker their own return hands back.
+ *
+ * Exported from this module rather than computed at the call site because the
+ * percentages and the tick-boxes are already this file's subject, and a second
+ * reading of them is a second chance for the closing credit and the ladder
+ * beside it to disagree about how much a household is getting.
+ *
+ * NO RATES AT ALL IS NO CREDIT, deliberately: a caller that has not wired the
+ * percentages through gets the sticker measured, which is the figure that was
+ * measured before credits entered this rule. Missing CLAIMS still claim
+ * everything, exactly as `buildCreditLadder` treats them, so the two cannot
+ * read the same half-supplied deal differently.
+ *
+ * Clamped into [0, 1]. Percentages summing past 100 cannot hand back more than
+ * the price, which is the same ceiling the ladder puts on `creditTotalCents`.
+ */
+export function claimedCreditRate(
+  rates: CreditRates | null | undefined,
+  claims: CreditClaims | null | undefined
+): number {
+  if (!rates) return 0;
+  const c = claims ?? CREDIT_CLAIMS_DEFAULT;
+  const pct =
+    (c.itc ? (usablePct(rates.itcPct) ?? 0) : 0) +
+    (c.energyCommunity ? (usablePct(rates.energyCommunityPct) ?? 0) : 0) +
+    (c.domesticContent ? (usablePct(rates.domesticContentPct) ?? 0) : 0);
+  if (!Number.isFinite(pct) || pct <= 0) return 0;
+  return Math.min(1, pct / 100);
+}
+
+/**
  * The ladder for one deal, or null when there is none to draw.
  *
  * NULL — meaning "this document says nothing about credits" — when the contract

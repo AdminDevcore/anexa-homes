@@ -353,10 +353,14 @@ function purchaseRow(
           fixedCents: (offer as OfferProduct).signTodayFixedCents ?? null,
           capPpwCents: (offer as OfferProduct).signTodayCapPpwCents ?? null,
         },
-    // The array at sticker: adders are work and the battery is hardware, and
-    // neither is margin a partner's cap is measured over.
+    // The array and the storage at sticker, less the credits this job claims:
+    // what the household is actually left holding. The adders are the one
+    // exclusion — separate work, and it raises the price and stays raised.
     systemPriceCents: priced.baseStickerCents,
+    batteryPriceCents: priced.batteryPriceCents,
     systemWatts: priced.systemWatts,
+    creditRates: basis.credits?.rates ?? null,
+    creditClaims: basis.credits?.claims ?? null,
     typedCents: basis.credits?.signTodayTypedCents ?? 0,
   });
 

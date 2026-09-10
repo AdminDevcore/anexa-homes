@@ -306,16 +306,55 @@ describe("the sign today credit is resolved per partner", () => {
     expect(s.financing.creditLadder?.signTodayCents).toBe(1_000_00);
   });
 
-  it("derives it from the system price when the partner gives away the overage", () => {
+  it("derives it from what the household nets, not from the sticker", () => {
     // The fixture sells 10 kW at a $3.50/W sticker, so the system alone is
-    // $35,000. A partner capping at $3.00/W hands back the fifty cents a watt
-    // above it — $5,000 — and not a cent of the adders or the battery.
+    // $35,000 — but the document claims all three federal credits, so what the
+    // household is left holding is half of that. $17,500 is well under the
+    // $30,000 a $3.00/W cap allows, and a partner cannot hand back money the
+    // credits already took off. Measured against the sticker this was $5,000.
     const s = build({
       signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 300 },
     });
     const ladder = s.financing.creditLadder!;
     expect(s.financing.basePriceCents).toBe(35_000_00);
-    expect(ladder.signTodayCents).toBe(5_000_00);
+    expect(ladder.signTodayCents).toBe(0);
+  });
+
+  it("hands back the overage on the net cost when the cap sits under it", () => {
+    // The same 10 kW, netting $17,500 once the credits are claimed, against a
+    // partner promising the household $1.50/W. $15,000 is allowed, so the
+    // $2,500 above it is theirs.
+    const s = build({
+      signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 150 },
+    });
+    expect(s.financing.creditLadder!.signTodayCents).toBe(2_500_00);
+  });
+
+  it("measures the storage on the job alongside the array", () => {
+    // The wiring, not the arithmetic: a battery is priced on top at catalogue
+    // and the household signs for it, so it has to reach the cap. $40,000 of
+    // storage on the same 10 kW nets $20,000 more, and all of it is above the
+    // $1.50/W the partner allows.
+    const withStorage = build({
+      finance: { ...LOAN, batteryPriceCents: 40_000_00 },
+      signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 150 },
+    });
+    const without = build({
+      signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 150 },
+    });
+    expect(withStorage.financing.creditLadder!.signTodayCents).toBe(
+      without.financing.creditLadder!.signTodayCents + 20_000_00
+    );
+  });
+
+  it("measures the sticker when the job claims no credits at all", () => {
+    // Nothing earned, so nothing comes off before the cap is applied and the
+    // rule reads exactly as it did before credits entered it.
+    const s = build({
+      signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 300 },
+      creditClaims: { itc: false, energyCommunity: false, domesticContent: false },
+    });
+    expect(s.financing.creditLadder!.signTodayCents).toBe(5_000_00);
   });
 
   it("gives nothing under a cap the deal is priced below", () => {
