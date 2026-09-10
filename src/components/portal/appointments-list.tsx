@@ -18,7 +18,7 @@ import {
   ALL_OUTCOMES,
   buildOutcomeFilters,
   matchesAppointmentQuery,
-  matchesOutcomeFilter,
+  visibleRows,
   type OutcomeFilter,
 } from "@/lib/appointment-filters";
 
@@ -33,6 +33,9 @@ export type AppointmentRow = {
   typeLabel: string;
   sourceName: string | null;
   stage: { name: string; color: string } | null;
+  /** The deal sits in a stage its pipeline flags `isLost`. Hidden while
+   *  browsing, reachable by the Cancelled chip or by searching for it. */
+  isCancelled: boolean;
   repName: string | null;
   /** Pre-formatted currency; `hasValue` says whether it's worth emphasising. */
   value: string;
@@ -59,15 +62,16 @@ export function AppointmentsList({
   const [q, setQ] = React.useState(initialQuery);
   const [filter, setFilter] = React.useState<string>(ALL_OUTCOMES);
 
+  const searching = q.trim().length > 0;
   const searched = React.useMemo(
-    () => (q.trim() ? rows.filter((r) => matchesAppointmentQuery(r, q)) : rows),
-    [rows, q]
+    () => (searching ? rows.filter((r) => matchesAppointmentQuery(r, q)) : rows),
+    [rows, q, searching]
   );
 
   // Counts reflect the current search, so the chips always add up to what's shown.
   const { states, outcomes } = React.useMemo(
-    () => buildOutcomeFilters(searched, configuredOutcomes),
-    [searched, configuredOutcomes]
+    () => buildOutcomeFilters(searched, configuredOutcomes, searching),
+    [searched, configuredOutcomes, searching]
   );
 
   // A state chip can disappear as the search narrows (e.g. the last upcoming
@@ -82,8 +86,8 @@ export function AppointmentsList({
   const active = selectable.has(filter) ? filter : ALL_OUTCOMES;
 
   const visible = React.useMemo(
-    () => searched.filter((r) => matchesOutcomeFilter(r, active)),
-    [searched, active]
+    () => visibleRows(searched, active, searching),
+    [searched, active, searching]
   );
 
   return (

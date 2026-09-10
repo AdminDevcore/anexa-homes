@@ -18,6 +18,7 @@ import { ResendButton } from "@/components/esign/resend-button";
 import { NewTemplateButton } from "@/components/portal/new-template-button";
 import { currentFormatters } from "@/lib/format-server";
 import { addressSearchText } from "@/lib/address";
+import { NOT_CANCELLED } from "@/server/modules/leads/cancelled";
 
 export const metadata = { title: "Documents" };
 
@@ -60,8 +61,9 @@ export default async function DocumentsPage() {
       },
     }),
     canSend
-      ? prisma.lead.findMany({
-          where: { AND: [leadScope, { vertical }] },
+      ? // A contract must never be sendable to a deal that is already dead.
+        prisma.lead.findMany({
+          where: { AND: [leadScope, { vertical }, NOT_CANCELLED] },
           orderBy: { createdAt: "desc" },
           take: 100,
           select: {

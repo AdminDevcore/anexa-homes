@@ -45,19 +45,30 @@ export default async function LeadsPage({
     // Scheduled appointments first (soonest-known first), unscheduled last.
     orderBy: [{ appointmentAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
     include: {
-      stage: { select: { name: true, color: true } },
+      // isLost is what marks the deal dead — see NOT_CANCELLED. Cancelled deals
+      // are still FETCHED here: they are hidden by the list's default chip, not
+      // by the query, so the Cancelled chip and a name search can still reach
+      // them without a second round trip.
+      stage: { select: { name: true, color: true, isLost: true } },
       source: { select: { name: true } },
       assignedRep: { select: { firstName: true, lastName: true } },
     },
   });
 
   const rows = buildAppointmentRows(leads, fmt);
+  // The header counts what the list opens on — the live deals — so it agrees
+  // with the All chip rather than with the raw query.
+  const cancelled = rows.filter((r) => r.isCancelled).length;
+  const live = rows.length - cancelled;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Appointments"
-        description={`${leads.length} ${leads.length === 1 ? "appointment" : "appointments"} in your view`}
+        description={
+          `${live} ${live === 1 ? "appointment" : "appointments"} in your view` +
+          (cancelled > 0 ? ` · ${cancelled} cancelled` : "")
+        }
         action={
           can(user, "create", "Lead") && (
             <Button asChild className="bg-gold text-gold-foreground hover:bg-gold/90">

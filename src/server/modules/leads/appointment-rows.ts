@@ -46,7 +46,7 @@ type LeadForRow = {
   value: number;
   appointmentAt: Date | null;
   appointmentDisposition: string | null;
-  stage: { name: string; color: string } | null;
+  stage: { name: string; color: string; isLost: boolean } | null;
   source: { name: string } | null;
   assignedRep: { firstName: string; lastName: string } | null;
 };
@@ -72,6 +72,9 @@ export function buildAppointmentRows(
     typeLabel: serviceTypeLabel(l.serviceType),
     sourceName: l.source?.name ?? null,
     stage: l.stage ? { name: l.stage.name, color: l.stage.color } : null,
+    // The deal is dead. Carried as its own field rather than re-read from the
+    // stage name, which is per-company free text ("Cancelled", "Dead", "Lost").
+    isCancelled: l.stage?.isLost ?? false,
     repName: l.assignedRep ? `${l.assignedRep.firstName} ${l.assignedRep.lastName}` : null,
     value: fmt.money(l.value, { compact: true }),
     hasValue: l.value > 0,

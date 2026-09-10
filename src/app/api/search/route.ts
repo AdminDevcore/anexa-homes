@@ -7,6 +7,7 @@ import { prisma } from "@/server/db/client";
 import { addressContains } from "@/lib/address";
 import { runUnscoped } from "@/server/vertical/context";
 import { permittedVerticalOnly, worksAcrossVerticals } from "@/server/vertical/visibility";
+import { NOT_CANCELLED } from "@/server/modules/leads/cancelled";
 
 type Item = {
   id: string;
@@ -51,6 +52,11 @@ export async function GET(req: Request) {
                 AND: [
                   leadScope,
                   workspace,
+                  // Cancelled deals stay out of ⌘K. They remain reachable from
+                  // the Appointments "Cancelled" chip and the Pipeline board's
+                  // Cancelled column — this narrows the reflex lookup, it does
+                  // not orphan the record.
+                  NOT_CANCELLED,
                   {
                     OR: [
                       { firstName: contains },

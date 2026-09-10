@@ -3,6 +3,7 @@ import { prisma } from "@/server/db/client";
 import { canManageAllCanvassing } from "./policies";
 import { skipTraceEnabled } from "@/server/modules/skiptrace/provider";
 import { addressContains } from "@/lib/address";
+import { NOT_CANCELLED } from "@/server/modules/leads/cancelled";
 
 export type KnockDTO = {
   id: string;
@@ -250,6 +251,10 @@ export async function getDealsInBounds(
       companyId,
       lat: { not: null, gte: bounds.minLat, lte: bounds.maxLat },
       lng: { not: null, gte: bounds.minLng, lte: bounds.maxLng },
+      // A cancelled deal is not a door worth walking to. Dropping the pin keeps
+      // the map a picture of live work rather than a graveyard the rep has to
+      // read around.
+      ...NOT_CANCELLED,
     },
     orderBy: { updatedAt: "desc" },
     take: cap,

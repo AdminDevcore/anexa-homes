@@ -4,6 +4,7 @@ import { prisma } from "@/server/db/client";
 import { installerProjectFilter, listScope } from "@/server/rbac/policies";
 import type { AccessUser } from "@/server/rbac/guards";
 import { runInVertical } from "@/server/vertical/context";
+import { NOT_CANCELLED } from "@/server/modules/leads/cancelled";
 
 export type CalendarEventType = "appointment" | "adjuster" | "install" | "inspection";
 
@@ -106,29 +107,35 @@ export async function getCalendarEvents(
 
   // Each source is skipped entirely when its type isn't shown in this vertical —
   // so a hidden type costs no query, and can't leak through a later edit here.
+  //
+  // NOT_CANCELLED is on all four, not just the appointment. Installs and
+  // inspections are read off the PROJECT, and cancelling a deal never clears
+  // the dates already sitting on it — so without this a dead job keeps holding
+  // a crew's slot on the calendar, which is the same confusion the Appointments
+  // list is being cleaned up to remove.
   const [appts, adjusters, installs, inspections] = await Promise.all([
     calendarShows(vertical, "appointment")
       ? prisma.lead.findMany({
-          where: { AND: [leadScope, { vertical }, { appointmentAt: { gte: from, lte: to } }] },
+          where: { AND: [leadScope, { vertical }, NOT_CANCELLED, { appointmentAt: { gte: from, lte: to } }] },
           select: { id: true, firstName: true, lastName: true, address: true, city: true, appointmentAt: true, assignedRep: { select: { firstName: true, lastName: true } } },
         })
       : [],
     // Adjuster meeting lives on the CLAIM (insurance step), scoped by its lead.
     calendarShows(vertical, "adjuster")
       ? prisma.claim.findMany({
-          where: { companyId: user.companyId, adjusterMeetingAt: { gte: from, lte: to }, lead: { is: { AND: [leadScope, { vertical }] } } },
+          where: { companyId: user.companyId, adjusterMeetingAt: { gte: from, lte: to }, lead: { is: { AND: [leadScope, { vertical }, NOT_CANCELLED] } } },
           select: { id: true, adjusterMeetingAt: true, lead: { select: { id: true, firstName: true, lastName: true, assignedRep: { select: { firstName: true, lastName: true } }, project: { select: { projectNumber: true } } } } },
         })
       : [],
     calendarShows(vertical, "install")
       ? prisma.project.findMany({
-          where: { AND: [projScope, ...visitScope("install"), { lead: { is: { vertical } } }, { installDate: { not: null }, AND: [{ installDate: { gte: from } }, { installDate: { lte: to } }] }] },
+          where: { AND: [projScope, ...visitScope("install"), { lead: { is: { AND: [{ vertical }, NOT_CANCELLED] } } }, { installDate: { not: null }, AND: [{ installDate: { gte: from } }, { installDate: { lte: to } }] }] },
           select: { id: true, projectNumber: true, installDate: true, assignees: crewSelect("install"), lead: { select: { id: true, firstName: true, lastName: true, address: true, city: true, assignedRep: { select: { firstName: true, lastName: true } } } } },
         })
       : [],
     calendarShows(vertical, "inspection")
       ? prisma.project.findMany({
-          where: { AND: [projScope, ...visitScope("inspection"), { lead: { is: { vertical } } }, { inspectionAt: { not: null }, AND: [{ inspectionAt: { gte: from } }, { inspectionAt: { lte: to } }] }] },
+          where: { AND: [projScope, ...visitScope("inspection"), { lead: { is: { AND: [{ vertical }, NOT_CANCELLED] } } }, { inspectionAt: { not: null }, AND: [{ inspectionAt: { gte: from } }, { inspectionAt: { lte: to } }] }] },
           select: { id: true, projectNumber: true, inspectionAt: true, assignees: crewSelect("inspection"), lead: { select: { id: true, firstName: true, lastName: true, address: true, city: true, assignedRep: { select: { firstName: true, lastName: true } } } } },
         })
       : [],

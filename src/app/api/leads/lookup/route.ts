@@ -6,6 +6,7 @@ import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { prisma } from "@/server/db/client";
 import { addressContains } from "@/lib/address";
+import { NOT_CANCELLED } from "@/server/modules/leads/cancelled";
 
 export type LeadLookupItem = {
   id: string;
@@ -42,6 +43,8 @@ export async function GET(req: Request) {
       AND: [
         scope,
         { vertical },
+        // Nothing new should be pinned to a dead deal.
+        NOT_CANCELLED,
         {
           OR: [
             { firstName: contains },

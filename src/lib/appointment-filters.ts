@@ -24,6 +24,14 @@ export const NOT_RAN = "__not_ran__";
 export const UPCOMING = "__upcoming__";
 /** No appointment date at all. */
 export const UNSCHEDULED = "__unscheduled__";
+/**
+ * The deal is dead — it sits in a stage its pipeline flags `isLost`.
+ *
+ * Archived rather than deleted: it drops out of every other chip, including
+ * the outcome it was carrying when it died, but stays one click away and stays
+ * in the reports. Nothing about it is destroyed.
+ */
+export const CANCELLED = "__cancelled__";
 
 export type OutcomeFilter = { key: string; label: string; count: number };
 
@@ -35,7 +43,14 @@ export type OutcomeFilterGroups = {
   outcomes: OutcomeFilter[];
 };
 
-type Filterable = { outcome: string | null; when: string | null; isPast: boolean };
+type Filterable = {
+  outcome: string | null;
+  when: string | null;
+  isPast: boolean;
+  /** In a stage flagged `isLost`. Required, not optional: a filter whose job is
+   *  hiding rows must never treat a forgotten field as "show it". */
+  isCancelled: boolean;
+};
 
 /** The columns the search box matches, plus the address behind the row. */
 type Searchable = {
@@ -64,22 +79,33 @@ export function matchesAppointmentQuery(row: Searchable, needle: string): boolea
     .includes(q);
 }
 
-/** The single bucket a row belongs to. Every row lands in exactly one. */
+/**
+ * The single bucket a row belongs to. Every row lands in exactly one.
+ *
+ * Cancelled wins over everything, including a recorded outcome: a deal that was
+ * signed and then died is not part of "Signed — proposal accepted" any more.
+ * Because every count in this file is derived from this function, that single
+ * line is what keeps dead deals out of every other chip's total.
+ */
 function bucketOf(row: Filterable): string {
+  if (row.isCancelled) return CANCELLED;
   if (row.outcome) return row.outcome;
   if (!row.when) return UNSCHEDULED;
   return row.isPast ? NOT_RAN : UPCOMING;
 }
 
-const SYNTHETIC = new Set([NOT_RAN, UPCOMING, UNSCHEDULED]);
+const SYNTHETIC = new Set([NOT_RAN, UPCOMING, UNSCHEDULED, CANCELLED]);
 
 /**
  * @param rows        appointments currently in view (already search-filtered)
  * @param configured  outcome labels from Settings, in configured order
+ * @param searching   a search box is non-empty, so All is showing cancelled
+ *                    deals too (see visibleRows) and must count them
  */
 export function buildOutcomeFilters(
   rows: Filterable[],
-  configured: string[] = []
+  configured: string[] = [],
+  searching = false
 ): OutcomeFilterGroups {
   const counts = new Map<string, number>();
   for (const r of rows) {
@@ -88,11 +114,18 @@ export function buildOutcomeFilters(
   }
 
   // A state chip that matches nothing is noise; All always anchors the row.
+  //
+  // All counts the LIVE deals, because live deals are what All renders — with
+  // the one exception that a running search reaches the cancelled ones, and the
+  // chip has to agree with the rows under it. Cancelled goes last: it closes
+  // the row rather than interrupting it.
+  const cancelled = counts.get(CANCELLED) ?? 0;
   const states = [
-    { key: ALL_OUTCOMES, label: "All", count: rows.length },
+    { key: ALL_OUTCOMES, label: "All", count: searching ? rows.length : rows.length - cancelled },
     { key: NOT_RAN, label: "Not ran", count: counts.get(NOT_RAN) ?? 0 },
     { key: UPCOMING, label: "Upcoming", count: counts.get(UPCOMING) ?? 0 },
     { key: UNSCHEDULED, label: "Unscheduled", count: counts.get(UNSCHEDULED) ?? 0 },
+    { key: CANCELLED, label: "Cancelled", count: cancelled },
   ].filter((f) => f.key === ALL_OUTCOMES || f.count > 0);
 
   const configuredSet = new Set(configured);
@@ -111,6 +144,29 @@ export function buildOutcomeFilters(
 }
 
 export function matchesOutcomeFilter(row: Filterable, filter: string): boolean {
-  if (filter === ALL_OUTCOMES) return true;
+  if (filter === ALL_OUTCOMES) return !row.isCancelled;
   return bucketOf(row) === filter;
+}
+
+/**
+ * The rows the list actually renders.
+ *
+ * Browsing hides cancelled deals; SEARCHING finds them. That asymmetry is the
+ * whole point of archiving rather than deleting — typing a customer's name and
+ * getting "no appointments match" reads as the deal having been thrown away,
+ * and reps would stop trusting the list. The row still shows its red Cancelled
+ * stage chip, so nothing is disguised as live.
+ *
+ * A search widens All only. Picking a chip is an explicit choice about what you
+ * want to see, and stays honoured.
+ *
+ * @param searching  the search box holds a non-empty query
+ */
+export function visibleRows<T extends Filterable>(
+  rows: T[],
+  filter: string,
+  searching: boolean
+): T[] {
+  if (searching && filter === ALL_OUTCOMES) return rows;
+  return rows.filter((r) => matchesOutcomeFilter(r, filter));
 }
