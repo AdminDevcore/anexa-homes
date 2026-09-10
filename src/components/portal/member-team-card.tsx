@@ -303,7 +303,7 @@ export function MemberTeamCard({
       {isManager && (
         <div className="mt-4 rounded-lg border border-gold/30 bg-gold/5 p-3">
           <Label htmlFor="team-name" className="text-xs">Team name</Label>
-          <div className="mt-1.5 flex items-center gap-2">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <Input
               id="team-name"
               value={teamName}
@@ -311,7 +311,7 @@ export function MemberTeamCard({
               placeholder="e.g. Team Alpha"
               maxLength={60}
               disabled={!canEdit || savingName}
-              className="max-w-xs"
+              className="min-w-0 flex-1"
             />
             {canEdit && (
               <Button size="sm" variant="outline" onClick={saveTeamName} disabled={savingName || !nameDirty}>
@@ -481,11 +481,13 @@ export function MemberTeamCard({
               </p>
             </div>
           )}
-          <div className="flex items-end gap-2">
+          {/* Stacked, not side by side: this card sits in the narrow column, and
+              a viewport breakpoint would lie about how much room it has. */}
+          <div className="space-y-2">
             <div className="space-y-1.5">
               <Label className="text-xs">Type</Label>
               <Select value={effectiveType} onValueChange={(v) => setType(v as OverrideType)}>
-                <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {/* The percentage means different things on the two sides and
                       says so — solar pays a share of what the REP earned, which
@@ -496,7 +498,7 @@ export function MemberTeamCard({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex-1 space-y-1.5">
+            <div className="space-y-1.5">
               <Label className="text-xs">
                 {effectiveType === "percentage" ? "Percent" : effectiveType === "ppw" ? "Rate ($/W)" : "Amount (USD)"}
               </Label>

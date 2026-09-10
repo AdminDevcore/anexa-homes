@@ -245,47 +245,6 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
             />
           )}
 
-          {/* Team — who is under them, who they report to, and what they earn
-              off each of those people. One card on purpose: see
-              components/portal/member-team-card.tsx. */}
-          <MemberTeamCard
-            member={{ id: detail.id, firstName: detail.firstName, role: detail.role, teamName: detail.teamName }}
-            canEdit={canEdit}
-            reportsTo={
-              detail.role === "canvasser"
-                ? { roleLabel: "Sales rep", name: detail.salesRepName, team: detail.team }
-                : detail.role === "sales_rep"
-                  ? { roleLabel: "Sales manager", name: detail.managerName, team: detail.team }
-                  : null
-            }
-            reports={detail.reports}
-            canvassers={detail.canvassers}
-            overrides={overrideRows.map((o) => ({
-              id: o.id,
-              sourceId: o.sourceId,
-              sourceName: `${o.source.firstName} ${o.source.lastName}`.trim(),
-              // Retired verticals are pinned to the default so a legacy row
-              // still renders somewhere real instead of an empty group.
-              vertical: isActiveVertical(o.vertical) ? o.vertical : DEFAULT_VERTICAL,
-              // A legacy roofing row on `job_cost` or `margin` has no override
-              // basis either engine pays on; it reads as a percentage, which
-              // is what it already behaved as, rather than crashing the sheet.
-              type: o.type === "flat" || o.type === "ppw" ? o.type : "percentage",
-              percent: o.percent,
-              flatAmount: o.flatAmount,
-              perWattMills: o.perWattMills,
-            }))}
-            candidates={overrideCandidates.map((c) => ({
-              id: c.id,
-              name: `${c.firstName} ${c.lastName}`.trim(),
-              // Only the sides this person works: an override on a workspace
-              // they can't sell in would never pay, so it isn't offered.
-              verticals: userVerticals(c),
-            }))}
-            verticals={liveVerticals}
-            showOverrides={showOverrides}
-          />
-
           {/* Activity rollups (privileged or self) */}
           {showFull && (
             <div className="rounded-xl border border-border bg-card p-5">
@@ -347,6 +306,47 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
               </ul>
             </div>
           )}
+
+          {/* Team — who is under them, who they report to, and what they earn
+              off each of those people. One card on purpose: see
+              components/portal/member-team-card.tsx. */}
+          <MemberTeamCard
+            member={{ id: detail.id, firstName: detail.firstName, role: detail.role, teamName: detail.teamName }}
+            canEdit={canEdit}
+            reportsTo={
+              detail.role === "canvasser"
+                ? { roleLabel: "Sales rep", name: detail.salesRepName, team: detail.team }
+                : detail.role === "sales_rep"
+                  ? { roleLabel: "Sales manager", name: detail.managerName, team: detail.team }
+                  : null
+            }
+            reports={detail.reports}
+            canvassers={detail.canvassers}
+            overrides={overrideRows.map((o) => ({
+              id: o.id,
+              sourceId: o.sourceId,
+              sourceName: `${o.source.firstName} ${o.source.lastName}`.trim(),
+              // Retired verticals are pinned to the default so a legacy row
+              // still renders somewhere real instead of an empty group.
+              vertical: isActiveVertical(o.vertical) ? o.vertical : DEFAULT_VERTICAL,
+              // A legacy roofing row on `job_cost` or `margin` has no override
+              // basis either engine pays on; it reads as a percentage, which
+              // is what it already behaved as, rather than crashing the sheet.
+              type: o.type === "flat" || o.type === "ppw" ? o.type : "percentage",
+              percent: o.percent,
+              flatAmount: o.flatAmount,
+              perWattMills: o.perWattMills,
+            }))}
+            candidates={overrideCandidates.map((c) => ({
+              id: c.id,
+              name: `${c.firstName} ${c.lastName}`.trim(),
+              // Only the sides this person works: an override on a workspace
+              // they can't sell in would never pay, so it isn't offered.
+              verticals: userVerticals(c),
+            }))}
+            verticals={liveVerticals}
+            showOverrides={showOverrides}
+          />
         </div>
       </div>
     </div>
