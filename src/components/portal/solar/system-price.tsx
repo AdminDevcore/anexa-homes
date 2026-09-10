@@ -39,9 +39,11 @@ import {
  * hears a total. They are the same number; whichever box is typed in, the other
  * follows.
  *
- * The ladder on the right is therefore ALL PRE-FEE: base, plus adders, equals
- * GROSS — what Anexa keeps. The customer's final price lives in the footer,
- * where the quoted programme's fee is named next to it.
+ * The ladder on the right runs from the base to what the household signs:
+ * base, plus adders, plus the battery, equals GROSS — what Anexa keeps — and
+ * then the lender's cut and the customer's price, the two rungs that only
+ * exist where somebody else is taking a share. The footer names the rule that
+ * produced the last one.
  *
  * THE HEADLINE IS THE GROSS, NOT THE BASE — 2026-09-08.
  *
@@ -315,6 +317,53 @@ export function SystemPriceCard({
    */
   const customerFinalPpw = customerPriced?.finalPpwCents ?? null;
 
+  /**
+   * THE LENDER'S CUT, TAKEN AS THE DIFFERENCE, not recomputed as a percentage.
+   *
+   * The ladder is read as arithmetic — a rep runs a finger down the column and
+   * a homeowner across the table adds it up — so gross plus fee has to equal
+   * final EXACTLY, on the two figures actually printed. `dealerFeeCents` off
+   * the breakdown is the fee on the SOLVED sticker, which is a different number
+   * from the gross this card prints the moment a partner rule has moved the
+   * price: near enough to look right, far enough for the column not to add up,
+   * which is the one thing a price table may never do.
+   *
+   * WITHHELD WHERE A PARTNER RULE BOUND THE PRICE — `customerCap.capped`.
+   *
+   * Under a ceiling, and under a flat rate always, the customer's price is not
+   * this company's gross with a percentage on it: the partner pinned the
+   * contract and the sticker was solved backwards out of it, so the gap between
+   * the gross above and the price below is the fee PLUS however far the rule
+   * moved the base a rep typed. Amos at $5.50/W leaves $1.92 a watt whatever
+   * was typed, so on a base of $2.87 the difference is a $27,670 "fee" against
+   * a real one of $42,874. Neither figure is wrong on its own and the
+   * subtraction between them is meaningless, so the row stands down and the
+   * footer names the rule instead. Also null on cash and on a fee-free
+   * programme, which have no cut to show.
+   */
+  const lenderFeeCents =
+    grossCents == null ||
+    customerContract == null ||
+    customerCap?.capped ||
+    customerContract <= grossCents
+      ? null
+      : customerContract - grossCents;
+  const lenderFeePpw = lenderFeeCents != null && watts > 0 ? lenderFeeCents / watts : null;
+
+  /**
+   * What the last rung says about itself: the programme it is quoted on, or —
+   * where the partner's own rule set the price rather than the base above did —
+   * that rule, because that is the answer to the question the row provokes.
+   * "Customer pays $65,960" under "Gross $38,290" with no fee between them is a
+   * $27,670 hole a rep will otherwise fill in with a guess.
+   */
+  const finalNote =
+    customerCap?.capped && quotedMaxFinalPpwCents != null
+      ? `${quotedFinalPpwMode === "flat" ? "flat" : "held at"} $${(
+          quotedMaxFinalPpwCents / 100
+        ).toFixed(2)}/W`
+      : null;
+
   const offDefault = defaultPpwCents != null && basePpwCents != null && basePpwCents !== defaultPpwCents;
 
   /**
@@ -536,32 +585,92 @@ export function SystemPriceCard({
           )}
         </div>
 
-        {/* Base → adders → gross. The last rung is what Anexa keeps on this job,
-            and the one that differs from the base rate on every job carrying
-            extra work. The dealer fee goes on top of it, in the footer. */}
-        <dl className="self-center rounded-lg bg-muted/50 p-3 text-sm">
-          <Rung label="Base" ppw={basePpwCents} total={baseTotalCents} />
-          <Rung label="Adders" ppw={watts > 0 ? adderPpw : null} total={allAdderCents} muted />
-          {/* Only where there is one. A "$0" battery rung on the four deals in
-              five that have no storage is a row a rep has to read to learn
-              nothing. */}
-          {batteryPriceCents > 0 && (
-            <Rung
-              label={batteryQty > 1 ? `Battery × ${batteryQty}` : "Battery"}
-              ppw={null}
-              total={batteryPriceCents}
-              muted
-            />
-          )}
-          <Rung
-            label="Gross"
-            ppw={grossPpw}
-            total={grossCents}
-            strong
-            ppwTestId="gross-ppw"
-            totalTestId="gross-total"
-          />
-        </dl>
+        {/* THE LADDER RUNS ALL THE WAY DOWN NOW — 2026-09-09.
+
+            Base → adders → battery → GROSS is what Anexa keeps, and for as
+            long as this card existed that is where the column stopped. The
+            figure a rep says out loud to the homeowner — what the household
+            actually signs — existed only inside a sentence in the footer, so
+            the one number on the screen with a customer's name on it was the
+            one number not printed as a number.
+
+            So the ladder carries on past the gross: the lender's cut, then the
+            price. Two rungs, one border heavier than the rest, and the last
+            line is the biggest thing on this side of the card.
+
+            A TABLE, not a stack of flex rows. Two money columns that mean
+            different things — a rate and an amount — do not read as columns
+            until they line up, and rows sized to their own contents put
+            $120,000 under $0.00/W. The browser aligns a table's columns for
+            free, the header says once what each column is so no cell has to
+            repeat "/W", and a screen reader gets a real row and column header
+            instead of a run-on definition list. */}
+        <div className="self-center rounded-lg bg-muted/50 px-4 py-3">
+          <table className="w-full text-sm">
+            <caption className="sr-only">
+              What this system costs, from the base rate to what the customer signs
+            </caption>
+            <thead>
+              <tr className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <th scope="col" className="pb-2 text-left font-medium">
+                  <span className="sr-only">Line</span>
+                </th>
+                <th scope="col" className="pb-2 pl-6 text-right font-medium">
+                  $/W
+                </th>
+                <th scope="col" className="pb-2 pl-8 text-right font-medium">
+                  Amount
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <Rung label="Base" ppw={basePpwCents} total={baseTotalCents} />
+              <Rung label="Adders" ppw={watts > 0 ? adderPpw : null} total={allAdderCents} muted />
+              {/* Only where there is one. A "$0" battery rung on the four deals
+                  in five that have no storage is a row a rep has to read to
+                  learn nothing. */}
+              {batteryPriceCents > 0 && (
+                <Rung
+                  label={batteryQty > 1 ? `Battery × ${batteryQty}` : "Battery"}
+                  ppw={null}
+                  total={batteryPriceCents}
+                  muted
+                />
+              )}
+              <Rung
+                label="Gross"
+                note="what we keep"
+                ppw={grossPpw}
+                total={grossCents}
+                strong
+                ppwTestId="gross-ppw"
+                totalTestId="gross-total"
+              />
+              {/* The two rungs below the gross exist only where somebody else
+                  is taking a cut. Cash pays the gross, so on cash the ladder
+                  ends where the money does. */}
+              {lenderFeeCents != null && (
+                <Rung
+                  label={quotedFeePct ? `Dealer fee · ${quotedFeePct}%` : "Dealer fee"}
+                  ppw={lenderFeePpw}
+                  total={lenderFeeCents}
+                  muted
+                />
+              )}
+              {customerContract != null && (
+                <Rung
+                  label="Customer pays"
+                  note={finalNote ?? undefined}
+                  ppw={customerFinalPpw ?? customerPpw}
+                  total={customerContract}
+                  final
+                  ppwTestId="final-ppw"
+                  totalTestId="final-total"
+                />
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <footer className="space-y-2 border-t border-border/70 bg-muted/20 px-4 py-2.5">
@@ -749,55 +858,104 @@ function BaseLine({
   );
 }
 
-/** One rung of the ladder: a rate and the money it comes to. */
+/**
+ * One rung of the ladder: a rate, and the money it comes to.
+ *
+ * A ROW OF A TABLE, so that every rung's rate sits under every other rung's
+ * rate however wide the amount beside it is. The two columns are set apart by
+ * padding rather than by a rule — a line between them would read as a divider
+ * between two tables, and they are one sentence: this many dollars a watt,
+ * which is this much money.
+ */
 function Rung({
   label,
+  note,
   ppw,
   total,
   muted,
   strong,
+  final: isFinal,
   ppwTestId,
   totalTestId,
 }: {
   label: string;
+  /**
+   * What the rung IS, under its name — "what we keep" under the gross, the
+   * partner's rule under the customer's price. The two rungs anybody argues
+   * about are the two that need saying whose money they are, and a row that
+   * says it in its own label ("Gross (what we keep)") is a label that no
+   * longer lines up with "Base" above it.
+   */
+  note?: string;
   /** Cents per watt. Null where there is no array to divide by. */
   ppw: number | null;
   total: number | null;
   muted?: boolean;
+  /** The subtotal: what the company keeps. Ruled off above, set in bold. */
   strong?: boolean;
+  /** The last line — what the household signs. The biggest figure on the card. */
+  final?: boolean;
   /** Split across the two figures on purpose: a test that reads one element
    *  holding "$3.39/W · $33,850" and strips the punctuation gets 3.3933850. */
   ppwTestId?: string;
   totalTestId?: string;
 }) {
+  // Only the two summary rungs are ruled off. A line under every row turns a
+  // short ladder into a grid and makes the one that matters weigh the same as
+  // the rest.
+  const rule = isFinal
+    ? "border-t-2 border-border pt-2.5"
+    : strong
+      ? "border-t border-border pt-2"
+      : "";
+  const cell = cn("py-1 align-baseline", rule);
+
   return (
-    <div
+    <tr
       className={cn(
-        "flex items-baseline justify-between gap-4 py-1",
-        strong && "mt-1 border-t border-border pt-2"
+        (strong || isFinal) && "font-semibold",
+        muted && "text-muted-foreground",
+        isFinal && "text-foreground"
       )}
     >
-      <dt className={cn("text-xs", strong ? "font-semibold" : "text-muted-foreground")}>{label}</dt>
-      <dd
-        className={cn(
-          "flex items-baseline gap-2 tabular-nums",
-          strong ? "font-semibold" : muted ? "text-muted-foreground" : ""
-        )}
+      <th
+        scope="row"
+        className={cn(cell, "pr-4 text-left", strong || isFinal ? "font-semibold" : "font-normal")}
       >
-        {/* Rounded to the nearest cent BEFORE the decimal is placed. A rate of
-            338.5 cents a watt is a real outcome — $3.00 base with $3,850 of
-            adders on 10 kW — and `(338.5 / 100).toFixed(2)` answers "3.38",
-            because 3.385 is not representable and lands a hair below. The rate
-            a rep is measured on should not be a cent light because of binary
-            floating point. */}
-        <span data-testid={ppwTestId} className="text-xs opacity-70">
-          {ppw == null ? "—" : `$${(Math.round(ppw) / 100).toFixed(2)}/W`}
+        <span className={cn("text-xs", !strong && !isFinal && "text-muted-foreground")}>
+          {label}
         </span>
-        <span data-testid={totalTestId} className={strong ? "font-display text-base" : "text-sm"}>
+        {note && (
+          <span className="block text-[10px] font-normal leading-tight text-muted-foreground">
+            {note}
+          </span>
+        )}
+      </th>
+      {/* Rounded to the nearest cent BEFORE the decimal is placed. A rate of
+          338.5 cents a watt is a real outcome — $3.00 base with $3,850 of
+          adders on 10 kW — and `(338.5 / 100).toFixed(2)` answers "3.38",
+          because 3.385 is not representable and lands a hair below. The rate a
+          rep is measured on should not be a cent light because of binary
+          floating point. */}
+      <td className={cn(cell, "pl-6 text-right tabular-nums")}>
+        <span
+          data-testid={ppwTestId}
+          className={cn(isFinal ? "text-sm" : "text-xs", !strong && !isFinal && "opacity-70")}
+        >
+          {ppw == null ? "—" : `$${(Math.round(ppw) / 100).toFixed(2)}`}
+        </span>
+      </td>
+      <td className={cn(cell, "pl-8 text-right tabular-nums")}>
+        <span
+          data-testid={totalTestId}
+          className={cn(
+            isFinal ? "font-display text-lg" : strong ? "font-display text-base" : "text-sm"
+          )}
+        >
           {total == null ? "—" : `$${Math.round(total / 100).toLocaleString()}`}
         </span>
-      </dd>
-    </div>
+      </td>
+    </tr>
   );
 }
 
