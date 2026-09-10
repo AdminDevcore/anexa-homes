@@ -388,20 +388,24 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     const form = page.getByTestId("commission-form");
     await expect(form).toBeVisible({ timeout: 15000 });
     await form.getByLabel("Amount").fill("2500");
-    await form.getByLabel("Paid").check();
+    // The tick is the FUNDING gate, not the rep's payment: it records the
+    // lender's draw landing and is what releases the deal to payroll. The rep's
+    // own payment is stamped on the Commissions page, and the two used to share
+    // one control labelled "Paid".
+    await form.getByLabel("Funding received").check();
     await form.getByRole("button", { name: /^Save$/ }).click();
     await expect(page.getByText(/Commission saved/)).toBeVisible({ timeout: 15000 });
 
-    // It round-trips: the new amount and a paid stamp survive a reload.
+    // It round-trips: the new amount and the funding stamp survive a reload.
     await page.reload();
     await expect(page.getByText("$2,500")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(/Paid \d/).first()).toBeVisible();
+    await expect(page.getByText(/Funding recorded \d/).first()).toBeVisible();
 
     // Put it back so the panel reads sensibly for the next walkthrough.
     await page.getByRole("button", { name: /Edit commission/ }).click();
     const form2 = page.getByTestId("commission-form");
     await form2.getByLabel("Amount").fill("3900");
-    await form2.getByLabel("Paid").uncheck();
+    await form2.getByLabel("Funding received").uncheck();
     await form2.getByRole("button", { name: /^Save$/ }).click();
     await expect(page.getByText(/Commission saved/)).toBeVisible({ timeout: 15000 });
   });
