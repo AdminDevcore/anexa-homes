@@ -354,7 +354,7 @@ export function SystemPriceCard({
    * What the last rung says about itself: the programme it is quoted on, or —
    * where the partner's own rule set the price rather than the base above did —
    * that rule, because that is the answer to the question the row provokes.
-   * "Customer pays $65,960" under "Gross $38,290" with no fee between them is a
+   * "Final price $65,960" under "Gross $38,290" with no fee between them is a
    * $27,670 hole a rep will otherwise fill in with a guess.
    */
   const finalNote =
@@ -659,7 +659,7 @@ export function SystemPriceCard({
               )}
               {customerContract != null && (
                 <Rung
-                  label="Customer pays"
+                  label="Final price"
                   note={finalNote ?? undefined}
                   ppw={customerFinalPpw ?? customerPpw}
                   total={customerContract}
