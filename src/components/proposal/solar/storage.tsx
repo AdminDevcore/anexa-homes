@@ -6,11 +6,23 @@ import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
 import { SOLAR_TIMELINE } from "@/lib/solar-proposal";
 import { PROPOSAL_NAV_PX } from "@/lib/proposal";
+import {
+  backupHeadline,
+  backupFootnote,
+  formatBackupHours,
+} from "@/lib/solar-storage";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
 import { ProposalChrome, type ChromeNavItem } from "../proposal-chrome";
 import { PaymentMenu } from "../payment-menu";
 import { usd } from "../format";
-import { Chapter, Stat, SpecList, DarkRow, EquipCard, ContactCard } from "./primitives";
+import {
+  Chapter,
+  Stat,
+  SpecList,
+  DarkRow,
+  EquipCard,
+  ContactCard,
+} from "./primitives";
 import { AcceptForm } from "./accept";
 import { ExecutionBlock } from "./signature-block";
 import { SignatureCertificate } from "./certificate";
@@ -74,15 +86,20 @@ export function SolarStorageProposalView({
 }) {
   const s = snapshot;
   const st = s.storage;
-  const [signed, setSigned] = React.useState<ProposalCertificate | null>(certificate);
+  const [signed, setSigned] = React.useState<ProposalCertificate | null>(
+    certificate,
+  );
 
   const options = s.options?.length ? s.options : [];
   const [selectedKey, setSelectedKey] = React.useState(
-    () => (options.find((o) => o.quoted) ?? options[0])?.key ?? ""
+    () => (options.find((o) => o.quoted) ?? options[0])?.key ?? "",
   );
-  const quoted = options.find((o) => o.key === selectedKey) ?? options[0] ?? null;
+  const quoted =
+    options.find((o) => o.key === selectedKey) ?? options[0] ?? null;
 
-  const vpp = (s.vpp ?? []).filter((v) => v.annualCents > 0 || v.upfrontCents > 0);
+  const vpp = (s.vpp ?? []).filter(
+    (v) => v.annualCents > 0 || v.upfrontCents > 0,
+  );
   const vppAnnualCents = vpp.reduce((n, v) => n + v.annualCents, 0);
   const touCents = st?.tou?.annualSavingsCents ?? 0;
 
@@ -94,7 +111,8 @@ export function SolarStorageProposalView({
    * A battery with none of those is a battery whose value this company has not
    * recorded, and printing an empty chapter says the opposite.
    */
-  const hasProtection = !!st && (st.backup.length > 0 || vpp.length > 0 || st.tou != null);
+  const hasProtection =
+    !!st && (st.backup.length > 0 || vpp.length > 0 || st.tou != null);
   const chapters: ChromeNavItem[] = [
     { id: "today", label: "Today" },
     { id: "system", label: "System" },
@@ -108,9 +126,18 @@ export function SolarStorageProposalView({
 
   useDeckKeys(true);
 
-  // The cover leads on the LOWEST-load profile, which is rank 0 — the list is
-  // ordered, so no field is needed to say which one to headline.
+  /**
+   * The runtime the cover leads on.
+   *
+   * ONE row on anything generated since backup went whole-home, so there is
+   * nothing to choose between. `backupBasis` is what says which kind of
+   * document this is: present, the figure was divided out of this home's own
+   * usage; absent, the proposal predates the change and quoted the company's
+   * list of named load profiles, where rank 0 was the row to headline. Both
+   * keep rendering, because a document says what it said the day it was signed.
+   */
   const headline = st?.backup[0] ?? null;
+  const wholeHome = st?.backupBasis ?? null;
 
   return (
     <div
@@ -127,8 +154,11 @@ export function SolarStorageProposalView({
         <div className="flex items-start justify-center gap-2 bg-neutral-900 px-4 py-2.5 text-center text-xs text-neutral-300 print:hidden">
           <Lock className="mt-px size-3.5 shrink-0" />
           <span>
-            <strong className="font-semibold text-white">Internal preview.</strong> This is exactly
-            what the customer would see. Acceptance is disabled and nothing has been sent.
+            <strong className="font-semibold text-white">
+              Internal preview.
+            </strong>{" "}
+            This is exactly what the customer would see. Acceptance is disabled
+            and nothing has been sent.
           </span>
         </div>
       )}
@@ -142,8 +172,8 @@ export function SolarStorageProposalView({
 
       {superseded && (
         <div className="border-b border-amber-300 bg-amber-50 px-6 py-3 text-center text-sm text-amber-900">
-          A newer version of this proposal has been issued. Please ask your consultant for the
-          current link.
+          A newer version of this proposal has been issued. Please ask your
+          consultant for the current link.
         </div>
       )}
 
@@ -166,7 +196,7 @@ export function SolarStorageProposalView({
                 {headline && (
                   <>
                     ,<br />
-                    about {fmtHours(headline.hours)} on {headline.name.toLowerCase()}
+                    {backupHeadline(headline, wholeHome)}
                   </>
                 )}
               </>
@@ -191,7 +221,11 @@ export function SolarStorageProposalView({
       >
         <div className="grid gap-4 sm:grid-cols-3">
           {s.energy.avgMonthlyBillCents != null && (
-            <Stat k="Your bill today" v={usd(s.energy.avgMonthlyBillCents)} note="a month" />
+            <Stat
+              k="Your bill today"
+              v={usd(s.energy.avgMonthlyBillCents)}
+              note="a month"
+            />
           )}
           {s.assumptions.currentRateMillsPerKwh > 0 && (
             <Stat
@@ -204,7 +238,9 @@ export function SolarStorageProposalView({
             <Stat
               k="At peak"
               v={`$${(st.tou.peakRateMills / 1000).toFixed(3)}`}
-              note={st.tou.peakWindow ? `per kWh · ${st.tou.peakWindow}` : "per kWh"}
+              note={
+                st.tou.peakWindow ? `per kWh · ${st.tou.peakWindow}` : "per kWh"
+              }
             />
           )}
         </div>
@@ -228,13 +264,17 @@ export function SolarStorageProposalView({
           <Stat
             k="Usable storage"
             v={`${(st?.usableKwh ?? 0).toFixed(1)} kWh`}
-            note={st && st.batteryQty > 1 ? `${st.batteryQty} units` : undefined}
+            note={
+              st && st.batteryQty > 1 ? `${st.batteryQty} units` : undefined
+            }
             size="lg"
           />
           {/* Named on the Battery card below, so it is stated here only when
               there is no card — a snapshot frozen before the cards existed
               carries the label and no equipment row. */}
-          {!s.system.battery && st?.batteryLabel && <Stat k="Battery" v={st.batteryLabel} />}
+          {!s.system.battery && st?.batteryLabel && (
+            <Stat k="Battery" v={st.batteryLabel} />
+          )}
         </div>
 
         {/* The MODULE card is deliberately absent. There are no panels on this
@@ -265,12 +305,11 @@ export function SolarStorageProposalView({
                 <DarkRow
                   key={b.name}
                   k={`${b.name} · ${(b.loadWatts / 1000).toFixed(1)} kW`}
-                  v={fmtHours(b.hours)}
+                  v={formatBackupHours(b.hours)}
                 />
               ))}
               <p className="text-xs text-white/50">
-                Estimated from {st.usableKwh.toFixed(1)} kWh of usable storage at the loads shown.
-                Real runtime moves with what is switched on.
+                {backupFootnote(st.usableKwh, wholeHome)}
               </p>
             </div>
           )}
@@ -301,19 +340,20 @@ export function SolarStorageProposalView({
               </h4>
               <DarkRow
                 k={`Charging off-peak, running on the battery at peak · about ${st.tou.shiftedKwhPerDay.toFixed(
-                  1
+                  1,
                 )} kWh a day shifted`}
                 v={`${usd(st.tou.annualSavingsCents)} / yr`}
                 strong
               />
               <p className="text-xs text-white/50">
-                Based on a ${(st.tou.peakRateMills / 1000).toFixed(3)} peak rate against $
-                {(st.tou.offPeakRateMills / 1000).toFixed(3)} off-peak
+                Based on a ${(st.tou.peakRateMills / 1000).toFixed(3)} peak rate
+                against ${(st.tou.offPeakRateMills / 1000).toFixed(3)} off-peak
                 {st.tou.peakWindow ? ` (${st.tou.peakWindow})` : ""}, assuming{" "}
                 {st.tou.peakSharePct}% of your use falls in the peak window,{" "}
-                {st.tou.cyclesPerDay} cycle{st.tou.cyclesPerDay === 1 ? "" : "s"} a day and{" "}
-                {st.tou.roundTripEfficiencyPct}% round-trip efficiency. An estimate, not a
-                guarantee — rates and usage change.
+                {st.tou.cyclesPerDay} cycle
+                {st.tou.cyclesPerDay === 1 ? "" : "s"} a day and{" "}
+                {st.tou.roundTripEfficiencyPct}% round-trip efficiency. An
+                estimate, not a guarantee — rates and usage change.
               </p>
             </div>
           )}
@@ -321,7 +361,10 @@ export function SolarStorageProposalView({
           {(vppAnnualCents > 0 || touCents > 0) && (
             <p className="mt-10 border-t border-white/15 pt-6 text-lg">
               Together, about{" "}
-              <strong className="font-semibold">{usd(vppAnnualCents + touCents)}</strong> a year.
+              <strong className="font-semibold">
+                {usd(vppAnnualCents + touCents)}
+              </strong>{" "}
+              a year.
             </p>
           )}
         </Chapter>
@@ -347,26 +390,36 @@ export function SolarStorageProposalView({
           <SpecList
             items={[
               [
-                st && st.batteryQty > 1 ? `System price · ${st.batteryQty} batteries` : "System price",
-                usd(quoted.financing.basePriceCents ?? quoted.financing.contractPriceCents ?? 0),
+                st && st.batteryQty > 1
+                  ? `System price · ${st.batteryQty} batteries`
+                  : "System price",
+                usd(
+                  quoted.financing.basePriceCents ??
+                    quoted.financing.contractPriceCents ??
+                    0,
+                ),
               ],
               ...(quoted.financing.adderTotalCents
-                ? ([["Additional work", usd(quoted.financing.adderTotalCents)]] as [
-                    string,
-                    React.ReactNode,
-                  ][])
+                ? ([
+                    ["Additional work", usd(quoted.financing.adderTotalCents)],
+                  ] as [string, React.ReactNode][])
                 : []),
               // Only where something sits between the two. On a plain battery
               // deal the system price IS the total, and printing the same
               // figure twice under two names reads as two charges.
               ...(quoted.financing.adderTotalCents
-                ? ([["Your total", usd(quoted.financing.contractPriceCents ?? 0)]] as [
+                ? ([
+                    [
+                      "Your total",
+                      usd(quoted.financing.contractPriceCents ?? 0),
+                    ],
+                  ] as [string, React.ReactNode][])
+                : []),
+              ...(quoted.monthlyCents != null
+                ? ([["Monthly payment", usd(quoted.monthlyCents)]] as [
                     string,
                     React.ReactNode,
                   ][])
-                : []),
-              ...(quoted.monthlyCents != null
-                ? ([["Monthly payment", usd(quoted.monthlyCents)]] as [string, React.ReactNode][])
                 : []),
             ]}
           />
@@ -410,7 +463,9 @@ export function SolarStorageProposalView({
               </span>
               <span>
                 <strong className="font-semibold">{step.title}</strong>
-                <span className="mt-0.5 block text-sm text-neutral-600">{step.blurb}</span>
+                <span className="mt-0.5 block text-sm text-neutral-600">
+                  {step.blurb}
+                </span>
               </span>
             </li>
           ))}
@@ -454,7 +509,11 @@ export function SolarStorageProposalView({
               <ContactCard
                 title={s.representative.name}
                 subtitle="Your consultant"
-                lines={[s.representative.phone, s.representative.email, s.company.name]}
+                lines={[
+                  s.representative.phone,
+                  s.representative.email,
+                  s.company.name,
+                ]}
               />
             </div>
           )}
@@ -466,11 +525,6 @@ export function SolarStorageProposalView({
       </section>
     </div>
   );
-}
-
-/** "27 hrs", "7.7 hrs" — one decimal only where it changes the answer. */
-function fmtHours(h: number): string {
-  return h < 10 ? `${h.toFixed(1)} hrs` : `${Math.round(h)} hrs`;
 }
 
 /**

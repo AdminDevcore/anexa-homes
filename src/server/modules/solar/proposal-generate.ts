@@ -12,7 +12,10 @@ import {
   type SnapshotEquipment,
   type SolarProposalSnapshot,
 } from "@/lib/solar-proposal";
-import { proposalAlternatives, type CatalogueProgramme } from "@/lib/solar-proposal-options";
+import {
+  proposalAlternatives,
+  type CatalogueProgramme,
+} from "@/lib/solar-proposal-options";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { canGenerate, type ValidationIssue } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
@@ -27,10 +30,18 @@ import { monthlyReconciles } from "@/lib/solar-loan";
 import { ladderReconciles } from "@/lib/solar-credit-ladder";
 import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { mayInheritLiveLink } from "@/lib/solar-proposal-state";
-import { parseLayoutBlocks, panelCorners, MODULE_FALLBACK_MM } from "@/lib/solar-layout";
+import {
+  parseLayoutBlocks,
+  panelCorners,
+  MODULE_FALLBACK_MM,
+} from "@/lib/solar-layout";
 import { listDealAdders } from "./adders";
-import { listBackupProfiles } from "./storage-queries";
-import { usableKwh, backupTable, touSavings } from "@/lib/solar-storage";
+import {
+  usableKwh,
+  wholeHomeBackup,
+  touSavings,
+  WHOLE_HOME_BACKUP_LABEL,
+} from "@/lib/solar-storage";
 import { monthlyProductionForDesign, readMonthlyUsage } from "./monthly";
 
 /**
@@ -93,7 +104,6 @@ function reconciliationProblem(snapshot: SolarProposalSnapshot): string | null {
   return null;
 }
 
-
 type EquipRow = {
   id?: string;
   manufacturer: string | null;
@@ -135,7 +145,6 @@ function equip(e: EquipRow, qty: number): SnapshotEquipment | null {
   };
 }
 
-
 export type GenerateOptions = {
   /**
    * Move the customer's live link onto the new version. See the note at the
@@ -173,22 +182,32 @@ export type GenerateResult =
 export async function generateProposalVersion(
   user: SessionUser,
   leadId: string,
-  opts: GenerateOptions = {}
+  opts: GenerateOptions = {},
 ): Promise<GenerateResult> {
   const [lead, design, finance, assumptions, company] = await Promise.all([
     prisma.lead.findFirst({
       where: { companyId: user.companyId, id: leadId },
       select: {
-        id: true, vertical: true, firstName: true, lastName: true,
-        address: true, city: true, state: true, zip: true,
+        id: true,
+        vertical: true,
+        firstName: true,
+        lastName: true,
+        address: true,
+        city: true,
+        state: true,
+        zip: true,
         // The rest of the cover's "Prepared for" block. Frozen with the
         // document like everything else on it, so a proposal keeps addressing
         // the household it was written for even after the deal is edited.
-        email: true, phone: true,
+        email: true,
+        phone: true,
         // The coordinate the array is drawn on. Null omits the drawing rather
         // than centring a customer's roof on the middle of the ocean.
-        lat: true, lng: true,
-        assignedRep: { select: { firstName: true, lastName: true, phone: true, email: true } },
+        lat: true,
+        lng: true,
+        assignedRep: {
+          select: { firstName: true, lastName: true, phone: true, email: true },
+        },
       },
     }),
     prisma.solarDesign.findUnique({
@@ -199,16 +218,43 @@ export async function generateProposalVersion(
         // is a panel in the wrong place on the customer's own roof.
         module: {
           select: {
-            manufacturer: true, model: true, ratingW: true,
-            widthMm: true, heightMm: true, specSheetUrl: true,
-            id: true, photoKey: true, photoUpdatedAt: true,
+            manufacturer: true,
+            model: true,
+            ratingW: true,
+            widthMm: true,
+            heightMm: true,
+            specSheetUrl: true,
+            id: true,
+            photoKey: true,
+            photoUpdatedAt: true,
           },
         },
-        inverter: { select: { id: true, manufacturer: true, model: true, ratingW: true, specSheetUrl: true, photoKey: true, photoUpdatedAt: true } },
+        inverter: {
+          select: {
+            id: true,
+            manufacturer: true,
+            model: true,
+            ratingW: true,
+            specSheetUrl: true,
+            photoKey: true,
+            photoUpdatedAt: true,
+          },
+        },
         // `priceCents` is what the catalogue sells one battery for, and it is
         // read here because it is a PRICE on this contract — see
         // `batteryChargeCents`. Every other field on this select is description.
-        battery: { select: { id: true, manufacturer: true, model: true, ratingW: true, priceCents: true, specSheetUrl: true, photoKey: true, photoUpdatedAt: true } },
+        battery: {
+          select: {
+            id: true,
+            manufacturer: true,
+            model: true,
+            ratingW: true,
+            priceCents: true,
+            specSheetUrl: true,
+            photoKey: true,
+            photoUpdatedAt: true,
+          },
+        },
       },
     }),
     prisma.solarFinance.findUnique({ where: { leadId } }),
@@ -216,8 +262,13 @@ export async function generateProposalVersion(
     prisma.company.findUnique({
       where: { id: user.companyId },
       select: {
-        name: true, phone: true, email: true,
-        address: true, city: true, state: true, zip: true,
+        name: true,
+        phone: true,
+        email: true,
+        address: true,
+        city: true,
+        state: true,
+        zip: true,
         settings: { select: { logoUrl: true } },
       },
     }),
@@ -225,7 +276,8 @@ export async function generateProposalVersion(
 
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
-  if (!design || !finance) return fail("Complete the system design and financing first.");
+  if (!design || !finance)
+    return fail("Complete the system design and financing first.");
 
   // A SIGNED VERSION DOES NOT CLOSE THE DEAL TO NEW ONES.
   //
@@ -253,7 +305,11 @@ export async function generateProposalVersion(
   const readiness = await readSolarReadiness(user.companyId, leadId);
   if (!readiness.ok) return fail(readiness.error);
   if (!canGenerate(readiness.issues)) {
-    return { ok: false as const, error: "Fix the blocking issues before generating.", issues: readiness.issues };
+    return {
+      ok: false as const,
+      error: "Fix the blocking issues before generating.",
+      issues: readiness.issues,
+    };
   }
 
   // The extra work on this job, read at generation and frozen with everything
@@ -265,7 +321,11 @@ export async function generateProposalVersion(
   const approvedCredit =
     finance.product === "loan"
       ? await prisma.creditApplication.findFirst({
-          where: { companyId: user.companyId, leadId, status: { in: ["approved", "conditional"] } },
+          where: {
+            companyId: user.companyId,
+            leadId,
+            status: { in: ["approved", "conditional"] },
+          },
           orderBy: { decidedAt: "desc" },
           select: { lender: true },
         })
@@ -280,7 +340,10 @@ export async function generateProposalVersion(
       ? await prisma.solarLender.findFirst({
           where: { companyId: user.companyId, id: design.lenderId },
           select: {
-            id: true, name: true, applyUrl: true, logoUpdatedAt: true,
+            id: true,
+            name: true,
+            applyUrl: true,
+            logoUpdatedAt: true,
             // The same rule counted in batteries, for a job with no array.
             maxFinalPricePerBatteryCents: true,
             finalBatteryPriceMode: true,
@@ -364,8 +427,13 @@ export async function generateProposalVersion(
    * either figure has actually changed. An unconditional write would touch
    * every row on every generation for nothing.
    */
-  if (!isStorage && (finance.product === "cash" || finance.product === "loan")) {
-    const stickerPpwCents = capped.capped ? capped.stickerPpwCents : finance.grossPpwCents;
+  if (
+    !isStorage &&
+    (finance.product === "cash" || finance.product === "loan")
+  ) {
+    const stickerPpwCents = capped.capped
+      ? capped.stickerPpwCents
+      : finance.grossPpwCents;
     const contractPriceCents = pricePurchase({
       product: finance.product,
       systemSizeKwDc: design.systemSizeKwDc,
@@ -448,12 +516,19 @@ export async function generateProposalVersion(
     ? await prisma.solarLenderProduct.findFirst({
         where: { companyId: user.companyId, id: finance.lenderProductId },
         select: {
-          product: true, name: true,
-          aprPct: true, termMonths: true, dealerFeePct: true,
-          leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true,
-          escalatorPct: true, termYears: true,
-          factorWithPaydownMicros: true, factorWithoutPaydownMicros: true,
-          paydownPct: true, paydownMonths: true,
+          product: true,
+          name: true,
+          aprPct: true,
+          termMonths: true,
+          dealerFeePct: true,
+          leaseRateCentsPerKwMonth: true,
+          rateMillsPerKwh: true,
+          escalatorPct: true,
+          termYears: true,
+          factorWithPaydownMicros: true,
+          factorWithoutPaydownMicros: true,
+          paydownPct: true,
+          paydownMonths: true,
         },
       })
     : null;
@@ -484,14 +559,26 @@ export async function generateProposalVersion(
    * turn it on later without reissuing the document.
    */
   const programmes = await prisma.solarLenderProduct.findMany({
-    where: { companyId: user.companyId, isActive: true, lender: { isActive: true } },
+    where: {
+      companyId: user.companyId,
+      isActive: true,
+      lender: { isActive: true },
+    },
     select: {
-      id: true, product: true, name: true,
-      aprPct: true, termMonths: true, dealerFeePct: true,
-      leaseRateCentsPerKwMonth: true, rateMillsPerKwh: true,
-      escalatorPct: true, termYears: true,
-      factorWithPaydownMicros: true, factorWithoutPaydownMicros: true,
-      paydownPct: true, paydownMonths: true,
+      id: true,
+      product: true,
+      name: true,
+      aprPct: true,
+      termMonths: true,
+      dealerFeePct: true,
+      leaseRateCentsPerKwMonth: true,
+      rateMillsPerKwh: true,
+      escalatorPct: true,
+      termYears: true,
+      factorWithPaydownMicros: true,
+      factorWithoutPaydownMicros: true,
+      paydownPct: true,
+      paydownMonths: true,
       rank: true,
       // Whether this paper funds a job with no array on it. Selected because
       // the menu is frozen: a storage document that offered a programme which
@@ -499,7 +586,11 @@ export async function generateProposalVersion(
       financesStorageOnly: true,
       lender: {
         select: {
-          id: true, name: true, rank: true, applyUrl: true, logoUpdatedAt: true,
+          id: true,
+          name: true,
+          rank: true,
+          applyUrl: true,
+          logoUpdatedAt: true,
           // The partner's rule, counted in batteries.
           maxFinalPricePerBatteryCents: true,
           finalBatteryPriceMode: true,
@@ -535,7 +626,8 @@ export async function generateProposalVersion(
         select: { lenderId: true },
       })
     : [];
-  const approvedLenderIds = approvals.length > 0 ? approvals.map((a) => a.lenderId) : null;
+  const approvedLenderIds =
+    approvals.length > 0 ? approvals.map((a) => a.lenderId) : null;
 
   /**
    * What the battery earns, if this deal clears the programme's conditions.
@@ -559,7 +651,7 @@ export async function generateProposalVersion(
    * The storage argument, resolved here and frozen with everything else.
    *
    * Only on a storage deal. Every figure is DERIVED — usable capacity from the
-   * catalogue's watt-hours, hours from the company's load profiles, the saving
+   * catalogue's watt-hours, hours from the home's own usage, the saving
    * from the provider's peak spread — because the customer's document derives
    * them the same way, and a rep who could type one would be typing a promise.
    *
@@ -570,8 +662,6 @@ export async function generateProposalVersion(
   const storage = await (async () => {
     if (design.systemType !== "storage") return null;
 
-    const profiles = await listBackupProfiles(user.companyId);
-
     const kwh = usableKwh(design.battery?.ratingW ?? null, design.batteryQty);
 
     // The deal's own rates first, the provider's otherwise. Null on the design
@@ -579,11 +669,23 @@ export async function generateProposalVersion(
     const provider = design.electricProvider
       ? await prisma.solarProvider.findFirst({
           where: { companyId: user.companyId, name: design.electricProvider },
-          select: { touPeakRateMills: true, touOffPeakRateMills: true, touPeakWindow: true },
+          select: {
+            touPeakRateMills: true,
+            touOffPeakRateMills: true,
+            touPeakWindow: true,
+          },
         })
       : null;
-    const peakMills = design.touPeakRateMills ?? provider?.touPeakRateMills ?? null;
-    const offPeakMills = design.touOffPeakRateMills ?? provider?.touOffPeakRateMills ?? null;
+    const peakMills =
+      design.touPeakRateMills ?? provider?.touPeakRateMills ?? null;
+    const offPeakMills =
+      design.touOffPeakRateMills ?? provider?.touOffPeakRateMills ?? null;
+
+    const backup = wholeHomeBackup({
+      usableKwh: kwh,
+      annualUsageKwh: design.annualUsageKwh,
+      outageDrawFactor: assumptions.backupOutageDrawFactor,
+    });
 
     const tou = touSavings({
       usableKwh: kwh,
@@ -599,11 +701,30 @@ export async function generateProposalVersion(
       batteryLabel: label(design.battery),
       batteryQty: design.batteryQty,
       usableKwh: kwh,
-      backup: backupTable(kwh, profiles).map(({ name, loadWatts, hours }) => ({
-        name,
-        loadWatts,
-        hours,
-      })),
+      // ONE row, and it is this house. The company's list of named load
+      // profiles is gone: every install here is whole-home backup, so the
+      // tiers described a product nobody offers, and dividing by one
+      // company-wide wattage quoted a condo and a four-bedroom house the same
+      // hours off the same stack.
+      backup: backup
+        ? [
+            {
+              name: WHOLE_HOME_BACKUP_LABEL,
+              loadWatts: backup.loadWatts,
+              hours: backup.hours,
+            },
+          ]
+        : [],
+      // Frozen beside the figure they produced, the same rule the TOU block
+      // below follows. A factor the company changes next month must not
+      // silently rewrite the runtime on a document somebody has already signed.
+      backupBasis: backup
+        ? {
+            annualUsageKwh: design.annualUsageKwh ?? 0,
+            averageLoadWatts: backup.averageLoadWatts,
+            outageDrawFactor: assumptions.backupOutageDrawFactor,
+          }
+        : null,
       tou:
         tou && peakMills != null && offPeakMills != null
           ? {
@@ -663,7 +784,10 @@ export async function generateProposalVersion(
       : null,
     adders: adderLines.map((l) => ({
       label: l.label,
-      amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
+      amountCents: adderAmountCents(
+        l,
+        Math.round(design.systemSizeKwDc * 1000),
+      ),
       description: l.description,
       showOnProposal: l.showOnProposal,
       financedOnTop: l.financedOnTop,
@@ -676,7 +800,10 @@ export async function generateProposalVersion(
   });
 
   // The shape of the customer's year. Cache-only — see monthlyProductionForDesign.
-  const monthlyProductionKwh = await monthlyProductionForDesign(user.companyId, leadId);
+  const monthlyProductionKwh = await monthlyProductionForDesign(
+    user.companyId,
+    leadId,
+  );
 
   /**
    * The array, frozen onto the document as ground metres.
@@ -700,7 +827,14 @@ export async function generateProposalVersion(
     orderBy: { version: "desc" },
     // `signedAt` because a signed row may not give its live link up — see the
     // note on `carried` below.
-    select: { id: true, version: true, publicToken: true, status: true, sentAt: true, signedAt: true },
+    select: {
+      id: true,
+      version: true,
+      publicToken: true,
+      status: true,
+      sentAt: true,
+      signedAt: true,
+    },
   });
   const version = (previous?.version ?? 0) + 1;
 
@@ -709,7 +843,11 @@ export async function generateProposalVersion(
   // lifecycle rule, a database restored without its storage) would otherwise be
   // frozen into the snapshot and render as a broken image in front of a
   // customer. Verified now, and verified again at render.
-  const layoutAsset = await resolveLayoutAsset(user.companyId, leadId, design.layoutImageFileId);
+  const layoutAsset = await resolveLayoutAsset(
+    user.companyId,
+    leadId,
+    design.layoutImageFileId,
+  );
   const layout = layoutAsset
     ? {
         fileId: layoutAsset.id,
@@ -721,7 +859,11 @@ export async function generateProposalVersion(
     : null;
 
   const companyAddress = company
-    ? [company.address, [company.city, company.state].filter(Boolean).join(", "), company.zip]
+    ? [
+        company.address,
+        [company.city, company.state].filter(Boolean).join(", "),
+        company.zip,
+      ]
         .filter(Boolean)
         .join(" · ") || null
     : null;
@@ -765,7 +907,10 @@ export async function generateProposalVersion(
       utilityRateMills: design.utilityRateMills,
       module: equip(design.module, design.moduleQty),
       inverter: equip(design.inverter, 1),
-      battery: equip(design.battery, design.batteryQty || (design.battery ? 1 : 0)),
+      battery: equip(
+        design.battery,
+        design.batteryQty || (design.battery ? 1 : 0),
+      ),
       monthlyUsageKwh: readMonthlyUsage(design.monthlyUsageKwh),
       monthlyProductionKwh,
     },
@@ -795,7 +940,10 @@ export async function generateProposalVersion(
       // line on a document a homeowner has already been shown.
       adders: adderLines.map((l) => ({
         label: l.label,
-        amountCents: adderAmountCents(l, Math.round(design.systemSizeKwDc * 1000)),
+        amountCents: adderAmountCents(
+          l,
+          Math.round(design.systemSizeKwDc * 1000),
+        ),
         description: l.description,
         showOnProposal: l.showOnProposal,
         financedOnTop: l.financedOnTop,
@@ -821,7 +969,9 @@ export async function generateProposalVersion(
     // Only the partner on the design has a logo to show: the credit
     // application records its lender as free text from a webhook, which is a
     // name and nothing more.
-    lenderLogoUrl: dealLender ? lenderLogoUrl(dealLender.id, dealLender.logoUpdatedAt) : null,
+    lenderLogoUrl: dealLender
+      ? lenderLogoUrl(dealLender.id, dealLender.logoUpdatedAt)
+      : null,
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
     lenderProductLabel: quotedProductLabel,
@@ -874,7 +1024,10 @@ export async function generateProposalVersion(
             source: "pvwatts" as const,
             station: design.yieldStation,
             arrays: design.yieldArrays,
-            totalArrays: Math.max(design.yieldArrays, parseLayoutBlocks(design.layoutBlocks).length),
+            totalArrays: Math.max(
+              design.yieldArrays,
+              parseLayoutBlocks(design.layoutBlocks).length,
+            ),
           }
         : null,
     now: new Date(),
@@ -986,7 +1139,11 @@ export async function generateProposalVersion(
             type: "generated",
             actorId: user.userId,
             actorName: user.fullName,
-            detail: [`v${version}`, finance.product, carried ? "live link kept" : null]
+            detail: [
+              `v${version}`,
+              finance.product,
+              carried ? "live link kept" : null,
+            ]
               .filter(Boolean)
               .join(" · "),
           },

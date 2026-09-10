@@ -178,6 +178,85 @@ export function wholeHomeBackup(input: {
 }
 
 /**
+ * What the document freezes about how a runtime was worked out, or null on one
+ * generated before backup went whole-home. Mirrors the snapshot's
+ * `storage.backupBasis` — see `SolarProposalSnapshot`.
+ */
+export type BackupBasis = {
+  annualUsageKwh: number;
+  averageLoadWatts: number;
+  outageDrawFactor: number;
+};
+
+/** One backup row as the document holds it, whichever era it came from. */
+export type FrozenBackupRow = {
+  name: string;
+  loadWatts: number;
+  hours: number;
+};
+
+/**
+ * Hours, as a customer reads them.
+ *
+ * A decimal below ten because the difference between six and seven hours is the
+ * difference between the fridge surviving the night; a whole number above it,
+ * where a tenth of an hour is false precision about a modelled figure.
+ */
+export function formatBackupHours(h: number): string {
+  return h < 10 ? `${h.toFixed(1)} hrs` : `${Math.round(h)} hrs`;
+}
+
+/**
+ * The runtime clause on the cover.
+ *
+ * HERE, not in the document component, because it is a sentence a homeowner
+ * reads and it changes on the era of the document. Assembled as one string
+ * rather than as JSX siblings: `{a} {b}` drops the space between them and ships
+ * "about 12 hrsfor the whole home" — see the note in `solar-proposal.ts`.
+ *
+ * With a basis it is THIS house, whole-home, and saying so matters: the number
+ * is no longer a tier anybody chose. Without one the document predates the
+ * change and named the profile the company put at rank 0, which is what that
+ * cover has always said and must keep saying.
+ */
+export function backupHeadline(
+  row: FrozenBackupRow,
+  basis: BackupBasis | null,
+): string {
+  const hours = formatBackupHours(row.hours);
+  return basis
+    ? `about ${hours} for the whole home`
+    : `about ${hours} on ${row.name.toLowerCase()}`;
+}
+
+/**
+ * The line under the runtime that shows its working.
+ *
+ * A modelled figure a household is asked to buy on should say what it was
+ * modelled from, in the household's own numbers — their usage, the average it
+ * implies, and how far above that average an outage is quoted. The alternative
+ * is a number with nothing behind it, which is the thing this whole change was
+ * about.
+ */
+export function backupFootnote(
+  usableKwh: number,
+  basis: BackupBasis | null,
+): string {
+  const held = `${usableKwh.toFixed(1)} kWh of usable storage`;
+  if (!basis) {
+    return `Estimated from ${held} at the loads shown. Real runtime moves with what is switched on.`;
+  }
+  const usage = Math.round(basis.annualUsageKwh).toLocaleString();
+  const avg = (basis.averageLoadWatts / 1000).toFixed(1);
+  const margin = Math.round((basis.outageDrawFactor - 1) * 100);
+  return (
+    `Estimated from ${held} against your own use: ${usage} kWh a year averages ${avg} kW, ` +
+    `and an outage is quoted ${margin}% above that because the power tends to go out when the ` +
+    `house is working hardest. Real runtime moves with what is switched on.`
+  );
+}
+
+/**
  * What charging cheap and discharging at peak is worth in a year.
  *
  *     peakUsage/day = annualUsage ÷ 365 × peakShare

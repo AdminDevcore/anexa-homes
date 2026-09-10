@@ -95,8 +95,6 @@ export type DesignForValidation = {
    */
   systemType?: "pv" | "pv_storage" | "storage";
   batteryQty?: number;
-  /** Whether the company has ANY active backup profile for hours to come from. */
-  hasBackupProfile?: boolean;
   systemSizeKwDc: number;
   year1ProductionKwh: number;
   annualUsageKwh: number | null;
@@ -259,23 +257,23 @@ export function validateDesign(
     if (!(d.batteryQty && d.batteryQty > 0)) {
       block("storage.no_qty", "equipment", "batteryQty", "Say how many batteries this deal installs.");
     }
-    if (d.hasBackupProfile === false) {
-      issues.push({
-        severity: "block",
-        code: "storage.no_backup_profile",
-        group: "design",
-        field: "backupProfile",
-        message:
-          "No backup load profiles, so the proposal cannot say how long this battery lasts.",
-        action: { label: "Open backup profiles", href: "/portal/settings/solar?tab=backup" },
-      });
-    }
+    /**
+     * Usage is a BLOCK on a battery deal, not the warning it used to be.
+     *
+     * It was a warning while runtime came from the company's list of named load
+     * profiles: a deal with no usage still had hours to print, and only lost
+     * the bill saving. Whole-home backup derives the runtime from this house's
+     * own usage, so a blank Energy step now costs the document BOTH of the two
+     * things a battery is bought for — how long the lights stay on, and what
+     * comes off the bill. That leaves a storage proposal with nothing to say,
+     * which is exactly what the old missing-profile block existed to prevent.
+     */
     if (d.annualUsageKwh == null || d.annualUsageKwh <= 0) {
-      warn(
+      block(
         "storage.no_usage",
         "design",
         "annualUsageKwh",
-        "No usage on file, so the proposal will leave out what this battery saves on the bill."
+        "No usage on file, so the proposal cannot say how long this battery lasts or what it saves."
       );
     }
     return issues;

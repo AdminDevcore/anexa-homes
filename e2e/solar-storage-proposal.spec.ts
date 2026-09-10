@@ -76,10 +76,14 @@ test.describe(FLAG_ON ? "storage-only proposals" : "storage-only proposals (flag
     await expect(page.getByText(/kWh of usable storage/)).toBeVisible({ timeout: 15000 });
 
     await page.getByLabel("How many").selectOption("2");
-    // Exact: "Essentials" is also a prefix of "Essentials + AC".
-    await expect(page.getByText("Essentials", { exact: true })).toBeVisible();
+    // ONE row now, and it is this house. The company's list of named load
+    // profiles is gone — every install is whole-home backup, so the tiers
+    // described a product nobody sells.
     await expect(page.getByText("Whole home", { exact: true })).toBeVisible();
-    // Runtime is DERIVED — nobody typed these.
+    await expect(page.getByText("Essentials", { exact: false })).toHaveCount(0);
+    // Runtime is DERIVED from the home's OWN usage — nobody typed it, and the
+    // seeded deal's 14,000 kWh a year is what it was divided out of.
+    await expect(page.getByText(/14,000 kWh a year averages/)).toBeVisible();
     await expect(page.getByText(/hrs$/).first()).toBeVisible();
 
     // Financing prices per BATTERY, not per watt.

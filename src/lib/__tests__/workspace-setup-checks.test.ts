@@ -17,14 +17,18 @@ import { SETUP_CHECKS, checksFor } from "@/server/modules/settings/workspace-hea
  * gap's card by key, silently dropped all three. A key here is a card id, and
  * workspace-health.test.ts is what holds the two lists to each other.
  *
- * The backup-profile gap lands on `solar_settings`: the profiles live on that
- * screen's Backup tab since the Storage card was deleted.
+ * `solar_settings` is NOT one of them any more. It carried the backup-profile
+ * gap, which existed while a runtime came from a list a company had to fill in.
+ * Whole-home backup derives the runtime from the deal's own usage against a
+ * factor that always has a value, so there is no company-level setting left
+ * that can be silently absent — the per-deal fact that can be missing is the
+ * home's usage, and readiness blocks on it where a rep can see it.
  *
  * `solar_pay` is the exception that proves it: it points at /portal/team, so it
  * has no card and its key names none. The hub keeps it on that basis — see the
  * card-less branch in `settings-overview.tsx`.
  */
-const STORAGE_CHECKS = ["solar_settings", "solar_lenders", "solar_pay"];
+const STORAGE_CHECKS = ["solar_lenders", "solar_pay"];
 
 describe("workspace setup checks", () => {
   it("has no duplicate keys — a gap lands on its card by key", () => {
@@ -61,7 +65,7 @@ describe("workspace setup checks", () => {
 
   it("none of the storage checks blocks — a panels-only company is fine", () => {
     const storage = SETUP_CHECKS.filter((c) => STORAGE_CHECKS.includes(c.key));
-    expect(storage).toHaveLength(3);
+    expect(storage).toHaveLength(2);
     for (const c of storage) expect(c.severity).toBe("silent");
   });
 });

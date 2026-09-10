@@ -45,9 +45,6 @@ beforeAll(async () => {
     data: { companyId, kind: "battery", manufacturer: "Tesla", model: "Powerwall 3", ratingW: 13500 },
   });
   batteryId = battery.id;
-  await db.solarBackupProfile.create({
-    data: { companyId, name: "Essentials", loadWatts: 1000, rank: 0 },
-  });
 });
 
 beforeEach(async () => {
@@ -112,13 +109,18 @@ describe("readiness on a storage deal", () => {
     expect(found).toContain("storage.no_qty");
   });
 
-  it("blocks when the company has no backup profile to state hours from", async () => {
-    await db.solarBackupProfile.deleteMany({ where: { companyId } });
+  it("blocks when there is no usage to state hours from", async () => {
+    // Whole-home backup divides THIS house's usage, so a blank Energy step
+    // leaves the document unable to say either of the two things a battery is
+    // bought for. It replaced a block about the company having no load profile,
+    // which is what a runtime used to be derived from.
+    await storageDeal({ annualUsageKwh: null });
+    expect(await codes()).toContain("storage.no_usage");
+  });
+
+  it("does not block a battery deal that has usage", async () => {
     await storageDeal();
-    expect(await codes()).toContain("storage.no_backup_profile");
-    await db.solarBackupProfile.create({
-      data: { companyId, name: "Essentials", loadWatts: 1000, rank: 0 },
-    });
+    expect(await codes()).not.toContain("storage.no_usage");
   });
 
   it("still demands an array on a pv deal read through the same reader", async () => {

@@ -3,12 +3,18 @@ import {
   autoBatteryCount,
   usableKwh,
   backupHours,
+  backupHeadline,
+  backupFootnote,
   wholeHomeBackup,
   touSavings,
   type TouAssumptions,
 } from "@/lib/solar-storage";
 
-const TOU: TouAssumptions = { peakSharePct: 30, cyclesPerDay: 1, roundTripEfficiencyPct: 90 };
+const TOU: TouAssumptions = {
+  peakSharePct: 30,
+  cyclesPerDay: 1,
+  roundTripEfficiencyPct: 90,
+};
 
 describe("usableKwh", () => {
   it("reads watt-hours off the catalogue row", () => {
@@ -68,42 +74,88 @@ describe("touSavings", () => {
 
   it("cycles the battery more than once when the company says so", () => {
     const once = touSavings({
-      usableKwh: 5, annualUsageKwh: 40_000, peakRateMills: 240, offPeakRateMills: 90, ...TOU,
+      usableKwh: 5,
+      annualUsageKwh: 40_000,
+      peakRateMills: 240,
+      offPeakRateMills: 90,
+      ...TOU,
     });
     const twice = touSavings({
-      usableKwh: 5, annualUsageKwh: 40_000, peakRateMills: 240, offPeakRateMills: 90,
-      ...TOU, cyclesPerDay: 2,
+      usableKwh: 5,
+      annualUsageKwh: 40_000,
+      peakRateMills: 240,
+      offPeakRateMills: 90,
+      ...TOU,
+      cyclesPerDay: 2,
     });
     // Within a cent, not exactly double: the figure is rounded once at the end,
     // so doubling a rounded number and rounding a doubled one differ by a cent.
     // Rounding once is the correct half of that pair.
-    expect(Math.abs(twice!.annualSavingsCents - once!.annualSavingsCents * 2)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(twice!.annualSavingsCents - once!.annualSavingsCents * 2),
+    ).toBeLessThanOrEqual(1);
   });
 
   it("is NULL, never zero, when a rate is missing", () => {
     expect(
-      touSavings({ usableKwh: 27, annualUsageKwh: 12_000, peakRateMills: null, offPeakRateMills: 90, ...TOU })
+      touSavings({
+        usableKwh: 27,
+        annualUsageKwh: 12_000,
+        peakRateMills: null,
+        offPeakRateMills: 90,
+        ...TOU,
+      }),
     ).toBeNull();
     expect(
-      touSavings({ usableKwh: 27, annualUsageKwh: 12_000, peakRateMills: 240, offPeakRateMills: null, ...TOU })
+      touSavings({
+        usableKwh: 27,
+        annualUsageKwh: 12_000,
+        peakRateMills: 240,
+        offPeakRateMills: null,
+        ...TOU,
+      }),
     ).toBeNull();
   });
 
   it("is NULL when the spread is zero or inverted — there is nothing to arbitrage", () => {
     expect(
-      touSavings({ usableKwh: 27, annualUsageKwh: 12_000, peakRateMills: 90, offPeakRateMills: 90, ...TOU })
+      touSavings({
+        usableKwh: 27,
+        annualUsageKwh: 12_000,
+        peakRateMills: 90,
+        offPeakRateMills: 90,
+        ...TOU,
+      }),
     ).toBeNull();
     expect(
-      touSavings({ usableKwh: 27, annualUsageKwh: 12_000, peakRateMills: 80, offPeakRateMills: 90, ...TOU })
+      touSavings({
+        usableKwh: 27,
+        annualUsageKwh: 12_000,
+        peakRateMills: 80,
+        offPeakRateMills: 90,
+        ...TOU,
+      }),
     ).toBeNull();
   });
 
   it("is NULL with no storage and with no usage on file", () => {
     expect(
-      touSavings({ usableKwh: 0, annualUsageKwh: 12_000, peakRateMills: 240, offPeakRateMills: 90, ...TOU })
+      touSavings({
+        usableKwh: 0,
+        annualUsageKwh: 12_000,
+        peakRateMills: 240,
+        offPeakRateMills: 90,
+        ...TOU,
+      }),
     ).toBeNull();
     expect(
-      touSavings({ usableKwh: 27, annualUsageKwh: 0, peakRateMills: 240, offPeakRateMills: 90, ...TOU })
+      touSavings({
+        usableKwh: 27,
+        annualUsageKwh: 0,
+        peakRateMills: 240,
+        offPeakRateMills: 90,
+        ...TOU,
+      }),
     ).toBeNull();
   });
 });
@@ -146,7 +198,11 @@ describe("autoBatteryCount", () => {
 
   it("rounds up — a partial battery is not something anybody installs", () => {
     const qty = (basisKwh: number) =>
-      autoBatteryCount({ basisKwh, nightSharePct: 55, batteryRatingWh: POWERWALL })!.qty;
+      autoBatteryCount({
+        basisKwh,
+        nightSharePct: 55,
+        batteryRatingWh: POWERWALL,
+      })!.qty;
 
     // 2.00 exactly: 27 kWh of night load off a 13.5 kWh unit.
     expect(qty((27 / 0.55) * 365)).toBe(2);
@@ -194,22 +250,42 @@ describe("autoBatteryCount", () => {
     // Every one of these leaves the deal's existing count alone. Answering "1"
     // would halve a real system the moment a figure went briefly missing.
     expect(
-      autoBatteryCount({ basisKwh: 0, nightSharePct: 55, batteryRatingWh: POWERWALL })
+      autoBatteryCount({
+        basisKwh: 0,
+        nightSharePct: 55,
+        batteryRatingWh: POWERWALL,
+      }),
     ).toBeNull();
     expect(
-      autoBatteryCount({ basisKwh: null, nightSharePct: 55, batteryRatingWh: POWERWALL })
+      autoBatteryCount({
+        basisKwh: null,
+        nightSharePct: 55,
+        batteryRatingWh: POWERWALL,
+      }),
     ).toBeNull();
     expect(
-      autoBatteryCount({ basisKwh: 20_000, nightSharePct: 55, batteryRatingWh: null })
+      autoBatteryCount({
+        basisKwh: 20_000,
+        nightSharePct: 55,
+        batteryRatingWh: null,
+      }),
     ).toBeNull();
     expect(
-      autoBatteryCount({ basisKwh: 20_000, nightSharePct: 55, batteryRatingWh: 0 })
+      autoBatteryCount({
+        basisKwh: 20_000,
+        nightSharePct: 55,
+        batteryRatingWh: 0,
+      }),
     ).toBeNull();
   });
 
   it("is null when the night share is not a share", () => {
     const bad = (nightSharePct: number | null) =>
-      autoBatteryCount({ basisKwh: 20_000, nightSharePct, batteryRatingWh: POWERWALL });
+      autoBatteryCount({
+        basisKwh: 20_000,
+        nightSharePct,
+        batteryRatingWh: POWERWALL,
+      });
     expect(bad(0)).toBeNull();
     expect(bad(-10)).toBeNull();
     expect(bad(101)).toBeNull();
@@ -225,7 +301,11 @@ describe("wholeHomeBackup", () => {
   it("carries the worked example the setting is written from", () => {
     // 15,000 kWh ÷ 8760 h = 1712 W average. × 1.3 = 2226 W while the grid is
     // down, and 27 kWh divided by that is a little over twelve hours.
-    const b = wholeHomeBackup({ usableKwh: KWH, annualUsageKwh: 15_000, outageDrawFactor: 1.3 });
+    const b = wholeHomeBackup({
+      usableKwh: KWH,
+      annualUsageKwh: 15_000,
+      outageDrawFactor: 1.3,
+    });
     expect(b).not.toBeNull();
     expect(b!.averageLoadWatts).toBeCloseTo(1712.3, 1);
     expect(b!.loadWatts).toBeCloseTo(2226.0, 1);
@@ -235,21 +315,37 @@ describe("wholeHomeBackup", () => {
   it("gives a bigger house fewer hours off the same battery", () => {
     // The whole reason the profile list went away: one company-wide wattage
     // told a 900 sq ft condo and a 4,000 sq ft house the same thing.
-    const small = wholeHomeBackup({ usableKwh: KWH, annualUsageKwh: 9_000, outageDrawFactor: 1.3 });
-    const big = wholeHomeBackup({ usableKwh: KWH, annualUsageKwh: 30_000, outageDrawFactor: 1.3 });
+    const small = wholeHomeBackup({
+      usableKwh: KWH,
+      annualUsageKwh: 9_000,
+      outageDrawFactor: 1.3,
+    });
+    const big = wholeHomeBackup({
+      usableKwh: KWH,
+      annualUsageKwh: 30_000,
+      outageDrawFactor: 1.3,
+    });
     expect(small!.hours).toBeGreaterThan(big!.hours);
     // And the ratio is the ratio of the usage, because nothing else differs.
     expect(small!.hours / big!.hours).toBeCloseTo(30_000 / 9_000, 6);
   });
 
   it("treats a factor of 1 as the plain average, no margin", () => {
-    const b = wholeHomeBackup({ usableKwh: KWH, annualUsageKwh: 15_000, outageDrawFactor: 1 });
+    const b = wholeHomeBackup({
+      usableKwh: KWH,
+      annualUsageKwh: 15_000,
+      outageDrawFactor: 1,
+    });
     expect(b!.loadWatts).toBeCloseTo(b!.averageLoadWatts, 6);
   });
 
   it("is null with no storage, so the chapter omits itself", () => {
     expect(
-      wholeHomeBackup({ usableKwh: 0, annualUsageKwh: 15_000, outageDrawFactor: 1.3 })
+      wholeHomeBackup({
+        usableKwh: 0,
+        annualUsageKwh: 15_000,
+        outageDrawFactor: 1.3,
+      }),
     ).toBeNull();
   });
 
@@ -258,15 +354,67 @@ describe("wholeHomeBackup", () => {
     // proposal is a worse way to discover a blank Energy step than the line
     // simply not being there.
     for (const usage of [null, undefined, 0]) {
-      expect(wholeHomeBackup({ usableKwh: KWH, annualUsageKwh: usage, outageDrawFactor: 1.3 })).toBeNull();
+      expect(
+        wholeHomeBackup({
+          usableKwh: KWH,
+          annualUsageKwh: usage,
+          outageDrawFactor: 1.3,
+        }),
+      ).toBeNull();
     }
   });
 
   it("is null when the factor is missing or not a multiplier", () => {
     for (const factor of [null, undefined, 0, -1]) {
       expect(
-        wholeHomeBackup({ usableKwh: KWH, annualUsageKwh: 15_000, outageDrawFactor: factor })
+        wholeHomeBackup({
+          usableKwh: KWH,
+          annualUsageKwh: 15_000,
+          outageDrawFactor: factor,
+        }),
       ).toBeNull();
     }
+  });
+});
+
+describe("what the customer's document says about runtime", () => {
+  const BASIS = {
+    annualUsageKwh: 15_000,
+    averageLoadWatts: 1712.3,
+    outageDrawFactor: 1.3,
+  };
+  const ROW = { name: "Whole home", loadWatts: 2226, hours: 12.13 };
+
+  it("headlines the hours as whole-home, not as a tier the customer picked", () => {
+    expect(backupHeadline(ROW, BASIS)).toBe("about 12 hrs for the whole home");
+  });
+
+  it("keeps naming the profile on a document generated before the change", () => {
+    // A signed document says what it said. Those proposals quoted a list of
+    // named load profiles, and rank 0 was the row the cover led on.
+    expect(
+      backupHeadline({ name: "Essentials", loadWatts: 1000, hours: 27 }, null),
+    ).toBe("about 27 hrs on essentials");
+  });
+
+  it("rounds to a whole hour past ten and keeps a decimal below it", () => {
+    expect(backupHeadline({ ...ROW, hours: 9.44 }, BASIS)).toBe(
+      "about 9.4 hrs for the whole home",
+    );
+  });
+
+  it("shows its working in the footnote — usage, average, and the margin", () => {
+    const note = backupFootnote(27, BASIS);
+    expect(note).toContain("27.0 kWh of usable storage");
+    expect(note).toContain("15,000 kWh a year");
+    expect(note).toContain("1.7 kW");
+    expect(note).toContain("30% above that");
+    expect(note).toContain("Real runtime moves with what is switched on.");
+  });
+
+  it("claims no derivation on an older document, which had none", () => {
+    const note = backupFootnote(27, null);
+    expect(note).toContain("at the loads shown");
+    expect(note).not.toContain("a year");
   });
 });

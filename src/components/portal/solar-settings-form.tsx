@@ -5,25 +5,19 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import {
   Caution,
   FieldGrid,
   Hint,
-  ListEditor,
   MoneyField,
   Panel,
   SaveBar,
   TextAreaField,
   TextField,
-  type ListRow,
 } from "@/components/portal/settings-kit";
 import { updateSolarSettingsAction } from "@/server/modules/solar/actions";
-import { saveBackupProfileAction, deleteBackupProfileAction } from "@/server/modules/solar/storage";
-import { backupHours } from "@/lib/solar-storage";
+import { wholeHomeBackup } from "@/lib/solar-storage";
 import type { SolarSettingsView } from "@/server/modules/solar/settings";
-import type { BackupProfileRow } from "@/server/modules/solar/storage-queries";
 
 /**
  * Solar assumptions. Everything a quote is built from lives here rather than in
@@ -35,48 +29,16 @@ import type { BackupProfileRow } from "@/server/modules/solar/storage-queries";
  * credit and prints none. Saving this form still clears the legacy incentive
  * columns, which nothing reads.
  */
-/** kWh a two-Powerwall system holds, used only to preview hours here. */
+/**
+ * The house the worked example below is drawn on.
+ *
+ * A REFERENCE, not a promise about any deal: a real quote divides the battery
+ * the customer is actually buying by the usage on their own Energy step. It is
+ * here so a factor typed with the decimal in the wrong place shows up as an
+ * absurd runtime before anybody saves it.
+ */
 const REFERENCE_KWH = 27;
-
-/**
- * One backup load profile as this screen edits it.
- *
- * `profileId` is null on a row that has not been saved yet, which is what tells
- * the Save whether to create or update. Watts stay a STRING while they are
- * being typed — a half-typed "3" must not become a saved 3 W profile.
- */
-type BackupRow = ListRow & {
-  profileId: string | null;
-  watts: string;
-  active: boolean;
-};
-
-const seedBackup = (profiles: BackupProfileRow[]): BackupRow[] =>
-  profiles.map((p) => ({
-    id: p.id,
-    profileId: p.id,
-    label: p.name,
-    watts: String(p.loadWatts),
-    active: p.isActive,
-  }));
-
-/**
- * The hours a reference system carries this load for, as the note beside the row.
- *
- * Not a promise about any deal — a real quote divides the battery the customer
- * is actually buying. It is here so a wattage typed with a digit missing shows
- * up as an absurd runtime before anybody saves it.
- */
-function hoursNote(watts: string): string {
-  const w = Number(watts);
-  if (!(w > 0)) return "—";
-  const hrs = backupHours(REFERENCE_KWH, w);
-  return hrs == null ? "—" : `${hrs.toFixed(1)} hrs`;
-}
-
-/** What the Save compares against, and what the server sent. */
-const backupKey = (rows: { label: string; watts: string; active: boolean }[]) =>
-  JSON.stringify(rows.map((r) => [r.label.trim(), r.watts.trim(), r.active]));
+const REFERENCE_USAGE_KWH = 15_000;
 
 /** The stored settings as the boxes on this form. */
 function seedFrom(settings: SolarSettingsView) {
@@ -88,9 +50,13 @@ function seedFrom(settings: SolarSettingsView) {
     utilityMeterFee: (settings.utilityMeterFeeCents / 100).toFixed(2),
     defaultGrossPpw: (settings.defaultGrossPpwCents / 100).toFixed(2),
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
-    targetNetPpw: settings.targetNetPpwCents == null ? "" : (settings.targetNetPpwCents / 100).toFixed(2),
+    targetNetPpw:
+      settings.targetNetPpwCents == null
+        ? ""
+        : (settings.targetNetPpwCents / 100).toFixed(2),
     homeValueUpliftPct: String(settings.homeValueUpliftPct),
     defaultBatteryQty: String(settings.defaultBatteryQty),
+    backupOutageDrawFactor: String(settings.backupOutageDrawFactor),
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
     creditItcPct: String(settings.creditRates.itcPct),
@@ -101,25 +67,22 @@ function seedFrom(settings: SolarSettingsView) {
   };
 }
 
-const SOLAR_TABS = ["production", "backup", "pricing", "guardrails", "credits", "stages"] as const;
+const SOLAR_TABS = [
+  "production",
+  "backup",
+  "pricing",
+  "guardrails",
+  "credits",
+  "stages",
+] as const;
 type SolarTab = (typeof SOLAR_TABS)[number];
 
 export function SolarSettingsForm({
   settings,
-  profiles,
   stageModel,
   initialTab,
 }: {
   settings: SolarSettingsView;
-  /**
-   * The company's backup load profiles, in rank order.
-   *
-   * They had a settings screen of their own — Settings → Storage — whose other
-   * half was a rebate catalogue nobody ever filled. Three rows that have never
-   * been edited did not need a card on the hub, and they belong beside the
-   * other assumptions a quote is built from rather than two clicks away.
-   */
-  profiles: BackupProfileRow[];
   /** The stage-model editor, rendered as this screen's last tab. */
   stageModel?: React.ReactNode;
   initialTab?: string | null;
@@ -127,7 +90,6 @@ export function SolarSettingsForm({
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [f, setF] = React.useState(() => seedFrom(settings));
-  const [bp, setBp] = React.useState(() => seedBackup(profiles));
 
   const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }));
 
@@ -146,75 +108,31 @@ export function SolarSettingsForm({
     setSeen(serverKey);
     setF(saved);
   }
-  const savedBackup = React.useMemo(() => seedBackup(profiles), [profiles]);
-  const backupServerKey = backupKey(savedBackup);
-  const [seenBackup, setSeenBackup] = React.useState(backupServerKey);
-  if (seenBackup !== backupServerKey) {
-    setSeenBackup(backupServerKey);
-    setBp(savedBackup);
-  }
-
-  const dirty = JSON.stringify(f) !== serverKey || backupKey(bp) !== backupServerKey;
+  const dirty = JSON.stringify(f) !== serverKey;
 
   /** The bounds are a band, so one above the other blocks every proposal. */
   const badOffsetBand = Number(f.minOffsetPct) >= Number(f.maxOffsetPct);
   const noDisclaimer = f.creditDisclaimer.trim() === "";
 
   /**
-   * A profile is only a profile with a name and a load above zero: hours are
-   * `capacity ÷ load`, so a zero would print an infinite runtime on a
-   * customer's document. Blocked here rather than caught by the action, so the
-   * Save says why instead of failing halfway through a list.
-   */
-  const badBackup = bp.some(
-    (r) => r.label.trim() === "" || !(Number(r.watts) > 0) || Number(r.watts) > 50_000,
-  );
-  const noProfiles = bp.filter((r) => r.active && r.label.trim() !== "").length === 0;
-
-  /**
-   * Save the backup list as a DIFF, through the actions each change was written
-   * for — the same shape as Lead Sources and the other list screens.
+   * The factor is a MARGIN over the home's average, so it starts at 1.
    *
-   * Deletes run FIRST: a profile is unique on (company, name), so renaming one
-   * to a name a deleted row is still holding would collide. Ranks are the
-   * INDEX, because the order on this screen is the order the customer's cover
-   * reads them in — rank 0 is the row the cover headlines.
+   * Below that the company would be quoting fewer watts than the house actually
+   * averages — hours on the strength of a household conserving, which is not a
+   * claim the customer's document makes. Blocked here rather than caught by the
+   * action, so the Save says why instead of failing after the click.
    */
-  async function saveBackup(): Promise<boolean> {
-    const kept = new Set(bp.map((r) => r.profileId).filter(Boolean));
-    for (const row of savedBackup) {
-      if (kept.has(row.profileId)) continue;
-      const res = await deleteBackupProfileAction({ id: row.profileId });
-      if (!res.ok) {
-        toast.error(res.error);
-        return false;
-      }
-    }
+  const factor = Number(f.backupOutageDrawFactor);
+  const badFactor = !(factor >= 1) || factor > 3;
 
-    for (const [rank, row] of bp.entries()) {
-      const before = savedBackup.find((r) => r.profileId === row.profileId);
-      const unchanged =
-        before &&
-        before.label === row.label.trim() &&
-        Number(before.watts) === Number(row.watts) &&
-        before.active === row.active &&
-        savedBackup.indexOf(before) === rank;
-      if (unchanged) continue;
-
-      const res = await saveBackupProfileAction({
-        ...(row.profileId ? { id: row.profileId } : {}),
-        name: row.label.trim(),
-        loadWatts: Math.round(Number(row.watts)),
-        rank,
-        isActive: row.active,
+  /** What that factor does to the reference home, live under the box. */
+  const example = badFactor
+    ? null
+    : wholeHomeBackup({
+        usableKwh: REFERENCE_KWH,
+        annualUsageKwh: REFERENCE_USAGE_KWH,
+        outageDrawFactor: factor,
       });
-      if (!res.ok) {
-        toast.error(res.error);
-        return false;
-      }
-    }
-    return true;
-  }
 
   async function save() {
     setBusy(true);
@@ -227,38 +145,56 @@ export function SolarSettingsForm({
         // Blank is zero, not "leave it alone": a company clearing this box is
         // saying its utility bills no standing charge.
         utilityMeterFeeCents:
-          f.utilityMeterFee.trim() === "" ? 0 : Math.round(Number(f.utilityMeterFee) * 100),
+          f.utilityMeterFee.trim() === ""
+            ? 0
+            : Math.round(Number(f.utilityMeterFee) * 100),
         defaultGrossPpwCents: Math.round(Number(f.defaultGrossPpw) * 100),
         defaultDealerFeePct: Number(f.defaultDealerFeePct),
         // Blank means "derive nothing" — the sticker stays exactly as a rep types
         // it, which is how every company behaves until somebody sets a target.
         targetNetPpwCents:
-          f.targetNetPpw.trim() === "" ? null : Math.round(Number(f.targetNetPpw) * 100),
+          f.targetNetPpw.trim() === ""
+            ? null
+            : Math.round(Number(f.targetNetPpw) * 100),
         // Blank is zero, and zero means the claim is not made at all — the
         // proposal omits the card rather than printing "0%".
-        homeValueUpliftPct: f.homeValueUpliftPct.trim() === "" ? 0 : Number(f.homeValueUpliftPct),
+        homeValueUpliftPct:
+          f.homeValueUpliftPct.trim() === "" ? 0 : Number(f.homeValueUpliftPct),
         // Blank falls back to one rather than zero: an empty box is a company
         // that has not said, and "a battery, none of them" is not a system.
-        defaultBatteryQty: f.defaultBatteryQty.trim() === "" ? 1 : Number(f.defaultBatteryQty),
+        defaultBatteryQty:
+          f.defaultBatteryQty.trim() === "" ? 1 : Number(f.defaultBatteryQty),
+        // Blank falls back to the plain average rather than to zero: an empty
+        // box is a company that has not said, and dividing by nothing prints an
+        // endless runtime on a customer's document.
+        backupOutageDrawFactor:
+          f.backupOutageDrawFactor.trim() === ""
+            ? 1
+            : Number(f.backupOutageDrawFactor),
         minOffsetPct: Number(f.minOffsetPct),
         maxOffsetPct: Number(f.maxOffsetPct),
         // Blank is zero, and zero means the bonus is not claimed at all — the
         // row is dropped from the customer's page rather than printed as "0%".
         creditItcPct: f.creditItcPct.trim() === "" ? 0 : Number(f.creditItcPct),
         creditEnergyCommunityPct:
-          f.creditEnergyCommunityPct.trim() === "" ? 0 : Number(f.creditEnergyCommunityPct),
+          f.creditEnergyCommunityPct.trim() === ""
+            ? 0
+            : Number(f.creditEnergyCommunityPct),
         creditDomesticContentPct:
-          f.creditDomesticContentPct.trim() === "" ? 0 : Number(f.creditDomesticContentPct),
+          f.creditDomesticContentPct.trim() === ""
+            ? 0
+            : Number(f.creditDomesticContentPct),
         // NEVER sent blank: an empty label is a negative figure on a customer's
         // page with no name against it, and an empty caveat is a page of credit
         // arithmetic with nothing qualifying it. The action rejects both, so the
         // form falls back to what is already stored rather than to a default the
         // company did not choose.
-        creditIncentiveLabel: f.creditIncentiveLabel.trim() || settings.creditIncentiveLabel,
-        creditDisclaimer: f.creditDisclaimer.trim() || settings.creditDisclaimer,
+        creditIncentiveLabel:
+          f.creditIncentiveLabel.trim() || settings.creditIncentiveLabel,
+        creditDisclaimer:
+          f.creditDisclaimer.trim() || settings.creditDisclaimer,
       });
       if (!res.ok) return toast.error(res.error);
-      if (!(await saveBackup())) return;
       toast.success("Solar settings saved");
       router.refresh();
     } finally {
@@ -270,21 +206,43 @@ export function SolarSettingsForm({
 
   return (
     <div className="min-w-0">
-      <Tabs value={tab} onValueChange={(v) => setTab(v as SolarTab)} className="gap-4">
-        <TabsList variant="line" className="w-full justify-start overflow-x-auto">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as SolarTab)}
+        className="gap-4"
+      >
+        <TabsList
+          variant="line"
+          className="w-full justify-start overflow-x-auto"
+        >
           <TabsTrigger value="production">Production</TabsTrigger>
           <TabsTrigger value="backup">
             Backup
-            {noProfiles && <span className="size-1.5 rounded-full bg-amber-500" aria-hidden />}
+            {badFactor && (
+              <span
+                className="size-1.5 rounded-full bg-amber-500"
+                aria-hidden
+              />
+            )}
           </TabsTrigger>
           <TabsTrigger value="pricing">Pricing</TabsTrigger>
           <TabsTrigger value="guardrails">
             Guard rails
-            {badOffsetBand && <span className="size-1.5 rounded-full bg-amber-500" aria-hidden />}
+            {badOffsetBand && (
+              <span
+                className="size-1.5 rounded-full bg-amber-500"
+                aria-hidden
+              />
+            )}
           </TabsTrigger>
           <TabsTrigger value="credits">
             Credits
-            {noDisclaimer && <span className="size-1.5 rounded-full bg-amber-500" aria-hidden />}
+            {noDisclaimer && (
+              <span
+                className="size-1.5 rounded-full bg-amber-500"
+                aria-hidden
+              />
+            )}
           </TabsTrigger>
           {stageModel && <TabsTrigger value="stages">Stage model</TabsTrigger>}
         </TabsList>
@@ -358,85 +316,39 @@ export function SolarSettingsForm({
         {/* ── BACKUP ─────────────────────────────────────────────────────── */}
         <TabsContent value="backup" className="space-y-4">
           <Panel
-            title="Backup load profiles"
-            description="What a battery is asked to keep running when the power is out. Hours are worked out from these — the proposal never asks anyone to type a runtime."
+            title="Whole-home backup"
+            description="How long a battery carries the house when the power is out. Worked out from each home's own usage — the proposal never asks anyone to type a runtime, and nobody picks a coverage tier."
           >
-            <ListEditor
-              rows={bp.map((r) => ({ ...r, note: hoursNote(r.watts) }))}
-              onChange={(next) =>
-                setBp(
-                  next.map((r) => {
-                    const row = r as BackupRow;
-                    // A row minted by the add box arrives as a bare ListRow, so
-                    // the two fields this screen adds have to be given defaults
-                    // here rather than trusted to be there.
-                    return {
-                      ...row,
-                      profileId: row.profileId ?? null,
-                      watts: row.watts ?? "",
-                      active: row.active ?? true,
-                    };
-                  }),
-                )
-              }
-              placeholder="Essentials + AC"
-              addLabel="Add profile"
-              /* Deleting the last one is allowed: the proposal then omits the
-                 chapter and readiness blocks generation with a message saying
-                 why, which is the designed behaviour rather than a broken
-                 state. Refusing here would only move that conversation. */
-              minRows={0}
-              renderExtra={(row, i) => {
-                const r = bp[i];
-                if (!r) return null;
-                return (
-                  <span className="flex shrink-0 items-center gap-2">
-                    <Input
-                      value={r.watts}
-                      type="number"
-                      inputMode="numeric"
-                      aria-label={`Load in watts for ${row.label || `item ${i + 1}`}`}
-                      aria-invalid={!(Number(r.watts) > 0) || undefined}
-                      onChange={(e) =>
-                        setBp((prev) =>
-                          prev.map((x, j) => (j === i ? { ...x, watts: e.target.value } : x)),
-                        )
-                      }
-                      className="h-9 w-24"
-                    />
-                    <span className="text-[11px] text-muted-foreground">W</span>
-                    <Switch
-                      checked={r.active}
-                      aria-label={`Offer ${row.label || `item ${i + 1}`} on proposals`}
-                      onCheckedChange={(v) =>
-                        setBp((prev) => prev.map((x, j) => (j === i ? { ...x, active: v } : x)))
-                      }
-                    />
-                  </span>
-                );
-              }}
-            />
+            <FieldGrid columns={2}>
+              <TextField
+                label="Outage draw multiplier"
+                type="number"
+                value={f.backupOutageDrawFactor}
+                onChange={(v) => set("backupOutageDrawFactor", v)}
+                why="A home's average draw is its yearly kilowatt-hours spread over 8,760 hours. An outage is not an average moment — the power goes out in a heatwave with the AC running — so the runtime is quoted against that average multiplied by this."
+                hint="1× quotes the bare average and promises the most hours. Anything up to 3× is accepted; past that is a typo, not a policy."
+              />
+            </FieldGrid>
 
-            <Hint className="mt-3">
-              Everything running at once while the power is out. A fridge and some lights is around
-              800 W; add air conditioning and it is several thousand. The hours beside each row are
-              what a {REFERENCE_KWH} kWh system — two Powerwalls — would carry it for, shown so a
-              wattage typed with a digit missing is obvious before it is saved. The switch takes a
-              profile off customer documents without deleting it, and the FIRST row is the one the
-              cover headlines.
-            </Hint>
-
-            {badBackup && (
-              <Caution>
-                Every profile needs a name and a load between 1 W and 50,000 W. Hours are capacity
-                divided by load, so a zero would print an endless runtime on a customer&rsquo;s
-                document.
-              </Caution>
+            {example && (
+              <Hint className="mt-3">
+                {/* One template literal: JSX drops the space after `{expr}`. */}
+                {`A home using ${REFERENCE_USAGE_KWH.toLocaleString()} kWh a year averages ` +
+                  `${(example.averageLoadWatts / 1000).toFixed(1)} kW, so at ${factor}× it is quoted ` +
+                  `${(example.loadWatts / 1000).toFixed(1)} kW while the grid is down — and a ` +
+                  `${REFERENCE_KWH} kWh system, two Powerwalls, carries that for about ` +
+                  `${example.hours < 10 ? example.hours.toFixed(1) : Math.round(example.hours)} hrs. ` +
+                  `A bigger house gets fewer hours off the same battery, which is the point: the ` +
+                  `runtime follows the home rather than a wattage typed once for everybody.`}
+              </Hint>
             )}
-            {noProfiles && !badBackup && (
+
+            {badFactor && (
               <Caution>
-                With no profile switched on, a battery-only proposal cannot say how long the battery
-                lasts — readiness blocks it from being generated at all.
+                Outage draw must be between 1× and 3× the home&rsquo;s average.
+                Below 1× the proposal would quote fewer watts than the house
+                actually averages, which promises hours on the strength of a
+                household conserving — not a claim the document makes.
               </Caution>
             )}
           </Panel>
@@ -493,8 +405,9 @@ export function SolarSettingsForm({
             </FieldGrid>
             {badOffsetBand && (
               <Caution>
-                The minimum is at or above the maximum, so no offset can satisfy both and every
-                proposal on this workspace would be blocked from generating.
+                The minimum is at or above the maximum, so no offset can satisfy
+                both and every proposal on this workspace would be blocked from
+                generating.
               </Caution>
             )}
             {/* THE MIN/MAX $/W BAND USED TO BE THE OTHER HALF OF THIS ROW.
@@ -507,9 +420,12 @@ export function SolarSettingsForm({
                 lives per partner, on Settings → Lenders → Pricing, beside the
                 ceiling it has to clear. */}
             <Hint>
-              A price-per-watt floor is set per financing partner, next to that partner&rsquo;s own
-              ceiling, on{" "}
-              <Link href="/portal/settings/solar-lenders" className="underline underline-offset-2">
+              A price-per-watt floor is set per financing partner, next to that
+              partner&rsquo;s own ceiling, on{" "}
+              <Link
+                href="/portal/settings/solar-lenders"
+                className="underline underline-offset-2"
+              >
                 Lenders
               </Link>
               . There is no company-wide $/W band.
@@ -567,9 +483,9 @@ export function SolarSettingsForm({
             />
             {noDisclaimer && (
               <Caution>
-                The caveat cannot be blank — a page of credit arithmetic with nothing qualifying it
-                is a promise about somebody&rsquo;s tax return. Saving keeps the stored wording
-                rather than clearing it.
+                The caveat cannot be blank — a page of credit arithmetic with
+                nothing qualifying it is a promise about somebody&rsquo;s tax
+                return. Saving keeps the stored wording rather than clearing it.
               </Caution>
             )}
           </Panel>
@@ -588,13 +504,12 @@ export function SolarSettingsForm({
         busy={busy}
         what="solar settings"
         onSave={save}
-        onDiscard={() => {
-          setF(saved);
-          setBp(savedBackup);
-        }}
-        disabled={badBackup}
+        onDiscard={() => setF(saved)}
+        disabled={badFactor}
         blockedReason={
-          badBackup ? "Every backup profile needs a name and a load above zero." : undefined
+          badFactor
+            ? "Outage draw must be between 1× and 3× the home's average."
+            : undefined
         }
       />
     </div>

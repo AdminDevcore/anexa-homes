@@ -149,25 +149,13 @@ export const SETUP_CHECKS: Check[] = [
    * configured with none of this, and a warning nobody can ever clear is a
    * warning everybody learns to ignore. See the commission-rules note above.
    */
-  {
-    // KEYED TO ITS CARD, not to what it counts. The hub finds a gap's card by
-    // key and drops any gap whose key names no card, so all three of these
-    // shipped invisible: named `solar_backup_profiles`, `solar_storage_lenders`
-    // and `solar_storage_redline`, they were filtered out of the grid AND out
-    // of the "N settings have never been set up" count — a warning about silent
-    // failure, failing silently. The key is the card; the label says what it is.
-    //
-    // The card is Solar Settings now: the profiles moved onto its Backup tab
-    // when the Storage screen was deleted, so the key followed them.
-    key: "solar_settings",
-    label: "Backup load profiles",
-    href: "/portal/settings/solar",
-    hint: "A storage proposal cannot say how long the battery lasts, so readiness blocks it from generating at all.",
-    severity: "silent",
-    verticals: ["solar"],
-    count: (companyId) =>
-      prisma.solarBackupProfile.count({ where: { companyId, isActive: true } }),
-  },
+  // RETIRED: "Backup load profiles" was a gap while a runtime came from a list
+  // a company had to fill in — an empty list blocked every storage proposal and
+  // said nothing until a rep hit it. Whole-home backup derives the runtime from
+  // the deal's own usage against a factor that always has a value, so there is
+  // no longer a company-level setting that can be silently absent. The per-deal
+  // fact that CAN be missing is the home's usage, which readiness blocks on
+  // where a rep can see and fix it — see `storage.no_usage`.
   {
     key: "solar_lenders",
     label: "Lenders that fund storage",

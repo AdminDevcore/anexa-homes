@@ -6,7 +6,11 @@ import { toast } from "sonner";
 import { BatteryCharging, Loader2, Star } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { setSolarDesignEquipmentAction } from "@/server/modules/solar/equipment-actions";
-import { usableKwh, backupTable, type BackupProfile } from "@/lib/solar-storage";
+import {
+  usableKwh,
+  wholeHomeBackup,
+  type AutoBatterySizing,
+} from "@/lib/solar-storage";
 
 export type StorageEquipmentOption = {
   id: string;
@@ -30,8 +34,27 @@ export type SolarStorageView = {
   batteries: StorageEquipmentOption[];
   /** How many of the standard battery this company's standard offer is. */
   defaultQty: number;
-  /** The company's active load profiles, rank-ordered. */
-  profiles: BackupProfile[];
+  /**
+   * What sizing-to-the-night has to say about this deal, or null when the
+   * company does not size that way and the count is simply whatever it says.
+   */
+  autoSize: {
+    /** A person typed this count, so the sizing rule is standing off it. */
+    setByRep: boolean;
+    nightSharePct: number;
+    /** Null when there is nothing to size from yet — no figures, no capacity. */
+    sized: AutoBatterySizing | null;
+  } | null;
+  /**
+   * The home's own use, kWh/yr — what the runtime below is divided out of.
+   *
+   * Null until somebody fills in the Energy step, and the panel says so rather
+   * than printing hours from nothing. Readiness blocks generating on the same
+   * fact, so a rep sees it here first.
+   */
+  annualUsageKwh: number | null;
+  /** The company's margin over that average while the grid is down. */
+  outageDrawFactor: number;
 };
 
 /**
@@ -78,10 +101,23 @@ export function SolarStoragePanel({
 
   const battery = view.batteries.find((b) => b.id === batteryId) ?? null;
   const standard = view.batteries.find((b) => b.isDefault) ?? null;
+  const auto = view.autoSize;
+  const autoQty = auto?.sized?.qty ?? null;
+  /** The count is the sizing rule's own, and nobody has overridden it. */
+  const isAutoSized = !!auto && !auto.setByRep && autoQty === qty;
   const kwh = usableKwh(battery?.ratingW ?? null, batteryId ? qty : 0);
-  const rows = backupTable(kwh, view.profiles);
+  const backup = wholeHomeBackup({
+    usableKwh: kwh,
+    annualUsageKwh: view.annualUsageKwh,
+    outageDrawFactor: view.outageDrawFactor,
+  });
 
-  async function save(next: { batteryId?: string | null; batteryQty?: number }) {
+  async function save(next: {
+    batteryId?: string | null;
+    batteryQty?: number;
+    /** Hand the count back to the sizing rule — see the action's own note. */
+    batteryQtyAuto?: boolean;
+  }) {
     setBusy(true);
     try {
       const res = await setSolarDesignEquipmentAction({ leadId, ...next });
@@ -112,8 +148,9 @@ export function SolarStoragePanel({
 
         {view.batteries.length === 0 ? (
           <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-            No batteries on the catalogue for this deal&rsquo;s lender. Add one in Settings →
-            Solar Equipment, or approve one on the lender&rsquo;s vendor list.
+            No batteries on the catalogue for this deal&rsquo;s lender. Add one
+            in Settings → Solar Equipment, or approve one on the lender&rsquo;s
+            vendor list.
           </p>
         ) : (
           <div className="flex flex-wrap items-end gap-3">
@@ -164,7 +201,10 @@ export function SolarStoragePanel({
                   {/* Long enough to contain the number actually on the design:
                       a select with no matching option renders blank and reads
                       as "no batteries". */}
-                  {Array.from({ length: Math.max(6, qty) }, (_, i) => i + 1).map((n) => (
+                  {Array.from(
+                    { length: Math.max(6, qty) },
+                    (_, i) => i + 1,
+                  ).map((n) => (
                     <option key={n} value={n}>
                       {n}
                     </option>
@@ -173,7 +213,56 @@ export function SolarStoragePanel({
               </div>
             )}
 
-            {busy && <Loader2 className="mb-2 size-4 animate-spin text-muted-foreground" />}
+            {busy && (
+              <Loader2 className="mb-2 size-4 animate-spin text-muted-foreground" />
+            )}
+          </div>
+        )}
+
+        {/* WHERE THE COUNT CAME FROM, whenever it did not come from this rep.
+            A number that changes on its own after a roof is redrawn is money
+            appearing on a deal nobody typed — the same complaint the itemised
+            adders were built to answer — so it says what it was measured from,
+            and says so in kWh a rep can check against the bill. */}
+        {batteryId && auto && (
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+            {auto.setByRep ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-medium">Set by hand</span>
+                {autoQty != null ? (
+                  <span className="text-muted-foreground">
+                    {`· sizing this home's night puts it at ${autoQty}`}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    · nothing to size from on this deal yet
+                  </span>
+                )}
+                {canEdit && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void save({ batteryQtyAuto: true })}
+                    className="font-medium text-solar underline underline-offset-2 disabled:opacity-50"
+                  >
+                    Size it to the home
+                  </button>
+                )}
+              </div>
+            ) : auto.sized ? (
+              <p className="text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {isAutoSized ? "Sized to this home" : "Sizing this home"}
+                </span>
+                {` · ${auto.sized.nightKwhPerDay.toFixed(1)} kWh a night at ${auto.nightSharePct}% after dark, covered by ${auto.sized.qty} × ${auto.sized.coveredKwh.toLocaleString()} kWh`}
+                {auto.sized.capped && " — capped, check the usage on this deal"}
+              </p>
+            ) : (
+              <p className="text-muted-foreground">
+                Sized to each home, but this deal has no production or usage on
+                it yet. Fill in the Energy step and the count follows.
+              </p>
+            )}
           </div>
         )}
 
@@ -188,13 +277,17 @@ export function SolarStoragePanel({
             disabled={busy}
             onClick={() => {
               setBatteryId(standard.id);
-              setQty(Math.max(1, view.defaultQty));
-              void save({ batteryId: standard.id, batteryQty: Math.max(1, view.defaultQty) });
+              setQty(Math.max(1, autoQty ?? view.defaultQty));
+              // The id ONLY. Sending a count would mark this deal as
+              // hand-set and stand the sizing rule off it for good — and
+              // this button is a click on a product, not a decision about
+              // how many. The server writes the right count either way.
+              void save({ batteryId: standard.id });
             }}
             className="flex items-center gap-2 rounded-lg border border-solar/40 bg-solar/5 px-3 py-2 text-sm font-medium hover:bg-solar/10 disabled:opacity-50"
           >
             <Star className="size-4 shrink-0 text-solar" aria-hidden />
-            Add {Math.max(1, view.defaultQty)} × {standard.label}
+            {`Add ${Math.max(1, autoQty ?? view.defaultQty)} × ${standard.label}`}
           </button>
         )}
       </section>
@@ -207,34 +300,40 @@ export function SolarStoragePanel({
 
           <div className="flex items-baseline gap-2 rounded-xl border border-border bg-muted/30 p-4">
             <BatteryCharging className="size-5 self-center text-muted-foreground" />
-            <span className="text-2xl font-semibold tabular-nums">{kwh.toFixed(1)}</span>
-            <span className="text-sm text-muted-foreground">kWh of usable storage</span>
+            <span className="text-2xl font-semibold tabular-nums">
+              {kwh.toFixed(1)}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              kWh of usable storage
+            </span>
           </div>
 
-          {rows.length === 0 ? (
+          {backup == null ? (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-              No backup load profiles, so the proposal cannot state how long this lasts. Add one in
-              Settings → Storage.
+              No usage on file, so the proposal cannot state how long this
+              lasts. Fill in the Energy step and the runtime follows from the
+              home&rsquo;s own use.
             </p>
           ) : (
             <>
-              <ul className="divide-y divide-border rounded-xl border border-border">
-                {rows.map((r) => (
-                  <li key={r.id} className="flex items-baseline gap-3 px-4 py-2.5">
-                    <span className="text-sm">{r.name}</span>
-                    <span className="text-xs tabular-nums text-muted-foreground">
-                      {(r.loadWatts / 1000).toFixed(1)} kW
-                    </span>
-                    <span className="ml-auto text-sm font-medium tabular-nums">
-                      {r.hours < 10 ? r.hours.toFixed(1) : Math.round(r.hours)} hrs
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <div className="flex items-baseline gap-3 rounded-xl border border-border px-4 py-2.5">
+                <span className="text-sm">Whole home</span>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {(backup.loadWatts / 1000).toFixed(1)} kW
+                </span>
+                <span className="ml-auto text-sm font-medium tabular-nums">
+                  {backup.hours < 10
+                    ? backup.hours.toFixed(1)
+                    : Math.round(backup.hours)}{" "}
+                  hrs
+                </span>
+              </div>
               <p className="text-xs text-muted-foreground">
-                Worked out from the profiles in Settings → Storage — nobody types a runtime. This is
-                what the customer&rsquo;s proposal will show, in this order, with the first line on
-                the cover.
+                {/* One template literal: JSX drops the space after `{expr}`. */}
+                {`${Math.round(view.annualUsageKwh ?? 0).toLocaleString()} kWh a year averages ` +
+                  `${(backup.averageLoadWatts / 1000).toFixed(1)} kW, and Settings quotes an outage ` +
+                  `${Math.round((view.outageDrawFactor - 1) * 100)}% above that. Nobody types a ` +
+                  `runtime — this is the figure the customer's proposal headlines.`}
               </p>
             </>
           )}

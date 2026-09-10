@@ -110,8 +110,7 @@ describe("a lender decides what a batteryless array means", () => {
         moduleRatingW: null,
         hasBattery: false,
         batteryQty: 0,
-        hasBackupProfile: true,
-        batteryRule: "required",
+              batteryRule: "required",
       },
       A
     );

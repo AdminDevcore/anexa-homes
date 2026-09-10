@@ -274,24 +274,6 @@ async function main() {
     data: { companyId: company.id },
   });
 
-  /**
-   * The loads a battery is asked to carry.
-   *
-   * Backup hours are DERIVED from these, so a company with none cannot state an
-   * hours figure at all — readiness blocks a storage proposal and the document
-   * omits the chapter. The migration that added the table seeded every company
-   * that existed then; this is the same three for every company made since.
-   *
-   * Rank order is load-bearing: the customer's cover headlines rank 0.
-   */
-  await prisma.solarBackupProfile.createMany({
-    data: [
-      { companyId: company.id, name: "Essentials", loadWatts: 1000, rank: 0 },
-      { companyId: company.id, name: "Essentials + AC", loadWatts: 3500, rank: 1 },
-      { companyId: company.id, name: "Whole home", loadWatts: 5000, rank: 2 },
-    ],
-  });
-
   // A small starter catalog so a rep can build a system on day one.
   await prisma.solarEquipment.createMany({
     data: [

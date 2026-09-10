@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 /**
@@ -22,8 +22,8 @@ import { join, relative, sep } from "node:path";
  * The fix, and the rule this guard enforces: a server action resolves its
  * company from `requireUser()` and never accepts one. Reads that take a
  * `companyId` live in a plain module beside it — `readiness.ts`, `adders.ts`,
- * `layout-asset.ts`, `esign/final-docs.ts` and `solar/storage-queries.ts` are
- * all that split, and each says so in its header.
+ * `layout-asset.ts` and `esign/final-docs.ts` are all that split, and each says
+ * so in its header.
  *
  * To add a legitimate exception: add the `file#export` to ALLOWED below with a
  * comment explaining why a caller-supplied id cannot cross a tenant boundary
@@ -135,34 +135,25 @@ describe("server-action boundary", () => {
       offenders,
       `Every export of a "use server" module is a public endpoint, so a tenant id in its\n` +
         `parameter list is caller-controlled. Resolve it from requireUser() instead, or move\n` +
-        `the helper into a plain module beside the actions (see solar/storage-queries.ts).\n\n` +
+        `the helper into a plain module beside the actions (see solar/adders.ts).\n\n` +
         `${offenders.join("\n")}\n`
     ).toEqual([]);
   });
 
-  it("the helpers that caused this guard are no longer server actions", () => {
-    const storage = readFileSync(
-      join(REPO_ROOT, "src/server/modules/solar/storage.ts"),
-      "utf8"
-    );
-    expect(isUseServerModule(storage)).toBe(true);
-    const names = exportedFunctions(storage).map((f) => f.name);
-    // The rebate four were DELETED with the rebate catalogue itself, so they
-    // are gone from the codebase rather than merely moved. `listBackupProfiles`
-    // is the one that still exists, in `storage-queries.ts` where a caller
-    // supplies the id it already resolved from the session.
-    for (const gone of [
-      "listBackupProfiles",
-      "listRebates",
-      "listDealRebates",
-      "dealRebateTotalCents",
-      "syncDealRebateQuantities",
+  it("the module that caused this guard is gone entirely", () => {
+    // `solar/storage.ts` and its `storage-queries.ts` split were both deleted
+    // when backup went whole-home: the company's list of named load profiles
+    // was the only thing either file edited, and a runtime is now derived from
+    // the home's own usage instead. The guard above still enforces the rule
+    // they taught; this only records that its original offenders are gone
+    // rather than merely moved, so nothing reintroduces the file by name.
+    for (const rel of [
+      "src/server/modules/solar/storage.ts",
+      "src/server/modules/solar/storage-queries.ts",
     ]) {
-      expect(names, `${gone} must not be exported from a "use server" module`).not.toContain(gone);
-    }
-    // …and the mutations a browser legitimately calls are still there.
-    for (const kept of ["saveBackupProfileAction", "deleteBackupProfileAction"]) {
-      expect(names).toContain(kept);
+      expect(existsSync(join(REPO_ROOT, rel)), `${rel} was deleted; do not recreate it`).toBe(
+        false
+      );
     }
   });
 

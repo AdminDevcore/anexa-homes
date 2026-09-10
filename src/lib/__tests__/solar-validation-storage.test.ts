@@ -32,7 +32,6 @@ const DESIGN: DesignForValidation = {
   avgMonthlyBillCents: 250_00,
   hasBattery: true,
   batteryQty: 2,
-  hasBackupProfile: true,
 };
 
 const FINANCE: FinanceForValidation = {
@@ -75,14 +74,19 @@ describe("storage readiness", () => {
     expect(canGenerate(validateDesign({ ...DESIGN, batteryQty: 0 }, A))).toBe(false);
   });
 
-  it("blocks with no backup profile — the document could not state hours", () => {
-    expect(canGenerate(validateDesign({ ...DESIGN, hasBackupProfile: false }, A))).toBe(false);
+  it("blocks on missing usage — the document could state neither hours nor saving", () => {
+    // A WARNING while runtime came from the company's list of named load
+    // profiles: the hours were there either way and only the bill saving went
+    // missing. Whole-home backup divides THIS house's usage, so a blank Energy
+    // step now costs the document both of the two things a battery is bought
+    // for, which leaves it nothing to say.
+    const issues = validateDesign({ ...DESIGN, annualUsageKwh: null }, A);
+    expect(canGenerate(issues)).toBe(false);
+    expect(codes(issues)).toContain("storage.no_usage");
   });
 
-  it("only WARNS on missing usage — the saving drops, the proposal still goes", () => {
-    const issues = validateDesign({ ...DESIGN, annualUsageKwh: null }, A);
-    expect(canGenerate(issues)).toBe(true);
-    expect(codes(issues)).toContain("storage.no_usage");
+  it("does not block a battery deal that has usage", () => {
+    expect(codes(validateDesign(DESIGN, A))).not.toContain("storage.no_usage");
   });
 
   it("blocks on a zero price per battery", () => {

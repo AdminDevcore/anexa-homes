@@ -46,6 +46,16 @@ const settingsSchema = z.object({
   // zero would mean "a battery, none of them", which is not a system anybody
   // can build. Optional so a client that predates the field leaves it alone.
   defaultBatteryQty: z.number().int().min(1).max(20).optional(),
+  // How much more than its yearly average a house is assumed to draw while the
+  // grid is down. Runtime is `usable kWh ÷ (average W × this)`, so this one
+  // number is the whole of what a battery-only proposal headlines.
+  //
+  // Never below 1: the field says "more than average", and a company quoting
+  // FEWER watts than the house actually averages is promising hours on the
+  // strength of a household conserving — which is not a claim the document
+  // makes. Three is a typo rail; nobody draws four times their average all
+  // outage. Optional so a client that predates the field leaves it alone.
+  backupOutageDrawFactor: z.number().min(1).max(3).optional(),
   minOffsetPct: z.number().min(0).max(200),
   maxOffsetPct: z.number().min(0).max(500),
   // The federal credits, for the contract-adjustment ladder. Statute, so they
@@ -1126,13 +1136,27 @@ export async function setDefaultSolarEquipmentAction(id: string, isDefault: bool
  *
  * The battery count rides along because it is the same decision: a company that
  * standardises on two Powerwalls is saying one thing, not two, and splitting it
- * across two screens is what made the count invisible in the first place.
+ * across two screens is what made the count invisible in the first place. So
+ * does the switch that sizes that count to each home's night load instead —
+ * it is the same question, answered a better way.
  */
 const equipmentDefaultsSchema = z.object({
   moduleId: z.string().min(1).nullish(),
   inverterId: z.string().min(1).nullish(),
   batteryId: z.string().min(1).nullish(),
   defaultBatteryQty: z.number().int().min(1).max(20).optional(),
+  /// Size the count to each home's night load instead of quoting the flat one.
+  autoBatteryQty: z.boolean().optional(),
+  /**
+   * What share of a day's kWh the house draws after dark, %.
+   *
+   * Bounded well inside 0-100 on purpose. A share of nothing is not a sizing
+   * instruction, and 100% would be a house that runs entirely at night — both
+   * are a field somebody cleared rather than an assumption anybody holds. The
+   * band is wide enough for any real answer and narrow enough that a typo is
+   * refused instead of quoted.
+   */
+  batteryNightSharePct: z.number().min(5).max(95).optional(),
 });
 
 export async function setSolarEquipmentDefaultsAction(
@@ -1142,7 +1166,8 @@ export async function setSolarEquipmentDefaultsAction(
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const parsed = equipmentDefaultsSchema.safeParse(input);
   if (!parsed.success) return fail("Those defaults could not be read.");
-  const { moduleId, inverterId, batteryId, defaultBatteryQty } = parsed.data;
+  const { moduleId, inverterId, batteryId, defaultBatteryQty, autoBatteryQty, batteryNightSharePct } =
+    parsed.data;
 
   const picks: [string | null | undefined, "module" | "inverter" | "battery"][] = [
     [moduleId, "module"],
@@ -1181,11 +1206,16 @@ export async function setSolarEquipmentDefaultsAction(
       if (id) await tx.solarEquipment.update({ where: { id }, data: { isDefault: true } });
     }
 
-    if (defaultBatteryQty !== undefined) {
+    const settings = {
+      ...(defaultBatteryQty !== undefined ? { defaultBatteryQty } : {}),
+      ...(autoBatteryQty !== undefined ? { autoBatteryQty } : {}),
+      ...(batteryNightSharePct !== undefined ? { batteryNightSharePct } : {}),
+    };
+    if (Object.keys(settings).length > 0) {
       await tx.solarSettings.upsert({
         where: { companyId: user.companyId },
-        create: { companyId: user.companyId, defaultBatteryQty },
-        update: { defaultBatteryQty },
+        create: { companyId: user.companyId, ...settings },
+        update: settings,
       });
     }
   });
@@ -1799,7 +1829,8 @@ const systemTypeSchema = z.object({
  * THE BATTERY FOLLOWS THE ANSWER, because this control IS the question "does
  * this deal have storage on it". Moving to solar + storage or storage only puts
  * the catalogue's default battery in an EMPTY slot, at the company's standard
- * quantity — the same rule the module and the inverter already follow, applied
+ * quantity — or, where the company sizes storage to the night, at the count
+ * that covers it — the same rule the module and the inverter already follow, applied
  * at the one moment a rep has actually said storage is part of the sale. A slot
  * that already names a battery is never touched: swapping in a default over a
  * rep's own pick is not a default. And a company that has starred no battery
@@ -1820,7 +1851,16 @@ export async function setSolarSystemTypeAction(input: unknown) {
 
   const design = await prisma.solarDesign.findFirst({
     where: { leadId, companyId: user.companyId },
-    select: { id: true, systemType: true, batteryId: true, batteryQty: true },
+    select: {
+      id: true,
+      systemType: true,
+      batteryId: true,
+      batteryQty: true,
+      // What auto-sizing counts against, when the company sizes to the night.
+      year1ProductionKwh: true,
+      annualUsageKwh: true,
+      usageAdjustmentKwh: true,
+    },
   });
   if (!design) return fail("This deal has no design yet.");
   if (design.systemType === systemType) return ok();
@@ -1829,7 +1869,12 @@ export async function setSolarSystemTypeAction(input: unknown) {
     user.companyId,
     systemType,
     design.batteryId,
-    design.batteryQty
+    design.batteryQty,
+    {
+      year1ProductionKwh: design.year1ProductionKwh,
+      annualUsageKwh: design.annualUsageKwh,
+      usageAdjustmentKwh: design.usageAdjustmentKwh,
+    }
   );
 
   await prisma.solarDesign.update({

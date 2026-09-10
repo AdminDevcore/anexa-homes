@@ -24,8 +24,8 @@ import {
   lenderAdderRules,
   listDealAdders,
 } from "@/server/modules/solar/adders";
-import { listBackupProfiles } from "@/server/modules/solar/storage-queries";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
+import { autoBatteryCount, autoBatteryBasisKwh } from "@/lib/solar-storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
 
@@ -89,7 +89,9 @@ export default async function SolarProposalBuilderPage({
 
   // The design is read FIRST: it carries the lender this system is being built
   // for, which is what the Financing step seeds its picker from.
-  const design = await prisma.solarDesign.findUnique({ where: { leadId: lead.id } });
+  const design = await prisma.solarDesign.findUnique({
+    where: { leadId: lead.id },
+  });
 
   // Read before the batch: the rate-sheet query needs to know which product
   // this deal already quotes, so a retired one stays selectable rather than
@@ -186,7 +188,7 @@ export default async function SolarProposalBuilderPage({
     select: { id: true, snapshot: true },
   });
   const withCreditSwitch = new Set(
-    snapshotFacts.filter((p) => hasCreditSwitch(p.snapshot)).map((p) => p.id)
+    snapshotFacts.filter((p) => hasCreditSwitch(p.snapshot)).map((p) => p.id),
   );
 
   // Who approved the final version, for the badge on the version list. One row
@@ -202,7 +204,10 @@ export default async function SolarProposalBuilderPage({
   // The panel the design is sized from, for the designer's live kW figure and
   // for true-scale panels. A catalogue entry with no dimensions falls back to a
   // standard 60-cell module rather than drawing nothing.
-  const sizingModule = await resolveSizingModule(user.companyId, design?.moduleId ?? null);
+  const sizingModule = await resolveSizingModule(
+    user.companyId,
+    design?.moduleId ?? null,
+  );
 
   // The adders this company sells, and the ones already on this deal. Sellable
   // rows only for the catalogue — a retired adder should stop being offered —
@@ -213,9 +218,16 @@ export default async function SolarProposalBuilderPage({
       where: { companyId: user.companyId, kind: "adder", isActive: true },
       orderBy: [{ rank: "asc" }, { model: "asc" }],
       select: {
-        id: true, manufacturer: true, model: true, description: true,
-        adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-        isVeryCommon: true, consumptionAdjustable: true, financedOnTop: true,
+        id: true,
+        manufacturer: true,
+        model: true,
+        description: true,
+        adderBasis: true,
+        priceCents: true,
+        priceMillsPerWatt: true,
+        isVeryCommon: true,
+        consumptionAdjustable: true,
+        financedOnTop: true,
       },
     }),
     listDealAdders(user.companyId, lead.id),
@@ -245,29 +257,60 @@ export default async function SolarProposalBuilderPage({
    * showing rather than the select falling back to "not set" and the next save
    * stripping a choice nobody meant to touch.
    */
-  const [storageBatteries, backupProfiles] = await Promise.all([
-    prisma.solarEquipment.findMany({
-      where: {
-        companyId: user.companyId,
-        kind: "battery",
-        OR: [
-          { isActive: true },
-          ...(design?.batteryId ? [{ id: design.batteryId }] : []),
-        ],
-      },
-      orderBy: [{ isDefault: "desc" }, { manufacturer: "asc" }, { model: "asc" }],
-      // `priceCents` is money on the contract, not decoration: a battery beside
-      // an array is charged for on top of the per-watt price.
-      select: { id: true, manufacturer: true, model: true, ratingW: true, priceCents: true, isDefault: true, isActive: true },
-    }),
-    listBackupProfiles(user.companyId),
-  ]);
+  const storageBatteries = await prisma.solarEquipment.findMany({
+    where: {
+      companyId: user.companyId,
+      kind: "battery",
+      OR: [
+        { isActive: true },
+        ...(design?.batteryId ? [{ id: design.batteryId }] : []),
+      ],
+    },
+    orderBy: [{ isDefault: "desc" }, { manufacturer: "asc" }, { model: "asc" }],
+    // `priceCents` is money on the contract, not decoration: a battery beside
+    // an array is charged for on top of the per-watt price.
+    select: {
+      id: true,
+      manufacturer: true,
+      model: true,
+      ratingW: true,
+      priceCents: true,
+      isDefault: true,
+      isActive: true,
+    },
+  });
 
   const battery = design?.batteryId
     ? await prisma.solarEquipment.findFirst({
         where: { id: design.batteryId, companyId: user.companyId },
         select: { manufacturer: true, model: true, ratingW: true },
       })
+    : null;
+
+  /**
+   * What sizing-to-the-night says this deal's battery count should be.
+   *
+   * Worked out HERE, on the server, from the same pure function the recompute
+   * uses — not fetched, because there is nothing to fetch: the count on the row
+   * IS the answer whenever nobody has overridden it. What the screen needs is
+   * the number BEHIND it, so a rep can see the count was measured rather than
+   * guessed, and see what auto-sizing would say while they are overriding it.
+   *
+   * Null when the company does not size to the night, which leaves the panel
+   * exactly as it was.
+   */
+  const storageAutoSize = settings.autoBatteryQty
+    ? {
+        setByRep: design?.batteryQtySetByRep ?? false,
+        nightSharePct: settings.batteryNightSharePct,
+        sized: autoBatteryCount({
+          basisKwh: design ? autoBatteryBasisKwh(design) : 0,
+          nightSharePct: settings.batteryNightSharePct,
+          batteryRatingWh:
+            storageBatteries.find((b) => b.id === design?.batteryId)?.ratingW ??
+            null,
+        }),
+      }
     : null;
 
   const quotedProduct = finance?.lenderProductId
@@ -302,7 +345,7 @@ export default async function SolarProposalBuilderPage({
   const layoutAvailable = !!(await resolveLayoutAsset(
     user.companyId,
     lead.id,
-    design?.layoutImageFileId
+    design?.layoutImageFileId,
   ));
 
   /**
@@ -320,7 +363,11 @@ export default async function SolarProposalBuilderPage({
     arrayType: design?.mountType === "ground" ? "ground" : "roof",
   });
 
-  const address = [lead.address, [lead.city, lead.state].filter(Boolean).join(", "), lead.zip]
+  const address = [
+    lead.address,
+    [lead.city, lead.state].filter(Boolean).join(", "),
+    lead.zip,
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -346,9 +393,15 @@ export default async function SolarProposalBuilderPage({
           long street name the two ran together into one unreadable string. */}
       <header className="mt-3 mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b border-border pb-5">
         <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-solar">Solar proposal</p>
-          <h1 className="font-display text-2xl font-bold">{name || "Build Proposal"}</h1>
-          {address && <p className="mt-0.5 text-sm text-muted-foreground">{address}</p>}
+          <p className="text-[11px] font-medium uppercase tracking-wide text-solar">
+            Solar proposal
+          </p>
+          <h1 className="font-display text-2xl font-bold">
+            {name || "Build Proposal"}
+          </h1>
+          {address && (
+            <p className="mt-0.5 text-sm text-muted-foreground">{address}</p>
+          )}
         </div>
         {design?.systemSizeKwDc ? (
           <p className="text-sm text-muted-foreground">
@@ -376,10 +429,15 @@ export default async function SolarProposalBuilderPage({
             isDefault: b.isDefault && b.isActive,
           })),
           defaultQty: settings.defaultBatteryQty,
-          profiles: backupProfiles,
+          annualUsageKwh: design?.annualUsageKwh ?? null,
+          outageDrawFactor: settings.backupOutageDrawFactor,
+          autoSize: storageAutoSize,
         }}
         initialStep={
-          step === "energy" || step === "design" || step === "financing" || step === "generate"
+          step === "energy" ||
+          step === "design" ||
+          step === "financing" ||
+          step === "generate"
             ? step
             : "customer"
         }
@@ -388,7 +446,8 @@ export default async function SolarProposalBuilderPage({
         design={
           design && {
             ...design,
-            layoutImageUploadedAt: design.layoutImageUploadedAt?.toISOString() ?? null,
+            layoutImageUploadedAt:
+              design.layoutImageUploadedAt?.toISOString() ?? null,
           }
         }
         finance={finance}
@@ -434,7 +493,9 @@ export default async function SolarProposalBuilderPage({
         // before the lender's cut", which is exactly what the base price is —
         // and otherwise the plain default sticker, which on a company with no
         // target is the same figure by another name.
-        defaultBasePpwCents={settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null}
+        defaultBasePpwCents={
+          settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null
+        }
         creditRates={settings.creditRates}
         // Which credits this job earns. A deal with no financing row yet has
         // nothing saved, and the ordinary case — all three — is what a fresh
@@ -457,7 +518,11 @@ export default async function SolarProposalBuilderPage({
           priceMillsPerWatt: a.priceMillsPerWatt,
           isVeryCommon: a.isVeryCommon,
           consumptionAdjustable: a.consumptionAdjustable,
-          financedOnTop: financedOnTopFor(lenderAdderRuleMap, a.id, a.financedOnTop),
+          financedOnTop: financedOnTopFor(
+            lenderAdderRuleMap,
+            a.id,
+            a.financedOnTop,
+          ),
         }))}
         adderLines={adderLines}
         systemSizeKwDc={design?.systemSizeKwDc ?? 0}
@@ -521,7 +586,8 @@ export default async function SolarProposalBuilderPage({
           createdAt: v.createdAt.toISOString(),
           showComparison: v.showComparison,
           approvedAt: v.approvedAt?.toISOString() ?? null,
-          approvedByName: (v.approvedById && approverName.get(v.approvedById)) || null,
+          approvedByName:
+            (v.approvedById && approverName.get(v.approvedById)) || null,
           approvedFileId: v.approvedFileId,
           approvedParFileId: v.approvedParFileId,
           hasCreditSwitch: withCreditSwitch.has(v.id),

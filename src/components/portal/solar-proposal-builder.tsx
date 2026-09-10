@@ -22,7 +22,7 @@ import {
 } from "@/components/portal/solar-panels";
 import type { AdderOption, DealAdderLine } from "@/components/portal/solar-adders-panel";
 import { effectiveUsageKwh } from "@/lib/solar-energy";
-import { usableKwh, backupTable } from "@/lib/solar-storage";
+import { usableKwh, wholeHomeBackup } from "@/lib/solar-storage";
 import { SolarCustomerPanel, type SolarCustomerView, type SolarSystemType } from "@/components/portal/solar-customer-panel";
 import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/solar-energy-panel";
 import { SolarStoragePanel, type SolarStorageView } from "@/components/portal/solar-storage-panel";
@@ -495,7 +495,11 @@ function SystemBanner({
       storage.batteries.find((b) => b.id === storage.batteryId)?.ratingW ?? null,
       storage.batteryQty
     );
-    const first = backupTable(kwh, storage.profiles)[0] ?? null;
+    const backup = wholeHomeBackup({
+      usableKwh: kwh,
+      annualUsageKwh,
+      outageDrawFactor: storage.outageDrawFactor,
+    });
     return (
       <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border bg-card px-4 py-3">
         <Figure label="Storage" value={kwh > 0 ? `${kwh.toFixed(1)} kWh` : "—"} muted={!(kwh > 0)} />
@@ -505,9 +509,13 @@ function SystemBanner({
           muted={!(storage.batteryQty > 0)}
         />
         <Figure
-          label={first ? `Backup · ${first.name.toLowerCase()}` : "Backup"}
-          value={first ? `${first.hours < 10 ? first.hours.toFixed(1) : Math.round(first.hours)} hrs` : "—"}
-          muted={!first}
+          label="Backup · whole home"
+          value={
+            backup
+              ? `${backup.hours < 10 ? backup.hours.toFixed(1) : Math.round(backup.hours)} hrs`
+              : "—"
+          }
+          muted={!backup}
         />
         <div className="ml-auto flex flex-wrap gap-2">
           <Button size="sm" variant="outline" onClick={onOpenDesign}>

@@ -1065,6 +1065,27 @@ export type SolarProposalSnapshot = {
     batteryQty: number;
     usableKwh: number;
     backup: { name: string; loadWatts: number; hours: number }[];
+    /**
+     * How that runtime was worked out, frozen beside it.
+     *
+     * PRESENT on everything generated since backup went whole-home, ABSENT on
+     * every document before it — and absent is meaningful, not missing. Those
+     * proposals quoted a list of named load profiles the company kept in
+     * Settings, so `backup` holds several rows and the renderer must keep
+     * drawing them exactly as it did the day they were signed. A document says
+     * what it said.
+     *
+     * Present, `backup` holds exactly one row: this house, whole-home, divided
+     * by its own usage rather than by a wattage typed once for every customer.
+     */
+    backupBasis?: {
+      /** The usage the average was taken from, kWh/yr. */
+      annualUsageKwh: number;
+      /** What the house draws on average, W — usage × 1000 ÷ 8760. */
+      averageLoadWatts: number;
+      /** The margin over that average the outage was quoted at. */
+      outageDrawFactor: number;
+    } | null;
     tou: {
       peakRateMills: number;
       offPeakRateMills: number;

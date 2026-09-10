@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  vi,
+} from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { runInVertical } from "@/server/vertical/context";
@@ -32,7 +40,9 @@ vi.mock("@/server/auth/session", () => ({ requireUser }));
 
 const { generateProposalVersion } = await import("../proposal-generate");
 
-const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
+const db = new PrismaClient({
+  datasources: { db: { url: TEST_DATABASE_URL } },
+});
 
 let companyId: string;
 let leadId: string;
@@ -43,7 +53,8 @@ let user: SessionUser;
 const ARRAY_CENTS = 55_000_00;
 const POWERWALL_CENTS = 40_000_00;
 
-const generate = () => runInVertical("solar", () => generateProposalVersion(user, leadId));
+const generate = () =>
+  runInVertical("solar", () => generateProposalVersion(user, leadId));
 
 async function snapshotOf(id: string): Promise<SolarProposalSnapshot> {
   const row = await db.solarProposal.findUniqueOrThrow({
@@ -245,7 +256,9 @@ describe("the battery reaches the contract", () => {
     if (!res.ok) throw new Error(res.error);
     const f = res.snapshot.financing;
     expect(
-      (f.basePriceCents ?? 0) + (f.adderTotalCents ?? 0) + (f.batteryPriceCents ?? 0)
+      (f.basePriceCents ?? 0) +
+        (f.adderTotalCents ?? 0) +
+        (f.batteryPriceCents ?? 0),
     ).toBe(f.contractPriceCents);
   });
 
@@ -272,7 +285,9 @@ describe("the battery reaches the contract", () => {
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
     expect(res.snapshot.financing.batteryPriceCents).toBe(POWERWALL_CENTS * 2);
-    expect(res.snapshot.financing.contractPriceCents).toBe(ARRAY_CENTS + POWERWALL_CENTS * 2);
+    expect(res.snapshot.financing.contractPriceCents).toBe(
+      ARRAY_CENTS + POWERWALL_CENTS * 2,
+    );
   });
 
   it("charges every option on the menu the same for it", async () => {
@@ -282,7 +297,7 @@ describe("the battery reaches the contract", () => {
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
     const purchases = (res.snapshot.options ?? []).filter(
-      (o) => o.financing.product === "cash" || o.financing.product === "loan"
+      (o) => o.financing.product === "cash" || o.financing.product === "loan",
     );
     expect(purchases.length).toBeGreaterThan(1);
     for (const o of purchases) {
@@ -303,7 +318,9 @@ describe("what a catalogue edit may and may not move", () => {
 
     const frozen = await snapshotOf(first.id);
     expect(frozen.financing.batteryPriceCents).toBe(POWERWALL_CENTS);
-    expect(frozen.financing.contractPriceCents).toBe(ARRAY_CENTS + POWERWALL_CENTS);
+    expect(frozen.financing.contractPriceCents).toBe(
+      ARRAY_CENTS + POWERWALL_CENTS,
+    );
   });
 
   it("prices the NEXT version at the new figure", async () => {
@@ -326,7 +343,9 @@ describe("what a catalogue edit may and may not move", () => {
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
     expect(res.snapshot.financing.batteryPriceCents).toBe(32_000_00);
-    expect(res.snapshot.financing.contractPriceCents).toBe(ARRAY_CENTS + 32_000_00);
+    expect(res.snapshot.financing.contractPriceCents).toBe(
+      ARRAY_CENTS + 32_000_00,
+    );
   });
 });
 
@@ -335,12 +354,8 @@ describe("a storage-only deal is not billed twice", () => {
     // There the battery IS the system and climbs the per-battery ladder. Adding
     // the catalogue price again would put one Powerwall on the contract twice.
     //
-    // A storage-only job has its own two gates before it may generate: the
-    // company needs a load profile for the backup table to be built from, and
-    // the paper has to be a programme that funds a battery on its own.
-    await db.solarBackupProfile.create({
-      data: { companyId, name: "Essentials", loadWatts: 1_500, rank: 1 },
-    });
+    // A storage-only job has its own gate before it may generate: the paper has
+    // to be a programme that funds a battery on its own.
     const storageProduct = await db.solarLenderProduct.create({
       data: {
         companyId,
@@ -371,5 +386,117 @@ describe("a storage-only deal is not billed twice", () => {
     const f = res.snapshot.financing;
     expect(f.batteryPriceCents).toBeUndefined();
     expect(f.contractPriceCents).toBe(POWERWALL_CENTS);
+  });
+});
+
+/**
+ * What the document is allowed to say about how long the battery lasts.
+ *
+ * Through `generateProposalVersion`, not against the pure function: the pure
+ * function had tests the whole time the snapshot was being built from a list of
+ * named load profiles, and a runtime derived correctly from arguments the
+ * generator never passes is a test that cannot fail.
+ */
+describe("the runtime a storage proposal freezes", () => {
+  /** Flip the deal to storage-only on paper that funds one. */
+  async function storageOnly() {
+    const product = await db.solarLenderProduct.create({
+      data: {
+        companyId,
+        lenderId,
+        product: "loan",
+        name: `battery-${Date.now()}`,
+        aprPct: 0,
+        termMonths: 240,
+        dealerFeePct: 65,
+        financesStorageOnly: true,
+      },
+    });
+    await db.solarDesign.update({
+      where: { leadId },
+      data: { systemType: "storage", batteryQty: 1 },
+    });
+    await db.solarFinance.update({
+      where: { leadId },
+      data: {
+        stickerPricePerBatteryCents: POWERWALL_CENTS,
+        grossPpwCents: 0,
+        lenderProductId: product.id,
+      },
+    });
+  }
+
+  it("is ONE whole-home row, divided out of the home's own usage", async () => {
+    await storageOnly();
+    const res = await generate();
+    if (!res.ok) throw new Error(JSON.stringify(res));
+
+    const st = res.snapshot.storage!;
+    // One row, not the three coverage tiers the company used to keep in
+    // Settings. Every install here is whole-home backup, so a menu of
+    // "Essentials / Essentials + AC / Whole home" described a product nobody
+    // sells — and one company-wide wattage quoted every house the same hours.
+    expect(st.backup).toHaveLength(1);
+    expect(st.backup[0].name).toBe("Whole home");
+
+    // 13,000 kWh ÷ 8,760 h = 1,484 W average, × 1.3 = 1,929 W while the grid is
+    // down, and one 13.5 kWh Powerwall carries that for seven hours.
+    expect(st.backup[0].loadWatts).toBeCloseTo(1929.2, 1);
+    expect(st.backup[0].hours).toBeCloseTo(7.0, 1);
+
+    // And the assumptions are frozen BESIDE the figure they produced, so a
+    // factor the company changes next month cannot silently rewrite the
+    // runtime on a document somebody has already signed.
+    expect(st.backupBasis).toEqual({
+      annualUsageKwh: 13_000,
+      averageLoadWatts: expect.closeTo(1484.0, 1),
+      outageDrawFactor: 1.3,
+    });
+  });
+
+  it("follows the company's factor, and records the one it used", async () => {
+    await db.solarSettings.upsert({
+      where: { companyId },
+      create: { companyId, backupOutageDrawFactor: 2 },
+      update: { backupOutageDrawFactor: 2 },
+    });
+    await storageOnly();
+    const res = await generate();
+    if (!res.ok) throw new Error(JSON.stringify(res));
+
+    const st = res.snapshot.storage!;
+    // Twice the draw is half the hours, and the document carries the 2 that
+    // did it rather than leaving a reader to guess.
+    expect(st.backup[0].loadWatts).toBeCloseTo(2968.0, 1);
+    expect(st.backup[0].hours).toBeCloseTo(4.5, 1);
+    expect(st.backupBasis?.outageDrawFactor).toBe(2);
+
+    await db.solarSettings.update({
+      where: { companyId },
+      data: { backupOutageDrawFactor: 1.3 },
+    });
+  });
+
+  it("cannot be generated at all with no usage on file", async () => {
+    // The runtime is divided out of this house's usage, so a blank Energy step
+    // leaves the document unable to say either of the two things a battery is
+    // bought for. It used to be a warning — the hours came from the company's
+    // profile list either way and only the bill saving went missing — and the
+    // block that replaced it is the one that used to fire when a company had
+    // no profiles at all.
+    await storageOnly();
+    await db.solarDesign.update({
+      where: { leadId },
+      data: { annualUsageKwh: null },
+    });
+    const res = await generate();
+    await db.solarDesign.update({
+      where: { leadId },
+      data: { annualUsageKwh: 13_000 },
+    });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error("expected the generator to refuse");
+    expect(res.issues?.map((i) => i.code)).toContain("storage.no_usage");
   });
 });
