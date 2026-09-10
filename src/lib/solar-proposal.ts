@@ -1406,6 +1406,8 @@ function priceOption(args: {
   creditClaims?: CreditClaims | null;
   creditIncentiveLabel?: string | null;
   creditDisclaimer?: string | null;
+  /** The closing credit typed on this deal, cents. The ladder's last rung. */
+  signTodayCreditCents?: number | null;
   /** When the document is being made — the date an effective date is read against. */
   now?: Date;
   assumptions: SolarAssumptions;
@@ -1504,6 +1506,7 @@ function priceOption(args: {
         claims: args.creditClaims,
         incentiveLabel: args.creditIncentiveLabel,
         disclaimer: args.creditDisclaimer,
+        signTodayCreditCents: args.signTodayCreditCents,
       })
     : null;
 
@@ -2004,6 +2007,14 @@ export function buildProposalSnapshot(args: {
   creditIncentiveLabel?: string | null;
   creditDisclaimer?: string | null;
   /**
+   * The rep's own closing credit on this deal, cents.
+   *
+   * Document-wide like the rest of them, and for a stronger reason: the offer
+   * is "sign today", so it cannot be one figure on the option a household picks
+   * and another on the option beside it.
+   */
+  signTodayCreditCents?: number | null;
+  /**
    * The other ways this customer may pay, already resolved and authorised by
    * the caller. Empty is the ordinary case and reads exactly as it always did.
    */
@@ -2078,6 +2089,7 @@ export function buildProposalSnapshot(args: {
     creditClaims: args.creditClaims ?? null,
     creditIncentiveLabel: args.creditIncentiveLabel ?? null,
     creditDisclaimer: args.creditDisclaimer ?? null,
+    signTodayCreditCents: args.signTodayCreditCents ?? null,
   };
 
   // The deal's own terms. This is the option the document is ABOUT: it stays at

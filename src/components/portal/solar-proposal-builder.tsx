@@ -137,6 +137,7 @@ export function SolarProposalBuilder({
   defaultBasePpwCents,
   creditRates,
   creditClaims,
+  signTodayCreditCents,
   adderCatalogue,
   adderLines,
   systemSizeKwDc,
@@ -198,6 +199,8 @@ export function SolarProposalBuilder({
   /** The company's federal-credit percentages — see SolarFinancePanel. */
   creditRates: CreditRates;
   creditClaims: CreditClaims;
+  /** The closing credit typed on this deal, cents — see SolarFinancePanel. */
+  signTodayCreditCents: number;
   /** Every adder the company sells, for the Financing step to offer. */
   adderCatalogue: AdderOption[];
   /** The adder lines already on this deal. Their sum is the contract's. */
@@ -329,6 +332,7 @@ export function SolarProposalBuilder({
               defaultBasePpwCents={defaultBasePpwCents}
               creditRates={creditRates}
               creditClaims={creditClaims}
+              signTodayCreditCents={signTodayCreditCents}
               adderCatalogue={adderCatalogue}
               adderLines={adderLines}
               systemSizeKwDc={systemSizeKwDc}

@@ -4465,6 +4465,20 @@ model SolarFinance {
   claimEnergyCommunity Boolean @default(true)
   claimDomesticContent Boolean @default(true)
 
+  /// The rep's own closing credit on this deal, cents. Zero on nearly all.
+  ///
+  /// TYPED, and the only rung of the credit ladder that is. It is not a tax
+  /// credit and it is not derived from the contract: it is money taken off
+  /// what the household nets for signing today, so it lives on the deal rather
+  /// than in Settings, where a company-wide figure would make it the same
+  /// offer to everybody and therefore no offer at all.
+  ///
+  /// DISPLAY ONLY, exactly like the credits above it. The contract price, the
+  /// monthly payment, the deal's value and the rep's commission are all
+  /// untouched by it — what moves is the net-cost-after-credits figure the
+  /// proposal shows behind its tax-credit switch.
+  signTodayCreditCents Int     @default(0)
+
   // ── Lease / PPA ─────────────────────────────────────────────────────────
   /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
   rateMillsPerKwh     Int?

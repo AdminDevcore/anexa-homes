@@ -248,3 +248,43 @@ describe("the home-value claim is only made when a company makes it", () => {
     expect(build({ homeValueUpliftPct: 4.1 }).assumptions.homeValueUpliftPct).toBe(4.1);
   });
 });
+
+/**
+ * THE CLOSING CREDIT REACHES THE DOCUMENT.
+ *
+ * The figure is typed on the deal and frozen here, which is the whole point of
+ * it: a credit offered for signing today cannot quietly come off a proposal
+ * the household is already holding. These assert the path — deal field →
+ * snapshot → the ladder the customer's page draws — rather than the ladder
+ * arithmetic, which `solar-credit-ladder.test.ts` owns.
+ */
+describe("the sign today credit is frozen into the document", () => {
+  it("carries the typed credit onto the quoted option's ladder", () => {
+    const s = build({ signTodayCreditCents: 1_500_00 });
+    const ladder = s.financing.creditLadder!;
+    expect(ladder.signTodayCents).toBe(1_500_00);
+    expect(ladder.signTodayLabel).toBe("Sign today credit");
+    // The bottom line moved by exactly the credit, and nothing else did.
+    const without = build().financing.creditLadder!;
+    expect(without.signTodayCents).toBe(0);
+    expect(ladder.netCostCents).toBe(without.netCostCents - 1_500_00);
+    expect(ladder.contractValueCents).toBe(without.contractValueCents);
+  });
+
+  it("puts the same credit on every option in the menu", () => {
+    // "Sign today" is an offer about the day, not about the product: quoting
+    // it on the loan and not on the cash line beside it is an offer that
+    // changes when the household picks differently.
+    const s = build({ alternatives: [CASH_ALT], signTodayCreditCents: 1_000_00 });
+    for (const o of s.options!) {
+      expect(o.financing.creditLadder?.signTodayCents).toBe(1_000_00);
+    }
+  });
+
+  it("leaves the price and the payment exactly where they were", () => {
+    const withCredit = build({ signTodayCreditCents: 2_000_00 }).financing;
+    const without = build().financing;
+    expect(withCredit.contractPriceCents).toBe(without.contractPriceCents);
+    expect(withCredit.monthlyPaymentCents).toBe(without.monthlyPaymentCents);
+  });
+});

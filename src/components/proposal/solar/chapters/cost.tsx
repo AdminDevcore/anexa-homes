@@ -27,11 +27,16 @@ function LadderBar({
   netCents,
   creditCents,
   incentiveCents,
+  signTodayCents,
+  signTodayLabel,
 }: {
   contractCents: number;
   netCents: number;
   creditCents: number;
   incentiveCents: number;
+  /** The rep's closing credit. Its own band, so the bar sums to the rows. */
+  signTodayCents: number;
+  signTodayLabel: string;
 }) {
   if (contractCents <= 0) return null;
   const seg = (cents: number) => `${Math.max(0, (cents / contractCents) * 100)}%`;
@@ -43,6 +48,15 @@ function LadderBar({
       label: "Incentive",
       cents: incentiveCents,
       className: "bg-[var(--proposal-accent)]/45",
+    },
+    // Folded into the bar rather than left out of it: the bands are read as
+    // the price, and one that stopped short of the contract by the size of
+    // the credit would read as an arithmetic slip.
+    {
+      key: "signToday",
+      label: signTodayLabel,
+      cents: signTodayCents,
+      className: "bg-[var(--proposal-accent)]/25",
     },
   ].filter((p) => p.cents > 0);
 
@@ -256,8 +270,14 @@ export function ChapterCost({ doc }: { doc: Doc }) {
           rather than to a page of its own. */}
       {showLadder && ladder && (
         <section className="mt-6 break-inside-avoid">
+          {/* The heading follows what is actually in the table. With a closing
+              credit on the deal the rows are no longer all tax credits, and a
+              heading that says they are invites the reader to take our own
+              discount for a federal one. */}
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
-            What your tax credits are worth
+            {ladder.signTodayCents > 0
+              ? "What your credits are worth"
+              : "What your tax credits are worth"}
           </h3>
           {/* NO PARAGRAPH HERE. The heading says what the block is and the rows
               below are the arithmetic; a sentence between them costs thirty
@@ -268,6 +288,8 @@ export function ChapterCost({ doc }: { doc: Doc }) {
               netCents={ladder.netCostCents}
               creditCents={creditTotal}
               incentiveCents={ladder.incentiveCents}
+              signTodayCents={ladder.signTodayCents}
+              signTodayLabel={ladder.signTodayLabel}
             />
           </div>
 
@@ -292,6 +314,16 @@ export function ChapterCost({ doc }: { doc: Doc }) {
                 an offer that was withheld. */}
             {ladder.incentiveCents > 0 && (
               <DarkRow k={ladder.incentiveLabel} v={`−${usd(ladder.incentiveCents)}`} muted />
+            )}
+            {/* OURS, not the government's, and the last thing off the price.
+                Dropped rather than printed at zero for the same reason as the
+                row above it. */}
+            {ladder.signTodayCents > 0 && (
+              <DarkRow
+                k={ladder.signTodayLabel}
+                v={`−${usd(ladder.signTodayCents)}`}
+                muted
+              />
             )}
             <DarkRow k="Your net cost after credits" v={usd(ladder.netCostCents)} strong />
           </dl>

@@ -828,6 +828,10 @@ export async function generateProposalVersion(
       energyCommunity: finance.claimEnergyCommunity,
       domesticContent: finance.claimDomesticContent,
     },
+    // The rep's own closing credit, as it stood when the document was made.
+    // Frozen with everything else: a credit offered for signing today is not
+    // one a rep can quietly take back off a proposal already sent.
+    signTodayCreditCents: finance.signTodayCreditCents,
     alternatives,
     // How the deal's own terms read in the menu. The catalogue row's own label
     // when it was quoted from one, so the option a homeowner picks is findable

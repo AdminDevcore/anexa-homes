@@ -134,6 +134,55 @@ export async function setSolarCreditClaimsAction(input: z.infer<typeof creditCla
   return ok();
 }
 
+/**
+ * THE CLOSING CREDIT, typed on this deal.
+ *
+ * Its own action rather than a fourth field on the one above, because it is a
+ * different gesture: the three claims are switches that save the instant they
+ * move, and this is an amount somebody types and then leaves. Folded together,
+ * every keystroke would have to carry the three booleans and a mid-typing save
+ * could race a switch.
+ *
+ * A DEAL FIELD, not a setting. A company-wide "sign today" figure is the same
+ * offer to every household, which is no offer at all — the number is the rep's
+ * to make on the job in front of them, inside the ceiling the schema sets.
+ *
+ * The same `Lead:update` grant as the claims, and for the same reason: this is
+ * money coming off what the customer nets, decided by the person selling it.
+ */
+const signTodaySchema = z.object({
+  leadId: z.string().min(1),
+  // A hard ceiling in the shape of the field, so a fat finger cannot put a
+  // seven-figure discount on a household's document. The ladder clamps at
+  // whatever is actually left on the deal on top of this.
+  cents: z.number().int().min(0).max(100_000_00),
+});
+
+export async function setSolarSignTodayCreditAction(input: z.infer<typeof signTodaySchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  const parsed = signTodaySchema.safeParse(input);
+  if (!parsed.success) return fail("Enter a credit between $0 and $100,000.");
+  const { leadId, cents } = parsed.data;
+
+  const lead = await prisma.lead.findFirst({
+    where: { companyId: user.companyId, id: leadId },
+    select: { id: true, vertical: true },
+  });
+  if (!lead) return fail("Deal not found.");
+  if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  const { count } = await prisma.solarFinance.updateMany({
+    where: { companyId: user.companyId, leadId },
+    data: { signTodayCreditCents: cents },
+  });
+  if (count === 0) return fail("Save the financing on this deal first.");
+
+  revalidatePath(`/portal/leads/${leadId}`);
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  return ok();
+}
+
 // ---------------------------------------------------------------------------
 // Design
 // ---------------------------------------------------------------------------

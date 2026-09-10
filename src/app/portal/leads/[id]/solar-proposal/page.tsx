@@ -410,6 +410,10 @@ export default async function SolarProposalBuilderPage({
           energyCommunity: finance?.claimEnergyCommunity ?? true,
           domesticContent: finance?.claimDomesticContent ?? true,
         }}
+        // Nothing typed on a deal with no financing row yet, which is the
+        // ordinary case for the credit as well: it is money a rep decides to
+        // offer, not a default anybody inherits.
+        signTodayCreditCents={finance?.signTodayCreditCents ?? 0}
         adderCatalogue={adderCatalogue.map((a) => ({
           id: a.id,
           label: [a.manufacturer, a.model].filter(Boolean).join(" ") || a.model,

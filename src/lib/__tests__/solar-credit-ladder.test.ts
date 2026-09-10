@@ -146,3 +146,82 @@ describe("wording", () => {
     expect(l.disclaimer).toMatch(/tax professional/i);
   });
 });
+
+/**
+ * THE TYPED RUNG.
+ *
+ * "Sign today credit" is the one figure on this ladder somebody enters, and
+ * every test here is about the same property: it comes off the bottom line,
+ * not off the reconciliation. A credit folded in among the tax credits would
+ * change `afterCredits`, the derived incentive would absorb it to land on the
+ * quoted price anyway, and the household would be told about a discount that
+ * moved no number on the page.
+ */
+describe("the sign today credit", () => {
+  it("comes off the bottom line, under the derived incentive", () => {
+    const l = ladder({ signTodayCreditCents: 1_500_00 })!;
+    // The incentive still does its own job: after credits, less the incentive,
+    // IS the quoted price — and the typed credit then comes off that.
+    expect(l.incentiveCents).toBe(l.afterCreditsCents - QUOTED);
+    expect(l.signTodayCents).toBe(1_500_00);
+    expect(l.netCostCents).toBe(QUOTED - 1_500_00);
+    expect(l.reliefCents).toBe(l.creditTotalCents + l.incentiveCents + l.signTodayCents);
+    expect(ladderReconciles(l)).toBe(true);
+  });
+
+  it("is the whole difference on an ordinary deal, where nothing is handed back", () => {
+    const l = buildCreditLadder({
+      contractValueCents: 50_000_00,
+      quotedPriceCents: 50_000_00,
+      rates: CREDIT_RATES_DEFAULT,
+      claims: CREDIT_CLAIMS_DEFAULT,
+      signTodayCreditCents: 1_000_00,
+    })!;
+    expect(l.incentiveCents).toBe(0);
+    expect(l.netCostCents).toBe(l.afterCreditsCents - 1_000_00);
+    expect(ladderReconciles(l)).toBe(true);
+  });
+
+  it("is clamped at what is left rather than printing a negative net cost", () => {
+    const l = buildCreditLadder({
+      contractValueCents: 50_000_00,
+      quotedPriceCents: 50_000_00,
+      rates: CREDIT_RATES_DEFAULT,
+      claims: CREDIT_CLAIMS_DEFAULT,
+      // More than the whole contract, let alone what survives the credits.
+      signTodayCreditCents: 999_999_00,
+    })!;
+    expect(l.netCostCents).toBe(0);
+    expect(l.signTodayCents).toBe(l.afterCreditsCents);
+    expect(ladderReconciles(l)).toBe(true);
+  });
+
+  it("draws a ladder on its own, with every credit switched off", () => {
+    const l = buildCreditLadder({
+      contractValueCents: 50_000_00,
+      quotedPriceCents: 50_000_00,
+      rates: CREDIT_RATES_DEFAULT,
+      claims: { itc: false, energyCommunity: false, domesticContent: false },
+      signTodayCreditCents: 1_000_00,
+    });
+    // Without it this is the "nothing to say" case and the whole block is
+    // dropped — which would take the rep's own discount off the document.
+    expect(l).not.toBeNull();
+    expect(l!.credits).toHaveLength(0);
+    expect(l!.netCostCents).toBe(49_000_00);
+    expect(ladderReconciles(l!)).toBe(true);
+  });
+
+  it("is absent, not zero, when nobody typed one", () => {
+    const l = ladder()!;
+    expect(l.signTodayCents).toBe(0);
+    expect(l.netCostCents).toBe(QUOTED);
+    expect(ladderReconciles(l)).toBe(true);
+  });
+
+  it("ignores a negative, rather than charging for signing today", () => {
+    const l = ladder({ signTodayCreditCents: -5_000_00 })!;
+    expect(l.signTodayCents).toBe(0);
+    expect(l.netCostCents).toBe(QUOTED);
+  });
+});

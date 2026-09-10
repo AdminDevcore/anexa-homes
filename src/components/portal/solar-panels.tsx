@@ -781,6 +781,7 @@ export function SolarFinancePanel({
   annualDegradationPct,
   creditRates,
   creditClaims,
+  signTodayCreditCents,
   onOpenDesign,
 }: {
   leadId: string;
@@ -790,6 +791,8 @@ export function SolarFinancePanel({
   creditRates: CreditRates;
   /** Which of them this job earns, as last saved on the finance row. */
   creditClaims: CreditClaims;
+  /** The closing credit typed on this deal, cents. Zero on nearly all. */
+  signTodayCreditCents: number;
   /** Every lender the company works with, retired ones included — a deal that
    *  already names one must keep showing it rather than falling back to none. */
   lenders: LenderOption[];
@@ -1071,7 +1074,7 @@ export function SolarFinancePanel({
     // What this job earns, live off the tick-boxes above — so unticking the
     // domestic-content bonus moves every card's after-credit payment on the
     // spot, exactly as it moves the ladder it was unticked on.
-    credits: { rates: creditRates, claims: creditClaims },
+    credits: { rates: creditRates, claims: creditClaims, signTodayCents: signTodayCreditCents },
   };
 
   /**
@@ -1224,6 +1227,7 @@ export function SolarFinancePanel({
           quotedPriceCents: livePrice.breakdown.contractPriceCents,
           rates: creditRates,
           claims: creditClaims,
+          signTodayCreditCents,
         })
       : null;
 
@@ -1449,6 +1453,7 @@ export function SolarFinancePanel({
           customerContractCents={livePrice.breakdown.contractPriceCents}
           creditRates={creditRates}
           claims={creditClaims}
+          signTodayCreditCents={signTodayCreditCents}
           canEdit={canEdit}
         />
       )}

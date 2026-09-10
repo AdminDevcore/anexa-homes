@@ -7,10 +7,14 @@ import {
   buildCreditLadder,
   CREDIT_HINT,
   CREDIT_LABEL,
+  SIGN_TODAY_LABEL,
   type CreditClaims,
   type CreditRates,
 } from "@/lib/solar-credit-ladder";
-import { setSolarCreditClaimsAction } from "@/server/modules/solar/actions";
+import {
+  setSolarCreditClaimsAction,
+  setSolarSignTodayCreditAction,
+} from "@/server/modules/solar/actions";
 
 /**
  * WHAT THIS PROPOSAL CLAIMS ON THE HOUSEHOLD'S TAX RETURN, on the deal, live.
@@ -45,6 +49,7 @@ export function CreditClaimsCard({
   customerContractCents,
   creditRates,
   claims: initialClaims,
+  signTodayCreditCents,
   canEdit,
 }: {
   leadId: string;
@@ -54,6 +59,8 @@ export function CreditClaimsCard({
   creditRates: CreditRates;
   /** Which credits this job earns, as last saved. */
   claims: CreditClaims;
+  /** The closing credit typed on this deal, cents. Zero on nearly all. */
+  signTodayCreditCents: number;
   canEdit: boolean;
 }) {
   /**
@@ -92,6 +99,41 @@ export function CreditClaimsCard({
   };
 
   /**
+   * THE TYPED CREDIT, held as the text in the box rather than as cents.
+   *
+   * A number kept in cents and formatted back on every keystroke fights the
+   * person typing it — "1500" becomes "$1,500" becomes an un-editable string
+   * the moment they try to delete a digit. The box holds what they typed; the
+   * ladder beside it reads the parsed value live; the save happens when they
+   * leave the field.
+   */
+  const [signDraft, setSignDraft] = React.useState(() => centsToInput(signTodayCreditCents));
+  const [seenSign, setSeenSign] = React.useState(signTodayCreditCents);
+  if (seenSign !== signTodayCreditCents) {
+    setSeenSign(signTodayCreditCents);
+    setSignDraft(centsToInput(signTodayCreditCents));
+  }
+  const signCents = inputToCents(signDraft);
+
+  /** On blur, and only when it actually moved — no save for a visit. */
+  const commitSign = () => {
+    if (signCents === signTodayCreditCents) {
+      // Re-normalise what is in the box anyway: "1,500." and "1500" are the
+      // same amount, and the field should settle on one of them.
+      setSignDraft(centsToInput(signTodayCreditCents));
+      return;
+    }
+    setError(null);
+    startSave(async () => {
+      const res = await setSolarSignTodayCreditAction({ leadId, cents: signCents });
+      if (!res.ok) {
+        setSignDraft(centsToInput(signTodayCreditCents));
+        setError(res.error);
+      }
+    });
+  };
+
+  /**
    * The ladder as the customer's own page will draw it — same call, same
    * arithmetic, so a rep is never shown a ladder the document then draws
    * differently. `buildCreditLadder` drops the incentive row on its own rather
@@ -102,6 +144,7 @@ export function CreditClaimsCard({
     quotedPriceCents: customerContractCents,
     rates: creditRates,
     claims,
+    signTodayCreditCents: signCents,
   });
 
   const fieldset = (
@@ -112,7 +155,10 @@ export function CreditClaimsCard({
       saving={saving}
       error={error}
       onToggle={toggle}
-      note="This is what the proposal's tax-credit switch claims on their behalf. It does not change the price or the payment they were quoted."
+      signDraft={signDraft}
+      onSignChange={setSignDraft}
+      onSignCommit={commitSign}
+      note="This is what the proposal's tax-credit switch claims on their behalf. Neither the credits nor the closing credit change the price or the payment they were quoted."
     />
   );
 
@@ -126,10 +172,10 @@ export function CreditClaimsCard({
           id="credit-claims-heading"
           className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
         >
-          Federal tax credits
+          Credits &amp; incentives
         </h3>
         <span className="text-[11px] text-muted-foreground">
-          Percentages set in Settings → Solar
+          Credit percentages set in Settings → Solar
         </span>
       </header>
 
@@ -154,6 +200,16 @@ export function CreditClaimsCard({
                   muted
                 />
               ))}
+              {/* Last, because it comes off last — and only where one was
+                  typed. A "$0" row on the ordinary deal is a discount the
+                  household can see was considered and withheld. */}
+              {ladder.signTodayCents > 0 && (
+                <Row
+                  k={ladder.signTodayLabel}
+                  v={`−${money(ladder.signTodayCents)}`}
+                  muted
+                />
+              )}
               <Row k="Net cost after credits" v={money(ladder.netCostCents)} strong />
             </dl>
           ) : (
@@ -191,6 +247,9 @@ function CreditClaimsFieldset({
   saving,
   error,
   onToggle,
+  signDraft,
+  onSignChange,
+  onSignCommit,
   note,
 }: {
   claims: CreditClaims;
@@ -199,6 +258,10 @@ function CreditClaimsFieldset({
   saving: boolean;
   error: string | null;
   onToggle: (key: keyof CreditClaims) => void;
+  /** What is in the closing-credit box, as typed. */
+  signDraft: string;
+  onSignChange: (v: string) => void;
+  onSignCommit: () => void;
   note: string;
 }) {
   return (
@@ -218,6 +281,18 @@ function CreditClaimsFieldset({
             onToggle={() => onToggle(key)}
           />
         ))}
+        {/* AN AMOUNT, NOT A SWITCH, and last in the list. The three above are
+            facts about the job that are either true or not; this is the rep's
+            own money on this deal, and how much of it is the whole decision.
+            In the same list because a household reads one column of things
+            coming off their price, not a federal list and a private one. */}
+        <SignTodayField
+          value={signDraft}
+          disabled={!canEdit || saving}
+          readOnly={!canEdit}
+          onChange={onSignChange}
+          onCommit={onSignCommit}
+        />
       </div>
       {error && (
         <p role="alert" className="mt-2 text-[11px] text-destructive">
@@ -285,6 +360,104 @@ function CreditToggle({
       />
     </div>
   );
+}
+
+/**
+ * THE CLOSING CREDIT, typed.
+ *
+ * Shaped like the switch rows above it — label, hint, control hard right — so
+ * the four read as one list rather than three settings and a form field. The
+ * dollar sign lives inside the box rather than in the label, because what the
+ * rep is typing IS dollars and a bare number in a column of percentages is
+ * exactly the ambiguity that gets a $1,500 credit entered as 1,500%.
+ *
+ * Saves on blur, not per keystroke: mid-typing, "15" is a real amount and
+ * would be written as $15.
+ */
+function SignTodayField({
+  value,
+  disabled,
+  readOnly,
+  onChange,
+  onCommit,
+}: {
+  value: string;
+  disabled: boolean;
+  readOnly: boolean;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+}) {
+  const id = React.useId();
+  return (
+    <div
+      className={cn(
+        "flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0",
+        readOnly && "opacity-70"
+      )}
+    >
+      <div className="min-w-0">
+        <label
+          htmlFor={id}
+          className={cn(
+            "block text-[12px] font-medium leading-snug text-foreground",
+            !readOnly && "cursor-pointer"
+          )}
+        >
+          {SIGN_TODAY_LABEL}
+        </label>
+        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+          Your own credit for signing today. Comes off what they net, never off the price.
+        </p>
+      </div>
+      <div className="relative mt-0.5 shrink-0">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[12px] text-muted-foreground"
+        >
+          $
+        </span>
+        <input
+          id={id}
+          type="text"
+          inputMode="decimal"
+          value={value}
+          disabled={disabled}
+          placeholder="0"
+          aria-label={SIGN_TODAY_LABEL}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onCommit}
+          // Enter saves without leaving the field, which is how a rep who is
+          // still looking at the ladder expects it to land.
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
+          className="h-8 w-28 rounded-md border border-input bg-background pl-5 pr-2 text-right text-[12px] tabular-nums outline-none focus:border-solar focus:ring-1 focus:ring-solar disabled:opacity-60"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What a rep typed, in cents.
+ *
+ * Forgiving on the way in — "$1,500", "1500", "1,500.00" are one amount — and
+ * zero for anything that is not a number, because the alternative is a NaN
+ * threaded into a ladder a household reads.
+ */
+function inputToCents(v: string): number {
+  const n = Number(v.replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.round(n * 100), 100_000_00);
+}
+
+/** And back out: plain digits, no separators to fight the next keystroke. */
+function centsToInput(cents: number): string {
+  if (!cents) return "";
+  return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
 }
 
 /** The company's percentage for one credit. */

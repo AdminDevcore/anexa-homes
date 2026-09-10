@@ -118,8 +118,17 @@ export type CompareBasis = {
    * same bonus whoever funds it. Absent — a lease-only shelf, a caller that
    * has not wired them — simply means no column quotes an after-credit
    * payment, which is what every column did before 2026-09-08.
+   *
+   * `signTodayCents` rides along because it is the ladder's last rung and the
+   * shelf has to quote the same net cost the card beside it shows — but it is
+   * the one part of this that is NOT a fact about the house: it is what the
+   * rep has decided to put on this deal.
    */
-  credits?: { rates: CreditRates; claims: CreditClaims } | null;
+  credits?: {
+    rates: CreditRates;
+    claims: CreditClaims;
+    signTodayCents?: number;
+  } | null;
 };
 
 export type CompareRow = {
@@ -301,6 +310,7 @@ function purchaseRow(
         quotedPriceCents: priced.contractPriceCents,
         rates: basis.credits.rates,
         claims: basis.credits.claims,
+        signTodayCreditCents: basis.credits.signTodayCents,
       })
     : null;
   const netMonthlyCents = ladder

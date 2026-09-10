@@ -23,7 +23,16 @@
  *   − domestic content 10%   $12,500
  *   = after credits          $62,500
  *   − signing incentive       $7,500   ← DERIVED, never typed
- *   = what you pay           $55,000   ← the quoted price, again
+ *   − sign today credit       $1,500   ← TYPED, and the only typed rung here
+ *   = what you pay           $53,500
+ *
+ * THE SIGN TODAY CREDIT is the one figure on this ladder somebody enters. It
+ * is the rep's own closing money on this job, it is not a tax credit and it is
+ * not derived from anything, and it therefore sits BELOW the derived incentive
+ * rather than among the credits: the incentive's whole job is to land the
+ * household on the price they were quoted, and a typed rung mixed in above it
+ * would be silently eaten by that reconciliation instead of coming off the
+ * bottom line. It is clamped at whatever is left, so no ladder ends negative.
  *
  * THREE RULES.
  *
@@ -123,6 +132,10 @@ export type CreditLadder = {
   incentiveLabel: string;
   /** afterCredits − quoted, floored at zero. Zero means no row is shown. */
   incentiveCents: number;
+  /** The typed closing credit on this deal, cents. Zero shows no row. */
+  signTodayCents: number;
+  /** What that rung is called. Always `SIGN_TODAY_LABEL`. */
+  signTodayLabel: string;
   /**
    * How far the credits took the contract BELOW the quoted price, cents.
    *
@@ -132,9 +145,9 @@ export type CreditLadder = {
    * this size. Never printed on the customer's document.
    */
   shortfallCents: number;
-  /** The bottom line: after credits, less the incentive. */
+  /** The bottom line: after credits, less the incentive and the credit. */
   netCostCents: number;
-  /** creditTotal + incentive — everything that comes off the contract. */
+  /** creditTotal + incentive + signToday — all of it, off the contract. */
   reliefCents: number;
   /** The tax caveat, as the company words it. Never empty. */
   disclaimer: string;
@@ -159,6 +172,16 @@ export const CREDIT_DISCLAIMER_DEFAULT =
 
 /** What the remainder is called when a company has not said. */
 export const CREDIT_INCENTIVE_LABEL_DEFAULT = "Incentive for signing today";
+
+/**
+ * What the typed closing credit is called, everywhere it is shown.
+ *
+ * A constant rather than a setting, unlike the label above it: that one names
+ * a partner's money and a company may have to characterise it in its own
+ * words, whereas this is our own discount for signing today and it is called
+ * the same thing on the rep's screen and on the household's page.
+ */
+export const SIGN_TODAY_LABEL = "Sign today credit";
 
 /** Every deal earns the base credit until somebody says otherwise. */
 export const CREDIT_CLAIMS_DEFAULT: CreditClaims = {
@@ -185,11 +208,10 @@ function usablePct(pct: number | null | undefined): number | null {
  *
  * NULL — meaning "this document says nothing about credits" — when the contract
  * value is not above zero, or when no credit is claimed AND there is no
- * remainder to hand back. The second half matters: a deal with every credit
- * switched off but a programme adjustment still has something true to say
- * (contract, less the incentive, is your price), and dropping the page there
- * would leave a $125,000 contract on the document with nothing explaining how
- * a household gets to $55,000.
+ * remainder to hand back AND no closing credit was typed. That last clause
+ * matters as much as the others: a cash deal with every credit switched off
+ * and $1,500 for signing today still has something true to say, and returning
+ * null there would take the rep's own discount off the document.
  *
  * `quotedPriceCents` goes in unchanged and comes back out as `netCostCents`
  * whenever there is any remainder at all — that equality IS the feature.
@@ -201,6 +223,8 @@ export function buildCreditLadder(input: {
   claims?: CreditClaims | null;
   incentiveLabel?: string | null;
   disclaimer?: string | null;
+  /** The typed closing credit on this deal, cents. Absent and zero are one. */
+  signTodayCreditCents?: number | null;
 }): CreditLadder | null {
   const contractValueCents = Math.round(input.contractValueCents);
   const quotedPriceCents = Math.max(0, Math.round(input.quotedPriceCents));
@@ -245,9 +269,28 @@ export function buildCreditLadder(input: {
   const remainder = afterCreditsCents - quotedPriceCents;
   const incentiveCents = Math.max(0, remainder);
   const shortfallCents = Math.max(0, -remainder);
-  const netCostCents = afterCreditsCents - incentiveCents;
 
-  if (credits.length === 0 && incentiveCents === 0) return null;
+  /**
+   * THE ONE TYPED RUNG, and it comes off last.
+   *
+   * Below the derived incentive rather than beside the credits, because the
+   * incentive is defined as whatever lands the household on the quoted price:
+   * a typed credit added higher up would change `afterCredits`, the incentive
+   * would absorb it to hit the same target, and a rep's $1,500 would leave no
+   * mark on the bottom line at all.
+   *
+   * Clamped at what is actually left. A rep who types $999,999 into a deal
+   * with $60,000 of room gets the $60,000 — never a negative net cost, which
+   * on a household's page reads as a refund we are not offering.
+   */
+  const afterIncentiveCents = afterCreditsCents - incentiveCents;
+  const signTodayCents = Math.min(
+    Math.max(0, Math.round(input.signTodayCreditCents ?? 0)),
+    afterIncentiveCents
+  );
+  const netCostCents = afterIncentiveCents - signTodayCents;
+
+  if (credits.length === 0 && incentiveCents === 0 && signTodayCents === 0) return null;
 
   return {
     contractValueCents,
@@ -257,9 +300,11 @@ export function buildCreditLadder(input: {
     afterCreditsCents,
     incentiveLabel: input.incentiveLabel?.trim() || CREDIT_INCENTIVE_LABEL_DEFAULT,
     incentiveCents,
+    signTodayCents,
+    signTodayLabel: SIGN_TODAY_LABEL,
     shortfallCents,
     netCostCents,
-    reliefCents: creditTotalCents + incentiveCents,
+    reliefCents: creditTotalCents + incentiveCents + signTodayCents,
     disclaimer: input.disclaimer?.trim() || CREDIT_DISCLAIMER_DEFAULT,
   };
 }
@@ -278,14 +323,17 @@ export function ladderReconciles(l: CreditLadder): boolean {
     l.contractValueCents > 0 &&
     l.creditTotalCents >= 0 &&
     l.incentiveCents >= 0 &&
+    l.signTodayCents >= 0 &&
     l.netCostCents >= 0 &&
     // The printed rows must add up to the printed total, or a reader with a
     // calculator finds the gap before we do.
     Math.min(l.contractValueCents, linesSum) === l.creditTotalCents &&
     l.afterCreditsCents === l.contractValueCents - l.creditTotalCents &&
-    l.netCostCents === l.afterCreditsCents - l.incentiveCents &&
-    l.reliefCents === l.creditTotalCents + l.incentiveCents &&
-    // Whenever anything was handed back, the bottom line IS the quoted price.
-    (l.incentiveCents === 0 || l.netCostCents === l.quotedPriceCents)
+    l.netCostCents === l.afterCreditsCents - l.incentiveCents - l.signTodayCents &&
+    l.reliefCents === l.creditTotalCents + l.incentiveCents + l.signTodayCents &&
+    // Whenever anything was handed back, the bottom line is the quoted price
+    // less the closing credit — which on the ordinary deal, where nothing was
+    // typed, is still exactly the price they were quoted.
+    (l.incentiveCents === 0 || l.netCostCents === l.quotedPriceCents - l.signTodayCents)
   );
 }
