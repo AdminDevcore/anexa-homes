@@ -307,6 +307,36 @@ describe("a person's count outlives the rule", () => {
     expect((await design())?.batteryQtySetByRep).toBe(false);
   });
 
+  it("hands back the count the home needs, not the one that was written first", async () => {
+    // What the designer's picker shows while the refresh is in flight. Putting
+    // a battery on an empty slot writes the company's flat two and the
+    // recompute sizes it a moment later, so an answer taken before that flashes
+    // a number the deal does not end up quoting — and on the screen where the
+    // count is money, the first number shown is the one a rep believes.
+    await sizeToTheHome();
+    await seedDesign({
+      batteryId: null,
+      batteryQty: 0,
+      annualUsageKwh: 20_000, // → 30.14 kWh a night → three 13.5 kWh units.
+    });
+
+    const res = await pick({ batteryId: powerwall });
+
+    expect(res.ok && res.batteryQty).toBe(3);
+    expect((await design())?.batteryQty).toBe(3);
+  });
+
+  it("hands back a typed count as the typed count", async () => {
+    await sizeToTheHome();
+    await seedDesign({ annualUsageKwh: 20_000 });
+
+    const res = await pick({ batteryQty: 5 });
+
+    // Sizing would say three. It stood down, so three is not the answer.
+    expect(res.ok && res.batteryQty).toBe(5);
+    expect(res.ok && res.batteryQtySetByRep).toBe(true);
+  });
+
   it("swapping the battery hands the count back to the rule", async () => {
     await sizeToTheHome();
     await seedDesign({ year1ProductionKwh: 0, annualUsageKwh: 20_000, batteryQty: 5 });

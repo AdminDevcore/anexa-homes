@@ -158,7 +158,7 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
     where: { leadId },
     create: { companyId: user.companyId, leadId, ...data },
     update: data,
-    select: { batteryQty: true },
+    select: { batteryQty: true, batteryQtySetByRep: true },
   });
 
   // The panel decides what every panel on the roof is worth, so the size, the
@@ -168,7 +168,23 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
   revalidatePath(`/portal/leads/${leadId}`);
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   revalidatePath(`/portal/leads/${leadId}/solar-proposal/design`);
-  // The count comes back so the screen can show what was actually written
-  // rather than the "1" it would otherwise display until the refresh lands.
-  return { ok: true as const, figures, batteryQty: saved.batteryQty };
+  /**
+   * The count comes back so the screen can show what was actually written
+   * rather than the "1" it would otherwise display until the refresh lands.
+   *
+   * AFTER the recompute, not before it. Putting a battery on an empty slot
+   * writes the company's flat count and the recompute then sizes it to the
+   * home a moment later — returning the flat one would flash two on the
+   * screen and settle on three, which reads as a bug whichever is right.
+   * Null — no sizing, or no recompute at all on a design that has not landed
+   * yet — falls back to what was written, which is then the answer.
+   */
+  return {
+    ok: true as const,
+    figures,
+    batteryQty: figures?.battery?.qty ?? saved.batteryQty,
+    // Whether the count on this deal is now a person's, so the screen can say
+    // so — and offer the way back — without waiting for a refresh.
+    batteryQtySetByRep: saved.batteryQtySetByRep,
+  };
 }

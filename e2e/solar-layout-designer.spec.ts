@@ -1255,4 +1255,129 @@ test.describe(FLAG_ON ? "the panel layout designer" : "the panel layout designer
     );
   });
 
+  /**
+   * The battery count is the one figure on this screen a rep does not work out
+   * by looking at the roof, and it is money.
+   *
+   * With the company sizing storage to each home, the rule ran on every
+   * recompute and the picker showed a bare number: no sign it had been
+   * measured, no sign when somebody had overridden it, and — because touching
+   * the box says "a person decided this" — no way back. The screen that said
+   * all three only ever rendered on a battery-only deal, which is the one kind
+   * that never opens a designer.
+   */
+  test("the picker says where the battery count came from, and can hand it back", async ({
+    page,
+  }) => {
+    // Two screens, a save, and a settings round trip either side of it — every
+    // one of them a first hit on a route this run has not compiled yet.
+    test.setTimeout(120_000);
+    await login(page, "admin@anexahomes.com");
+    // Switches into the solar workspace, which the settings screen below needs.
+    const leadId = await openDesignerDeal(page);
+
+    /**
+     * The rule ships OFF, so turning it on is part of the test: this is the
+     * only place the switch is proved to reach a deal at all. It appears only
+     * once the company has standardised on a battery, because "how many" is a
+     * question about a product.
+     */
+    await page.goto("/portal/settings/solar-equipment");
+    await page.getByRole("button", { name: /Default equipment/ }).click();
+    // A settings select is a Radix combobox, not a native <select>: a trigger
+    // to open and a listbox to pick from.
+    await page.getByLabel("Default battery").click();
+    await page.getByRole("option", { name: /Powerwall 3/ }).click();
+    await page.getByRole("switch", { name: /Size the count to each home/ }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Defaults saved")).toBeVisible({ timeout: 15000 });
+
+    await page.goto(`/portal/leads/${leadId}/solar-proposal/design`);
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 15000 });
+    await clearRoof(page);
+
+    /**
+     * Something for the night to be measured against — and SAVED.
+     *
+     * The line in the picker reads the production being drawn, the way the
+     * offset beside it does; the count the server writes is measured off the
+     * production on file. Both are right, and they say the same thing about a
+     * roof that has been saved, which is the state a count is decided in.
+     */
+    const drawBox = await pickTool(page, "Draw array");
+    await dragArray(page, drawBox);
+    await expect.poll(() => panelsOnRoof(page), { timeout: 10000 }).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText(/panels? saved/)).toBeVisible({ timeout: 20000 });
+
+    await page.getByTestId("system-picker").click();
+    /**
+     * The one-click standard battery — the gesture that used to lock the deal.
+     *
+     * It sent a COUNT along with the product, and a count in that call is how
+     * the action is told a person decided it. Nobody decided anything here
+     * beyond "the standard battery, please", so the deal came out of it
+     * latched against sizing for ever, on a screen with no way to unsay it.
+     */
+    await page.getByRole("button", { name: /^Add \d+ × Tesla Powerwall 3/ }).click();
+    await expect(page.getByLabel("How many batteries")).toBeEnabled({ timeout: 20000 });
+
+    /**
+     * Ask the DEAL, not the click.
+     *
+     * The picker holds what it just sent on screen while the round trip is out,
+     * so a latch written by that very click is invisible until the page is read
+     * back. Reloading is the only assertion that can tell "the rule chose this"
+     * from "this deal has been quietly locked out of the rule".
+     */
+    await page.reload();
+    await expect(page.getByTestId("layout-canvas")).toBeVisible({ timeout: 20000 });
+    await page.getByTestId("system-picker").click();
+
+    // Adding it is not a decision about the count, so the rule keeps it — and
+    // says so, in kWh a rep can check against the bill.
+    const sizing = page.getByTestId("battery-sizing");
+    await expect(sizing).toContainText(/kWh a night at \d+% after dark/, { timeout: 15000 });
+    await expect(sizing).not.toContainText("Set by hand");
+    const sized = /covered by (\d+) ×/.exec((await sizing.textContent())!)![1];
+
+    /**
+     * The box catches up to the line.
+     *
+     * Not a formality: putting a battery on an empty slot writes the company's
+     * flat count first and sizes it a moment later, so a screen that took its
+     * answer from the write showed a number the deal does not quote. They are
+     * the same number here or this assertion fails.
+     */
+    const qty = page.getByLabel("How many batteries");
+    await expect(qty).toHaveValue(sized, { timeout: 15000 });
+    await expect(sizing).toContainText("Sized to this home");
+
+    // Typing one IS a decision, and it survives — but the screen now admits it
+    // is standing on a person's number, and offers the way back.
+    await qty.selectOption(String(Number(sized) + 1));
+    await expect(sizing).toContainText("Set by hand", { timeout: 15000 });
+    await expect(sizing).toContainText(`puts it at ${sized}`);
+
+    await sizing.getByRole("button", { name: "Size it to the home" }).click();
+    await expect(sizing).toContainText("Sized to this home", { timeout: 15000 });
+    await expect(qty).toHaveValue(sized);
+
+    /**
+     * Put the company back the way it was found.
+     *
+     * These are COMPANY settings, and the specs share one seeded company in
+     * file order — leaving sizing on would quietly change the battery count on
+     * every solar deal a later spec looks at, which is the failure that looks
+     * like a product bug and is not one. The switch is turned off before the
+     * battery is unstarred because the panel only writes it while a default
+     * battery is named.
+     */
+    await page.goto("/portal/settings/solar-equipment");
+    await page.getByRole("button", { name: /Default equipment/ }).click();
+    await page.getByRole("switch", { name: /Size the count to each home/ }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Defaults saved")).toBeVisible({ timeout: 15000 });
+  });
+
 });

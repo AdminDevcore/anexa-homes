@@ -86,6 +86,11 @@ import {
   COMMON_PITCHES,
 } from "@/lib/solar-orientation";
 import { withProductionMargin, type YieldAssumptions } from "@/lib/solar-money";
+import {
+  autoBatteryCount,
+  autoBatteryBasisKwh,
+  type AutoBatterySizing,
+} from "@/lib/solar-storage";
 import { saveSolarLayoutAction } from "@/server/modules/solar/layout-actions";
 import { setSolarDesignEquipmentAction } from "@/server/modules/solar/equipment-actions";
 import { uploadPanelLayoutAction } from "@/server/modules/solar/proposal-actions";
@@ -346,6 +351,7 @@ export function SolarLayoutDesigner({
   moduleRatingW,
   catalogue,
   defaultBatteryQty,
+  sizing,
   chosen,
   annualUsageKwh,
   measuredYields,
@@ -377,6 +383,23 @@ export function SolarLayoutDesigner({
    * nothing in it — a count a rep has set is never overwritten from here.
    */
   defaultBatteryQty: number;
+  /**
+   * The company's rule for how many batteries a home needs.
+   *
+   * `on` is the switch at Settings → Solar Equipment → Default equipment. Off
+   * means the count is simply whatever the deal says and the picker shows
+   * nothing extra. On means it is DERIVED from the night this house has to be
+   * carried through, and the picker says so — because a number that changes
+   * on its own after a roof is redrawn is money appearing on a deal nobody
+   * typed.
+   */
+  sizing: {
+    on: boolean;
+    /** What share of a day's kWh the house is assumed to draw after dark. */
+    nightSharePct: number;
+    /** Which figure the night is measured from — see `autoBatteryBasisKwh`. */
+    systemType: "pv" | "pv_storage" | "storage";
+  };
   /** What this design already names. Null in a slot means nothing chosen. */
   chosen: {
     moduleId: string | null;
@@ -384,6 +407,14 @@ export function SolarLayoutDesigner({
     batteryId: string | null;
     /** How many batteries. 0 or absent reads as one, the way every reader does. */
     batteryQty: number;
+    /**
+     * A person typed that count, so sizing is standing off it.
+     *
+     * Part of `chosen` rather than a prop of its own so it travels with the
+     * optimistic override below: picking a count latches the deal, and the
+     * line under the picker has to say so before the refresh lands.
+     */
+    batteryQtySetByRep: boolean;
   };
   /** What the house uses, so offset is live rather than a saved snapshot. */
   annualUsageKwh: number | null;
@@ -660,9 +691,23 @@ export function SolarLayoutDesigner({
    * Choosing a panel changes what every panel on the roof is worth, so the
    * server re-derives the size, the production and the offset, and the page is
    * refreshed to pick them up. The drawing itself is untouched.
+   *
+   * `batteryQtyAuto` is not part of `chosen` because it is not a fact about
+   * the design — it is a request to stop overriding one, and what comes back
+   * is the count the rule then chose.
    */
-  async function pickEquipment(patch: Partial<typeof chosen>) {
-    setPendingEquip(patch);
+  async function pickEquipment(
+    patch: Partial<typeof chosen> & { batteryQtyAuto?: boolean }
+  ) {
+    // Mirrored on screen: the design's own fields, and only those. Releasing
+    // the latch has no count of its own to show — the server works one out and
+    // sends it back below.
+    const optimistic: Partial<typeof chosen> = {};
+    if ("moduleId" in patch) optimistic.moduleId = patch.moduleId;
+    if ("inverterId" in patch) optimistic.inverterId = patch.inverterId;
+    if ("batteryId" in patch) optimistic.batteryId = patch.batteryId;
+    if ("batteryQty" in patch) optimistic.batteryQty = patch.batteryQty;
+    setPendingEquip(optimistic);
     setEquipBusy(true);
     const res = await setSolarDesignEquipmentAction({ leadId, ...patch });
     setEquipBusy(false);
@@ -672,11 +717,17 @@ export function SolarLayoutDesigner({
       setPendingEquip(null);
       return toast.error(res.error);
     }
-    // Picking a battery writes the company's standard quantity, so hold the
-    // count the SERVER wrote on screen until the refresh carries it in. Without
-    // this the box reads "1" for as long as the round trip takes, which is the
-    // one number the rep is most likely to believe.
-    setPendingEquip({ ...patch, batteryQty: res.batteryQty });
+    // Picking a battery writes a quantity the rep did not type — the company's
+    // standard, then sized to this home — so hold what the SERVER settled on
+    // until the refresh carries it in. Without this the box reads "1" for as
+    // long as the round trip takes, which is the one number the rep is most
+    // likely to believe. The latch travels with it so the line underneath does
+    // not claim the count was set by hand a moment after it was released.
+    setPendingEquip({
+      ...optimistic,
+      batteryQty: res.batteryQty,
+      batteryQtySetByRep: res.batteryQtySetByRep,
+    });
     router.refresh();
     setPendingEquip(null);
   }
@@ -770,6 +821,48 @@ export function SolarLayoutDesigner({
     annualUsageKwh && annualUsageKwh > 0
       ? (totals.year1ProductionKwh / annualUsageKwh) * 100
       : null;
+
+  /**
+   * How many batteries this home's night needs, live.
+   *
+   * The same two pure functions the server sizes with, against the production
+   * being DRAWN rather than the one last saved — so a roof that grows from
+   * twenty to thirty-four thousand kilowatt-hours shows the bigger night
+   * straight away, and the count the next save writes is the count already on
+   * screen. That is the whole argument for the offset above it, and storage is
+   * the figure with money attached.
+   *
+   * Null whenever the arithmetic has nothing behind it — no battery chosen, no
+   * capacity on the catalogue row, no kilowatt-hours yet — and the line under
+   * the picker then says which, rather than printing a number from nothing.
+   *
+   * `annualUsageKwh` is already this deal's usage PLUS its adders, so the
+   * adjustment is passed as zero: adding it twice would size a storage-only
+   * deal off an EV charger it has already counted.
+   */
+  const batteryRatingWh =
+    (catalogue.battery.find((b) => b.id === equip.batteryId) ??
+      // Nothing chosen yet, so the battery being sized for is the one the
+      // one-click button would add — the company's standard. Sizing it a step
+      // early is what lets that button promise the count it is about to write
+      // rather than the price list's answer for a different house.
+      catalogue.battery.find((b) => b.isDefault))?.ratingW ?? null;
+  const sizedBattery: AutoBatterySizing | null = React.useMemo(
+    () =>
+      !sizing.on
+        ? null
+        : autoBatteryCount({
+            basisKwh: autoBatteryBasisKwh({
+              systemType: sizing.systemType,
+              year1ProductionKwh: totals.year1ProductionKwh,
+              annualUsageKwh,
+              usageAdjustmentKwh: 0,
+            }),
+            nightSharePct: sizing.nightSharePct,
+            batteryRatingWh,
+          }),
+    [sizing.on, sizing.systemType, sizing.nightSharePct, totals.year1ProductionKwh, annualUsageKwh, batteryRatingWh]
+  );
 
   /**
    * Array-to-inverter ratio. Blank without an inverter — 1.2 is not a default.
@@ -2866,6 +2959,7 @@ export function SolarLayoutDesigner({
               : "Choose a module"
           }
           defaultBatteryQty={defaultBatteryQty}
+          sizing={sizing.on ? { setByRep: equip.batteryQtySetByRep, nightSharePct: sizing.nightSharePct, sized: sizedBattery } : null}
           onChange={(patch) => void pickEquipment(patch)}
         />
       </header>
@@ -3988,6 +4082,7 @@ function SystemPicker({
   busy,
   summary,
   defaultBatteryQty,
+  sizing,
   onChange,
 }: {
   catalogue: { module: EquipOption[]; inverter: EquipOption[]; battery: EquipOption[] };
@@ -3997,12 +4092,39 @@ function SystemPicker({
   summary: string;
   /** How many of the standard battery a storage deal starts with. */
   defaultBatteryQty: number;
-  onChange: (patch: Partial<{ moduleId: string | null; inverterId: string | null; batteryId: string | null; batteryQty: number }>) => void;
+  /**
+   * What sizing-to-the-night has to say here, or null when the company does
+   * not size that way and the count is simply whatever the deal says.
+   *
+   * Same shape and same sentences as the storage panel on the deal page: two
+   * screens describing one rule must not describe it differently.
+   */
+  sizing: { setByRep: boolean; nightSharePct: number; sized: AutoBatterySizing | null } | null;
+  onChange: (
+    patch: Partial<{
+      moduleId: string | null;
+      inverterId: string | null;
+      batteryId: string | null;
+      batteryQty: number;
+      /** Hand the count back to the sizing rule — see the action's own note. */
+      batteryQtyAuto: boolean;
+    }>
+  ) => void;
 }) {
   const defaultBattery = catalogue.battery.find((b) => b.isDefault) ?? null;
+  /**
+   * How many the one-click button would put on THIS house.
+   *
+   * The sized count when the company sizes to the home, its flat standard
+   * otherwise — so the label promises the number that is actually about to be
+   * written rather than the price list's answer to a different house.
+   */
+  const startQty = sizing ? (sizing.sized?.qty ?? defaultBatteryQty) : defaultBatteryQty;
+  /** The count is the rule's own, and nobody has overridden it. */
+  const isAutoSized = !!sizing && !sizing.setByRep && sizing.sized?.qty === Math.max(1, equip.batteryQty);
   return (
     <details className="group relative shrink-0">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white hover:bg-white/10">
+      <summary data-testid="system-picker" className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white hover:bg-white/10">
         {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sun className="size-3.5 text-solar" />}
         <span className="max-w-[18rem] truncate">{summary}</span>
         <ChevronDown className="size-3.5 opacity-60 transition-transform group-open:rotate-180" />
@@ -4024,14 +4146,21 @@ function SystemPicker({
           <button
             type="button"
             disabled={disabled}
-            onClick={() =>
-              onChange({ batteryId: defaultBattery.id, batteryQty: defaultBatteryQty })
-            }
+            /**
+             * THE BATTERY ONLY. Not a count.
+             *
+             * Sending one would tell the action a person had decided it, which
+             * latches the deal against sizing for ever — and nobody decided
+             * anything here beyond "the standard battery, please". The action
+             * fills an empty slot with the company's count on its own, and the
+             * recompute at the end of it sizes that to the home.
+             */
+            onClick={() => onChange({ batteryId: defaultBattery.id })}
             className="flex w-full items-center gap-1.5 rounded-md border border-solar/40 bg-solar/10 px-2 py-1.5 text-left text-xs text-white hover:bg-solar/20 disabled:opacity-50"
           >
             <Star className="size-3.5 shrink-0 text-solar" aria-hidden />
             <span className="min-w-0 truncate">
-              Add {defaultBatteryQty} × {defaultBattery.label}
+              Add {startQty} × {defaultBattery.label}
             </span>
           </button>
         )}
@@ -4059,6 +4188,47 @@ function SystemPicker({
               ))}
             </select>
           </label>
+        )}
+        {/* WHERE THE COUNT CAME FROM, whenever it did not come from this rep.
+            Without this the select is a bare number that moves on its own
+            after a roof is redrawn — money appearing on a deal nobody typed —
+            and, worse, a one-way door: touching it says "a person decided
+            this", and until now the only screen that could unsay it was one a
+            solar-plus-storage deal never opens. */}
+        {equip.batteryId && sizing && (
+          <div data-testid="battery-sizing" className="rounded-md bg-white/5 px-2 py-1.5 text-[11px] leading-snug text-white/45">
+            {sizing.setByRep ? (
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                <span className="font-medium text-white/80">Set by hand</span>
+                <span>
+                  {sizing.sized
+                    ? `· sizing this home's night puts it at ${sizing.sized.qty}`
+                    : "· nothing to size from on this deal yet"}
+                </span>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onChange({ batteryQtyAuto: true })}
+                  className="font-medium text-solar underline underline-offset-2 disabled:opacity-50"
+                >
+                  Size it to the home
+                </button>
+              </div>
+            ) : sizing.sized ? (
+              <p>
+                <span className="font-medium text-white/80">
+                  {isAutoSized ? "Sized to this home" : "Sizing this home"}
+                </span>
+                {` · ${sizing.sized.nightKwhPerDay.toFixed(1)} kWh a night at ${sizing.nightSharePct}% after dark, covered by ${sizing.sized.qty} × ${sizing.sized.coveredKwh.toLocaleString()} kWh`}
+                {sizing.sized.capped && " — capped, check the usage on this deal"}
+              </p>
+            ) : (
+              <p>
+                Sized to each home, but there is nothing to size from yet — draw
+                the array, or fill in the Energy step.
+              </p>
+            )}
+          </div>
         )}
       </div>
     </details>

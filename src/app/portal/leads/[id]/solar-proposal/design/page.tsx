@@ -68,6 +68,10 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
       inverterId: true,
       batteryId: true,
       batteryQty: true,
+      // What the battery count is sized off, and whether anything is allowed
+      // to size it — see the designer's own `sizing` prop.
+      systemType: true,
+      batteryQtySetByRep: true,
     },
   });
 
@@ -181,6 +185,26 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         battery: optionsOf("battery"),
       }}
       defaultBatteryQty={settings.defaultBatteryQty}
+      /**
+       * Whether the battery count belongs to the home or to the price list.
+       *
+       * The rule itself runs on the server, on every recompute. What was
+       * missing here is any way to SEE it: on a solar-plus-storage deal the
+       * count exists in exactly one place — the picker in this screen's top
+       * bar — and that picker showed a bare number with no hint that it was
+       * measured, no hint when a person had overridden it, and no way back.
+       * The sizing panel that says all three only ever rendered on a
+       * battery-only deal, which is the one kind that never opens a designer.
+       *
+       * Only the RULE is passed. The arithmetic is done on the client against
+       * the production being drawn right now, not against the figure last
+       * saved — the whole point of this screen is watching the numbers move.
+       */
+      sizing={{
+        on: settings.autoBatteryQty,
+        nightSharePct: settings.batteryNightSharePct,
+        systemType: design?.systemType ?? "pv_storage",
+      }}
       chosen={{
         // The design's own module if it names one, otherwise whatever the
         // catalogue default resolved to — so the picker shows the panel the
@@ -189,6 +213,7 @@ export default async function SolarDesignerPage({ params }: { params: Promise<{ 
         inverterId: design?.inverterId ?? defaultInverterId,
         batteryId: design?.batteryId ?? null,
         batteryQty: design?.batteryQty ?? 0,
+        batteryQtySetByRep: design?.batteryQtySetByRep ?? false,
       }}
       // Plus whatever this deal's adders add to the household's year. Offset
       // is divided by this everywhere else — the deal page, the save, the
