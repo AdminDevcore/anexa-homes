@@ -41,6 +41,7 @@ import {
 } from "@/lib/solar-money";
 import { SystemPriceCard, StoragePriceCard } from "@/components/portal/solar/system-price";
 import { CreditClaimsCard } from "@/components/portal/solar/credit-claims";
+import { resolveSignToday, type SignTodayMode } from "@/lib/solar-sign-today";
 import {
   buildCreditLadder,
   type CreditClaims,
@@ -719,6 +720,14 @@ export type LenderOption = {
    */
   maxFinalPpwCents: number | null;
   /**
+   * How this partner's SIGN TODAY CREDIT is arrived at, and its figure. `none`
+   * — every lender until somebody sets a rule — leaves the credit to the rep,
+   * typed on the deal. See `solar-sign-today`.
+   */
+  signTodayMode: SignTodayMode;
+  signTodayFixedCents: number | null;
+  signTodayCapPpwCents: number | null;
+  /**
    * The same two rules over BATTERIES, for a deal with no watts. Null means no
    * rule, which is every lender until somebody sets one.
    */
@@ -1024,6 +1033,12 @@ export function SolarFinancePanel({
                 label: lenderProductLabel(p),
                 maxFinalPpwCents: l.maxFinalPpwCents,
                 finalPpwMode: l.finalPpwMode,
+                // Same reason as the ceiling above: the shelf prices a
+                // programme, and each column's closing credit is its own
+                // partner's to decide.
+                signTodayMode: l.signTodayMode,
+                signTodayFixedCents: l.signTodayFixedCents,
+                signTodayCapPpwCents: l.signTodayCapPpwCents,
               },
             ]
           : [];
@@ -1074,7 +1089,13 @@ export function SolarFinancePanel({
     // What this job earns, live off the tick-boxes above — so unticking the
     // domestic-content bonus moves every card's after-credit payment on the
     // spot, exactly as it moves the ladder it was unticked on.
-    credits: { rates: creditRates, claims: creditClaims, signTodayCents: signTodayCreditCents },
+    credits: {
+      rates: creditRates,
+      claims: creditClaims,
+      // What the REP typed. Each column resolves its own partner's rule over
+      // it, so this only reaches a card whose lender has no rule of its own.
+      signTodayTypedCents: signTodayCreditCents,
+    },
   };
 
   /**
@@ -1220,6 +1241,35 @@ export function SolarFinancePanel({
    * the strip's second payment cannot be quoted on a net cost the card next to
    * it is not showing.
    */
+  /**
+   * THE CLOSING CREDIT ON THE DEAL'S OWN PARTNER, resolved once here and
+   * handed to both the ladder and the card, so the two cannot differ.
+   *
+   * The rep's typed figure only survives on a partner with no rule; a fixed
+   * partner gives its own figure, and one that gives away everything over a
+   * cap derives it from the system price as it stands this second — which is
+   * why this sits with the live price rather than on the server.
+   */
+  const arrayPrice =
+    livePrice && "systemWatts" in livePrice.breakdown ? livePrice.breakdown : null;
+
+  const signToday = resolveSignToday({
+    rule: quotedLender
+      ? {
+          mode: quotedLender.signTodayMode,
+          fixedCents: quotedLender.signTodayFixedCents,
+          capPpwCents: quotedLender.signTodayCapPpwCents,
+        }
+      : null,
+    // A storage-only deal is priced per battery and has no installed watts at
+    // all, so there is no system price for a per-watt cap to be measured over.
+    // The resolver answers "nothing" to that, which is the right answer: a
+    // Powerwall order is hardware at catalogue price, not margin.
+    systemPriceCents: arrayPrice?.baseStickerCents ?? 0,
+    systemWatts: arrayPrice?.systemWatts ?? 0,
+    typedCents: signTodayCreditCents,
+  });
+
   const liveLadder =
     isPurchase && livePrice
       ? buildCreditLadder({
@@ -1227,7 +1277,7 @@ export function SolarFinancePanel({
           quotedPriceCents: livePrice.breakdown.contractPriceCents,
           rates: creditRates,
           claims: creditClaims,
-          signTodayCreditCents,
+          signTodayCreditCents: signToday.cents,
         })
       : null;
 
@@ -1454,6 +1504,8 @@ export function SolarFinancePanel({
           creditRates={creditRates}
           claims={creditClaims}
           signTodayCreditCents={signTodayCreditCents}
+          signToday={signToday}
+          lenderName={quotedLender?.name ?? null}
           canEdit={canEdit}
         />
       )}

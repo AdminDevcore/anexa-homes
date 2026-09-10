@@ -13,6 +13,7 @@ import {
   hasPaymentFactor,
   programmeMonthlyCents,
 } from "@/lib/solar-loan";
+import { resolveSignToday, type SignTodayMode } from "@/lib/solar-sign-today";
 import {
   buildCreditLadder,
   type CreditClaims,
@@ -67,6 +68,15 @@ export type OfferProduct = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is that lender's ceiling or its flat price. */
   finalPpwMode: FinalPpwMode;
+  /**
+   * That lender's sign-today rule, carried for the same reason as the cap —
+   * and it has to be per COLUMN rather than per shelf, because two programmes
+   * on the same screen can belong to two partners who hand back different
+   * money. See `solar-sign-today`.
+   */
+  signTodayMode: SignTodayMode;
+  signTodayFixedCents: number | null;
+  signTodayCapPpwCents: number | null;
   isActive: boolean;
 };
 
@@ -119,15 +129,16 @@ export type CompareBasis = {
    * has not wired them — simply means no column quotes an after-credit
    * payment, which is what every column did before 2026-09-08.
    *
-   * `signTodayCents` rides along because it is the ladder's last rung and the
-   * shelf has to quote the same net cost the card beside it shows — but it is
-   * the one part of this that is NOT a fact about the house: it is what the
-   * rep has decided to put on this deal.
+   * `signTodayTypedCents` rides along because the ladder's last rung has to
+   * match the card beside it — but unlike everything else here it is NOT a
+   * fact about the house, and it is not even the answer: it is what the rep
+   * typed, which only counts on a partner with no rule of its own. Each column
+   * resolves its OWN partner's rule over it. See `solar-sign-today`.
    */
   credits?: {
     rates: CreditRates;
     claims: CreditClaims;
-    signTodayCents?: number;
+    signTodayTypedCents?: number;
   } | null;
 };
 
@@ -304,13 +315,42 @@ function purchaseRow(
    * quoting a different one is how a rep promises a payment the proposal then
    * refuses to print.
    */
+  /**
+   * THE CLOSING CREDIT, resolved on THIS column's partner and THIS column's
+   * price — not once for the shelf.
+   *
+   * Two programmes side by side can belong to two partners who hand back
+   * different money: one gives a flat $1,000, the next gives whatever the
+   * system is priced over its cap, and a third leaves it to the rep. Resolved
+   * per row, the "with credits" figure under each card is that partner's
+   * actual offer. Resolved once, every card would quote the deal's own
+   * partner's credit under somebody else's name.
+   *
+   * Cash has no partner and therefore no rule, so it falls to the typed
+   * figure — the same line every other lender rule on this shelf draws.
+   */
+  const signToday = resolveSignToday({
+    rule: cash
+      ? null
+      : {
+          mode: (offer as OfferProduct).signTodayMode ?? "none",
+          fixedCents: (offer as OfferProduct).signTodayFixedCents ?? null,
+          capPpwCents: (offer as OfferProduct).signTodayCapPpwCents ?? null,
+        },
+    // The array at sticker: adders are work and the battery is hardware, and
+    // neither is margin a partner's cap is measured over.
+    systemPriceCents: priced.baseStickerCents,
+    systemWatts: priced.systemWatts,
+    typedCents: basis.credits?.signTodayTypedCents ?? 0,
+  });
+
   const ladder = basis.credits
     ? buildCreditLadder({
         contractValueCents: priced.contractPriceCents,
         quotedPriceCents: priced.contractPriceCents,
         rates: basis.credits.rates,
         claims: basis.credits.claims,
-        signTodayCreditCents: basis.credits.signTodayCents,
+        signTodayCreditCents: signToday.cents,
       })
     : null;
   const netMonthlyCents = ladder

@@ -41,7 +41,9 @@ import {
   ppwToCents,
   ppwToDollars,
   resolvedAdderRules,
+  signTodayToCents,
 } from "./types";
+import type { SignTodayMode } from "@/lib/solar-sign-today";
 import {
   Caution,
   ChoiceCards,
@@ -210,6 +212,12 @@ export function LenderDetail({
     return basePpwFromSticker(draftPpwCents, Math.min(...fees));
   }, [draftPpwCents, liveProducts]);
 
+  /** The typed sign-today cap, for the worked example beside it. */
+  const signTodayCapCents = React.useMemo(() => {
+    const c = ppwToCents(draft.signTodayCapPpw);
+    return c === "invalid" ? null : c;
+  }, [draft.signTodayCapPpw]);
+
   const floorCents = React.useMemo(() => {
     const c = ppwToCents(draft.minBasePpw);
     return c === "invalid" ? null : c;
@@ -274,6 +282,24 @@ export function LenderDetail({
       return toast.error("Min base $/battery has to be between $500 and $100,000, or blank for no floor.");
     }
 
+    // The sign-today rule, checked here for the same reason the prices are: a
+    // partner saved with a rule and no figure hands every household nothing
+    // under that partner's name, and nothing on the deal screen says why.
+    const signTodayFixedCents = signTodayToCents(draft.signTodayFixed);
+    if (signTodayFixedCents === "invalid") {
+      return toast.error("Sign today credit has to be between $0 and $100,000.");
+    }
+    const signTodayCapPpwCents = ppwToCents(draft.signTodayCapPpw);
+    if (signTodayCapPpwCents === "invalid") {
+      return toast.error("The sign today cap has to be a price per watt between $0.50 and $20.00.");
+    }
+    if (draft.signTodayMode === "fixed" && signTodayFixedCents == null) {
+      return toast.error("Type what this partner gives, or choose “The rep decides”.");
+    }
+    if (draft.signTodayMode === "above_cap" && signTodayCapPpwCents == null) {
+      return toast.error("Type the cap this partner gives away above, or choose “The rep decides”.");
+    }
+
     setBusy(true);
     try {
       if (fieldsDirty) {
@@ -298,6 +324,12 @@ export function LenderDetail({
             draft.batteryMode === "normal" ? lender.finalBatteryPriceMode : draft.batteryMode,
           minBasePricePerBatteryCents,
           batteryRule: draft.batteryRule,
+          signTodayMode: draft.signTodayMode,
+          // Kept rather than cleared when the mode moves off them, so an admin
+          // switching a partner to "the rep decides" for a month does not have
+          // to retype the figure to switch it back.
+          signTodayFixedCents,
+          signTodayCapPpwCents,
           submissionAmountBasis: draft.submissionAmountBasis,
           submissionSavingBasis: draft.submissionSavingBasis,
           submissionSavingHorizon: draft.submissionSavingHorizon,
@@ -777,6 +809,108 @@ export function LenderDetail({
                     you. Every deal on it would be blocked.
                   </Caution>
                 )}
+              </Panel>
+
+              {/* WHAT THIS PARTNER HANDS BACK FOR SIGNING TODAY.
+                  Under the price panel because it is measured against the
+                  price: the cap rule gives away whatever the SYSTEM is sold
+                  above a figure, and an admin setting that has to be able to
+                  see the $/W this partner charges while they type it. */}
+              <Panel
+                title="Sign today credit"
+                description="What a household is handed back for signing today. It comes off what they NET once the federal credits are claimed — never off the price, the payment, the contract or the rep's commission."
+              >
+                <ChoiceCards<SignTodayMode>
+                  name={`sign-today-mode-${lender.id}`}
+                  legend="Who decides the figure"
+                  why={
+                    <>
+                      Most partners leave it to the rep, who types what he is offering on the deal.
+                      A partner that gives a set figure gives it on every deal written on them; a
+                      partner that gives away the overage hands back whatever the system was priced
+                      above their cap, so the credit grows the higher the deal is sold.
+                    </>
+                  }
+                  value={draft.signTodayMode}
+                  onChange={(v) => set("signTodayMode", v)}
+                  options={[
+                    {
+                      value: "none",
+                      label: "The rep decides",
+                      detail: "Typed on the deal, deal by deal. What every partner did until now.",
+                    },
+                    {
+                      value: "fixed",
+                      label: "This partner gives",
+                      detail: "One figure, automatic on every deal. The rep cannot change it.",
+                    },
+                    {
+                      value: "above_cap",
+                      label: "Everything above a cap",
+                      detail: "Whatever the system is priced over the figure below. Derived, never typed.",
+                    },
+                  ]}
+                />
+
+                {draft.signTodayMode === "fixed" && (
+                  <MoneyField
+                    id={`ld-${lender.id}-sign-fixed`}
+                    label="Credit"
+                    placeholder="1,500"
+                    value={draft.signTodayFixed}
+                    onChange={(v) => set("signTodayFixed", v)}
+                    invalid={signTodayToCents(draft.signTodayFixed) === "invalid"}
+                    hint="Given on every deal on this partner."
+                  />
+                )}
+
+                {draft.signTodayMode === "above_cap" && (
+                  <>
+                    <MoneyField
+                      id={`ld-${lender.id}-sign-cap`}
+                      label="Cap"
+                      suffix="/W"
+                      placeholder="5.00"
+                      value={draft.signTodayCapPpw}
+                      onChange={(v) => set("signTodayCapPpw", v)}
+                      invalid={ppwToCents(draft.signTodayCapPpw) === "invalid"}
+                      hint="Measured on the system alone — adders and batteries are not margin."
+                    />
+                    {/* WORKED, but only where there is a price to work it on.
+                        A partner that publishes its own $/W has one; a partner
+                        pricing the ordinary way does not, because what a deal
+                        hands back then depends on what each rep sold it at —
+                        and a figure invented against an assumed price is the
+                        kind of number that gets quoted at a kitchen table. */}
+                    {signTodayCapCents != null &&
+                      (draftPpwCents != null ? (
+                        <Figure
+                          label={`A ${EXAMPLE_KW} kW system at $${ppwToDollars(draftPpwCents)}/W hands back`}
+                          tone={draftPpwCents > signTodayCapCents ? "gold" : "plain"}
+                          value={money(
+                            Math.max(0, (draftPpwCents - signTodayCapCents) * EXAMPLE_KW * 1000)
+                          )}
+                        />
+                      ) : (
+                        <Hint>
+                          This partner prices the ordinary way, so what each deal hands back
+                          depends on what it was sold at: every cent a watt above $
+                          {ppwToDollars(signTodayCapCents)}/W goes back to the household. A{" "}
+                          {EXAMPLE_KW} kW job sold a dime a watt over the cap returns{" "}
+                          <span className="font-medium tabular-nums text-foreground">
+                            {money(10 * EXAMPLE_KW * 1000)}
+                          </span>
+                          .
+                        </Hint>
+                      ))}
+                  </>
+                )}
+
+                <Hint>
+                  Whichever way it is set, the credit is shown on the proposal&rsquo;s tax-credit
+                  switch, under the federal credits. It never changes what this partner funds or
+                  what the household is asked to pay.
+                </Hint>
               </Panel>
 
               {/* The same two rules, on a deal with no watts.

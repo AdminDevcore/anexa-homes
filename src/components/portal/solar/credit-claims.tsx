@@ -15,6 +15,7 @@ import {
   setSolarCreditClaimsAction,
   setSolarSignTodayCreditAction,
 } from "@/server/modules/solar/actions";
+import type { SignToday } from "@/lib/solar-sign-today";
 
 /**
  * WHAT THIS PROPOSAL CLAIMS ON THE HOUSEHOLD'S TAX RETURN, on the deal, live.
@@ -50,6 +51,8 @@ export function CreditClaimsCard({
   creditRates,
   claims: initialClaims,
   signTodayCreditCents,
+  signToday,
+  lenderName,
   canEdit,
 }: {
   leadId: string;
@@ -61,6 +64,14 @@ export function CreditClaimsCard({
   claims: CreditClaims;
   /** The closing credit typed on this deal, cents. Zero on nearly all. */
   signTodayCreditCents: number;
+  /**
+   * The credit as RESOLVED — the partner's rule applied over what was typed.
+   * The card shows this figure and only lets it be edited when the partner
+   * left the decision to the rep. See `solar-sign-today`.
+   */
+  signToday: SignToday;
+  /** Who set it, when the partner did. Named in the sentence under the row. */
+  lenderName: string | null;
   canEdit: boolean;
 }) {
   /**
@@ -113,11 +124,22 @@ export function CreditClaimsCard({
     setSeenSign(signTodayCreditCents);
     setSignDraft(centsToInput(signTodayCreditCents));
   }
-  const signCents = inputToCents(signDraft);
+  /**
+   * WHAT THE LADDER IS DRAWN ON. The box as it is being typed when the figure
+   * is the rep's to make — so the rungs move under his hands — and the
+   * partner's own resolved figure when it is not, because on those deals the
+   * box is not an input at all.
+   */
+  const signCents = signToday.editable ? inputToCents(signDraft) : signToday.cents;
 
   /** On blur, and only when it actually moved — no save for a visit. */
   const commitSign = () => {
-    if (signCents === signTodayCreditCents) {
+    // A partner-decided credit has no box to leave, and writing the derived
+    // figure onto the deal would freeze today's price into a field the rule is
+    // supposed to recompute.
+    if (!signToday.editable) return;
+    const typed = inputToCents(signDraft);
+    if (typed === signTodayCreditCents) {
       // Re-normalise what is in the box anyway: "1,500." and "1500" are the
       // same amount, and the field should settle on one of them.
       setSignDraft(centsToInput(signTodayCreditCents));
@@ -125,7 +147,7 @@ export function CreditClaimsCard({
     }
     setError(null);
     startSave(async () => {
-      const res = await setSolarSignTodayCreditAction({ leadId, cents: signCents });
+      const res = await setSolarSignTodayCreditAction({ leadId, cents: typed });
       if (!res.ok) {
         setSignDraft(centsToInput(signTodayCreditCents));
         setError(res.error);
@@ -156,6 +178,8 @@ export function CreditClaimsCard({
       error={error}
       onToggle={toggle}
       signDraft={signDraft}
+      signToday={signToday}
+      lenderName={lenderName}
       onSignChange={setSignDraft}
       onSignCommit={commitSign}
       note="This is what the proposal's tax-credit switch claims on their behalf. Neither the credits nor the closing credit change the price or the payment they were quoted."
@@ -248,6 +272,8 @@ function CreditClaimsFieldset({
   error,
   onToggle,
   signDraft,
+  signToday,
+  lenderName,
   onSignChange,
   onSignCommit,
   note,
@@ -260,6 +286,8 @@ function CreditClaimsFieldset({
   onToggle: (key: keyof CreditClaims) => void;
   /** What is in the closing-credit box, as typed. */
   signDraft: string;
+  signToday: SignToday;
+  lenderName: string | null;
   onSignChange: (v: string) => void;
   onSignCommit: () => void;
   note: string;
@@ -287,9 +315,11 @@ function CreditClaimsFieldset({
             In the same list because a household reads one column of things
             coming off their price, not a federal list and a private one. */}
         <SignTodayField
-          value={signDraft}
-          disabled={!canEdit || saving}
-          readOnly={!canEdit}
+          value={signToday.editable ? signDraft : centsToInput(signToday.cents)}
+          signToday={signToday}
+          lenderName={lenderName}
+          disabled={!canEdit || saving || !signToday.editable}
+          readOnly={!canEdit || !signToday.editable}
           onChange={onSignChange}
           onCommit={onSignCommit}
         />
@@ -376,18 +406,38 @@ function CreditToggle({
  */
 function SignTodayField({
   value,
+  signToday,
+  lenderName,
   disabled,
   readOnly,
   onChange,
   onCommit,
 }: {
   value: string;
+  signToday: SignToday;
+  lenderName: string | null;
   disabled: boolean;
   readOnly: boolean;
   onChange: (v: string) => void;
   onCommit: () => void;
 }) {
   const id = React.useId();
+  const who = lenderName ?? "This lender";
+  /**
+   * WHO DECIDED THIS FIGURE, in one line under the label.
+   *
+   * A greyed-out box with a number in it and no explanation is a rep filing a
+   * support ticket. Each sentence names the partner and the rule, so the
+   * answer to "why can't I change it" is on the same row as the box.
+   */
+  const hint =
+    signToday.source === "lender_fixed"
+      ? `${who} gives this on every deal. Not yours to change or remove.`
+      : signToday.source === "above_cap"
+        ? signToday.capPpwCents == null
+          ? `${who} gives away whatever the system is priced above a cap, but no cap is set — Settings → Lenders.`
+          : `${who} hands back whatever the system is priced above ${usdc(signToday.capPpwCents)}/W — so the higher this deal is sold, the more comes back.`
+        : "Your own credit for signing today. Comes off what they net, never off the price.";
   return (
     <div
       className={cn(
@@ -405,9 +455,7 @@ function SignTodayField({
         >
           {SIGN_TODAY_LABEL}
         </label>
-        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-          Your own credit for signing today. Comes off what they net, never off the price.
-        </p>
+        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{hint}</p>
       </div>
       <div className="relative mt-0.5 shrink-0">
         <span
@@ -494,6 +542,14 @@ function Row({
     </div>
   );
 }
+
+/** Two decimals, because a cap is a rate per watt: 500 → "$5.00". */
+const usdc = (cents: number) =>
+  (cents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+  });
 
 const money = (cents: number, digits = 0) =>
   (cents / 100).toLocaleString("en-US", {

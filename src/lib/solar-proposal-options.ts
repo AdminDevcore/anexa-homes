@@ -1,6 +1,7 @@
 import type { FinanceProduct } from "@prisma/client";
 import { financeRowForProduct } from "./solar-finance-row";
 import { lenderProductLabel } from "./solar-lender-product";
+import type { SignTodayMode } from "./solar-sign-today";
 import type { ProposalAlternative, ProposalFinanceInput } from "./solar-proposal";
 import {
   basePpwFromSticker,
@@ -72,6 +73,15 @@ export type CatalogueProgramme = {
     /** The same rule, counted in batteries, for a job with no array. */
     maxFinalPricePerBatteryCents?: number | null;
     finalBatteryPriceMode?: FinalPpwMode;
+    /**
+     * What this partner hands back for signing today, and how it is arrived
+     * at. On the LENDER for the same reason the ceiling is, and carried into
+     * the menu because each column is priced under its own partner's rule —
+     * see `solar-sign-today`.
+     */
+    signTodayMode?: SignTodayMode;
+    signTodayFixedCents?: number | null;
+    signTodayCapPpwCents?: number | null;
   };
 };
 
@@ -334,6 +344,13 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
       lenderLogoUrl: p.lender.logoUrl,
       lenderApplyUrl: p.lender.applyUrl,
       lenderProductLabel: lenderProductLabel(p),
+      // THIS partner's closing credit, not the deal partner's. A menu row is
+      // an offer from whoever publishes it.
+      signTodayRule: {
+        mode: p.lender.signTodayMode ?? "none",
+        fixedCents: p.lender.signTodayFixedCents ?? null,
+        capPpwCents: p.lender.signTodayCapPpwCents ?? null,
+      },
       loanFactors:
         p.product === "loan"
           ? {

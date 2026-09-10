@@ -292,6 +292,11 @@ export async function generateProposalVersion(
             // directions, so a document generated without it would quote a
             // cheap deal under the price list its own lender publishes.
             finalPpwMode: true,
+            // What this partner hands back for signing today, and how it is
+            // arrived at — see `solar-sign-today`.
+            signTodayMode: true,
+            signTodayFixedCents: true,
+            signTodayCapPpwCents: true,
           },
         })
       : null;
@@ -504,6 +509,12 @@ export async function generateProposalVersion(
           // does not fund, in a document nobody can correct afterwards.
           maxFinalPpwCents: true,
           finalPpwMode: true,
+          // …and what it hands back for signing today. Frozen with the rest of
+          // the menu for the same reason: each column is an offer from
+          // whoever publishes it.
+          signTodayMode: true,
+          signTodayFixedCents: true,
+          signTodayCapPpwCents: true,
         },
       },
     },
@@ -624,22 +635,23 @@ export async function generateProposalVersion(
       grossPpwCents: finance.grossPpwCents,
       dealerFeePct: finance.dealerFeePct,
     },
-    programmes: programmes.map(
-      (p): CatalogueProgramme => ({
-        ...p,
-        lender: {
-          id: p.lender.id,
-          name: p.lender.name,
-          rank: p.lender.rank,
-          applyUrl: p.lender.applyUrl,
-          logoUrl: lenderLogoUrl(p.lender.id, p.lender.logoUpdatedAt),
-          maxFinalPpwCents: p.lender.maxFinalPpwCents,
-          finalPpwMode: p.lender.finalPpwMode,
-          maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
-          finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
-        },
-      })
-    ),
+    programmes: programmes.map((p): CatalogueProgramme => ({
+      ...p,
+      lender: {
+        id: p.lender.id,
+        name: p.lender.name,
+        rank: p.lender.rank,
+        applyUrl: p.lender.applyUrl,
+        logoUrl: lenderLogoUrl(p.lender.id, p.lender.logoUpdatedAt),
+        maxFinalPpwCents: p.lender.maxFinalPpwCents,
+        finalPpwMode: p.lender.finalPpwMode,
+        maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
+        finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
+        signTodayMode: p.lender.signTodayMode,
+        signTodayFixedCents: p.lender.signTodayFixedCents,
+        signTodayCapPpwCents: p.lender.signTodayCapPpwCents,
+      },
+    })),
     approvedLenderIds,
     design: { systemSizeKwDc: design.systemSizeKwDc },
     systemType: design.systemType,
@@ -828,10 +840,19 @@ export async function generateProposalVersion(
       energyCommunity: finance.claimEnergyCommunity,
       domesticContent: finance.claimDomesticContent,
     },
-    // The rep's own closing credit, as it stood when the document was made.
-    // Frozen with everything else: a credit offered for signing today is not
-    // one a rep can quietly take back off a proposal already sent.
-    signTodayCreditCents: finance.signTodayCreditCents,
+    // The closing credit, as it stood when the document was made. What the
+    // rep typed, plus the deal partner's own rule over it — the alternatives
+    // below each carry the rule of whoever publishes THAT programme. Frozen
+    // with everything else: a credit offered for signing today is not one a
+    // rep can quietly take back off a proposal already sent.
+    signTodayTypedCents: finance.signTodayCreditCents,
+    signTodayRule: dealLender
+      ? {
+          mode: dealLender.signTodayMode,
+          fixedCents: dealLender.signTodayFixedCents,
+          capPpwCents: dealLender.signTodayCapPpwCents,
+        }
+      : null,
     alternatives,
     // How the deal's own terms read in the menu. The catalogue row's own label
     // when it was quoted from one, so the option a homeowner picks is findable

@@ -1,4 +1,5 @@
 import type { FinanceProduct } from "@prisma/client";
+import type { SignTodayMode } from "@/lib/solar-sign-today";
 
 /**
  * The shapes the lenders screen is handed, and the parsers that turn what an
@@ -46,6 +47,14 @@ export type LenderRow = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is a ceiling or this partner's flat price. */
   finalPpwMode: "cap" | "flat";
+  /**
+   * What this partner hands back for signing today, and how it is arrived at.
+   * `none` — every lender until somebody sets a rule — leaves it to the rep to
+   * type on the deal. See `solar-sign-today`.
+   */
+  signTodayMode: SignTodayMode;
+  signTodayFixedCents: number | null;
+  signTodayCapPpwCents: number | null;
   /**
    * The least this partner's deals may leave the company per watt, cents,
    * before its cut. Null — nearly every lender — means no floor.
@@ -218,6 +227,23 @@ export function batteryPriceToCents(s: string): number | null | "invalid" {
 export const batteryPriceToDollars = (cents: number | null) =>
   cents == null ? "" : String(Math.round(cents / 100));
 
+/**
+ * A SIGN TODAY figure, typed in whole dollars.
+ *
+ * Its own converter for the same reason the battery one is: the range is
+ * $0–$100,000 and it starts at nothing. Blank means "this partner has no
+ * figure", which under a `fixed` rule is a half-configured partner the save
+ * refuses rather than a lender quietly giving away zero.
+ */
+export function signTodayToCents(s: string): number | null | "invalid" {
+  const t = s.trim().replace(/^\$/, "").replace(/,/g, "");
+  if (t === "") return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return "invalid";
+  const cents = Math.round(n * 100);
+  return cents >= 0 && cents <= 100_000_00 ? cents : "invalid";
+}
+
 /** Whole dollars, as this screen writes money everywhere else. */
 export const money = (cents: number) =>
   (cents / 100).toLocaleString("en-US", {
@@ -303,6 +329,9 @@ export function draftFrom(lender: LenderRow) {
     maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
     minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
     batteryRule: lender.batteryRule,
+    signTodayMode: lender.signTodayMode,
+    signTodayFixed: batteryPriceToDollars(lender.signTodayFixedCents),
+    signTodayCapPpw: ppwToDollars(lender.signTodayCapPpwCents),
   };
 }
 

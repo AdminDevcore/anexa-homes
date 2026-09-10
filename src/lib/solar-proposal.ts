@@ -14,6 +14,7 @@ import {
   type PurchaseBreakdown,
   type ThirdPartyBreakdown,
 } from "./solar-money";
+import { resolveSignToday, type SignTodayRule } from "@/lib/solar-sign-today";
 import {
   buildCreditLadder,
   CREDIT_RATES_DEFAULT,
@@ -1365,6 +1366,16 @@ export type ProposalAlternative = {
   loanFactors?: PaymentFactors | null;
   /** The rate-sheet row's own name, frozen for the funder's paperwork. */
   lenderProductLabel?: string | null;
+  /**
+   * THIS option's partner's sign-today rule.
+   *
+   * Per option rather than per document, because a menu is a menu of
+   * PARTNERS: one hands back a flat $1,000, the next gives away whatever the
+   * system is priced over its cap, and the cash column has no partner at all.
+   * One rule for the sheet would print one partner's offer under another's
+   * name. Absent means no rule, which falls to whatever the rep typed.
+   */
+  signTodayRule?: SignTodayRule | null;
 };
 
 /**
@@ -1406,8 +1417,10 @@ function priceOption(args: {
   creditClaims?: CreditClaims | null;
   creditIncentiveLabel?: string | null;
   creditDisclaimer?: string | null;
-  /** The closing credit typed on this deal, cents. The ladder's last rung. */
-  signTodayCreditCents?: number | null;
+  /** What the REP typed on the deal, cents. Only counts under no rule. */
+  signTodayTypedCents?: number | null;
+  /** This option's partner's rule, which decides whether that figure counts. */
+  signTodayRule?: SignTodayRule | null;
   /** When the document is being made — the date an effective date is read against. */
   now?: Date;
   assumptions: SolarAssumptions;
@@ -1498,6 +1511,22 @@ function priceOption(args: {
    * the price with the credits taken off it, and `buildCreditLadder` drops the
    * incentive row on its own rather than printing a zero.
    */
+  /**
+   * THE CLOSING CREDIT ON THIS OPTION'S PARTNER.
+   *
+   * Resolved per option and inside the pricing, because two of the three rules
+   * need figures only this block has: the cap is measured against the SYSTEM
+   * price — the array at sticker, adders and battery excluded — over the watts
+   * this option installs. Resolved outside, a menu would quote the deal
+   * lender's credit under every partner's name on it.
+   */
+  const signToday = resolveSignToday({
+    rule: args.signTodayRule,
+    systemPriceCents: purchase?.baseStickerCents ?? 0,
+    systemWatts: purchase?.systemWatts ?? 0,
+    typedCents: args.signTodayTypedCents,
+  });
+
   const creditLadder: CreditLadder | null = purchase
     ? buildCreditLadder({
         contractValueCents: documentPriceCents,
@@ -1506,7 +1535,7 @@ function priceOption(args: {
         claims: args.creditClaims,
         incentiveLabel: args.creditIncentiveLabel,
         disclaimer: args.creditDisclaimer,
-        signTodayCreditCents: args.signTodayCreditCents,
+        signTodayCreditCents: signToday.cents,
       })
     : null;
 
@@ -2007,13 +2036,15 @@ export function buildProposalSnapshot(args: {
   creditIncentiveLabel?: string | null;
   creditDisclaimer?: string | null;
   /**
-   * The rep's own closing credit on this deal, cents.
+   * What the REP typed as a closing credit on this deal, cents.
    *
-   * Document-wide like the rest of them, and for a stronger reason: the offer
-   * is "sign today", so it cannot be one figure on the option a household picks
-   * and another on the option beside it.
+   * Document-wide, but it is not the answer: each option resolves its OWN
+   * partner's rule over it, and a typed figure only survives on a partner that
+   * left the decision to the rep. See `solar-sign-today`.
    */
-  signTodayCreditCents?: number | null;
+  signTodayTypedCents?: number | null;
+  /** The QUOTED option's partner's rule. Alternatives carry their own. */
+  signTodayRule?: SignTodayRule | null;
   /**
    * The other ways this customer may pay, already resolved and authorised by
    * the caller. Empty is the ordinary case and reads exactly as it always did.
@@ -2089,7 +2120,10 @@ export function buildProposalSnapshot(args: {
     creditClaims: args.creditClaims ?? null,
     creditIncentiveLabel: args.creditIncentiveLabel ?? null,
     creditDisclaimer: args.creditDisclaimer ?? null,
-    signTodayCreditCents: args.signTodayCreditCents ?? null,
+    signTodayTypedCents: args.signTodayTypedCents ?? null,
+    // The quoted option's own partner. Each alternative overrides it below
+    // with the rule belonging to the partner publishing THAT programme.
+    signTodayRule: args.signTodayRule ?? null,
   };
 
   // The deal's own terms. This is the option the document is ABOUT: it stays at
@@ -2143,6 +2177,9 @@ export function buildProposalSnapshot(args: {
       lenderApplyUrl: alt.lenderApplyUrl ?? null,
       loanFactors: alt.loanFactors ?? null,
       lenderProductLabel: alt.lenderProductLabel ?? null,
+      // This column's partner, not the deal's. Cash carries none and falls to
+      // whatever the rep typed, which is the same line the shelf draws.
+      signTodayRule: alt.signTodayRule ?? null,
         now: args.now,
     });
     options.push({

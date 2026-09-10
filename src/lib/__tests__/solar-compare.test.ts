@@ -35,6 +35,10 @@ const loan = (over: Partial<OfferProduct> = {}): OfferProduct => ({
   lenderName: "Amos Capital Fund",
   label: "Amos 30 yr",
   finalPpwMode: "cap",
+  // No sign-today rule, which is every lender until somebody sets one.
+  signTodayMode: "none",
+  signTodayFixedCents: null,
+  signTodayCapPpwCents: null,
   product: "loan",
   aprPct: 4.99,
   termMonths: 300,

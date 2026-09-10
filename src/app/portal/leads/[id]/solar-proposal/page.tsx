@@ -99,48 +99,79 @@ export default async function SolarProposalBuilderPage({
     select: { lenderProductId: true },
   });
 
-  const [finance, settings, lenders, lenderProducts, proposals] = await Promise.all([
-    prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
-    getSolarSettings(user.companyId),
-    // Every lender, retired ones included: a deal that already names one has to
-    // keep showing it, or the select falls back to "— none —" and the next save
-    // strips a lender nobody meant to touch.
-    prisma.solarLender.findMany({
-      where: { companyId: user.companyId },
-      orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
-      select: {
-        id: true, name: true, isActive: true, portalUrl: true, creditInstructions: true,
-        logoUpdatedAt: true, maxFinalPpwCents: true, minBasePpwCents: true,
-        maxFinalPricePerBatteryCents: true, minBasePricePerBatteryCents: true,
-        finalBatteryPriceMode: true,
-        finalPpwMode: true,
-      },
-    }),
-    // EVERY lender's rate sheet, not just the chosen one's: the Financing step
-    // switches lender in the browser, and re-fetching a sheet per change would
-    // put a spinner between a rep and the terms they are quoting. Sellable rows,
-    // PLUS whatever this deal quotes even if it has since been retired.
-    prisma.solarLenderProduct.findMany({
-      where: {
-        companyId: user.companyId,
-        OR: [
-          { isActive: true },
-          ...(finance0?.lenderProductId ? [{ id: finance0.lenderProductId }] : []),
+  const [finance, settings, lenders, lenderProducts, proposals] =
+    await Promise.all([
+      prisma.solarFinance.findUnique({ where: { leadId: lead.id } }),
+      getSolarSettings(user.companyId),
+      // Every lender, retired ones included: a deal that already names one has to
+      // keep showing it, or the select falls back to "— none —" and the next save
+      // strips a lender nobody meant to touch.
+      prisma.solarLender.findMany({
+        where: { companyId: user.companyId },
+        orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          portalUrl: true,
+          creditInstructions: true,
+          logoUpdatedAt: true,
+          maxFinalPpwCents: true,
+          minBasePpwCents: true,
+          maxFinalPricePerBatteryCents: true,
+          minBasePricePerBatteryCents: true,
+          finalBatteryPriceMode: true,
+          finalPpwMode: true,
+          // How this partner's closing credit is arrived at — see
+          // `solar-sign-today`. Every column of the shelf resolves its own.
+          signTodayMode: true,
+          signTodayFixedCents: true,
+          signTodayCapPpwCents: true,
+        },
+      }),
+      // EVERY lender's rate sheet, not just the chosen one's: the Financing step
+      // switches lender in the browser, and re-fetching a sheet per change would
+      // put a spinner between a rep and the terms they are quoting. Sellable rows,
+      // PLUS whatever this deal quotes even if it has since been retired.
+      prisma.solarLenderProduct.findMany({
+        where: {
+          companyId: user.companyId,
+          OR: [
+            { isActive: true },
+            ...(finance0?.lenderProductId
+              ? [{ id: finance0.lenderProductId }]
+              : []),
+          ],
+        },
+        orderBy: [
+          { isActive: "desc" },
+          { product: "asc" },
+          { rank: "asc" },
+          { createdAt: "asc" },
         ],
-      },
-      orderBy: [{ isActive: "desc" }, { product: "asc" }, { rank: "asc" }, { createdAt: "asc" }],
-    }),
-    prisma.solarProposal.findMany({
-      where: { companyId: user.companyId, leadId: lead.id },
-      orderBy: { version: "desc" },
-      select: {
-        id: true, version: true, status: true, publicToken: true, supersededAt: true,
-        sentAt: true, viewedAt: true, signedAt: true, signerName: true, createdAt: true,
-        showComparison: true,
-        approvedAt: true, approvedFileId: true, approvedParFileId: true, approvedById: true,
-      },
-    }),
-  ]);
+      }),
+      prisma.solarProposal.findMany({
+        where: { companyId: user.companyId, leadId: lead.id },
+        orderBy: { version: "desc" },
+        select: {
+          id: true,
+          version: true,
+          status: true,
+          publicToken: true,
+          supersededAt: true,
+          sentAt: true,
+          viewedAt: true,
+          signedAt: true,
+          signerName: true,
+          createdAt: true,
+          showComparison: true,
+          approvedAt: true,
+          approvedFileId: true,
+          approvedParFileId: true,
+          approvedById: true,
+        },
+      }),
+    ]);
 
   /**
    * Which versions have two readings to file — the option the document opens on
@@ -374,6 +405,9 @@ export default async function SolarProposalBuilderPage({
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
+          signTodayMode: l.signTodayMode,
+          signTodayFixedCents: l.signTodayFixedCents,
+          signTodayCapPpwCents: l.signTodayCapPpwCents,
         }))}
         lenderId={design?.lenderId ?? null}
         lenderProducts={lenderProducts.map((p) => ({

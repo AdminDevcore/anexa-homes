@@ -1391,6 +1391,23 @@ const lenderSchema = z.object({
    * before this existed; `optional` says nothing at all.
    */
   batteryRule: z.enum(["optional", "warn", "required"]).optional(),
+  /**
+   * WHAT THIS PARTNER HANDS BACK FOR SIGNING TODAY — see `solar-sign-today`.
+   *
+   * `none` leaves the figure to the rep on the deal, `fixed` gives this
+   * partner's own figure on every deal written on it, `above_cap` gives away
+   * whatever the system was priced above the cap.
+   *
+   * The two figures are accepted and stored whatever the mode says, exactly as
+   * `finalPpwMode` is: a figure with no mode applying to it is inert, and
+   * clearing it on every mode change would make an admin retype a partner's
+   * credit to turn it back on. Bounded so a fat finger cannot write a
+   * seven-figure giveaway, and the cap shares the $0.50–$20.00/W band every
+   * other price per watt on this screen uses.
+   */
+  signTodayMode: z.enum(["none", "fixed", "above_cap"]).optional(),
+  signTodayFixedCents: z.number().int().min(0).max(100_000_00).nullable().optional(),
+  signTodayCapPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
   // WHAT THE PARTNER API IS TOLD. Which of the document's several true amounts
   // this partner underwrites, and what it means by a saving.
   submissionAmountBasis: z

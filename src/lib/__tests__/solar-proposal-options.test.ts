@@ -260,7 +260,7 @@ describe("the home-value claim is only made when a company makes it", () => {
  */
 describe("the sign today credit is frozen into the document", () => {
   it("carries the typed credit onto the quoted option's ladder", () => {
-    const s = build({ signTodayCreditCents: 1_500_00 });
+    const s = build({ signTodayTypedCents: 1_500_00 });
     const ladder = s.financing.creditLadder!;
     expect(ladder.signTodayCents).toBe(1_500_00);
     expect(ladder.signTodayLabel).toBe("Sign today credit");
@@ -275,16 +275,80 @@ describe("the sign today credit is frozen into the document", () => {
     // "Sign today" is an offer about the day, not about the product: quoting
     // it on the loan and not on the cash line beside it is an offer that
     // changes when the household picks differently.
-    const s = build({ alternatives: [CASH_ALT], signTodayCreditCents: 1_000_00 });
+    const s = build({ alternatives: [CASH_ALT], signTodayTypedCents: 1_000_00 });
     for (const o of s.options!) {
       expect(o.financing.creditLadder?.signTodayCents).toBe(1_000_00);
     }
   });
 
   it("leaves the price and the payment exactly where they were", () => {
-    const withCredit = build({ signTodayCreditCents: 2_000_00 }).financing;
+    const withCredit = build({ signTodayTypedCents: 2_000_00 }).financing;
     const without = build().financing;
     expect(withCredit.contractPriceCents).toBe(without.contractPriceCents);
     expect(withCredit.monthlyPaymentCents).toBe(without.monthlyPaymentCents);
+  });
+});
+
+/**
+ * ONE MENU, SEVERAL PARTNERS, SEVERAL CREDITS.
+ *
+ * The rule that matters here: a column's closing credit belongs to whoever
+ * publishes that column. Resolved once for the document, every card on the
+ * sheet would print the deal partner's offer under somebody else's name — and
+ * the sheet is frozen, so nobody could correct it afterwards.
+ */
+describe("the sign today credit is resolved per partner", () => {
+  it("gives the quoted option's partner's fixed figure, whatever the rep typed", () => {
+    const s = build({
+      signTodayTypedCents: 5_000_00,
+      signTodayRule: { mode: "fixed", fixedCents: 1_000_00, capPpwCents: null },
+    });
+    expect(s.financing.creditLadder?.signTodayCents).toBe(1_000_00);
+  });
+
+  it("derives it from the system price when the partner gives away the overage", () => {
+    // The fixture sells 10 kW at a $3.50/W sticker, so the system alone is
+    // $35,000. A partner capping at $3.00/W hands back the fifty cents a watt
+    // above it — $5,000 — and not a cent of the adders or the battery.
+    const s = build({
+      signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 300 },
+    });
+    const ladder = s.financing.creditLadder!;
+    expect(s.financing.basePriceCents).toBe(35_000_00);
+    expect(ladder.signTodayCents).toBe(5_000_00);
+  });
+
+  it("gives nothing under a cap the deal is priced below", () => {
+    const s = build({
+      signTodayTypedCents: 2_000_00,
+      // Far above anything this deal is sold at, so there is no overage — and
+      // the rep's typed figure does not sneak in under the partner's rule.
+      signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 1500 },
+    });
+    expect(s.financing.creditLadder?.signTodayCents).toBe(0);
+  });
+
+  it("lets each option in the menu carry its own partner's rule", () => {
+    const s = build({
+      signTodayTypedCents: 0,
+      signTodayRule: { mode: "fixed", fixedCents: 1_000_00, capPpwCents: null },
+      alternatives: [
+        { ...CASH_ALT, signTodayRule: { mode: "fixed", fixedCents: 250_00, capPpwCents: null } },
+      ],
+    });
+    const [quoted, cash] = s.options!;
+    expect(quoted.financing.creditLadder?.signTodayCents).toBe(1_000_00);
+    expect(cash.financing.creditLadder?.signTodayCents).toBe(250_00);
+  });
+
+  it("falls to what the rep typed on an option whose partner has no rule", () => {
+    const s = build({
+      signTodayTypedCents: 750_00,
+      signTodayRule: { mode: "none", fixedCents: null, capPpwCents: null },
+      alternatives: [CASH_ALT],
+    });
+    for (const o of s.options!) {
+      expect(o.financing.creditLadder?.signTodayCents).toBe(750_00);
+    }
   });
 });
