@@ -76,6 +76,8 @@ export function SolarEquipmentManager({
   lenders,
   canEdit,
   defaultBatteryQty,
+  autoBatteryQty,
+  batteryNightSharePct,
   initialItemId,
   initialTab,
 }: {
@@ -85,6 +87,8 @@ export function SolarEquipmentManager({
   canEdit: boolean;
   /** How many batteries a storage deal starts with — edited on the defaults panel. */
   defaultBatteryQty: number;
+  autoBatteryQty: boolean;
+  batteryNightSharePct: number;
   /** Read on the SERVER — see the note on the page. */
   initialItemId?: string | null;
   initialTab?: string | null;
@@ -298,6 +302,8 @@ export function SolarEquipmentManager({
           <DefaultsPanel
             items={items}
             defaultBatteryQty={defaultBatteryQty}
+            autoBatteryQty={autoBatteryQty}
+            batteryNightSharePct={batteryNightSharePct}
             canEdit={canEdit}
           />
         )}

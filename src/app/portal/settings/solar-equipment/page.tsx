@@ -59,6 +59,8 @@ export default async function SolarEquipmentPage({
         canEdit={can(user, "update", "Settings")}
         lenders={lenders}
         defaultBatteryQty={settings.defaultBatteryQty}
+        autoBatteryQty={settings.autoBatteryQty}
+        batteryNightSharePct={settings.batteryNightSharePct}
         initialItemId={one(params.item)}
         initialTab={one(params.tab)}
         items={items
