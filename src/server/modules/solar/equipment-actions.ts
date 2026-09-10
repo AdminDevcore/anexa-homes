@@ -45,6 +45,17 @@ const schema = z.object({
    * never picked up a count quoted and earned for a single unit.
    */
   batteryQty: z.number().int().min(1).max(20).optional(),
+  /**
+   * Hand the count back to auto-sizing.
+   *
+   * The way OUT of an override. `batteryQty` says "a person decided this" and
+   * latches the count against the sizing rule; without a way to unsay it, one
+   * stray click on the stepper would keep a deal on a hand-set count for the
+   * rest of its life, and the only remedy would be switching the company's
+   * whole sizing rule off. Writes no count of its own — the recompute at the
+   * end of this action works out the right one.
+   */
+  batteryQtyAuto: z.boolean().optional(),
 });
 
 export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema>) {
@@ -52,7 +63,7 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
   if (!can(user, "update", "Lead")) return fail("Not allowed.");
   const parsed = schema.safeParse(input);
   if (!parsed.success) return fail("That equipment could not be read.");
-  const { leadId, moduleId, inverterId, batteryId, batteryQty } = parsed.data;
+  const { leadId, moduleId, inverterId, batteryId, batteryQty, batteryQtyAuto } = parsed.data;
 
   const lead = await prisma.lead.findFirst({
     where: { companyId: user.companyId, id: leadId },
@@ -93,11 +104,23 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
    * count in this call always wins — that IS the rep deciding.
    */
   let startingQty: number | undefined;
+  /**
+   * Whether this call hands the count back to the sizing rule.
+   *
+   * Swapping the BATTERY does, and that is the interesting case. A rep who set
+   * four of one manufacturer's units has said something about that product —
+   * four of somebody else's, with a different capacity, is not what they
+   * decided, and honouring the number would leave the new battery quoted at a
+   * count nobody chose for it. So a product change re-arms auto-sizing, and the
+   * recompute at the end of this action works the count out afresh.
+   */
+  let unlatch = batteryQtyAuto === true;
   if (batteryQty === undefined && typeof batteryId === "string") {
     const current = await prisma.solarDesign.findUnique({
       where: { leadId },
       select: { batteryId: true, batteryQty: true },
     });
+    if (current?.batteryId && current.batteryId !== batteryId) unlatch = true;
     const hadOne = !!current?.batteryId && (current?.batteryQty ?? 0) > 0;
     if (!hadOne) {
       const settings = await prisma.solarSettings.findUnique({
@@ -119,7 +142,17 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
     // Taking the battery off the design takes its count with it. A count left
     // behind on a slot with nothing in it is the sort of thing that comes back
     // as "two batteries" the next time somebody picks one.
-    ...(batteryId === null ? { batteryQty: 0 } : {}),
+    ...(batteryId === null ? { batteryQty: 0, batteryQtySetByRep: false } : {}),
+    /**
+     * A typed count is a person's decision, and it survives from here on.
+     *
+     * Only where the count came in EXPLICITLY. `startingQty` is the company's
+     * own default landing on an empty slot — nobody chose it for this house, so
+     * it must not latch, or turning sizing on would find every deal in the
+     * pipeline already claiming to have been set by hand.
+     */
+    ...(batteryQty !== undefined ? { batteryQtySetByRep: true } : {}),
+    ...(unlatch ? { batteryQtySetByRep: false } : {}),
   };
   const saved = await prisma.solarDesign.upsert({
     where: { leadId },

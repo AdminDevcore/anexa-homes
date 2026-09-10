@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "./settings";
-import { resolveSizingModule, resolveDesignInverter } from "./sizing";
+import { resolveSizingModule, resolveDesignInverter, resolveAutoBatteryQty } from "./sizing";
 import { applyAutoAdders, recomputeAdderTotal } from "./adders";
 import { planeFor, resolvePlaneYields } from "./pvwatts";
 import { groundPlanesFor, resolveRoofPlanes } from "./roof-planes";
@@ -55,6 +55,11 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
         annualUsageKwh: true,
         usageAdjustmentKwh: true,
         mountType: true,
+        // For the battery count, which follows the production computed below.
+        systemType: true,
+        batteryId: true,
+        batteryQty: true,
+        batteryQtySetByRep: true,
       },
     }),
   ]);
@@ -156,6 +161,29 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
   const usageKwh = effectiveUsageKwh(design.annualUsageKwh, design.usageAdjustmentKwh);
   const computedOffset = usageKwh ? offsetPct(totals.year1ProductionKwh, usageKwh) : 0;
 
+  /**
+   * How many batteries the night now needs.
+   *
+   * HERE, because the production it is measured against is the number this
+   * function just worked out — a roof redrawn from 20,000 to 34,000 kWh is a
+   * bigger night to carry, and a count decided once when storage landed on the
+   * deal would still be quoting the smaller array's answer. This is the same
+   * argument the module and the inverter are resolved here for: the derived
+   * figures belong wherever the figures they derive from are written.
+   *
+   * Against the production TOTALS rather than the stored column, which has not
+   * been written yet. Null — the switch is off, a rep typed the count, nothing
+   * to size from — leaves `batteryQty` out of the update entirely.
+   */
+  const sizedBattery = await resolveAutoBatteryQty(companyId, {
+    systemType: design.systemType,
+    batteryId: design.batteryId,
+    batteryQtySetByRep: design.batteryQtySetByRep,
+    year1ProductionKwh: totals.year1ProductionKwh,
+    annualUsageKwh: design.annualUsageKwh,
+    usageAdjustmentKwh: design.usageAdjustmentKwh,
+  });
+
   await prisma.solarDesign.update({
     where: { leadId },
     data: {
@@ -181,6 +209,11 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
       yieldSource: totals.measuredArrays > 0 ? "pvwatts" : null,
       yieldStation: totals.measuredArrays > 0 ? station : null,
       yieldArrays: totals.measuredArrays,
+      // Only when it moved. Writing the same count back would put every storage
+      // design in the "updated" set on a recompute that changed nothing.
+      ...(sizedBattery && sizedBattery.qty !== design.batteryQty
+        ? { batteryQty: sizedBattery.qty }
+        : {}),
     },
   });
 
@@ -202,6 +235,14 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
     year1ProductionKwh: totals.year1ProductionKwh,
     offsetPct: computedOffset,
     measuredArrays: totals.measuredArrays,
+    /**
+     * The battery count auto-sizing settled on, or null when it did not run.
+     *
+     * Returned for the same reason `autoAdders` is: the number on the rep's
+     * screen changed without them typing anything, and on a storage deal that
+     * is money. The designer says what moved and what it was measured from.
+     */
+    battery: sizedBattery,
     /** How many arrays took their angles off the building, so the screen can say. */
     filledFromRoof: read.filled,
     /**

@@ -47,6 +47,17 @@ export type SolarSettingsView = SolarAssumptions & {
   /// gets WRITTEN on a design the first time a battery lands on it, and from
   /// there the ordinary equipment figures follow.
   defaultBatteryQty: number;
+  /// Size the count to the home's night load instead of quoting the flat
+  /// number above. See `autoBatteryCount` for the arithmetic and
+  /// `resolveAutoBatteryQty` for when it runs.
+  autoBatteryQty: boolean;
+  /// What share of a day's kWh the house draws after dark, %. The whole of
+  /// auto-sizing rests on it, and it is modelled rather than metered — which is
+  /// why the company states it instead of the code assuming it.
+  batteryNightSharePct: number;
+  /// How much more than its yearly average a house is assumed to draw while the
+  /// grid is down. See `wholeHomeBackup` for the arithmetic it feeds.
+  backupOutageDrawFactor: number;
   /// What a battery is assumed to shift, and what it loses doing it.
   ///
   /// NOT SolarAssumptions either, because those are the array's: degradation,
@@ -86,6 +97,12 @@ export const CREDIT_DEFAULTS = {
 /// What a company that has never opened the settings page assumes about a
 /// battery. Mirrors the column defaults in the schema, for the same reason
 /// DEFAULT_BATTERY_QTY does.
+/// The margin over a home's yearly average that a company which has never
+/// opened the settings page quotes an outage at. Mirrors the column default,
+/// for the same reason DEFAULT_BATTERY_QTY does: a company with no settings row
+/// and one with an untouched one are the same company.
+export const DEFAULT_OUTAGE_DRAW_FACTOR = 1.3;
+
 export const TOU_DEFAULTS = {
   touPeakSharePct: 30,
   touCyclesPerDay: 1,
@@ -98,6 +115,15 @@ export const TOU_DEFAULTS = {
 /// with an untouched one are the same company.
 export const DEFAULT_BATTERY_QTY = 2;
 
+/// What a company that has never opened the settings page does about sizing:
+/// nothing. Off, so the flat count above is what every storage deal quotes and
+/// this feature changes no number until somebody turns it on. Mirrors the
+/// column defaults, for the same reason DEFAULT_BATTERY_QTY does.
+export const AUTO_BATTERY_DEFAULTS = {
+  autoBatteryQty: false,
+  batteryNightSharePct: 55,
+} as const;
+
 export async function getSolarSettings(companyId: string): Promise<SolarSettingsView> {
   const row = await prisma.solarSettings.findUnique({ where: { companyId } });
   if (!row) {
@@ -106,6 +132,8 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
       targetNetPpwCents: null,
       homeValueUpliftPct: 0,
       defaultBatteryQty: DEFAULT_BATTERY_QTY,
+      backupOutageDrawFactor: DEFAULT_OUTAGE_DRAW_FACTOR,
+      ...AUTO_BATTERY_DEFAULTS,
       ...TOU_DEFAULTS,
       ...CREDIT_DEFAULTS,
     };
@@ -123,6 +151,9 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     targetNetPpwCents: row.targetNetPpwCents,
     homeValueUpliftPct: row.homeValueUpliftPct,
     defaultBatteryQty: row.defaultBatteryQty,
+    backupOutageDrawFactor: row.backupOutageDrawFactor,
+    autoBatteryQty: row.autoBatteryQty,
+    batteryNightSharePct: row.batteryNightSharePct,
     touPeakSharePct: row.touPeakSharePct,
     touCyclesPerDay: row.touCyclesPerDay,
     touRoundTripEfficiency: row.touRoundTripEfficiency,

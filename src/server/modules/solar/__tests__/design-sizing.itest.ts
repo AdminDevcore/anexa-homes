@@ -313,7 +313,11 @@ describe("the default battery follows what the deal is quoting", () => {
       resolveDesignBattery(companyId, "pv", theirs.id, 2)
     );
 
-    expect(patch).toEqual({ batteryId: null, batteryQty: 0 });
+    // The rep's own count goes with it. A deal that comes back to storage
+    // later is a fresh decision about storage, and honouring a count typed
+    // against a battery long since removed would lock the new one out of
+    // auto-sizing for a number nobody remembers choosing.
+    expect(patch).toEqual({ batteryId: null, batteryQty: 0, batteryQtySetByRep: false });
   });
 
   it("writes nothing at all on a solar deal that never had one", async () => {

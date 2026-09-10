@@ -373,7 +373,6 @@ model Company {
   solarEquipment           SolarEquipment[]
   solarProviders           SolarProvider[]
   solarDesigns             SolarDesign[]
-  solarBackupProfiles      SolarBackupProfile[]
   solarFinance             SolarFinance[]
   creditApplications       CreditApplication[]
   solarProposals           SolarProposal[]
@@ -3348,9 +3347,57 @@ model SolarSettings {
   ///
   /// Only ever applied to a design with NO battery on it — swapping a chosen
   /// battery for another model keeps whatever quantity a rep deliberately set.
+  ///
+  /// STILL LOAD-BEARING with `autoBatteryQty` on: it is what a deal starts with
+  /// in the window before the figures auto-sizing needs exist at all — storage
+  /// set on a deal whose Energy step is still blank has neither production nor
+  /// usage to size from. The count corrects itself on the first recompute that
+  /// has something to work with.
   defaultBatteryQty Int @default(2)
 
+  /// Size the battery count to the home's night load instead of quoting a flat
+  /// `defaultBatteryQty` on every job.
+  ///
+  ///     night kWh/day = year-1 production ÷ 365 × batteryNightSharePct
+  ///     batteries     = ceil(night kWh/day ÷ the battery's usable kWh)
+  ///
+  /// The count then FOLLOWS the array: a roof redrawn from 20,000 to 34,000
+  /// kWh moves the storage with it, which a flat two never did. A rep who types
+  /// their own count keeps it — see `SolarDesign.batteryQtySetByRep`.
+  ///
+  /// Off by default, because turning it on changes what every storage deal in
+  /// the pipeline quotes and that is a decision somebody makes, not one that
+  /// arrives with a deploy.
+  autoBatteryQty       Boolean @default(false)
+  /// What share of a day's kilowatt-hours the house draws after dark, %.
+  ///
+  /// The whole of auto-sizing rests on this one number and it is MODELLED, not
+  /// metered — which is exactly why it is a company decision on a settings
+  /// screen rather than a constant in the sizing code. Same discipline as
+  /// `touPeakSharePct` below, and the same reason.
+  batteryNightSharePct Float   @default(55)
+
   // ── Storage assumptions ─────────────────────────────────────────────────
+  /// How much more than its yearly average a house is assumed to draw while the
+  /// grid is down, as a multiplier.
+  ///
+  ///     average W = the deal's annual kWh × 1000 ÷ 8760
+  ///     outage W  = average × this
+  ///
+  /// REPLACED the company's list of named backup load profiles, which sold
+  /// "Essentials / Essentials + AC / Whole home" as coverage tiers. Every
+  /// install here is whole-home backup, so the tiers described a product nobody
+  /// offers — and one company-wide wattage quoted a condo and a four-bedroom
+  /// house the same hours off the same stack. The home's own usage is already
+  /// on the deal and is a better divisor than a number typed once in Settings.
+  ///
+  /// Above 1 because an outage is not an average moment: the power goes out in
+  /// a heatwave with the AC running, and dividing by the bare average would
+  /// overpromise. MODELLED, not metered, which is exactly why the company states
+  /// it and every document carries the figure it was worked out from — the same
+  /// discipline as `touPeakSharePct` below.
+  backupOutageDrawFactor Float @default(1.3)
+
   /// What share of a day's kWh falls inside the peak window, %.
   ///
   /// MODELLED, not measured, and the softest number in a storage quote — which
@@ -3455,6 +3502,27 @@ enum SolarSystemType {
   pv
   pv_storage
   storage
+}
+
+/// How a partner's SIGN TODAY CREDIT is arrived at.
+///
+/// The credit itself is not the lender's money — it comes off what the
+/// household nets, never off the price, and the partner funds the same
+/// contract either way. What differs partner by partner is what we are
+/// permitted to hand back, and these are the three answers.
+enum SolarSignTodayMode {
+  /// NO RULE, and the default: the rep types whatever he is offering on the
+  /// deal, which is exactly what every lender did before this column existed.
+  none
+  /// A FIGURE THIS PARTNER GIVES. Automatic on every deal written on it, not
+  /// editable and not removable — it is the partner's own offer, not the
+  /// rep's, and a rep who could switch it off could quietly keep it.
+  fixed
+  /// WHATEVER THE SYSTEM IS PRICED ABOVE A CAP. Derived, never typed: price a
+  /// deal above the partner's figure and the excess is what the household is
+  /// handed back for signing today. Priced at or under it, there is nothing to
+  /// give and no row is shown.
+  above_cap
 }
 
 /// How a partner's stated price per watt behaves.
@@ -3677,6 +3745,21 @@ model SolarLender {
   /// SolarLenderBatteryRule. `warn` is the default and is what every lender did
   /// before the column existed.
   batteryRule SolarLenderBatteryRule @default(warn)
+
+  /// How the sign today credit is arrived at on this partner's deals -- see
+  /// SolarSignTodayMode. `none` is the default, and leaves the per-deal box
+  /// exactly as it was.
+  signTodayMode        SolarSignTodayMode @default(none)
+  /// `fixed` mode: what this partner gives, in cents. 150000 = $1,500.
+  signTodayFixedCents  Int?
+  /// `above_cap` mode: the cap, in cents per installed watt. 500 = $5.00/W.
+  ///
+  /// MEASURED ON THE SYSTEM PRICE — the array at sticker, fee included, adders
+  /// and battery excluded — because those two are work and hardware the
+  /// household is being charged for, not margin anybody can give away. A cap
+  /// read against the whole contract would turn a $120,000 battery into a
+  /// $120,000 discount.
+  signTodayCapPpwCents Int?
 
   /// Where YOUR team runs credit for this partner — the dealer portal login.
   /// Rep-facing only: it never reaches a customer-facing document.
@@ -4341,6 +4424,19 @@ model SolarDesign {
   batteryId               String?
   battery                 SolarEquipment? @relation("DesignBattery", fields: [batteryId], references: [id], onDelete: SetNull)
   batteryQty              Int             @default(0)
+  /// A person chose this count, so auto-sizing must not take it back.
+  ///
+  /// Only meaningful when `SolarSettings.autoBatteryQty` is on. Without it the
+  /// rep's own number is not an override at all: the next roof edit recomputes
+  /// production, re-derives the count and silently overwrites it, and the rep's
+  /// only clue is that a battery they added is gone by the time the customer
+  /// opens the proposal.
+  ///
+  /// CLEARED when the battery PRODUCT changes, because the count was a decision
+  /// about a different unit — "four Powerwalls" is not an instruction about
+  /// four of somebody else's battery. Also cleared when the deal goes back to
+  /// panels only, along with the battery itself.
+  batteryQtySetByRep      Boolean         @default(false)
   systemSizeKwDc          Float           @default(0)
   systemSizeKwAc          Float           @default(0)
   year1ProductionKwh      Int             @default(0)
@@ -5215,29 +5311,3 @@ model DealFeedPost {
   @@index([companyId, leadId, createdAt])
   @@map("deal_feed_posts")
 }
-
-/// A named load a battery might be asked to carry, so backup hours are DERIVED
-/// rather than typed.
-///
-/// Rank-ordered, and that order is load-bearing: the customer's cover headlines
-/// the first row, which saves the design a "which one do I headline" column and
-/// a second place for the same fact to be kept in sync.
-model SolarBackupProfile {
-  id        String   @id @default(uuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  /// Isolated per vertical: this row belongs to exactly one workspace.
-  vertical  Vertical @default(solar)
-  name      String
-  /// What is being backed up, watts. Hours = usable kWh ÷ (this ÷ 1000).
-  loadWatts Int
-  rank      Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([companyId, name])
-  @@index([companyId, isActive])
-  @@map("solar_backup_profiles")
-}
-

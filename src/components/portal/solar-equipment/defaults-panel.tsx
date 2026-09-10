@@ -4,9 +4,18 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Star } from "lucide-react";
-import { Panel, SaveBar, SelectField, NumField, Hint, useDraft } from "@/components/portal/settings-kit";
+import {
+  Panel,
+  SaveBar,
+  SelectField,
+  NumField,
+  ToggleRow,
+  Hint,
+  useDraft,
+} from "@/components/portal/settings-kit";
 import { PanelHeader } from "@/components/portal/settings-kit/panel-header";
 import { setSolarEquipmentDefaultsAction } from "@/server/modules/solar/actions";
+import { autoBatteryCount } from "@/lib/solar-storage";
 import { KINDS, itemName, type Item } from "./types";
 
 /** The "nothing chosen" option — `<select>` has no null, so it needs a value. */
@@ -35,11 +44,16 @@ const NONE = "__none__";
 export function DefaultsPanel({
   items,
   defaultBatteryQty,
+  autoBatteryQty,
+  batteryNightSharePct,
   canEdit,
 }: {
   /** The whole hardware catalogue — retired rows included, so a retired default is visible. */
   items: Item[];
   defaultBatteryQty: number;
+  /** Size the count to each home's night load rather than quoting the flat one. */
+  autoBatteryQty: boolean;
+  batteryNightSharePct: number;
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -57,6 +71,8 @@ export function DefaultsPanel({
     inverter: currentFor("inverter")?.id ?? NONE,
     battery: currentFor("battery")?.id ?? NONE,
     qty: String(defaultBatteryQty),
+    auto: autoBatteryQty,
+    night: String(batteryNightSharePct),
   });
 
   /**
@@ -78,7 +94,16 @@ export function DefaultsPanel({
   ];
 
   const qty = Number(draft.qty);
-  const qtyBad = draft.battery !== NONE && (!Number.isInteger(qty) || qty < 1 || qty > 20);
+  const night = Number(draft.night);
+  const hasBattery = draft.battery !== NONE;
+  // Only the field that is on screen can block the Save. The flat count is not
+  // shown while sizing is on, and a stale value in a hidden input must not be
+  // what stops somebody saving a switch they can see.
+  const qtyBad =
+    hasBattery && !draft.auto && (!Number.isInteger(qty) || qty < 1 || qty > 20);
+  const nightBad =
+    hasBattery && draft.auto && (!Number.isFinite(night) || night < 5 || night > 95);
+  const blocked = qtyBad || nightBad;
 
   const set_ = <K extends keyof typeof draft>(k: K, v: (typeof draft)[K]) => {
     if (!canEdit) return;
@@ -86,14 +111,18 @@ export function DefaultsPanel({
   };
 
   async function save() {
-    if (qtyBad) return;
+    if (blocked) return;
     setBusy(true);
     try {
       const res = await setSolarEquipmentDefaultsAction({
         moduleId: draft.module === NONE ? null : draft.module,
         inverterId: draft.inverter === NONE ? null : draft.inverter,
         batteryId: draft.battery === NONE ? null : draft.battery,
-        ...(draft.battery === NONE ? {} : { defaultBatteryQty: qty }),
+        // The flat count is still written while sizing is on. It is what a deal
+        // starts with in the window before there are any figures to size from,
+        // and clearing it here would put those deals on a silent "1".
+        ...(hasBattery ? { defaultBatteryQty: qty, autoBatteryQty: draft.auto } : {}),
+        ...(hasBattery && draft.auto ? { batteryNightSharePct: night } : {}),
       });
       if (!res.ok) return toast.error(res.error, { duration: 9000 });
       toast.success("Defaults saved");
@@ -157,23 +186,67 @@ export function DefaultsPanel({
             hint="Lands on a deal the moment it is set to Solar + Storage or Storage only, and comes off again if it goes back to Solar. Never on a deal quoting panels only, and never over a battery a rep has already chosen."
           />
 
-          {draft.battery !== NONE && (
-            <div className="max-w-[16rem]">
-              <NumField
-                label="Batteries per system"
-                value={draft.qty}
-                onChange={(v) => set_("qty", v)}
-                step="1"
-                hint={
-                  chosen("battery", draft.battery)
-                    ? `How many ${itemName(chosen("battery", draft.battery)!)} a storage deal starts with. A rep can change it on any deal.`
-                    : "How many a storage deal starts with. A rep can change it on any deal."
+          {hasBattery && (
+            <div className="space-y-4 border-t border-border pt-4">
+              <ToggleRow
+                label="Size the count to each home"
+                description="How many batteries a deal quotes is worked out from what that house uses after dark, instead of the same number on every job."
+                checked={draft.auto}
+                onChange={(v) => set_("auto", v)}
+                disabled={!canEdit}
+                why={
+                  <>
+                    A flat count is right for the house it was chosen for and
+                    wrong for the one next door. What a battery has to do is
+                    carry the night, and the night is a property of the home —
+                    so with this on, a bigger roof quotes more storage and a
+                    small one quotes less, without a rep working anything out.
+                  </>
                 }
               />
-              {qtyBad && (
-                <Hint className="mt-1.5 text-amber-600 dark:text-amber-400">
-                  Between 1 and 20. Zero batteries is not a system anybody can build.
-                </Hint>
+
+              {draft.auto ? (
+                <>
+                  <div className="max-w-[16rem]">
+                    <NumField
+                      label="Used after dark %"
+                      value={draft.night}
+                      onChange={(v) => set_("night", v)}
+                      step="1"
+                      hint="What share of a day's power the house draws once the sun is down. The batteries have to cover it."
+                    />
+                    {nightBad && (
+                      <Hint className="mt-1.5 text-amber-600 dark:text-amber-400">
+                        Between 5% and 95%. A house draws neither nothing nor
+                        everything after dark.
+                      </Hint>
+                    )}
+                  </div>
+                  <WorkedExample
+                    battery={chosen("battery", draft.battery)}
+                    nightSharePct={night}
+                    flatQty={qty}
+                  />
+                </>
+              ) : (
+                <div className="max-w-[16rem]">
+                  <NumField
+                    label="Batteries per system"
+                    value={draft.qty}
+                    onChange={(v) => set_("qty", v)}
+                    step="1"
+                    hint={
+                      chosen("battery", draft.battery)
+                        ? `How many ${itemName(chosen("battery", draft.battery)!)} a storage deal starts with. A rep can change it on any deal.`
+                        : "How many a storage deal starts with. A rep can change it on any deal."
+                    }
+                  />
+                  {qtyBad && (
+                    <Hint className="mt-1.5 text-amber-600 dark:text-amber-400">
+                      Between 1 and 20. Zero batteries is not a system anybody can build.
+                    </Hint>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -193,10 +266,84 @@ export function DefaultsPanel({
           onSave={() => void save()}
           onDiscard={reset}
           what="your default equipment"
-          disabled={qtyBad}
-          blockedReason={qtyBad ? "Batteries per system must be between 1 and 20." : undefined}
+          disabled={blocked}
+          blockedReason={
+            qtyBad
+              ? "Batteries per system must be between 1 and 20."
+              : nightBad
+                ? "The share used after dark must be between 5% and 95%."
+                : undefined
+          }
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The rule, worked through on a system the reader recognises.
+ *
+ * A percentage and a division are not something anybody can picture, and the
+ * question this panel has to answer before somebody flips the switch is "what
+ * will my deals actually quote?". So it is answered directly, on three system
+ * sizes spanning the ordinary range, with the arithmetic shown rather than
+ * asserted — including the count the flat setting would have quoted, because
+ * the whole decision is what changes.
+ *
+ * Sizes chosen as landmarks, not sampled from the pipeline: a table that moved
+ * whenever a deal was sold would be a different explanation of the same rule
+ * every time somebody opened the screen.
+ */
+function WorkedExample({
+  battery,
+  nightSharePct,
+  flatQty,
+}: {
+  battery: Item | null;
+  nightSharePct: number;
+  flatQty: number;
+}) {
+  // Nothing to work through until the reader can see which battery it is
+  // dividing by, and what that battery holds.
+  if (!battery?.ratingW || !(battery.ratingW > 0)) return null;
+  if (!Number.isFinite(nightSharePct) || nightSharePct < 5 || nightSharePct > 95) return null;
+
+  const perUnitKwh = battery.ratingW / 1000;
+  const rows = [12_000, 20_000, 34_000].map((basisKwh) => {
+    const sized = autoBatteryCount({ basisKwh, nightSharePct, batteryRatingWh: battery.ratingW });
+    return { basisKwh, sized };
+  });
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <p className="text-xs font-medium">
+        {`What that quotes, on ${itemName(battery)} at ${perUnitKwh.toLocaleString()} kWh each`}
+      </p>
+      <table className="mt-2 w-full text-xs tabular-nums">
+        <thead className="text-muted-foreground">
+          <tr className="text-left">
+            <th className="font-normal">A year of power</th>
+            <th className="font-normal">Night load</th>
+            <th className="font-normal">Batteries</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ basisKwh, sized }) => (
+            <tr key={basisKwh} className="border-t border-border/60">
+              <td className="py-1">{`${basisKwh.toLocaleString()} kWh`}</td>
+              <td className="py-1">
+                {sized ? `${sized.nightKwhPerDay.toFixed(1)} kWh a night` : "—"}
+              </td>
+              <td className="py-1 font-medium">
+                {sized ? `${sized.qty} · ${sized.coveredKwh.toLocaleString()} kWh` : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Hint className="mt-2">
+        {`Rounded up, always — a part of a battery is not something anybody installs. Today every one of these deals quotes ${flatQty}.`}
+      </Hint>
     </div>
   );
 }

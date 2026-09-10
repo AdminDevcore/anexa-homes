@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
-import { DEFAULT_BATTERY_QTY } from "./settings";
+import { autoBatteryCount, autoBatteryBasisKwh, type AutoBatterySizing } from "@/lib/solar-storage";
+import { AUTO_BATTERY_DEFAULTS, DEFAULT_BATTERY_QTY } from "./settings";
 
 /**
  * Which panel a design is sized from.
@@ -119,13 +120,30 @@ export async function resolveDesignBattery(
   companyId: string,
   systemType: "pv" | "pv_storage" | "storage",
   existingBatteryId: string | null,
-  existingBatteryQty: number
-): Promise<{ batteryId?: string | null; batteryQty?: number }> {
+  existingBatteryQty: number,
+  /**
+   * The figures auto-sizing needs, when the caller has them.
+   *
+   * Optional so the rule below is unchanged for a caller that does not: no
+   * figures means no auto-sizing, and the company's flat count lands exactly as
+   * it always did.
+   */
+  figures?: {
+    year1ProductionKwh: number;
+    annualUsageKwh: number | null;
+    usageAdjustmentKwh: number;
+  }
+): Promise<{ batteryId?: string | null; batteryQty?: number; batteryQtySetByRep?: boolean }> {
   if (systemType === "pv") {
     // Already empty is already right — and writing nothing keeps a design that
     // never had storage out of the "changed" set entirely.
+    //
+    // The rep's own count goes with it. A deal coming back to storage later is
+    // a fresh decision about storage, and honouring a count typed against a
+    // battery that has since been taken off would lock the new one out of
+    // auto-sizing for a number nobody remembers choosing.
     return existingBatteryId || existingBatteryQty > 0
-      ? { batteryId: null, batteryQty: 0 }
+      ? { batteryId: null, batteryQty: 0, batteryQtySetByRep: false }
       : {};
   }
 
@@ -143,8 +161,98 @@ export async function resolveDesignBattery(
   ]);
   if (!battery) return {};
 
+  const flat = Math.max(1, settings?.defaultBatteryQty ?? DEFAULT_BATTERY_QTY);
+
+  /**
+   * Size it to the night on the way in, so the FIRST count a rep sees is right.
+   *
+   * Leaving it to the next recompute would work — nothing about this deal is
+   * final yet — but it would put the company's flat two on the screen first and
+   * change it under the rep a moment later, which reads as a bug whichever
+   * number turns out to be correct. Null falls through to the flat count, which
+   * is the honest answer on a deal that has no figures to size from yet.
+   */
+  const sized = figures
+    ? await resolveAutoBatteryQty(companyId, {
+        systemType,
+        batteryId: battery.id,
+        batteryQtySetByRep: false,
+        ...figures,
+      })
+    : null;
+
   return {
     batteryId: battery.id,
-    batteryQty: Math.max(1, settings?.defaultBatteryQty ?? DEFAULT_BATTERY_QTY),
+    batteryQty: sized?.qty ?? flat,
   };
+}
+
+/**
+ * What the battery COUNT should be on a deal that auto-sizes.
+ *
+ * The flat "two batteries" a company sets is an answer to the wrong question.
+ * Two is right for the house it was chosen for and wrong for the one next door,
+ * because what a battery has to do is carry the night — and the night is a
+ * property of the home's own consumption, not of the company's price list. So
+ * with the switch on, the count is DERIVED:
+ *
+ *     night kWh/day = the year's kWh ÷ 365 × the company's night share
+ *     batteries     = ceil(night kWh/day ÷ this battery's usable kWh)
+ *
+ * WHICH kWh depends on what the deal sells. A solar-plus-storage deal is sized
+ * off its PRODUCTION, because that is the energy the battery is being asked to
+ * time-shift — and a 60%-offset array cannot charge storage for a night it
+ * never made the power for. A storage-only deal makes no kilowatt-hours at all,
+ * so it is sized off what the house USES, adders included. Sizing that deal off
+ * production would quote one battery to every house on the street.
+ *
+ * Returns null — leave the count alone — in every case where the answer would
+ * be a guess:
+ *
+ *   - the switch is off                → the flat default is the company's answer
+ *   - the deal quotes panels only      → there is no battery to count
+ *   - the slot is empty                → nothing to size
+ *   - a REP TYPED THE COUNT            → their number is the answer, not ours
+ *   - the catalogue has no capacity    → a battery with no kWh cannot be divided into
+ *   - no production and no usage yet   → a brand-new deal; the next recompute
+ *                                        will have something to work with
+ *
+ * `SolarSettings` and `SolarEquipment` are SCOPED models, so callers outside a
+ * portal session must wrap this in `runInVertical("solar", …)`.
+ */
+export async function resolveAutoBatteryQty(
+  companyId: string,
+  design: {
+    systemType: "pv" | "pv_storage" | "storage";
+    batteryId: string | null;
+    batteryQtySetByRep?: boolean;
+    year1ProductionKwh: number;
+    annualUsageKwh: number | null;
+    usageAdjustmentKwh: number;
+  }
+): Promise<AutoBatterySizing | null> {
+  if (design.systemType === "pv") return null;
+  if (!design.batteryId) return null;
+  if (design.batteryQtySetByRep) return null;
+
+  const settings = await prisma.solarSettings.findUnique({
+    where: { companyId },
+    select: { autoBatteryQty: true, batteryNightSharePct: true },
+  });
+  const autoOn = settings?.autoBatteryQty ?? AUTO_BATTERY_DEFAULTS.autoBatteryQty;
+  if (!autoOn) return null;
+
+  const battery = await prisma.solarEquipment.findFirst({
+    where: { companyId, id: design.batteryId, kind: "battery" },
+    select: { ratingW: true },
+  });
+  if (!battery) return null;
+
+  return autoBatteryCount({
+    // Production on a deal that has an array, usage on one that does not —
+    // see `autoBatteryBasisKwh`, which the deal screen reads too.
+    basisKwh: autoBatteryBasisKwh(design),
+    nightSharePct: settings?.batteryNightSharePct ?? AUTO_BATTERY_DEFAULTS.batteryNightSharePct,
+    batteryRatingWh: battery.ratingW,
+  });
 }
