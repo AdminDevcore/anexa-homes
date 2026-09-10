@@ -182,7 +182,7 @@ export function CreditClaimsCard({
       lenderName={lenderName}
       onSignChange={setSignDraft}
       onSignCommit={commitSign}
-      note="This is what the proposal's tax-credit switch claims on their behalf. Neither the credits nor the closing credit change the price or the payment they were quoted."
+      note="This is what the proposal claims on their behalf, and the payment is quoted on what is left. Switching one off raises the payment. Neither these nor the closing credit change the PRICE of the system."
     />
   );
 
@@ -206,12 +206,12 @@ export function CreditClaimsCard({
       <div className="grid gap-5 p-4 lg:grid-cols-2">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">
-            What the switch shows
+            What the payment is quoted on
           </p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            The proposal quotes the price and payment below. Its tax-credit switch shows this
-            same deal with the credits already applied — the customer is never quoted the lower
-            figure by default.
+            The proposal opens with these credits applied, so the payment is worked out on the
+            net cost below — not on the full price. Its tax-credit switch shows the same deal
+            with nothing claimed, which is the higher payment.
           </p>
           {ladder ? (
             <dl className="mt-3 space-y-1 text-sm">
@@ -238,8 +238,8 @@ export function CreditClaimsCard({
             </dl>
           ) : (
             <p className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-              No credit is being claimed on this deal, so the proposal shows the price and the
-              payment and offers no switch at all.
+              No credit is being claimed on this deal, so the payment is quoted on the whole
+              price and the proposal offers no switch at all.
             </p>
           )}
         </div>

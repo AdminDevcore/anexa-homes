@@ -87,8 +87,12 @@ export function ChapterPay({
               was the third time the same sentence appeared on the sheet. No
               caption replaced it either — see the note beside the headline. */}
           {/* The paydown warning. It is the single most consequential sentence
-              on this sheet, and it sits beside the two figures it is about. */}
-          {f.loanPaydownCents != null && (
+              on this sheet, and it sits beside the two figures it is about —
+              which is why it goes when they do. With the credits applied there
+              is no pair: the household is quoted one payment on what is left of
+              the contract, and the sheet with the higher figure is the one the
+              tax-credit switch produces. */}
+          {!credits?.on && f.loanPaydownCents != null && (
             <p className="break-inside-avoid rounded-xl border border-amber-500/40 bg-amber-50 p-3.5 text-[0.8rem] leading-relaxed text-amber-900">
               <strong className="font-semibold">Read this one twice:</strong> the lower payment
               assumes the paydown shown is applied to the loan by the month stated. If it is not,
@@ -214,29 +218,37 @@ export function ChapterPay({
       {/* The payment if the paydown is never made, directly beneath the one
           that assumes it is. Printing only the low figure is the most
           misleading thing a solar document can do — a customer who never
-          applies the credit finds out from a bank statement. */}
-      {(f.loanMonthlyWithoutPaydownCents != null || f.loanPaydownCents != null) && (
-        <div className="mt-6">
-          <SpecList
-            items={[
-              [
-                f.loanPaydownMonths != null
-                  ? `Monthly if the paydown is not made by month ${f.loanPaydownMonths}`
-                  : "Monthly without the paydown",
-                f.loanMonthlyWithoutPaydownCents != null
-                  ? usd(f.loanMonthlyWithoutPaydownCents, 2)
-                  : null,
-              ],
-              [
-                f.loanPaydownMonths != null
-                  ? `Paydown due by month ${f.loanPaydownMonths}`
-                  : "Paydown",
-                f.loanPaydownCents != null ? usd(f.loanPaydownCents) : null,
-              ],
-            ]}
-          />
-        </div>
-      )}
+          applies the credit finds out from a bank statement.
+
+          ONLY ON THE UNCREDITED READING. Both figures here were frozen against
+          the WHOLE contract, and a programme's paydown IS the federal credit —
+          so with the credits already inside the principal above, "if the
+          paydown is not made" quotes a payment on a balance this sheet is not
+          describing. That question is what the tax-credit switch answers now,
+          and it answers it for the whole document rather than in one row. */}
+      {!credits?.on &&
+        (f.loanMonthlyWithoutPaydownCents != null || f.loanPaydownCents != null) && (
+          <div className="mt-6">
+            <SpecList
+              items={[
+                [
+                  f.loanPaydownMonths != null
+                    ? `Monthly if the paydown is not made by month ${f.loanPaydownMonths}`
+                    : "Monthly without the paydown",
+                  f.loanMonthlyWithoutPaydownCents != null
+                    ? usd(f.loanMonthlyWithoutPaydownCents, 2)
+                    : null,
+                ],
+                [
+                  f.loanPaydownMonths != null
+                    ? `Paydown due by month ${f.loanPaydownMonths}`
+                    : "Paydown",
+                  f.loanPaydownCents != null ? usd(f.loanPaydownCents) : null,
+                ],
+              ]}
+            />
+          </div>
+        )}
 
       {/* WHAT THE BATTERY EARNS, next to the payment it offsets. Here rather
           than in the comparison chapter because this is the chapter about what

@@ -149,23 +149,33 @@ export type CompareRow = {
   lenderName: string | null;
   label: string;
   product: FinanceProduct;
-  /** Null where a fixed monthly is not what this product quotes (cash, PPA). */
+  /**
+   * THE PAYMENT THIS COLUMN QUOTES — the credits this job earns already in it.
+   *
+   * A deal that claims credits is quoted on what is left of the contract once
+   * they are against the loan, because that is the money the household
+   * actually finances. The full-contract payment has not gone anywhere; it is
+   * `withoutCreditsMonthlyCents` below, and it is what a household that never
+   * files for the credit ends up paying.
+   *
+   * Null where a fixed monthly is not what this product quotes (cash, PPA).
+   */
   monthlyCents: number | null;
   /** Loan only: what the payment becomes if the paydown is never applied. */
   monthlyWithoutPaydownCents: number | null;
   /**
-   * WHAT THE PAYMENT BECOMES ONCE THIS HOUSEHOLD'S CREDITS ARE AGAINST IT.
+   * THE SAME PROGRAMME WITH NO CREDIT CLAIMED — the contract financed whole.
    *
-   * The ladder's bottom line run through the SAME terms as the payment beside
-   * it, which is the figure the proposal's tax-credit switch turns on. Null
-   * where it would say nothing: cash and the third-party products, a basis
-   * carrying no credits, a deal claiming none — and, deliberately, whenever it
-   * is not BELOW the headline. On a partner programme the ladder lands exactly
-   * on the price the headline payment already came off, and the same number
-   * printed twice under two names reads as a second, different loan.
+   * The contrast to the figure above, and the honest floor of the deal: a
+   * household that never files gets this one. Null where there is nothing to
+   * contrast — cash and the third-party products, a basis carrying no credits,
+   * a deal claiming none — and, deliberately, wherever it would not come out
+   * ABOVE the quote. On a partner programme the ladder lands exactly on the
+   * price the payment already came off, and the same number printed twice
+   * under two names reads as a second, different loan.
    */
-  creditsAppliedMonthlyCents: number | null;
-  /** The contract less those credits — what that payment is quoted on. */
+  withoutCreditsMonthlyCents: number | null;
+  /** The contract less those credits — what the quoted payment is on. */
   netCostAfterCreditsCents: number | null;
   /** The lump sum the program expects, cents. Null when it has no paydown. */
   paydownCents: number | null;
@@ -272,7 +282,7 @@ function purchaseRow(
     ...meta,
     monthlyCents: null,
     monthlyWithoutPaydownCents: null,
-    creditsAppliedMonthlyCents: null,
+    withoutCreditsMonthlyCents: null,
     netCostAfterCreditsCents: null,
     paydownCents: null,
     fromFactor: false,
@@ -304,16 +314,22 @@ function purchaseRow(
   const factors = hasPaymentFactor(p) ? factorQuote(p, financedCents) : null;
   const factorMonthly = factors ? factorMonthlyCents(factors) : null;
 
-  const monthlyCents = programmeMonthlyCents(p, financedCents);
+  /**
+   * THE CONTRACT FINANCED WHOLE — the deal with no credit ever claimed.
+   *
+   * Not the quote any more, and not gone either: it is what the household pays
+   * if they never file, and it is printed under the quote wherever the two
+   * differ.
+   */
+  const contractMonthlyCents = programmeMonthlyCents(p, financedCents);
 
   /**
-   * THE SECOND PAYMENT: the same programme, asked about what is left after the
-   * household claims the credits this job earns.
+   * THE PAYMENT THIS DEAL IS QUOTED ON: the same programme, asked about what is
+   * left after the household claims the credits this job earns.
    *
    * Identical arithmetic to `solar-proposal.ts`, on purpose: this is the figure
-   * the customer's document puts behind its tax-credit switch, and a shelf
-   * quoting a different one is how a rep promises a payment the proposal then
-   * refuses to print.
+   * the customer's document opens on, and a shelf quoting a different one is
+   * how a rep promises a payment the proposal then refuses to print.
    */
   /**
    * THE CLOSING CREDIT, resolved on THIS column's partner and THIS column's
@@ -357,12 +373,32 @@ function purchaseRow(
     ? programmeMonthlyCents(p, ladder.netCostCents - basis.downPaymentCents)
     : null;
   const creditsApplies =
-    netMonthlyCents != null && monthlyCents != null && netMonthlyCents < monthlyCents;
+    netMonthlyCents != null &&
+    contractMonthlyCents != null &&
+    netMonthlyCents < contractMonthlyCents;
+
+  /**
+   * WHICH OF THE TWO THE CUSTOMER IS QUOTED.
+   *
+   * The credited one wherever this job earns credits, because the credits come
+   * off the price and the household finances what is left. Where nothing is
+   * claimed the contract IS what is financed and the two are the same figure.
+   */
+  const monthlyCents = creditsApplies ? netMonthlyCents : contractMonthlyCents;
 
   const months = p.termMonths ?? 0;
+  /**
+   * Everything the household hands over across the term.
+   *
+   * The programme's own paydown is added only where the credits were NOT
+   * applied to the principal — where they were, that lump IS the credits and
+   * charging for it again would bill the same money twice.
+   */
   const total =
     monthlyCents != null && months > 0
-      ? monthlyCents * months + basis.downPaymentCents + (factors?.paydownCents ?? 0)
+      ? monthlyCents * months +
+        basis.downPaymentCents +
+        (creditsApplies ? 0 : (factors?.paydownCents ?? 0))
       : null;
 
   const without = factors?.withoutPaydownMonthlyCents ?? null;
@@ -371,7 +407,7 @@ function purchaseRow(
     ...base,
     monthlyCents,
     monthlyWithoutPaydownCents: without,
-    creditsAppliedMonthlyCents: creditsApplies ? netMonthlyCents : null,
+    withoutCreditsMonthlyCents: creditsApplies ? contractMonthlyCents : null,
     netCostAfterCreditsCents: creditsApplies ? ladder!.netCostCents : null,
     paydownCents: factors?.paydownCents ?? null,
     fromFactor: factorMonthly != null,
@@ -434,7 +470,7 @@ function thirdPartyRow(
     monthlyWithoutPaydownCents: null,
     // A lease or PPA buys electricity. The household never owns the array, so
     // it never claims a credit on one and there is no second payment to quote.
-    creditsAppliedMonthlyCents: null,
+    withoutCreditsMonthlyCents: null,
     netCostAfterCreditsCents: null,
     paydownCents: null,
     fromFactor: false,

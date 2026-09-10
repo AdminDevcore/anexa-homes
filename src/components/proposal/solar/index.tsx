@@ -236,15 +236,22 @@ type SolarProposalViewProps = {
   /**
    * WHICH WAY THE TAX-CREDIT SWITCH STARTS.
    *
-   * Off for every reader, which is the honest default and the one the document
-   * has always printed — see `creditsOn` below. Passed true by exactly one
-   * caller: the print route rendering the credits-applied copy of a signed
-   * proposal. That copy has to exist as paper and paper has no switch, so the
-   * scenario has to be chosen before the render rather than clicked during it.
+   * ON, since 2026-09-10: the credits this job earns come off the price, and
+   * what the household finances is the remainder — so the payment the document
+   * opens on is quoted against the net cost after credits. Throwing the switch
+   * off shows the same deal with the credit never claimed, which is the higher
+   * payment and the honest floor.
    *
-   * It seeds the state; it does not pin it. A reader who is handed a document
-   * opened this way can still throw the switch, because it is the same control
-   * either way round.
+   * It used to start OFF, on the reasoning that the lower figure should never
+   * be quoted by default. That was reversed deliberately: a household reading a
+   * price with fifty percent of credits listed under it, and a payment computed
+   * on the whole price anyway, is being quoted a payment for money they do not
+   * end up borrowing.
+   *
+   * The print route passes it EXPLICITLY, both ways — a filed PDF is one of the
+   * two readings, complete, and paper has no switch — so this default only ever
+   * decides where an interactive reader starts. It seeds the state; it does not
+   * pin it.
    */
   creditsApplied?: boolean;
   /**
@@ -284,7 +291,7 @@ function SolarPvProposalView({
   rep = null,
   accentColor,
   chromeOffset = 0,
-  creditsApplied: initialCreditsApplied = false,
+  creditsApplied: initialCreditsApplied = true,
   qualifyOffer = null,
   repQualify = null,
 }: SolarProposalViewProps) {
@@ -330,11 +337,17 @@ function SolarPvProposalView({
   /**
    * WHETHER THE HOUSEHOLD'S TAX CREDITS ARE APPLIED, for the whole document.
    *
-   * OFF by default, and that is the honest default rather than a shy one: a
-   * credit is claimed on somebody's own return, against their own liability,
-   * and a proposal that opens on the assumption it lands has quoted a payment
-   * nobody has yet earned. The rep turns it on when the conversation reaches
-   * it, and everything moves at once.
+   * ON by default since 2026-09-10. The credits this job earns come off the
+   * price, so the money the household actually finances is what is left — and
+   * a payment quoted on the whole price is a payment on a principal nobody
+   * borrows. Thrown the other way it shows the deal with the credit never
+   * claimed: the full payment, every month, for the whole term. Both readings
+   * were frozen at generation; the switch chooses between them and everything
+   * moves at once.
+   *
+   * The caveat this default owes the reader is carried by the cost chapter's
+   * own disclaimer — a credit is claimed on somebody's return, against their
+   * own liability — not by refusing to quote the figure.
    *
    * Held HERE rather than on the sheet that shows the control, because two
    * sheets show it and both have to say the same thing. Kept across a change of

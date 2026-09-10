@@ -100,6 +100,33 @@ function reconciliationProblem(snapshot: SolarProposalSnapshot): string | null {
     ) {
       return `${where} quotes a monthly payment that does not reconcile with the amount the customer is financing and the term.`;
     }
+
+    /**
+     * THE READING THE DOCUMENT NOW OPENS ON, checked the same way.
+     *
+     * Since 2026-09-10 the tax-credit switch starts ON, so the first payment a
+     * household sees is quoted on the contract less the credits this job earns
+     * — and the pair above never touches those two figures. They are built from
+     * one call in `priceOption` and therefore agree by construction today; this
+     * asserts it, because the day one of them starts being derived somewhere
+     * else is the day a household reads a payment on a balance the same sheet
+     * says is something different.
+     */
+    const applied = option.creditsApplied;
+    if (
+      applied?.financedAmountCents != null &&
+      !monthlyReconciles({
+        financedAmountCents: applied.financedAmountCents,
+        aprPct: f.aprPct,
+        termMonths: f.loanTermMonths ?? null,
+        monthlyCents: applied.monthlyCents,
+        // No paydown here: the credits ARE the paydown, and they are already
+        // inside the principal this payment was quoted on.
+        paydownCents: null,
+      })
+    ) {
+      return `${where} quotes a monthly payment with the tax credits applied that does not reconcile with what it says is being financed.`;
+    }
   }
   return null;
 }

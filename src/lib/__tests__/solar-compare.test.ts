@@ -441,13 +441,14 @@ describe("the builder's quoted strip and the shelf above it price one deal", () 
 });
 
 /**
- * THE SECOND PAYMENT — what the loan asks for once the household's federal
+ * THE QUOTED PAYMENT — what the loan asks for once the household's federal
  * credits are against it.
  *
- * The figure the customer's own document puts behind its tax-credit switch, so
- * the arithmetic is checked by hand here for the same reason every other figure
- * in this file is: a shelf quoting a payment the proposal will not print is a
- * rep promising something on a laptop that the paperwork then withdraws.
+ * Since 2026-09-10 this IS the payment, not a second figure under it: the
+ * credits come off the price and the household finances what is left. The
+ * arithmetic is checked by hand here for the same reason every other figure in
+ * this file is — a shelf quoting a payment the proposal will not print is a rep
+ * promising something on a laptop that the paperwork then withdraws.
  */
 describe("compareOffers — the payment once the credits are applied", () => {
   const CREDITS = {
@@ -455,15 +456,52 @@ describe("compareOffers — the payment once the credits are applied", () => {
     claims: { itc: true, energyCommunity: true, domesticContent: true },
   };
 
-  it("quotes it on the contract less every credit the job earns", () => {
+  /** $27,280 financed whole, which is what the column quoted before this. */
+  const CONTRACT_MONTHLY = loanPaymentCents({
+    principalCents: 2_728_000,
+    aprPct: 4.99,
+    termMonths: 300,
+  })!;
+
+  it("quotes the payment on the contract less every credit the job earns", () => {
     // $27,280 contract, 50% of it credited, leaves $13,640 — and $13,640 at
-    // 4.99% over 300 months amortises to half the payment beside it.
+    // 4.99% over 300 months amortises to half the payment it replaced.
     const [row] = compareOffers([loan()], { ...BASIS, credits: CREDITS });
     expect(row.netCostAfterCreditsCents).toBe(1_364_000);
-    expect(row.creditsAppliedMonthlyCents).toBe(
+    expect(row.monthlyCents).toBe(
       loanPaymentCents({ principalCents: 1_364_000, aprPct: 4.99, termMonths: 300 })
     );
-    expect(row.creditsAppliedMonthlyCents!).toBeLessThan(row.monthlyCents!);
+    expect(row.monthlyCents!).toBeLessThan(CONTRACT_MONTHLY);
+  });
+
+  it("keeps the uncredited payment beside it, and it is the higher one", () => {
+    const [row] = compareOffers([loan()], { ...BASIS, credits: CREDITS });
+    expect(row.withoutCreditsMonthlyCents).toBe(CONTRACT_MONTHLY);
+    expect(row.withoutCreditsMonthlyCents!).toBeGreaterThan(row.monthlyCents!);
+  });
+
+  it("totals the term on the payment it actually quotes", () => {
+    const [row] = compareOffers([loan()], { ...BASIS, credits: CREDITS });
+    expect(row.totalPaidCents).toBe(row.monthlyCents! * 300);
+  });
+
+  it("does not bill the paydown twice once the credits are in the principal", () => {
+    // The paydown IS the federal credit. Applied to the principal, charging for
+    // it again in the total would hand the lender the same money twice.
+    const [row] = compareOffers(
+      [
+        loan({
+          factorWithPaydownMicros: 5712,
+          factorWithoutPaydownMicros: 8140,
+          paydownPct: 30,
+          paydownMonths: 18,
+        }),
+      ],
+      { ...BASIS, credits: CREDITS }
+    );
+    // $13,640 × 0.005712 = $77.91
+    expect(row.monthlyCents).toBe(7_791);
+    expect(row.totalPaidCents).toBe(7_791 * 300);
   });
 
   it("follows the tick-boxes: an unclaimed bonus is a higher payment", () => {
@@ -477,10 +515,10 @@ describe("compareOffers — the payment once the credits are applied", () => {
     });
     // 30% off rather than 50%, so more is left to finance.
     expect(itcOnly.netCostAfterCreditsCents).toBe(1_909_600);
-    expect(itcOnly.creditsAppliedMonthlyCents!).toBeGreaterThan(all.creditsAppliedMonthlyCents!);
+    expect(itcOnly.monthlyCents!).toBeGreaterThan(all.monthlyCents!);
   });
 
-  it("says nothing at all when the deal claims no credit", () => {
+  it("falls back to the whole contract when the deal claims no credit", () => {
     const [row] = compareOffers([loan()], {
       ...BASIS,
       credits: {
@@ -488,18 +526,20 @@ describe("compareOffers — the payment once the credits are applied", () => {
         claims: { itc: false, energyCommunity: false, domesticContent: false },
       },
     });
-    expect(row.creditsAppliedMonthlyCents).toBeNull();
+    expect(row.monthlyCents).toBe(CONTRACT_MONTHLY);
+    expect(row.withoutCreditsMonthlyCents).toBeNull();
     expect(row.netCostAfterCreditsCents).toBeNull();
   });
 
   it("is absent on a basis that carries no credits, as every column was before", () => {
     const [row] = compareOffers([loan()], BASIS);
-    expect(row.creditsAppliedMonthlyCents).toBeNull();
+    expect(row.monthlyCents).toBe(CONTRACT_MONTHLY);
+    expect(row.withoutCreditsMonthlyCents).toBeNull();
   });
 
   it("never quotes one on cash, which has no payment for a credit to lower", () => {
     const [cash] = compareOffers([{ kind: "cash" }], { ...BASIS, credits: CREDITS });
     expect(cash.id).toBe(CASH_OFFER_ID);
-    expect(cash.creditsAppliedMonthlyCents).toBeNull();
+    expect(cash.withoutCreditsMonthlyCents).toBeNull();
   });
 });

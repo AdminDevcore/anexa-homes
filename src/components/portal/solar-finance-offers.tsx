@@ -103,13 +103,13 @@ function OfferCard({
   headline: string | null;
   headlineNote: string | null;
   /**
-   * THE SAME PAYMENT ONCE THE CREDITS THIS JOB EARNS ARE AGAINST THE LOAN.
+   * THE SAME PAYMENT WITH NO TAX CREDIT AGAINST IT.
    *
    * Under the quoted figure rather than instead of it, because the two are both
-   * true and the document says both: the proposal quotes the headline and its
-   * tax-credit switch shows this one. A card carrying only the lower number
-   * would have a rep promising a payment the customer's own page does not open
-   * on. Null wherever it would repeat the headline — see `CompareRow`.
+   * true and the document says both: the proposal opens on the headline and its
+   * tax-credit switch shows this one. A card carrying only the credited figure
+   * would leave a rep with nothing to answer "and if I don't get the credit?"
+   * with. Null wherever it would repeat the headline — see `CompareRow`.
    */
   creditNote: string | null;
   /** Set only where the lender's maximum price per watt moved this figure. */
@@ -197,8 +197,11 @@ function OfferCard({
                 {headlineNote}
               </div>
             )}
+            {/* Muted, not green: it is the HIGHER figure now — what this costs
+                if the credit never lands — and colouring a worse number as
+                good news is how a rep reads past it. */}
             {creditNote && (
-              <div className="mt-0.5 text-[11px] font-medium tabular-nums text-emerald-700 dark:text-emerald-400">
+              <div className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
                 {creditNote}
               </div>
             )}
@@ -238,19 +241,19 @@ const LINES: CompareLine[] = [
   {
     key: "monthly",
     label: "Monthly",
-    hint: "Until the lender approves one.",
+    hint: "The credits this job earns are already against the loan.",
     lead: true,
     cell: (r) => (r.monthlyCents == null ? null : `${money2(r.monthlyCents)}/mo`),
   },
   {
-    // Directly under the payment it is a version of. Only the columns that
-    // actually earn credits carry it, and only where it is below the figure
-    // above — see `creditsAppliedMonthlyCents`.
-    key: "monthly-with-credits",
-    label: "With credits applied",
-    hint: "Once the federal credits this job earns are against the loan.",
+    // Directly under the payment it is the other reading of. Only the columns
+    // that actually earn credits carry it, and only where it comes out above
+    // the figure above — see `withoutCreditsMonthlyCents`.
+    key: "monthly-without-credits",
+    label: "If they never claim it",
+    hint: "The whole contract financed, with no tax credit against it.",
     cell: (r) =>
-      r.creditsAppliedMonthlyCents == null ? null : `${money2(r.creditsAppliedMonthlyCents)}/mo`,
+      r.withoutCreditsMonthlyCents == null ? null : `${money2(r.withoutCreditsMonthlyCents)}/mo`,
   },
   {
     key: "monthly-without-paydown",
@@ -726,8 +729,8 @@ export function FinanceOffers({
         headline={headline}
         headlineNote={note}
         creditNote={
-          row?.creditsAppliedMonthlyCents != null
-            ? `${money2(row.creditsAppliedMonthlyCents)}/mo with credits`
+          row?.withoutCreditsMonthlyCents != null
+            ? `${money2(row.withoutCreditsMonthlyCents)}/mo without the tax credit`
             : null
         }
         // On the shelf too, not only in the comparison below: the shelf is what

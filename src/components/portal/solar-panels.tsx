@@ -1300,7 +1300,7 @@ export function SolarFinancePanel({
         fromFactor: false,
         factors: null,
         // A lease never owns the array, so it never claims a credit on one.
-        creditsAppliedMonthlyCents: null,
+        withoutCreditsMonthlyCents: null,
         netCostAfterCreditsCents: null,
       };
     }
@@ -1312,35 +1312,51 @@ export function SolarFinancePanel({
     // does not equal `loanPaymentCents` for the same APR and term — and quoting
     // the derived figure when the lender printed a factor misquotes the
     // customer. Programs with no factor on file fall through unchanged.
-    const monthlyCents =
+    const contractMonthlyCents =
       (factors && factorMonthlyCents(factors)) ??
       loanPaymentCents({
         principalCents: contractNow,
         aprPct: chosen.aprPct,
         termMonths: chosen.termMonths,
       });
-    if (monthlyCents == null) return null;
+    if (contractMonthlyCents == null) return null;
 
     /**
      * The same terms, asked about what is left once the household claims its
-     * credits — the figure the proposal's tax-credit switch turns on.
+     * credits — and THIS is the payment the deal quotes, because the credits
+     * come off the price and what the household finances is the remainder.
      *
-     * Dropped where it is not BELOW the payment above it: on a partner
+     * Dropped where it is not BELOW the contract payment: on a partner
      * programme the ladder hands the remainder back and lands exactly on the
-     * price this payment already came off, and the same number twice under two
+     * price that payment already came off, and the same number twice under two
      * names reads as a second, different loan.
      */
     const netMonthly =
       liveLadder != null ? programmeMonthlyCents(chosen, liveLadder.netCostCents) : null;
+    const creditsApply = netMonthly != null && netMonthly < contractMonthlyCents;
+
+    /**
+     * THE FACTOR ROWS FOLLOW THE PRINCIPAL THE HEADLINE CAME OFF.
+     *
+     * "With paydown / If the paydown is skipped" are the published factors read
+     * against the money being borrowed. Left on the whole contract while the
+     * headline moved to the net, they would put two payments on one strip that
+     * no single principal explains — the exact failure `monthlyReconciles`
+     * exists to catch on the document.
+     */
+    const quotedFactors =
+      creditsApply && hasPaymentFactor(chosen)
+        ? factorQuote(chosen, Math.round(liveLadder!.netCostCents))
+        : factors;
 
     return {
-      monthlyCents,
+      monthlyCents: creditsApply ? netMonthly : contractMonthlyCents,
       /** True when the figure came off the sheet rather than out of a formula. */
-      fromFactor: factors != null && factorMonthlyCents(factors) != null,
-      factors,
-      creditsAppliedMonthlyCents:
-        netMonthly != null && netMonthly < monthlyCents ? netMonthly : null,
-      netCostAfterCreditsCents: liveLadder?.netCostCents ?? null,
+      fromFactor: quotedFactors != null && factorMonthlyCents(quotedFactors) != null,
+      factors: quotedFactors,
+      /** The deal with no credit ever claimed — printed under the quote. */
+      withoutCreditsMonthlyCents: creditsApply ? contractMonthlyCents : null,
+      netCostAfterCreditsCents: creditsApply ? liveLadder!.netCostCents : null,
     };
   }, [chosen, product, isLoan, systemSizeKwDc, documentPriceCents, liveLadder]);
 
@@ -1586,11 +1602,13 @@ export function SolarFinancePanel({
                 ${(quote.monthlyCents / 100).toFixed(2)}
               </div>
               {/* Both payments, in the order the customer's own document says
-                  them: what they are quoted, and what it becomes once the
-                  credits this job earns are against the loan. */}
-              {quote.creditsAppliedMonthlyCents != null && (
-                <div className="text-[11px] font-medium tabular-nums text-emerald-700 dark:text-emerald-400">
-                  ${(quote.creditsAppliedMonthlyCents / 100).toFixed(2)}/mo with credits
+                  them: what they are quoted — the credits this job earns
+                  already against the loan — and what it costs if they never
+                  claim them. Muted, because the second figure is the higher
+                  one. */}
+              {quote.withoutCreditsMonthlyCents != null && (
+                <div className="text-[11px] tabular-nums text-muted-foreground">
+                  ${(quote.withoutCreditsMonthlyCents / 100).toFixed(2)}/mo without the tax credit
                 </div>
               )}
             </div>
