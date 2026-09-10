@@ -291,22 +291,6 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
             <RepVendorLink userId={detail.id} vendors={companyVendors} currentVendorId={linkedVendor?.id ?? null} />
           )}
 
-          {showFull && (
-            <div className="rounded-xl border border-border bg-card p-5">
-              <h3 className="flex items-center gap-2 font-semibold"><Shield className="size-4 text-muted-foreground" /> Role access</h3>
-              <p className="mt-1 text-xs text-muted-foreground">What the {detail.roleLabel} role can access.</p>
-              <ul className="mt-3 space-y-1.5 text-sm">
-                {detail.permissions.length === 0 && <li className="text-muted-foreground">No access grants.</li>}
-                {detail.permissions.map((p) => (
-                  <li key={p.resource} className="flex items-start justify-between gap-2">
-                    <span className="font-medium">{p.resource}</span>
-                    <span className="text-right text-xs capitalize text-muted-foreground">{p.actions.join(", ")}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
           {/* Team — who is under them, who they report to, and what they earn
               off each of those people. One card on purpose: see
               components/portal/member-team-card.tsx. */}
@@ -347,6 +331,22 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
             verticals={liveVerticals}
             showOverrides={showOverrides}
           />
+
+          {showFull && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <h3 className="flex items-center gap-2 font-semibold"><Shield className="size-4 text-muted-foreground" /> Role access</h3>
+              <p className="mt-1 text-xs text-muted-foreground">What the {detail.roleLabel} role can access.</p>
+              <ul className="mt-3 space-y-1.5 text-sm">
+                {detail.permissions.length === 0 && <li className="text-muted-foreground">No access grants.</li>}
+                {detail.permissions.map((p) => (
+                  <li key={p.resource} className="flex items-start justify-between gap-2">
+                    <span className="font-medium">{p.resource}</span>
+                    <span className="text-right text-xs capitalize text-muted-foreground">{p.actions.join(", ")}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
     </div>
