@@ -34,12 +34,24 @@ export default async function PortalLayout({
   // New invited users complete onboarding before entering the portal.
   if (await needsOnboarding(user.userId)) redirect("/onboarding");
 
-  const allowedHrefs = PORTAL_NAV.filter(
-    (item) =>
-      can(user, "read", item.resource) &&
-      // `roles`, where an item has one, narrows further — it never widens.
-      (!item.roles || item.roles.includes(user.role))
-  ).map((item) => item.href);
+  // Every route the sidebar may open, an item's TABS included — a tab is a
+  // route with its own gate, so Contractor Pay is in this list for accounting
+  // and absent for a rep even though both hold the Commissions item it sits on.
+  const allowedHrefs = Array.from(
+    new Set(
+      PORTAL_NAV.filter(
+        (item) =>
+          can(user, "read", item.resource) &&
+          // `roles`, where an item has one, narrows further — it never widens.
+          (!item.roles || item.roles.includes(user.role))
+      ).flatMap((item) => [
+        item.href,
+        ...(item.tabs ?? [])
+          .filter((tab) => can(user, "read", tab.resource))
+          .map((tab) => tab.href),
+      ])
+    )
+  );
 
   const branding = await currentBranding();
 

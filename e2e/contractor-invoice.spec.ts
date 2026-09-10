@@ -113,13 +113,31 @@ test.describe("contractor invoice drop box", () => {
     }
   });
 
-  test("accounting reaches Contractor Pay from the sidebar; a rep has no such link", async ({
+  // Contractor Pay stopped being a sidebar row of its own: it is the second tab
+  // on Commissions, because both are money going out on the same payroll run.
+  // The gate did not move with it — the tab carries ContractorInvoice:read, so
+  // the rep who shares the page never sees the tab.
+  test("accounting reaches Contractor Pay from the Commissions tabs; a rep has no tab", async ({
     page,
   }) => {
     await login(page, "accounting@anexahomes.com");
-    await expect(page.getByRole("link", { name: "Contractor Pay" })).toBeVisible({ timeout: 10000 });
+    await page.goto("/portal/commissions");
+
+    const tabs = page.getByRole("navigation", { name: "Pay sections" });
+    await expect(tabs.getByRole("link", { name: "Contractor Pay" })).toBeVisible({ timeout: 10000 });
+    await tabs.getByRole("link", { name: "Contractor Pay" }).click();
+    await page.waitForURL(/\/portal\/contractor-pay$/, { timeout: 15000 });
+    await expect(page.getByRole("heading", { name: "Contractor Pay" })).toBeVisible();
+
+    // One sidebar row for both halves, and it stays lit on the second one.
+    await expect(page.locator('aside a[href="/portal/commissions"]')).toBeVisible();
+    await expect(page.locator('aside a[href="/portal/contractor-pay"]')).toHaveCount(0);
 
     await login(page, "rep@anexahomes.com");
+    await page.goto("/portal/commissions");
+    await expect(page.getByRole("heading", { name: "Commissions" })).toBeVisible({ timeout: 10000 });
+    // A lone tab is not drawn at all, so there is no strip to hunt through.
+    await expect(page.getByRole("navigation", { name: "Pay sections" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Contractor Pay" })).toHaveCount(0);
   });
 });

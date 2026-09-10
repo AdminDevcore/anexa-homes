@@ -66,9 +66,23 @@ export function CommandPalette({
     placeholderData: (p) => p,
   });
 
+  // Tabs are listed as pages of their own. They have no sidebar row, so this is
+  // the only place someone who types "contractor" gets taken there.
   const pages: Row[] = PORTAL_NAV.filter((n) => allowedHrefs.includes(n.href))
-    .filter((n) => !dq || n.label.toLowerCase().includes(dq.toLowerCase()))
-    .map((n) => ({ key: `p:${n.href}`, group: "Pages", icon: n.icon, title: n.label, href: n.href }));
+    .flatMap((n): Row[] => [
+      { key: `p:${n.href}`, group: "Pages", icon: n.icon, title: n.label, href: n.href },
+      ...(n.tabs ?? [])
+        .filter((t) => t.href !== n.href && allowedHrefs.includes(t.href))
+        .map((t) => ({
+          key: `p:${t.href}`,
+          group: "Pages",
+          icon: t.icon,
+          title: t.label,
+          subtitle: n.label,
+          href: t.href,
+        })),
+    ])
+    .filter((r) => !dq || r.title.toLowerCase().includes(dq.toLowerCase()));
 
   const rows: Row[] = dq
     ? [

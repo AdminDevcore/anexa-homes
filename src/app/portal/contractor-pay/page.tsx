@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { DollarSign, FileText, ImageIcon, ReceiptText, Search } from "lucide-react";
+import { Clock3, DollarSign, FileText, ImageIcon, ReceiptText, BarChart3 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
@@ -8,7 +8,11 @@ import { Button } from "@/components/ui/button";
 import { roleLabel } from "@/lib/roles";
 import { currentFormatters } from "@/lib/format-server";
 import { listContractorInvoices } from "@/server/modules/contractor-pay/queries";
-import { ContractorPayTabs } from "@/components/portal/contractor-pay-tabs";
+import { payTabCounts } from "@/server/modules/payroll/pay-tab-counts";
+import { PayTabs } from "@/components/portal/pay-tabs";
+import { PayStatus } from "@/components/portal/pay-status";
+import { Initials } from "@/components/portal/initials";
+import { ListFilter, type ListFacet } from "@/components/portal/list-filter";
 import {
   ContractorPayAmount,
   ContractorPayRowActions,
@@ -33,12 +37,18 @@ const dateTime = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
+/** Submitted-but-not-yet-a-payable comes first; then the road money travels. */
+const STATUS_ORDER = ["submitted", "pending", "approved", "paid", "void"];
+
+const TH = "text-xs font-medium uppercase tracking-wide text-muted-foreground";
+
 /**
- * Contractor Pay — the crews' Commissions tab.
+ * Contractor Pay — the crews' half of the Pay page.
  *
- * Deliberately the same shape as `/portal/commissions`: totals across the top,
- * Generate and Approve All in the header, one row per payable, and the same
- * pending → approved → paid vocabulary, because it feeds the same payroll run.
+ * The same shape as the Commissions tab beside it, on purpose: totals across
+ * the top, Generate and Approve All in the header, one row per payable, and the
+ * same pending → approved → paid vocabulary, because it feeds the same payroll
+ * run.
  *
  * Two things it does that Commissions does not, both forced by what an invoice
  * is. The amount is an INPUT, not a computed figure — nothing here can read a
@@ -51,19 +61,19 @@ const dateTime = new Intl.DateTimeFormat("en-US", {
  * is a URL. The route that serves the bytes carries the same check, so a copied
  * link is refused even though it never appeared in a list.
  */
-export default async function ContractorPayPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function ContractorPayPage() {
   const fmt = await currentFormatters();
   const user = await requireUser();
   if (!can(user, "read", "ContractorInvoice")) redirect("/portal/dashboard");
 
   const canManage = can(user, "update", "ContractorInvoice");
-  const sp = await searchParams;
-  const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
-  const invoices = await listContractorInvoices(user.companyId, q);
+  // Searched in the browser, like the Commissions tab: the query never narrowed
+  // the fetch anyway — every invoice is on the page — so a round trip bought
+  // nothing but a reload.
+  const invoices = await listContractorInvoices(user.companyId);
+  const tabCounts = await payTabCounts(user);
+
+  const statusOf = (i: (typeof invoices)[number]) => i.pay?.status ?? "submitted";
 
   const owed = invoices
     .filter((i) => i.pay && (i.pay.status === "pending" || i.pay.status === "approved"))
@@ -75,82 +85,106 @@ export default async function ContractorPayPage({
   const approvable = invoices.filter((i) => i.pay?.status === "pending" && i.pay.amount > 0).length;
   const unpriced = invoices.filter((i) => i.pay?.status === "pending" && i.pay.amount === 0).length;
 
+  const count = (s: string) => invoices.filter((i) => statusOf(i) === s).length;
+  const facets: ListFacet[] = STATUS_ORDER.filter((s) => count(s) > 0).map((s) => ({
+    key: s,
+    label: s,
+    count: count(s),
+  }));
+
+  // Everything the row does not print but somebody will type: the full address,
+  // the project number, the role of whoever sent it.
+  const searchText = (i: (typeof invoices)[number]) =>
+    [statusOf(i), i.job.address, i.job.projectNumber, i.uploadedBy?.name, i.name]
+      .filter(Boolean)
+      .join(" ");
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Contractor Pay"
         description="Invoices submitted by the crews who did the work. Price them from the PDF, approve, and they go into the next payroll run."
         action={
-          canManage ? (
-            <ContractorPayToolbar ungenerated={ungenerated} approvable={approvable} />
-          ) : undefined
+          <>
+            {/* The payout report is the same money asked about by period rather
+                than by invoice — a report, so it reads as one and does not take
+                a tab of its own. */}
+            {can(user, "read", "Commission") && (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/portal/contractor-pay/payouts">
+                  <BarChart3 className="size-4" /> Payout report
+                </Link>
+              </Button>
+            )}
+            {canManage && <ContractorPayToolbar ungenerated={ungenerated} approvable={approvable} />}
+          </>
         }
       />
 
-      <ContractorPayTabs active="invoices" showPayouts={can(user, "read", "Commission")} />
+      <PayTabs user={user} active="/portal/contractor-pay" counts={tabCounts} />
 
       <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
-        <StatCard label="Owed" value={fmt.money(owed, { compact: true })} icon={DollarSign} accent />
-        <StatCard label="Paid" value={fmt.money(paid, { compact: true })} icon={DollarSign} />
-        <StatCard label="Invoices" value={invoices.length} icon={ReceiptText} />
+        <StatCard
+          label="Owed"
+          value={fmt.money(owed, { compact: true })}
+          hint={ungenerated > 0 ? `${ungenerated} not yet priced` : "approved + pending"}
+          icon={Clock3}
+          accent
+        />
+        <StatCard label="Paid" value={fmt.money(paid, { compact: true })} hint="all time" icon={DollarSign} />
+        <StatCard
+          label="Invoices"
+          value={invoices.length}
+          hint={`${count("submitted")} awaiting Generate`}
+          icon={ReceiptText}
+        />
       </div>
 
       {/* Said out loud rather than left to be noticed: an unpriced line is
           invisible to Approve All and to payroll, so a stack of them is a stack
           of contractors quietly not being paid. */}
       {unpriced > 0 && canManage && (
-        <p className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-2.5 text-sm text-muted-foreground">
+        <p className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">
           {unpriced === 1 ? "1 invoice still needs" : `${unpriced} invoices still need`} an amount
           typed in before {unpriced === 1 ? "it" : "they"} can be approved.
         </p>
       )}
 
-      <form method="get" className="flex max-w-md items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            name="q"
-            defaultValue={q}
-            placeholder="Job, address, project # or who submitted it"
-            aria-label="Search submitted invoices"
-            className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-3 text-sm"
-          />
-        </div>
-        <Button type="submit" size="sm" variant="outline">
-          Search
-        </Button>
-      </form>
-
       {invoices.length === 0 ? (
         <EmptyState
           icon={ReceiptText}
-          title={q ? "No invoices match that search" : "No invoices submitted yet"}
-          description={
-            q
-              ? "Try the customer's last name, the street, the project number, or the name of whoever uploaded it."
-              : "An invoice appears here the moment a contractor drops it into the Contractor Invoice folder on a job."
-          }
+          title="No invoices submitted yet"
+          description="An invoice appears here the moment a contractor drops it into the Contractor Invoice folder on a job."
         />
       ) : (
-        <>
+        <ListFilter placeholder="Job, address, project # or who sent it…" facets={facets}>
           {/* Desktop: table. Mobile: cards (below). */}
-          <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
-            <Table>
+          <div
+            data-search-hide-when-empty
+            className="hidden overflow-hidden rounded-xl border border-border bg-card md:block"
+          >
+            <Table className="[&_td]:px-4 [&_th]:px-4">
               <TableHeader>
-                <TableRow>
-                  <TableHead>Job</TableHead>
-                  <TableHead>Contractor</TableHead>
-                  <TableHead>Invoice</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  {canManage && <TableHead className="text-right">Actions</TableHead>}
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableHead className={TH}>Job</TableHead>
+                  <TableHead className={TH}>Contractor</TableHead>
+                  {/* The slack column — see the Commissions table. */}
+                  <TableHead className={`${TH} w-full`}>Invoice</TableHead>
+                  <TableHead className={`${TH} text-right`}>Amount</TableHead>
+                  <TableHead className={TH}>Status</TableHead>
+                  {canManage && <TableHead className={`${TH} text-right`}>Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {invoices.map((inv) => (
-                  <TableRow key={inv.id} className="align-top">
-                    <TableCell className="font-medium">
+                  <TableRow
+                    key={inv.id}
+                    className="align-top"
+                    data-search-item
+                    data-search-facet={statusOf(inv)}
+                    data-search-text={searchText(inv)}
+                  >
+                    <TableCell className="py-3 font-medium">
                       {/* The job links out; the invoice does not live there, but
                           whoever is about to pay it wants the job in front of
                           them. Accounting reads deals company-wide, so this
@@ -166,14 +200,17 @@ export default async function ContractorPayPage({
                         {[inv.job.projectNumber, inv.job.address].filter(Boolean).join(" · ") || "—"}
                       </span>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-3">
                       {inv.uploadedBy ? (
-                        <>
-                          {inv.uploadedBy.name}
-                          <span className="block text-xs text-muted-foreground">
-                            {roleLabel(inv.uploadedBy.role)}
+                        <span className="flex items-center gap-2">
+                          <Initials name={inv.uploadedBy.name} />
+                          <span>
+                            {inv.uploadedBy.name}
+                            <span className="block text-xs text-muted-foreground">
+                              {roleLabel(inv.uploadedBy.role)}
+                            </span>
                           </span>
-                        </>
+                        </span>
                       ) : (
                         // uploadedBy is SetNull, so a departed contractor leaves
                         // his invoices standing without a name rather than
@@ -181,7 +218,7 @@ export default async function ContractorPayPage({
                         <span className="text-muted-foreground">Account removed</span>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-3">
                       <a
                         href={`/portal/files/${inv.id}`}
                         target="_blank"
@@ -199,7 +236,7 @@ export default async function ContractorPayPage({
                         {dateTime.format(inv.submittedAt)}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right font-medium">
+                    <TableCell className="py-3 text-right font-medium tabular-nums">
                       {inv.pay ? (
                         <ContractorPayAmount
                           id={inv.pay.id}
@@ -211,13 +248,11 @@ export default async function ContractorPayPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
-                        {inv.pay?.status ?? "submitted"}
-                      </span>
+                    <TableCell className="py-3">
+                      <PayStatus status={statusOf(inv)} />
                     </TableCell>
                     {canManage && (
-                      <TableCell className="text-right">
+                      <TableCell className="py-3 text-right">
                         <ContractorPayRowActions
                           payId={inv.pay?.id ?? null}
                           status={inv.pay?.status ?? null}
@@ -233,9 +268,15 @@ export default async function ContractorPayPage({
           </div>
 
           {/* Mobile: cards */}
-          <div className="space-y-2 md:hidden">
+          <div data-search-hide-when-empty className="space-y-2 md:hidden">
             {invoices.map((inv) => (
-              <div key={inv.id} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5">
+              <div
+                key={inv.id}
+                data-search-item
+                data-search-facet={statusOf(inv)}
+                data-search-text={searchText(inv)}
+                className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     {inv.job.leadId ? (
@@ -248,11 +289,12 @@ export default async function ContractorPayPage({
                     <div className="text-xs text-muted-foreground">
                       {[inv.job.projectNumber, inv.job.address].filter(Boolean).join(" · ") || "—"}
                     </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      → {inv.uploadedBy?.name ?? "Account removed"}
+                    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Initials name={inv.uploadedBy?.name ?? "?"} className="size-5 text-[9px]" />
+                      {inv.uploadedBy?.name ?? "Account removed"}
                     </div>
                   </div>
-                  <div className="shrink-0 text-right font-medium">
+                  <div className="shrink-0 text-right font-medium tabular-nums">
                     {inv.pay ? (
                       <ContractorPayAmount
                         id={inv.pay.id}
@@ -275,9 +317,7 @@ export default async function ContractorPayPage({
                   <span className="truncate">{inv.name}</span>
                 </a>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">
-                    {inv.pay?.status ?? "submitted"}
-                  </span>
+                  <PayStatus status={statusOf(inv)} />
                   {canManage ? (
                     <ContractorPayRowActions
                       payId={inv.pay?.id ?? null}
@@ -294,7 +334,18 @@ export default async function ContractorPayPage({
               </div>
             ))}
           </div>
-        </>
+
+          {/* Hidden inline rather than by class: the filter shows it by CLEARING
+              the inline display, which a `hidden` class would then override. */}
+          <p
+            data-search-empty
+            style={{ display: "none" }}
+            className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-sm text-muted-foreground"
+          >
+            No invoices match that search. Try the customer’s last name, the street, the project
+            number, or whoever uploaded it.
+          </p>
+        </ListFilter>
       )}
     </div>
   );

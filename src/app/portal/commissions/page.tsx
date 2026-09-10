@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { DollarSign } from "lucide-react";
+import { Clock3, DollarSign, Wallet } from "lucide-react";
 import type { Prisma } from "@prisma/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
@@ -8,12 +8,16 @@ import { prisma } from "@/server/db/client";
 import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { commissionGateLabel } from "@/server/modules/payroll/eligibility";
+import { payTabCounts } from "@/server/modules/payroll/pay-tab-counts";
 import { PageHeader, EmptyState, StatCard } from "@/components/portal/ui";
+import { PayTabs } from "@/components/portal/pay-tabs";
+import { PayStatus } from "@/components/portal/pay-status";
+import { Initials } from "@/components/portal/initials";
 import { CommissionRowActions, CommissionsToolbar } from "@/components/portal/commission-actions";
 import { RaiseChargeback, ChargebackDecision } from "@/components/portal/chargeback-actions";
 import { CompReviewQueue } from "@/components/portal/comp-review-queue";
 import { dealsNeedingCompReview } from "@/server/modules/solar/deal-comp";
-import { ListFilter } from "@/components/portal/list-filter";
+import { ListFilter, type ListFacet } from "@/components/portal/list-filter";
 import { currentFormatters } from "@/lib/format-server";
 import { addressSearchText } from "@/lib/address";
 import {
@@ -26,6 +30,9 @@ import {
 } from "@/components/ui/table";
 
 export const metadata = { title: "Commissions" };
+
+/** The order money moves in, which is the order the chips are drawn in. */
+const STATUS_ORDER = ["pending", "approved", "paid", "void"];
 
 export default async function CommissionsPage() {
   const fmt = await currentFormatters();
@@ -103,24 +110,53 @@ export default async function CommissionsPage() {
       .filter((x): x is string => !!x)
   );
 
-  const totalPending = commissions
-    .filter((c) => c.status === "pending" || c.status === "approved")
-    .reduce((s, c) => s + c.amount, 0);
-  const totalPaid = commissions.filter((c) => c.status === "paid").reduce((s, c) => s + c.amount, 0);
-  const pendingCount = commissions.filter((c) => c.status === "pending").length;
+  const tabCounts = await payTabCounts(user);
+
+  const sum = (status: string) =>
+    commissions.filter((c) => c.status === status).reduce((s, c) => s + c.amount, 0);
+  const count = (status: string) => commissions.filter((c) => c.status === status).length;
+
+  const pendingCount = count("pending");
+  const lines = (n: number) => (n === 1 ? "1 line" : `${n} lines`);
+
+  // Only statuses that actually occur get a chip — an empty "Void" filter is a
+  // dead end, and the counts are the point of the row.
+  const facets: ListFacet[] = STATUS_ORDER.filter((s) => count(s) > 0).map((s) => ({
+    key: s,
+    label: s,
+    count: count(s),
+  }));
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Commissions"
-        description={`Track earned, approved, and paid commissions. Generate runs only on deals that have reached ${commissionGateLabel(vertical)}.`}
+        description={`What the sales floor has earned. Generate runs only on deals that have reached ${commissionGateLabel(vertical)}.`}
         action={canManage ? <CommissionsToolbar pendingCount={pendingCount} /> : undefined}
       />
 
+      <PayTabs user={user} active="/portal/commissions" counts={tabCounts} />
+
       <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
-        <StatCard label="Pending + Approved" value={fmt.money(totalPending, { compact: true })} icon={DollarSign} accent />
-        <StatCard label="Paid" value={fmt.money(totalPaid, { compact: true })} icon={DollarSign} />
-        <StatCard label="Records" value={commissions.length} icon={DollarSign} />
+        <StatCard
+          label="Awaiting approval"
+          value={fmt.money(sum("pending"), { compact: true })}
+          hint={lines(pendingCount)}
+          icon={Clock3}
+          accent
+        />
+        <StatCard
+          label="Approved to pay"
+          value={fmt.money(sum("approved"), { compact: true })}
+          hint={lines(count("approved"))}
+          icon={Wallet}
+        />
+        <StatCard
+          label="Paid"
+          value={fmt.money(sum("paid"), { compact: true })}
+          hint={lines(count("paid"))}
+          icon={DollarSign}
+        />
       </div>
 
       {canManage && (
@@ -148,7 +184,7 @@ export default async function CommissionsPage() {
               <li key={cb.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm">
                 <div className="min-w-0">
                   <div className="font-medium">
-                    {cb.user.firstName} {cb.user.lastName} — {fmt.money(cb.amountCents)}
+                    {`${cb.user.firstName} ${cb.user.lastName} — ${fmt.money(cb.amountCents)}`}
                   </div>
                   <div className="text-[11px] text-muted-foreground">
                     {cb.reason.replace(/_/g, " ")}
@@ -167,106 +203,141 @@ export default async function CommissionsPage() {
         <EmptyState
           icon={DollarSign}
           title="No commissions yet"
-          description={canManage ? "Click “Generate” to compute commissions from active rules." : undefined}
+          description={
+            canManage
+              ? "Click “Generate” to compute commissions from active rules. Deals that have not reached the funding gate are skipped."
+              : "Nothing has been earned on a funded deal yet."
+          }
         />
       ) : (
-        <ListFilter placeholder="Search project, address, recipient…">
-        {/* Desktop: table. Mobile: cards (below). */}
-        <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Project</TableHead>
-                <TableHead>Recipient</TableHead>
-                <TableHead className="hidden md:table-cell">Label</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Status</TableHead>
-                {canManage && <TableHead className="text-right">Actions</TableHead>}
-                {!canManage && <TableHead className="hidden sm:table-cell">Date</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {commissions.map((c) => (
-                <TableRow key={c.id} data-search-item data-search-text={searchText(c)}>
-                  <TableCell className="font-medium">
-                    <Link href={`/portal/projects/${c.projectId}`} className="hover:text-gold-muted hover:underline">
-                      {c.project.projectNumber}
-                    </Link>
-                    {c.project.lead && (
-                      <span className="block text-xs font-normal text-muted-foreground">
-                        {c.project.lead.firstName} {c.project.lead.lastName}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>{c.user.firstName} {c.user.lastName}</TableCell>
-                  <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{c.label ?? "—"}</TableCell>
-                  <TableCell className="text-right font-medium">{fmt.money(c.amount)}</TableCell>
-                  <TableCell>
-                    <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">{c.status}</span>
-                  </TableCell>
+        <ListFilter placeholder="Search project, address, recipient…" facets={facets}>
+          {/* Desktop: table. Mobile: cards (below). */}
+          <div
+            data-search-hide-when-empty
+            className="hidden overflow-hidden rounded-xl border border-border bg-card md:block"
+          >
+            <Table className="[&_td]:px-4 [&_th]:px-4">
+              <TableHeader>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableHead className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Project</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recipient</TableHead>
+                  {/* The slack column: it absorbs the width the others do not need, so
+                      Status and Actions sit beside the money instead of drifting
+                      to the far edge of a wide screen. */}
+                  <TableHead className="hidden w-full text-xs font-medium uppercase tracking-wide text-muted-foreground lg:table-cell">Label</TableHead>
+                  <TableHead className="text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">Amount</TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</TableHead>
                   {canManage ? (
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <CommissionRowActions id={c.id} status={c.status} />
-                        {/* Only money that has actually been earned can be
-                            clawed back. A pending line is simply voided, and a
-                            line already charged back does not offer it twice. */}
-                        {(c.status === "approved" || c.status === "paid") && !chargedBack.has(c.id) && (
-                          <RaiseChargeback
-                            commissionId={c.id}
-                            userId={c.userId}
-                            recipientName={`${c.user.firstName} ${c.user.lastName}`.trim()}
-                            amountCents={c.amount}
-                            isOverride={!!c.overrideId}
-                          />
-                        )}
-                      </div>
-                    </TableCell>
+                    <TableHead className="text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">Actions</TableHead>
                   ) : (
-                    <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">{fmt.date(c.createdAt)}</TableCell>
+                    <TableHead className="hidden text-xs font-medium uppercase tracking-wide text-muted-foreground sm:table-cell">Date</TableHead>
                   )}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {commissions.map((c) => (
+                  <TableRow
+                    key={c.id}
+                    data-search-item
+                    data-search-facet={c.status}
+                    data-search-text={searchText(c)}
+                  >
+                    <TableCell className="py-3 font-medium">
+                      <Link href={`/portal/projects/${c.projectId}`} className="hover:text-gold-muted hover:underline">
+                        {c.project.projectNumber}
+                      </Link>
+                      {c.project.lead && (
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          {`${c.project.lead.firstName} ${c.project.lead.lastName}`}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <span className="flex items-center gap-2">
+                        <Initials name={`${c.user.firstName} ${c.user.lastName}`} />
+                        {`${c.user.firstName} ${c.user.lastName}`}
+                      </span>
+                    </TableCell>
+                    <TableCell className="hidden py-3 text-sm text-muted-foreground lg:table-cell">{c.label ?? "—"}</TableCell>
+                    <TableCell className="py-3 text-right font-medium tabular-nums">{fmt.money(c.amount)}</TableCell>
+                    <TableCell className="py-3">
+                      <PayStatus status={c.status} />
+                    </TableCell>
+                    {canManage ? (
+                      <TableCell className="py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <CommissionRowActions id={c.id} status={c.status} />
+                          {/* Only money that has actually been earned can be
+                              clawed back. A pending line is simply voided, and a
+                              line already charged back does not offer it twice. */}
+                          {(c.status === "approved" || c.status === "paid") && !chargedBack.has(c.id) && (
+                            <RaiseChargeback
+                              commissionId={c.id}
+                              userId={c.userId}
+                              recipientName={`${c.user.firstName} ${c.user.lastName}`.trim()}
+                              amountCents={c.amount}
+                              isOverride={!!c.overrideId}
+                            />
+                          )}
+                        </div>
+                      </TableCell>
+                    ) : (
+                      <TableCell className="hidden py-3 text-sm text-muted-foreground sm:table-cell">{fmt.date(c.createdAt)}</TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
 
-        {/* Mobile: cards */}
-        <div className="space-y-2 md:hidden">
-          {commissions.map((c) => (
-            <div
-              key={c.id}
-              data-search-item
-              data-search-text={searchText(c)}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <Link href={`/portal/projects/${c.projectId}`} className="font-medium hover:text-gold-muted">
-                    {c.project.projectNumber}
-                  </Link>
-                  {c.project.lead ? (
-                    <div className="text-xs text-muted-foreground">
-                      {c.project.lead.firstName} {c.project.lead.lastName}
+          {/* Mobile: cards */}
+          <div data-search-hide-when-empty className="space-y-2 md:hidden">
+            {commissions.map((c) => (
+              <div
+                key={c.id}
+                data-search-item
+                data-search-facet={c.status}
+                data-search-text={searchText(c)}
+                className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3.5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <Link href={`/portal/projects/${c.projectId}`} className="font-medium hover:text-gold-muted">
+                      {c.project.projectNumber}
+                    </Link>
+                    {c.project.lead ? (
+                      <div className="text-xs text-muted-foreground">
+                        {`${c.project.lead.firstName} ${c.project.lead.lastName}`}
+                      </div>
+                    ) : null}
+                    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Initials name={`${c.user.firstName} ${c.user.lastName}`} className="size-5 text-[9px]" />
+                      {`${c.user.firstName} ${c.user.lastName}`}
                     </div>
-                  ) : null}
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    → {c.user.firstName} {c.user.lastName}
                   </div>
+                  <div className="shrink-0 text-right font-medium tabular-nums">{fmt.money(c.amount)}</div>
                 </div>
-                <div className="shrink-0 text-right font-medium">{fmt.money(c.amount)}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <PayStatus status={c.status} />
+                  {canManage ? (
+                    <CommissionRowActions id={c.id} status={c.status} />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">{fmt.date(c.createdAt)}</span>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium capitalize">{c.status}</span>
-                {canManage ? (
-                  <CommissionRowActions id={c.id} status={c.status} />
-                ) : (
-                  <span className="text-xs text-muted-foreground">{fmt.date(c.createdAt)}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+
+          {/* Hidden inline rather than by class: the filter shows it by CLEARING
+              the inline display, which a `hidden` class would then override. */}
+          <p
+            data-search-empty
+            style={{ display: "none" }}
+            className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-sm text-muted-foreground"
+          >
+            No commissions match that search.
+          </p>
         </ListFilter>
       )}
     </div>

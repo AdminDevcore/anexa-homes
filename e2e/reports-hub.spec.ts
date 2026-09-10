@@ -105,15 +105,13 @@ test("contractor pay report moved to its own page, old URL redirects", async ({ 
   expect(csv.headers()["content-type"]).toContain("text/csv");
 
   // The hub no longer carries a CARD for it — two things called Contractor Pay
-  // in two places is what the move was for. Asserted on the card heading, not
-  // on the text: the sidebar link of that name is the whole point and is very
-  // much still there.
+  // in two places is what the move was for. It does not carry a sidebar row
+  // either any more: Contractor Pay is the second tab on Commissions, reached
+  // from there.
   await page.goto("/portal/reports");
   await expect(page.getByRole("heading", { name: "Contractor Pay", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Contractor Pay" })).toHaveAttribute(
-    "href",
-    "/portal/contractor-pay",
-  );
+  await expect(page.getByRole("link", { name: "Contractor Pay" })).toHaveCount(0);
+  await expect(page.locator('aside a[href="/portal/commissions"]')).toBeVisible();
 
   await page.context().clearCookies();
 });

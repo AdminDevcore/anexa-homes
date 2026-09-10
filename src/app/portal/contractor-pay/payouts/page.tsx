@@ -1,10 +1,11 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { PageHeader } from "@/components/portal/ui";
 import { ReportsControls } from "@/components/portal/reports-client";
 import { RenderableReportView } from "@/components/portal/renderable-report";
-import { ContractorPayTabs } from "@/components/portal/contractor-pay-tabs";
 import { resolvePeriod, resolveScope, getScopeOptions } from "@/server/modules/reports/builders";
 import { buildContractorPayReport } from "@/server/modules/reports/contractor-pay";
 
@@ -13,11 +14,14 @@ export const metadata = { title: "Contractor Payouts" };
 /**
  * Moved here from `/portal/reports/contractor-pay`, unchanged.
  *
- * It answers "what do we owe the crews", which is the other half of the
- * question the Invoices tab asks. Leaving it in the Reports hub put two things
- * called Contractor Pay in two places, and neither one linked to the other.
- * The old URL still resolves — it redirects — so bookmarks and the PDFs already
- * mailed out keep working.
+ * It answers "what do we owe the crews" by PERIOD, which is the same money the
+ * Contractor Pay tab lists invoice by invoice. That makes it a report rather
+ * than a third half of the page, so it hangs off the tab it belongs to — a
+ * button up in the header, and a way back at the top of this one — instead of
+ * competing with Commissions for a tab.
+ *
+ * The old Reports-hub URL still resolves (it redirects), so bookmarks and the
+ * PDFs already mailed out keep working.
  */
 export default async function ContractorPayoutsPage({
   searchParams,
@@ -44,12 +48,17 @@ export default async function ContractorPayoutsPage({
 
   return (
     <div className="space-y-6">
+      <Link
+        href="/portal/contractor-pay"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" /> Contractor Pay
+      </Link>
+
       <PageHeader
         title="Contractor Pay"
-        description="Money paid and still owed to installer-crews and 1099 contractors."
+        description="Money paid and still owed to installer-crews and 1099 contractors, by period."
       />
-
-      <ContractorPayTabs active="payouts" showPayouts />
 
       <ReportsControls
         preset={period.preset}

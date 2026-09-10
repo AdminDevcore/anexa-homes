@@ -6,8 +6,8 @@
  * installing contractor drops his bill into the job he worked, and from that
  * moment the deal is only the ADDRESS on the envelope — the file cannot be
  * listed, opened or downloaded from the folder by anyone, the uploader
- * included. It is read in exactly one place: Contractor Pay in the sidebar,
- * which only super_admin and accounting can reach.
+ * included. It is read in exactly one place: the Contractor Pay tab on
+ * Commissions, which only super_admin and accounting can reach.
  *
  * Why a letter slot rather than a normally-permissioned folder: a deal is the
  * most widely-shared object in the product. The rep who sold the job, their

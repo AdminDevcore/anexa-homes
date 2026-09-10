@@ -131,11 +131,12 @@ const STATIC_CARDS: ReportCard[] = [
     action: "read",
     resource: "Report",
   },
-  // Contractor Pay is no longer a card here. It became its own sidebar item —
-  // /portal/contractor-pay — so the money owed to a crew sits beside the
-  // invoices that crew submitted. Its old URL redirects; the `contractorPay`
-  // icon key is kept in ReportIcon because the hub still maps icons by name and
-  // removing a value there is a wider change than removing a card.
+  // Contractor Pay is no longer a card here. It moved to /portal/contractor-pay
+  // — the Contractor Pay tab on Commissions — so the money owed to a crew sits
+  // beside the invoices that crew submitted, and the payout report hangs off
+  // that tab's header. Its old URL redirects; the `contractorPay` icon key is
+  // kept in ReportIcon because the hub still maps icons by name and removing a
+  // value there is a wider change than removing a card.
   {
     id: "claims",
     title: "Claims & Supplement Capture",

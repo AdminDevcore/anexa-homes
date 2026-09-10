@@ -64,6 +64,32 @@ async function dealVerticalFilter(): Promise<Prisma.LeadWhereInput | null> {
 const fullName = (u: { firstName: string; lastName: string }) =>
   `${u.firstName} ${u.lastName}`.trim();
 
+/**
+ * How many invoices are waiting on somebody: not yet a payable, or priced and
+ * still unapproved. It is the number on the Contractor Pay tab, read from the
+ * same table and through the same workspace filter as the list itself, so the
+ * badge can never disagree with the page it points at.
+ */
+export async function countContractorInvoicesNeedingAttention(companyId: string): Promise<number> {
+  const vertical = await dealVerticalFilter();
+  const inWorkspace: Prisma.FileAssetWhereInput = vertical
+    ? { OR: [{ lead: { is: vertical } }, { project: { is: { lead: { is: vertical } } } }] }
+    : {};
+
+  return prisma.fileAsset.count({
+    where: {
+      companyId,
+      category: CONTRACTOR_INVOICE_CATEGORY,
+      // Both clauses carry an OR of their own, so they are ANDed as siblings
+      // rather than spread on top of each other.
+      AND: [
+        inWorkspace,
+        { OR: [{ contractorPay: { is: null } }, { contractorPay: { is: { status: "pending" } } }] },
+      ],
+    },
+  });
+}
+
 export async function listContractorInvoices(
   companyId: string,
   query?: string,

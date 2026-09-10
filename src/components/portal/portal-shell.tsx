@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Menu, Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PORTAL_NAV } from "@/lib/nav";
+import { PORTAL_NAV, navRoutes, type NavItem } from "@/lib/nav";
 import { Logo } from "@/components/marketing/logo";
 import type { Branding } from "@/server/branding/defaults";
 import { UserMenu } from "./user-menu";
@@ -47,6 +47,19 @@ function NavPending() {
  * and rebuilds it instead of updating in place, which loses focus and any state
  * inside it.
  */
+/**
+ * How specifically an item claims this path: the length of the longest route it
+ * owns that the path sits under, or -1 for no claim at all.
+ */
+function matchLength(item: NavItem, pathname: string): number {
+  return Math.max(
+    -1,
+    ...navRoutes(item)
+      .filter((href) => pathname === href || pathname.startsWith(href + "/"))
+      .map((href) => href.length)
+  );
+}
+
 function AppNavList({
   items,
   pathname,
@@ -61,11 +74,13 @@ function AppNavList({
   return (
     <nav className="flex flex-col gap-1 px-3">
       {items.map((item) => {
-        const matches = (href: string) => pathname === href || pathname.startsWith(href + "/");
         // Longest matching href wins, so a parent route (Settings) doesn't also
         // highlight on a child owned by another item (Reviews lives at
-        // /portal/settings/reviews).
-        const active = matches(item.href) && !items.some((o) => o.href.length > item.href.length && matches(o.href));
+        // /portal/settings/reviews). An item's tab routes count as its own:
+        // standing on Contractor Pay lights up Commissions, which is where the
+        // tab that opened it lives.
+        const mine = matchLength(item, pathname);
+        const active = mine >= 0 && !items.some((o) => matchLength(o, pathname) > mine);
         const badge = item.href === "/portal/chat" && unread > 0 ? unread : null;
         return (
           <Link
