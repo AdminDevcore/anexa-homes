@@ -208,14 +208,19 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
 
     // 2 · Money panel, including the PPW decomposition and both schedules.
     await expect(page.getByText("Pricing breakdown")).toBeVisible();
-    // The ladder in the order the business says it: base, plus adders, is the
-    // GROSS the company keeps; the dealer fee grosses that up to the FINAL
-    // price the customer signs.
+    // The ladder in the order the business says it: base, plus adders, is what
+    // the job sells for.
     const ladder = page.getByTestId("pricing-breakdown");
-    for (const label of ["Base price", "Adders", "Gross price", "Final price"]) {
+    for (const label of ["Base price", "Adders", "Final price"]) {
       await expect(ladder.getByText(label, { exact: true })).toBeVisible();
     }
-    await expect(ladder.getByText(/^Dealer fee/)).toBeVisible();
+    // THE LENDER'S CUT IS NOT PUBLISHED HERE, and the gross it is measured
+    // against is gone with it — final minus gross is the fee, so a ladder that
+    // dropped only the labelled row would still have printed the number.
+    await expect(ladder.getByText(/Dealer fee/)).toHaveCount(0);
+    await expect(ladder.getByText(/Gross/)).toHaveCount(0);
+    // Nor on the lender's own terms, the other half of the same slide.
+    await expect(page.getByText(/Dealer fee/)).toHaveCount(0);
     // One commission line, not a four-slot schedule: the rep is paid in full,
     // once, and the financier's own funding is the pipeline stage.
     await expect(page.getByText("Rep commission")).toBeVisible();

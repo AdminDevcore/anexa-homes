@@ -94,7 +94,12 @@ export function FinancingTermsPanel({ terms }: { terms: FinancingTerms }) {
       : `${terms.termMonths} months`;
     rows.push({ k: "Term", v: label });
   }
-  if (terms.dealerFeePct) rows.push({ k: "Dealer fee", v: `${terms.dealerFeePct}%` });
+  // The dealer fee is deliberately absent. It is the lender's own cut of the
+  // price, it is set on the partner's rate sheet in Settings → Lenders, and it
+  // is not something the deal page publishes — the same call the price ladder
+  // on the left makes. `dealerFeePct` stays on the type because the panel is
+  // handed the lender's whole terms row; nothing renders it.
+
   // Two different products' payments, never both at once: the loan figure comes
   // from the lender, the lease figure is the lease itself.
   if (terms.loanMonthlyPaymentCents) {

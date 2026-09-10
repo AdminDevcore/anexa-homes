@@ -230,11 +230,16 @@ export function SolarSystemMoneyPanel({
                 is already stored on the design and finance rows — nothing new
                 is entered here.
 
-                BASE + ADDERS = GROSS is what the company keeps; the dealer fee
-                grosses that up to the FINAL price the customer signs. The fee
-                is a percentage OF THE FINAL, which is why gross → final divides
-                rather than multiplies: a 30% programme on a $100,000 system
-                leaves $70,000.
+                THE DEALER FEE IS NOT ON THIS SCREEN, and the gross it is
+                measured against went with it. The arithmetic is untouched —
+                base plus adders plus the battery is still grossed up by the
+                lender's cut to reach the final price, and `money.dealerFeeCents`
+                still carries it for anything that needs it — but the deal page
+                shows what the job sells for, not what the lender takes out of
+                it. Gross had to go too: final minus gross IS the fee, so
+                leaving that rung standing would have hidden the label and
+                published the number. The percentage is still set, and still
+                read, on the partner's rate sheet in Settings → Lenders.
               */}
               <Block label="Pricing breakdown">
                 <dl data-testid="pricing-breakdown" className="divide-y divide-border text-sm">
@@ -255,18 +260,6 @@ export function SolarSystemMoneyPanel({
                       v={usd(money.batteryPriceCents)}
                     />
                   )}
-                  <SpecRow
-                    k="Gross price"
-                    v={`${usdc(money.grossPpwCents)}/W · ${usd(money.grossPriceCents)}`}
-                  />
-                  <SpecRow
-                    k={money.dealerFeePct > 0 ? `Dealer fee · ${money.dealerFeePct}%` : "Dealer fee"}
-                    v={
-                      money.dealerFeeCents > 0
-                        ? `${usdc(money.dealerFeePpwCents)}/W · ${usd(money.dealerFeeCents)}`
-                        : "None"
-                    }
-                  />
                   <div className="flex items-center justify-between gap-4 py-1.5 font-semibold">
                     <dt>Final price</dt>
                     <dd className="tabular-nums text-solar">
@@ -274,30 +267,16 @@ export function SolarSystemMoneyPanel({
                     </dd>
                   </div>
                 </dl>
-                {/* WHY THE FEE IS NOT THE PERCENTAGE IT SAYS IT IS. On a deal
-                    with storage the line above reads "Dealer fee · 65%" over an
-                    amount that is 24% of the final price, because the battery is
-                    on both sides of the fee at its own price and the percentage
-                    only ever applied to the system and its adders. Unexplained
-                    that reads as a broken number on the card a rep quotes off.
-                    The batteryless sentence is left exactly as it was — four
-                    deals in five see no change. */}
-                <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-                  {money.batteryPriceCents > 0 ? (
-                    <>
-                      Gross is what Anexa keeps — base plus adders plus the battery, before the
-                      lender&rsquo;s cut. The dealer fee is a share of the final price, so the
-                      adders carry it too; the battery does not, and is billed at its catalogue
-                      price on both sides of the fee. That is why the fee is under{" "}
-                      {money.dealerFeePct}% of the final price.
-                    </>
-                  ) : (
-                    <>
-                      Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut.
-                      The dealer fee is a share of the final price, so the adders carry it too.
-                    </>
-                  )}
-                </p>
+                {/* The one thing left that a rep still cannot read off the
+                    rungs: the battery is a catalogue PRICE, not a rate over
+                    installed watts, so it does not move with the $/W above it.
+                    Said once here rather than as a hint on the row. */}
+                {money.batteryPriceCents > 0 && (
+                  <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                    The battery is billed at its catalogue price, on top of what the array itself
+                    is priced per watt.
+                  </p>
+                )}
                 {/* WHICH SYSTEM THIS LADDER PRICED. The rungs are the company's
                     own arithmetic and were never frozen into the customer's
                     document, so they can only ever price the current drawing.
