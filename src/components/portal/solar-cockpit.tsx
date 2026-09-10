@@ -96,6 +96,17 @@ export type SystemMoney = {
   basePpwCents: number;
   adderPpwCents: number;
   adderTotalCents: number;
+  /**
+   * The storage on this job at its catalogue price, which rides ON TOP of the
+   * per-watt rate — see `PurchaseInput.batteryPriceCents`. Zero on a deal
+   * without one, and on a storage-only deal, where the battery IS the base.
+   *
+   * It is a rung in its own right because GROSS = BASE + ADDERS + BATTERY. Left
+   * off the screen the ladder does not add up to its own total.
+   */
+  batteryPriceCents: number;
+  /** How many, for the rung's label. */
+  batteryQty: number;
   grossPpwCents: number;
   grossPriceCents: number;
   dealerFeePct: number;
@@ -232,6 +243,18 @@ export function SolarSystemMoneyPanel({
                     k="Adders"
                     v={`${usdc(money.adderPpwCents)}/W${money.adderTotalCents > 0 ? ` · ${usd(money.adderTotalCents)}` : ""}`}
                   />
+                  {/* Only where there is one — the same rule the builder's own
+                      ladder uses. A "$0" battery rung on the four deals in five
+                      without storage is a row a rep reads to learn nothing. No
+                      $/W: a rate per watt is a price for an ARRAY, and the
+                      whole reason this line exists is that no arithmetic over
+                      installed watts can charge for a Powerwall. */}
+                  {money.batteryPriceCents > 0 && (
+                    <SpecRow
+                      k={money.batteryQty > 1 ? `Batteries × ${money.batteryQty}` : "Battery"}
+                      v={usd(money.batteryPriceCents)}
+                    />
+                  )}
                   <SpecRow
                     k="Gross price"
                     v={`${usdc(money.grossPpwCents)}/W · ${usd(money.grossPriceCents)}`}
@@ -251,9 +274,29 @@ export function SolarSystemMoneyPanel({
                     </dd>
                   </div>
                 </dl>
+                {/* WHY THE FEE IS NOT THE PERCENTAGE IT SAYS IT IS. On a deal
+                    with storage the line above reads "Dealer fee · 65%" over an
+                    amount that is 24% of the final price, because the battery is
+                    on both sides of the fee at its own price and the percentage
+                    only ever applied to the system and its adders. Unexplained
+                    that reads as a broken number on the card a rep quotes off.
+                    The batteryless sentence is left exactly as it was — four
+                    deals in five see no change. */}
                 <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-                  Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut. The
-                  dealer fee is a share of the final price, so the adders carry it too.
+                  {money.batteryPriceCents > 0 ? (
+                    <>
+                      Gross is what Anexa keeps — base plus adders plus the battery, before the
+                      lender&rsquo;s cut. The dealer fee is a share of the final price, so the
+                      adders carry it too; the battery does not, and is billed at its catalogue
+                      price on both sides of the fee. That is why the fee is under{" "}
+                      {money.dealerFeePct}% of the final price.
+                    </>
+                  ) : (
+                    <>
+                      Gross is what Anexa keeps — base plus adders, before the lender&rsquo;s cut.
+                      The dealer fee is a share of the final price, so the adders carry it too.
+                    </>
+                  )}
                 </p>
                 {/* WHICH SYSTEM THIS LADDER PRICED. The rungs are the company's
                     own arithmetic and were never frozen into the customer's

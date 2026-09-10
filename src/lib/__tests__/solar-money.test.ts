@@ -1221,6 +1221,24 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
     }
   });
 
+  it("keeps the COMPANY's ladder adding up too — gross is base + adders + battery", () => {
+    // The other half of the invariant above, and the half the deal card prints:
+    // base, adders and the battery are the rungs, and GROSS is the three of
+    // them. The card used to render only the first two under a gross that
+    // included all three, so a rep on a deal with $120,000 of Powerwalls read
+    // $1.93/W of base under $11.33/W of gross with nothing accounting for the
+    // gap. The arithmetic was never wrong — the screen was incomplete — so this
+    // pins the identity the screen has to show.
+    for (const battery of [0, 1, 99, POWERWALL, 9_999_999]) {
+      const p = pricePurchase({
+        product: "loan", systemSizeKwDc: 11.3, stickerPpwCents: 550, dealerFeePct: 65,
+        adderTotalCents: 233_333, onTopAdderTotalCents: 700_000,
+        batteryPriceCents: battery,
+      });
+      expect(p.basePriceCents + p.adderTotalCents + p.batteryPriceCents).toBe(p.grossPriceCents);
+    }
+  });
+
   it("prices every deal that has no battery exactly as it did before", () => {
     const before = pricePurchase({
       ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 145_000,

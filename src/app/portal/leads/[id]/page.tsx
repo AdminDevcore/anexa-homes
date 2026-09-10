@@ -892,6 +892,18 @@ export default async function LeadDetailPage({
       adderPpwCents:
         watts > 0 ? Math.round((breakdown?.adderTotalCents ?? adderAll(fin)) / watts) : 0,
       adderTotalCents: breakdown?.adderTotalCents ?? adderAll(fin),
+      // THE STORAGE, ON ITS OWN RUNG. Gross is base + adders + BATTERY, and it
+      // always was — but this ladder printed only the first two, so a deal with
+      // $120,000 of Powerwalls on it showed $1.93/W of base under a $11.33/W
+      // gross and nothing in between to explain the other $9.40. A rep adding
+      // the visible rows up got a different number than the row marked Gross,
+      // on the one card the price is read off. The builder has always shown
+      // this rung; the deal page simply never did.
+      batteryPriceCents: breakdown?.batteryPriceCents ?? 0,
+      // The design's count, not the frozen proposal's: this ladder prices the
+      // CURRENT drawing (the drift notice above says so), so the label has to
+      // count the batteries the price was actually built from.
+      batteryQty: solarDesign?.batteryQty ?? 0,
       grossPpwCents: Math.round(breakdown?.grossPpwCents ?? 0),
       grossPriceCents: breakdown?.grossPriceCents ?? 0,
       dealerFeePct: fin && fin.product === "loan" ? fin.dealerFeePct : 0,
