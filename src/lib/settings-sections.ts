@@ -78,8 +78,7 @@ export type SettingsSectionKey =
   | "solar_settings"
   | "solar_lenders"
   | "solar_providers"
-  | "solar_equipment"
-  | "solar_pay";
+  | "solar_equipment";
 
 export type SettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
@@ -330,25 +329,21 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     keywords: ["panels", "modules", "inverter", "battery", "adders"],
     verticals: ["solar"],
   },
-  {
-    // Not a settings page: solar pays its reps off each person's own profile,
-    // so this card is a signpost to Team rather than a screen of its own — the
-    // same shape as Document Templates, which opens /portal/documents.
-    //
-    // Roofing names rep pay in Settings through Commission Rules; solar names it
-    // nowhere — the roster link in the header counts users, it does not say that
-    // what a rep earns is set there. The setup gap that warns "no rep can be
-    // paid on a storage deal" also had no card to appear on, so it never did.
-    icon: DollarSign,
-    key: "solar_pay",
-    title: "Rep Pay",
-    body: "Each rep's redline lives on their profile — per watt, and per battery on a storage-only job.",
-    href: "/portal/team",
-    group: "solar",
-    keywords: ["commission", "redline", "split", "payout", "pay", "battery", "storage"],
-    verticals: ["solar"],
-  },
 ];
+
+/*
+ * There is deliberately no "Rep Pay" card.
+ *
+ * One briefly existed: a signpost with no screen behind it, pointing out of
+ * Settings at /portal/team, because a solar rep's redline is a field on his own
+ * profile. It read as a settings page in the menu and was not one, so it went.
+ *
+ * What it was carrying still matters. The per-battery pay gap ("no rep can be
+ * paid on a storage deal") was keyed to that card, and the hub drops a gap whose
+ * key names no card — deleting the card would have deleted the warning with it.
+ * The gap now stands on its own href instead; see `workspace-health.ts` and the
+ * unkeyed-gap branch in `settings-overview.tsx`.
+ */
 
 export type ResolvedSettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
@@ -374,6 +369,31 @@ export function visibleSettingsSections(vertical: ActiveVertical): ResolvedSetti
       keywords: s.keywords,
     };
   });
+}
+
+/**
+ * Does a setup gap with this key belong on the hub in this workspace?
+ *
+ * A gap is normally keyed to its own card, so the hub can render the warning ON
+ * the card that fixes it. That makes the obvious filter — "is this key a card we
+ * show?" — wrong in one case, and wrong in the silent direction: a gap pointing
+ * at a page OUTSIDE Settings has no card at all, and would be dropped from both
+ * the grid and the "needs attention" count without anything failing.
+ *
+ * That is not hypothetical. Per-battery rep pay is set on each person's Team
+ * profile, and its gap was keyed to a "Rep Pay" card that only ever linked out
+ * to /portal/team. Deleting that signpost would have deleted the warning too.
+ *
+ * So there are two questions, not one:
+ *   the key names no card  → keep it; it stands on its own href, which is a page
+ *                            every workspace can open.
+ *   the key names a card   → keep it only if this workspace shows that card, so
+ *                            nobody is sent to fix something on a hidden screen.
+ */
+export function gapBelongsInWorkspace(gapKey: string, vertical: ActiveVertical): boolean {
+  const section = SETTINGS_SECTIONS.find((s) => s.key === gapKey);
+  if (!section) return true;
+  return !section.verticals || section.verticals.includes(vertical);
 }
 
 export type SettingsGroup = {

@@ -3,8 +3,8 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, Building2, CheckCircle2, Users } from "lucide-react";
 import {
   SETTINGS_SECTIONS,
+  gapBelongsInWorkspace,
   visibleSettingsGroups,
-  type SettingsSectionKey,
 } from "@/lib/settings-sections";
 import type { SettingsInventory } from "@/server/modules/settings/inventory";
 import type { SetupGap } from "@/server/modules/settings/workspace-health";
@@ -39,12 +39,11 @@ export function SettingsOverview({
   company: { name: string; userCount: number };
 }) {
   const groups = visibleSettingsGroups(vertical);
-  const visible = new Set(groups.flatMap((g) => g.sections.map((s) => s.key)));
 
-  // Only gaps whose section this workspace actually shows. A check whose section
-  // is hidden here has nowhere to be fixed, so listing it would send somebody to
-  // a screen that does not exist in the workspace they are standing in.
-  const open = gaps.filter((g) => visible.has(g.key as SettingsSectionKey));
+  // A gap whose card this workspace hides has nowhere to be fixed, so listing it
+  // would send somebody to a screen that does not exist where they are standing.
+  // A gap with no card at all is a different thing and is kept — see the rule.
+  const open = gaps.filter((g) => gapBelongsInWorkspace(g.key, vertical));
 
   // Sections the whole company shares — one public site, one roster — rather
   // than ones this workspace configures for itself. Read off the inventory

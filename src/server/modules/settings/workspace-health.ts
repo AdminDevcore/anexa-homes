@@ -181,10 +181,13 @@ export const SETUP_CHECKS: Check[] = [
       }),
   },
   {
+    // The one check with no settings card behind it. Both rates are per rep, on
+    // their own Team profile, so there is no screen in Settings to key this to —
+    // a "Rep Pay" card was tried as a signpost and removed for pretending to be
+    // one. `settings-overview.tsx` keeps a gap whose key names no card, which is
+    // what stops this warning from vanishing along with it.
     key: "solar_pay",
     label: "Per-battery rep pay",
-    // Team, not a settings page: both rates are per rep, on their own profile.
-    // The Rep Pay card is the signpost to it — see settings-sections.ts.
     href: "/portal/team",
     // The specific failure, because "no commission" and "a commission of zero"
     // are the two things this whole feature was careful to keep apart.

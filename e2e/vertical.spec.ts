@@ -149,14 +149,16 @@ test.describe("workspace switcher", () => {
     for (const gone of ["Commission Rules", "Commission rules", "Inspection Outcomes", "Site Survey Outcomes"]) {
       expect(body, `"${gone}" is still offered in the solar menu`).not.toContain(gone);
     }
-    // And searching for it turns up the solar answer instead of the roofing one:
-    // "Rep Pay" carries the keyword "commission" precisely because a solar rep's
-    // cut is the redline on his own profile. The assertion this replaces expected
-    // an empty result and had been failing since that keyword was added.
+    // And searching for it finds nothing in solar. There is nowhere in Settings
+    // to set what a solar rep earns — his redline is a field on his own Team
+    // profile — so the menu says so rather than offering a near-miss. A "Rep Pay"
+    // row briefly answered this search by linking out to /portal/team; it was a
+    // signpost wearing a settings page's clothes and has been removed.
     await page.getByLabel("Find a setting").fill("commission");
     const menu = page.getByRole("navigation", { name: "Settings sections" });
-    await expect(menu.getByText("Rep Pay")).toBeVisible({ timeout: 15000 });
+    await expect(menu.getByText(/Nothing matches/)).toBeVisible({ timeout: 15000 });
     await expect(menu.getByText("Commission Rules")).toHaveCount(0);
+    await expect(menu.getByText("Rep Pay")).toHaveCount(0);
 
     // And the URLs are closed, not just unlinked — both pages write
     // vertical-scoped rows a solar workspace would never read back.
@@ -164,6 +166,32 @@ test.describe("workspace switcher", () => {
       await page.goto(path);
       await expect(page).toHaveURL(/\/portal\/settings$/, { timeout: 15000 });
     }
+  });
+
+  test("the rep-pay warning outlives the card it used to be keyed to", async ({ page }) => {
+    // Deleting the "Rep Pay" menu row was nearly a silent regression. The hub
+    // finds a gap's card by key and drops any gap whose key names none, so the
+    // per-battery pay warning — "no rep can be paid on a storage deal" — would
+    // have gone down with its signpost, taking the "needs attention" count with
+    // it. Warnings that vanish when a menu is tidied are the whole bug class this
+    // panel exists to catch, so it is asserted on the rendered page.
+    await login(page, "admin@anexahomes.com");
+    await switchTo(page, "Solar");
+    await page.goto("/portal/settings");
+    await expect(
+      page.getByRole("heading", { name: "Settings", exact: true })
+    ).toBeVisible({ timeout: 15000 });
+
+    // Nobody in the seed has either per-battery rate set, so the gap is open.
+    const gap = page.getByRole("link", { name: /Per-battery rep pay/ });
+    await expect(gap).toBeVisible({ timeout: 15000 });
+    // It still points where the rate is actually set: the rep's own profile.
+    await expect(gap).toHaveAttribute("href", "/portal/team");
+
+    // ...while the menu it was removed from stays clean.
+    await expect(
+      page.getByRole("navigation", { name: "Settings sections" }).getByText("Rep Pay")
+    ).toHaveCount(0);
   });
 
   test("Operations reports how long the deal spent in each stage", async ({ page }) => {

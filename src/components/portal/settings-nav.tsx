@@ -225,9 +225,9 @@ export function SettingsSidebarNav({
 /**
  * One section.
  *
- * Off-site rows — Document Templates lives at /portal/documents, solar rep pay
- * on the Team roster — carry an arrow, because following one leaves Settings and
- * the sidebar turns back into the app menu behind you.
+ * Off-site rows — Document Templates lives at /portal/documents — carry an
+ * arrow, because following one leaves Settings and the sidebar turns back into
+ * the app menu behind you.
  */
 function SettingsNavLink({
   section,

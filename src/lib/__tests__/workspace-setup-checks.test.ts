@@ -19,6 +19,10 @@ import { SETUP_CHECKS, checksFor } from "@/server/modules/settings/workspace-hea
  *
  * The backup-profile gap lands on `solar_settings`: the profiles live on that
  * screen's Backup tab since the Storage card was deleted.
+ *
+ * `solar_pay` is the exception that proves it: it points at /portal/team, so it
+ * has no card and its key names none. The hub keeps it on that basis — see the
+ * card-less branch in `settings-overview.tsx`.
  */
 const STORAGE_CHECKS = ["solar_settings", "solar_lenders", "solar_pay"];
 
