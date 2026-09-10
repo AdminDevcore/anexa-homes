@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
 import {
   buildCreditLadder,
   CREDIT_HINT,
@@ -173,9 +174,15 @@ export function CreditClaimsCard({
  * WHICH CREDITS THIS JOB EARNS.
  *
  * Editable, because the two bonuses are conditional on the address and on the
- * equipment and only the person selling the job knows. Unticking one does not
- * change the price or the payment the household was quoted — what moves is
+ * equipment and only the person selling the job knows. Switching one off does
+ * not change the price or the payment the household was quoted — what moves is
  * what the document CLAIMS on somebody's return.
+ *
+ * A SWITCH PER CREDIT, NOT A TICK-BOX. A tick-box reads as a form somebody
+ * fills in and submits; these three are live settings on the deal that re-price
+ * the ladder beside them the moment they move, and the document's own
+ * tax-credit control is a switch too. Same gesture on the rep's screen as on
+ * the customer's page.
  */
 function CreditClaimsFieldset({
   claims,
@@ -199,29 +206,17 @@ function CreditClaimsFieldset({
       <legend className="text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">
         Credits this job earns
       </legend>
-      <div className="mt-2 space-y-2">
+      <div className="mt-2 divide-y divide-border/60">
         {(["itc", "energyCommunity", "domesticContent"] as const).map((key) => (
-          <label
+          <CreditToggle
             key={key}
-            className={cn(
-              "flex cursor-pointer items-start gap-2.5 text-[12px] leading-snug",
-              !canEdit && "cursor-default opacity-70"
-            )}
-          >
-            <input
-              type="checkbox"
-              className="mt-0.5 size-3.5 shrink-0 accent-[var(--solar)]"
-              checked={claims[key]}
-              disabled={!canEdit || saving}
-              onChange={() => onToggle(key)}
-            />
-            <span className="min-w-0">
-              <span className="font-medium text-foreground">
-                {CREDIT_LABEL[key]} ({rateFor(creditRates, key)}%)
-              </span>
-              <span className="mt-0.5 block text-muted-foreground">{CREDIT_HINT[key]}</span>
-            </span>
-          </label>
+            label={`${CREDIT_LABEL[key]} (${rateFor(creditRates, key)}%)`}
+            hint={CREDIT_HINT[key]}
+            on={claims[key]}
+            disabled={!canEdit || saving}
+            readOnly={!canEdit}
+            onToggle={() => onToggle(key)}
+          />
         ))}
       </div>
       {error && (
@@ -231,6 +226,64 @@ function CreditClaimsFieldset({
       )}
       <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{note}</p>
     </fieldset>
+  );
+}
+
+/**
+ * One credit, on or off.
+ *
+ * The label carries the percentage because that is what the switch is worth —
+ * a rep flipping "Energy community bonus (10%)" can see the ten points leave
+ * the ladder on the left. `htmlFor` on the label so the words are the target
+ * too: three small switches in a narrow column are a poor click area on their
+ * own, and the text is what a rep is reading when they decide.
+ */
+function CreditToggle({
+  label,
+  hint,
+  on,
+  disabled,
+  readOnly,
+  onToggle,
+}: {
+  label: string;
+  hint: string;
+  on: boolean;
+  /** Also true mid-save, so a second click cannot race the first. */
+  disabled: boolean;
+  /** No permission to edit — dim the row, rather than look momentarily busy. */
+  readOnly: boolean;
+  onToggle: () => void;
+}) {
+  const id = React.useId();
+  return (
+    <div
+      className={cn(
+        "flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0",
+        readOnly && "opacity-70"
+      )}
+    >
+      <div className="min-w-0">
+        <label
+          htmlFor={id}
+          className={cn(
+            "block text-[12px] font-medium leading-snug text-foreground",
+            !readOnly && "cursor-pointer"
+          )}
+        >
+          {label}
+        </label>
+        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{hint}</p>
+      </div>
+      <Switch
+        id={id}
+        size="sm"
+        checked={on}
+        disabled={disabled}
+        onCheckedChange={onToggle}
+        className="mt-0.5 data-checked:bg-solar"
+      />
+    </div>
   );
 }
 
