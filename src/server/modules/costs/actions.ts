@@ -7,6 +7,7 @@ import type { Prisma, ProjectCostType } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { projectAccessible } from "@/server/rbac/lead-access";
 import { listScope } from "@/server/rbac/policies";
 import { putObject } from "@/server/storage";
 import { computeDealCommission, resolveSplitSnapshot, applySplitSnapshot } from "@/lib/commission";
@@ -339,6 +340,10 @@ export async function setProjectScheduleAction(input: z.infer<typeof scheduleSch
   const { projectId, field, date } = parsed.data;
   const project = await prisma.project.findFirst({ where: { id: projectId, companyId: user.companyId }, select: { id: true, leadId: true } });
   if (!project) return { ok: false as const, error: "Project not found." };
+  // Unlike its neighbours in this file, this one is also reachable with
+  // Project:update — which managers hold — so company scope is not the ceiling
+  // here that Commission:update makes it elsewhere. These dates gate pay.
+  if (!(await projectAccessible(user, project.id))) return { ok: false as const, error: "Project not found." };
   const value = date ? new Date(`${date}T12:00:00`) : null;
   if (value && Number.isNaN(value.getTime())) return { ok: false as const, error: "Enter a valid date." };
   await prisma.project.update({

@@ -7,6 +7,8 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
+import { leadAccessible, projectAccessible } from "@/server/rbac/lead-access";
+import type { AccessUser } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
 import { getMembership } from "@/server/modules/chat/queries";
 import { companyExportLabel } from "@/lib/company-exports";
@@ -20,6 +22,27 @@ import { isActiveVertical } from "@/lib/vertical";
 import sharp from "sharp";
 
 const MAX_BYTES = 30 * 1024 * 1024; // 30MB (phone photos); compressed after upload
+
+/**
+ * A file attached to a deal is authorised BY that deal.
+ *
+ * The download route already works this way (see app/portal/files/[id]/route.ts);
+ * moving and deleting were the two doors that did not, so a rep with File perms
+ * could re-file or destroy a photo on somebody else's job by id alone.
+ *
+ * A file hanging off neither a lead nor a project — a chat attachment, an
+ * onboarding document, a company asset — has no deal to ask about, and the
+ * uploader/admin rules at each call site stay its boundary.
+ */
+async function fileParentAccessible(
+  user: AccessUser,
+  file: { leadId: string | null; projectId: string | null }
+): Promise<boolean> {
+  if (file.leadId) return !!(await leadAccessible(user, file.leadId));
+  if (file.projectId) return !!(await projectAccessible(user, file.projectId));
+  return true;
+}
+
 const CALL_MAX_BYTES = 100 * 1024 * 1024; // 100MB — call recordings (audio, uncompressed)
 
 // Dedicated call-recording slots on a deal (QC Call). Kept in sync with
@@ -364,6 +387,9 @@ export async function moveFileAction(id: string, category: string) {
     },
   });
   if (!file) return { ok: false as const, error: "File not found." };
+  // Same sentence as a missing file: whether it exists on another rep's deal
+  // is not something an id-guesser should learn.
+  if (!(await fileParentAccessible(user, file))) return { ok: false as const, error: "File not found." };
   if (!can(user, "update", "File") && file.uploadedById !== user.userId) {
     return { ok: false as const, error: "You can only move your own uploads." };
   }
@@ -408,6 +434,9 @@ export async function deleteFileAction(id: string) {
     select: { id: true, uploadedById: true, category: true, projectId: true, leadId: true },
   });
   if (!file) return { ok: false as const, error: "File not found." };
+  // Same sentence as a missing file: whether it exists on another rep's deal
+  // is not something an id-guesser should learn.
+  if (!(await fileParentAccessible(user, file))) return { ok: false as const, error: "File not found." };
 
   /* A submitted invoice is the contractor's evidence that he billed, so it
    * outranks the "your own uploads" rule that would otherwise let him take it

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import {
   annualFromMonthlyKwh,
   annualUsageFromBill,
@@ -55,10 +56,7 @@ export async function saveSolarEnergyAction(input: z.infer<typeof energySchema>)
   if (!parsed.success) return fail("Invalid energy details.");
   const d = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: d.leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, d.leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
@@ -150,8 +148,11 @@ export async function saveCustomerDetailsAction(input: z.infer<typeof customerSc
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid customer details.");
   const d = parsed.data;
 
+  if (!(await leadAccessible(user, d.leadId))) return fail("Deal not found.");
+  // Authorised above; this read is for the address COMPARISON below, which
+  // needs the columns the scope check does not return.
   const existing = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: d.leadId },
+    where: { id: d.leadId, companyId: user.companyId },
     select: { id: true, address: true, city: true, state: true, zip: true },
   });
   if (!existing) return fail("Deal not found.");
@@ -220,6 +221,7 @@ export async function saveSolarTouOverrideAction(input: unknown) {
   const parsed = touSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: "Invalid rates." };
   const { leadId, touPeakRateMills, touOffPeakRateMills } = parsed.data;
+  if (!(await leadAccessible(user, leadId))) return { ok: false as const, error: "Deal not found." };
 
   if ((touPeakRateMills == null) !== (touOffPeakRateMills == null)) {
     return { ok: false as const, error: "Enter both the peak and the off-peak rate, or neither." };

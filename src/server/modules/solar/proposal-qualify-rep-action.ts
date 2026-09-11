@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { qualifyOnProposalAsRep } from "./proposal-qualify-rep";
 import type { QualifyResult } from "./proposal-qualify";
 
@@ -54,6 +55,11 @@ export async function qualifyFromPortalAction(input: {
     },
   });
   if (!proposal) {
+    return { ok: false, error: "That proposal is not on this company's books.", retryable: false };
+  }
+  // ...and on THIS rep's books. Starting a credit application against somebody
+  // else's customer is the one thing in this module that cannot be undone.
+  if (!(await leadAccessible(user, proposal.leadId))) {
     return { ok: false, error: "That proposal is not on this company's books.", retryable: false };
   }
 

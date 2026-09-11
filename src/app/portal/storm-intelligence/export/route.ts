@@ -10,7 +10,11 @@ function cell(v: string | number): string {
 
 export async function GET(req: Request) {
   const user = await requireUser();
-  if (!can(user, "read", "StormIntelligence")) return new NextResponse("Forbidden", { status: 403 });
+  // `export`, not `read`. A canvasser reads the storm layer to pick a door;
+  // taking the list away as a spreadsheet is a different act, and the matrix
+  // grants that verb to leadership only. The rows are row-scoped underneath
+  // this too — see getStormMatches.
+  if (!can(user, "export", "StormIntelligence")) return new NextResponse("Forbidden", { status: 403 });
 
   const sp = new URL(req.url).searchParams;
   const minScoreRaw = sp.get("minScore");
@@ -19,7 +23,7 @@ export async function GET(req: Request) {
   const subjectType = subject === "lead" || subject === "knock" ? subject : undefined;
 
   const matches = await getStormMatches(
-    user.companyId,
+    user,
     { minScore: Number.isFinite(minScore) ? minScore : undefined, subjectType },
     5000,
   );

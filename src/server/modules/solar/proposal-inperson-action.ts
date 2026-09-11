@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { mintWitness } from "./witness";
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -43,6 +44,10 @@ export async function openInPersonProposalSigningAction(proposalId: string) {
     },
   });
   if (!p) return fail("Proposal not found.");
+  // Scoped to the caller's own deals, not just their company: `p.leadId`
+  // came out of an id the browser supplied. Same sentence as a missing
+  // proposal, so the two cases stay indistinguishable from outside.
+  if (!(await leadAccessible(user, p.leadId))) return fail("Proposal not found.");
   if (p.signedAt) return fail("This proposal has already been signed.");
   if (p.supersededAt) {
     return fail("This version has been replaced. Open the current one to sign it.");

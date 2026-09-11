@@ -12,7 +12,7 @@ import type { CanvassingMeta, KnockListRow } from "@/server/modules/canvassing/q
 
 type SortCol = "address" | "status" | "repName" | "territoryName" | "knockedAt";
 
-export function CanvassingList() {
+export function CanvassingList({ canExport }: { canExport: boolean }) {
   const { data: meta } = useQuery<CanvassingMeta>({
     queryKey: ["canvassing-meta"],
     queryFn: async () => (await fetch("/api/canvassing/data")).json(),
@@ -61,27 +61,6 @@ export function CanvassingList() {
     setSort((s) => (s.col === col ? { col, dir: (s.dir * -1) as 1 | -1 } : { col, dir: 1 }));
   }
 
-  function exportCsv() {
-    const header = ["Address", "Status", "Rep", "Territory", "Date/Time", "Notes"];
-    const lines = sorted.map((r) => [
-      r.address ?? "",
-      dispositionMeta(r.status).label,
-      r.repName ?? "",
-      r.territoryName ?? "",
-      new Date(r.knockedAt).toLocaleString(),
-      r.notesPreview ?? "",
-    ]);
-    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-    const csv = [header, ...lines].map((row) => row.map(esc).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `canvassing-knocks-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   const Th = ({ col, children, className }: { col: SortCol; children: React.ReactNode; className?: string }) => (
     <th className={cn("px-3 py-2 text-left font-semibold", className)}>
       <button onClick={() => toggleSort(col)} className="inline-flex items-center gap-1 hover:text-foreground">
@@ -117,9 +96,16 @@ export function CanvassingList() {
           <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search address / notes" className="h-8 w-56 pl-7" />
         </div>
-        <Button variant="outline" size="sm" onClick={exportCsv} disabled={!sorted.length} className="ml-auto gap-1.5">
-          <Download className="size-4" /> Export CSV
-        </Button>
+        {/* The download is a server route so the permission model can see it.
+            Hidden without `export Canvassing` — the route refuses it anyway,
+            and a button that always 403s is worse than no button. */}
+        {canExport && (
+          <Button asChild variant="outline" size="sm" className="ml-auto gap-1.5">
+            <a href={`/portal/canvassing/export?${params.toString()}`}>
+              <Download className="size-4" /> Export CSV
+            </a>
+          </Button>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-border bg-card">

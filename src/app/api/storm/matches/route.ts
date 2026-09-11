@@ -14,7 +14,7 @@ export async function GET(req: Request) {
   const subject = sp.get("subject");
   const subjectType = subject === "lead" || subject === "knock" ? subject : undefined;
 
-  const matches = await getStormMatches(user.companyId, {
+  const matches = await getStormMatches(user, {
     minScore: Number.isFinite(minScore) ? minScore : undefined,
     subjectType,
   });

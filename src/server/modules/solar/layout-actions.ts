@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { pinMoveAllowed } from "@/lib/map-view";
 import { recomputeDesignFigures } from "./recompute";
@@ -118,14 +119,19 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
   if (!parsed.success) return fail("That layout could not be read.");
   const { leadId, blocks, setbacks } = parsed.data;
 
+  // Authorisation first, and through the viewer's own scope — a leadId from the
+  // browser is a request, not a fact. The read below is then detail, not a gate.
+  const allowed = await leadAccessible(user, leadId);
+  if (!allowed) return fail("Deal not found.");
+  if (allowed.vertical !== "solar") return fail("This is not a solar deal.");
+
   const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
+    where: { id: leadId },
     // The coordinate is the site. `lat` drives the sun's path for the fallback
     // model; both together are what PVWatts simulates the real weather for.
-    select: { id: true, vertical: true, lat: true, lng: true },
+    select: { id: true, lat: true, lng: true },
   });
   if (!lead) return fail("Deal not found.");
-  if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
   const moduleQty = panelCount(blocks as LayoutBlock[]);
   if (moduleQty > 500) return fail("That is more than 500 panels — check the drawing.");

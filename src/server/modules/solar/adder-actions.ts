@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { ADDER_BASES } from "@/lib/solar-adders";
 import {
   dealLenderId,
@@ -85,10 +86,7 @@ async function guard(
 ): Promise<{ ok: false; error: string } | { ok: true; user: SolarUser }> {
   const user = await requireUser();
   if (!can(user, "update", "Lead")) return { ok: false, error: "Not allowed." };
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return { ok: false, error: "Deal not found." };
   if (lead.vertical !== "solar") return { ok: false, error: "This is not a solar deal." };
   return { ok: true, user };

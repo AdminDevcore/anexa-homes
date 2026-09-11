@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
@@ -56,6 +57,10 @@ export default async function SolarProposalBuilderPage({
   if (!can(user, "create", "Proposal") && !can(user, "update", "Proposal")) {
     redirect(`/portal/leads/${id}`);
   }
+
+  // The layout above 404s an out-of-scope deal, but a layout is a backstop:
+  // Next renders page segments independently. The page proves it for itself.
+  if (!(await leadAccessible(user, id))) notFound();
 
   const lead = await prisma.lead.findFirst({
     where: { id, companyId: user.companyId },

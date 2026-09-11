@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { recomputeDesignFigures } from "./recompute";
 import { DEFAULT_BATTERY_QTY } from "./settings";
 
@@ -65,10 +66,7 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
   if (!parsed.success) return fail("That equipment could not be read.");
   const { leadId, moduleId, inverterId, batteryId, batteryQty, batteryQtyAuto } = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 

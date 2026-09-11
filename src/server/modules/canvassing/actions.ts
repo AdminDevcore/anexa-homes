@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { DISPOSITION_VALUES, pointInPolygon, type LatLng } from "@/lib/canvassing";
 import { canManageAllCanvassing } from "./policies";
 import { fetchAddressesInPolygon, coordKey } from "./addresses";
@@ -166,7 +167,9 @@ export async function updateLeadPositionAction(
   const parsed = leadPositionSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid position.");
   const { leadId, lat, lng } = parsed.data;
-  const lead = await prisma.lead.findFirst({ where: { id: leadId, companyId: me.companyId }, select: { id: true } });
+  // Canvassing scopes KNOCKS with knockScope, but this moves a LEAD, and the
+  // lead scope is the one that decides whose pin this is.
+  const lead = await leadAccessible(me, leadId);
   if (!lead) return fail("Deal not found.");
   await prisma.lead.update({ where: { id: lead.id }, data: { lat, lng, geocodedAt: new Date() } });
   await prisma.knock.updateMany({ where: { companyId: me.companyId, leadId: lead.id }, data: { lat, lng } });
