@@ -220,15 +220,20 @@ test.describe(FLAG_ON ? "solar payment factors" : "solar payment factors (flag o
     await expect(page.getByText("Without paydown")).toBeVisible();
     await expect(page.getByText(/Paydown due by month 18/)).toBeVisible();
 
-    // An approval belongs to the programme it was run on, so quoting a
-    // different one CLEARS it rather than carrying another lender's figure
-    // across. With the box empty the headline is the FACTOR — not our
-    // amortisation, which is the whole point of storing factors.
-    await expect(page.getByLabel("Monthly payment $", { exact: true })).toHaveValue("");
+    // The headline is the FACTOR, and the step says so in as many words. That
+    // is the whole point of storing factors: a published factor already carries
+    // the fee and whatever promotional structure the programme has, so our own
+    // amortisation of the same APR and term would quote the customer a
+    // different number.
     await expect(page.getByText(/rate sheet's payment factor/)).toBeVisible({ timeout: 15000 });
 
-    // Type one in and it outranks the sheet again, as the lender's own number.
-    await page.getByLabel("Monthly payment $", { exact: true }).fill("259.40");
-    await expect(page.getByText(/own figure from the approval/)).toBeVisible({ timeout: 15000 });
+    // And there is no third source any more. A rep could once type the lender's
+    // approved figure into a "Monthly payment $" box and outrank the sheet with
+    // it; that box went with the "Approved loan terms" card in 4e94a8d, having
+    // never once been filled in on a real deal, leaving two sources
+    // — the published factor, else our amortisation. This asserts its ABSENCE,
+    // because the risk it left behind is a hand-typed payment quietly beating
+    // the lender's own published one.
+    await expect(page.getByLabel(/Monthly payment/)).toHaveCount(0);
   });
 });
