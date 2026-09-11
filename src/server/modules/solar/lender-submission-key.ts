@@ -3,6 +3,7 @@
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { revalidatePath } from "next/cache";
 import { lenderReference } from "./lender-submit";
 
@@ -53,6 +54,11 @@ export async function resetLenderSubmissionKeyAction(proposalId: string): Promis
     select: { leadId: true },
   });
   if (!proposal) return { ok: false, error: "Proposal not found." };
+  // Company is not enough: the proposal id came from the browser, so the deal
+  // behind it has to be one this user may reach. Same sentence either way.
+  if (!(await leadAccessible(user, proposal.leadId))) {
+    return { ok: false, error: "Proposal not found." };
+  }
   const leadId = proposal.leadId;
 
   const design = await prisma.solarDesign.findFirst({

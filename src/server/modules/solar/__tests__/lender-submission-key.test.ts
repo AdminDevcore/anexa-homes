@@ -7,6 +7,7 @@ vi.mock('@/server/rbac/guards', () => ({ can: (...a: unknown[]) => can(...a) }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 
 const proposalFindFirst = vi.fn()
+const leadFindFirst = vi.fn()
 const designFindFirst = vi.fn()
 const designUpdate = vi.fn()
 const eventFindFirst = vi.fn()
@@ -14,6 +15,9 @@ const activityCreate = vi.fn()
 vi.mock('@/server/db/client', () => ({
   prisma: {
     solarProposal: { findFirst: (...a: unknown[]) => proposalFindFirst(...a) },
+    // leadAccessible() reads this: the action now proves the deal behind the
+    // proposal is one this user may reach, not merely one in their company.
+    lead: { findFirst: (...a: unknown[]) => leadFindFirst(...a) },
     solarDesign: {
       findFirst: (...a: unknown[]) => designFindFirst(...a),
       update: (...a: unknown[]) => designUpdate(...a),
@@ -30,6 +34,7 @@ beforeEach(() => {
   requireUser.mockReset().mockResolvedValue({ id: 'u1', companyId: 'co-1' })
   can.mockReset().mockReturnValue(true)
   proposalFindFirst.mockReset().mockResolvedValue({ leadId: 'lead-1' })
+  leadFindFirst.mockReset().mockResolvedValue({ id: 'lead-1', vertical: 'solar' })
   designFindFirst
     .mockReset()
     .mockResolvedValue({ id: 'design-abc', lenderSubmissionAttempt: 0, lenderId: 'lender-1' })
@@ -109,6 +114,18 @@ describe('resetLenderSubmissionKeyAction', () => {
     const r = await resetLenderSubmissionKeyAction('prop-1')
     expect(r).toMatchObject({ ok: false })
     expect((r as { error: string }).error).toContain('support')
+    expect(designUpdate).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The reference this resets is what a lender's callbacks are keyed on, so
+   * abandoning somebody else's would strand a live application. Company scope
+   * alone let any rep do it with a proposal id.
+   */
+  it('refuses a deal outside the caller\'s own scope', async () => {
+    leadFindFirst.mockResolvedValue(null) // listScope found nothing for this user
+    const res = await resetLenderSubmissionKeyAction('prop-1')
+    expect(res).toEqual({ ok: false, error: 'Proposal not found.' })
     expect(designUpdate).not.toHaveBeenCalled()
   })
 })
