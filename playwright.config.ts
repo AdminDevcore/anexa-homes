@@ -1,3 +1,8 @@
+// FIRST, and for its side effect: loads `.env` into the runner the way `next dev`
+// loads it into the app. Everything below reads `process.env` at module scope, so
+// this import must stay above them. See e2e/load-env.ts for what went wrong without it.
+import "./e2e/load-env";
+
 import { defineConfig, devices } from "@playwright/test";
 import { E2E_DATABASE_URL } from "./e2e/global-setup";
 
@@ -48,5 +53,22 @@ export default defineConfig({
       GOOGLE_MAPS_API_KEY: "e2e-not-a-real-key",
     },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // Runs BEFORE anything else and stops the run if it fails. The failure it
+    // exists to catch — the app having a workspace switched on that the suite is
+    // skipping — is invisible in a report that says "passed, 84 skipped", and it
+    // survived precisely because nothing ever went red. A dependency makes it
+    // impossible to miss and cheap to hit: ~10 seconds, not 20 minutes in.
+    {
+      name: "preflight",
+      testMatch: /vertical-coverage\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
+      testIgnore: /vertical-coverage\.spec\.ts/,
+      dependencies: ["preflight"],
+    },
+  ],
 });
