@@ -11,6 +11,7 @@ import { getActiveVertical } from "@/server/auth/vertical";
 import { can } from "@/server/rbac/guards";
 import { isAdmin } from "@/server/rbac/matrix";
 import { listScope } from "@/server/rbac/policies";
+import { projectAccessible } from "@/server/rbac/lead-access";
 import { fireEvent } from "@/server/modules/notifications/engine";
 import { getQcChecklistTemplate } from "@/server/modules/settings/queries";
 
@@ -248,6 +249,9 @@ export async function unassignCrewAction(projectCrewId: string) {
     select: { id: true, projectId: true },
   });
   if (!pc) return fail("Assignment not found.");
+  // The assignment id came off the wire; the JOB behind it has to be one this
+  // user may reach. Same sentence as a missing assignment.
+  if (!(await projectAccessible(user, pc.projectId))) return fail("Assignment not found.");
   await prisma.projectCrew.delete({ where: { id: projectCrewId } });
   revalidatePath(`/portal/projects/${pc.projectId}`);
   return ok();
@@ -332,6 +336,9 @@ export async function setInstallerRoleAction(assigneeId: string, role: string) {
     select: { id: true, projectId: true },
   });
   if (!row) return fail("Assignment not found.");
+  // The assignment id came off the wire; the JOB behind it has to be one this
+  // user may reach. Same sentence as a missing assignment.
+  if (!(await projectAccessible(user, row.projectId))) return fail("Assignment not found.");
   await prisma.projectAssignee.update({
     where: { id: assigneeId },
     data: { role: role.trim().slice(0, 60) || null },
@@ -348,6 +355,9 @@ export async function unassignInstallerAction(assigneeId: string) {
     select: { id: true, projectId: true },
   });
   if (!row) return fail("Assignment not found.");
+  // The assignment id came off the wire; the JOB behind it has to be one this
+  // user may reach. Same sentence as a missing assignment.
+  if (!(await projectAccessible(user, row.projectId))) return fail("Assignment not found.");
   await prisma.projectAssignee.delete({ where: { id: assigneeId } });
   await revalidateCrew(row.projectId);
   return ok();

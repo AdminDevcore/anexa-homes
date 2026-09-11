@@ -6,9 +6,11 @@ import { join, relative, sep } from "node:path";
  * CI guard for the ROW-SCOPE boundary.
  *
  * A caller can pick which ROW inside their tenant they act on, and this stops
- * them. (Its sibling — a guard against an action accepting the TENANT itself as
- * a parameter — is not on this branch yet; see the storage.ts note in
- * KNOWN_GAPS, which is exactly what such a guard would have caught.)
+ * them. Its sibling — a guard against an action accepting the TENANT itself as
+ * a parameter — is not on this branch yet. That gap was real: solar/storage.ts
+ * exported two reads taking `companyId`, and the fix was to move them off the
+ * RPC surface entirely (see solar/deal-rebates.ts), because a caller-supplied
+ * company is not something a row check can repair.
  *
  * Every export of a `"use server"` module is a public RPC endpoint, so a
  * `leadId` parameter is whatever the browser typed. Two questions have to be
@@ -24,10 +26,10 @@ import { join, relative, sep } from "node:path";
  * 2026-09-10 — design, pricing, lender and credit settings on somebody else's
  * customer — while `/portal/leads/<id>` correctly 404'd the same person.
  *
- * THE RULE. If an export's parameters or body name a `leadId`, `projectId` or
- * `documentId`, its body must reach a scoping helper: `listScope`,
- * `leadAccessible`, `projectAccessible`, or a local function in the same file
- * that itself reaches one (so the `guard()` / `ensureScope()` wrappers this
+ * THE RULE. If an export's parameters or body name a `leadId`, `projectId`,
+ * `documentId` or `proposalId`, its body must reach a scoping helper:
+ * `listScope`, `leadAccessible`, `projectAccessible`, or a local function in
+ * the same file that itself reaches one (so the `guard()` wrappers this
  * codebase already uses count).
  *
  * WHAT THIS DOES NOT CHECK. It reads source text. It proves the question is
@@ -35,10 +37,11 @@ import { join, relative, sep } from "node:path";
  * module — `esign/actions.ts` delegates to `sendForSignature`, which scopes
  * properly one file over, and is listed below for exactly that reason.
  *
- * `proposalId` is deliberately NOT in the trigger list. Solar keys eight
- * actions off it and every one of them now resolves the parent lead through
- * `leadAccessible`, but adding it here would flag a long tail across the app
- * that has not been audited. Widening the list is the obvious next ratchet.
+ * `proposalId` was added to the triggers on 2026-09-11 and surfaced nothing:
+ * all twelve proposal-keyed exports already named `leadId` in their bodies,
+ * because acting on a proposal means resolving the deal behind it. It is in the
+ * list anyway — the guard should say what it means, not rely on a coincidence
+ * of how these functions happen to be written today.
  */
 
 const REPO_ROOT = join(__dirname, "..", "..", "..");
@@ -47,7 +50,7 @@ const SCAN_EXT = [".ts", ".tsx"];
 const SKIP_DIRS = new Set(["node_modules", ".next", ".next-e2e", "dist", "build", "__tests__"]);
 
 /** The parameters that name ONE ROW of customer data. */
-const ROW_KEY = /\b(leadId|projectId|documentId)\b/;
+const ROW_KEY = /\b(leadId|projectId|documentId|proposalId)\b/;
 
 /** Where a row-scope decision can legitimately come from. */
 const SCOPE_ROOTS = ["listScope", "leadAccessible", "projectAccessible"];
@@ -62,6 +65,13 @@ const ALLOWED: Record<string, string> = {
     "Creates the lead. Nothing to scope against until it exists.",
   "src/server/modules/canvassing/actions.ts#convertKnockToLeadAction":
     "Creates a lead from a knock; the knock is what gets authorised, by knockScope.",
+
+  // ── THE CUSTOMER'S OWN ACTION, NO SESSION TO SCOPE ───────────────────────
+  "src/server/modules/proposals/actions.ts#selectPaymentOptionAction":
+    "The homeowner picking how they want to pay, resolved by publicToken under " +
+    "runUnscoped. There is no `user` here — a staff scope check would break the " +
+    "customer's own presentation, the same way it would on the solar sign and " +
+    "qualify actions.",
 
   // ── SCOPED BY THE CANVASSING SYSTEM, NOT listScope ────────────────────────
   // Canvassing carries its own row-scope rules (knockScope + the explicit
@@ -107,56 +117,6 @@ const ALLOWED: Record<string, string> = {
     "Delegates to sendForSignature(), which applies listScope(user,'Lead') — esign/service.ts:131.",
   "src/server/modules/esign/actions.ts#sendDocumentsAction":
     "Delegates to sendForSignature(), which applies listScope(user,'Lead') — esign/service.ts:131.",
-};
-
-/**
- * Real gaps, audited on 2026-09-10 and deliberately NOT fixed in the solar
- * pass. This is DEBT, not permission: every one of these lets a role that can
- * reach the feature act on a row outside their own scope.
- *
- * It is a ratchet. The test below fails if the list grows, and fails if an
- * entry is fixed but left here — so the number can only go down, and nobody
- * can quietly add to it instead of scoping a new action.
- */
-const KNOWN_GAPS: Record<string, string> = {
-  "src/server/modules/canvassing/actions.ts#updateLeadPositionAction":
-    "Moves an existing lead's map pin on companyId alone — any rep can move any pin.",
-  "src/server/modules/costs/actions.ts#setProjectScheduleAction":
-    "Also reachable with Project:update, which managers hold, so it escapes the finance-only reasoning above.",
-  "src/server/modules/estimates/actions.ts#deleteEstimateLineAction":
-    "Scoped to the estimate's leadId but not to the viewer's leads.",
-  "src/server/modules/files/actions.ts#moveFileAction": "File perms are held by reps; companyId only.",
-  "src/server/modules/files/actions.ts#deleteFileAction": "File perms are held by reps; companyId only.",
-  "src/server/modules/projects/actions.ts#unassignCrewAction": "Project:update reaches any job in the company.",
-  "src/server/modules/projects/actions.ts#setInstallerRoleAction": "Project:update reaches any job in the company.",
-  "src/server/modules/projects/actions.ts#unassignInstallerAction": "Project:update reaches any job in the company.",
-  "src/server/modules/proposals/actions.ts#updateProposalContentAction":
-    "Roofing proposal, companyId only — the same shape solar just had.",
-  "src/server/modules/proposals/actions.ts#generateProposalAction": "Roofing proposal, companyId only.",
-  "src/server/modules/proposals/actions.ts#emailProposalAction": "Roofing proposal, companyId only.",
-  "src/server/modules/proposals/actions.ts#selectPaymentOptionAction": "Roofing proposal, companyId only.",
-  "src/server/modules/scope/actions.ts#deleteScopeLineAction":
-    "The one export in this file that skips its own leadAccessible() helper.",
-
-  /* ── solar/storage.ts — WORSE THAN A ROW GAP, AND ON PURPOSE UNFIXED ──────
-   * These five are deal-keyed and unscoped like the rest of this list, but two
-   * of them — listDealRebates and dealRebateTotalCents — take `companyId` as a
-   * PARAMETER. That is not a row boundary, it is the TENANT boundary: inside a
-   * "use server" module the caller supplies it, so the tenant becomes whatever
-   * was typed, and no downstream scoping can recover from that.
-   *
-   * Left alone here only because the pending solar branch DELETES this file
-   * outright (the storage/rebates tab was dropped), so scoping it now buys a
-   * delete/modify conflict on code that is going away. If that branch is
-   * delayed, fix these first — ahead of everything else on this list.
-   */
-  "src/server/modules/solar/storage.ts#listDealRebates":
-    "Takes companyId as a parameter — tenant boundary, not row. File is deleted by the solar branch.",
-  "src/server/modules/solar/storage.ts#dealRebateTotalCents":
-    "Takes companyId as a parameter — tenant boundary, not row. File is deleted by the solar branch.",
-  "src/server/modules/solar/storage.ts#applyDealRebateAction": "Deal-keyed, companyId only. File is deleted by the solar branch.",
-  "src/server/modules/solar/storage.ts#removeDealRebateAction": "Deal-keyed, companyId only. File is deleted by the solar branch.",
-  "src/server/modules/solar/storage.ts#syncDealRebateQuantities": "A deal-keyed WRITE, companyId only. File is deleted by the solar branch.",
 };
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -292,7 +252,7 @@ describe("row-scope boundary", () => {
   });
 
   it("every deal-keyed server action resolves the row through the viewer's scope", () => {
-    const offenders = unscoped.filter((e) => !(e in ALLOWED) && !(e in KNOWN_GAPS));
+    const offenders = unscoped.filter((e) => !(e in ALLOWED));
 
     expect(
       offenders,
@@ -303,29 +263,17 @@ describe("row-scope boundary", () => {
     ).toEqual([]);
   });
 
-  it("the known-gap list only ever shrinks", () => {
-    const stillOpen = new Set(unscoped);
-    const fixed = Object.keys(KNOWN_GAPS).filter((e) => !stillOpen.has(e));
-
-    expect(
-      fixed,
-      `These are scoped now. Delete them from KNOWN_GAPS so the list keeps meaning\n` +
-        `something:\n` +
-        fixed.map((e) => `  • ${e}`).join("\n")
-    ).toEqual([]);
-  });
-
   it("no exception names an export that no longer exists", () => {
     const live = new Set<string>();
     for (const file of serverModules) {
       const src = readFileSync(file, "utf8");
       for (const fn of functions(src, EXPORTED())) live.add(`${repoPath(file)}#${fn.name}`);
     }
-    const stale = [...Object.keys(ALLOWED), ...Object.keys(KNOWN_GAPS)].filter((e) => !live.has(e));
+    const stale = Object.keys(ALLOWED).filter((e) => !live.has(e));
 
     expect(
       stale,
-      `ALLOWED / KNOWN_GAPS name exports that are gone. Delete these entries:\n` +
+      `ALLOWED names exports that are gone. Delete these entries:\n` +
         stale.map((e) => `  • ${e}`).join("\n")
     ).toEqual([]);
   });
