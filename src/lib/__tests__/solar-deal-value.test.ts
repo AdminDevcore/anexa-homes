@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   formatSolarDealValue,
+  snapshotPriceSource,
   solarDealValue,
   solarLeadValueCents,
 } from "@/lib/solar-deal-value";
+import type { SnapshotFinancing } from "@/lib/solar-proposal";
 
 /** The deal page's own formatter, near enough — cents in, dollars out. */
 const money = (cents: number) =>
@@ -16,12 +18,33 @@ const money = (cents: number) =>
 const priced = {
   product: "loan" as const,
   contractPriceCents: 8_266_000,
+  netAfterCreditsCents: null,
   monthlyPaymentCents: null,
   rateMillsPerKwh: null,
 };
 
 describe("what a solar deal is worth", () => {
-  it("a purchase is its contract price", () => {
+  it("a purchase is what the household NETS, not what the paper says", () => {
+    // The change: the credits drive the payment, the customer's own document
+    // leads with the net, and a pipeline totalling contracts was adding up a
+    // figure no household was ever asked for.
+    const withCredits = { ...priced, netAfterCreditsCents: 4_133_000 };
+    expect(solarDealValue(withCredits)).toEqual({ kind: "total", cents: 4_133_000 });
+    expect(formatSolarDealValue(solarDealValue(withCredits), money)).toBe("$41,330");
+    // And the column every list sums agrees with the card, by being it.
+    expect(solarLeadValueCents(withCredits)).toBe(4_133_000);
+  });
+
+  it("a system the credits cover entirely is worth nothing, and says so", () => {
+    // A zero NET is a real answer and must not fall through to the contract —
+    // which is why the fallback turns on the field being absent, not falsy.
+    expect(solarDealValue({ ...priced, netAfterCreditsCents: 0 })).toEqual({
+      kind: "total",
+      cents: 0,
+    });
+  });
+
+  it("falls back to the contract where the document claims nothing", () => {
     expect(solarDealValue(priced)).toEqual({ kind: "total", cents: 8_266_000 });
     expect(formatSolarDealValue(solarDealValue(priced), money)).toBe("$82,660");
     expect(solarDealValue({ ...priced, product: "cash" })).toEqual({
@@ -37,6 +60,7 @@ describe("what a solar deal is worth", () => {
     const lease = solarDealValue({
       product: "lease",
       contractPriceCents: 8_266_000,
+      netAfterCreditsCents: null,
       monthlyPaymentCents: 17_500,
       rateMillsPerKwh: null,
     });
@@ -46,6 +70,7 @@ describe("what a solar deal is worth", () => {
     const ppa = solarDealValue({
       product: "ppa",
       contractPriceCents: 8_266_000,
+      netAfterCreditsCents: null,
       monthlyPaymentCents: 17_500,
       rateMillsPerKwh: 145,
     });
@@ -60,6 +85,7 @@ describe("what a solar deal is worth", () => {
     const none = solarDealValue({
       product: "loan",
       contractPriceCents: 0,
+      netAfterCreditsCents: null,
       monthlyPaymentCents: null,
       rateMillsPerKwh: null,
     });
@@ -73,6 +99,7 @@ describe("what a solar deal is worth", () => {
       solarDealValue({
         product: null,
         contractPriceCents: 5_000_000,
+        netAfterCreditsCents: null,
         monthlyPaymentCents: null,
         rateMillsPerKwh: null,
       })
@@ -85,6 +112,24 @@ describe("what gets stamped onto Lead.value", () => {
     expect(solarLeadValueCents(priced)).toBe(8_266_000);
   });
 
+  it("reads the ladder out of a frozen document, a level down", () => {
+    const f = {
+      product: "loan",
+      contractPriceCents: 8_266_000,
+      monthlyPaymentCents: null,
+      rateMillsPerKwh: null,
+      creditLadder: { netCostCents: 4_133_000 },
+    } as unknown as SnapshotFinancing;
+    expect(snapshotPriceSource(f).netAfterCreditsCents).toBe(4_133_000);
+    expect(solarLeadValueCents(snapshotPriceSource(f))).toBe(4_133_000);
+
+    // A document generated before the ladder existed has no such key, and the
+    // honest reading of that is the contract it was actually quoted at.
+    const older = { ...f, creditLadder: undefined } as unknown as SnapshotFinancing;
+    expect(snapshotPriceSource(older).netAfterCreditsCents).toBeNull();
+    expect(solarLeadValueCents(snapshotPriceSource(older))).toBe(8_266_000);
+  });
+
   it("a lease and a PPA stamp zero — there is no contract total to add up", () => {
     // Not the stale loan figure: a pipeline that keeps summing a contract the
     // customer switched off is worse than one that reports nothing.
@@ -92,6 +137,7 @@ describe("what gets stamped onto Lead.value", () => {
       solarLeadValueCents({
         product: "lease",
         contractPriceCents: 8_266_000,
+        netAfterCreditsCents: null,
         monthlyPaymentCents: 17_500,
         rateMillsPerKwh: null,
       })
@@ -100,6 +146,7 @@ describe("what gets stamped onto Lead.value", () => {
       solarLeadValueCents({
         product: "ppa",
         contractPriceCents: 8_266_000,
+        netAfterCreditsCents: null,
         monthlyPaymentCents: null,
         rateMillsPerKwh: 145,
       })

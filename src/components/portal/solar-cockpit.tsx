@@ -109,23 +109,17 @@ export type SystemMoney = {
     inverterLabel: string | null;
     batteryLabel: string | null;
     batteryQty: number;
-    /** Already money-formatted: a lease reads "/mo", a PPA "/kWh". */
+    /**
+     * WHAT IT COSTS THE HOUSEHOLD, already money-formatted: a lease reads
+     * "/mo", a PPA "/kWh", and a purchase reads the price after the federal
+     * credits wherever the document works one out.
+     */
     priceLabel: string;
     /**
-     * THE SECOND PRICE ON THE SAME DOCUMENT, cents: what is left of it once
-     * the household claims the federal credits this job earns.
-     *
-     * It sits under the contract on the cost tile rather than replacing it,
-     * because both are true and a deal has to be able to state either — the
-     * contract is what gets signed, submitted and paid commission on, and the
-     * net is what the household finances and what every payment quoted on this
-     * deal is worked out from.
-     *
-     * Null on a lease and a PPA, which own nothing and claim nothing; on a deal
-     * a rep has unticked every credit on; and on any proposal frozen before the
-     * ladder existed, where the honest answer is that the document does not say.
+     * The contract under it — what is signed, submitted and paid commission on.
+     * Null where the deal claims no credits and the two are one figure.
      */
-    netAfterCreditsCents: number | null;
+    contractLabel: string | null;
   };
   /**
    * What has moved on the drawing since that version was frozen. Empty on a
@@ -268,22 +262,21 @@ export function SolarSystemMoneyPanel({
               value={`${money.reported.year1ProductionKwh.toLocaleString()} kWh`}
             />
             <Metric label="Offset" value={`${Math.round(money.reported.offsetPct)}%`} />
-            {/* TWO PRICES, ONE TILE. The contract leads because it is what was
-                signed and what everything downstream — the lender's file, the
-                deal's value, the rep's commission — is measured on. The net
-                follows it because it is what the household actually pays and
-                what the payment on their document is quoted from, and a rep
-                asked "so what does it cost them" should not have to open the
-                proposal to answer. Dropped where the two are the same figure:
-                on a deal claiming nothing there is no ladder at all, the field
-                is null, and the tile is the one number it has always been. */}
+            {/* TWO PRICES, ONE TILE — and the HOUSEHOLD'S leads. It is what
+                they were asked for, what the loan is written against and what
+                every payment quoted on this deal divides into; the contract
+                follows because it is what gets signed, submitted to the funder
+                and paid commission on, and a deal has to be able to state
+                either. Dropped where the two are the same figure: on a deal
+                claiming nothing there is no ladder at all, the field is null,
+                and the tile is the one number it has always been. */}
             <Metric
               label="System cost"
               value={money.reported.priceLabel}
               accent
               sub={
-                money.reported.netAfterCreditsCents != null
-                  ? `${usd(money.reported.netAfterCreditsCents)} after credits`
+                money.reported.contractLabel
+                  ? `${money.reported.contractLabel} contract`
                   : undefined
               }
             />

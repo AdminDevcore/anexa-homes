@@ -11,9 +11,17 @@
  * walks the deals that were quoted BEFORE it did.
  *
  * THE SNAPSHOT IS THE SOURCE, not the design and not the finance row: the
- * newest proposal's frozen `financing.contractPriceCents` is what that customer
- * was actually quoted, and it is the same figure generation stamps today, so
- * running this changes nothing on a deal quoted since.
+ * reported proposal's own frozen figures are what that customer was actually
+ * quoted, and they are the same ones generation stamps today.
+ *
+ * RE-RUNNABLE, AND IT MOVES NUMBERS AGAIN (2026-09-10). Two rules changed under
+ * it and this is what brings the column back in step with the deal page:
+ *   1. The value is the HOUSEHOLD'S NET — the price after the federal credits
+ *      the document claims — falling back to the contract only where the
+ *      document works no ladder out. Expect roughly half off a deal claiming
+ *      all three credits.
+ *   2. The version read is the APPROVED one where a deal has one, and the
+ *      newest otherwise, matching `resolveReportedSystem`.
  *
  * ONLY DEALS WITH A PROPOSAL. A deal that is priced but never proposed keeps
  * its $0: nobody has been quoted anything, and putting a working figure into
@@ -31,6 +39,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { solarLeadValueCents, type SolarPriceSource } from "../src/lib/solar-deal-value";
+import { REPORTED_PROPOSAL_ORDER } from "../src/lib/solar-system-of-record";
 
 /**
  * A PLAIN client, not `@/server/db/client`.
@@ -60,9 +69,19 @@ function financingOf(snapshot: unknown): SolarPriceSource | null {
   if (!financing || typeof financing !== "object") return null;
   const f = financing as Record<string, unknown>;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  // The ladder sits a level down and is the field a reader forgets — it is the
+  // whole reason `snapshotPriceSource` exists in the app. Read the same way
+  // here rather than imported, because this script must keep parsing documents
+  // written by every schema version rather than trusting the newest shape.
+  const ladder = f.creditLadder;
+  const netCostCents =
+    ladder && typeof ladder === "object"
+      ? num((ladder as Record<string, unknown>).netCostCents)
+      : null;
   return {
     product: (typeof f.product === "string" ? f.product : null) as SolarPriceSource["product"],
     contractPriceCents: num(f.contractPriceCents),
+    netAfterCreditsCents: netCostCents,
     monthlyPaymentCents: num(f.monthlyPaymentCents),
     rateMillsPerKwh: num(f.rateMillsPerKwh),
   };
@@ -80,12 +99,13 @@ async function main() {
   let skipped = 0;
 
   for (const lead of leads) {
-    // The NEWEST version, which is the one the deal page reports and the one
-    // generation would have stamped. A superseded version is a record of what
-    // was offered, not what the deal is worth now.
+    // THE APPROVED VERSION, then the newest — the same ordering the deal page
+    // reports at. `nulls: "last"` is load-bearing: Postgres sorts NULLs FIRST
+    // on a DESC order, so without it this asks for the approved version and
+    // reliably stamps the newest draft instead.
     const proposal = await prisma.solarProposal.findFirst({
       where: { leadId: lead.id },
-      orderBy: { version: "desc" },
+      orderBy: REPORTED_PROPOSAL_ORDER,
       select: { version: true, snapshot: true },
     });
     if (!proposal) {

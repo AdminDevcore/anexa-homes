@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db/client";
+import { restampLeadValue } from "./deal-value";
 
 /**
  * Approving a version, and the copy that files itself when you do.
@@ -155,6 +156,11 @@ export async function approveProposalVersion(
   // back, leaving a deal whose approved version points at nothing.
   await removeFiledCopies(actor.companyId, stale);
 
+  // The pipeline follows the approval. Approving v13 over a newer v14 hands the
+  // deal page back to v13, and a lead value still stamped from v14 would leave
+  // every list totalling a document this deal no longer reports.
+  await restampLeadValue(actor.companyId, proposal.leadId);
+
   await prisma.activityLog.create({
     data: {
       companyId: actor.companyId,
@@ -203,6 +209,10 @@ export async function unapproveProposalVersion(
     actor.companyId,
     [proposal.approvedFileId, proposal.approvedParFileId].filter((id): id is string => !!id),
   );
+
+  // And back again: with the mark gone the newest version answers once more, so
+  // the column has to follow the report rather than keep the withdrawn one.
+  await restampLeadValue(actor.companyId, proposal.leadId);
 
   await prisma.activityLog.create({
     data: {

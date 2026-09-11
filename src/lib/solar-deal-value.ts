@@ -1,4 +1,5 @@
 import type { FinanceProduct } from "@prisma/client";
+import type { SnapshotFinancing } from "@/lib/solar-proposal";
 
 /**
  * What a solar deal is worth, said the way the customer was told it.
@@ -25,6 +26,21 @@ export type SolarPriceSource = {
   product: FinanceProduct | null;
   /** Cash and loan only: the price the DOCUMENT quotes. */
   contractPriceCents: number | null;
+  /**
+   * WHAT THE HOUSEHOLD ACTUALLY PAYS, cents — the price with the federal
+   * credits this job earns taken off it. Cash and loan only.
+   *
+   * THIS IS THE DEAL'S VALUE where the document quotes one, and the contract is
+   * the fallback rather than the answer. The credits stopped being a footnote
+   * when they started driving the payment: the loan is written against what
+   * survives them, the customer's own document leads with it, and a pipeline
+   * totalling contracts was adding up a number no household was ever asked for.
+   *
+   * Null on a lease, a PPA, a deal claiming nothing, and on any proposal frozen
+   * before the ladder existed — all of which fall back to the contract, which
+   * is what those deals were quoted at.
+   */
+  netAfterCreditsCents: number | null;
   /** Lease only: the fixed monthly. */
   monthlyPaymentCents: number | null;
   /** PPA only: price per kWh, in tenths of a cent. */
@@ -57,7 +73,11 @@ export function solarDealValue(src: SolarPriceSource | null | undefined): SolarD
   if (src.product === "lease") {
     return src.monthlyPaymentCents ? { kind: "monthly", cents: src.monthlyPaymentCents } : NONE;
   }
-  // Cash, loan, and a deal with no product decided yet: all priced as a total.
+  // Cash, loan, and a deal with no product decided yet: all priced as a total,
+  // and the total is the NET wherever the document works one out. A zero net is
+  // a real answer — a system the credits cover entirely — so the fallback turns
+  // on the field being absent, never on it being falsy.
+  if (src.netAfterCreditsCents != null) return { kind: "total", cents: src.netAfterCreditsCents };
   return src.contractPriceCents ? { kind: "total", cents: src.contractPriceCents } : NONE;
 }
 
@@ -91,6 +111,12 @@ export function formatSolarDealValue(
 /**
  * What a solar deal's `Lead.value` should be set to.
  *
+ * THE SAME FIGURE THE DEAL PAGE LEADS WITH — the household's net where the
+ * document works one out. The column is what the pipeline board, the funnel
+ * report and lead-source revenue add up, and a deal that reads $95,090 on its
+ * own page and $190,180 in the pipeline is the same two-owners-for-one-truth
+ * defect the system-of-record module exists to stop, one table further out.
+ *
  * Only a purchase writes one. A lease and a PPA have no system price, and
  * carrying the old loan figure forward after a product switch would leave every
  * pipeline total quoting a contract that no longer exists — so they clear it to
@@ -100,4 +126,24 @@ export function formatSolarDealValue(
 export function solarLeadValueCents(src: SolarPriceSource | null | undefined): number {
   const value = solarDealValue(src);
   return value.kind === "total" ? value.cents : 0;
+}
+
+/**
+ * A frozen document, as a price.
+ *
+ * One mapping, used by the deal page's card and by the stamp on `Lead.value`,
+ * because the two have to agree by BEING the same reading rather than by two
+ * call sites happening to pick the same four fields. The credit ladder is the
+ * field that makes this worth a function: it lives a level down from the rest
+ * and is the one a caller forgets.
+ */
+export function snapshotPriceSource(f: SnapshotFinancing): SolarPriceSource {
+  return {
+    product: f.product,
+    contractPriceCents: f.contractPriceCents,
+    // THAT DOCUMENT'S OWN ladder, never today's percentages.
+    netAfterCreditsCents: f.creditLadder?.netCostCents ?? null,
+    monthlyPaymentCents: f.monthlyPaymentCents,
+    rateMillsPerKwh: f.rateMillsPerKwh,
+  };
 }

@@ -1,4 +1,4 @@
-import type { FinanceProduct } from "@prisma/client";
+import type { FinanceProduct, Prisma } from "@prisma/client";
 import type { CreditLadder } from "@/lib/solar-credit-ladder";
 import type { SnapshotFinancing, SolarProposalSnapshot } from "@/lib/solar-proposal";
 
@@ -26,6 +26,29 @@ import type { SnapshotFinancing, SolarProposalSnapshot } from "@/lib/solar-propo
  *
  * Related: src/lib/solar-deal-value.ts, which applies the same rule to price.
  */
+
+/**
+ * WHICH VERSION A SOLAR DEAL IS REPORTED AT, as an ordering.
+ *
+ * The approved one where a deal has one — a customer signature applies that
+ * mark by itself — and the newest otherwise. Exported because it is asked in
+ * three places now (the deal page, the stamp on `Lead.value`, the backfill
+ * script) and three copies of a sort rule is three chances to drift.
+ *
+ * **`nulls: "last"` is load-bearing.** Postgres sorts NULLs FIRST on a DESC
+ * order, so an ordering written without it asks for the approved version and
+ * reliably returns whichever draft was generated last — which reads as an
+ * off-by-one in the caller rather than as a sort default. Pinned against real
+ * Postgres in `proposal-approval.itest.ts`.
+ *
+ * It lives HERE, beside the resolver it feeds, rather than in a server module:
+ * a plain script has to be able to ask this question without dragging in the
+ * vertical-scoped Prisma client.
+ */
+export const REPORTED_PROPOSAL_ORDER: Prisma.SolarProposalOrderByWithRelationInput[] = [
+  { approvedAt: { sort: "desc", nulls: "last" } },
+  { version: "desc" },
+];
 
 /** Where the reported figures came from, so a screen can say so out loud. */
 export type ReportedSystemSource =
@@ -230,9 +253,12 @@ export function systemDrift(
   // Only a purchase has a contract price. A lease and a PPA are quoted as a
   // monthly or a rate, and reporting "$0 → $0" on one would invent a change
   // out of two fields neither side ever filled.
+  // "Contract", not "System cost". The cost tile leads with the household's NET
+  // now and labels the contract underneath it, so a drift row calling the
+  // contract "System cost" would name one figure two ways on one card.
   add(
     "contractPrice",
-    "System cost",
+    "Contract",
     "cents",
     reported.contractPriceCents,
     design.contractPriceCents,

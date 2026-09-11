@@ -28,8 +28,8 @@ import {
 } from "@/lib/solar-money";
 import { monthlyReconciles } from "@/lib/solar-loan";
 import { ladderReconciles } from "@/lib/solar-credit-ladder";
-import { solarLeadValueCents } from "@/lib/solar-deal-value";
 import { mayInheritLiveLink } from "@/lib/solar-proposal-state";
+import { restampLeadValue } from "./deal-value";
 import {
   parseLayoutBlocks,
   panelCorners,
@@ -1190,16 +1190,22 @@ export async function generateProposalVersion(
    * nothing. The deal page derives its figure from the snapshot and never
    * needed this; every list that reads the column does.
    *
+   * THE HOUSEHOLD'S NET, not the contract, wherever this document works one
+   * out — the same figure the deal page leads with.
+   *
+   * Stamped from the REPORTED version rather than from the one just written,
+   * which are not always the same document: generating v14 on a deal whose v13
+   * is approved leaves v13 the version every surface reports, so stamping the
+   * new snapshot here would put a figure in the pipeline that the deal page
+   * disagrees with. `restampLeadValue` asks the same question the page does.
+   *
    * OUTSIDE the transaction above, with the activity log. That one exists to
    * keep the customer's live link and the new version in step, and a
    * denormalised total is not worth widening its blast radius: a failure here
    * leaves the proposal standing and one number stale, which the next
    * generation corrects.
    */
-  await prisma.lead.update({
-    where: { id: leadId },
-    data: { value: solarLeadValueCents(snapshot.financing) },
-  });
+  await restampLeadValue(user.companyId, leadId);
 
   await prisma.activityLog.create({
     data: {

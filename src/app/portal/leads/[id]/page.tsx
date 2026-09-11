@@ -49,9 +49,14 @@ import {
 } from "@/lib/solar-layout";
 import { lenderLogoUrl } from "@/lib/lender-mark";
 import { financingCard } from "@/lib/solar-deal-header";
-import { formatSolarDealValue, solarDealValue } from "@/lib/solar-deal-value";
+import {
+  formatSolarDealValue,
+  snapshotPriceSource,
+  solarDealValue,
+} from "@/lib/solar-deal-value";
 import {
   frozenPriceLadder,
+  REPORTED_PROPOSAL_ORDER,
   resolveReportedSystem,
   systemDrift,
   type DesignSystem,
@@ -421,9 +426,12 @@ export default async function LeadDetailPage({
          * a bigger array must not restate the deal underneath it. At most one
          * version can hold the mark: a partial unique index enforces it.
          *
-         * `nulls: "last"` is doing the work. Postgres sorts NULLs FIRST on a
-         * DESC order by default, so without it this asks for the approved
-         * version and reliably returns an unapproved one.
+         * The ordering itself lives in `solar-system-of-record.ts`, because
+         * the stamp
+         * on `Lead.value` has to ask this exact question too — and `nulls:
+         * "last"` is doing the work in it. Postgres sorts NULLs FIRST on a DESC
+         * order by default, so without it this asks for the approved version
+         * and reliably returns an unapproved one.
          *
          * With nothing approved the newest answers, exactly as it always has.
          *
@@ -434,7 +442,7 @@ export default async function LeadDetailPage({
          */
         prisma.solarProposal.findFirst({
           where: { companyId: user.companyId, leadId: lead.id },
-          orderBy: [{ approvedAt: { sort: "desc", nulls: "last" } }, { version: "desc" }],
+          orderBy: REPORTED_PROPOSAL_ORDER,
           select: {
             version: true, status: true, sentAt: true, createdAt: true, snapshot: true,
             approvedAt: true,
@@ -1074,29 +1082,46 @@ export default async function LeadDetailPage({
         batteryLabel: reportedSystem.batteryLabel,
         batteryQty: reportedSystem.batteryQty,
         /**
-         * Priced through the same function as the Deal Value card, so a lease
-         * reads "$215/mo" and a PPA "$0.145/kWh" instead of the "$0" that a
-         * tile hard-wired to a contract price printed on both.
+         * WHAT THIS SYSTEM COSTS THE HOUSEHOLD — the price after their federal
+         * credits wherever the document works one out, and the contract only
+         * where it does not.
+         *
+         * The tile led with the contract and carried the net underneath, which
+         * had the emphasis backwards: the credits drive the payment, the
+         * customer's own document leads with the net, and the figure a rep
+         * reads off the top of a deal has to be the one the household was
+         * actually asked for.
+         *
+         * Priced through the same function as the Deal Value card and the
+         * stamped `Lead.value`, so a lease reads "$215/mo" and a PPA
+         * "$0.145/kWh" instead of the "$0" that a tile hard-wired to a contract
+         * price printed on both — and so the pipeline cannot total a different
+         * number than the deal shows.
          */
         priceLabel: formatSolarDealValue(
           solarDealValue({
             product: reportedSystem.product,
             contractPriceCents: reportedSystem.contractPriceCents,
+            netAfterCreditsCents: reportedSystem.netAfterCreditsCents,
             monthlyPaymentCents: reportedSystem.monthlyPaymentCents,
             rateMillsPerKwh: reportedSystem.rateMillsPerKwh,
           }),
           fmt.money
         ),
         /**
-         * The SAME document's price with the credits off it — read out of the
-         * ladder that document was signed against, never re-derived from
-         * today's percentages. A tile reporting version 35 has to report
-         * version 35's arithmetic; statute moves, and so do the tick-boxes.
+         * THE CONTRACT, underneath it — what is signed, submitted to the funder
+         * and paid commission on.
          *
-         * Null on a lease, a PPA, a deal claiming nothing, and on any proposal
-         * generated before the ladder existed.
+         * Kept, and kept small: the two are different questions and the deal
+         * has to be able to answer either. Null where there is nothing to
+         * distinguish — a deal claiming no credits quotes one price, and a tile
+         * printing it twice is a tile inventing a distinction.
          */
-        netAfterCreditsCents: reportedSystem.netAfterCreditsCents,
+        contractLabel:
+          reportedSystem.netAfterCreditsCents != null &&
+          reportedSystem.contractPriceCents != null
+            ? fmt.money(reportedSystem.contractPriceCents)
+            : null,
       },
       /** Empty unless the drawing has moved since that version was frozen. */
       drift: systemDriftRows,
@@ -1176,18 +1201,20 @@ export default async function LeadDetailPage({
    */
   const solarValue = isSolarDeal
     ? (() => {
+        // The same reading of the document that gets stamped onto `Lead.value`
+        // at generation, so this card and every list that totals the column
+        // cannot quote two different numbers for one deal.
         const quoted = reportedSnapshot
-          ? solarDealValue({
-              product: reportedSnapshot.financing.product,
-              contractPriceCents: reportedSnapshot.financing.contractPriceCents,
-              monthlyPaymentCents: reportedSnapshot.financing.monthlyPaymentCents,
-              rateMillsPerKwh: reportedSnapshot.financing.rateMillsPerKwh,
-            })
+          ? solarDealValue(snapshotPriceSource(reportedSnapshot.financing))
           : ({ kind: "none" } as const);
         if (quoted.kind !== "none" && reportedProposal) {
           return {
             value: formatSolarDealValue(quoted, fmt.money),
-            hint: `Proposal v${reportedProposal.version}`,
+            // Named, because the figure moved: a card that quietly halved would
+            // read as a pricing error to anyone who knew the old number.
+            hint: reportedSnapshot?.financing.creditLadder
+              ? `After credits · Proposal v${reportedProposal.version}`
+              : `Proposal v${reportedProposal.version}`,
           };
         }
         const working = solarDealValue({
@@ -1195,6 +1222,7 @@ export default async function LeadDetailPage({
           // Reached only where no proposal exists at all, so the ladder here is
           // the working one by construction — see `solarMoney.ladder`.
           contractPriceCents: solarMoney?.ladder?.final.totalCents ?? null,
+          netAfterCreditsCents: workingLadder?.netCostCents ?? null,
           monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
           rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
         });
