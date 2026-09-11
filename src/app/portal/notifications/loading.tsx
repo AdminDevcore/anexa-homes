@@ -1,0 +1,16 @@
+import { PageSkeleton } from "@/components/portal/page-skeleton";
+
+/**
+ * The notifications screens, which have no route that refuses by id.
+ *
+ * The portal-wide `loading.tsx` had to go: a Suspense boundary flushes the
+ * shell — and the 200 status with it — before anything beneath it can call
+ * `notFound()`, which is what made a record nobody may see render as blank
+ * chrome instead of a 404. Skeletons live per-segment now, only where they
+ * cannot cover a route that refuses by id.
+ *
+ * src/lib/__tests__/not-found-boundary.test.ts fails the build if one ever does.
+ */
+export default function NotificationsLoading() {
+  return <PageSkeleton />;
+}
