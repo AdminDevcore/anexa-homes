@@ -173,10 +173,7 @@ export async function setSolarSignTodayCreditAction(input: z.infer<typeof signTo
   if (!parsed.success) return fail("Enter a credit between $0 and $100,000.");
   const { leadId, cents } = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 

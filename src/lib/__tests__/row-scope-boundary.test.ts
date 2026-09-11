@@ -7,10 +7,13 @@ import { join, relative, sep } from "node:path";
  *
  * A caller can pick which ROW inside their tenant they act on, and this stops
  * them. Its sibling — a guard against an action accepting the TENANT itself as
- * a parameter — is not on this branch yet. That gap was real: solar/storage.ts
- * exported two reads taking `companyId`, and the fix was to move them off the
- * RPC surface entirely (see solar/deal-rebates.ts), because a caller-supplied
- * company is not something a row check can repair.
+ * a parameter — does not exist yet, and that gap has already been real once:
+ * `solar/storage.ts` exported reads taking `companyId`, which inside a
+ * `"use server"` module hands the tenant boundary to the caller. That file was
+ * deleted for unrelated reasons before this branch landed, so there is nothing
+ * left to point at — which is exactly why the RULE is written down here rather
+ * than left as an example. A caller-supplied company is not something a row
+ * check can repair; the fix is to take the export off the RPC surface.
  *
  * Every export of a `"use server"` module is a public RPC endpoint, so a
  * `leadId` parameter is whatever the browser typed. Two questions have to be
@@ -101,6 +104,8 @@ const ALLOWED: Record<string, string> = {
   "src/server/modules/costs/actions.ts#setDealLeadProvidedAction": "Commission:update — finance roles only.",
   "src/server/modules/payroll/actions.ts#generateCommissionsAction": "Payroll — accounting/owner only.",
   "src/server/modules/payroll/actions.ts#approveCommissionAction": "Commission:approve — finance roles only.",
+  "src/server/modules/payroll/ledger-actions.ts#addPayrollAdjustmentAction": "Payroll — accounting/owner only.",
+  "src/server/modules/payroll/ledger-actions.ts#requestChargebackAction": "Payroll — accounting/owner only.",
 
   // ── COMPANY STATIONERY, NOT A CUSTOMER'S PAPERWORK ───────────────────────
   // `documentId` here is a PDF inside a DocumentTemplate — the blank contract

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { establishHistoricalComp } from "./deal-comp";
 
 /**
@@ -56,6 +57,9 @@ export async function establishHistoricalCompAction(input: z.infer<typeof termsS
     return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid terms." };
   }
   const d = parsed.data;
+  if (!(await leadAccessible(user, d.leadId))) {
+    return { ok: false as const, error: "Deal not found." };
+  }
 
   const res = await establishHistoricalComp({
     companyId: user.companyId,
