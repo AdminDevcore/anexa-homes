@@ -17,8 +17,22 @@ import type { StormMeta } from "./storm/types";
  * @param canStorm StormIntelligence permission AND a vertical that has storms.
  *   Roofing prospects off hail; solar does not, so its Field Map is territories
  *   and knocks with no storm surface anywhere on it.
+ * @param canExportKnocks `export Canvassing` — whether the List tab offers a CSV.
+ * @param canExportStorm `export StormIntelligence` — the storm CSV/PDF buttons.
+ *   Both are separate from the `read` that shows the tab at all: looking at the
+ *   list is not the same act as taking it away as a file.
  */
-export function CanvassingShell({ canStorm, googleTiles }: { canStorm: boolean; googleTiles: boolean }) {
+export function CanvassingShell({
+  canStorm,
+  googleTiles,
+  canExportKnocks,
+  canExportStorm,
+}: {
+  canStorm: boolean;
+  googleTiles: boolean;
+  canExportKnocks: boolean;
+  canExportStorm: boolean;
+}) {
   // Storm Intelligence is folded into the Field Map. Its tools are reachable
   // from the manager rail rather than as top-level tabs.
   const { data: stormMeta } = useQuery<StormMeta>({
@@ -75,7 +89,7 @@ export function CanvassingShell({ canStorm, googleTiles }: { canStorm: boolean; 
           />
         </TabsContent>
         <TabsContent value="list">
-          <CanvassingList />
+          <CanvassingList canExport={canExportKnocks} />
         </TabsContent>
         <TabsContent value="insights">
           <CanvassingInsights />
@@ -83,7 +97,7 @@ export function CanvassingShell({ canStorm, googleTiles }: { canStorm: boolean; 
         {canStorm && (
           <>
             <TabsContent value="storm-leads">
-              <StormLeads />
+              <StormLeads canExport={canExportStorm} />
             </TabsContent>
             <TabsContent value="storm-checker">
               <AddressChecker />

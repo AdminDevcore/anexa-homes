@@ -7,7 +7,8 @@ import { buildStormReport } from "@/server/modules/storm/report";
 
 export async function GET(req: Request) {
   const user = await requireUser();
-  if (!can(user, "read", "StormIntelligence")) return new NextResponse("Forbidden", { status: 403 });
+  // Same rule as the CSV sibling: a download is `export`, not `read`.
+  if (!can(user, "export", "StormIntelligence")) return new NextResponse("Forbidden", { status: 403 });
 
   const sp = new URL(req.url).searchParams;
   const minScoreRaw = sp.get("minScore");
@@ -15,7 +16,7 @@ export async function GET(req: Request) {
   const subject = sp.get("subject");
   const subjectType = subject === "lead" || subject === "knock" ? subject : undefined;
 
-  const report = await buildStormReport(user.companyId, {
+  const report = await buildStormReport(user, {
     minScore: Number.isFinite(minScore) ? minScore : undefined,
     subjectType,
   });

@@ -1,5 +1,6 @@
 import type { RenderableReport } from "@/server/modules/reports/builders";
 import { prisma } from "@/server/db/client";
+import type { AccessUser } from "@/server/rbac/guards";
 import { getStormMatches, type StormMatchFilters } from "./queries";
 
 function fmtDate(iso: string | null): string {
@@ -9,11 +10,11 @@ function fmtDate(iso: string | null): string {
 
 /** Build an internal Storm Intelligence report (metrics + top leads) for PDF. */
 export async function buildStormReport(
-  companyId: string,
+  viewer: AccessUser,
   filters: StormMatchFilters,
 ): Promise<RenderableReport> {
-  const matches = await getStormMatches(companyId, filters, 5000);
-  const eventCount = await prisma.stormEvent.count({ where: { companyId } });
+  const matches = await getStormMatches(viewer, filters, 5000);
+  const eventCount = await prisma.stormEvent.count({ where: { companyId: viewer.companyId } });
 
   const leads = matches.filter((m) => m.subjectType === "lead").length;
   const knocks = matches.filter((m) => m.subjectType === "knock").length;

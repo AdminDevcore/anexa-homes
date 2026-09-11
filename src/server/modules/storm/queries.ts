@@ -1,5 +1,8 @@
 import { Prisma, type StormType } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import type { AccessUser } from "@/server/rbac/guards";
+import { listScope } from "@/server/rbac/policies";
+import { knockScope } from "@/server/modules/canvassing/queries";
 import { geocode } from "@/server/modules/geo/geocode";
 import {
   haversineMiles,
@@ -117,13 +120,32 @@ export type StormMatchDTO = {
 
 export type StormMatchFilters = { minScore?: number; subjectType?: "lead" | "knock" };
 
-/** Scored property matches (leads + knocks), highest score first. */
+/**
+ * Scored property matches (leads + knocks), highest score first.
+ *
+ * ROW SCOPED, and it takes the VIEWER rather than a company id to make that
+ * impossible to opt out of. Two reasons it is the whole user and not the
+ * `listScope` fragment alone: the knock half needs `knockScope`, which reads
+ * userId and role in its own right; and a caller holding a fragment can pass
+ * `{}` and silently unscope the query, which is the defect this is fixing.
+ *
+ * HOW the scope is applied. `PropertyStormMatch` carries a bare `leadId` /
+ * `knockId` with no Prisma relation, so there is no join to filter on. The
+ * scope goes on the lookups that hydrate the rows, and any match whose subject
+ * did not come back is DROPPED — not rendered anonymously. The match row holds
+ * `lat`/`lng`, so a row kept with its name blanked still hands over the
+ * address, which is most of what was being protected.
+ *
+ * The cap is applied before scoping, so a manager can receive fewer than
+ * `limit` rows. That is the honest trade against loading the company's whole
+ * match table to fill a page.
+ */
 export async function getStormMatches(
-  companyId: string,
+  viewer: AccessUser,
   filters: StormMatchFilters = {},
   limit = 500,
 ): Promise<StormMatchDTO[]> {
-  const where: Prisma.PropertyStormMatchWhereInput = { companyId };
+  const where: Prisma.PropertyStormMatchWhereInput = { companyId: viewer.companyId };
   if (filters.minScore != null) where.score = { gte: filters.minScore };
   if (filters.subjectType === "lead") where.leadId = { not: null };
   if (filters.subjectType === "knock") where.knockId = { not: null };
@@ -134,18 +156,21 @@ export async function getStormMatches(
     take: limit,
   });
 
+  const leadScope = listScope(viewer, "Lead") as Prisma.LeadWhereInput;
+  const knocksVisible = knockScope(viewer.companyId, viewer.userId, viewer.role);
+
   const leadIds = matches.map((m) => m.leadId).filter((x): x is string => !!x);
   const knockIds = matches.map((m) => m.knockId).filter((x): x is string => !!x);
   const [leads, knocks] = await Promise.all([
     leadIds.length
       ? prisma.lead.findMany({
-          where: { id: { in: leadIds } },
+          where: { AND: [{ id: { in: leadIds } }, leadScope] },
           select: { id: true, firstName: true, lastName: true, address: true, city: true, state: true, zip: true },
         })
       : Promise.resolve([]),
     knockIds.length
       ? prisma.knock.findMany({
-          where: { id: { in: knockIds } },
+          where: { AND: [{ id: { in: knockIds } }, knocksVisible] },
           select: { id: true, address: true, city: true, state: true, zip: true, contactName: true },
         })
       : Promise.resolve([]),
@@ -156,10 +181,17 @@ export async function getStormMatches(
   const fmtAddr = (a?: string | null, c?: string | null, s?: string | null, z?: string | null) =>
     [a, [c, s].filter(Boolean).join(", "), z].filter(Boolean).join(" ").trim() || "—";
 
-  return matches.map((m) => {
-    if (m.leadId && leadMap.has(m.leadId)) {
-      const l = leadMap.get(m.leadId)!;
-      return {
+  /**
+   * A match survives only if its subject did. Written as a flatMap rather than
+   * a map because the old code fell THROUGH to the knock branch when a lead was
+   * missing, which after scoping would have turned every one of someone else's
+   * deals into an unnamed "Door knock" pin still carrying its coordinates.
+   */
+  return matches.flatMap((m): StormMatchDTO[] => {
+    if (m.leadId) {
+      const l = leadMap.get(m.leadId);
+      if (!l) return [];
+      return [{
         id: m.id,
         subjectType: "lead" as const,
         leadId: m.leadId,
@@ -174,16 +206,17 @@ export async function getStormMatches(
         eventCount: m.eventCount,
         maxHailIn: m.maxHailIn,
         maxWindMph: m.maxWindMph,
-      };
+      }];
     }
     const k = m.knockId ? knockMap.get(m.knockId) : undefined;
-    return {
+    if (!k) return [];
+    return [{
       id: m.id,
       subjectType: "knock" as const,
       leadId: null,
       knockId: m.knockId,
-      name: k?.contactName || "Door knock",
-      address: fmtAddr(k?.address, k?.city, k?.state, k?.zip),
+      name: k.contactName || "Door knock",
+      address: fmtAddr(k.address, k.city, k.state, k.zip),
       lat: m.lat,
       lng: m.lng,
       score: m.score,
@@ -192,7 +225,7 @@ export async function getStormMatches(
       eventCount: m.eventCount,
       maxHailIn: m.maxHailIn,
       maxWindMph: m.maxWindMph,
-    };
+    }];
   });
 }
 

@@ -45,7 +45,9 @@ export function StormIntelligenceShell() {
           {meta ? <StormMapTab meta={meta} /> : <Loading />}
         </TabsContent>
         <TabsContent value="leads">
-          <StormLeads />
+          {/* Unreachable: /portal/storm-intelligence redirects to the Field
+              Map. Downloads off by default rather than granted blindly. */}
+          <StormLeads canExport={false} />
         </TabsContent>
         <TabsContent value="checker">
           <AddressChecker />

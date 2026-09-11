@@ -6,7 +6,11 @@ import { buildPnlPdf } from "@/server/modules/bookkeeping/pdf";
 
 export async function GET(req: Request) {
   const user = await getSessionUser();
-  if (!user || !can(user, "read", "Bookkeeping")) return new Response("Forbidden", { status: 403 });
+  // A download is `export`, not `read`. Same grant list either way today
+  // (super_admin + accounting), but the 1099 CSV carries recipient TINs and
+  // the books leave the product as a file — so the verb that exists to be
+  // withheld is the one that has to be asked for.
+  if (!user || !can(user, "export", "Bookkeeping")) return new Response("Forbidden", { status: 403 });
   const url = new URL(req.url);
   const startMs = url.searchParams.get("start");
   const endMs = url.searchParams.get("end");
