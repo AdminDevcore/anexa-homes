@@ -454,3 +454,59 @@ describe("a proposal that earns credits files both readings", () => {
     expect(row1.approvedParFileId).toBeNull();
   });
 });
+
+/**
+ * WHICH VERSION THE DEAL PAGE REPORTS.
+ *
+ * The rule is a `findFirst` ordering, not a function, so this is the only place
+ * it can be proved — and the half worth proving is the one Postgres decides:
+ * `ORDER BY approved_at DESC` puts NULLs FIRST by default, so an ordering
+ * written without `nulls: "last"` asks for the approved version and reliably
+ * returns whichever draft was generated last. It reads as an off-by-one in the
+ * page rather than as a sort default, which is why it is pinned here.
+ *
+ * Kept verbatim in step with the query in `app/portal/leads/[id]/page.tsx`.
+ */
+const REPORTED_ORDER = [
+  { approvedAt: { sort: "desc", nulls: "last" } },
+  { version: "desc" },
+] as const;
+
+describe("the version a deal is reported at", () => {
+  const reported = () =>
+    db.solarProposal.findFirst({
+      where: { companyId, leadId },
+      orderBy: [...REPORTED_ORDER],
+      select: { version: true, approvedAt: true },
+    });
+
+  it("is the approved one, even with newer versions above it", async () => {
+    const v13 = await makeVersion(13);
+    await makeVersion(14);
+    await makeVersion(15);
+    await inSolar(() => approveProposalVersion(actor, v13));
+
+    const got = await reported();
+    expect(got?.version).toBe(13);
+    expect(got?.approvedAt).not.toBeNull();
+  });
+
+  it("is the newest one while nothing is approved", async () => {
+    await makeVersion(13);
+    await makeVersion(14);
+
+    expect((await reported())?.version).toBe(14);
+  });
+
+  it("follows the approval when it moves to another version", async () => {
+    const v13 = await makeVersion(13);
+    const v14 = await makeVersion(14);
+    await inSolar(() => approveProposalVersion(actor, v13));
+    expect((await reported())?.version).toBe(13);
+
+    // Only one version may hold the mark — a partial unique index enforces it —
+    // so approving another has to hand the report over rather than tie.
+    await inSolar(() => approveProposalVersion(actor, v14));
+    expect((await reported())?.version).toBe(14);
+  });
+});

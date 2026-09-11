@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  frozenPriceLadder,
   resolveReportedSystem,
   systemDrift,
   type DesignSystem,
 } from "@/lib/solar-system-of-record";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import type { SnapshotFinancing, SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * The deal that produced this module, copied out of production.
@@ -58,13 +59,19 @@ const DESIGN: DesignSystem = {
   rateMillsPerKwh: null,
 };
 
-const PROPOSAL = { version: 13, status: "signed", at: "2026-08-28T00:58:15.043Z" };
+const PROPOSAL = { version: 13, status: "signed", at: "2026-08-28T00:58:15.043Z", approved: true };
 
 describe("resolveReportedSystem", () => {
   it("reports the newest proposal, not the design that moved under it", () => {
     const got = resolveReportedSystem({ proposal: { ...PROPOSAL, snapshot: SNAPSHOT }, design: DESIGN });
     expect(got).not.toBeNull();
-    expect(got!.source).toEqual({ kind: "proposal", version: 13, status: "signed", at: PROPOSAL.at });
+    expect(got!.source).toEqual({
+      kind: "proposal",
+      version: 13,
+      status: "signed",
+      at: PROPOSAL.at,
+      approved: true,
+    });
     expect(got!.sizeKwDc).toBe(11);
     expect(got!.moduleQty).toBe(25);
     expect(got!.year1ProductionKwh).toBe(15397);
@@ -254,5 +261,78 @@ describe("systemDrift", () => {
       monthlyPaymentCents: 21500,
     }).map((r) => r.key);
     expect(keys).not.toContain("contractPrice");
+  });
+});
+
+/**
+ * The ladder off a real document.
+ *
+ * A 11.00 kW loan deal at $60,500, two Powerwalls at $19,000 and $6,900 of
+ * extra work — the shape every purchase snapshot has, with the dealer fee
+ * already inside the base and the adders. The whole point of the block is that
+ * these four figures subtract to each other on screen, so that is what is
+ * asserted rather than each rung on its own.
+ */
+const LADDER_FINANCING = {
+  product: "loan",
+  contractPriceCents: 6050000,
+  basePriceCents: 3460000,
+  adderTotalCents: 690000,
+  batteryPriceCents: 1900000,
+  batteryQty: 2,
+  finalPpwCents: 550,
+  monthlyPaymentCents: null,
+  rateMillsPerKwh: null,
+} as unknown as SnapshotFinancing;
+
+describe("frozenPriceLadder", () => {
+  it("reads the document's own rungs, and they add up to its total", () => {
+    const l = frozenPriceLadder(LADDER_FINANCING, 11)!;
+    expect(l.source).toBe("proposal");
+    expect(l.base.totalCents + l.adders.totalCents + l.batteryPriceCents).toBe(
+      l.final.totalCents
+    );
+    expect(l.final.totalCents).toBe(6050000);
+    expect(l.batteryQty).toBe(2);
+  });
+
+  it("divides each rung into the array it was sold with", () => {
+    const l = frozenPriceLadder(LADDER_FINANCING, 11)!;
+    // 11 kW = 11,000 W. $34,600 / 11,000 = $3.15/W, $6,900 / 11,000 = $0.63/W.
+    expect(l.base.ppwCents).toBe(315);
+    expect(l.adders.ppwCents).toBe(63);
+    // The document's own rate, not the contract re-divided — they agree here,
+    // and where they do not it is the frozen one that was quoted.
+    expect(l.final.ppwCents).toBe(550);
+    expect(l.systemWatts).toBe(11000);
+  });
+
+  it("quotes no rate per watt on a storage job, which has no watts", () => {
+    const l = frozenPriceLadder(
+      { ...LADDER_FINANCING, basePriceCents: 1900000, adderTotalCents: null,
+        batteryPriceCents: 1900000, contractPriceCents: 1900000, finalPpwCents: null
+      } as unknown as SnapshotFinancing,
+      0
+    )!;
+    expect(l.base.ppwCents).toBeNull();
+    expect(l.final.ppwCents).toBeNull();
+    expect(l.final.totalCents).toBe(1900000);
+  });
+
+  it("falls back to the total less what is priced separately, for an old document", () => {
+    // Generated before the base was frozen: the customer's own cost chapter
+    // reads it the same way, so this card cannot disagree with the sheet.
+    const old = { ...LADDER_FINANCING, basePriceCents: null } as unknown as SnapshotFinancing;
+    const l = frozenPriceLadder(old, 11)!;
+    expect(l.base.totalCents).toBe(6050000 - 690000 - 1900000);
+  });
+
+  it("has no ladder for a lease, which is sold as a monthly", () => {
+    const lease = {
+      product: "lease",
+      contractPriceCents: null,
+      monthlyPaymentCents: 21500,
+    } as unknown as SnapshotFinancing;
+    expect(frozenPriceLadder(lease, 11)).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import type { FinanceProduct } from "@prisma/client";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import type { CreditLadder } from "@/lib/solar-credit-ladder";
+import type { SnapshotFinancing, SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * WHICH SYSTEM THIS DEAL IS, when the deal holds two of them.
@@ -28,7 +29,14 @@ import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
 
 /** Where the reported figures came from, so a screen can say so out loud. */
 export type ReportedSystemSource =
-  | { kind: "proposal"; version: number; status: string; at: string | null }
+  | {
+      kind: "proposal";
+      version: number;
+      status: string;
+      at: string | null;
+      /** True when this is the version somebody marked as the one that sold. */
+      approved: boolean;
+    }
   | { kind: "design" };
 
 /**
@@ -85,17 +93,35 @@ export type ReportedSystem = DesignSystem & { source: ReportedSystemSource };
 /**
  * The system this deal should be reported as.
  *
- * The newest proposal wins whenever there is one, at any status: a draft that
+ * THE APPROVED VERSION WINS. A deal accumulates versions — ten on the deal that
+ * prompted the approval mark — and exactly one of them can be stamped as the
+ * one that sold (a partial unique index enforces that, and a customer signature
+ * stamps it by itself). Where that stamp exists it is the whole answer: it is
+ * the document the household agreed to, the one the funder is submitted and the
+ * one the rep is paid on, and a later draft generated while somebody explored a
+ * bigger array must not restate the deal underneath it.
+ *
+ * With nothing approved the NEWEST proposal answers, at any status: a draft that
  * was generated and never sent is still a document somebody produced from a
  * deliberate state of the design, and it is the last such state. The live
  * design answers only while no proposal exists at all — the one moment it IS
  * the best account of the job.
+ *
+ * Picking between versions is the CALLER's job — it is a query, not a
+ * computation, and the deal page's own `orderBy` does it. This function is
+ * handed the version that won and says what it says.
  */
 export function resolveReportedSystem({
   proposal,
   design,
 }: {
-  proposal: { version: number; status: string; at: string | null; snapshot: SolarProposalSnapshot } | null;
+  proposal: {
+    version: number;
+    status: string;
+    at: string | null;
+    approved: boolean;
+    snapshot: SolarProposalSnapshot;
+  } | null;
   design: DesignSystem | null;
 }): ReportedSystem | null {
   if (proposal) {
@@ -113,6 +139,7 @@ export function resolveReportedSystem({
         version: proposal.version,
         status: proposal.status,
         at: proposal.at,
+        approved: proposal.approved,
       },
       sizeKwDc: system.sizeKwDc,
       // v1 snapshots have only the labels; v2 and later carry the catalogue
@@ -227,4 +254,98 @@ export function systemDrift(
     whole
   );
   return rows;
+}
+
+/**
+ * ONE RUNG OF THE PRICE, as a screen draws it: a total, and the rate per
+ * installed watt that total works out at.
+ *
+ * `ppwCents` is NULL rather than zero wherever there are no installed watts to
+ * be per — every storage-only job. A rate of "$0.00/W" beside a $19,000 battery
+ * is a page inventing a price for an array that was never sold, and it is the
+ * same rule the snapshot itself follows when it freezes `finalPpwCents` as null
+ * on a storage document.
+ */
+export type PriceRung = { totalCents: number; ppwCents: number | null };
+
+/**
+ * THE PRICE LADDER THIS DEAL IS REPORTED AT.
+ *
+ * `source` is the whole reason the shape exists: the two ladders below are not
+ * the same arithmetic said twice, and a screen drawing them has to know which
+ * one it has.
+ *
+ * - `"proposal"` — the rungs the customer's own document was frozen with. The
+ *   dealer fee is already INSIDE `base` and `adders` (that is what "sticker"
+ *   means), so `base + adders + battery === contract` holds to the cent, and a
+ *   rep reading the card is reading the sheet on the kitchen table.
+ * - `"design"` — today's working derivation, on a deal that has never produced
+ *   a document. `base` is the pre-fee figure the rep typed in the builder, so
+ *   the rungs deliberately do NOT sum to the contract: the lender's cut sits
+ *   between them and is not shown here.
+ */
+export type ReportedPriceLadder = {
+  source: "proposal" | "design";
+  base: PriceRung;
+  adders: PriceRung;
+  /** Zero on a deal without storage, which shows no rung at all. */
+  batteryPriceCents: number;
+  batteryQty: number;
+  final: PriceRung;
+  /** The system these rungs priced, watts. Zero on a storage-only job. */
+  systemWatts: number;
+  /** The credits taken off that price. Null wherever there are none. */
+  credits: CreditLadder | null;
+};
+
+const rung = (totalCents: number, watts: number): PriceRung => ({
+  totalCents,
+  ppwCents: watts > 0 ? Math.round(totalCents / watts) : null,
+});
+
+/**
+ * The ladder the approved document was signed against.
+ *
+ * READ, NEVER RE-DERIVED. Every figure here is lifted out of the frozen
+ * snapshot: the rates on the deal move, the catalogue moves, statute moves, and
+ * none of that is allowed to restate a price a household has already agreed to.
+ * The only arithmetic performed is the division into a rate per watt, and that
+ * is done here rather than read off the row so the rate and the total on the
+ * same line always divide into each other.
+ *
+ * Null on a document that quotes no price — a lease and a PPA are sold as a
+ * monthly and a rate per kWh, and there is no ladder under either.
+ *
+ * `basePriceCents` is absent on documents generated before the base was frozen;
+ * those fall back to the total less everything priced separately, which is the
+ * same reading the customer's own cost chapter takes of them.
+ */
+export function frozenPriceLadder(
+  financing: SnapshotFinancing,
+  sizeKwDc: number
+): ReportedPriceLadder | null {
+  const contractPriceCents = financing.contractPriceCents;
+  if (contractPriceCents == null) return null;
+  const watts = Math.max(0, Math.round(sizeKwDc * 1000));
+  const batteryPriceCents = Math.max(0, financing.batteryPriceCents ?? 0);
+  const adderTotalCents = Math.max(0, financing.adderTotalCents ?? 0);
+  const basePriceCents =
+    financing.basePriceCents ?? contractPriceCents - adderTotalCents - batteryPriceCents;
+  return {
+    source: "proposal",
+    base: rung(basePriceCents, watts),
+    adders: rung(adderTotalCents, watts),
+    batteryPriceCents,
+    batteryQty: financing.batteryQty ?? (financing.batteryLabel ? 1 : 0),
+    // The document's own rate where it froze one, and the contract divided by
+    // the array where it did not — never the stored gross, which is a third
+    // number arrived at another way.
+    final: {
+      totalCents: contractPriceCents,
+      ppwCents:
+        financing.finalPpwCents ?? (watts > 0 ? Math.round(contractPriceCents / watts) : null),
+    },
+    systemWatts: watts,
+    credits: financing.creditLadder ?? null,
+  };
 }
