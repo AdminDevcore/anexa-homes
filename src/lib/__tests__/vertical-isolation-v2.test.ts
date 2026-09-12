@@ -55,11 +55,10 @@ describe("solar milestones are inside the isolation boundary", () => {
 });
 
 describe("shared modules stay shared", () => {
-  // The spec is explicit that these are NOT isolated. A future edit that scopes
-  // them would split the employee roster or the website's review wall in two.
-  it("Team and Reviews are not scoped", () => {
+  // The spec is explicit that this is NOT isolated. A future edit that scoped
+  // it would split the employee roster in two.
+  it("Team is not scoped", () => {
     expect(classify("User")).toBe("shared");
-    expect(classify("Review")).toBe("shared");
   });
 
   it("chat is not scoped, so it stays cross-vertical", () => {

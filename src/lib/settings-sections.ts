@@ -10,7 +10,6 @@ import {
   ListChecks,
   Calculator,
   Megaphone,
-  Star,
   CloudLightning,
   Sun,
   PanelsTopLeft,
@@ -261,15 +260,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "insurance",
     keywords: ["line items", "xactimate", "estimate", "trades"],
     verticals: ["roofing"],
-  },
-  {
-    icon: Star,
-    key: "reviews",
-    title: "Website Reviews",
-    body: "Approve, feature, hide, or remove customer reviews from the website.",
-    href: "/portal/settings/reviews",
-    group: "company",
-    keywords: ["testimonials", "ratings", "stars", "public site"],
   },
   {
     icon: ShieldCheck,

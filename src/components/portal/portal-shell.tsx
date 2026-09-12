@@ -75,8 +75,8 @@ function AppNavList({
     <nav className="flex flex-col gap-1 px-3">
       {items.map((item) => {
         // Longest matching href wins, so a parent route (Settings) doesn't also
-        // highlight on a child owned by another item (Reviews lives at
-        // /portal/settings/reviews). An item's tab routes count as its own:
+        // highlight on a child owned by another item. An item's tab routes
+        // count as its own:
         // standing on Contractor Pay lights up Commissions, which is where the
         // tab that opened it lives.
         const mine = matchLength(item, pathname);

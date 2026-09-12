@@ -23,10 +23,9 @@ import type { SettingsSectionKey } from "@/lib/settings-sections";
  * panel restating them.
  *
  * Everything here reads through the scoped client, so the numbers answer for the
- * workspace the viewer has open. Two deliberate exceptions are labelled as such
- * in the UI: website reviews and the role matrix are company-wide (one public
- * site, one roster), which is exactly how they are registered in
- * server/vertical/models.ts.
+ * workspace the viewer has open. One deliberate exception is labelled as such
+ * in the UI: the role matrix is company-wide (one roster), which is exactly how
+ * it is registered in server/vertical/models.ts.
  *
  * Counts are totals, not active-only, matching workspaceSetupGaps — a card that
  * says "3 rules" next to a gap warning saying there are none would be worse than
@@ -79,8 +78,6 @@ export async function settingsInventory(
     automationRules,
     photoTemplates,
     scopeItems,
-    reviewsPending,
-    reviewsPublished,
     solarEquipment,
     solarLenders,
     solarProviders,
@@ -105,10 +102,6 @@ export async function settingsInventory(
     prisma.automationRule.count({ where: { companyId } }),
     prisma.photoTemplate.count({ where: { companyId } }),
     roofing ? prisma.scopeTemplateItem.count({ where: { companyId } }) : Promise.resolve(0),
-    prisma.review.count({ where: { companyId, status: "pending", deletedAt: null } }),
-    prisma.review.count({
-      where: { companyId, status: "approved", hidden: false, deletedAt: null },
-    }),
     solar ? prisma.solarEquipment.count({ where: { companyId } }) : Promise.resolve(0),
     solar ? prisma.solarLender.count({ where: { companyId } }) : Promise.resolve(0),
     solar ? prisma.solarProvider.count({ where: { companyId } }) : Promise.resolve(0),
@@ -189,12 +182,6 @@ export async function settingsInventory(
       companyWide: true,
     },
     branding: { label: branding?.logoUrl ? "Logo set" : "No logo yet" },
-    reviews: reviewsPending
-      ? { label: `${plural(reviewsPending, "review")} awaiting approval`, tone: "attention", companyWide: true }
-      : {
-          label: reviewsPublished === 0 ? "None published" : `${plural(reviewsPublished, "review")} live`,
-          companyWide: true,
-        },
   };
 
   if (roofing) {

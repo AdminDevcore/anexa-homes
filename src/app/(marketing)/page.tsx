@@ -8,7 +8,6 @@ import {
   StayInformedSection,
   FinancingSection,
   WhyAnexaSection,
-  TestimonialsSection,
   ServiceAreaSection,
   CtaBand,
 } from "@/components/marketing/home-sections";
@@ -28,7 +27,6 @@ export default function HomePage() {
       <ProcessSection />
       <StayInformedSection />
       <FinancingSection />
-      <TestimonialsSection />
       <ServiceAreaSection />
       <FaqSection />
       <Section id="contact">

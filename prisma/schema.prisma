@@ -368,7 +368,6 @@ model Company {
   scopeCostTemplates       ScopeCostTemplate[]
   scopeSupplementTemplates ScopeSupplementTemplate[]
   proposals                Proposal[]
-  reviews                  Review[]
   solarSettings            SolarSettings?
   solarEquipment           SolarEquipment[]
   solarProviders           SolarProvider[]
@@ -619,7 +618,6 @@ model User {
   territoriesCreated      Territory[]          @relation("TerritoryCreator")
   onboarding              UserOnboarding?
   proposalsCreated        Proposal[]           @relation("ProposalCreatedBy")
-  reviewsApproved         Review[]             @relation("ReviewApprover")
   feedPosts               DealFeedPost[]       @relation("FeedAuthor")
   projectAssignments      ProjectAssignee[]    @relation("ProjectAssignee")
   solarDealComps          SolarDealComp[]      @relation("SolarDealCompRep")
@@ -3044,53 +3042,6 @@ model StoredFile {
   orphanedAt  DateTime?
 
   @@map("stored_files")
-}
-
-// ---------------------------------------------------------------------------
-// Customer Reviews — first-party reviews submitted from the public website.
-// New submissions are `pending` and never shown publicly until a staff member
-// approves them. The public site reads only: status=approved, deletedAt=null,
-// consentToPublish=true, hidden=false. Deletes are soft (deletedAt) so a
-// removed review can be audited/restored. Optional photo lives in storage
-// (photoKey) and is served via /api/reviews/photo.
-// ---------------------------------------------------------------------------
-
-enum ReviewStatus {
-  pending
-  approved
-  rejected
-}
-
-model Review {
-  id               String       @id @default(uuid())
-  companyId        String
-  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  customerName     String
-  city             String?
-  // Free-text service label captured from the public form (e.g. "Roofing").
-  serviceType      String?
-  rating           Int          @default(5)
-  reviewText       String
-  // Storage key + mime for an optional customer-uploaded photo (legacy single).
-  photoKey         String?
-  photoMime        String?
-  // Storage keys for review photos (of the work/project) — supports multiple.
-  photoKeys        String[]     @default([])
-  consentToPublish Boolean      @default(false)
-  status           ReviewStatus @default(pending)
-  featured         Boolean      @default(false)
-  // Hidden = approved but temporarily pulled from the public site.
-  hidden           Boolean      @default(false)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  approvedAt       DateTime?
-  approvedById     String?
-  approvedBy       User?        @relation("ReviewApprover", fields: [approvedById], references: [id])
-  deletedAt        DateTime?
-
-  @@index([companyId, status])
-  @@index([companyId, featured])
-  @@map("reviews")
 }
 
 // ---------------------------------------------------------------------------

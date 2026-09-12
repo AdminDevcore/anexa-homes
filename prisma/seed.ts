@@ -103,7 +103,7 @@ async function main() {
     { key: "pm", role: "manager", firstName: "Sofia", lastName: "Nguyen", title: "Project Manager" },
     { key: "office", role: "accounting", firstName: "Jordan", lastName: "Lee", title: "Office Coordinator" },
     // No customer account. Homeowners never sign in to this product — they get
-    // public token links (proposal, e-sign, review request) instead.
+    // public token links (proposal, e-sign) instead.
   ];
 
   const users: Record<string, { id: string }> = {};
