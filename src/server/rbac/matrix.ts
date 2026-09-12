@@ -9,7 +9,7 @@ import type { Role } from "@prisma/client";
  * `customer` is deliberately absent. It is still a value in the Postgres enum
  * so historical rows keep validating, but homeowners do not have accounts here:
  * there is no customer portal, no customer sign-in and no way to invite one.
- * Anything customer-facing (proposals, e-signature, review requests) reaches
+ * Anything customer-facing (proposals, e-signature) reaches
  * them through a public token link, never a login. See LEGACY_ROLES.
  */
 export const ROLES = [
@@ -61,7 +61,6 @@ export const RESOURCES = [
   "Knowledge", // training library / knowledge base (role-gated)
   "Scope", // scope-of-work job cost calculator (costs management-only)
   "Proposal", // customer-facing roofing presentation / proposal builder
-  "Review", // public website customer reviews (moderation queue)
 ] as const;
 
 export const ACTIONS = [
@@ -154,7 +153,6 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ALL,
     Scope: ALL,
     Proposal: ALL,
-    Review: ALL,
   },
 
   admin: {
@@ -183,8 +181,6 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ALL,
     Scope: ALL,
     Proposal: ALL,
-    // Admins moderate reviews (approve/reject/feature/hide/edit) but cannot delete.
-    Review: ["read", "update", "approve"],
   },
 
   manager: {
@@ -255,8 +251,6 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Note: ["create", "read"],
     File: ["read"],
     Knowledge: ["read"],
-    // The marketing team curates website reviews (but cannot delete them).
-    Review: ["read", "update", "approve"],
   },
 
   installer: {

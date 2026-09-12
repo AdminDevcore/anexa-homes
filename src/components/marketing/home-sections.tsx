@@ -26,18 +26,9 @@ import {
 import { Section, SectionHeading } from "./ui";
 import { Reveal } from "./reveal";
 import { TiltCard } from "./tilt-card";
-import { TestimonialsCarousel } from "./testimonials-carousel";
 import { Button } from "@/components/ui/button";
 import { GlassButton } from "./glass";
-import {
-  SERVICES,
-  ROOFING_PROCESS,
-  WHY_ANEXA,
-  TESTIMONIALS,
-  COMPANY,
-} from "@/lib/site";
-import { getPublicReviews, getPublicReviewStats } from "@/server/modules/reviews/public";
-import type { CarouselReview } from "./testimonials-carousel";
+import { SERVICES, ROOFING_PROCESS, WHY_ANEXA, COMPANY } from "@/lib/site";
 
 export function ServicesSection() {
   return (
@@ -322,35 +313,6 @@ export function WhyAnexaSection() {
             </TiltCard>
           </Reveal>
         ))}
-      </div>
-    </Section>
-  );
-}
-
-export async function TestimonialsSection() {
-  // Show ONLY real approved reviews once any exist (so the count badge matches
-  // and we never present placeholder testimonials as real). Seed quotes are a
-  // last-resort filler only when there are zero real reviews yet.
-  const [approved, stats] = await Promise.all([getPublicReviews(12), getPublicReviewStats()]);
-  const seed: CarouselReview[] = TESTIMONIALS.map((t) => ({
-    name: t.name,
-    location: t.location,
-    service: null,
-    rating: t.rating,
-    quote: t.quote,
-  }));
-  const items: CarouselReview[] = approved.length > 0 ? approved : seed;
-
-  return (
-    <Section>
-      <SectionHeading
-        align="center"
-        eyebrow="Homeowner Reviews"
-        title="Trusted by hundreds of North Texas families."
-        description="Real reviews from homeowners across the Dallas–Fort Worth metroplex."
-      />
-      <div className="mt-14">
-        <TestimonialsCarousel items={items} stats={stats} />
       </div>
     </Section>
   );

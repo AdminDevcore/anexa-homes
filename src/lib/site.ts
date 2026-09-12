@@ -157,51 +157,6 @@ export const WHY_ANEXA: { title: string; body: string }[] = [
   { title: "Local & Trusted", body: "Hundreds of homeowners across North Texas trust Anexa Homes with their biggest asset." },
 ];
 
-export const TESTIMONIALS: { name: string; location: string; quote: string; rating: number }[] = [
-  {
-    name: "Jennifer M.",
-    location: "Frisco, TX",
-    quote:
-      "Anexa handled my entire insurance claim and the new roof looks incredible. They made a stressful process completely effortless.",
-    rating: 5,
-  },
-  {
-    name: "Robert & Lisa T.",
-    location: "Plano, TX",
-    quote:
-      "Professional from start to finish. The portal kept us updated daily and the crew left our property spotless.",
-    rating: 5,
-  },
-  {
-    name: "Marcus D.",
-    location: "Dallas, TX",
-    quote:
-      "They got my claim approved after another company told me I'd get nothing. Premium work and honest people.",
-    rating: 5,
-  },
-  {
-    name: "Priya & Sanjay R.",
-    location: "McKinney, TX",
-    quote:
-      "We did our roof and solar with Anexa. One team, one point of contact, and the whole project ran on schedule.",
-    rating: 5,
-  },
-  {
-    name: "Tom B.",
-    location: "Fort Worth, TX",
-    quote:
-      "Crew was on time, cleaned up every day, and the new windows made a huge difference in our energy bills.",
-    rating: 5,
-  },
-  {
-    name: "Alicia W.",
-    location: "Arlington, TX",
-    quote:
-      "After the hail storm they handled everything with my insurance. Stress-free from inspection to final walkthrough.",
-    rating: 5,
-  },
-];
-
 export const FAQS: { q: string; a: string }[] = [
   {
     q: "Do you really handle the whole insurance claim?",

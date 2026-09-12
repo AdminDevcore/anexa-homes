@@ -47,11 +47,6 @@ export function SiteFooter() {
               )
             )}
             <li>
-              <Link href="/reviews" className="text-white/65 transition-colors hover:text-white">
-                Reviews
-              </Link>
-            </li>
-            <li>
               <Link href="/contact" className="text-white/65 transition-colors hover:text-white">
                 Request Inspection
               </Link>
