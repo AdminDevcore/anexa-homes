@@ -22,6 +22,7 @@ import {
   buildFilterFields,
   customFieldKey,
   sanitizeConditions,
+  sanitizeMatch,
   type FactValue,
 } from "@/lib/pipeline-filters";
 import { KanbanSquare } from "lucide-react";
@@ -101,7 +102,7 @@ export default async function PipelinePage() {
     prisma.pipelineFilterView.findMany({
       where: { companyId: user.companyId, vertical, OR: [{ createdById: user.userId }, { shared: true }] },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, shared: true, conditions: true, createdById: true },
+      select: { id: true, name: true, shared: true, conditions: true, match: true, createdById: true },
     }),
   ]);
 
@@ -235,6 +236,7 @@ export default async function PipelinePage() {
       name: v.name,
       shared: v.shared,
       conditions: sanitizeConditions(v.conditions),
+      match: sanitizeMatch(v.match),
       mine,
       canEdit: mine || (v.shared && canShareViews),
     };

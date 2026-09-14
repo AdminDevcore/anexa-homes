@@ -2314,6 +2314,8 @@ model PipelineFilterView {
   /// In everyone's Views menu, not just the creator's. Sharing needs Pipeline:update.
   shared      Boolean  @default(false)
   conditions  Json     @default("[]")
+  /// How the conditions combine: "all" (AND) or "any" (OR). Read through sanitizeMatch.
+  match       String   @default("all")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

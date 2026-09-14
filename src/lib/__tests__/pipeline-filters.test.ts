@@ -9,10 +9,12 @@ import {
   matchCondition,
   matchesDeal,
   sameConditions,
+  sameFilter,
   sanitizeConditions,
   stageTimer,
   stateFromSearchParams,
   stateToQuery,
+  visibleStageColumns,
   type Condition,
   type DealPlacement,
   type FactValue,
@@ -83,7 +85,7 @@ const FIELDS = new Map<string, FilterField>(
 
 let n = 0;
 const cond = (fieldKey: string, op: Operator, ...values: string[]): Condition => ({ id: `t${n++}`, field: fieldKey, op, values });
-const hit = (c: Condition, d = deal()) => matchesDeal(d, d, [c], FIELDS, "", NOW);
+const hit = (c: Condition, d = deal()) => matchesDeal(d, d, [c], FIELDS, { q: "", now: NOW });
 
 describe("stageTimer mirrors the card's colours", () => {
   it("has no timer when the stage has no target", () => {
@@ -119,8 +121,8 @@ describe("choice fields", () => {
 describe("stage and stage timer come from where the card sits", () => {
   it("uses the column, not the stage the deal was loaded in", () => {
     const moved = { stageId: "stage-ntp", targetDays: 0 };
-    expect(matchesDeal(deal(), moved, [cond("stage", "any_of", "stage-signed")], FIELDS, "", NOW)).toBe(false);
-    expect(matchesDeal(deal(), moved, [cond("stage", "any_of", "stage-ntp")], FIELDS, "", NOW)).toBe(true);
+    expect(matchesDeal(deal(), moved, [cond("stage", "any_of", "stage-signed")], FIELDS, { q: "", now: NOW })).toBe(false);
+    expect(matchesDeal(deal(), moved, [cond("stage", "any_of", "stage-ntp")], FIELDS, { q: "", now: NOW })).toBe(true);
   });
 
   it("has no timer on an untargeted stage, so only 'is empty' reaches it", () => {
@@ -210,23 +212,23 @@ describe("half-built conditions", () => {
   it("narrow nothing, and neither does a field this pipeline doesn't have", () => {
     const d = deal();
     const conditions = [cond("rep", "any_of"), cond("cf.lead.gone", "any_of", "x"), cond("value", "gt", "1")];
-    expect(matchesDeal(d, d, conditions, FIELDS, "", NOW)).toBe(true);
+    expect(matchesDeal(d, d, conditions, FIELDS, { q: "", now: NOW })).toBe(true);
     expect(completeConditions(conditions, FIELDS)).toHaveLength(1);
   });
 
   it("requires every complete condition at once", () => {
     const d = deal();
-    expect(matchesDeal(d, d, [cond("rep", "any_of", "rep-shayan"), cond("value", "gt", "50000")], FIELDS, "", NOW)).toBe(true);
-    expect(matchesDeal(d, d, [cond("rep", "any_of", "rep-shayan"), cond("value", "gt", "90000")], FIELDS, "", NOW)).toBe(false);
+    expect(matchesDeal(d, d, [cond("rep", "any_of", "rep-shayan"), cond("value", "gt", "50000")], FIELDS, { q: "", now: NOW })).toBe(true);
+    expect(matchesDeal(d, d, [cond("rep", "any_of", "rep-shayan"), cond("value", "gt", "90000")], FIELDS, { q: "", now: NOW })).toBe(false);
   });
 });
 
 describe("search", () => {
   it("matches the address the card never shows, and a formatted phone", () => {
     const d = deal();
-    expect(matchesDeal(d, d, [], FIELDS, "108 Oak", NOW)).toBe(true);
-    expect(matchesDeal(d, d, [], FIELDS, "(361) 934", NOW)).toBe(true);
-    expect(matchesDeal(d, d, [], FIELDS, "Nowhereville", NOW)).toBe(false);
+    expect(matchesDeal(d, d, [], FIELDS, { q: "108 Oak", now: NOW })).toBe(true);
+    expect(matchesDeal(d, d, [], FIELDS, { q: "(361) 934", now: NOW })).toBe(true);
+    expect(matchesDeal(d, d, [], FIELDS, { q: "Nowhereville", now: NOW })).toBe(false);
   });
 });
 
@@ -327,12 +329,15 @@ describe("describeCondition", () => {
 
 describe("storage and the URL", () => {
   it("writes nothing when nothing is set", () => {
-    expect(stateToQuery({ q: "", conditions: [], viewId: null })).toBe("");
+    expect(stateToQuery({ q: "", conditions: [], match: "all", viewId: null })).toBe("");
+    // A mode with no rows to join says nothing, so it isn't written either.
+    expect(stateToQuery({ q: "", conditions: [], match: "any", viewId: null })).toBe("");
   });
 
   it("reads back what it wrote", () => {
     const state = {
       q: "oak st",
+      match: "any" as const,
       viewId: "0b7d6a3e-4f7e-4d0c-9d2f-3c5a1b2e9f10",
       conditions: [cond("rep", "any_of", "rep-a", NONE), cond("value", "between", "25000", "90000"), cond(PERMIT, "checked")],
     };
@@ -340,11 +345,13 @@ describe("storage and the URL", () => {
     const back = stateFromSearchParams(params);
     expect(back.q).toBe("oak st");
     expect(back.viewId).toBe(state.viewId);
+    expect(back.match).toBe("any");
     expect(sameConditions(back.conditions, state.conditions)).toBe(true);
   });
 
   it("drops malformed input instead of trusting a hand-edited link", () => {
     expect(stateFromSearchParams({ f: "{not json" }).conditions).toEqual([]);
+    expect(stateFromSearchParams({ m: "sometimes" }).match).toBe("all");
     expect(stateFromSearchParams({ view: "1; drop table" }).viewId).toBeNull();
     const kept = sanitizeConditions([
       ["rep", "any_of", ["x", 7]],
@@ -369,5 +376,58 @@ describe("storage and the URL", () => {
 describe("matchCondition on its own", () => {
   it("defaults 'now' to the real clock without throwing", () => {
     expect(matchCondition(cond("created_at", "last_days", "36500"), field("created_at", "date"), local(2026, 1, 1))).toBe(true);
+  });
+});
+
+describe("and / or", () => {
+  const either = () => [cond("rep", "any_of", "rep-mia"), cond("value", "gt", "80000")];
+
+  it("keeps a deal that meets any one row under or, not under and", () => {
+    const d = deal();
+    expect(matchesDeal(d, d, either(), FIELDS, { match: "all", now: NOW })).toBe(false);
+    expect(matchesDeal(d, d, either(), FIELDS, { match: "any", now: NOW })).toBe(true);
+  });
+
+  it("drops a deal that meets no row under or", () => {
+    const d = deal();
+    const neither = [cond("rep", "any_of", "rep-mia"), cond("value", "gt", "90000")];
+    expect(matchesDeal(d, d, neither, FIELDS, { match: "any", now: NOW })).toBe(false);
+  });
+
+  it("shows everything under or while no row is complete, and the search box still narrows", () => {
+    const d = deal();
+    expect(matchesDeal(d, d, [cond("rep", "any_of")], FIELDS, { match: "any", now: NOW })).toBe(true);
+    expect(matchesDeal(d, d, either(), FIELDS, { match: "any", q: "Nowhereville", now: NOW })).toBe(false);
+  });
+});
+
+describe("visibleStageColumns", () => {
+  const ids = ["stage-new", "stage-signed", "stage-ntp"];
+  const onStage = (...stages: string[]) => cond("stage", "any_of", ...stages);
+
+  it("is every column when no row names a stage", () => {
+    expect(visibleStageColumns(ids, [cond("rep", "any_of", "x")], FIELDS, "all")).toBeNull();
+  });
+
+  it("under and, keeps only the columns every Stage row allows", () => {
+    const cols = visibleStageColumns(ids, [onStage("stage-new", "stage-signed"), onStage("stage-signed")], FIELDS, "all");
+    expect([...cols!]).toEqual(["stage-signed"]);
+  });
+
+  it("under or, joins the Stage rows — but keeps every column once another field could match", () => {
+    expect([...visibleStageColumns(ids, [onStage("stage-new"), onStage("stage-ntp")], FIELDS, "any")!]).toEqual([
+      "stage-new",
+      "stage-ntp",
+    ]);
+    expect(visibleStageColumns(ids, [onStage("stage-new"), cond("rep", "any_of", "x")], FIELDS, "any")).toBeNull();
+  });
+});
+
+describe("sameFilter", () => {
+  it("counts the mode only once there is more than one row to join", () => {
+    const one = [cond("rep", "any_of", "a")];
+    const two = [cond("rep", "any_of", "a"), cond("value", "gt", "1")];
+    expect(sameFilter({ conditions: one, match: "all" }, { conditions: one, match: "any" })).toBe(true);
+    expect(sameFilter({ conditions: two, match: "all" }, { conditions: two, match: "any" })).toBe(false);
   });
 });

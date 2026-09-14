@@ -32,13 +32,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { Condition } from "@/lib/pipeline-filters";
+import type { Condition, MatchMode } from "@/lib/pipeline-filters";
 
 export type SavedFilterView = {
   id: string;
   name: string;
   shared: boolean;
   conditions: Condition[];
+  /** How the saved rows combine: and ("all") or or ("any"). */
+  match: MatchMode;
   /** Made by the person looking at it. */
   mine: boolean;
   /** Theirs, or a shared view and they may manage shared views. */

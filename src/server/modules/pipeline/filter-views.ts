@@ -34,6 +34,7 @@ const saveSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Give the view a name.").max(60, "Keep the name under 60 characters."),
   shared: z.boolean().default(false),
+  match: z.enum(["all", "any"]).default("all"),
   conditions: z.array(z.unknown()).max(30),
 });
 
@@ -55,7 +56,12 @@ export async function saveFilterViewAction(input: z.input<typeof saveSchema>) {
   const canShare = can(user, "update", "Pipeline");
   if (d.shared && !canShare) return fail("Only managers and admins can share a view with the team.");
 
-  const data = { name: d.name, shared: d.shared, conditions: conditions as unknown as Prisma.InputJsonValue };
+  const data = {
+    name: d.name,
+    shared: d.shared,
+    match: d.match,
+    conditions: conditions as unknown as Prisma.InputJsonValue,
+  };
   const select = { id: true, name: true, shared: true } as const;
 
   if (d.id) {

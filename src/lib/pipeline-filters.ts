@@ -1,7 +1,8 @@
 /**
  * The Pipeline page's filter builder — Kanban and List both.
  *
- * A filter is a list of CONDITIONS that must all hold. Each names a field
+ * A filter is a list of CONDITIONS joined one way: all must hold, or any may.
+ * Each names a field
  * ("Rep", "Deal value", one of the company's custom fields), an operator
  * ("is any of", "is between") and its values. Everything here is pure and runs
  * in the browser over deals the page already loaded, which is what lets the
@@ -114,6 +115,17 @@ export type FilterField = {
 
 export type Condition = { id: string; field: string; op: Operator; values: string[] };
 export type StoredCondition = { field: string; op: Operator; values: string[] };
+
+/**
+ * How the rows combine: "all" joins them with AND, "any" with OR. One mode per
+ * filter, never mixed — "A and B or C" reads two ways — so, like Airtable and
+ * Notion, the connector is chosen once and every row follows it.
+ */
+export type MatchMode = "all" | "any";
+
+export function sanitizeMatch(raw: unknown): MatchMode {
+  return raw === "any" ? "any" : "all";
+}
 
 // ── Deals ───────────────────────────────────────────────────────────────────
 
@@ -301,21 +313,53 @@ function matchesSearch(deal: FilterableDeal, q: string): boolean {
   return digits.length >= 3 && /^[\d\s().+-]+$/.test(needle) && deal.phoneDigits.includes(digits);
 }
 
+export type MatchOptions = { q?: string; match?: MatchMode; now?: number };
+
 export function matchesDeal(
   deal: FilterableDeal,
   at: DealPlacement,
   conditions: Condition[],
   fields: ReadonlyMap<string, FilterField>,
-  q = "",
-  now = Date.now()
+  { q = "", match = "all", now = Date.now() }: MatchOptions = {}
 ): boolean {
+  // The search box always narrows; the mode only decides how the rows combine.
   if (!matchesSearch(deal, q)) return false;
+  let complete = 0;
   for (const c of conditions) {
     const field = fields.get(c.field);
     if (!field || !isComplete(c, field)) continue;
-    if (!matchCondition(c, field, factOf(deal, at, c.field), now)) return false;
+    complete += 1;
+    const ok = matchCondition(c, field, factOf(deal, at, c.field), now);
+    if (match === "all" && !ok) return false;
+    if (match === "any" && ok) return true;
   }
-  return true;
+  // "all" got through every row; "any" matched none, which only passes when
+  // there was nothing to match against.
+  return match === "all" || complete === 0;
+}
+
+/**
+ * The board columns a filter leaves standing, or null for every column. Under
+ * "all" each Stage row must allow the column. Under "any" a deal in any column
+ * could still satisfy some other row, so columns only narrow when every row is
+ * a Stage row — and then to the columns any of them allows.
+ */
+export function visibleStageColumns(
+  stageIds: string[],
+  conditions: Condition[],
+  fields: ReadonlyMap<string, FilterField>,
+  match: MatchMode
+): Set<string> | null {
+  const stageField = fields.get(STAGE_FIELD);
+  const active = completeConditions(conditions, fields);
+  const onStage = active.filter((c) => c.field === STAGE_FIELD);
+  if (!stageField || onStage.length === 0) return null;
+  if (match === "any" && onStage.length !== active.length) return null;
+  const allows = (id: string) =>
+    match === "all"
+      ? onStage.every((c) => matchCondition(c, stageField, id))
+      : onStage.some((c) => matchCondition(c, stageField, id));
+  return new Set(stageIds.filter(allows));
 }
 
 // ── The field catalogue ─────────────────────────────────────────────────────
@@ -532,7 +576,16 @@ export function sameConditions(a: Condition[], b: Condition[]): boolean {
   return JSON.stringify(toStoredConditions(a)) === JSON.stringify(toStoredConditions(b));
 }
 
-export type FilterUrlState = { q: string; conditions: Condition[]; viewId: string | null };
+/** Same rows and same mode — though with one row or none, and/or reads the same. */
+export function sameFilter(
+  a: { conditions: Condition[]; match: MatchMode },
+  b: { conditions: Condition[]; match: MatchMode }
+): boolean {
+  const modeMatters = a.conditions.length > 1 || b.conditions.length > 1;
+  return sameConditions(a.conditions, b.conditions) && (!modeMatters || a.match === b.match);
+}
+
+export type FilterUrlState = { q: string; conditions: Condition[]; match: MatchMode; viewId: string | null };
 
 type RawParams = Record<string, string | string[] | undefined>;
 
@@ -554,6 +607,7 @@ export function stateFromSearchParams(params: RawParams): FilterUrlState {
   return {
     q: one("q").slice(0, 200),
     conditions,
+    match: sanitizeMatch(one("m")),
     viewId: /^[0-9a-f-]{36}$/i.test(view) ? view : null,
   };
 }
@@ -563,6 +617,7 @@ export function stateToQuery(s: FilterUrlState): string {
   const sp = new URLSearchParams();
   if (s.q) sp.set("q", s.q);
   if (s.viewId) sp.set("view", s.viewId);
+  if (s.match === "any" && s.conditions.length) sp.set("m", "any");
   if (s.conditions.length) sp.set("f", JSON.stringify(s.conditions.map((c) => [c.field, c.op, c.values])));
   return sp.toString();
 }

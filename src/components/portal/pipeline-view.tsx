@@ -28,19 +28,19 @@ import {
 } from "@/components/portal/pipeline-views-menu";
 import { deleteFilterViewAction, saveFilterViewAction } from "@/server/modules/pipeline/filter-views";
 import {
-  STAGE_FIELD,
   completeConditions,
-  matchCondition,
   matchesDeal,
-  sameConditions,
+  sameFilter,
   stateFromSearchParams,
   stateToQuery,
   toStoredConditions,
+  visibleStageColumns,
   type Condition,
   type DealPlacement,
   type FilterField,
   type FilterUrlState,
   type FilterableDeal,
+  type MatchMode,
 } from "@/lib/pipeline-filters";
 
 export type ListLead = FilterableDeal &
@@ -126,14 +126,18 @@ export function PipelineView({
   const active = React.useMemo(() => completeConditions(filter.conditions, fieldMap), [filter.conditions, fieldMap]);
   const filtering = filter.q.trim() !== "" || active.length > 0;
   const activeView = views.find((v) => v.id === filter.viewId) ?? null;
-  const dirty = activeView !== null && !sameConditions(active, activeView.conditions);
+  const dirty = activeView !== null && !sameFilter({ conditions: active, match: filter.match }, activeView);
 
   const shownLeads = React.useMemo(
-    () => (filtering ? listLeads.filter((l) => matchesDeal(l, l, active, fieldMap, filter.q)) : listLeads),
-    [filtering, listLeads, active, fieldMap, filter.q]
+    () =>
+      filtering
+        ? listLeads.filter((l) => matchesDeal(l, l, active, fieldMap, { q: filter.q, match: filter.match }))
+        : listLeads,
+    [filtering, listLeads, active, fieldMap, filter.q, filter.match]
   );
   const countMatches = React.useCallback(
-    (draft: Condition[]) => listLeads.filter((l) => matchesDeal(l, l, draft, fieldMap, filter.q)).length,
+    (draft: Condition[], match: MatchMode) =>
+      listLeads.filter((l) => matchesDeal(l, l, draft, fieldMap, { q: filter.q, match })).length,
     [listLeads, fieldMap, filter.q]
   );
 
@@ -143,24 +147,30 @@ export function PipelineView({
   const isVisible = React.useCallback(
     (leadId: string, stage: Stage) => {
       const deal = dealsById.get(leadId);
-      return !deal || matchesDeal(deal, { stageId: stage.id, targetDays: stage.targetDays ?? 0 }, active, fieldMap, filter.q);
+      return (
+        !deal ||
+        matchesDeal(deal, { stageId: stage.id, targetDays: stage.targetDays ?? 0 }, active, fieldMap, {
+          q: filter.q,
+          match: filter.match,
+        })
+      );
     },
-    [dealsById, active, fieldMap, filter.q]
+    [dealsById, active, fieldMap, filter.q, filter.match]
   );
   // A Stage condition narrows the board to the columns it allows.
-  const visibleStageIds = React.useMemo(() => {
-    const stageField = fieldMap.get(STAGE_FIELD);
-    const onStage = active.filter((c) => c.field === STAGE_FIELD);
-    if (!stageField || onStage.length === 0) return null;
-    return new Set(stages.filter((s) => onStage.every((c) => matchCondition(c, stageField, s.id))).map((s) => s.id));
-  }, [active, fieldMap, stages]);
+  const visibleStageIds = React.useMemo(
+    () => visibleStageColumns(stages.map((s) => s.id), active, fieldMap, filter.match),
+    [active, fieldMap, stages, filter.match]
+  );
 
   const setConditions = (conditions: Condition[]) => setFilter((f) => ({ ...f, conditions }));
-  const clearAll = () => setFilter((f) => ({ ...f, conditions: [], viewId: null }));
+  const applyFilters = (conditions: Condition[], match: MatchMode) => setFilter((f) => ({ ...f, conditions, match }));
+  const clearAll = () => setFilter((f) => ({ ...f, conditions: [], match: "all", viewId: null }));
   const selectView = (v: SavedFilterView | null) =>
     setFilter((f) => ({
       ...f,
       viewId: v?.id ?? null,
+      match: v?.match ?? "all",
       conditions: v ? v.conditions.map((c, i) => ({ ...c, id: `${v.id}-${i}` })) : [],
     }));
 
@@ -183,6 +193,7 @@ export function PipelineView({
         name,
         shared,
         // Renaming keeps what the view saved; a new view takes the board as it is.
+        match: editing ? editing.match : filter.match,
         conditions: toStoredConditions(editing ? editing.conditions : active),
       });
       if (!res.ok) {
@@ -201,6 +212,7 @@ export function PipelineView({
         id: v.id,
         name: v.name,
         shared: v.shared,
+        match: filter.match,
         conditions: toStoredConditions(active),
       });
       if (!res.ok) toast.error(res.error);
@@ -261,7 +273,8 @@ export function PipelineView({
           <FilterBuilderButton
             fields={fields}
             conditions={active}
-            onApply={setConditions}
+            match={filter.match}
+            onApply={applyFilters}
             countMatches={countMatches}
             total={count}
             onSaveAsView={() => openDialog({ mode: "new" })}
@@ -289,7 +302,13 @@ export function PipelineView({
         </div>
       </div>
 
-      <ActiveFilterChips fields={fields} conditions={active} onChange={setConditions} onClearAll={clearAll} />
+      <ActiveFilterChips
+        fields={fields}
+        conditions={active}
+        match={filter.match}
+        onChange={setConditions}
+        onClearAll={clearAll}
+      />
 
       {!mounted ? (
         <div className="flex-1" />

@@ -121,3 +121,42 @@ test("pipeline: a shared saved view reopens its filters and can be deleted", asy
   await openViewsMenu(page, "Views");
   await expect(page.getByRole("menuitem", { name: /E2E rep view/ })).toHaveCount(0);
 });
+
+test("pipeline: switching and to or widens the board to deals matching either row", async ({ page }) => {
+  await login(page, "manager@anexahomes.com");
+  await page.goto("/portal/pipeline");
+
+  const cards = page.locator('[data-testid="pipeline-card"]');
+  await expect(cards.first()).toBeVisible({ timeout: 15000 });
+
+  // Row 1: the first rep on the list. Row 2: the second.
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  const rows = page.getByTestId("filter-condition");
+  for (const row of [0, 1]) {
+    if (row === 1) await page.getByRole("button", { name: "Add condition" }).click();
+    await rows.nth(row).getByRole("combobox", { name: "Field" }).click();
+    await page.getByRole("option", { name: "Rep", exact: true }).click();
+    await rows.nth(row).getByRole("button", { name: /^Values/ }).click();
+    await page.getByTestId("value-picker").getByRole("checkbox").nth(row).click();
+    await page.keyboard.press("Escape"); // closes the value list, not the builder
+  }
+
+  // A deal has one rep, so "and" across two different reps matches nothing…
+  await expect(page.getByText(/^0 of \d+ deals? match$/)).toBeVisible();
+
+  // …and "or" matches the deals of either.
+  await rows.nth(1).getByRole("combobox", { name: "And or" }).click();
+  await page.getByRole("option", { name: "or", exact: true }).click();
+  await expect(page.getByText("Show deals where any condition is true")).toBeVisible();
+  await page.getByRole("button", { name: "Apply" }).click();
+
+  await expect(page).toHaveURL(/[?&]m=any/);
+  await expect(page.getByText("Any of", { exact: true })).toBeVisible();
+  const either = await cards.count();
+  expect(either).toBeGreaterThan(0);
+
+  // The mode rides in the URL with the rows.
+  await page.reload();
+  await expect(page.getByText("Any of", { exact: true })).toBeVisible({ timeout: 15000 });
+  await expect(cards).toHaveCount(either);
+});

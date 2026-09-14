@@ -26,6 +26,7 @@ import {
   operatorsFor,
   type Condition,
   type FilterField,
+  type MatchMode,
   type Operator,
 } from "@/lib/pipeline-filters";
 
@@ -35,13 +36,14 @@ const blankRow = (): Condition => ({ id: `row-${++rowSeq}`, field: "", op: "any_
 
 /**
  * The Filters button and its builder: "Where <field> <operator> <values>", as
- * many rows as you like, all of which must hold. Rows are a DRAFT until Apply,
+ * many rows as you like, joined by and or by or. Rows are a DRAFT until Apply,
  * so a half-picked row never empties the board behind the panel — but the
  * footer counts what the draft would show as you build it.
  */
 export function FilterBuilderButton({
   fields,
   conditions,
+  match,
   onApply,
   countMatches,
   total,
@@ -49,19 +51,24 @@ export function FilterBuilderButton({
 }: {
   fields: FilterField[];
   conditions: Condition[];
-  onApply: (next: Condition[]) => void;
-  countMatches: (draft: Condition[]) => number;
+  match: MatchMode;
+  onApply: (next: Condition[], match: MatchMode) => void;
+  countMatches: (draft: Condition[], match: MatchMode) => number;
   total: number;
   onSaveAsView: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<Condition[]>([]);
+  const [draftMatch, setDraftMatch] = React.useState<MatchMode>("all");
   const byKey = React.useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
   const active = conditions.filter((c) => isComplete(c, byKey.get(c.field))).length;
   const ready = draft.filter((c) => isComplete(c, byKey.get(c.field)));
 
   function onOpenChange(next: boolean) {
-    if (next) setDraft(conditions.length ? conditions.map((c) => ({ ...c })) : [blankRow()]);
+    if (next) {
+      setDraft(conditions.length ? conditions.map((c) => ({ ...c })) : [blankRow()]);
+      setDraftMatch(match);
+    }
     setOpen(next);
   }
 
@@ -75,7 +82,7 @@ export function FilterBuilderButton({
 
   function apply(e?: React.FormEvent) {
     e?.preventDefault();
-    onApply(ready);
+    onApply(ready, draftMatch);
     setOpen(false);
   }
 
@@ -106,7 +113,9 @@ export function FilterBuilderButton({
         <form onSubmit={apply} className="flex flex-col">
           <div className="border-b border-border px-4 py-3">
             <p className="text-sm font-semibold">Filters</p>
-            <p className="text-xs text-muted-foreground">Show deals where every condition is true</p>
+            <p className="text-xs text-muted-foreground">
+              {draftMatch === "any" ? "Show deals where any condition is true" : "Show deals where every condition is true"}
+            </p>
           </div>
 
           <div className="flex flex-col gap-2.5 px-4 py-3">
@@ -114,6 +123,8 @@ export function FilterBuilderButton({
               <ConditionRow
                 key={c.id}
                 first={i === 0}
+                match={draftMatch}
+                onMatchChange={setDraftMatch}
                 condition={c}
                 fields={fields}
                 field={byKey.get(c.field)}
@@ -124,7 +135,7 @@ export function FilterBuilderButton({
             <button
               type="button"
               onClick={() => setDraft((d) => [...d, blankRow()])}
-              className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-gold-muted transition-colors hover:bg-muted sm:ml-12"
+              className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-gold-muted transition-colors hover:bg-muted sm:ml-18"
             >
               <Plus className="size-4" /> Add condition
             </button>
@@ -137,7 +148,7 @@ export function FilterBuilderButton({
               size="sm"
               disabled={ready.length === 0}
               onClick={() => {
-                onApply(ready);
+                onApply(ready, draftMatch);
                 setOpen(false);
                 onSaveAsView();
               }}
@@ -146,9 +157,12 @@ export function FilterBuilderButton({
             </Button>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground tabular-nums">
-                {`${countMatches(ready)} of ${total} ${total === 1 ? "deal" : "deals"} match`}
+                {`${countMatches(ready, draftMatch)} of ${total} ${total === 1 ? "deal" : "deals"} match`}
               </span>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setDraft([blankRow()])}>
+              <Button type="button" variant="ghost" size="sm" onClick={() => {
+                  setDraft([blankRow()]);
+                  setDraftMatch("all");
+                }}>
                 Clear
               </Button>
               <Button type="submit" size="sm">
@@ -174,6 +188,8 @@ function carryValues(c: Condition, op: Operator): string[] {
 
 function ConditionRow({
   first,
+  match,
+  onMatchChange,
   condition: c,
   fields,
   field,
@@ -181,6 +197,8 @@ function ConditionRow({
   onRemove,
 }: {
   first: boolean;
+  match: MatchMode;
+  onMatchChange: (match: MatchMode) => void;
   condition: Condition;
   fields: FilterField[];
   field: FilterField | undefined;
@@ -192,9 +210,26 @@ function ConditionRow({
       data-testid="filter-condition"
       className="flex flex-col gap-2 rounded-lg border border-border/70 p-2 sm:flex-row sm:items-start sm:border-0 sm:p-0"
     >
-      <span className="hidden w-10 shrink-0 pt-2 text-xs font-medium text-muted-foreground sm:block">
-        {first ? "Where" : "and"}
-      </span>
+      {first ? (
+        <span className="hidden w-16 shrink-0 pt-2 text-xs font-medium text-muted-foreground sm:block">Where</span>
+      ) : (
+        // One connector for the whole filter: changing any row's and/or changes
+        // every row's, so the builder never shows a mix it can't evaluate.
+        <Select
+          value={match}
+          onValueChange={(v) => {
+            if ((v === "all" || v === "any") && v !== match) onMatchChange(v);
+          }}
+        >
+          <SelectTrigger className="h-9 w-full shrink-0 text-xs sm:w-16" aria-label="And or">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">and</SelectItem>
+            <SelectItem value="any">or</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
 
       <Select
         value={c.field}
@@ -449,11 +484,13 @@ function MultiValuePicker({
 export function ActiveFilterChips({
   fields,
   conditions,
+  match,
   onChange,
   onClearAll,
 }: {
   fields: FilterField[];
   conditions: Condition[];
+  match: MatchMode;
   onChange: (next: Condition[]) => void;
   onClearAll: () => void;
 }) {
@@ -467,6 +504,10 @@ export function ActiveFilterChips({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Active filters">
+      {/* Chips read as a list, so under or the list has to say so. */}
+      {match === "any" && chips.length > 1 ? (
+        <span className="text-xs font-medium text-muted-foreground">Any of</span>
+      ) : null}
       {chips.map(({ c, label }) => (
         <button
           key={c.id}
