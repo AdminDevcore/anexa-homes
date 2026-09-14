@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Menu, Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PORTAL_NAV, navRoutes, type NavItem } from "@/lib/nav";
+import { NAV_GROUPS, PORTAL_NAV, navRoutes, type NavItem } from "@/lib/nav";
 import { Logo } from "@/components/marketing/logo";
 import type { Branding } from "@/server/branding/defaults";
 import { UserMenu } from "./user-menu";
@@ -71,49 +71,69 @@ function AppNavList({
   unread: number;
   onNavigate?: () => void;
 }) {
+  // Ungrouped items lead, then each heading in order. Built from what this user
+  // may open, so a heading with nothing under it for them is never drawn.
+  const sections = [
+    { key: "top", label: null as string | null, items: items.filter((i) => !i.group) },
+    ...NAV_GROUPS.map((g) => ({
+      key: g.key,
+      label: g.label as string | null,
+      items: items.filter((i) => i.group === g.key),
+    })),
+  ].filter((s) => s.items.length > 0);
+
   return (
-    <nav className="flex flex-col gap-1 px-3">
-      {items.map((item) => {
-        // Longest matching href wins, so a parent route (Settings) doesn't also
-        // highlight on a child owned by another item. An item's tab routes
-        // count as its own:
-        // standing on Contractor Pay lights up Commissions, which is where the
-        // tab that opened it lives.
-        const mine = matchLength(item, pathname);
-        const active = mine >= 0 && !items.some((o) => matchLength(o, pathname) > mine);
-        const badge = item.href === "/portal/chat" && unread > 0 ? unread : null;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            className={cn(
-              "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              // Active is a lifted surface, not a slab of brand colour, with a
-              // thin orange rule at the leading edge. The eye still lands on it
-              // instantly, and the orange stays available for the button that
-              // actually wants pressing.
-              active
-                ? "bg-white/[0.08] text-white before:absolute before:inset-y-1.5 before:-left-1 before:w-[3px] before:rounded-full before:bg-gold"
-                : "text-white/55 hover:bg-white/[0.04] hover:text-white/90"
-            )}
-          >
-            <item.icon className="size-[18px] shrink-0" />
-            <span className="flex-1">{item.label}</span>
-            <NavPending />
-            {badge !== null && (
-              <Badge
+    <nav className="flex flex-col gap-3 px-3">
+      {sections.map((section) => (
+        <div key={section.key} className="flex flex-col gap-0.5">
+          {section.label && (
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+              {section.label}
+            </p>
+          )}
+          {section.items.map((item) => {
+            // Longest matching href wins, so a parent route (Settings) doesn't also
+            // highlight on a child owned by another item. An item's tab routes
+            // count as its own:
+            // standing on Contractor Pay lights up Commissions, which is where the
+            // tab that opened it lives.
+            const mine = matchLength(item, pathname);
+            const active = mine >= 0 && !items.some((o) => matchLength(o, pathname) > mine);
+            const badge = item.href === "/portal/chat" && unread > 0 ? unread : null;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
                 className={cn(
-                  "h-5 min-w-5 justify-center rounded-full px-1.5 tabular-nums",
-                  active && "bg-background text-foreground"
+                  "relative flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                  // Active is a lifted surface, not a slab of brand colour, with a
+                  // thin orange rule at the leading edge. The eye still lands on it
+                  // instantly, and the orange stays available for the button that
+                  // actually wants pressing.
+                  active
+                    ? "bg-white/[0.08] text-white before:absolute before:inset-y-1.5 before:-left-1 before:w-[3px] before:rounded-full before:bg-gold"
+                    : "text-white/55 hover:bg-white/[0.04] hover:text-white/90"
                 )}
               >
-                {badge}
-              </Badge>
-            )}
-          </Link>
-        );
-      })}
+                <item.icon className="size-[18px] shrink-0" />
+                <span className="flex-1">{item.label}</span>
+                <NavPending />
+                {badge !== null && (
+                  <Badge
+                    className={cn(
+                      "h-5 min-w-5 justify-center rounded-full px-1.5 tabular-nums",
+                      active && "bg-background text-foreground"
+                    )}
+                  >
+                    {badge}
+                  </Badge>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }
