@@ -1611,6 +1611,7 @@ export default async function LeadDetailPage({
             <DealSlides
               id="production"
               className="scroll-mt-24"
+              foldable
               slides={[
                 { id: "system", label: "System & financing" },
                 { id: "timeline", label: "Timeline", icon: "timeline" },
