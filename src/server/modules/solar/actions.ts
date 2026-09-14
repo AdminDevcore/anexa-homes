@@ -8,15 +8,11 @@ import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
 import { dealMoneyColumns, recomputeDealMoney } from "./deal-money";
 import { auditSignedEdit, checkSignedLock } from "./signed-lock";
-import { getSolarSettings } from "./settings";
 import { resolveDesignBattery, resolveSizingModule } from "./sizing";
 import { recomputeDesignFigures } from "./recompute";
 import { canGenerate } from "@/lib/solar-validation";
 import { readSolarReadiness } from "./readiness";
-import { financeRowForProduct } from "@/lib/solar-finance-row";
-import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
-import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
-import { priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
+import { recomputeAdderTotal, restampAddersForLender } from "./adders";
 import { FIELD_SOURCES, WIRE_FIELDS } from "./lender-field-map";
 
 const fail = (error: string) => ({ ok: false as const, error });

@@ -59,7 +59,7 @@ let leadId: string;
 let projectId: string;
 let proposalId: string;
 const users: Partial<Record<Role, string>> = {};
-let stages: Record<string, string> = {};
+const stages: Record<string, string> = {};
 
 const inSolar = <T>(fn: () => Promise<T>) => runInVertical("solar", fn);
 function actAs(role: Role) {
