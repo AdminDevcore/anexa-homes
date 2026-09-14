@@ -1,5 +1,6 @@
 import type { NovaAuditPhase } from "@prisma/client";
 import { recordNovaAudit } from "../audit";
+import { proposeWrite } from "../pending";
 import type { NovaCtx, ToolResult } from "../types";
 import type { NovaTool } from "./define";
 import { NOVA_TOOLS_BY_NAME } from "./registry";
@@ -10,17 +11,20 @@ function phaseFor(tool: NovaTool, result: ToolResult): NovaAuditPhase {
 }
 
 /**
- * Run one read (or decline) tool as the user and audit it — every call, refused
- * and failed ones included. Writes never come through here: they are proposed
- * and confirmed separately, so nothing that changes data can run in the loop.
+ * Run one tool call from the conversation, as the user, and audit it — every
+ * call, refused and failed ones included. Reads run now. Writes are only
+ * proposed here; they run from confirmPendingAction once the user says yes, so
+ * nothing that changes data can happen inside the loop.
  */
 export async function runNovaTool(ctx: NovaCtx, name: string, rawInput: unknown): Promise<ToolResult> {
   const tool = NOVA_TOOLS_BY_NAME.get(name);
-  if (!tool || tool.kind === "write") {
+  if (!tool) {
     const result: ToolResult = { ok: false, reason: "invalid", message: `There is no tool called ${name}.` };
     await recordNovaAudit(ctx, { tool: name, kind: "read", phase: "failed", args: rawInput, error: result.message });
     return result;
   }
+  // A write tool called from the conversation only ever PROPOSES.
+  if (tool.kind === "write") return proposeWrite(ctx, tool, rawInput);
 
   const parsed = tool.input.safeParse(rawInput ?? {});
   let result: ToolResult;

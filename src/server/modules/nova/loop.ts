@@ -3,7 +3,7 @@ import { roleLabel } from "@/lib/roles";
 import { formatDay } from "./format";
 import { NOVA_SYSTEM_PROMPT } from "./prompt";
 import { toolDefinitions } from "./tools/registry";
-import type { HistoryTurn, NovaCtx, ToolResult } from "./types";
+import type { HistoryTurn, NovaCtx, NovaReply, ToolResult } from "./types";
 
 export const NOVA_MODEL_ID = "claude-opus-5";
 
@@ -31,12 +31,7 @@ export function anthropicModel(client: Anthropic = new Anthropic()): NovaModel {
   };
 }
 
-export type TurnOutcome = {
-  kind: "answer" | "declined" | "error";
-  reply: string;
-  /** Tool names called this turn, in order — for the transcript, not the audit. */
-  tools: string[];
-};
+export type TurnOutcome = NovaReply;
 
 export type TurnDeps = {
   model: NovaModel;
@@ -131,6 +126,17 @@ export async function runTurn(
     for (const call of calls) {
       used.push(call.name);
       const result = await deps.runTool(ctx, call.name, call.input);
+      // A write has been proposed, not done. The turn ends here: nothing else
+      // runs and the model is not consulted again until the user answers.
+      if (result.ok && result.proposal) {
+        const { pendingActionId, summary } = result.proposal;
+        return {
+          kind: "confirm",
+          reply: `${summary} Shall I go ahead?`,
+          pending: { id: pendingActionId, summary },
+          tools: used,
+        };
+      }
       // A declined capability gets the canned, audited sentence — the model
       // does not get a second chance to phrase (or soften) the refusal.
       if (call.name === "decline_request" && result.ok) {

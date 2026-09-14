@@ -125,4 +125,27 @@ describe("runTurn", () => {
     // A history may not start with the assistant.
     expect(params.messages[0].role).toBe("user");
   });
+
+  it("ends the turn the moment a write is proposed — nothing after it runs, and the model is not asked again", async () => {
+    const { model } = scripted(
+      message("tool_use", [
+        { type: "tool_use", id: "t1", name: "add_note", input: { text: "Called, left a voicemail." } },
+        { type: "tool_use", id: "t2", name: "find_deal", input: { query: "Omar" } },
+      ])
+    );
+    const summary = 'Add a note to Dana Whitfield\'s deal: "Called, left a voicemail."';
+    const runTool = vi.fn(async (_c: NovaCtx, name: string): Promise<ToolResult> =>
+      name === "add_note"
+        ? { ok: true, data: {}, proposal: { pendingActionId: "p1", summary } }
+        : { ok: true, data: {} }
+    );
+
+    const out = await runTurn(ctx, { text: "note that I called", history: [] }, { model, runTool });
+
+    expect(out).toMatchObject({ kind: "confirm", pending: { id: "p1", summary } });
+    expect(out.reply.startsWith(summary)).toBe(true);
+    expect(out.reply.trim().endsWith("?")).toBe(true);
+    expect(model.create).toHaveBeenCalledTimes(1);
+    expect(runTool).toHaveBeenCalledTimes(1);
+  });
 });

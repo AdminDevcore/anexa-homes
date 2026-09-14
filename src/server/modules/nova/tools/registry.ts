@@ -10,6 +10,10 @@ import { listAppointments } from "./list-appointments";
 import { listTasks } from "./list-tasks";
 import { getTeamMember } from "./team-member";
 import { declineRequest } from "./decline";
+import { addNote } from "./write/add-note";
+import { createFollowUp, createTask } from "./write/tasks";
+import { createLead } from "./write/create-lead";
+import { bookAppointment, setAppointmentOutcome } from "./write/appointments";
 
 /** Order is stable on purpose: the tool list is part of the cached prompt prefix. */
 export const NOVA_TOOLS: NovaTool[] = [
@@ -21,6 +25,12 @@ export const NOVA_TOOLS: NovaTool[] = [
   listAppointments,
   listTasks,
   getTeamMember,
+  addNote,
+  createTask,
+  createFollowUp,
+  createLead,
+  bookAppointment,
+  setAppointmentOutcome,
   declineRequest,
 ];
 

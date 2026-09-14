@@ -1110,6 +1110,16 @@ export type FeedPost = {
   createdAt: string;
 };
 
+/** A change Nova made on the deal, as its audit trail records it. */
+export type NovaFeedEvent = {
+  id: string;
+  /** The person Nova acted for. */
+  actor: string;
+  text: string;
+  failed: boolean;
+  createdAt: string;
+};
+
 /**
  * One stream, like roofing's notes.
  *
@@ -1128,11 +1138,19 @@ export function SolarActivityFeed({
   leadId,
   posts,
   canPost,
+  novaEvents = [],
 }: {
   leadId: string;
   posts: FeedPost[];
   canPost: boolean;
+  /** Changes Nova made on this deal, from its audit trail. Shown in the same stream. */
+  novaEvents?: NovaFeedEvent[];
 }) {
+  const stream = [
+    ...posts.map((p) => ({ kind: "post" as const, at: p.createdAt, post: p })),
+    ...novaEvents.map((e) => ({ kind: "nova" as const, at: e.createdAt, event: e })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+
   const router = useRouter();
   const [body, setBody] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -1167,21 +1185,40 @@ export function SolarActivityFeed({
         </div>
       )}
 
-      {posts.length === 0 ? (
+      {stream.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing here yet.</p>
       ) : (
         <ul className="space-y-3">
-          {posts.map((p) => (
-            <li key={p.id} className="rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-medium">{p.author}</span>
-                <span className="text-muted-foreground">
-                  {new Date(p.createdAt).toLocaleString()}
-                </span>
-              </div>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm">{p.body}</p>
-            </li>
-          ))}
+          {stream.map((item) =>
+            item.kind === "post" ? (
+              <li key={item.post.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-medium">{item.post.author}</span>
+                  <span className="text-muted-foreground">
+                    {new Date(item.post.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <p className="mt-1.5 whitespace-pre-wrap text-sm">{item.post.body}</p>
+              </li>
+            ) : (
+              <li
+                key={`nova-${item.event.id}`}
+                className="rounded-lg border border-dashed border-border p-3"
+                data-testid="nova-activity-item"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Nova</span>
+                  <span className="text-muted-foreground">{`for ${item.event.actor}`}</span>
+                  <span className="text-muted-foreground">
+                    {new Date(item.event.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <p className={cn("mt-1.5 whitespace-pre-wrap text-sm", item.event.failed && "text-destructive")}>
+                  {item.event.text}
+                </p>
+              </li>
+            )
+          )}
         </ul>
       )}
     </div>

@@ -78,6 +78,9 @@ export const SCOPED_MODELS = [
   "SolarFinance",
   "SolarMilestone",
   "CreditApplication",
+  // Nova's proposed writes. Scoped so a pending Solar action can only ever be
+  // confirmed from the Solar workspace.
+  "NovaPendingAction",
 ] as const;
 
 /**

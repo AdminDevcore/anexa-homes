@@ -5380,3 +5380,32 @@ model NovaAuditEvent {
   @@index([companyId, actorId, createdAt])
   @@map("nova_audit_events")
 }
+
+enum NovaPendingStatus {
+  pending
+  confirmed
+  cancelled
+  expired
+}
+
+/// A write Nova has proposed and is waiting on the user to confirm. Single use:
+/// confirming claims the row atomically, so a double click or a replayed request
+/// cannot run the write twice. What actually happened is in nova_audit_events.
+model NovaPendingAction {
+  id             String            @id @default(uuid())
+  companyId      String
+  vertical       Vertical
+  actorId        String
+  conversationId String
+  tool           String
+  args           Json              @default("{}")
+  summary        String
+  leadId         String?
+  status         NovaPendingStatus @default(pending)
+  expiresAt      DateTime
+  resolvedAt     DateTime?
+  createdAt      DateTime          @default(now())
+
+  @@index([companyId, actorId, status])
+  @@map("nova_pending_actions")
+}

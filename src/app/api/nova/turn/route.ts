@@ -1,12 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionUser } from "@/server/auth/session";
-import { getActiveVertical } from "@/server/auth/vertical";
 import { runInVertical } from "@/server/vertical/context";
+import { classifyConfirmation } from "@/server/modules/nova/confirmation";
 import { buildNovaCtx } from "@/server/modules/nova/context";
-import { createRateLimiter, novaAccess, novaEnabled } from "@/server/modules/nova/gate";
 import { anthropicModel, runTurn } from "@/server/modules/nova/loop";
+import { cancelPendingAction, confirmPendingAction } from "@/server/modules/nova/pending";
+import { authorizeNovaRequest } from "@/server/modules/nova/request";
 import { runNovaTool } from "@/server/modules/nova/tools/run";
 
 // Nova: one spoken (or typed) request in, one answer out. The API key stays on
@@ -14,8 +14,6 @@ import { runNovaTool } from "@/server/modules/nova/tools/run";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-const limiter = createRateLimiter({ limit: 30, windowMs: 60_000 });
 
 const bodySchema = z.object({
   text: z.string().trim().min(1).max(2000),
@@ -25,42 +23,43 @@ const bodySchema = z.object({
     .default([]),
   pathname: z.string().max(500).nullable().default(null),
   conversationId: z.string().uuid().nullable().default(null),
+  /** The write Nova last read out, if the user is answering it. */
+  pendingActionId: z.string().uuid().nullable().default(null),
 });
 
 export async function POST(req: Request) {
-  const user = await getSessionUser();
-  const access = novaAccess({
-    enabled: novaEnabled(),
-    user,
-    activeVertical: user ? await getActiveVertical(user) : null,
-    hasModelKey: Boolean(process.env.ANTHROPIC_API_KEY),
-  });
-  if (!access.ok || !user) {
-    const denied = access.ok ? { status: 401, message: "Sign in to use Nova." } : access;
-    return NextResponse.json({ error: denied.message }, { status: denied.status });
-  }
-  if (!limiter.allow(user.userId, Date.now())) {
-    return NextResponse.json({ error: "Too many requests. Wait a moment and try again." }, { status: 429 });
-  }
+  const auth = await authorizeNovaRequest();
+  if (!auth.ok) return auth.response;
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "That request wasn't understood." }, { status: 400 });
   }
-  const { text, history, pathname, conversationId } = parsed.data;
+  const { text, history, pathname, conversationId, pendingActionId } = parsed.data;
 
   // The gate has already established the active workspace is Solar, so the
   // request's own resolution and this explicit one agree; the explicit one is
   // what holds if a caller ever reaches this code without a request scope.
   return runInVertical("solar", async () => {
-    const ctx = await buildNovaCtx(user, { pathname, conversationId });
+    const ctx = await buildNovaCtx(auth.user, { pathname, conversationId });
+    const reply = (out: object) => NextResponse.json({ conversationId: ctx.conversationId, ...out });
     try {
+      // Answering a proposed write: only a plain yes confirms it. A no cancels
+      // it; anything else cancels it too and is handled as a new request — so
+      // "yes, but make it three" books nothing until the new time is read back.
+      if (pendingActionId) {
+        const answer = classifyConfirmation(text);
+        if (answer === "yes") return reply(await confirmPendingAction(ctx, pendingActionId));
+        const cancelled = await cancelPendingAction(ctx, pendingActionId);
+        if (answer === "no") return reply(cancelled);
+      }
+
       const outcome = await runTurn(
         ctx,
         { text, history },
         { model: anthropicModel(new Anthropic({ timeout: 50_000, maxRetries: 1 })), runTool: runNovaTool }
       );
-      return NextResponse.json({ conversationId: ctx.conversationId, ...outcome });
+      return reply(outcome);
     } catch (e) {
       const modelDown = e instanceof Anthropic.APIError;
       console.error(modelDown ? "[nova] model call failed" : "[nova] turn failed", e);

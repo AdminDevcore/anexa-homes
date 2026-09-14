@@ -87,6 +87,7 @@ import { SolarProposalStrip } from "@/components/portal/solar/proposal-strip";
 import { readSolarReadiness } from "@/server/modules/solar/readiness";
 import { estimatedSolarCommission } from "@/server/modules/payroll/solar-engine";
 import { approverNames } from "@/server/modules/solar/proposal-approval";
+import { getNovaActivity } from "@/server/modules/nova/activity";
 import {
   readLenderAttempts,
   versionLenderBadge,
@@ -896,7 +897,7 @@ export default async function LeadDetailPage({
   // One row: the rep's commission, which pays in full on M1 funding. The table
   // still holds whatever four-slot schedules were written before that changed,
   // and the deal simply stops asking about them.
-  const [solarCommission, solarFeed] = isSolarDeal
+  const [solarCommission, solarFeed, novaActivity] = isSolarDeal
     ? await Promise.all([
         prisma.solarMilestone.findFirst({
           where: { companyId: user.companyId, leadId: lead.id, payee: "rep", sequence: 1 },
@@ -907,8 +908,10 @@ export default async function LeadDetailPage({
           take: 50,
           include: { author: { select: { firstName: true, lastName: true } } },
         }),
+        // What Nova changed on this deal, straight from its audit trail.
+        getNovaActivity(user.companyId, lead.id),
       ])
-    : [null, []];
+    : [null, [], []];
 
   /**
    * What the pay engine says this deal is worth to its rep, beside the figure
@@ -1798,6 +1801,7 @@ export default async function LeadDetailPage({
                     author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
                     createdAt: f.createdAt.toISOString(),
                   }))}
+                  novaEvents={novaActivity}
                 />
               </div>
             </DealSlides>
