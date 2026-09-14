@@ -41,9 +41,9 @@ import {
  *
  * The ladder on the right runs from the base to what the household signs:
  * base, plus adders, plus the battery, equals GROSS — what Anexa keeps — and
- * then the lender's cut and the customer's price, the two rungs that only
- * exist where somebody else is taking a share. The footer names the rule that
- * produced the last one.
+ * then the lender's cut and the customer's price, the two rungs that exist
+ * wherever the deal is quoted on a lender's programme. The footer names the
+ * rule that produced the last one.
  *
  * THE HEADLINE IS THE GROSS, NOT THE BASE — 2026-09-08.
  *
@@ -227,13 +227,7 @@ export function SystemPriceCard({
   // differs is which side of the partner's ceiling it is paid out of, not
   // whether it is paid.
   const allAdderCents = adderTotalCents + onTopAdderTotalCents;
-  // The battery is kept whole here for the same reason a roof financed on top
-  // is: it is money the company keeps, and what differs is only which side of
-  // the partner's ceiling it is paid out of.
-  const grossCents =
-    baseTotalCents == null ? null : baseTotalCents + allAdderCents + batteryPriceCents;
   const adderPpw = watts > 0 ? allAdderCents / watts : 0;
-  const grossPpw = grossCents != null && watts > 0 ? grossCents / watts : null;
 
   /**
    * What the headline total is FOR, named by what is actually in it.
@@ -262,9 +256,13 @@ export function SystemPriceCard({
    * as well as of the array. Adding them on at face value here was quoting a
    * customer price the company could not actually net its own catalogue price
    * out of.
+   *
+   * A 0% programme has one too: the gross, with nothing taken out of it. A
+   * ladder that stops short on a 0% rate sheet hides the one figure that would
+   * tell a rep the fee box was left at nought.
    */
   const uncappedCustomerPpw =
-    basePpwCents != null && quotedFeePct != null && quotedFeePct > 0
+    basePpwCents != null && quotedFeePct != null && quotedFeePct >= 0
       ? grossPpwFromNet(basePpwCents, quotedFeePct)
       : null;
   /**
@@ -318,34 +316,53 @@ export function SystemPriceCard({
   const customerFinalPpw = customerPriced?.finalPpwCents ?? null;
 
   /**
+   * THE BASE ON THE LADDER, and so the gross — what the company actually keeps.
+   *
+   * The base a rep typed, until a partner rule moves the price. Under a ceiling
+   * that bites, and under a flat rate, the contract is pinned and the sticker is
+   * solved backwards out of it, so the base anybody is getting is what survives
+   * that solve: Amos at $5.50/W and 65% leaves $1.93 a watt however
+   * confidently $3.00 was typed. The ladder prints THAT base, so the gross above
+   * the fee is the gross the fee is really taken from. The box a rep types in
+   * still holds what they typed; the rung says what the rule made of it.
+   */
+  const heldBaseCents =
+    customerCap?.capped && customerPriced ? customerPriced.basePriceCents : null;
+  const ladderBaseCents = heldBaseCents ?? baseTotalCents;
+  const ladderBasePpw =
+    heldBaseCents != null ? (watts > 0 ? heldBaseCents / watts : null) : basePpwCents;
+  const heldNote =
+    heldBaseCents != null && heldBaseCents !== baseTotalCents && quotedMaxFinalPpwCents != null
+      ? `after the $${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W ${
+          quotedFinalPpwMode === "flat" ? "flat rate" : "cap"
+        }`
+      : null;
+  // The battery is kept whole here for the same reason a roof financed on top
+  // is: it is money the company keeps, and what differs is only which side of
+  // the partner's ceiling it is paid out of.
+  const grossCents =
+    ladderBaseCents == null ? null : ladderBaseCents + allAdderCents + batteryPriceCents;
+  const grossPpw = grossCents != null && watts > 0 ? grossCents / watts : null;
+
+  /**
    * THE LENDER'S CUT, TAKEN AS THE DIFFERENCE, not recomputed as a percentage.
    *
    * The ladder is read as arithmetic — a rep runs a finger down the column and
    * a homeowner across the table adds it up — so gross plus fee has to equal
-   * final EXACTLY, on the two figures actually printed. `dealerFeeCents` off
-   * the breakdown is the fee on the SOLVED sticker, which is a different number
-   * from the gross this card prints the moment a partner rule has moved the
-   * price: near enough to look right, far enough for the column not to add up,
-   * which is the one thing a price table may never do.
+   * final EXACTLY, on the two figures actually printed.
    *
-   * WITHHELD WHERE A PARTNER RULE BOUND THE PRICE — `customerCap.capped`.
+   * SHOWN UNDER A PARTNER RULE TOO — 2026-09-14.
    *
-   * Under a ceiling, and under a flat rate always, the customer's price is not
-   * this company's gross with a percentage on it: the partner pinned the
-   * contract and the sticker was solved backwards out of it, so the gap between
-   * the gross above and the price below is the fee PLUS however far the rule
-   * moved the base a rep typed. Amos at $5.50/W leaves $1.92 a watt whatever
-   * was typed, so on a base of $2.87 the difference is a $27,670 "fee" against
-   * a real one of $42,874. Neither figure is wrong on its own and the
-   * subtraction between them is meaningless, so the row stands down and the
-   * footer names the rule instead. Also null on cash and on a fee-free
-   * programme, which have no cut to show.
+   * It used to stand down whenever a rule bound the price, because the gross
+   * above it was built from the TYPED base: the gap to the customer's price was
+   * the fee PLUS however far the rule had moved that base — a $27,670 "fee"
+   * against a real one of $42,874. With the held base on the ladder the gap is
+   * the fee and nothing else, the same `dealerFeeCents` the breakdown works
+   * out, so the row stays. On a 0% programme it prints $0 rather than
+   * vanishing. Null on cash, and wherever there is no customer price yet.
    */
   const lenderFeeCents =
-    grossCents == null ||
-    customerContract == null ||
-    customerCap?.capped ||
-    customerContract <= grossCents
+    grossCents == null || customerContract == null || customerContract < grossCents
       ? null
       : customerContract - grossCents;
   const lenderFeePpw = lenderFeeCents != null && watts > 0 ? lenderFeeCents / watts : null;
@@ -353,9 +370,8 @@ export function SystemPriceCard({
   /**
    * What the last rung says about itself: the programme it is quoted on, or —
    * where the partner's own rule set the price rather than the base above did —
-   * that rule, because that is the answer to the question the row provokes.
-   * "Final price $65,960" under "Gross $38,290" with no fee between them is a
-   * $27,670 hole a rep will otherwise fill in with a guess.
+   * that rule, because that is the answer to the question the row provokes: why
+   * the base on the ladder is not the base in the box.
    */
   const finalNote =
     customerCap?.capped && quotedMaxFinalPpwCents != null
@@ -624,7 +640,12 @@ export function SystemPriceCard({
               </tr>
             </thead>
             <tbody>
-              <Rung label="Base" ppw={basePpwCents} total={baseTotalCents} />
+              <Rung
+                label="Base"
+                note={heldNote ?? undefined}
+                ppw={ladderBasePpw}
+                total={ladderBaseCents}
+              />
               <Rung label="Adders" ppw={watts > 0 ? adderPpw : null} total={allAdderCents} muted />
               {/* Only where there is one. A "$0" battery rung on the four deals
                   in five that have no storage is a row a rep has to read to
@@ -646,15 +667,18 @@ export function SystemPriceCard({
                 ppwTestId="gross-ppw"
                 totalTestId="gross-total"
               />
-              {/* The two rungs below the gross exist only where somebody else
-                  is taking a cut. Cash pays the gross, so on cash the ladder
-                  ends where the money does. */}
+              {/* The two rungs below the gross exist wherever the deal is quoted
+                  on a programme — a 0% one included, where the fee reads $0 and
+                  the final price is the gross. Cash pays the gross, so on cash
+                  the ladder ends where the money does. */}
               {lenderFeeCents != null && (
                 <Rung
-                  label={quotedFeePct ? `Dealer fee · ${quotedFeePct}%` : "Dealer fee"}
+                  label={quotedFeePct != null ? `Dealer fee · ${quotedFeePct}%` : "Dealer fee"}
                   ppw={lenderFeePpw}
                   total={lenderFeeCents}
                   muted
+                  ppwTestId="fee-ppw"
+                  totalTestId="fee-total"
                 />
               )}
               {customerContract != null && (
