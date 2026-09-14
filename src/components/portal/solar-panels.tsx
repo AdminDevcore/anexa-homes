@@ -745,6 +745,11 @@ export type LenderOption = {
    * cut, cents. Null — nearly every lender — means no floor.
    */
   minBasePpwCents: number | null;
+  /**
+   * Whether this partner takes its dealer fee on a battery beside the array —
+   * see SolarLender.batteryInsideFee.
+   */
+  batteryInsideFee: boolean;
 };
 
 export type LenderProductOption = {
@@ -1042,6 +1047,7 @@ export function SolarFinancePanel({
                 label: lenderProductLabel(p),
                 maxFinalPpwCents: l.maxFinalPpwCents,
                 finalPpwMode: l.finalPpwMode,
+                batteryInsideFee: l.batteryInsideFee,
                 // Same reason as the ceiling above: the shelf prices a
                 // programme, and each column's closing credit is its own
                 // partner's to decide.
@@ -1214,6 +1220,7 @@ export function SolarFinancePanel({
       adderTotalCents,
       onTopAdderTotalCents,
       batteryPriceCents,
+      batteryInsideFee: quotedLender?.batteryInsideFee ?? false,
       maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
       finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
       ppwBasis: chosen?.ppwBasis,
@@ -1223,7 +1230,7 @@ export function SolarFinancePanel({
     adderTotalCents, onTopAdderTotalCents, batteryPriceCents,
     quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
     quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
-    chosen?.ppwBasis, chosen?.batteryPriceBasis,
+    chosen?.ppwBasis, chosen?.batteryPriceBasis, quotedLender?.batteryInsideFee,
   ]);
 
   /**
@@ -1280,7 +1287,7 @@ export function SolarFinancePanel({
     systemPriceCents: arrayPrice?.baseStickerCents ?? 0,
     // Storage counts: the household signs for it, and a per-watt promise that
     // steps around it is not a promise about the figure they land on.
-    batteryPriceCents: arrayPrice?.batteryPriceCents ?? 0,
+    batteryPriceCents: arrayPrice?.batteryStickerCents ?? 0,
     systemWatts: arrayPrice?.systemWatts ?? 0,
     // The live tick-boxes, so the figure moves the moment a rep unticks a
     // bonus this job does not earn.
@@ -1520,6 +1527,8 @@ export function SolarFinancePanel({
         quotedFinalPpwMode={quotedLender?.finalPpwMode ?? "cap"}
         // Which price that figure fixes is the chosen PROGRAMME's to say.
         quotedPpwBasis={chosen?.ppwBasis ?? "final"}
+        // …and whether that partner takes its dealer fee on the battery.
+        quotedBatteryInsideFee={quotedLender?.batteryInsideFee ?? false}
         // The floor is the partner's too, and read the same way. Cash has no
         // lender and therefore no floor — the company band is all that guards
         // it, which is what "no lender" has always meant here.

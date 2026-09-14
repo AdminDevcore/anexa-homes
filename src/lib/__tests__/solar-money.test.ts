@@ -1300,3 +1300,75 @@ describe("batteryChargeCents decides which price, times how many", () => {
     ).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A partner that takes its dealer fee on the battery — 2026-09-14
+// ---------------------------------------------------------------------------
+describe("a partner that takes its dealer fee on the battery", () => {
+  // The deal it was asked about: 12.76 kW on a 25% programme, a $2.00/W base
+  // stickered at $2.67/W, and two batteries at $36,000.
+  const DEAL = {
+    product: "loan" as const,
+    systemSizeKwDc: 12.76,
+    stickerPpwCents: 267,
+    dealerFeePct: 25,
+    adderTotalCents: 0,
+    batteryPriceCents: 7_200_000,
+  };
+
+  it("grosses the battery up, so the fee is a share of the WHOLE final price", () => {
+    const p = pricePurchase({ ...DEAL, batteryInsideFee: true });
+    expect(p.batteryStickerCents).toBe(9_600_000); // $72,000 ÷ 0.75
+    expect(p.contractPriceCents).toBe(3_406_920 + 9_600_000);
+    // 25% of the system's sticker, plus 25% of the battery's.
+    expect(p.dealerFeeCents).toBe(851_730 + 2_400_000);
+    expect(p.dealerFeeCents / p.contractPriceCents).toBeCloseTo(0.25, 6);
+  });
+
+  it("still leaves the company the battery's catalogue price", () => {
+    const p = pricePurchase({ ...DEAL, batteryInsideFee: true });
+    expect(p.batteryPriceCents).toBe(7_200_000);
+    expect(p.grossPriceCents - p.basePriceCents - p.adderTotalCents).toBe(7_200_000);
+  });
+
+  it("keeps both ladders adding up to the contract", () => {
+    for (const battery of [0, 1, 99, 4_000_000, 9_999_999]) {
+      const p = pricePurchase({
+        product: "loan", systemSizeKwDc: 11.3, stickerPpwCents: 550, dealerFeePct: 65,
+        adderTotalCents: 233_333, onTopAdderTotalCents: 700_000,
+        batteryPriceCents: battery, batteryInsideFee: true,
+      });
+      expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
+      expect(p.baseStickerCents + p.adderStickerCents + p.batteryStickerCents).toBe(
+        p.contractPriceCents
+      );
+    }
+  });
+
+  it("prices exactly as before with the switch off", () => {
+    const off = pricePurchase({ ...DEAL, batteryInsideFee: false });
+    const absent = pricePurchase(DEAL);
+    expect(off).toEqual(absent);
+    expect(absent.batteryStickerCents).toBe(absent.batteryPriceCents);
+    expect(absent.contractPriceCents).toBe(3_406_920 + 7_200_000);
+  });
+
+  it("changes nothing on cash, where there is no fee to take", () => {
+    const p = pricePurchase({ ...DEAL, product: "cash", dealerFeePct: 0, batteryInsideFee: true });
+    expect(p.batteryStickerCents).toBe(7_200_000);
+    expect(p.dealerFeeCents).toBe(0);
+  });
+
+  it("keeps the battery outside a flat partner's $/W, with the fee on it", () => {
+    const cap = capStickerToFinalPpw({
+      stickerPpwCents: 857, maxFinalPpwCents: 550, mode: "flat",
+      systemSizeKwDc: 10, dealerFeePct: 65, adderTotalCents: 0,
+    });
+    const p = pricePurchase({
+      product: "loan", systemSizeKwDc: 10, stickerPpwCents: cap.stickerPpwCents,
+      dealerFeePct: 65, adderTotalCents: 0, batteryPriceCents: 4_000_000, batteryInsideFee: true,
+    });
+    expect(p.baseStickerCents).toBe(5_500_000);
+    expect(p.contractPriceCents).toBe(5_500_000 + Math.round(4_000_000 / 0.35));
+  });
+});

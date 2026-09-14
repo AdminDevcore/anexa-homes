@@ -90,6 +90,11 @@ export type CatalogueProgramme = {
     signTodayMode?: SignTodayMode;
     signTodayFixedCents?: number | null;
     signTodayCapPpwCents?: number | null;
+    /**
+     * Whether this partner takes its dealer fee on a battery beside the array.
+     * Per column, for the same reason as everything else on the menu.
+     */
+    batteryInsideFee?: boolean;
   };
 };
 
@@ -319,6 +324,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
           maxFinalPpwCents: p.lender.maxFinalPpwCents,
           finalPpwMode: p.lender.finalPpwMode,
           ppwBasis: p.ppwBasis,
+          batteryInsideFee: p.lender.batteryInsideFee ?? false,
         },
         targetNetPpwCents: input.targetNetPpwCents,
       }
@@ -381,11 +387,14 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         dealerFeePct: row.dealerFeePct,
         adderTotalCents: row.adderTotalCents,
         onTopAdderTotalCents: row.onTopAdderTotalCents,
-        // At the same price on every programme. The battery does not get more
-        // expensive because the money is dearer — it rides on top of whatever
-        // the partner's paper says, at what the catalogue sells one for.
+        // At the same catalogue price on every programme. Whether the dealer
+        // fee is taken on it is THIS partner's switch, so it travels with the
+        // column rather than with the deal.
         ...(input.batteryPriceCents && input.batteryPriceCents > 0
-          ? { batteryPriceCents: input.batteryPriceCents }
+          ? {
+              batteryPriceCents: input.batteryPriceCents,
+              batteryInsideFee: p.lender.batteryInsideFee ?? false,
+            }
           : {}),
         ...(row.adderTotalCents + row.onTopAdderTotalCents > 0
           ? { adders: input.adders }

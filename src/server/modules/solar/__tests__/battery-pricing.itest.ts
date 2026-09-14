@@ -154,6 +154,10 @@ beforeAll(async () => {
       name: "Flat Rate Partner",
       maxFinalPpwCents: 550,
       finalPpwMode: "flat",
+      // These specs pin the battery riding ON TOP of the partner's price, so
+      // this partner does not take its fee on it. The inside-the-fee
+      // arithmetic is pinned in solar-money.test.ts.
+      batteryInsideFee: false,
     },
   });
   lenderId = lender.id;

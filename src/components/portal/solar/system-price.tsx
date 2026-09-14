@@ -85,6 +85,7 @@ export function SystemPriceCard({
   quotedMaxFinalPpwCents,
   quotedFinalPpwMode,
   quotedPpwBasis = "final",
+  quotedBatteryInsideFee = false,
   quotedMinBasePpwCents,
   quotedLabel,
   canEdit,
@@ -146,6 +147,13 @@ export function SystemPriceCard({
    * fee inside it, or the gross or base with the fee on top. See SolarPriceBasis.
    */
   quotedPpwBasis?: PriceBasis;
+  /**
+   * Whether that partner takes its dealer fee on the battery too. On, the
+   * battery is grossed up with the rest of the job and its share of the fee
+   * lands on the Dealer fee rung; off, it rides on top at its catalogue price.
+   * See `PurchaseInput.batteryInsideFee`.
+   */
+  quotedBatteryInsideFee?: boolean;
   /**
    * That publisher's floor under what the company keeps per watt, cents. Null
    * on cash and on any lender that sets none.
@@ -320,6 +328,7 @@ export function SystemPriceCard({
           adderTotalCents,
           onTopAdderTotalCents,
           batteryPriceCents,
+          batteryInsideFee: quotedBatteryInsideFee,
         })
       : null;
   const customerContract = customerPriced?.contractPriceCents ?? null;
@@ -759,8 +768,9 @@ export function SystemPriceCard({
               </>
             ) : (
               <>
-                takes a {quotedFeePct}% dealer fee on the whole job, adders included, so the
-                customer&rsquo;s final price is{" "}
+                {`takes a ${quotedFeePct}% dealer fee on the whole job, ${
+                  quotedBatteryInsideFee && batteryPriceCents > 0 ? "adders and battery" : "adders"
+                } included, so the customer’s final price is `}
               </>
             )}
             <span
@@ -786,10 +796,15 @@ export function SystemPriceCard({
                 which of the two the household signs, and why. */}
             {batteryPriceCents > 0 && (
               <>
-                It also includes ${Math.round(batteryPriceCents / 100).toLocaleString()} for the
-                {batteryLabel ? ` ${batteryLabel}` : " battery"}
-                {batteryQty > 1 ? ` × ${batteryQty}` : ""}, priced from the catalogue and added on
-                top of the rate.{" "}
+                {`It also includes $${Math.round(
+                  (customerPriced?.batteryStickerCents ?? batteryPriceCents) / 100
+                ).toLocaleString()} for the ${batteryLabel ?? "battery"}${
+                  batteryQty > 1 ? ` × ${batteryQty}` : ""
+                }${
+                  quotedBatteryInsideFee
+                    ? `: its $${Math.round(batteryPriceCents / 100).toLocaleString()} catalogue price, with the dealer fee taken on it like the rest of the job. `
+                    : ", priced from the catalogue and added on top of the rate. "
+                }`}
               </>
             )}
             Cash pays the gross.

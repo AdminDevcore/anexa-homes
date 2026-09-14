@@ -38,8 +38,9 @@ export type FinanceInput = {
   onTopAdderTotalCents?: number;
   /**
    * The storage on this job, at its catalogue price, already resolved by
-   * `batteryChargeCents`. Rides on top exactly as a roof does, so it is added
-   * to the contract below and kept out of the ceiling solve above it.
+   * `batteryChargeCents`. Kept out of the ceiling solve above and added to the
+   * contract below — at face, or grossed up by the fee where the quoted
+   * partner takes its fee on the battery (`LenderProductTerms.batteryInsideFee`).
    */
   batteryPriceCents?: number;
   rateMillsPerKwh?: number | null;
@@ -86,6 +87,11 @@ export type LenderProductTerms = {
   ppwBasis?: PriceBasis | null;
   /** The same, for the partner's figure per battery. */
   batteryPriceBasis?: PriceBasis | null;
+  /**
+   * Whether the publishing LENDER takes its dealer fee on a battery beside the
+   * array — `SolarLender.batteryInsideFee`. Off the lender, like the ceiling.
+   */
+  batteryInsideFee?: boolean | null;
 };
 
 export type FinanceRow = {
@@ -197,6 +203,7 @@ export function financeRowForProduct(
       adderTotalCents: f.adderTotalCents ?? 0,
       onTopAdderTotalCents: f.onTopAdderTotalCents ?? 0,
       batteryPriceCents: f.batteryPriceCents ?? 0,
+      batteryInsideFee: lp?.batteryInsideFee ?? false,
     });
     contractPriceCents = breakdown.contractPriceCents;
   }

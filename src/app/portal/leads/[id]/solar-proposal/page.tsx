@@ -129,6 +129,8 @@ export default async function SolarProposalBuilderPage({
           minBasePricePerBatteryCents: true,
           finalBatteryPriceMode: true,
           finalPpwMode: true,
+          // Whether this partner takes its dealer fee on the battery.
+          batteryInsideFee: true,
           // How this partner's closing credit is arrived at — see
           // `solar-sign-today`. Every column of the shelf resolves its own.
           signTodayMode: true,
@@ -469,6 +471,7 @@ export default async function SolarProposalBuilderPage({
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
+          batteryInsideFee: l.batteryInsideFee,
           signTodayMode: l.signTodayMode,
           signTodayFixedCents: l.signTodayFixedCents,
           signTodayCapPpwCents: l.signTodayCapPpwCents,

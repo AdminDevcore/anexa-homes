@@ -41,7 +41,14 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
         stickerPricePerBatteryCents: true,
         // Which price the partner's figure fixes is the quoted programme's to
         // say. No programme quoted reads as `final`, the rule as it always was.
-        lenderProduct: { select: { ppwBasis: true, batteryPriceBasis: true } },
+        lenderProduct: {
+          select: {
+            ppwBasis: true,
+            batteryPriceBasis: true,
+            // …and whether its lender takes the dealer fee on the battery.
+            lender: { select: { batteryInsideFee: true } },
+          },
+        },
       },
     }),
     db.solarDesign.findUnique({
@@ -137,6 +144,7 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
           maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
           finalPpwMode: design.lender?.finalPpwMode,
           ppwBasis: finance.lenderProduct?.ppwBasis,
+          batteryInsideFee: finance.lenderProduct?.lender.batteryInsideFee ?? false,
         }).breakdown
       : null;
 

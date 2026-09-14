@@ -68,6 +68,8 @@ export type LenderRow = {
    * every lender did before the column existed.
    */
   batteryRule: "optional" | "warn" | "required";
+  /** Whether this partner's dealer fee is taken on a battery beside the array. */
+  batteryInsideFee: boolean;
   /** Which figure this partner's paper is written at — see the Submission tab. */
   submissionAmountBasis: "contract_value" | "customer_obligation" | "after_credits";
   /** What this partner means by "estimated saving". */
@@ -347,6 +349,8 @@ export function draftFrom(lender: LenderRow) {
       { ppwBasis: "final" | "gross" | "base"; batteryPriceBasis: "final" | "gross" | "base" }
     >,
     batteryRule: lender.batteryRule,
+    /** A choice card, so a word rather than a boolean. Saved back as one. */
+    batteryInsideFee: (lender.batteryInsideFee ? "inside" : "on_top") as "inside" | "on_top",
     signTodayMode: lender.signTodayMode,
     signTodayFixed: batteryPriceToDollars(lender.signTodayFixedCents),
     signTodayCapPpw: ppwToDollars(lender.signTodayCapPpwCents),

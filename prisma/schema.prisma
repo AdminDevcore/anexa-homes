@@ -3769,6 +3769,15 @@ model SolarLender {
   /// before the column existed.
   batteryRule SolarLenderBatteryRule @default(warn)
 
+  /// Whether this partner's dealer fee is taken on a BATTERY beside an array, as
+  /// it is on the system and the ordinary adders. On -- the default -- the
+  /// battery grosses up by the programme's fee like everything before it on the
+  /// ladder, so the fee is a share of the whole final price. Off, it rides on
+  /// top at its catalogue price, which is how every lender priced before
+  /// 2026-09-14. A storage-only deal is unaffected: there the battery IS the
+  /// system and was always inside the fee.
+  batteryInsideFee Boolean @default(true)
+
   /// How the sign today credit is arrived at on this partner's deals -- see
   /// SolarSignTodayMode. `none` is the default, and leaves the per-deal box
   /// exactly as it was.

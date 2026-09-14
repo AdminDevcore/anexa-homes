@@ -458,6 +458,8 @@ export default async function LeadDetailPage({
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
             maxFinalPpwCents: true, finalPpwMode: true,
+            // Whether its dealer fee is taken on the battery beside the array.
+            batteryInsideFee: true,
             // Which price that figure fixes, per programme — the deal is
             // priced on the basis of the programme it was quoted on.
             products: { select: { id: true, ppwBasis: true } },
@@ -645,6 +647,13 @@ export default async function LeadDetailPage({
           finalPpwMode: designLenderRow?.finalPpwMode,
           ppwBasis: designLenderRow?.products.find((p) => p.id === solarFinance.lenderProductId)
             ?.ppwBasis,
+          // Only on a deal QUOTED on one of this partner's programmes, the way
+          // the builder reads it: no programme, no partner's fee on the battery.
+          batteryInsideFee: designLenderRow?.products.some(
+            (p) => p.id === solarFinance.lenderProductId
+          )
+            ? designLenderRow.batteryInsideFee
+            : false,
         })
       : null;
 
@@ -702,7 +711,7 @@ export default async function LeadDetailPage({
             // left holding, so a deal page that passed only the array would
             // print a closing credit the builder next door disagrees with.
             systemPriceCents: workingPrice.breakdown.baseStickerCents,
-            batteryPriceCents: workingPrice.breakdown.batteryPriceCents,
+            batteryPriceCents: workingPrice.breakdown.batteryStickerCents,
             systemWatts: workingPrice.breakdown.systemWatts,
             creditRates: solarSettings.creditRates,
             creditClaims: solarCreditClaims,

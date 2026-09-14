@@ -262,6 +262,18 @@ export type PurchaseInput = {
    * paying overage on it would pay a rep for the manufacturer's margin.
    */
   batteryPriceCents?: number;
+  /**
+   * WHETHER THE DEALER FEE IS TAKEN ON THAT BATTERY — the partner's switch,
+   * `SolarLender.batteryInsideFee`.
+   *
+   * On: the battery grosses up by the fee exactly as an ordinary adder does, so
+   * the fee is a percentage of the WHOLE final price and the company still
+   * keeps the catalogue figure. Off, or absent: it rides on top at face, as
+   * above. Absent reads as off so a caller with no partner — cash, a worked
+   * example — keeps its arithmetic; every caller that has one passes the
+   * partner's answer, and a CI guard checks that it does.
+   */
+  batteryInsideFee?: boolean;
   /** Our hard cost, for the margin basis. */
   equipmentCostCents?: number;
 };
@@ -287,6 +299,12 @@ export type PurchaseBreakdown = {
    * contract alike. Zero on every deal without one.
    */
   batteryPriceCents: number;
+  /**
+   * What the CUSTOMER pays for that battery: its catalogue price grossed up by
+   * the fee where the partner takes its fee on the battery, and the catalogue
+   * price itself where it does not. The battery's line on their breakdown.
+   */
+  batteryStickerCents: number;
 
   /** GROSS — base + adders + battery, still before the cut. What we keep. */
   grossPriceCents: number;
@@ -309,7 +327,7 @@ export type PurchaseBreakdown = {
    * What the customer pays for the extra work: the ordinary adders grossed up
    * by the fee, PLUS the on-top ones at their own price. "Additional work".
    *
-   * `baseStickerCents + adderStickerCents + batteryPriceCents === contractPriceCents`
+   * `baseStickerCents + adderStickerCents + batteryStickerCents === contractPriceCents`
    * always, which is the invariant the customer's own breakdown is printed
    * from. The battery is in that sum at its own price for the same reason an
    * on-top adder is: it is a line the household pays, and a breakdown missing
@@ -350,6 +368,8 @@ export type UnitPriceInput = {
   onTopAdderTotalCents?: number;
   /** See `PurchaseInput.batteryPriceCents`. */
   batteryPriceCents?: number;
+  /** See `PurchaseInput.batteryInsideFee`. */
+  batteryInsideFee?: boolean;
   equipmentCostCents?: number;
 };
 
@@ -360,6 +380,7 @@ export type UnitPriceBreakdown = {
   adderTotalCents: number;
   onTopAdderTotalCents: number;
   batteryPriceCents: number;
+  batteryStickerCents: number;
   grossPriceCents: number;
   grossPerUnitCents: number;
   dealerFeeCents: number;
@@ -393,11 +414,13 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   // AFTER that gross-up, at face: the partner advances them and keeps nothing
   // of them, so there is no cut for the customer's price to have to cover.
   const adderStickerCents = up(insideAdderCents) + onTopAdderTotalCents;
-  // The battery is added to BOTH sides at its own price — the customer pays the
-  // catalogue figure and the company keeps all of it — so the fee below, which
-  // is the difference between them, is untouched by it. That is the whole
-  // meaning of "on top".
-  const contractPriceCents = baseStickerCents + adderStickerCents + batteryPriceCents;
+  // The battery. The company keeps its catalogue price either way; what the
+  // customer pays for it is the partner's to say. Inside the fee — the default
+  // since 2026-09-14 — it grosses up exactly like an ordinary adder, so the fee
+  // is a percentage of the WHOLE final price, battery included. On top, the
+  // customer pays the catalogue figure and the fee below is untouched by it.
+  const batteryStickerCents = input.batteryInsideFee ? up(batteryPriceCents) : batteryPriceCents;
+  const contractPriceCents = baseStickerCents + adderStickerCents + batteryStickerCents;
   const grossPriceCents = basePriceCents + adderTotalCents + batteryPriceCents;
 
   // Subtracted rather than recomputed as `contract × f`: gross + fee has to
@@ -416,6 +439,7 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
     adderTotalCents,
     onTopAdderTotalCents,
     batteryPriceCents,
+    batteryStickerCents,
     grossPriceCents,
     grossPerUnitCents: per(grossPriceCents),
     dealerFeeCents,
@@ -463,8 +487,9 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
  *
  * A BATTERY IS PRICED THE SAME WAY, and for a plainer reason: a rate per watt
  * is a price for an array, and no arithmetic over installed watts can charge
- * for a Powerwall. It rides on top at its catalogue price on every deal that is
- * not storage-only — see `batteryPriceCents`.
+ * for a Powerwall. It is charged on every deal that is not storage-only — see
+ * `batteryPriceCents` — on top at its catalogue price, or grossed up by the fee
+ * like an adder where the partner takes its fee on it (`batteryInsideFee`).
  *
  * Cash has no lender and therefore no fee; passing one is rejected rather than
  * silently applied, because a cash deal quoted with a dealer fee is simply
@@ -483,6 +508,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     adderTotalCents: input.adderTotalCents,
     onTopAdderTotalCents: input.onTopAdderTotalCents,
     batteryPriceCents: input.batteryPriceCents,
+    batteryInsideFee: input.batteryInsideFee,
     equipmentCostCents: input.equipmentCostCents,
   });
   return {
@@ -492,6 +518,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
     batteryPriceCents: u.batteryPriceCents,
+    batteryStickerCents: u.batteryStickerCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: u.grossPerUnitCents,
     dealerFeeCents: u.dealerFeeCents,
@@ -1078,6 +1105,7 @@ export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
     // battery is the SYSTEM, counted in `basePriceCents`, and charging for it
     // again on top would bill the household twice for one Powerwall.
     batteryPriceCents: u.batteryPriceCents,
+    batteryStickerCents: u.batteryStickerCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: 0,
     dealerFeeCents: u.dealerFeeCents,

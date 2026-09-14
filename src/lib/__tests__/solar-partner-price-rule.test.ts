@@ -214,3 +214,51 @@ describe("a deal is never priced without its partner's rule", () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * The FOURTH guard: a battery is never priced without its partner's fee switch.
+ *
+ * `batteryInsideFee` is optional and reads as off, so a caller that prices a
+ * battery and forgets the switch still compiles — and quietly quotes the
+ * battery on top, at its catalogue price, on a partner that takes its fee on
+ * it. One screen then shows a final price $24,000 under the next.
+ *
+ * So a file that prices a deal AND handles the battery's price must mention the
+ * switch, or say in ALLOWED_BATTERY why it does not.
+ */
+const PRICES_ANY = /\b(pricePurchase|priceStoredPurchase|priceUnits)\s*\(/;
+const HANDLES_BATTERY = /\bbatteryPriceCents\b/;
+const READS_SWITCH = /\bbatteryInsideFee\b/;
+
+const ALLOWED_BATTERY: Record<string, string> = {
+  "src/lib/solar-money.ts": "declares the switch and the arithmetic",
+};
+
+describe("no battery is priced without its partner's fee switch", () => {
+  it("every file pricing a deal with a battery on it also passes batteryInsideFee", () => {
+    const offenders: string[] = [];
+
+    for (const dir of SCAN_DIRS) {
+      for (const file of walk(join(REPO_ROOT, dir))) {
+        const rel = relative(REPO_ROOT, file).split(sep).join("/");
+        const code = readFileSync(file, "utf8")
+          .split("\n")
+          .filter((line) => !COMMENT.test(line));
+
+        if (!code.some((line) => PRICES_ANY.test(line))) continue;
+        if (!code.some((line) => HANDLES_BATTERY.test(line))) continue;
+        if (rel in ALLOWED_BATTERY) continue;
+        if (code.some((line) => READS_SWITCH.test(line))) continue;
+
+        offenders.push(rel);
+      }
+    }
+
+    expect(
+      offenders,
+      `These files price a deal carrying a battery without the partner's fee switch, ` +
+        `so a partner that takes its fee on the battery would be quoted with it on top. ` +
+        `Pass batteryInsideFee from the quoted programme's lender.`
+    ).toEqual([]);
+  });
+});

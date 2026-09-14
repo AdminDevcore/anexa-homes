@@ -496,8 +496,8 @@ function PriceLadder({
           hint on the row. */}
       {ladder.batteryPriceCents > 0 && (
         <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-          The battery is billed at its catalogue price, on top of what the array itself is priced
-          per watt.
+          The battery is priced from the catalogue rather than per watt, so it does not move with the
+          rate above it.
         </p>
       )}
       {/* WHAT THE NET IS AND IS NOT. Two prices on one ladder invite exactly one
