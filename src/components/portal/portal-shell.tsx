@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { WorkspaceSwitcher } from "./workspace-switcher";
+import { NovaDock } from "./nova/nova-dock";
 import { rememberAppPath, SettingsSidebarNav, SETTINGS_ROOT } from "./settings-nav";
 import { VERTICAL_ACCENT, type ActiveVertical } from "@/lib/vertical";
 
@@ -145,6 +146,7 @@ export function PortalShell({
   vertical,
   availableVerticals,
   settingsVertical,
+  nova = null,
   children,
 }: {
   user: ShellUser;
@@ -159,6 +161,8 @@ export function PortalShell({
    * menu still has to know which sections belong to it.
    */
   settingsVertical: ActiveVertical;
+  /** Nova, the Solar assistant. Null wherever it is off — including every Roofing page. */
+  nova?: { voice: boolean } | null;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -295,6 +299,7 @@ export function PortalShell({
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user.roleLabel}
             </span>
+            {nova && <NovaDock voice={nova.voice} />}
             <NotificationBell />
             <UserMenu name={user.name} email={user.email} roleLabel={user.roleLabel} />
           </div>
