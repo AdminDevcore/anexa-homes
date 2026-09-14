@@ -86,23 +86,38 @@ async function login(page: Page, email: string) {
 /**
  * Run a measurement, tolerating a navigation that lands mid-evaluate.
  *
- * Some portal routes settle with a late client-side redirect, and an
- * `evaluate` caught by one dies with "Execution context was destroyed". That
- * is the page still moving, not a layout defect, so the measurement is simply
- * taken again once it has stopped.
+ * Some portal routes settle with a late client-side redirect, and a measurement
+ * caught by one fails in either of two ways depending on how far the swap had
+ * got: the execution context is destroyed under it, or the context survives but
+ * `document.documentElement` is briefly null and the read dies on a property of
+ * it. Both mean the same thing — the page was still moving — so both are
+ * retried once the load state says it has stopped.
+ *
+ * The null case is reported by the measurement returning `null` rather than by
+ * letting a TypeError escape, because a TypeError from inside an `evaluate` is
+ * indistinguishable from a genuine bug in the measuring code.
  */
-async function measure<T>(page: Page, fn: () => Promise<T>): Promise<T> {
+async function measure<T>(page: Page, fn: () => Promise<T | null>): Promise<T> {
+  const settle = async () => {
+    await page.waitForLoadState("domcontentloaded");
+    const again = await fn();
+    if (again === null) throw new Error("No document to measure, twice — the page never settled.");
+    return again;
+  };
+
+  let first: T | null;
   try {
-    return await fn();
+    first = await fn();
   } catch (err) {
     if (!String(err).includes("Execution context was destroyed")) throw err;
-    await page.waitForLoadState("domcontentloaded");
-    return fn();
+    return settle();
   }
+  return first === null ? settle() : first;
 }
 
 async function unreachableOverflow(page: Page) {
   return page.evaluate(() => {
+    if (!document.documentElement || !document.body) return null;
     const limit = document.documentElement.clientWidth + 2;
     const scrollable = (el: Element | null): boolean => {
       while (el && el !== document.body && el !== document.documentElement) {
@@ -160,6 +175,8 @@ async function visit(page: Page, path: string) {
 async function documentScrollsSideways(page: Page) {
   return page.evaluate(() => {
     const de = document.documentElement;
+    // Mid-navigation there is no document to measure. Say so; `measure` retries.
+    if (!de) return null;
     return { scrollW: de.scrollWidth, clientW: de.clientWidth, over: de.scrollWidth > de.clientWidth + 2 };
   });
 }
