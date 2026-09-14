@@ -4,7 +4,8 @@ import { z } from "zod";
 import { runInVertical } from "@/server/vertical/context";
 import { classifyConfirmation } from "@/server/modules/nova/confirmation";
 import { buildNovaCtx } from "@/server/modules/nova/context";
-import { anthropicModel, runTurn } from "@/server/modules/nova/loop";
+import { runTurn } from "@/server/modules/nova/loop";
+import { novaModel } from "@/server/modules/nova/model";
 import { cancelPendingAction, confirmPendingAction } from "@/server/modules/nova/pending";
 import { authorizeNovaRequest } from "@/server/modules/nova/request";
 import { runNovaTool } from "@/server/modules/nova/tools/run";
@@ -105,7 +106,7 @@ export async function POST(req: Request) {
       const outcome = await runTurn(
         ctx,
         { text, history },
-        { model: anthropicModel(new Anthropic({ timeout: 50_000, maxRetries: 1 })), runTool: runNovaTool }
+        { model: novaModel(), runTool: runNovaTool }
       );
       return reply(outcome);
     } catch (e) {
