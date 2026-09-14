@@ -724,10 +724,23 @@ model SolarProvider {
   /// Its name, where the programme is branded separately from the provider —
   /// a customer signs up to "Renew Home", not to their retailer.
   vppProgramme    String?
-  /// One-off enrolment money, cents.
+  /// One-off enrolment money, cents. PER BATTERY — see `vppMaxBatteries`.
   vppUpfrontCents Int?
-  /// Recurring money, cents a year.
+  /// Recurring money, cents a year. PER BATTERY — see `vppMaxBatteries`.
   vppAnnualCents  Int?
+  /// The most batteries this programme will pay for on one house.
+  ///
+  /// The two figures above are rates per battery and were multiplied by the
+  /// design's raw count with no ceiling at all, so a ten-battery design quoted
+  /// $2,000 a year against a programme that pays at most $1,200 — on a document
+  /// the customer signs, under a twenty-five-year projection built on it.
+  ///
+  /// Null means the standard six (`VPP_DEFAULT_MAX_BATTERIES`), which with the
+  /// $200 rate is the $1,200 ceiling the business runs. A column rather than a
+  /// constant because the RATE beside it is already the provider's own: a
+  /// programme paying something else has a different ceiling, and one hardcoded
+  /// number would contradict the other the first time a second provider signs.
+  vppMaxBatteries Int?
 
   // ── Who the programme is actually open to ────────────────────────────────
   //

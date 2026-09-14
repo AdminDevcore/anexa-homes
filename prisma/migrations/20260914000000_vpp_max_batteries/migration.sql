@@ -1,0 +1,12 @@
+-- The ceiling on a battery programme.
+--
+-- `vppAnnualCents` and `vppUpfrontCents` are rates PER BATTERY and were
+-- multiplied by the design's raw count with no maximum, so a ten-battery design
+-- quoted $2,000 a year from a programme that pays at most $1,200.
+--
+-- NULLABLE, and null means the standard six -- see VPP_DEFAULT_MAX_BATTERIES in
+-- src/lib/solar-provider-terms.ts. Left null rather than backfilled to 6 so the
+-- column distinguishes "this programme has stated its own ceiling" from "use
+-- the house rule", which is the same convention every other optional rule on
+-- this table follows.
+ALTER TABLE "solar_providers" ADD COLUMN "vppMaxBatteries" INTEGER;

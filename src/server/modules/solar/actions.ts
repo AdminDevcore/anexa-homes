@@ -528,6 +528,8 @@ const providerTermsSchema = z.object({
   vppProgramme: z.string().max(120).nullable(),
   vppUpfrontCents: z.number().int().min(0).max(100_000_00).nullable(),
   vppAnnualCents: z.number().int().min(0).max(100_000_00).nullable(),
+  /** The programme's ceiling. Null = the house rule, VPP_DEFAULT_MAX_BATTERIES. */
+  vppMaxBatteries: z.number().int().min(0).max(100).nullable(),
   /**
    * Who the programme is open to. Every list EMPTY MEANS NO RESTRICTION, which
    * is why they are plain arrays with no "restrict?" flag beside them: there is
@@ -613,6 +615,7 @@ export async function saveSolarProviderTermsAction(
       vppProgramme: d.vpp ? (d.vppProgramme?.trim() || null) : null,
       vppUpfrontCents: d.vpp ? d.vppUpfrontCents : null,
       vppAnnualCents: d.vpp ? d.vppAnnualCents : null,
+      vppMaxBatteries: d.vpp ? d.vppMaxBatteries : null,
       // The conditions follow their flag, exactly as the figures do. A battery
       // list left behind on a provider somebody has just said runs NO programme
       // is a condition on nothing, and it would come back the day the flag is

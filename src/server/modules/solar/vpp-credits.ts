@@ -2,7 +2,12 @@ import { prisma } from "@/server/db/client";
 import type { FinanceProduct } from "@prisma/client";
 import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
-import { vppEligibility, type VppDealFacts } from "@/lib/solar-provider-terms";
+import {
+  vppCreditCents,
+  vppEligibility,
+  vppPaidBatteryCount,
+  type VppDealFacts,
+} from "@/lib/solar-provider-terms";
 import type { VppCredit } from "@/lib/solar-proposal";
 
 /**
@@ -35,15 +40,12 @@ export async function resolveVppCredits(args: {
   financeProductId: string | null;
 }): Promise<VppCredit[]> {
   /**
-   * A battery chosen with no quantity typed is ONE battery.
-   *
-   * The same rule the snapshot's equipment card already uses — it prints
-   * "1 total" for exactly this row — and it has to be the same rule, or a deal
-   * would show one battery on its equipment card and earn for none. The
-   * quantity box is optional on the designer and most reps never open it.
+   * No battery on the design, no programme money. Everything about HOW MANY —
+   * the untyped-is-one rule, the ceiling, and what to do with a negative or a
+   * fraction — lives in `vppPaidBatteryCount`, once, so the count the money is
+   * worked out from and the count printed beside it cannot disagree.
    */
-  const qty = args.batteryId ? Math.max(1, args.batteryQty) : 0;
-  if (qty === 0 || !args.batteryId) return [];
+  if (!args.batteryId) return [];
 
   const names = [args.utilityProvider, args.electricProvider]
     .map((n) => n?.trim())
@@ -57,6 +59,7 @@ export async function resolveVppCredits(args: {
       buyback: true, buybackRateMills: true,
       touPeakRateMills: true, touOffPeakRateMills: true, touPeakWindow: true,
       vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
+      vppMaxBatteries: true,
       vppFinanceProducts: true,
       notes: true,
       vppEquipment: {
@@ -131,8 +134,24 @@ export async function resolveVppCredits(args: {
     const verdict = vppEligibility(terms, deal);
     if (verdict.state !== "eligible" && verdict.state !== "unrestricted") continue;
 
-    const annualCents = (p.vppAnnualCents ?? 0) * qty;
-    const upfrontCents = (p.vppUpfrontCents ?? 0) * qty;
+    /**
+     * PER PROGRAMME, because the ceiling is the programme's own. Two providers
+     * on one house can enrol a different number of the same batteries.
+     */
+    const paidBatteries = vppPaidBatteryCount({
+      batteryQty: args.batteryQty,
+      maxBatteries: p.vppMaxBatteries,
+    });
+    if (paidBatteries === 0) continue;
+
+    const annualCents = vppCreditCents({
+      perBatteryCents: p.vppAnnualCents,
+      paidBatteries,
+    });
+    const upfrontCents = vppCreditCents({
+      perBatteryCents: p.vppUpfrontCents,
+      paidBatteries,
+    });
     if (annualCents <= 0 && upfrontCents <= 0) continue;
 
     credits.push({
@@ -140,7 +159,11 @@ export async function resolveVppCredits(args: {
       provider: p.name,
       annualCents,
       upfrontCents,
-      batteryQty: qty,
+      // The count the money was ACTUALLY worked out from, not the design's.
+      // The customer's card divides the annual figure by this to print a
+      // per-battery rate, so a capped deal would otherwise advertise a rate
+      // nobody publishes.
+      batteryQty: paidBatteries,
     });
   }
 

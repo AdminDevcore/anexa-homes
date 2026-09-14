@@ -25,6 +25,7 @@ const blank: ProviderTerms = {
   vppProgramme: null,
   vppUpfrontCents: null,
   vppAnnualCents: null,
+  vppMaxBatteries: null,
   notes: null,
   vppFinanceProducts: ways(),
   vppBatteries: [],
