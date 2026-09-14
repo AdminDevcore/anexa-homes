@@ -7,6 +7,10 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
+import {
+  canCertifyFunding,
+  FUNDING_AUTHORITY_ERROR,
+} from "@/server/modules/payroll/funding-authority";
 import { sendEmail } from "@/server/modules/notifications/delivery";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
@@ -34,7 +38,7 @@ const commissionSchema = z.object({
 });
 
 /**
- * Set what the rep is owed on this deal, and whether it has been paid.
+ * Set what the rep is owed on this deal, and whether the lender has funded it.
  *
  * ONE FIGURE, NOT A SCHEDULE. This wrote four rows once — M1/M2 for the rep and
  * two financier draws — because a solar deal was assumed to pay its rep in
@@ -42,40 +46,130 @@ const commissionSchema = z.object({
  * time, so three of the four slots were a schedule nobody had a second entry
  * for, and every deal in production had all four sitting empty.
  *
- * The financier's own funding is not typed here either. When the lender pays is
- * already recorded by the pipeline stage the payroll gate reads (M1 Funding) —
- * see `server/modules/payroll/gate.ts` — and a hand-kept copy of it on the deal
- * could only ever disagree with the stage that actually releases the money.
- *
  * The row is still a `SolarMilestone` (payee `rep`, sequence 1): the storage
  * was always general enough, it was the interface that asked for too much. The
  * payee and sequence are decided here rather than passed in, so no caller can
  * write a slot the deal will not show.
+ *
+ * ── TWO AUTHORITIES, NOT ONE ────────────────────────────────────────────────
+ * The fields on this row are not all the same kind of fact, and until now they
+ * were all written under `Lead:update`, which every `sales_rep` holds on their
+ * own deals.
+ *
+ *   amount / trigger / expectedAt   a FORECAST. What the rep expects to earn
+ *                                   and when. Theirs to keep up to date, and
+ *                                   nothing downstream pays out of it.
+ *
+ *   paid                            a FINANCIAL EVENT. `paidAt` is one of the
+ *                                   two conditions `generateCommissionsAction`
+ *                                   reads to release commission, so a rep who
+ *                                   could set it could certify the funding of
+ *                                   their own deal. It now needs
+ *                                   `Commission:approve` — the funding desk.
+ *
+ * See `payroll/funding-authority.ts` for who that is and why it is not a new
+ * permission.
+ *
+ * ── AN OMITTED `paid` NO LONGER UN-FUNDS THE DEAL ───────────────────────────
+ * `paidAt: d.paid ? new Date() : null` cleared the funding stamp on every save
+ * that did not resend the flag — so a rep updating the expected amount silently
+ * reversed a funding confirmation the desk had already made, and the only trace
+ * was the commission quietly ceasing to generate. The column is now touched
+ * ONLY when a caller who may certify funding says so explicitly.
  */
 export async function upsertSolarCommissionAction(input: z.infer<typeof commissionSchema>) {
   const user = await requireUser();
-  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  /**
+   * EITHER authority opens the door, and each field is checked on its own below.
+   *
+   * `Lead:update` alone was the gate, and it excluded the very people this row
+   * most concerns: `accounting` — the funding desk — holds no Lead grant at
+   * all, so the role whose job it is to confirm M1 could not reach the action
+   * that records it. Requiring both would have locked them out; requiring
+   * `Lead:update` only would have kept the hole this fix closes.
+   */
+  const mayEditForecast = can(user, "update", "Lead");
+  const mayCertify = canCertifyFunding(user);
+  if (!mayEditForecast && !mayCertify) return fail("Not allowed.");
+
   const parsed = commissionSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid commission.");
   const d = parsed.data;
 
   const scope = listScope(user, "Lead") as Prisma.LeadWhereInput;
-  if (!(await assertLead(user.companyId, scope, d.leadId))) return fail("Deal not found.");
+  const lead = await assertLead(user.companyId, scope, d.leadId);
+  if (!lead) return fail("Deal not found.");
+
+  /**
+   * Is this call trying to move the funding stamp at all?
+   *
+   * Compared against what is already on the row rather than taken from the
+   * request, so a form that faithfully echoes the current state back — which is
+   * what the deal page does — is not treated as an attempt to change it. Only a
+   * real transition needs the authority.
+   */
+  const existing = await prisma.solarMilestone.findUnique({
+    where: { leadId_payee_sequence: { leadId: d.leadId, payee: "rep", sequence: 1 } },
+    select: { paidAt: true },
+  });
+  const fundedNow = existing?.paidAt != null;
+  const wantsFunded = d.paid === true;
+  const movesFunding = d.paid !== undefined && wantsFunded !== fundedNow;
+
+  if (movesFunding && !mayCertify) return fail(FUNDING_AUTHORITY_ERROR);
 
   const data = {
     label: "Commission",
-    amountCents: d.amountCents,
-    trigger: d.trigger ?? null,
-    expectedAt: d.expectedAt ? new Date(d.expectedAt) : null,
-    // Marking paid stamps the date; un-marking clears it, so the two never drift.
-    paidAt: d.paid ? new Date() : null,
+    // The forecast, and only from somebody who may edit the deal. The funding
+    // desk reaching in to confirm M1 leaves the rep's own figures untouched.
+    ...(mayEditForecast
+      ? {
+          amountCents: d.amountCents,
+          trigger: d.trigger ?? null,
+          expectedAt: d.expectedAt ? new Date(d.expectedAt) : null,
+        }
+      : {}),
+    // Only ever written by somebody who may certify funding, and only when they
+    // actually moved it. Everyone else's save leaves the stamp exactly as the
+    // desk left it.
+    ...(movesFunding ? { paidAt: wantsFunded ? new Date() : null } : {}),
   };
 
   await prisma.solarMilestone.upsert({
     where: { leadId_payee_sequence: { leadId: d.leadId, payee: "rep", sequence: 1 } },
-    create: { companyId: user.companyId, leadId: d.leadId, payee: "rep", sequence: 1, ...data },
+    create: {
+      companyId: user.companyId,
+      leadId: d.leadId,
+      payee: "rep",
+      sequence: 1,
+      ...data,
+      // A row created by somebody with no funding authority starts unfunded
+      // rather than inheriting the spread above, which omits the key entirely.
+      paidAt: movesFunding && wantsFunded ? new Date() : null,
+    },
     update: data,
   });
+
+  /**
+   * A funding confirmation is a financial event and leaves a trail.
+   *
+   * Named, timestamped and attributed on the deal's own activity log, because
+   * "who said this deal funded, and when" is the first question anybody asks
+   * about a commission that should not have been paid.
+   */
+  if (movesFunding) {
+    await prisma.activityLog.create({
+      data: {
+        companyId: user.companyId,
+        type: "payment",
+        message: wantsFunded
+          ? `${user.fullName} confirmed M1 funding received on this deal`
+          : `${user.fullName} withdrew the M1 funding confirmation on this deal`,
+        actorId: user.userId,
+        leadId: d.leadId,
+      },
+    });
+  }
 
   revalidatePath(`/portal/leads/${d.leadId}`);
   return ok();

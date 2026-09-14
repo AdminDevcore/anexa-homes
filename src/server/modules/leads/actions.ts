@@ -12,6 +12,7 @@ import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 import { runAutomations } from "@/server/modules/automations/engine";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { notifyProjectStatusChanged } from "@/server/modules/projects/status-events";
+import { fundingGateMoveError } from "@/server/modules/payroll/funding-authority";
 
 /** Ensures the lead exists AND is within the user's row-level scope. */
 async function assertLeadInScope(userCompanyId: string, scope: Prisma.LeadWhereInput, leadId: string) {
@@ -142,9 +143,21 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   // Validate stage belongs to this company.
   const stage = await prisma.pipelineStage.findFirst({
     where: { id: parsed.data.stageId, pipeline: { companyId: user.companyId } },
-    select: { id: true, name: true, position: true, defaultBlocker: true, stageType: true },
+    select: {
+      id: true,
+      key: true,
+      name: true,
+      position: true,
+      isLost: true,
+      defaultBlocker: true,
+      stageType: true,
+      pipelineId: true,
+    },
   });
   if (!stage) return { ok: false as const, error: "Invalid stage." };
+
+  const gateError = await fundingGateMoveError(user, parsed.data.leadId, stage);
+  if (gateError) return { ok: false as const, error: gateError };
 
   await prisma.lead.update({
     where: { id: parsed.data.leadId },

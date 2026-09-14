@@ -1635,6 +1635,7 @@ export default async function LeadDetailPage({
                 <SolarSystemMoneyPanel
                   leadId={lead.id}
                   canEdit={can(user, "update", "Lead")}
+                  canCertifyFunding={can(user, "approve", "Commission")}
                   money={solarMoney}
                   financing={financingTerms}
                   commission={
