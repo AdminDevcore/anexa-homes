@@ -1992,7 +1992,7 @@ export default async function LeadDetailPage({
                 only place on the deal that answers it. */}
             {isSolarDeal && solarProposals.length > 0 && (
               <section id="proposal" className="scroll-mt-24">
-                <Card title="Proposal" icon={Sun} tone="solar">
+                <Card title="Proposal" icon={Sun} tone="solar" foldKey="proposal">
                   <SolarProposalStrip
                     leadId={lead.id}
                     state={solarState}
@@ -2079,6 +2079,8 @@ export default async function LeadDetailPage({
             icon={FolderOpen}
             tone={isSolarDeal ? "solar" : "brand"}
             description="Signed paperwork, photos and every file on this job"
+            // Solar only: roofing's Documents & Files card renders as it did.
+            foldKey={isSolarDeal ? "documents" : undefined}
           >
             <DealFolders
               leadId={lead.id}
