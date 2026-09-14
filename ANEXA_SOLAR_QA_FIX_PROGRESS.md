@@ -113,7 +113,15 @@ Not to be recreated — repository history shows deliberate removal:
   Baseline 220 passed / 31 failed; this branch 227 passed / 29 failed. **27 failures are common to
   all three runs** (the project's own backlog); 7 churn between runs. Six of the churning ones are
   pre-existing flakes. The seventh was mine — `responsive-solar` desktop, a null
-  `document.documentElement` mid-navigation — fixed at cause in `0f6632a` and green 5/5 after.
+  `document.documentElement` mid-navigation — fixed at cause in `0f6632a` and `a49007f`, green 5/5
+  twice since. The first attempt was wrong in an instructive way: it retried after
+  `waitForLoadState("domcontentloaded")`, which resolves immediately when the PREVIOUS document
+  already reached that state, so it waited for nothing.
+- Runs 3 and 4 ran while another process took this machine's load average from 3.6 to 25; their
+  extra failures are 30s timeouts spread across specs this branch cannot touch. Not comparable,
+  and not used for any claim.
+- OUTSTANDING: a clean isolated run of `solar-financing-shelf`. Two attempts wedged in global setup
+  against the shared `e2e_test` schema. Its two failures are in the baseline's own set.
 - `solar-adders:180` was chased rather than dismissed, because it is exactly the code P1-6 touched:
   passes 3/3 in isolation, and `resolveAdderTotal`'s no-lines branch returns the stored figures
   `recomputeAdderTotal(force:true)` has already written, so the two cannot disagree.

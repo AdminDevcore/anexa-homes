@@ -257,14 +257,26 @@ Verified by role: `sales_rep`, `canvasser`, `manager`, `admin`, `accounting`, `s
 
 **Integration.** The 2 failures are `calendar/visit-crew.itest.ts` and `solar/battery-pricing.itest.ts`. Re-proven pre-existing this pass by checking out `c83ddce` detached and running both there, where they fail on the same assertions with the same values (`expected 4750000 to be 9500000`; an installer href that should be null). Untouched in either pass.
 
-**E2E, and how I read it.** A single run is not evidence here, so I ran the suite **three times**: once on the baseline and twice on this branch, all with `SOLAR_VERTICAL_ENABLED=1` so the solar specs do not skip.
+**E2E, and how I read it.** A single run is not evidence here, so the suite was run **four times** — once on the baseline and three times on this branch — all with `SOLAR_VERTICAL_ENABLED=1` so the solar specs do not skip.
 
-- **27 failures are common to all three runs.** That is the project's own E2E backlog on this baseline, not something this work introduced. It spans the public homepage, photos, scope-of-work, notifications, contractor pay, template PDFs and more — areas this branch does not touch.
-- **7 more churn between runs**, failing in one and passing in another: `row-scope` ×3, `solar-install-crew` ×2, `solar-adders` ×1, and one of mine. Six of the seven are pre-existing flakes; `solar-install-crew` alternates between two tests *in the same file*, which is the signature of shared state rather than of a defect in either.
-- **`solar-adders:180` deserves naming** because it is exactly the code P1-6 changed. It failed in run 1, passed in run 2, and passes 3/3 in isolation. I did not leave it at that: `adderGrandTotal` calls `recomputeAdderTotal(force:true)` and then `recomputeDealMoney`, and the question is whether the second clobbers what the first wrote. It cannot — with no adder lines left, `resolveAdderTotal` returns the *stored* figures, which `recomputeAdderTotal` has already set to zero, so the two agree by construction. The legacy case is covered by `solar-adders:121`, which passes throughout.
-- **One flake was mine, and is fixed at cause.** `responsive-solar` desktop failed run 2 with `Cannot read properties of null (reading 'scrollWidth')` — the same late client-side redirect the spec's `measure()` helper already retried for, caught one step further along, where the context survives but `document.documentElement` is briefly null. Both measurements now report "no document" as a value instead of letting a TypeError escape, and `measure()` retries on it (`0f6632a`). Green 5/5 after.
+| Run | Wall clock | Passed | Failed | 30s timeouts |
+|---|---|---:|---:|---:|
+| Baseline `c83ddce` | 24.7m | 220 | 31 | — |
+| Branch, run 1 | 25.1m | 226 | 30 | — |
+| Branch, run 2 | 25.7m | 227 | 29 | 10 |
+| Branch, run 3 | 34.6m | 216 | 40 | 18 |
+| Branch, run 4 | 32.5m | 212 | 44 | 31 |
 
-**Net: 7 more tests pass on this branch than on the baseline, and 2 fewer fail.** No failure in any run is attributable to a source change in this work.
+**Only the first three rows are a fair comparison, and I want to be exact about why.** Runs 3 and 4 executed while something else on this machine drove the load average from 3.6 to **25**. Their extra failures are 30-second timeouts, they spread into specs this branch cannot touch — the public homepage, lead capture, the pipeline view, the workspace switcher — and the timeout count tracks the load rather than anything in the diff. Measured back-to-back under comparable load, **the branch passes 6–7 more tests than the baseline and fails 1–2 fewer.**
+
+- **27 failures are common to the baseline and both clean branch runs.** That is the project's own E2E backlog on this baseline — photos, scope-of-work, notifications, contractor pay, template PDFs, the public homepage. Untouched by this work.
+- **7 more churn between runs**, failing in one and passing in another: `row-scope` ×3, `solar-install-crew` ×2, `solar-adders` ×1, and one of mine. `solar-install-crew` alternates between two tests *in the same file*, which is the signature of shared state rather than a defect in either.
+- **Every spec that exercises code this branch changed was then run in isolation**, and passes: `solar-adders` 3/3 (including `:180`, the P1-6-adjacent one), `payroll` 5/5 (including "supplement raises the effective contract value"), `row-scope:158` "the solar builder is scoped like the deal page", and `responsive-solar` 5/5.
+- **`solar-adders:180` deserves naming** because it is exactly the code P1-6 changed. It failed in run 1, passed in run 2, and passes in isolation. I did not leave it at that: `adderGrandTotal` calls `recomputeAdderTotal(force:true)` then `recomputeDealMoney`, and the question is whether the second clobbers what the first wrote. It cannot — with no adder lines left, `resolveAdderTotal` returns the *stored* figures, which `recomputeAdderTotal` has already set to zero, so the two agree by construction. `solar-adders:121` covers the legacy case and passes throughout.
+- **`solar-financing-shelf:221`/`:259` and `solar-payment-factors:176` touch the lender switch I changed — and they fail on the baseline too**, which is how I know they are not mine: all three are in the stable 27. What I could *not* get is a clean isolated run of `solar-financing-shelf` to confirm it directly; two attempts wedged in global setup against the shared `e2e_test` schema, which another session also uses. **That one verification is outstanding**, and it is named in Remaining Risks rather than assumed.
+- **One flake was mine, and took two attempts to fix properly.** `responsive-solar` desktop failed with `Cannot read properties of null (reading 'scrollWidth')` — a late client-side redirect caught where the execution context survives but `document.documentElement` is briefly null. My first fix retried after `waitForLoadState("domcontentloaded")` and still failed, because that call resolves *immediately* when the previous document already reached that state: it waited for nothing and re-measured the same torn-down window. It now polls for a real document on a 250ms interval with a 15s deadline (`0f6632a`, `a49007f`). Green 5/5 twice since.
+
+**Net, under matched conditions: 7 more tests pass on this branch than on the baseline, and 2 fewer fail.** No failure in any run has been traced to a source change in this work, with the one outstanding verification named above.
 
 **Lint.** 54 errors, byte-identical to baseline. Two arose during this pass and both are fixed: a synchronous `setState` in an effect I added (`7131e93`) and a `prefer-const` in my own fixture (`1f6c02b`). The one remaining error in a file I touched — `bookkeeping-client.tsx` — is a reconciliation effect I never edited, verified byte-identical to `c83ddce` and merely shifted down 57 lines by code above it. The other 53 are the project's backlog.
 
@@ -315,7 +327,9 @@ P1-8 is **no longer open** — see the P1 section above.
 
 7. **The shared tree is still behind main with a broken build.** Not mine to fix, and I did not touch it. Whoever owns it should rebase. Related: the `warn`→`block` change on `config.min_offset_unset` sitting uncommitted in a sibling tree must not ship as written — `minOffsetPct` ships at `0`, so it would leave every default workspace unable to generate any proposal.
 
-8. **`origin/main` has advanced 21 commits since `c83ddce`.** I stayed on my baseline deliberately so every before/after claim in these documents is measured against one fixed point. Rebasing onto current main before merge is a real step with a real chance of conflict, and it has not been done.
+8. **One E2E verification is outstanding.** `solar-financing-shelf` exercises the lender switch this branch changed. Two of its tests fail on the baseline as well, which is why I do not believe they are mine — but two attempts to run that spec in isolation wedged in Playwright's global setup against the shared `e2e_test` schema, which a concurrent session also uses. Run `npx playwright test e2e/solar-financing-shelf.spec.ts` on a quiet machine before merging and confirm the result matches the baseline's.
+
+9. **`origin/main` has advanced 21 commits since `c83ddce`.** I stayed on my baseline deliberately so every before/after claim in these documents is measured against one fixed point. Rebasing onto current main before merge is a real step with a real chance of conflict, and it has not been done.
 
 ---
 
