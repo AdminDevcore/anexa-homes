@@ -83,6 +83,24 @@ async function login(page: Page, email: string) {
  * table that does not, so asking the wide element about its own overflow would
  * report every one of them as broken.
  */
+/**
+ * Run a measurement, tolerating a navigation that lands mid-evaluate.
+ *
+ * Some portal routes settle with a late client-side redirect, and an
+ * `evaluate` caught by one dies with "Execution context was destroyed". That
+ * is the page still moving, not a layout defect, so the measurement is simply
+ * taken again once it has stopped.
+ */
+async function measure<T>(page: Page, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!String(err).includes("Execution context was destroyed")) throw err;
+    await page.waitForLoadState("domcontentloaded");
+    return fn();
+  }
+}
+
 async function unreachableOverflow(page: Page) {
   return page.evaluate(() => {
     const limit = document.documentElement.clientWidth + 2;
@@ -152,8 +170,6 @@ test.describe("solar screens are usable at every width", () => {
   // statement about how long any of this should take.
   test.describe.configure({ timeout: 120_000 });
 
-  test.skip(!FLAG_ON, "Solar workspace is behind SOLAR_VERTICAL_ENABLED.");
-
   /**
    * The pages the report named, plus the two that carry the widest content —
    * payroll (a money table) and the proposal builder (a five-step form).
@@ -171,6 +187,29 @@ test.describe("solar screens are usable at every width", () => {
     ["Commissions", "/portal/commissions"],
     ["Solar settings", "/portal/settings/solar"],
   ] as const;
+
+  /**
+   * Compile the routes before the first assertion depends on them.
+   *
+   * `webServer` is `next dev`, which builds each route on its first request —
+   * so whichever test runs first pays for every page in the list and can lose
+   * its login to that. Warming up here makes the suite's result about layout
+   * rather than about which test happened to go first.
+   */
+  test.beforeAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await page.goto("/login", { waitUntil: "domcontentloaded" });
+      for (const [, path] of STATIC_PAGES) {
+        await page.goto(path, { waitUntil: "domcontentloaded" }).catch(() => {});
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test.skip(!FLAG_ON, "Solar workspace is behind SOLAR_VERTICAL_ENABLED.");
+
 
   for (const vp of VIEWPORTS) {
     test(`${vp.name} — ${vp.width}px`, async ({ page }) => {
@@ -197,8 +236,8 @@ test.describe("solar screens are usable at every width", () => {
           continue;
         }
 
-        const doc = await documentScrollsSideways(page);
-        const stuck = await unreachableOverflow(page);
+        const doc = await measure(page, () => documentScrollsSideways(page));
+        const stuck = await measure(page, () => unreachableOverflow(page));
         if (doc.over && stuck.length > 0) {
           failures.push(`${label} @${vp.width}: document ${doc.scrollW}px > ${doc.clientW}px — ${stuck.join(" | ")}`);
         }
@@ -225,8 +264,8 @@ test.describe("solar screens are usable at every width", () => {
     for (const path of [href!, `${href}/solar-proposal`]) {
       await visit(page, path);
       await expect(page.locator("body")).not.toBeEmpty();
-      const doc = await documentScrollsSideways(page);
-      const stuck = await unreachableOverflow(page);
+      const doc = await measure(page, () => documentScrollsSideways(page));
+      const stuck = await measure(page, () => unreachableOverflow(page));
       expect(
         doc.over && stuck.length > 0,
         `${path} @390: ${doc.scrollW}px > ${doc.clientW}px — ${stuck.join(" | ")}`
