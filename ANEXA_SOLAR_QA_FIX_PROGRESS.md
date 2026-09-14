@@ -39,8 +39,10 @@ Every issue re-checked in the clean tree. **None had been fixed by another sessi
 | P1-5 | VPP rebate cap | **VERIFIED** — `141da8b` |
 | P1-7 | Signed PDFs filed at signing | **VERIFIED** — `ff46423` |
 | P1-4 | Adjustment-only payee gets no stub *(found en route)* | **VERIFIED** — `74365c9` |
-| P1-6 | Cached contract price drift | **PARTIALLY FIXED** — `db977e8`; see Remaining Risks |
-| P1-8 | Deal-page estimate vs payroll | **NOT FIXED** — out of scope, one-line fix documented |
+| P1-6 | Cached contract price drift | **VERIFIED** — `2cc3f92` |
+| P1-8 | Deal-page estimate vs payroll | **VERIFIED** — `f10dfe4` |
+| — | Signed lock: UI gating + super-admin reason workflow | **VERIFIED** — `e3687f2` |
+| — | Whole-journey lifecycle regression | **VERIFIED** — `c3a7716` |
 | — | `config.min_offset_unset` default | **VERIFIED** — `b8f3441`; not a bug on main |
 | — | §35 client-side errors | **VERIFIED** — clean |
 | — | §36 responsive UI | **VERIFIED** — clean at 4 widths, `33d569f` |
@@ -75,4 +77,35 @@ Not to be recreated — repository history shows deliberate removal:
 - §35 clean. §36 automated (`33d569f`) and green at 1440/1280/768/390, three consecutive runs.
 - Final: 2,165 unit / 600 integration (2 pre-existing failures) / 5 e2e. Typecheck clean.
   Lint identical to base — zero regression.
-- **11 commits, 46 files, 119 new tests. Nothing pushed, merged or deployed.**
+- **Phase 3, on the business decisions given.**
+- P1-6 FIXED (`2cc3f92`) — the derivation that priced a deal on save lived inline in
+  `saveSolarFinanceAction`, so every OTHER way of changing a deal (equipment picker, layout
+  designer, design save, live re-price, adder edit, lender switch, system-type switch) left the
+  cached columns behind. Extracted verbatim to `solar/deal-money.ts` and called from the
+  `recompute.ts` chokepoint. **Extracted, not reimplemented** — one derivation, not two.
+  9 integration tests, each deriving the expected figure independently rather than asserting a
+  number I chose.
+- P1-8 FIXED (`f10dfe4`) — the deal page and payroll carried separate copies of the pay-terms
+  precedence chain, and disagreed on the case that matters most: a signed deal with no frozen
+  terms. Payroll refused it; the deal page quoted the rep's current profile and showed a confident
+  figure payroll would never pay. Both now call `resolveDealPayTerms`. The estimate also gained
+  layer 2 of the chain (an existing commission line), which it had never read. 8 integration
+  tests, every one asserting the two answers are *the same answer*.
+- Signed-lock UI FIXED (`e3687f2`) — the server already refused protected writes on a signed
+  contract; the screen still showed editable controls that failed on save. The builder now goes
+  read-only behind a banner that says why, and a super admin gets a real door: `SolarContractUnlock`
+  records who reopened it, when, why, and until when, and every edit made under it cites the reason
+  on the deal's history beside the old and new value. Reason required, minimum 8 characters,
+  30-minute window. One migration. Suite grew 15 → 22 tests.
+- Lifecycle regression added (`c3a7716`) — one deal walked from proposal to ledger in order.
+  Pins the $56,000 contract through eleven steps, and pins that a rep is refused on both the stage
+  move and the milestone while accounting succeeds.
+- Lint cleanup (`1f6c02b`) — removed the seven imports the P1-6 extraction orphaned.
+- **17 commits, 60 files, 12 new test files. Nothing pushed, merged or deployed.**
+- Final sweep: **2,165 unit passing** (139 files), **626 integration passing** of 628 — the 2
+  failures are `calendar/visit-crew` and `solar/battery-pricing`, re-proven pre-existing by
+  re-running both on a detached checkout of the `c83ddce` baseline, where they fail on the same
+  assertions with the same values. Typecheck clean. Lint: the only error I introduced was a
+  `prefer-const` in my own fixture, now fixed; the one error in a file I touched
+  (`bookkeeping-client.tsx`) is byte-identical to baseline and belongs to an effect I never
+  edited.

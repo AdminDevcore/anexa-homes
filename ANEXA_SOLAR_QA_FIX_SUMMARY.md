@@ -9,7 +9,11 @@
 
 # Executive Summary
 
-All **3 P0** and all **5 P1** issues from `ANEXA_SOLAR_QA_REPORT.md` are fixed, with **119 new tests**. Two additional defects were found while fixing them and are fixed here too. One P1 is **partially** fixed and one P3 is deliberately **not** fixed; both are named below rather than buried.
+All **3 P0** and all **8 P1** issues from `ANEXA_SOLAR_QA_REPORT.md` are fixed. Two additional defects were found while fixing them and are fixed here too. **Nothing is left partially fixed.**
+
+The last pass closed 8 of 10 and named the two it left open. This pass closed both, on your business decisions: **P1-6** (cached price drift), **P1-8** (deal-page estimate vs payroll), and the signed-lock's missing **UI gating and required reason**.
+
+Both remaining items turned out to have the same root cause, and it is worth stating plainly because it shaped the fix: *a calculation existed in two places.* P1-6 was the deal's price derived inline inside one save action, so the seven other ways of changing a deal left the cache stale. P1-8 was the pay-terms precedence chain written out twice, once for the deal page and once for payroll, which had drifted apart on the case that matters most. In both, the fix was to **extract the existing implementation into one shared function** and call it from both sides — not to write a second implementation that agrees. You asked me not to create competing sources of truth; the way to honour that was to remove the ones already there.
 
 The work was done in an isolated worktree off `origin/main`. That mattered: five sibling Claude sessions were live in the shared tree, three actively writing, and that tree was nine commits behind main while carrying a half-finished refactor that left the app unable to compile. Building on it would have meant a stale base, three concurrent writers, and a broken build.
 
@@ -110,6 +114,36 @@ Quantities are normalised rather than trusted — NaN, null, Infinity and string
 
 A cron sweep every ten minutes. The on-open path stays as the fast case; the renderer still must not block a customer's signature, which was the right call and is preserved. Each row is re-read immediately before rendering so the sweep does not race an admin, and `hasCreditSwitch` decides how many copies are expected so a single-copy document is not re-rendered for ever.
 
+### P1-6 · One deal, one price — `2cc3f92`
+
+**The defect.** The block of code that decides what a solar deal costs lived *inside* `saveSolarFinanceAction`. That made saving the Financing step the only event in the entire product that refreshed the cached price columns. Seven other things move a deal's price — the equipment picker, the layout designer, the design save, the live re-price, an adder edit, a lender switch, a system-type switch — and every one of them left the cache holding the old number.
+
+**The fix.** I extracted the block verbatim into `solar/deal-money.ts` and had the save call it. `recomputeDealMoney` then re-runs that same derivation from the stored inputs, and is wired into `recompute.ts` — the chokepoint every design path already passes through — plus `adderGrandTotal`, the lender switch and the system-type switch.
+
+**On not creating competing sources of truth.** `priceStoredPurchase` was and remains the authority on what a deal costs; the stored columns are a cache of *its* answer. The temptation here was to write a fresh "recompute" that agrees with the save — which is two implementations and a promise. Extracting the one that already existed means there is nothing to keep in sync. `recomputeDealMoney` writes only the seven derived columns, only when one actually changed, and never creates a finance row that does not exist.
+
+One thing it deliberately does **not** cache: a lender-*row* price ceiling. That is applied on read by `priceStoredPurchase` and written back only at generation, because publishing a rate sheet must not silently rewrite every saved deal in the company. I found this while writing the tests, and pinned the distinction rather than "fixing" it.
+
+**Tests:** 9 integration cases. Each derives the expected figure independently through `priceStoredPurchase` and asserts the stored columns equal it — so the test cannot pass by agreeing with the same mistake.
+
+### P1-8 · The rep's estimate is the payroll calculation — `f10dfe4`
+
+**The defect, and why it was bigger than reported.** The report described a symptom: on a signed deal with no frozen terms, the deal page quotes a number payroll refuses. The cause was that `estimatedSolarCommission` and `computeSolarCommissionsForProject` each held their **own copy** of the pay-terms precedence chain. Two copies of a calculation drift, and these had.
+
+**The fix.** One exported `resolveDealPayTerms`, called by both. The precedence is unchanged — `SolarDealComp` snapshot, then an existing commission line, then the rep's live profile **on unsigned deals only** — it is now written once. A signed deal with no snapshot returns `unavailable` carrying *the same reason string* payroll refuses with, so the rep reads what payroll will say instead of a confident figure it will never honour.
+
+**What sharing recovered that patching would not.** Layer 2 — reading terms off an existing pending commission line — was only ever in the payroll copy. A deal whose line predates `SolarDealComp` carries its terms there and nowhere else, so the deal page had been quoting the rep's *current* profile against a line already generated at a different rate. Nobody had reported it. Mirroring one branch, as the report suggested, would have left it.
+
+**Tests:** 8 integration cases, every one asserting the two answers are *the same answer* rather than checking each against a number I chose.
+
+### Plus · The signed lock stops lying to the user — `e3687f2`
+
+The server has refused protected writes on a signed contract since `04e7be3`. The screen did not know: it still rendered editable price, design and lender controls that failed on save. A control that looks editable and then refuses is worse than no control, because it teaches people the app is broken rather than that the contract is final.
+
+The builder now goes read-only behind a banner saying the contract is signed, what is frozen, and that quoting something different means issuing a new proposal — and for a super admin, the banner is the door through. See the Decisions section for the reason workflow and the two places I went stricter than the brief.
+
+**Tests:** the signed-lock suite grew 15 → 22 cases, adding the unlock lifecycle: refused without one, allowed with one, refused again after expiry, reason recorded on the audit line, and non-super-admins refused throughout.
+
 ### Plus · The unset minimum-offset guard rail — `b8f3441`
 
 Investigated as instructed, **after** the P0/P1 work. Answering your questions directly:
@@ -125,25 +159,35 @@ So it becomes a **workspace setup gap**, the mechanism this codebase already has
 
 # Files Changed
 
-46 files, +4,356 / −111. Full list in `git diff --stat c83ddce`.
+60 files. Full list in `git diff --stat c83ddce`.
 
-**New (13)** — `payroll/funding-authority.ts`, `solar/signed-lock.ts`, `reports/solar-contract.ts`, `bookkeeping/reports-db.ts`, `api/bookkeeping/reports/route.ts`, `api/cron/file-signed-proposals/route.ts`, one migration, and 6 test files + 1 e2e spec.
+**New (19)** — `payroll/funding-authority.ts`, `solar/signed-lock.ts`, `solar/deal-money.ts`, `solar/unlock-actions.ts`, `components/portal/solar/signed-contract-lock.tsx`, `reports/solar-contract.ts`, `bookkeeping/reports-db.ts`, `api/bookkeeping/reports/route.ts`, `api/cron/file-signed-proposals/route.ts`, two migrations, and 9 test files + 1 e2e spec.
 
-**Modified, by area** — reports (`rep-scorecard`, `lead-sources`), dashboard/bookkeeping (`queries`, `bookkeeping-client`, `paystub`, `post-bookkeeping`, `payroll/actions`), solar (`actions`, `adder-actions`, `equipment-actions`, `cockpit-actions`, `deal-value`, `vpp-credits`, `proposal-file-copy`, `providers`), leads/projects (`leads/actions`, `projects/actions`), settings (`workspace-health`), libs (`solar-deal-value`, `solar-provider-terms`), UI (`solar-cockpit`, `solar-provider-manager`, `leads/[id]/page`, `settings/solar-providers/page`), plus `schema.prisma`, `vercel.json` and the backfill script.
+**Modified, by area** — reports (`rep-scorecard`, `lead-sources`), dashboard/bookkeeping (`queries`, `bookkeeping-client`, `paystub`, `post-bookkeeping`, `payroll/actions`), solar (`actions`, `adder-actions`, `equipment-actions`, `cockpit-actions`, `deal-value`, `vpp-credits`, `proposal-file-copy`, `providers`), leads/projects (`leads/actions`, `projects/actions`), settings (`workspace-health`), libs (`solar-deal-value`, `solar-provider-terms`), UI (`solar-cockpit`, `solar-provider-manager`, `leads/[id]/page`, `settings/solar-providers/page`), plus `solar/recompute.ts`, `payroll/solar-engine.ts`, `solar-proposal-builder.tsx`, `leads/[id]/solar-proposal/page.tsx`, `schema.prisma`, `vercel.json` and the backfill script.
 
 ---
 
 # Database Migrations Added
 
-**One.**
+**Two. Both additive. Nothing dropped, nothing rewritten, no backfill.**
 
-`prisma/migrations/20260914000000_vpp_max_batteries/migration.sql`
+**1 · `20260914000000_vpp_max_batteries`**
 
 ```sql
 ALTER TABLE "solar_providers" ADD COLUMN "vppMaxBatteries" INTEGER;
 ```
 
-Additive, nullable, no backfill — null means the house rule of six, which is the same convention every other optional rule on that table follows. Nothing is dropped or rewritten. Applied to the local dev and test schemas only.
+Nullable — null means the house rule of six, the same convention every other optional rule on that table follows.
+
+**2 · `20260914120000_solar_contract_unlock`**
+
+```sql
+CREATE TABLE "solar_contract_unlocks" ( ... );   -- + 1 index, 2 FKs, ON DELETE CASCADE
+```
+
+A new table; it touches nothing existing. Note the column is `"vertical"`, **not** `"industry"` — the solar tables use the literal name, which I verified against `solar_lenders` in the database rather than inferring from the `@@map` on the enum.
+
+Both applied to the local dev and test schemas only. **Neither has been applied to production.**
 
 ---
 
@@ -155,7 +199,8 @@ Additive, nullable, no backfill — null means the house rule of six, which is t
 | `upsertSolarCommissionAction` — amount/trigger/date | `Lead:update` | `Lead:update` (unchanged) |
 | `upsertSolarCommissionAction` — entry | `Lead:update` | `Lead:update` **or** `Commission:approve` |
 | `moveLeadStage` into/past the solar funding gate | `Lead:update` | `Commission:approve`, unless already funded |
-| 8 solar economic actions, after signature | `Lead:update` | `super_admin` only, audited |
+| 8 solar economic actions, after signature | `Lead:update` | `super_admin` **with a live, reasoned unlock**, audited |
+| `unlockSignedContractAction` (new) | — | `super_admin` only, reason ≥ 8 chars, 30-min window |
 | `/api/bookkeeping/reports` (new) | — | `Bookkeeping:read` |
 | `/api/cron/file-signed-proposals` (new) | — | `CRON_SECRET`, fails closed |
 
@@ -169,15 +214,17 @@ Verified by role: `sales_rep`, `canvasser`, `manager`, `admin`, `accounting`, `s
 - **Funding certification** is a separate authority from deal editing.
 - **Payroll adjustments** post to the ledger with the correct sign, and reconcile against the amount actually paid.
 - **VPP** is clamped to the programme's ceiling; the reported count is clamped with it.
-- **Signed contracts** are immutable to everyone but a super admin, with a trail.
+- **Signed contracts** are immutable to everyone but a super admin who has opened a reasoned unlock, with a trail that names the reason, the actor, the time and both figures.
+- **A deal's cached price** is refreshed by the same function that derives it, from every path that can move it — not only from the Financing step's Save.
+- **The rep's estimated commission and payroll's** come from one resolver, so the deal page can no longer quote a figure payroll will refuse.
 
-No pricing formula was changed. The 27 independent recalculations from the original audit still pass unchanged.
+**No pricing formula was changed** — in this pass or the last. `priceStoredPurchase` is still the single authority on what a solar deal costs; what changed is how many places remember its answer, and how stale that memory is allowed to get. The 27 independent recalculations from the original audit still pass unchanged.
 
 ---
 
 # Tests Added
 
-**119 new tests** across 9 new files.
+**12 new test files.** The suite as a whole went from 2,126 unit / 527 integration at baseline to **2,165 unit / 628 integration**.
 
 | File | Tests | Covers |
 |---|---:|---|
@@ -188,7 +235,10 @@ No pricing formula was changed. The 27 independent recalculations from the origi
 | `payroll/__tests__/funding-gate.itest.ts` | 17 | every role, API bypass, un-funding by omission, cancel |
 | `bookkeeping/__tests__/pnl-truncation.itest.ts` | 15 | 1,300-row ledger, bounds, isolation, segment reconciliation |
 | `payroll/__tests__/ledger-posting.itest.ts` | 12 | all adjustment kinds, re-post, resumed partial post |
-| `solar/__tests__/signed-lock.itest.ts` | 15 | six locked surfaces × four roles, override + audit |
+| `solar/__tests__/signed-lock.itest.ts` | 22 | six locked surfaces × four roles, unlock lifecycle + audit |
+| `solar/__tests__/price-drift.itest.ts` | 9 | cache vs `priceStoredPurchase` on every path that moves a price |
+| `payroll/__tests__/estimate-matches-payroll.itest.ts` | 8 | deal page and payroll agree, case by case |
+| `solar/__tests__/deal-lifecycle.itest.ts` | 2 | one deal, proposal → ledger, in order |
 | `solar/__tests__/signed-proposal-filing.itest.ts` | 11 | both PDFs, naming, idempotency, partial failure |
 | `solar/__tests__/vpp-credits.itest.ts` (extended) | 5 | the ceiling end to end |
 | `e2e/responsive-solar.spec.ts` | 5 | four viewports, seven screens |
@@ -234,44 +284,52 @@ Not in scope this round. From the original report, unchanged:
 
 **P3** — webhook uses plain string compare (P3-1); one webhook secret for all lenders (P3-2); the orphaned `CreditApplication` flow (P3-3); decimal battery qty rounds up (P3-4); a 99.999% dealer fee is accepted (P3-5); `cash_bids` schema drift (P3-6); ten dead server actions (P3-7).
 
-Also still open: **P1-8** (`estimatedSolarCommission` disagrees with payroll on a signed deal with no snapshot). Narrow — it needs `snapshotSolarDealComp` to have thrown — and nothing pays out of it. The one-line fix is in the report.
+P1-8 is **no longer open** — see the P1 section above.
 
 ---
 
 # Remaining Risks
 
-1. **`SolarFinance.contractPriceCents` can still drift** (P1-6, partially fixed). The `Project.contractValue` leg is fixed and nothing that reports money reads the stale column any more. Closing it fully means re-saving the finance row whenever the design or adders change — a wider change than this pass should make unannounced.
+1. **Nothing has been applied to production.** Two migrations and one backfill are pending per environment:
+   - `20260914000000_vpp_max_batteries` — additive, nullable; nothing breaks before it runs because the code reads `?? VPP_DEFAULT_MAX_BATTERIES`.
+   - `20260914120000_solar_contract_unlock` — a new table; **the signed-lock override cannot be used until this runs**, and a super admin attempting to reopen a contract before then will hit a missing relation. Apply it with the deploy, not after.
+   - `scripts/backfill-solar-deal-value.ts --apply` — every solar Project created before this work still holds the after-credit net. Dry-run by default, re-runnable, and the number to check afterwards is the dashboard's Team Performance against a known contract.
 
-2. **The stage guard changes an operational workflow.** Pre-funding, a manager or coordinator can no longer move a solar deal to or past M1 Funding; the desk records M1 on the deal first, then the board moves. That matches the pipeline's own intended order (Install Complete → M1 Funding → Inspection), but it is a workflow change and you should know about it. **See Business Input.**
+2. **The stage guard changes an operational workflow.** Pre-funding, a manager or coordinator can no longer move a solar deal to or past M1 Funding; the desk records M1 on the deal first, then the board moves. You confirmed this is what you want. It still matters that your coordinators hear it before the deploy rather than after, because to someone who has been dragging the card *as* the way of announcing that money arrived, a correct refusal is indistinguishable from a broken board.
 
-3. **The backfill has not been run anywhere but locally.** Every already-created solar Project still holds the after-credit net until `scripts/backfill-solar-deal-value.ts --apply` runs against that environment. It is dry-run by default and re-runnable.
+3. **The 30-minute unlock window is a judgement, not a requirement you gave me.** Long enough to make a correction, short enough that a contract does not sit quietly editable for a day. A super admin can close it early, and it expires by itself. If your corrections routinely involve a phone call to the lender, say so and I will lengthen it — it is one constant.
 
-4. **The migration is unapplied outside local.** Additive and nullable, so nothing breaks before it runs — the code reads `?? VPP_DEFAULT_MAX_BATTERIES`.
+4. **`recomputeDealMoney` now runs on every design change.** It is one indexed read plus a conditional write, and it writes nothing when nothing moved, so the cost is a read on the paths that already do several. But it is new work on a hot path, and the honest statement is that I have measured it as correct rather than as fast.
 
-5. **The signed-lock has no UI gating yet.** The server refuses correctly and the error text says what to do, but the builder still offers the controls. Cosmetic, and deliberate: gating eight surfaces is UI churn I did not want to bundle into a correctness pass.
+5. **Automations are deliberately NOT gated by the funding authority.** The starter automation set moves Installed → Inspection, which crosses the M1 gate. A rule engine acting as the company is not a rep acting as themselves, so this is intentional — but it does mean an automation could carry a deal past the gate. If you ever add a rule that a rep can trigger on demand, that reasoning stops holding.
 
-6. **Two pre-existing integration failures remain red** on main. Not mine, not investigated.
+6. **Two pre-existing integration failures remain red** on main — `calendar/visit-crew`, `solar/battery-pricing`. Re-proven not mine by running both on a detached checkout of the `c83ddce` baseline, where they fail on the same assertions with the same values. Not investigated; they were out of scope both passes.
 
-7. **The shared tree is still nine-plus commits behind main with a broken build.** Not mine to fix, and I did not touch it. Whoever owns it should rebase.
+7. **The shared tree is still behind main with a broken build.** Not mine to fix, and I did not touch it. Whoever owns it should rebase. Related: the `warn`→`block` change on `config.min_offset_unset` sitting uncommitted in a sibling tree must not ship as written — `minOffsetPct` ships at `0`, so it would leave every default workspace unable to generate any proposal.
+
+8. **`origin/main` has advanced 21 commits since `c83ddce`.** I stayed on my baseline deliberately so every before/after claim in these documents is measured against one fixed point. Rebasing onto current main before merge is a real step with a real chance of conflict, and it has not been done.
 
 ---
 
 # Recommended Next Phase
 
-1. **Merge this branch**, run the backfill and the migration per environment, then re-check the dashboard's Team Performance against a known contract.
-2. **Decide the two business questions below.**
+1. **Rebase onto current `origin/main`** (21 commits ahead of my baseline) and re-run the sweep.
+2. **Merge**, apply *both* migrations, run the backfill per environment, then re-check the dashboard's Team Performance against a known contract.
 3. **P2-5 and P2-6** — the orphan FKs and the `activity_logs` index. Cheap, and the index gets more valuable every day.
 4. **P2-1** — the equipment summary on Review & Send. Small, visible, and it was an explicit ask.
 5. **P2-4 and P2-10** — the two idempotency races (customer signing, chargeback recovery).
-6. **Close P1-6 properly** by re-saving the finance row on design and adder changes.
-7. **Tell the sibling session** that the `warn`→`block` change on `config.min_offset_unset` must not ship as written.
+6. **Tell the sibling session** that the `warn`→`block` change on `config.min_offset_unset` must not ship as written.
 
 ---
 
-# Decisions That Need Your Input
+# Decisions You Made, and What I Did With Them
 
-**1. The stage guard and your operations workflow.** Pre-funding, only `super_admin` / `admin` / `accounting` can move a solar deal to or past M1 Funding. Once funding is recorded, anyone with the board can carry it through Inspection and PTO. This matches your pipeline's order, but if coordinators routinely drag deals into M1 Funding *as* the way of announcing that money arrived, this will feel like a wall. The alternative is to guard only the milestone and leave the stage open — the payout hole is closed either way. **Which do you want?**
+All three questions from the last pass are answered and implemented. Recorded here so the reasoning survives the conversation.
 
-**2. Is an audit trail without a written reason enough?** A super admin can change a signed contract's price. I record who, when, what, and both figures. Your brief said "record reason if infrastructure already supports reasons" — it does not, and adding one means a required argument and a prompt on eight surfaces. **Say the word and I will add it.**
+**1 · The stage guard — you said keep it strict.** Reps and ordinary coordinators cannot declare M1 funding; `super_admin`, `admin` and `accounting` can. Implemented exactly, and with the part you added: once funding is legitimately recorded, the gate stops applying, so ops users carry the deal through Inspection and PTO as before. `crossesFundingGate` returns false for a deal already funded, which is what makes the guard a gate rather than a wall. The lifecycle test pins both halves — the rep refused on *both* the stage move and the milestone, their manager refused too, accounting succeeding, and the board moving freely afterwards.
 
-**3. The VPP ceiling as data vs. constant.** I made it a per-provider column defaulting to six, because the rate beside it is already per-provider. Your brief specified the formula with `6` hard-coded. The default gives you exactly the stated rule out of the box. **Confirm you are happy with the column, or I will inline the constant.**
+**2 · Changes after signature — you said keep the lock, but require a reason.** Done, and done once per sitting rather than once per field. A super admin opens a `SolarContractUnlock` carrying the reason; every protected write under it cites that reason on the deal's history beside the old and new value, and the unlock row is expired rather than deleted on the way out. Your four example reasons are offered as editable suggestions rather than a fixed menu, because the useful reasons are specific — "lender corrected the fee to 22%" tells a later reader something "Pricing correction" does not.
+
+Two details worth flagging because they are stricter than what you asked for. First, `super_admin` alone no longer bypasses the lock — the role plus a live unlock does. A permanent key held by a role is not an exception anyone can later audit. Second, the reason is collected **before** the edit, not after; a reason gathered afterwards is a justification rather than a decision.
+
+**3 · VPP — you said keep it provider-level, default 6.** Unchanged from the last pass, which is the answer: `vppMaxBatteries` is a nullable per-provider column and null means six. The standard rule works out of the box with no provider configured, and a provider that publishes different terms is data rather than a code change. `solar-vpp-cap.test.ts` pins your three figures exactly — 2 batteries → $400, 6 → $1,200, 7 → $1,200 — inside a table that walks 0 through 100.

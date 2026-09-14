@@ -282,11 +282,32 @@ Note this is *partly* deliberate: the engine's comment says "a design that grows
 > PTO, survey, plan set, notes, tasks, photos, documents, stage moves, crew and
 > install dates. A lock that stopped the job would be worse than the defect.
 >
-> **Not done**: a written *reason* is not collected, because these eight actions
-> take none and adding a required argument to each would be a UI change in eight
-> places. Who, when, what, before and after are recorded. Flagged for your call.
+> **Reason now collected** — `e3687f2`, on your instruction.
 >
-> Tests: 15 integration cases driving the actions directly.
+> Rather than add a required argument to eight actions, the reason is collected
+> **once, before the edit**, and covers the sitting. A super admin opens a
+> `SolarContractUnlock` — who, when, why, and a 30-minute expiry — and every
+> protected write made under it cites that reason on the deal's own history
+> beside the old and the new value. The row is *expired*, never deleted, on the
+> way out: it is the record that an exception was made, which is exactly the
+> thing the reason was collected for.
+>
+> A reason gathered afterwards is a justification, not a decision; asking first
+> is why this is a door rather than a key the super admin simply carries. The
+> four reasons you named are offered as editable suggestions, not a fixed menu,
+> because the useful ones are specific — "lender corrected the fee to 22%" tells
+> a later reader something "Pricing correction" does not. Minimum 8 characters,
+> enforced server-side.
+>
+> **The UI no longer lies.** The server always refused these writes; the screen
+> still rendered editable controls that failed on save, which is worse than no
+> control. The builder now goes read-only behind a banner that says the contract
+> is signed, what is frozen, and that quoting something different means issuing a
+> new proposal. `super_admin` additionally requires a live unlock — the role
+> alone no longer bypasses the lock.
+>
+> Tests: 22 integration cases, up from 15, across six locked surfaces, four
+> roles and the unlock lifecycle.
 
 ### P1-3 · The pay stub email states a "Net pay" that ignores every adjustment
 
@@ -376,19 +397,38 @@ The $44,000 is the two Tesla Powerwall 3s at their catalogue price ($14,000 each
 
 **Mitigation already present.** The builder *does* surface the drift — `src/components/portal/solar-panels.tsx:1459` computes `dirty` and renders "Saved at $X — this quote comes to $Y". But it is 11px muted text beside the Save button on one step of a five-step wizard, and no other surface mentions it.
 
-> **STATUS: PARTIALLY FIXED** — `db977e8`
+> **STATUS: FIXED** — `db977e8`, then closed fully in `2cc3f92`
 >
-> The `Project.contractValue` leg is fixed and re-stamped from the reported
-> proposal at every moment the answer can move, so the figure every revenue
-> surface reads is now correct and stays correct.
+> The `Project.contractValue` leg was fixed first, re-stamped from the reported
+> proposal at every moment the answer can move.
 >
-> `SolarFinance.contractPriceCents` can still drift from what
-> `priceStoredPurchase` computes, because it is only as fresh as the last save.
-> Nothing that reports money reads it any more — payroll and the deal page both
-> recompute — so the remaining exposure is the builder's own muted notice.
-> Closing it properly means re-saving the finance row whenever the design or
-> adders change, which is a wider change than this pass should make
-> unannounced. **Left open deliberately; see Remaining Risks in the summary.**
+> The remaining leg — `SolarFinance.contractPriceCents` drifting from what
+> `priceStoredPurchase` computes — is now closed too, by option (a) above.
+>
+> **Root cause.** The derivation that prices a deal lived *inline inside*
+> `saveSolarFinanceAction`. Saving the Financing step was therefore the only
+> event in the product that refreshed the cached columns. Every other way of
+> changing what a deal costs — the equipment picker, the layout designer, the
+> design save, the live re-price, an adder edit, a lender switch, a system-type
+> switch — moved the price and left the cache behind.
+>
+> **Fix.** The block was *extracted*, not reimplemented: `solar/deal-money.ts`
+> now holds the one derivation, `saveSolarFinanceAction` calls it, and
+> `recomputeDealMoney` re-runs it from stored inputs. It is wired into
+> `recompute.ts`, which is the chokepoint all four design paths already pass
+> through, plus `adderGrandTotal`, the lender switch and the system-type switch.
+> It writes only the seven derived columns and only when one actually changes,
+> and it never creates a finance row that does not exist.
+>
+> **The authoritative source is unchanged and unduplicated:** `priceStoredPurchase`
+> still decides what a deal costs. The stored columns are a cache of its answer,
+> and are now refreshed by the same function that produces it — so there is one
+> source of truth, not two. A lender-*row* ceiling is deliberately still applied
+> on read rather than baked in, because publishing a rate sheet must not silently
+> rewrite every saved deal; `price-drift.itest.ts` pins that distinction.
+>
+> 9 integration tests, each deriving the expected figure independently via
+> `priceStoredPurchase` rather than asserting a number chosen by hand.
 
 **Fix.** Either (a) make the cached column authoritative by re-saving it whenever the design or adders change — `recomputeAdderTotal` already runs on every adder edit and is the natural hook — or (b) stop storing it and derive everywhere. (a) is less disruptive. Whichever, promote the `dirty` notice from muted text to a blocking condition on proposal generation, since generating from a stale row is how the drift reaches a customer.
 
@@ -429,12 +469,27 @@ The $44,000 is the two Tesla Powerwall 3s at their catalogue price ($14,000 each
 
 **Fix.** Mirror the engine's precedence: in `estimatedSolarCommission`, if a signed proposal exists and no snapshot does, return `{ state: "needs_review" }` rather than falling through to the live profile.
 
-> **STATUS: NOT FIXED** — deliberately out of scope for this pass.
+> **STATUS: FIXED** — `f10dfe4`
 >
-> Narrow (it needs `snapshotSolarDealComp` to have thrown) and cosmetic: the
-> deal page shows an estimate payroll will refuse. Nothing pays out of it. The
-> one-line fix above still stands and is the first thing to take in a next
-> pass.
+> Fixed wider than the one-line suggestion above, because the one line treated a
+> symptom. The real defect was that `estimatedSolarCommission` and
+> `computeSolarCommissionsForProject` each carried their **own copy** of the
+> pay-terms precedence chain. Two copies drift; these had.
+>
+> **Fix.** Both now call one exported `resolveDealPayTerms`. The signed-with-no-
+> snapshot case returns `unavailable` with *the same reason string* payroll
+> refuses with, so the rep is told what payroll will say rather than being shown
+> a confident figure it will never honour.
+>
+> Fixing it by sharing rather than by patching also recovered a second, quieter
+> disagreement: layer 2 of the chain — reading terms off an **existing pending
+> commission line** — was only ever in the payroll copy. A deal whose line
+> predates `SolarDealComp` carries its terms there and nowhere else, so the deal
+> page had been quoting the rep's current profile against a line already
+> generated at a different rate.
+>
+> 8 integration tests, every one asserting the two answers are *the same
+> answer* rather than checking each separately against a figure I picked.
 
 ---
 
@@ -735,7 +790,7 @@ Existing coverage is strong: **183 test files, 2,129 tests, 66 Playwright specs.
 2. **`postRunToBookkeeping` completeness** — nothing asserts that what is posted to the ledger equals what was paid. Would have caught P1-1.
 3. **Pay stub email content** — `payStubBreakdown` is well tested; the email that quotes it is not. Would have caught P1-3.
 4. **VPP quantity boundaries** — `vpp-credits.itest.ts` exists but has no case above the cap. Would have caught P1-5.
-5. **Cached-vs-live price drift** — nothing asserts `SolarFinance.contractPriceCents` still equals what `priceStoredPurchase` computes. Would have caught P1-6.
+5. **Cached-vs-live price drift** — nothing asserts `SolarFinance.contractPriceCents` still equals what `priceStoredPurchase` computes. Would have caught P1-6. *(Closed — `price-drift.itest.ts`, 9 cases, each deriving the expected figure independently.)*
 6. **The M1 gate as an authorisation boundary** — `commission-gate.test.ts` tests the stage matching thoroughly, but nothing asserts *who may set the milestone*. Would have caught P0-2.
 7. **Post-signature immutability** — nothing asserts a signed deal's price cannot move. Would have caught P1-2.
 8. **Bookkeeping period correctness above the row cap.** Would have caught P0-3.
