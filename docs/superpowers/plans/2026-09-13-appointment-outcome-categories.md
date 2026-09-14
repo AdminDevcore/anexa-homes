@@ -1349,21 +1349,12 @@ import {
   );
 ```
 
-  **Header JSX.** Replace the header block (the `lg:flex-row` div holding the search `div` and the "Filter by status" group) with:
+  **Header JSX.** *(As built: the search `div` stays exactly where it is, so roofing's markup is unchanged.)* Leave the search `div` in place, drop the `search` const above, and replace only the "Row 1" status group and the header's closing `</div>` with:
 
 ```tsx
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        {solar ? (
-          <div className="flex w-full flex-wrap items-center gap-2">
-            {search}
-            <RepToggle value={rep} counts={reps} onChange={setRep} />
-          </div>
-        ) : (
-          search
-        )}
-
-        {/* Row 1 — where an appointment stands. Solar gives it its own row. */}
-        {!solar && statusChips}
+        {/* Row 1 — where an appointment stands. Solar puts who has it here
+            instead, and gives the statuses a row of their own below. */}
+        {solar ? <RepToggle value={rep} counts={reps} onChange={setRep} /> : statusChips}
       </div>
 
       {solar && statusChips}

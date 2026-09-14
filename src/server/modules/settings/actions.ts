@@ -12,6 +12,7 @@ import { claimStatusKey, type ClaimStatusOption } from "@/lib/claim-status";
 import { prisma } from "@/server/db/client";
 
 import { writeVerticalConfig } from "@/lib/vertical-config";
+import { OUTCOME_CATEGORIES, inferCountsAs, type OutcomeCategory } from "@/lib/dispositions";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
@@ -198,6 +199,7 @@ const dispositionsSchema = z.object({
       z.object({
         group: z.string().trim().max(40).nullable().optional(),
         label: z.string().trim().min(1).max(60),
+        countsAs: z.enum(OUTCOME_CATEGORIES).optional(),
       })
     )
     .max(80),
@@ -240,24 +242,25 @@ export async function updateAppointmentDispositionsAction(input: z.infer<typeof 
   const parsed = dispositionsSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid outcomes.");
 
+  // Solar sorts its Appointments list by what each outcome counts as, so a
+  // solar save stores it (inferring from the wording if a client sent none).
+  // Roofing stores its list exactly as it did before categories existed.
+  const vertical = await getActiveVertical(user);
+  const solar = vertical === "solar";
+
   // De-dupe by label (case-insensitive) while preserving order; keep group.
   const seen = new Set<string>();
-  const items: { group: string | null; label: string }[] = [];
+  const items: { group: string | null; label: string; countsAs?: OutcomeCategory }[] = [];
   for (const raw of parsed.data.items) {
     const label = raw.label.trim();
     const group = raw.group?.trim() || null;
     if (!label || seen.has(label.toLowerCase())) continue;
     seen.add(label.toLowerCase());
-    items.push({ group, label });
+    items.push(solar ? { group, label, countsAs: raw.countsAs ?? inferCountsAs(label) } : { group, label });
   }
   if (items.length === 0) return fail("Keep at least one outcome.");
 
-  await saveVerticalScopedSetting(
-    user.companyId,
-    await getActiveVertical(user),
-    "appointmentDispositions",
-    items
-  );
+  await saveVerticalScopedSetting(user.companyId, vertical, "appointmentDispositions", items);
   revalidatePath("/portal/settings/appointment-outcomes");
   return ok();
 }
