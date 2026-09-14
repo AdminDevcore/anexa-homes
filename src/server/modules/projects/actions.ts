@@ -383,7 +383,7 @@ const projectFieldsSchema = z.object({
  * Settings has offered a "Project Fields" column since custom fields existed,
  * and nothing in the app had ever written a value into one — every definition
  * made there was a field you could invent, map into a document template, and
- * then never fill. They are edited on the deal's System info slide, next to the
+ * then never fill. They are edited on the deal's Operations slide, next to the
  * rest of what is true about the job.
  *
  * Only DEFINED keys are stored, so a renamed or deleted field cannot leave an

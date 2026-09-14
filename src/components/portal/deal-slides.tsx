@@ -10,6 +10,7 @@ import {
   PanelsTopLeft,
   ReceiptText,
   ShieldCheck,
+  Wrench,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const SLIDE_ICONS: Record<string, LucideIcon> = {
   system: Zap,
   activity: MessageSquare,
   timeline: History,
+  ops: Wrench,
   install: Hammer,
   specs: PanelsTopLeft,
 };

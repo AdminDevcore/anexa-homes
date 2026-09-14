@@ -91,7 +91,7 @@ export type SystemMoney = {
    * WHAT THIS DEAL IS — the signed proposal wherever there is one.
    *
    * These four figures and the equipment under them used to be read straight
-   * off the live SolarDesign while the System info slide read them off the
+   * off the live SolarDesign while the Operations → Design tab read them off the
    * frozen proposal, so one deal showed two systems on two tabs of the same
    * page: 24 panels / 10.56 kW / $58,080 here against 25 / 11.00 / $60,500
    * there. Both now come from `resolveReportedSystem`, which is the only way
@@ -233,7 +233,7 @@ export function SolarSystemMoneyPanel({
       {money && (
         <>
           {/* Provenance first, in the same words and the same colours the
-              System info slide uses. Four numbers with no document named
+              Operations → Design tab uses. Four numbers with no document named
               against them is exactly how this page came to show two systems
               and look like neither was wrong. */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
