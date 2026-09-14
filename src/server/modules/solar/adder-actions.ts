@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
+import { checkSignedLock } from "./signed-lock";
 import { ADDER_BASES } from "@/lib/solar-adders";
 import {
   dealLenderId,
@@ -89,6 +90,13 @@ async function guard(
   const lead = await leadAccessible(user, leadId);
   if (!lead) return { ok: false, error: "Deal not found." };
   if (lead.vertical !== "solar") return { ok: false, error: "This is not a solar deal." };
+  /**
+   * Adders are money on the contract — they gross up by the fee, they move the
+   * total the customer signed, and on a flat-rate partner they ride on top of
+   * it. A signature settles them with everything else.
+   */
+  const lock = await checkSignedLock(user, leadId, "the adders");
+  if (lock.blocked) return { ok: false, error: lock.error };
   return { ok: true, user };
 }
 

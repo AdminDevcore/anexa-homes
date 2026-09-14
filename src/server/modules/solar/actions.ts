@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
+import { auditSignedEdit, checkSignedLock } from "./signed-lock";
 import { getSolarSettings } from "./settings";
 import { resolveDesignBattery, resolveSizingModule } from "./sizing";
 import { recomputeDesignFigures } from "./recompute";
@@ -128,6 +129,13 @@ export async function setSolarCreditClaimsAction(input: z.infer<typeof creditCla
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_setSolarCreditClaimsAction = await checkSignedLock(user, lead.id, "the federal credits this deal claims");
+  if (lock_setSolarCreditClaimsAction.blocked) return fail(lock_setSolarCreditClaimsAction.error);
+
   // updateMany rather than update: a deal whose financing has not been saved
   // yet has no row, and the honest outcome there is "nothing to record", not a
   // thrown P2025 that reads to a rep as a dead tick-box.
@@ -176,6 +184,13 @@ export async function setSolarSignTodayCreditAction(input: z.infer<typeof signTo
   const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_setSolarSignTodayCreditAction = await checkSignedLock(user, lead.id, "the sign-today credit");
+  if (lock_setSolarSignTodayCreditAction.blocked) return fail(lock_setSolarSignTodayCreditAction.error);
 
   const { count } = await prisma.solarFinance.updateMany({
     where: { companyId: user.companyId, leadId },
@@ -245,6 +260,13 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   const lead = await leadAccessible(user, d.leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_saveSolarDesignAction = await checkSignedLock(user, lead.id, "the system design");
+  if (lock_saveSolarDesignAction.blocked) return fail(lock_saveSolarDesignAction.error);
 
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
@@ -398,6 +420,11 @@ export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderS
 
   const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
+
+  // The lender decides the fee, the ceiling and how adders are financed, so on
+  // a signed contract it is an economic field like any other.
+  const lenderLock = await checkSignedLock(user, leadId, "the deal's lender");
+  if (lenderLock.blocked) return fail(lenderLock.error);
 
   // A lender id from another company must never attach to this design.
   if (lenderId) {
@@ -705,6 +732,26 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_saveSolarFinanceAction = await checkSignedLock(user, lead.id, "the price and financing");
+  if (lock_saveSolarFinanceAction.blocked) return fail(lock_saveSolarFinanceAction.error);
+  /**
+   * The contract as it stood, so an override can be answered with a figure
+   * rather than only with a timestamp. Read only when one is actually
+   * happening — an ordinary save on an unsigned deal costs no extra query.
+   */
+  const priceBefore = lock_saveSolarFinanceAction.override
+    ? (
+        await prisma.solarFinance.findUnique({
+          where: { leadId: f.leadId },
+          select: { contractPriceCents: true },
+        })
+      )?.contractPriceCents ?? null
+    : null;
+
   const assumptions = await getSolarSettings(user.companyId);
 
   const design = await prisma.solarDesign.findUnique({
@@ -835,6 +882,15 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       lenderProductId: true,
     },
   });
+
+  // A super admin rewriting a signed contract's price, with both figures.
+  if (lock_saveSolarFinanceAction.override) {
+    await auditSignedEdit(user, lead.id, {
+      what: "the contract price",
+      before: priceBefore,
+      after: saved.contractPriceCents,
+    });
+  }
 
   revalidatePath(`/portal/leads/${f.leadId}`);
   // Return what was actually STORED, so the panel re-seeds from the database
@@ -1837,6 +1893,11 @@ export async function setSolarSystemTypeAction(input: unknown) {
   if (!parsed.success) return fail("Pick solar, solar + storage, or storage only.");
   const { leadId, systemType } = parsed.data;
   if (!(await leadAccessible(user, leadId))) return fail("Deal not found.");
+
+  // Switching between PV, PV + storage and storage-only re-prices the whole
+  // deal, which a signature has settled.
+  const typeLock = await checkSignedLock(user, leadId, "what the deal sells");
+  if (typeLock.blocked) return fail(typeLock.error);
 
   const design = await prisma.solarDesign.findFirst({
     where: { leadId, companyId: user.companyId },
