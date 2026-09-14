@@ -139,6 +139,52 @@ describe("no screen loses a roof that is financed on top", () => {
   });
 });
 
+/**
+ * The THIRD guard: a partner's figure never travels without its programme's basis.
+ *
+ * `maxFinalPpwCents` stopped meaning "the final price" the day a programme
+ * could say its partner's $5.50 is the GROSS or the BASE with the dealer fee on
+ * top. A caller that hands the figure to the rule and forgets the basis still
+ * compiles — the basis is optional and defaults to `final` — and quietly prices
+ * a gross-priced programme with the fee inside the $5.50 instead of on top.
+ *
+ * So a file that reads a partner's figure AND applies the rule must mention the
+ * programme's basis somewhere.
+ */
+const READS_FIGURE = /\b(maxFinalPpwCents|maxFinalPricePerBatteryCents)\b/;
+const APPLIES_FIGURE =
+  /\b(capStickerToFinalPpw|capStickerToFinalUnit|priceStoredPurchase|priceStorageStored|financeRowForProduct)\s*\(/;
+const READS_BASIS = /[pP]pwBasis|[bB]atteryPriceBasis|\bbasis:/;
+
+describe("no partner figure is applied without its programme's basis", () => {
+  it("every file applying a lender's $/W or $/battery also reads the basis", () => {
+    const offenders: string[] = [];
+
+    for (const dir of SCAN_DIRS) {
+      for (const file of walk(join(REPO_ROOT, dir))) {
+        const rel = relative(REPO_ROOT, file).split(sep).join("/");
+        const code = readFileSync(file, "utf8")
+          .split("\n")
+          .filter((line) => !COMMENT.test(line));
+
+        const reads = code.some((line) => READS_FIGURE.test(line));
+        const applies = code.some((line) => APPLIES_FIGURE.test(line));
+        if (!reads || !applies) continue;
+        if (code.some((line) => READS_BASIS.test(line))) continue;
+
+        offenders.push(rel);
+      }
+    }
+
+    expect(
+      offenders,
+      `These files apply a partner's figure without the programme's basis, so a ` +
+        `gross- or base-priced programme would be priced with the fee inside the ` +
+        `figure. Pass ppwBasis / batteryPriceBasis from the quoted programme.`
+    ).toEqual([]);
+  });
+});
+
 describe("a deal is never priced without its partner's rule", () => {
   it("every pricePurchase caller applies the cap, or is a reviewed exception", () => {
     const offenders: string[] = [];

@@ -33,7 +33,8 @@ import {
   setLenderFieldMapAction,
 } from "@/server/modules/solar/actions";
 import { SubmissionMapping } from "./submission-mapping";
-import type { AdderRuleOption, LenderRow, PricingMode } from "./types";
+import type { AdderRuleOption, LenderProduct, LenderRow, PricingMode } from "./types";
+import { lenderProductLabel } from "@/lib/solar-lender-product";
 import {
   batteryPriceToCents,
   draftFrom,
@@ -53,6 +54,7 @@ import {
   MoneyField,
   Panel,
   Pill,
+  SelectField,
   TextField,
 } from "@/components/portal/settings-kit/fields";
 import { LogoControl } from "./logo-control";
@@ -71,6 +73,26 @@ export type LenderTab = (typeof LENDER_TABS)[number];
 
 /** The example job every "what does this mean" line on the Pricing tab is worked on. */
 const EXAMPLE_KW = 10;
+
+type Basis = "final" | "gross" | "base";
+
+/**
+ * Which price a partner's figure fixes, per programme. His words: "some products
+ * are on a flat 5.5 per watt on base price, some are on the gross price — and
+ * the dealer fee is on top of the gross price."
+ */
+const BASIS_OPTIONS: { value: Basis; label: string }[] = [
+  { value: "final", label: "Final price — fee included" },
+  { value: "gross", label: "Gross price — fee on top" },
+  { value: "base", label: "Base price — adders and fee on top" },
+];
+
+/** What `cents` quotes on a programme once its basis and fee are applied — no extra work. */
+function quotedOn(cents: number, basis: Basis, feePct: number | null): number {
+  const fee = feePct ?? 0;
+  if (basis === "final" || !(fee > 0 && fee < 100)) return cents;
+  return Math.round((cents * 100) / (100 - fee));
+}
 
 /**
  * The cell where a price box would be, on a partner that publishes none.
@@ -189,6 +211,15 @@ export function LenderDetail({
 
   const liveProducts = lender.products.filter((p) => p.isActive);
 
+  // The programmes each figure applies to: the $/W to this partner's loans, the
+  // $/battery to the loans that fund a battery on its own.
+  const ppwProgrammes = liveProducts.filter((p) => p.product === "loan");
+  const batteryProgrammes = ppwProgrammes.filter((p) => p.financesStorageOnly);
+  const basisOf = (p: LenderProduct) =>
+    draft.programmeBases[p.id] ?? { ppwBasis: p.ppwBasis, batteryPriceBasis: p.batteryPriceBasis };
+  const setBasis = (p: LenderProduct, patch: Partial<{ ppwBasis: Basis; batteryPriceBasis: Basis }>) =>
+    set("programmeBases", { ...draft.programmeBases, [p.id]: { ...basisOf(p), ...patch } });
+
   /**
    * The most this lender's own ceiling can leave the company, per watt.
    *
@@ -198,9 +229,10 @@ export function LenderDetail({
    * $5.50/W on a 65% fee, which is $1.93 — set a $3.00 floor there and every
    * deal on that partner blocks, with nothing on the screen having warned you.
    *
-   * Taken against the LOWEST fee on the rate sheet, because that is the
-   * programme that leaves the most; a floor above this is unreachable on any of
-   * them. Read off the DRAFT, so the sentence moves while the cap is typed.
+   * Taken as the MOST any programme leaves; a floor above that is unreachable
+   * on all of them. A programme whose figure is its gross or base has the fee on
+   * top, so it leaves the whole figure. Read off the DRAFT, so the sentence
+   * moves while the cap or a basis is changed.
    */
   const draftPpwCents = React.useMemo(() => {
     if (draft.ppwMode === "normal") return null;
@@ -208,12 +240,16 @@ export function LenderDetail({
     return c === "invalid" ? null : c;
   }, [draft.ppwMode, draft.maxFinalPpw]);
 
-  const capBasePpwCents = React.useMemo(() => {
+  const capBasePpwCents = (() => {
     if (draftPpwCents == null) return null;
-    const fees = liveProducts.filter((p) => p.dealerFeePct != null).map((p) => p.dealerFeePct!);
-    if (fees.length === 0) return null;
-    return basePpwFromSticker(draftPpwCents, Math.min(...fees));
-  }, [draftPpwCents, liveProducts]);
+    const left = ppwProgrammes.flatMap((p) => {
+      if (basisOf(p).ppwBasis !== "final") return [draftPpwCents];
+      return p.dealerFeePct == null ? [] : [basePpwFromSticker(draftPpwCents, p.dealerFeePct)];
+    });
+    return left.length === 0 ? null : Math.max(...left);
+  })();
+  /** Every programme on the fee-included rule — the only case one worked figure is true of all. */
+  const allFinal = ppwProgrammes.every((p) => basisOf(p).ppwBasis === "final");
 
   /** The typed sign-today cap, for the worked example beside it. */
   const signTodayCapCents = React.useMemo(() => {
@@ -338,6 +374,7 @@ export function LenderDetail({
           // "prices the normal way" it keeps whatever it was — flipping back to
           // a cap later should not silently forget that this partner is flat.
           finalPpwMode: draft.ppwMode === "normal" ? lender.finalPpwMode : draft.ppwMode,
+          programmeBases: Object.entries(draft.programmeBases).map(([id, b]) => ({ id, ...b })),
           minBasePpwCents,
           maxFinalPricePerBatteryCents,
           finalBatteryPriceMode:
@@ -721,7 +758,7 @@ export function LenderDetail({
                   above what a cap can ever leave. */}
               <Panel
                 title="Price per watt"
-                description="What this partner charges a homeowner, and the least those deals may leave you. Dealer fee and adders are included in the first; the second is measured before the fee, on what survives it."
+                description="What this partner charges, and the least those deals may leave you. Each programme says whether the first is the final price with the dealer fee inside it, or the gross or base with the fee on top; the second is measured before the fee, on what survives it."
               >
                 <ChoiceCards<PricingMode>
                   name={`ppw-mode-${lender.id}`}
@@ -787,7 +824,46 @@ export function LenderDetail({
                   />
                 </div>
 
-                {draftPpwCents != null && (
+                {/* WHICH PRICE THE FIGURE IS, programme by programme. One
+                    partner's $5.50 is the gross on one product and the base on
+                    another, with the dealer fee on top of either. */}
+                {draft.ppwMode !== "normal" && ppwProgrammes.length > 0 && (
+                  <div className="space-y-2">
+                    {ppwProgrammes.map((p) => {
+                      const basis = basisOf(p).ppwBasis;
+                      const watts = EXAMPLE_KW * 1000;
+                      return (
+                        <div
+                          key={p.id}
+                          data-testid={`ppw-basis-${p.id}`}
+                          className="rounded-lg border border-border px-3 py-2.5"
+                        >
+                          <SelectField<Basis>
+                            id={`ld-${lender.id}-ppw-basis-${p.id}`}
+                            label={`${lenderProductLabel(p)} — the $/W is its`}
+                            value={basis}
+                            onChange={(v) => setBasis(p, { ppwBasis: v })}
+                            options={BASIS_OPTIONS}
+                            disabled={!canEdit}
+                            hint={
+                              draftPpwCents == null
+                                ? `${p.dealerFeePct ?? 0}% dealer fee`
+                                : `${p.dealerFeePct ?? 0}% dealer fee · a ${EXAMPLE_KW} kW job with no extra work quotes ${money(
+                                    quotedOn(draftPpwCents * watts, basis, p.dealerFeePct)
+                                  )} and leaves you $${ppwToDollars(
+                                    basis === "final"
+                                      ? basePpwFromSticker(draftPpwCents, p.dealerFeePct ?? 0)
+                                      : draftPpwCents
+                                  )}/W`
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {draftPpwCents != null && allFinal && (
                   <div className="grid gap-2 sm:grid-cols-2">
                     <Figure
                       label={`A ${EXAMPLE_KW} kW system quotes`}
@@ -990,6 +1066,37 @@ export function LenderDetail({
                     hint="The least these deals may leave you."
                   />
                 </div>
+                {draft.batteryMode !== "normal" && batteryProgrammes.length > 0 && (
+                  <div className="space-y-2">
+                    {batteryProgrammes.map((p) => {
+                      const basis = basisOf(p).batteryPriceBasis;
+                      const figure = batteryPriceToCents(draft.maxFinalBattery);
+                      return (
+                        <div
+                          key={p.id}
+                          data-testid={`battery-basis-${p.id}`}
+                          className="rounded-lg border border-border px-3 py-2.5"
+                        >
+                          <SelectField<Basis>
+                            id={`ld-${lender.id}-battery-basis-${p.id}`}
+                            label={`${lenderProductLabel(p)} — the $/battery is its`}
+                            value={basis}
+                            onChange={(v) => setBasis(p, { batteryPriceBasis: v })}
+                            options={BASIS_OPTIONS}
+                            disabled={!canEdit}
+                            hint={
+                              typeof figure === "number"
+                                ? `${p.dealerFeePct ?? 0}% dealer fee · one battery with no extra work quotes ${money(
+                                    quotedOn(figure, basis, p.dealerFeePct)
+                                  )}`
+                                : `${p.dealerFeePct ?? 0}% dealer fee`
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <Hint>
                   Measured before the dealer fee, on what survives it — the same rule as the $/W
                   floor.

@@ -38,6 +38,7 @@ import {
   batteryChargeCents,
   type YieldAssumptions,
   type FinalPpwMode,
+  type PriceBasis,
 } from "@/lib/solar-money";
 import { SystemPriceCard, StoragePriceCard } from "@/components/portal/solar/system-price";
 import { CreditClaimsCard } from "@/components/portal/solar/credit-claims";
@@ -769,6 +770,14 @@ export type LenderProductOption = {
   paydownPct: number | null;
   paydownMonths: number | null;
   isActive: boolean;
+  /**
+   * Which price the partner's $/W and $/battery fix on THIS programme — see
+   * SolarPriceBasis. Read off the chosen programme, beside the partner's own
+   * figure: one partner's $5.50 is the gross on one product and the base on
+   * another.
+   */
+  ppwBasis: PriceBasis;
+  batteryPriceBasis: PriceBasis;
 };
 
 export function SolarFinancePanel({
@@ -1192,6 +1201,7 @@ export function SolarFinancePanel({
         onTopAdderTotalCents,
         maxFinalPricePerBatteryCents: quotedLender?.maxFinalPricePerBatteryCents ?? null,
         finalBatteryPriceMode: quotedLender?.finalBatteryPriceMode ?? "cap",
+        batteryPriceBasis: chosen?.batteryPriceBasis,
       });
     }
 
@@ -1206,12 +1216,14 @@ export function SolarFinancePanel({
       batteryPriceCents,
       maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
       finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
+      ppwBasis: chosen?.ppwBasis,
     });
   }, [
     isPurchase, isStorage, batteryQty, product, systemSizeKwDc, stickerPpwCents, feePct,
     adderTotalCents, onTopAdderTotalCents, batteryPriceCents,
     quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
     quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
+    chosen?.ppwBasis, chosen?.batteryPriceBasis,
   ]);
 
   /**
@@ -1478,6 +1490,7 @@ export function SolarFinancePanel({
           quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
           quotedMaxFinalPerBatteryCents={quotedLender?.maxFinalPricePerBatteryCents ?? null}
           quotedFinalBatteryPriceMode={quotedLender?.finalBatteryPriceMode ?? "cap"}
+          quotedBatteryPriceBasis={chosen?.batteryPriceBasis ?? "final"}
           quotedMinBasePerBatteryCents={isCash ? null : (quotedLender?.minBasePricePerBatteryCents ?? null)}
           quotedLabel={quotedLender?.name ?? null}
           adderTotalCents={adderTotalCents}
@@ -1505,6 +1518,8 @@ export function SolarFinancePanel({
         // is not a pricing rule, and the two arriving from different places is
         // how one of them goes stale.
         quotedFinalPpwMode={quotedLender?.finalPpwMode ?? "cap"}
+        // Which price that figure fixes is the chosen PROGRAMME's to say.
+        quotedPpwBasis={chosen?.ppwBasis ?? "final"}
         // The floor is the partner's too, and read the same way. Cash has no
         // lender and therefore no floor — the company band is all that guards
         // it, which is what "no lender" has always meant here.

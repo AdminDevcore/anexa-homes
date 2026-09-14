@@ -492,6 +492,8 @@ export default async function SolarProposalBuilderPage({
           paydownPct: p.paydownPct,
           paydownMonths: p.paydownMonths,
           isActive: p.isActive,
+          ppwBasis: p.ppwBasis,
+          batteryPriceBasis: p.batteryPriceBasis,
         }))}
         // What a deal nobody has priced yet opens on. The company's net
         // target when it has set one — that is already "what we keep per watt

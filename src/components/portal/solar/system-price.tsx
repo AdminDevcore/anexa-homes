@@ -11,7 +11,20 @@ import {
   grossPpwFromNet,
   pricePurchase,
   priceStoragePurchase,
+  type PriceBasis,
 } from "@/lib/solar-money";
+
+/**
+ * What a partner's figure covers, in words, on a programme's basis. Shared by
+ * both cards so "fee included" is never printed over a price the fee sits on
+ * top of.
+ */
+function ruleClause(basis: PriceBasis, feePct: number | null, work: string): string {
+  const fee = `the ${feePct ?? 0}% dealer fee`;
+  if (basis === "gross") return `${work} included, with ${fee} on top`;
+  if (basis === "base") return `before ${work}, with ${work} and ${fee} on top`;
+  return `fee and ${work} included`;
+}
 
 /**
  * What this company charges for THIS system, and the one control that moves it.
@@ -71,6 +84,7 @@ export function SystemPriceCard({
   quotedFeePct,
   quotedMaxFinalPpwCents,
   quotedFinalPpwMode,
+  quotedPpwBasis = "final",
   quotedMinBasePpwCents,
   quotedLabel,
   canEdit,
@@ -127,6 +141,11 @@ export function SystemPriceCard({
    * rep typing into a number with no effect on the quote.
    */
   quotedFinalPpwMode: "cap" | "flat";
+  /**
+   * Which price that figure fixes on the quoted PROGRAMME — the final with the
+   * fee inside it, or the gross or base with the fee on top. See SolarPriceBasis.
+   */
+  quotedPpwBasis?: PriceBasis;
   /**
    * That publisher's floor under what the company keeps per watt, cents. Null
    * on cash and on any lender that sets none.
@@ -284,6 +303,7 @@ export function SystemPriceCard({
           stickerPpwCents: flatSeedPpw,
           maxFinalPpwCents: quotedMaxFinalPpwCents,
           mode: quotedFinalPpwMode,
+          basis: quotedPpwBasis,
           systemSizeKwDc,
           dealerFeePct: quotedFeePct ?? 0,
           // Only the work the partner's figure is a price FOR.
@@ -377,8 +397,15 @@ export function SystemPriceCard({
     customerCap?.capped && quotedMaxFinalPpwCents != null
       ? `${quotedFinalPpwMode === "flat" ? "flat" : "held at"} $${(
           quotedMaxFinalPpwCents / 100
-        ).toFixed(2)}/W`
+        ).toFixed(2)}/W${quotedPpwBasis === "final" ? "" : ` ${quotedPpwBasis}`}`
       : null;
+
+  // A roof financed on top is only an exception worth naming where the other
+  // work is INSIDE the figure. On a base-priced programme all of it rides on top.
+  const onTopNote =
+    quotedPpwBasis !== "base" && onTopAdderTotalCents > 0
+      ? " apart from the work financed on top"
+      : "";
 
   const offDefault = defaultPpwCents != null && basePpwCents != null && basePpwCents !== defaultPpwCents;
 
@@ -717,17 +744,18 @@ export function SystemPriceCard({
             <span className="font-medium text-foreground">{quotedLabel}</span>{" "}
             {quotedFinalPpwMode === "flat" && quotedMaxFinalPpwCents != null ? (
               <>
-                sells at a flat ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, fee and adders
-                included{onTopAdderTotalCents > 0 ? " apart from the work financed on top" : ""}{" "}
-                — the base above only changes what you keep, so the customer&rsquo;s final
-                price is{" "}
+                {/* One template literal: JSX drops the space after an {expression}. */}
+                {`sells at a flat $${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, ${ruleClause(
+                  quotedPpwBasis,
+                  quotedFeePct,
+                  "adders"
+                )}${onTopNote} — the base above only changes what you keep, so the customer’s final price is `}
               </>
             ) : customerCap?.capped && quotedMaxFinalPpwCents != null ? (
               <>
-                never charges more than ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W, fee and
-                adders included
-                {onTopAdderTotalCents > 0 ? " apart from the work financed on top" : ""}, so the
-                customer&rsquo;s final price is held at{" "}
+                never charges more than ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W,{" "}
+                {ruleClause(quotedPpwBasis, quotedFeePct, "adders")}
+                {onTopNote}, so the customer&rsquo;s final price is held at{" "}
               </>
             ) : (
               <>
@@ -1007,6 +1035,7 @@ export function StoragePriceCard({
   quotedFeePct,
   quotedMaxFinalPerBatteryCents,
   quotedFinalBatteryPriceMode,
+  quotedBatteryPriceBasis = "final",
   quotedMinBasePerBatteryCents,
   quotedLabel,
   adderTotalCents,
@@ -1020,6 +1049,8 @@ export function StoragePriceCard({
   quotedFeePct: number | null;
   quotedMaxFinalPerBatteryCents: number | null;
   quotedFinalBatteryPriceMode: "cap" | "flat";
+  /** Which price that figure fixes on the quoted programme. See SolarPriceBasis. */
+  quotedBatteryPriceBasis?: PriceBasis;
   quotedMinBasePerBatteryCents: number | null;
   quotedLabel: string | null;
   adderTotalCents: number;
@@ -1037,6 +1068,7 @@ export function StoragePriceCard({
           stickerPerUnitCents: sticker,
           maxFinalPerUnitCents: quotedMaxFinalPerBatteryCents,
           mode: quotedFinalBatteryPriceMode,
+          basis: quotedBatteryPriceBasis,
           units: batteryQty,
           dealerFeePct: fee,
           adderTotalCents,
@@ -1122,8 +1154,8 @@ export function StoragePriceCard({
       {cap?.capped && (
         <p className="rounded-lg border border-blue-500/40 bg-blue-500/5 p-2.5 text-xs">
           {quotedFinalBatteryPriceMode === "flat"
-            ? `This partner sells at a flat ${money(quotedMaxFinalPerBatteryCents ?? 0)} a battery, fee and work included — so the price above is theirs, not the one typed.`
-            : `Held down to this partner's ${money(quotedMaxFinalPerBatteryCents ?? 0)} a battery ceiling. Extra work comes out of what you keep, not out of the customer's price.`}
+            ? `This partner sells at a flat ${money(quotedMaxFinalPerBatteryCents ?? 0)} a battery, ${ruleClause(quotedBatteryPriceBasis, quotedFeePct, "work")} — so the price above is theirs, not the one typed.`
+            : `Held down to this partner's ${money(quotedMaxFinalPerBatteryCents ?? 0)} a battery ceiling, ${ruleClause(quotedBatteryPriceBasis, quotedFeePct, "work")}.${quotedBatteryPriceBasis === "base" ? "" : " Extra work comes out of what you keep, not out of the customer's price."}`}
         </p>
       )}
 

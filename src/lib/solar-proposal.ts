@@ -1301,8 +1301,12 @@ export type SolarProposalSnapshot = {
  *     read by nothing. From here it rides on top at its catalogue price, like a
  *     roof does. Every document at revision 3 or below was quoted with the
  *     storage given away.
+ * 5 — a partner's $/W (and $/battery) figure can fix the GROSS or the BASE on a
+ *     programme, with the dealer fee added on top, as well as the FINAL price
+ *     with the fee inside it. Chosen per programme; `final` is the default, so
+ *     a revision-4 document was necessarily priced on `final`.
  */
-export const PRICING_CALCULATION_VERSION = 4;
+export const PRICING_CALCULATION_VERSION = 5;
 
 /** The standing non-binding-estimate wording. Shown on every proposal. */
 export const ESTIMATE_DISCLAIMER =

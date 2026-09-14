@@ -3554,6 +3554,17 @@ enum SolarFinalPpwMode {
   flat
 }
 
+/// Which rung of the price ladder a partner's figure is a price FOR.
+enum SolarPriceBasis {
+  /// System + adders, dealer fee INCLUDED. The figure is what the homeowner
+  /// signs. The only rule before this enum existed.
+  final
+  /// System + adders, dealer fee added ON TOP. Extra work comes out of the base.
+  gross
+  /// The system alone, dealer fee added ON TOP. Extra work rides above it too.
+  base
+}
+
 /// WHICH FIGURE A PARTNER UNDERWRITES.
 ///
 /// A priced solar deal carries several defensible "amounts" and they can differ
@@ -3976,6 +3987,17 @@ model SolarLenderProduct {
   termMonths   Int?
   /// The lender's cut, as a % of gross. Drives the derived sticker price.
   dealerFeePct Float?
+
+  /// Which price the LENDER's figure fixes on this programme — its $/W
+  /// (`SolarLender.maxFinalPpwCents`) and its $/battery
+  /// (`maxFinalPricePerBatteryCents`) respectively. See SolarPriceBasis.
+  ///
+  /// Per programme and not per lender because one partner's figure is not one
+  /// rule: Amos's $5.50 is the gross on one product and the base on another.
+  /// `final` is the default and what every programme did before the column
+  /// existed, so nothing already quoted moves.
+  ppwBasis          SolarPriceBasis @default(final)
+  batteryPriceBasis SolarPriceBasis @default(final)
 
   // ── Payment factors ─────────────────────────────────────────────────────
   // Solar lenders publish a PAYMENT FACTOR rather than expecting the dealer to

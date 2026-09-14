@@ -215,6 +215,8 @@ export default async function SolarLendersPage({
             paydownPct: p.paydownPct,
             paydownMonths: p.paydownMonths,
             isActive: p.isActive,
+            ppwBasis: p.ppwBasis,
+            batteryPriceBasis: p.batteryPriceBasis,
           })),
         }))}
       />

@@ -458,6 +458,9 @@ export default async function LeadDetailPage({
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
             maxFinalPpwCents: true, finalPpwMode: true,
+            // Which price that figure fixes, per programme — the deal is
+            // priced on the basis of the programme it was quoted on.
+            products: { select: { id: true, ppwBasis: true } },
             // The partner's own closing-credit rule. Read for the same reason
             // the ceiling above it is: the credit ladder on this page has to
             // be the one the builder and the document draw, and two of the
@@ -640,6 +643,8 @@ export default async function LeadDetailPage({
           }),
           maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
           finalPpwMode: designLenderRow?.finalPpwMode,
+          ppwBasis: designLenderRow?.products.find((p) => p.id === solarFinance.lenderProductId)
+            ?.ppwBasis,
         })
       : null;
 
@@ -1182,6 +1187,8 @@ export default async function LeadDetailPage({
        */
       maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
       finalPpwMode: dealLender?.finalPpwMode ?? "cap",
+      ppwBasis:
+        dealLender?.products.find((p) => p.id === fin?.lenderProductId)?.ppwBasis ?? "final",
       cappedByLender: priced?.cap.capped ?? false,
       lenderName: dealLender?.name ?? null,
     };
