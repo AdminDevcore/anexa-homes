@@ -144,30 +144,42 @@ export function BookkeepingClient({
   const [loadingReports, setLoadingReports] = React.useState(false);
 
   React.useEffect(() => {
-    if (data.ledgerComplete) {
-      setFetched(null);
-      return;
-    }
+    // Nothing to fetch while the page we hold IS the whole ledger; the local
+    // recompute is exact there and `useReports` below ignores `fetched`.
+    if (data.ledgerComplete) return;
+
     // A period change while a previous request is in flight must not let the
     // slower answer land last and describe the wrong period.
     const ac = new AbortController();
-    setLoadingReports(true);
     const qs = new URLSearchParams();
     if (resolved.period.startMs != null) qs.set("start", String(resolved.period.startMs));
     if (resolved.period.endMs != null) qs.set("end", String(resolved.period.endMs));
-    fetch(`/api/bookkeeping/reports?${qs}`, { signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body) => {
-        if (body) setFetched({ pnl: body.pnl, balanceSheet: body.balanceSheet });
-      })
-      .catch(() => {
+
+    // Wrapped rather than called straight from the effect body: a synchronous
+    // setState there cascades a second render before the first has painted.
+    void (async () => {
+      setLoadingReports(true);
+      try {
+        const res = await fetch(`/api/bookkeeping/reports?${qs}`, { signal: ac.signal });
+        if (!res.ok) return;
+        const body = await res.json();
+        setFetched({ pnl: body.pnl, balanceSheet: body.balanceSheet });
+      } catch {
         /* aborted, or offline — the previous figures stay on screen */
-      })
-      .finally(() => setLoadingReports(false));
+      } finally {
+        if (!ac.signal.aborted) setLoadingReports(false);
+      }
+    })();
+
     return () => ac.abort();
   }, [data.ledgerComplete, resolved.period]);
 
-  const { pnl, balanceSheet } = fetched ?? localReports;
+  /**
+   * `fetched` is only ever consulted on a ledger past the cap, so it never has
+   * to be cleared when the page turns out to be complete — which is what kept a
+   * synchronous setState in the effect above.
+   */
+  const { pnl, balanceSheet } = data.ledgerComplete ? localReports : (fetched ?? localReports);
 
   // PDF links carry the selected period so the download matches the screen.
   const pdfParams = (kind: "pnl" | "bs") => {
