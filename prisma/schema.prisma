@@ -606,6 +606,7 @@ model User {
   payrollItems    PayrollItem[]
   activityLogs    ActivityLog[]
   stageMoves      LeadStageEvent[]     @relation("LeadStageEventMovedBy")
+  appointmentMoves LeadAppointmentReschedule[] @relation("LeadAppointmentRescheduleMovedBy")
   crewMemberships CrewMember[]
   invitationsSent Invitation[]         @relation("InviteInviter")
   passwordResets  PasswordResetToken[]
@@ -933,6 +934,28 @@ model LeadStageEvent {
   @@map("lead_stage_events")
 }
 
+/// One row per time a solar deal's appointment moved from one time to another.
+///
+/// Written by server/modules/leads/appointment-moves.ts from every path that
+/// moves a time. A child of Lead with no vertical column, like LeadStageEvent:
+/// only ever reached through a deal the caller has already scoped.
+model LeadAppointmentReschedule {
+  id             String   @id @default(uuid())
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromAt         DateTime
+  toAt           DateTime
+  /// The outcome the old visit carried, cleared off the deal by this move.
+  clearedOutcome String?
+  /// SetNull: removing a user must not erase that the appointment moved.
+  movedById      String?
+  movedBy        User?    @relation("LeadAppointmentRescheduleMovedBy", fields: [movedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@map("lead_appointment_reschedules")
+}
+
 model Lead {
   id        String  @id @default(uuid())
   companyId String
@@ -1066,6 +1089,7 @@ model Lead {
   documentPackages       DocumentPackage[]
   activityLogs           ActivityLog[]
   stageEvents            LeadStageEvent[]
+  appointmentReschedules LeadAppointmentReschedule[]
   knocks                 Knock[]                 @relation("KnockLead")
   scope                  ScopeOfWork?
   estimate               Estimate?
