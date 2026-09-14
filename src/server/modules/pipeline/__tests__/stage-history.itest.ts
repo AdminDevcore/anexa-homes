@@ -17,6 +17,7 @@ const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } })
 
 let companyId: string;
 let pipelineId: string;
+let userId: string;
 const stages: Record<string, string> = {};
 
 const STAGE_NAMES = ["New Appointment", "Contract Signed", "Install Complete"];
@@ -26,6 +27,13 @@ beforeAll(async () => {
     data: { name: "Cycle Time Co", slug: `cyc-${process.pid}-${Date.now()}` },
   });
   companyId = c.id;
+  const u = await db.user.create({
+    data: {
+      companyId, email: `mover-${process.pid}-${Date.now()}@example.com`, passwordHash: "x",
+      firstName: "Mo", lastName: "Ver", role: "sales_rep",
+    },
+  });
+  userId = u.id;
   const p = await db.pipeline.create({ data: { companyId, name: "P", vertical: "solar" } });
   pipelineId = p.id;
   for (const [i, name] of STAGE_NAMES.entries()) {
@@ -39,6 +47,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.leadStageEvent.deleteMany({ where: { lead: { companyId } } });
   await db.lead.deleteMany({ where: { companyId } });
+  await db.user.deleteMany({ where: { companyId } });
   await db.pipelineStage.deleteMany({ where: { pipelineId } });
   await db.pipeline.delete({ where: { id: pipelineId } });
   await db.company.delete({ where: { id: companyId } });
@@ -125,6 +134,27 @@ describe("recordStageEntry", () => {
 
     const rows = await events();
     expect(rows[0].exitedAt!.getTime()).toBeGreaterThanOrEqual(rows[0].enteredAt.getTime());
+  });
+
+  it("records who made each move, and what did when nobody did", async () => {
+    await recordStageEntry({ leadId, stageId: stages["New Appointment"], at: day(1), movedById: userId }, db);
+    await recordStageEntry({ leadId, stageId: stages["Contract Signed"], at: day(2), via: "signature" }, db);
+    await recordStageEntry({ leadId, stageId: stages["Install Complete"], at: day(3), via: "automation" }, db);
+
+    expect((await events()).map((r) => [r.stageName, r.movedById, r.via])).toEqual([
+      ["New Appointment", userId, null],
+      ["Contract Signed", null, "signature"],
+      ["Install Complete", null, "automation"],
+    ]);
+  });
+
+  it("keeps the original mover when a later write does not move the deal", async () => {
+    await recordStageEntry({ leadId, stageId: stages["New Appointment"], at: day(1), movedById: userId }, db);
+    await recordStageEntry({ leadId, stageId: stages["New Appointment"], at: day(2), via: "automation" }, db);
+
+    const rows = await events();
+    expect(rows).toHaveLength(1);
+    expect([rows[0].movedById, rows[0].via]).toEqual([userId, null]);
   });
 
   it("does nothing for a lead with no stage", async () => {

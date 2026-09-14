@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import type { StageMoveVia } from "@/lib/stage-history";
 
 /**
  * Records how long a deal spends in each pipeline stage.
@@ -30,6 +31,10 @@ export type StageEntryInput = {
   /** Saves a lookup when the caller already has the stage in hand. */
   stage?: { id: string; name: string; position?: number } | null;
   at?: Date;
+  /** The signed-in user who moved it. Leave it off only when no person did. */
+  movedById?: string | null;
+  /** Say why no person is named: a rule moved it, or a signature did. */
+  via?: StageMoveVia | null;
 };
 
 export async function recordStageEntry(input: StageEntryInput, db?: Db): Promise<void> {
@@ -75,6 +80,14 @@ async function writeStageEntry(input: StageEntryInput, db: Db): Promise<void> {
   }
 
   await db.leadStageEvent.create({
-    data: { leadId, stageId, stageName: stage.name, position: stage.position, enteredAt: at },
+    data: {
+      leadId,
+      stageId,
+      stageName: stage.name,
+      position: stage.position,
+      enteredAt: at,
+      movedById: input.movedById ?? null,
+      via: input.via ?? null,
+    },
   });
 }

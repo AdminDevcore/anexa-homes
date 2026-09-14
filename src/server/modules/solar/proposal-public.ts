@@ -232,7 +232,7 @@ export async function acceptSolarProposal(
           lastChaseAlertAt: null,
         },
       });
-      await recordStageEntry({ leadId: proposal.leadId, stageId: stage.id, stage });
+      await recordStageEntry({ leadId: proposal.leadId, stageId: stage.id, stage, via: "signature" });
     }
 
     // Freeze what this deal pays, now that it is sold. Best-effort and

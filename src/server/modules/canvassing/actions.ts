@@ -440,7 +440,7 @@ export async function convertKnockToLeadAction(
     select: { id: true },
   });
 
-  await recordStageEntry({ leadId: lead.id, stageId: pipeline?.stages[0]?.id ?? null });
+  await recordStageEntry({ leadId: lead.id, stageId: pipeline?.stages[0]?.id ?? null, movedById: me.userId });
 
   await prisma.knock.update({ where: { id: knock.id }, data: { leadId: lead.id } });
   await prisma.knockEvent.create({
@@ -557,7 +557,7 @@ export async function convertKnockToAppointmentAction(
           ...(stageId !== lead.stageId ? { stageChangedAt: new Date() } : {}),
         },
       });
-      if (stageId !== lead.stageId) await recordStageEntry({ leadId: lead.id, stageId });
+      if (stageId !== lead.stageId) await recordStageEntry({ leadId: lead.id, stageId, movedById: me.userId });
     }
   }
 

@@ -49,7 +49,7 @@ export const moveStageAction: AutomationActionModule = {
     }
 
     await prisma.lead.update({ where: { id: lead.id }, data: { stageId: stage.id } });
-    await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage });
+    await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage, via: "automation" });
 
     await prisma.activityLog.create({
       data: {

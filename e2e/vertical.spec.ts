@@ -194,7 +194,7 @@ test.describe("workspace switcher", () => {
     ).toHaveCount(0);
   });
 
-  test("Operations reports how long the deal spent in each stage", async ({ page }) => {
+  test("Timeline reports how long the deal spent in each stage", async ({ page }) => {
     await login(page, "admin@anexahomes.com");
     await switchTo(page, "Solar");
 
@@ -202,7 +202,7 @@ test.describe("workspace switcher", () => {
     await page.locator('table a[href^="/portal/leads/"]').first().click();
     await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 
-    await page.getByRole("tab", { name: "Operations" }).click();
+    await page.getByRole("tab", { name: "Timeline" }).click();
 
     // The headline: how long this job has been running, start to now.
     await expect(page.getByText("Elapsed so far")).toBeVisible({ timeout: 15000 });

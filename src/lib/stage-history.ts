@@ -9,6 +9,9 @@
  * interesting the moment the deal moves on.
  */
 
+/** How a deal got into a stage when no person moved it. */
+export type StageMoveVia = "automation" | "signature";
+
 export type StageEventRow = {
   id: string;
   stageId: string | null;
@@ -16,6 +19,10 @@ export type StageEventRow = {
   position: number;
   enteredAt: string;
   exitedAt: string | null;
+  /** Who moved the deal into this stage, by name. Null when nobody is on record. */
+  movedBy?: string | null;
+  /** Set instead of a name when the move was not a person's. */
+  via?: StageMoveVia | null;
 };
 
 export type TimelineRow = StageEventRow & {

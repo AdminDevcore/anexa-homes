@@ -159,6 +159,7 @@ export function DealStageTimeline({ timeline }: { timeline: Timeline }) {
             {rows.map((r, i) => {
               const last = i === rows.length - 1;
               const finished = i === finish;
+              const by = movedByLabel(r);
               return (
                 <li key={r.id} className="relative flex gap-3 pb-3 last:pb-0">
                   {/* Rail */}
@@ -194,6 +195,7 @@ export function DealStageTimeline({ timeline }: { timeline: Timeline }) {
                     </div>
                     <div className="text-[11px] tabular-nums text-muted-foreground">
                       {fmtDate(r.enteredAt)} → {r.exitedAt ? fmtDate(r.exitedAt) : "now"}
+                      {by ? ` · ${by}` : null}
                     </div>
                   </div>
                 </li>
@@ -288,6 +290,17 @@ function byStage(rows: TimelineRow[], finishName: string | null): Bucket[] {
   // Ties keep the order they happened in — Map preserves insertion order and
   // sort is stable, so a run of same-length stages still reads chronologically.
   return [...byName.values()].sort((a, b) => b.days - a.days);
+}
+
+/**
+ * Who put the deal into this stage. Nothing at all on a move made before the
+ * mover was recorded — "unknown" beside every old row would read as a fault.
+ */
+function movedByLabel(row: TimelineRow): string | null {
+  if (row.movedBy) return `by ${row.movedBy}`;
+  if (row.via === "automation") return "by automation";
+  if (row.via === "signature") return "homeowner signed";
+  return null;
 }
 
 /** "Aug 9 → Aug 28, 2026" — the year said once unless the run crossed one. */

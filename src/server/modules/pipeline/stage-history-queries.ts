@@ -19,7 +19,16 @@ export async function leadStageTimeline(lead: {
     prisma.leadStageEvent.findMany({
       where: { leadId: lead.id },
       orderBy: { enteredAt: "asc" },
-      select: { id: true, stageId: true, stageName: true, position: true, enteredAt: true, exitedAt: true },
+      select: {
+        id: true,
+        stageId: true,
+        stageName: true,
+        position: true,
+        enteredAt: true,
+        exitedAt: true,
+        via: true,
+        movedBy: { select: { firstName: true, lastName: true } },
+      },
     }),
     lead.pipelineId
       ? prisma.pipelineStage.findMany({
@@ -55,6 +64,8 @@ export async function leadStageTimeline(lead: {
     position: e.position,
     enteredAt: e.enteredAt.toISOString(),
     exitedAt: e.exitedAt ? e.exitedAt.toISOString() : null,
+    movedBy: e.movedBy ? `${e.movedBy.firstName} ${e.movedBy.lastName}`.trim() : null,
+    via: e.via === "automation" || e.via === "signature" ? e.via : null,
   }));
 
   return buildTimeline(rows, {
