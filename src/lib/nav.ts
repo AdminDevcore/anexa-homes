@@ -57,7 +57,24 @@ export type NavItem = {
    * the item highlights on all of them, and the page draws the tab strip.
    */
   tabs?: NavTab[];
+  /**
+   * The sidebar heading this item sits under. Unset means above every heading
+   * (Dashboard). A heading with nothing this user may open is not drawn, so a
+   * rep sees Money with only Commissions under it, and an installer no Admin.
+   */
+  group?: NavGroup;
 };
+
+/** Sidebar headings, in the order they are drawn. */
+export const NAV_GROUPS = [
+  { key: "sales", label: "Sales" },
+  { key: "work", label: "Work" },
+  { key: "files", label: "Files" },
+  { key: "money", label: "Money" },
+  { key: "admin", label: "Admin" },
+] as const;
+
+export type NavGroup = (typeof NAV_GROUPS)[number]["key"];
 
 /**
  * The two halves of what the company pays out: what the SALES FLOOR earned and
@@ -80,24 +97,25 @@ export function navRoutes(item: NavItem): string[] {
   return [item.href, ...(item.tabs ?? []).map((t) => t.href)];
 }
 
+// Listed in sidebar order: ungrouped first, then group by group.
 export const PORTAL_NAV: NavItem[] = [
   { label: "Dashboard", href: "/portal/dashboard", icon: LayoutDashboard, resource: "Project" },
-  { label: "Appointments", href: "/portal/leads", icon: Users, resource: "Lead" },
-  { label: "Pipeline", href: "/portal/pipeline", icon: KanbanSquare, resource: "Lead" },
-  { label: "Calendar", href: "/portal/calendar", icon: CalendarDays, resource: "Project" },
-  { label: "Field Map", href: "/portal/canvassing", icon: MapPinned, resource: "Canvassing" },
+  { label: "Appointments", href: "/portal/leads", icon: Users, resource: "Lead", group: "sales" },
+  { label: "Pipeline", href: "/portal/pipeline", icon: KanbanSquare, resource: "Lead", group: "sales" },
   // Storm Intel is folded into the Field Map (Storm leads / Address checker / Zones tabs).
-  { label: "Tasks", href: "/portal/tasks", icon: ListTodo, resource: "Task" },
-  { label: "Chat", href: "/portal/chat", icon: MessagesSquare, resource: "Chat" },
-  { label: "Documents", href: "/portal/documents", icon: FileSignature, resource: "Document" },
-  { label: "Knowledge Base", href: "/portal/knowledge", icon: GraduationCap, resource: "Knowledge", customerHidden: true },
+  { label: "Field Map", href: "/portal/canvassing", icon: MapPinned, resource: "Canvassing", group: "sales" },
+  { label: "Calendar", href: "/portal/calendar", icon: CalendarDays, resource: "Project", group: "work" },
+  { label: "Tasks", href: "/portal/tasks", icon: ListTodo, resource: "Task", group: "work" },
   // An installer reaches no deal page (see rbac/policies.ts), so this is the
-  // only way in to the job he is standing on — and the only way to bill it.
-  { label: "My Jobs", href: "/portal/jobs", icon: Hammer, resource: "Project", roles: ["installer"] },
-  { label: "Commissions", href: "/portal/commissions", icon: DollarSign, resource: "Commission", tabs: PAY_TABS },
-  { label: "Payroll", href: "/portal/payroll", icon: Wallet, resource: "Payroll" },
-  { label: "Bookkeeping", href: "/portal/bookkeeping", icon: Calculator, resource: "Bookkeeping" },
-  { label: "Reports", href: "/portal/reports", icon: BarChart3, resource: "Report" },
-  { label: "Team", href: "/portal/team", icon: UserCog, resource: "User" },
-  { label: "Settings", href: "/portal/settings", icon: Settings, resource: "Settings" },
+  // only way in to the job they are standing on — and the only way to bill it.
+  { label: "My Jobs", href: "/portal/jobs", icon: Hammer, resource: "Project", roles: ["installer"], group: "work" },
+  { label: "Chat", href: "/portal/chat", icon: MessagesSquare, resource: "Chat", group: "work" },
+  { label: "Documents", href: "/portal/documents", icon: FileSignature, resource: "Document", group: "files" },
+  { label: "Knowledge Base", href: "/portal/knowledge", icon: GraduationCap, resource: "Knowledge", customerHidden: true, group: "files" },
+  { label: "Commissions", href: "/portal/commissions", icon: DollarSign, resource: "Commission", tabs: PAY_TABS, group: "money" },
+  { label: "Payroll", href: "/portal/payroll", icon: Wallet, resource: "Payroll", group: "money" },
+  { label: "Bookkeeping", href: "/portal/bookkeeping", icon: Calculator, resource: "Bookkeeping", group: "money" },
+  { label: "Reports", href: "/portal/reports", icon: BarChart3, resource: "Report", group: "money" },
+  { label: "Team", href: "/portal/team", icon: UserCog, resource: "User", group: "admin" },
+  { label: "Settings", href: "/portal/settings", icon: Settings, resource: "Settings", group: "admin" },
 ];
