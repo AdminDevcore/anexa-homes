@@ -101,6 +101,10 @@ export const TAGGED_MODELS = [
   // real cost for no gain. Every call site already runs inside the action that
   // resolved the workspace, so the ambient value is the provenance.
   "ActivityLog",
+  // Nova's audit trail. Tagged like ActivityLog for the same reason: the row
+  // records which workspace the assistant acted in, and an auditor granted both
+  // workspaces reads it without toggling.
+  "NovaAuditEvent",
 ] as const;
 
 export type ScopedModel = (typeof SCOPED_MODELS)[number];

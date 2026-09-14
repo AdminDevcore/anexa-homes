@@ -5323,3 +5323,60 @@ model DealFeedPost {
   @@index([companyId, leadId, createdAt])
   @@map("deal_feed_posts")
 }
+
+// ---------------------------------------------------------------------------
+// Nova — the voice assistant in the Solar portal
+// ---------------------------------------------------------------------------
+
+enum NovaToolKind {
+  read
+  write
+  decline
+}
+
+enum NovaAuditPhase {
+  /// A read ran, or a confirmed write ran and succeeded.
+  executed
+  /// The permission or row check said no. Nothing ran.
+  refused
+  /// It ran (or tried to) and errored, or its input was invalid.
+  failed
+  /// A write was put to the user for confirmation. Nothing ran yet.
+  proposed
+  cancelled
+  expired
+  /// The request named something Nova does not do at all (stage moves, pricing…).
+  declined
+}
+
+/// Everything Nova did or was asked to do, one row per event.
+///
+/// APPEND-ONLY. Nothing in the app updates or deletes these rows — a guard test
+/// fails the build on any `novaAuditEvent.update/delete` in the module — so the
+/// record of what the assistant did as somebody cannot be edited afterwards.
+///
+/// Plain id columns, no relations, on purpose: the audit trail must outlive the
+/// deal and the person it names, and a cascade from either would delete the
+/// evidence along with the thing it is evidence about.
+model NovaAuditEvent {
+  id              String         @id @default(uuid())
+  companyId       String
+  vertical        Vertical?
+  actorId         String
+  conversationId  String
+  tool            String
+  kind            NovaToolKind
+  phase           NovaAuditPhase
+  args            Json           @default("{}")
+  result          Json?
+  error           String?
+  leadId          String?
+  entityType      String?
+  entityId        String?
+  pendingActionId String?
+  createdAt       DateTime       @default(now())
+
+  @@index([companyId, leadId, createdAt])
+  @@index([companyId, actorId, createdAt])
+  @@map("nova_audit_events")
+}
