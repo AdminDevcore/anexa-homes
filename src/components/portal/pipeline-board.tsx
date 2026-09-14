@@ -19,23 +19,19 @@ import { cn } from "@/lib/utils";
 import { useFormat } from "@/components/portal/branding-provider";
 import { moveLeadStage } from "@/server/modules/leads/actions";
 import { stageAccent } from "@/lib/chip-color";
+import {
+  isFiltering,
+  matchesPipelineFilters,
+  stageTimer,
+  type FilterableDeal,
+  type PipelineFilters,
+} from "@/lib/pipeline-filters";
 
-export type BoardLead = {
+export type BoardLead = FilterableDeal & {
   id: string;
-  name: string;
-  value: number;
-  phone: string | null;
-  city: string | null;
-  /** Full street/city/state/ZIP — searchable, but only `city` is rendered. */
-  addressText: string | null;
-  rep: string | null;
-  // Whole-day ages (computed server-side): total age since the appointment was
-  // booked, and time spent in the current stage.
+  // Whole-day age since the appointment was booked (computed server-side);
+  // `stageDays`, the time in the current stage, comes with FilterableDeal.
   ageDays: number;
-  stageDays: number;
-  // Recorded outcomes (null until set on the deal).
-  appointmentOutcome: string | null;
-  inspectionOutcome: string | null;
 };
 type Stage = { id: string; name: string; color: string; targetDays?: number };
 
@@ -58,12 +54,13 @@ export function PipelineBoard({
   stages,
   initialLeadsByStage,
   canMove,
+  filters,
 }: {
   stages: Stage[];
   initialLeadsByStage: Record<string, BoardLead[]>;
   canMove: boolean;
+  filters: PipelineFilters;
 }) {
-  const fmt = useFormat();
   const [columns, setColumns] = React.useState(initialLeadsByStage);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -120,12 +117,15 @@ export function PipelineBoard({
   }
 
   const active = activeId ? findLead(activeId) : null;
+  // A stage filter narrows the board to that column. The drag state underneath
+  // still holds every deal, so clearing a filter never loses a move.
+  const shownStages = filters.stage ? stages.filter((s) => s.id === filters.stage) : stages;
 
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="flex flex-1 gap-3 overflow-x-auto pb-4">
-        {stages.map((stage) => (
-          <Column key={stage.id} stage={stage} leads={columns[stage.id] ?? []} canMove={canMove} />
+        {shownStages.map((stage) => (
+          <Column key={stage.id} stage={stage} leads={columns[stage.id] ?? []} canMove={canMove} filters={filters} />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>
@@ -135,9 +135,25 @@ export function PipelineBoard({
   );
 }
 
-function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; canMove: boolean }) {
+function Column({
+  stage,
+  leads: all,
+  canMove,
+  filters,
+}: {
+  stage: Stage;
+  leads: BoardLead[];
+  canMove: boolean;
+  filters: PipelineFilters;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   const fmt = useFormat();
+  const filtering = isFiltering(filters);
+  // The count and the $ total describe the cards you can see, not the column's
+  // whole contents — a filtered header that still said "12 · $480K" would lie.
+  const leads = filtering
+    ? all.filter((l) => matchesPipelineFilters(l, { stageId: stage.id, targetDays: stage.targetDays ?? 0 }, filters))
+    : all;
   const total = leads.reduce((sum, l) => sum + l.value, 0);
 
   return (
@@ -176,7 +192,7 @@ function Column({ stage, leads, canMove }: { stage: Stage; leads: BoardLead[]; c
         ))}
         {leads.length === 0 && (
           <div className="m-1 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/70 px-2 py-10 text-center text-xs text-muted-foreground">
-            Drop appointments here
+            {filtering ? "No matching deals" : "Drop appointments here"}
           </div>
         )}
       </div>
@@ -210,8 +226,6 @@ function Card({
   return (
     <div
       ref={setNodeRef}
-      data-search-item
-      data-search-text={lead.addressText ?? undefined}
       data-testid="pipeline-card"
       className={cn(
         // shrink-0 is load-bearing: the card is a flex item in the column's
@@ -288,13 +302,15 @@ function Card({
             <CalendarClock className="size-3" /> {fmtDays(lead.ageDays)}
           </span>
           {(() => {
-            const overdue = targetDays > 0 && lead.stageDays > targetDays;
-            const dueSoon = targetDays > 0 && !overdue && lead.stageDays >= targetDays - 1;
+            // Same function the Stage timer filter uses, so a card coloured
+            // "overdue" is exactly a card that filter keeps.
+            const timer = stageTimer(lead.stageDays, targetDays);
+            const overdue = timer === "overdue";
             const cls = overdue ? "bg-red-100 font-medium text-red-700"
-              : dueSoon ? "bg-amber-100 font-medium text-amber-700"
-              : targetDays > 0 ? "bg-emerald-100 font-medium text-emerald-700"
+              : timer === "due_soon" ? "bg-amber-100 font-medium text-amber-700"
+              : timer === "on_track" ? "bg-emerald-100 font-medium text-emerald-700"
               : lead.stageDays >= 14 ? "bg-amber-100 font-medium text-amber-700" : "bg-muted/70";
-            const dot = overdue ? "🔴 " : dueSoon ? "🟡 " : targetDays > 0 ? "🟢 " : "";
+            const dot = overdue ? "🔴 " : timer === "due_soon" ? "🟡 " : timer ? "🟢 " : "";
             const title = targetDays > 0
               ? `${lead.stageDays}/${targetDays} days in stage${overdue ? ` · overdue by ${lead.stageDays - targetDays}` : ""}`
               : `${lead.stageDays} day${lead.stageDays === 1 ? "" : "s"} in this status`;

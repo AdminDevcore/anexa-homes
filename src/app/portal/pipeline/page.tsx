@@ -9,7 +9,7 @@ import { VERTICAL_LABEL } from "@/lib/vertical";
 import { PageHeader, EmptyState } from "@/components/portal/ui";
 import { type BoardLead } from "@/components/portal/pipeline-board";
 import { PipelineView, type ListLead } from "@/components/portal/pipeline-view";
-import { ListFilter } from "@/components/portal/list-filter";
+import type { FilterableDeal } from "@/lib/pipeline-filters";
 import { addressSearchText } from "@/lib/address";
 import { KanbanSquare } from "lucide-react";
 
@@ -57,7 +57,12 @@ export default async function PipelinePage() {
       stageChangedAt: true,
       appointmentDisposition: true,
       inspectionOutcome: true,
+      assignedRepId: true,
       assignedRep: { select: { firstName: true, lastName: true } },
+      setterId: true,
+      setter: { select: { firstName: true, lastName: true } },
+      sourceId: true,
+      source: { select: { name: true } },
     },
   });
 
@@ -71,51 +76,50 @@ export default async function PipelinePage() {
   for (const s of pipeline.stages) leadsByStage[s.id] = [];
   const listLeads: ListLead[] = [];
   for (const l of leads) {
-    const rep = l.assignedRep ? `${l.assignedRep.firstName} ${l.assignedRep.lastName}` : null;
-    const name = `${l.firstName} ${l.lastName}`;
-    // Only the city is shown on a card/row; the rest of the address rides along
-    // so the page search can match a street or ZIP the card never displays.
-    const addressText = addressSearchText(l) || null;
+    // Everything the Filters panel narrows by, carried by the card and the list
+    // row alike. Only the city is shown; the rest of the address rides along so
+    // the search can match a street or ZIP the card never displays.
+    const deal: FilterableDeal = {
+      name: `${l.firstName} ${l.lastName}`,
+      phone: l.phone,
+      city: l.city,
+      addressText: addressSearchText(l) || null,
+      rep: l.assignedRep ? `${l.assignedRep.firstName} ${l.assignedRep.lastName}` : null,
+      repId: l.assignedRepId,
+      setter: l.setter ? `${l.setter.firstName} ${l.setter.lastName}` : null,
+      setterId: l.setterId,
+      source: l.source?.name ?? null,
+      sourceId: l.sourceId,
+      appointmentOutcome: l.appointmentDisposition,
+      inspectionOutcome: l.inspectionOutcome,
+      value: l.value,
+      stageDays: daysSince(l.stageChangedAt, l.createdAt),
+      appointmentAt: l.appointmentAt?.toISOString() ?? null,
+      createdAt: l.createdAt.toISOString(),
+    };
     if (l.stageId && leadsByStage[l.stageId]) {
-      leadsByStage[l.stageId].push({
-        id: l.id,
-        name,
-        value: l.value,
-        phone: l.phone,
-        city: l.city,
-        addressText,
-        rep,
-        ageDays: daysSince(l.appointmentAt, l.createdAt),
-        stageDays: daysSince(l.stageChangedAt, l.createdAt),
-        appointmentOutcome: l.appointmentDisposition,
-        inspectionOutcome: l.inspectionOutcome,
-      });
+      leadsByStage[l.stageId].push({ id: l.id, ...deal, ageDays: daysSince(l.appointmentAt, l.createdAt) });
     }
     const st = l.stageId ? stageMeta.get(l.stageId) : undefined;
     listLeads.push({
       id: l.id,
-      name,
-      value: l.value,
-      city: l.city,
-      addressText,
-      rep,
+      ...deal,
       serviceType: l.serviceType,
+      stageId: st ? l.stageId : null,
       stageName: st?.name ?? "—",
       stageColor: st?.color ?? "#A1A1AA",
-      createdAt: l.createdAt.toISOString(),
+      targetDays: st?.targetDays ?? 0,
     });
   }
 
   return (
-    <ListFilter placeholder="Search deals by name, address…" hideInput>
-      <PipelineView
-        title={`${VERTICAL_LABEL[vertical]} Pipeline`}
-        count={leads.length}
-        stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name, color: s.color, targetDays: s.targetDays }))}
-        initialLeadsByStage={leadsByStage}
-        listLeads={listLeads}
-        canMove={can(user, "update", "Lead")}
-      />
-    </ListFilter>
+    <PipelineView
+      title={`${VERTICAL_LABEL[vertical]} Pipeline`}
+      count={leads.length}
+      stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name, color: s.color, targetDays: s.targetDays }))}
+      initialLeadsByStage={leadsByStage}
+      listLeads={listLeads}
+      canMove={can(user, "update", "Lead")}
+    />
   );
 }
