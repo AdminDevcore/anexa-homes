@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
+import { dealMoneyColumns, recomputeDealMoney } from "./deal-money";
 import { auditSignedEdit, checkSignedLock } from "./signed-lock";
 import { getSolarSettings } from "./settings";
 import { resolveDesignBattery, resolveSizingModule } from "./sizing";
@@ -472,6 +473,14 @@ export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderS
   const restamped = await restampAddersForLender(user.companyId, leadId, lenderId);
   if (restamped > 0) await recomputeAdderTotal(user.companyId, leadId, { force: true });
 
+  /**
+   * AND THE CONTRACT. A partner brings its own dealer fee, its own $/W ceiling
+   * and its own per-battery rule, so moving a deal between lenders reprices it
+   * even when not one adder moved. Leaving the cached figure behind is how a
+   * deal quoted one price on screen and submitted another to the bank.
+   */
+  await recomputeDealMoney(user.companyId, leadId);
+
   revalidatePath(`/portal/leads/${leadId}`);
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   return { ok: true as const, clearedProduct, restampedAdders: restamped };
@@ -752,121 +761,17 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       )?.contractPriceCents ?? null
     : null;
 
-  const assumptions = await getSolarSettings(user.companyId);
-
-  const design = await prisma.solarDesign.findUnique({
-    where: { leadId: f.leadId },
-    select: {
-      systemSizeKwDc: true,
-      lenderId: true,
-      systemType: true,
-      batteryQty: true,
-      // What the catalogue sells this battery for — the price the deal falls
-      // back to when nobody has typed one. See `batteryChargeCents`.
-      battery: { select: { priceCents: true } },
-      // The partner's per-battery rule, read off the LENDER rather than the
-      // programme row — the same place the $/W ceiling is read from.
-      lender: {
-        select: { maxFinalPricePerBatteryCents: true, finalBatteryPriceMode: true },
-      },
-    },
-  });
-  const lenderBand = design?.lender ?? null;
-
-  // The quoted product's terms are READ HERE, from the row, and never taken
-  // from the request. A rate sheet a caller can post arbitrary terms against is
-  // not a rate sheet — the APR a customer is quoted has to be one this lender
-  // actually offers. Scoped to the company, and to the lender the system was
-  // designed for, so a product id from elsewhere resolves to nothing.
-  const lenderProduct = f.lenderProductId
-    ? await prisma.solarLenderProduct.findFirst({
-        where: {
-          id: f.lenderProductId,
-          companyId: user.companyId,
-          ...(design?.lenderId ? { lenderId: design.lenderId } : {}),
-        },
-        select: LENDER_TERMS_SELECT,
-      })
-    : null;
-
-  // The adders are the DEAL's, read here rather than taken from the request.
-  // Nothing was sending them, so every save wrote a zero over the cached total
-  // and priced the contract without the extra work in it.
-  const adders = await resolveAdderTotal(user.companyId, f.leadId);
-
   /**
-   * WHAT THE STORAGE ADDS TO THIS CONTRACT.
+   * THE ONE DERIVATION, shared with every recompute.
    *
-   * The rep's own per-battery price where the deal carries one, else the
-   * catalogue's — the rule lives in `batteryChargeCents` so that this save, the
-   * builder that called it, the proposal and payroll cannot disagree about one
-   * house. Zero on a storage-only deal, which is priced per battery below.
+   * This block used to live inline here, which meant the financing step was the
+   * only thing in the product that could put `contractPriceCents` back in step.
+   * Everything else that moves the price — the roof, the battery, an adder, a
+   * change of lender — wrote its own table and left the contract stale. It is
+   * `deal-money.ts` now, called from all of them, so there is one answer to
+   * what a house costs rather than one per caller. See that file.
    */
-  const batteryPriceCents = batteryChargeCents({
-    systemType: design?.systemType,
-    batteryQty: design?.batteryQty,
-    dealPerBatteryCents: f.stickerPricePerBatteryCents,
-    cataloguePerBatteryCents: design?.battery?.priceCents ?? null,
-  });
-
-  // Every product-specific column is gated on the product — see
-  // financeRowForProduct for why "most of them" was a customer-facing defect.
-  const rowData = financeRowForProduct({ ...f, ...adders, batteryPriceCents }, {
-    systemSizeKwDc: design?.systemSizeKwDc ?? 0,
-    assumptions,
-    lenderProduct: toLenderProductTerms(lenderProduct),
-    targetNetPpwCents: assumptions.targetNetPpwCents,
-  });
-
-  /**
-   * The storage sticker, and the contract that follows from it.
-   *
-   * `financeRowForProduct` prices per watt — the company default, the target
-   * net, the partner's $/W ceiling. On a deal with no array every one of those
-   * multiplies by zero, so a storage deal is priced here instead, through the
-   * same ladder over batteries.
-   */
-  const isStorage = design?.systemType === "storage";
-  const storageSticker = isStorage ? (f.stickerPricePerBatteryCents ?? 0) : 0;
-  const storagePrice =
-    isStorage && (f.product === "cash" || f.product === "loan") && storageSticker > 0
-      ? priceStorageStored({
-          product: f.product,
-          batteryQty: design?.batteryQty ?? 0,
-          stickerPricePerBatteryCents: storageSticker,
-          dealerFeePct: f.product === "cash" ? 0 : (rowData.dealerFeePct ?? 0),
-          adderTotalCents: adders.adderTotalCents,
-          onTopAdderTotalCents: adders.onTopAdderTotalCents,
-          maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
-          finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
-        })
-      : null;
-
-  const data = {
-    ...rowData,
-    /**
-     * WHAT ONE BATTERY SELLS FOR ON THIS DEAL — on either kind of deal.
-     *
-     * It used to be zeroed on anything that was not storage-only, because
-     * nothing else read it. Something else reads it now: a battery beside an
-     * array is charged for on top of the per-watt price, and this is where a
-     * rep's own figure for it lives. Wiping it here would throw that price away
-     * on the next save of the financing step and quietly re-quote the deal at
-     * the catalogue's.
-     *
-     * Still zeroed on a deal with NO battery at all, which is the case the old
-     * rule was really about: a deal switched back to solar-only must not keep a
-     * price per battery nothing reads.
-     */
-    stickerPricePerBatteryCents: isStorage
-      ? storageSticker
-      : (design?.batteryQty ?? 0) > 0
-        ? (f.stickerPricePerBatteryCents ?? 0)
-        : 0,
-    // The $/W sticker is meaningless on storage and would be read as one.
-    ...(isStorage ? { grossPpwCents: 0 } : {}),
-    ...(storagePrice ? { contractPriceCents: storagePrice.breakdown.contractPriceCents } : {}),
-  };
+  const data = await dealMoneyColumns(user.companyId, f.leadId, f);
 
   const saved = await prisma.solarFinance.upsert({
     where: { leadId: f.leadId },
@@ -1949,6 +1854,13 @@ export async function setSolarSystemTypeAction(input: unknown) {
         : {}),
     },
   });
+
+  /**
+   * AND THE CONTRACT. Switching between an array and storage-only changes which
+   * ladder prices the deal — per watt or per battery — so the cached figure is
+   * a price for a system this deal no longer sells.
+   */
+  await recomputeDealMoney(user.companyId, leadId);
 
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   revalidatePath(`/portal/leads/${leadId}`);

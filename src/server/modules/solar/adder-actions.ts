@@ -7,6 +7,7 @@ import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
 import { checkSignedLock } from "./signed-lock";
+import { recomputeDealMoney } from "./deal-money";
 import { ADDER_BASES } from "@/lib/solar-adders";
 import {
   dealLenderId,
@@ -109,6 +110,15 @@ async function guard(
  */
 async function adderGrandTotal(companyId: string, leadId: string): Promise<number> {
   const split = await recomputeAdderTotal(companyId, leadId, { force: true });
+  /**
+   * The adders are part of the contract, so moving them moves the contract.
+   *
+   * `recomputeAdderTotal` writes the two adder columns and stops; the cached
+   * `contractPriceCents` beside them used to be left behind, which is how a
+   * deal ended up quoting one figure on the builder and another to the lender.
+   * See `recomputeDealMoney`.
+   */
+  await recomputeDealMoney(companyId, leadId);
   return split.adderTotalCents + split.onTopAdderTotalCents;
 }
 
