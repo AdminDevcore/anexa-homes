@@ -147,3 +147,41 @@ export function snapshotPriceSource(f: SnapshotFinancing): SolarPriceSource {
     rateMillsPerKwh: f.rateMillsPerKwh,
   };
 }
+
+/**
+ * WHAT THE HOUSEHOLD CONTRACTED TO PAY — the gross, before any credit.
+ *
+ * THE SECOND ANSWER, and the reason this sits beside `solarLeadValueCents`
+ * rather than replacing it. A solar deal has two defensible totals and they are
+ * for different readers:
+ *
+ *   `solarLeadValueCents`      what the household NETS after the federal
+ *                              credits their document quotes. The right figure
+ *                              on a pipeline card and in a conversation about
+ *                              affordability, and a deliberate product decision
+ *                              — see the docblock on that function.
+ *
+ *   `solarContractRevenueCents`  what the CONTRACT is written for. The right
+ *                              figure for revenue: it is the money the company
+ *                              is owed and the amount the lender funds. A tax
+ *                              credit is claimed by the homeowner on their own
+ *                              federal return months later; it is not a
+ *                              discount the company gave and it never reduces
+ *                              what the company books.
+ *
+ * Reporting revenue at the net understated every solar deal by the whole
+ * credit — 30% on a base-ITC job, up to 50% with both bonuses — which is what
+ * turned a $56,000 contract into $39,200 on the rep scorecard.
+ *
+ * LEASE AND PPA RETURN ZERO, exactly as the net figure does, and for the same
+ * reason: there is no contract price on a system the household does not buy,
+ * and multiplying a monthly out into a "revenue" figure would book a number
+ * nobody signed.
+ */
+export function solarContractRevenueCents(src: SolarPriceSource | null | undefined): number {
+  if (!src) return 0;
+  if (src.product === "lease" || src.product === "ppa") return 0;
+  // A zero contract is "not priced yet", never a sale of nothing — the same
+  // reading `solarDealValue` takes of it.
+  return src.contractPriceCents && src.contractPriceCents > 0 ? src.contractPriceCents : 0;
+}

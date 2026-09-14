@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { getSaleLine } from "@/server/modules/pipeline/sale-line";
 import type { Period, RenderableReport, ResolvedScope } from "./builders";
+import { solarContractByLead } from "./solar-contract";
 
 type ReportUser = { companyId: string; userId: string; role: string };
 const usd = (cents: number) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
@@ -21,6 +22,8 @@ export async function buildLeadSourceReport(user: ReportUser, period: Period, sc
   const leads = await prisma.lead.findMany({
     where: { ...scope.leadWhere, createdAt: inPeriod },
     select: {
+      id: true,
+      vertical: true,
       stageId: true,
       value: true,
       claimPrice: true,
@@ -28,6 +31,19 @@ export async function buildLeadSourceReport(user: ReportUser, period: Period, sc
       project: { select: { contractValue: true, supplementCents: true, deductibleCents: true } },
     },
   });
+
+  /**
+   * The solar deals that are sold but have no job yet.
+   *
+   * The `claimPrice ?? value` fallback below is roofing's: `claimPrice` is null
+   * on solar and `value` is the household's NET after the federal credits, so a
+   * solar deal without a Project attributed its source a figure 30–50% under
+   * the contract. See `solarContractByLead`.
+   */
+  const soldSolarWithoutJob = leads
+    .filter((l) => l.vertical === "solar" && !l.project && !!l.stageId && saleLine.stageIds.has(l.stageId))
+    .map((l) => l.id);
+  const solarContracts = await solarContractByLead(user.companyId, soldSolarWithoutJob);
 
   type Agg = { leads: number; won: number; revenue: number };
   const bySource = new Map<string, Agg>();
@@ -39,7 +55,7 @@ export async function buildLeadSourceReport(user: ReportUser, period: Period, sc
       e.won += 1;
       e.revenue += l.project
         ? l.project.contractValue + l.project.supplementCents + l.project.deductibleCents
-        : l.claimPrice ?? l.value;
+        : (solarContracts.get(l.id) ?? l.claimPrice ?? l.value);
     }
     bySource.set(name, e);
   }
