@@ -253,7 +253,7 @@ Verified by role: `sales_rep`, `canvasser`, `manager`, `admin`, `accounting`, `s
 | Integration | 527 total / 525 passed / **2 pre-existing failures** | 628 total / **626 passed** / same 2 |
 | E2E (`playwright`, solar flag ON) | 259 total / **220 passed / 31 failed** / 8 skipped | 264 total / **227 passed / 29 failed** / 8 skipped |
 | Typecheck | clean | **clean** |
-| Lint | 54 errors | **54 errors — identical, zero regression** |
+| Lint | 53 errors | **53 errors — identical, zero regression** |
 
 **Integration.** The 2 failures are `calendar/visit-crew.itest.ts` and `solar/battery-pricing.itest.ts`. Re-proven pre-existing this pass by checking out `c83ddce` detached and running both there, where they fail on the same assertions with the same values (`expected 4750000 to be 9500000`; an installer href that should be null). Untouched in either pass.
 
@@ -278,7 +278,7 @@ Verified by role: `sales_rep`, `canvasser`, `manager`, `admin`, `accounting`, `s
 
 **Net, under matched conditions: 7 more tests pass on this branch than on the baseline, and 2 fewer fail.** No failure in any run has been traced to a source change in this work, with the one outstanding verification named above.
 
-**Lint.** 54 errors, byte-identical to baseline. Two arose during this pass and both are fixed: a synchronous `setState` in an effect I added (`7131e93`) and a `prefer-const` in my own fixture (`1f6c02b`). The one remaining error in a file I touched — `bookkeeping-client.tsx` — is a reconciliation effect I never edited, verified byte-identical to `c83ddce` and merely shifted down 57 lines by code above it. The other 53 are the project's backlog.
+**Lint.** 53 errors, identical to baseline. Two arose during this pass and both are fixed: a synchronous `setState` in an effect I added (`7131e93`) and a `prefer-const` in my own fixture (`1f6c02b`). The one remaining error in a file I touched — `bookkeeping-client.tsx` — is a reconciliation effect I never edited, verified byte-identical to `c83ddce` and merely shifted down 57 lines by code above it. The other 52 are the project's backlog.
 
 ---
 
