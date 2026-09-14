@@ -17,6 +17,12 @@ import { getSkipTraceProvider, type OwnerResult } from "@/server/modules/skiptra
 import { resolveStageForAppointment } from "@/server/modules/leads/staging";
 import { resolveOwningRepId } from "@/server/modules/leads/owning-rep";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
+import {
+  appointmentMovePatch,
+  planLeadAppointmentMove,
+  recordAppointmentReschedule,
+} from "@/server/modules/leads/appointment-moves";
+import { tracksReschedules } from "@/lib/appointment-reschedule";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -543,7 +549,10 @@ export async function convertKnockToAppointmentAction(
   if (knock.leadId) {
     const lead = await prisma.lead.findFirst({
       where: { id: knock.leadId, companyId: me.companyId },
-      select: { id: true, pipelineId: true, stageId: true },
+      select: {
+        id: true, pipelineId: true, stageId: true,
+        vertical: true, appointmentAt: true, appointmentDisposition: true,
+      },
     });
     if (lead) {
       const stageId = await resolveStageForAppointment({
@@ -551,6 +560,8 @@ export async function convertKnockToAppointmentAction(
         candidateStageId: lead.stageId,
         hasAppointment: true,
       });
+      // Booking again from the map on a deal that already had a time moves it.
+      const move = await planLeadAppointmentMove(me.companyId, lead, when);
       await prisma.lead.update({
         where: { id: lead.id },
         data: {
@@ -558,9 +569,11 @@ export async function convertKnockToAppointmentAction(
           assignedRepId: ownerRepId,
           stageId,
           ...(stageId !== lead.stageId ? { stageChangedAt: new Date() } : {}),
+          ...appointmentMovePatch(move),
         },
       });
       if (stageId !== lead.stageId) await recordStageEntry({ leadId: lead.id, stageId, movedById: me.userId });
+      await recordAppointmentReschedule(lead.id, move, me.userId);
     }
   }
 
@@ -828,6 +841,24 @@ export async function rescheduleAppointmentAction(
       where: { companyId: me.companyId, leadId: knock.leadId, title: { startsWith: "Appointment" }, dueAt: prev },
       data: { dueAt: when },
     });
+  }
+  // Solar: the deal carries the time the Appointments list and the deal page
+  // read. Moving only the knock left both showing the old time and the
+  // reschedule uncounted. Only a deal that already HAS a time is moved, so no
+  // stage needs re-deriving. Roofing keeps the knock-only behaviour it had.
+  if (knock.leadId) {
+    const lead = await prisma.lead.findFirst({
+      where: { id: knock.leadId, companyId: me.companyId },
+      select: { id: true, vertical: true, appointmentAt: true, appointmentDisposition: true },
+    });
+    if (lead?.appointmentAt && tracksReschedules(lead.vertical)) {
+      const move = await planLeadAppointmentMove(me.companyId, lead, when);
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { appointmentAt: when, ...appointmentMovePatch(move) },
+      });
+      await recordAppointmentReschedule(lead.id, move, me.userId);
+    }
   }
   await prisma.knockEvent.create({
     data: {
