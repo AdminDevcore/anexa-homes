@@ -48,6 +48,7 @@ export const SCOPED_MODELS = [
   "Claim",
   // Pipeline + workflow config
   "Pipeline",
+  "PipelineFilterView",
   // Per-vertical configuration
   "LeadSource",
   "CustomFieldDef",

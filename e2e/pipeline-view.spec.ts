@@ -24,7 +24,41 @@ test("pipeline: Kanban/List toggle shows deals as a table that opens the deal", 
   await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
 });
 
-test("pipeline: Filters narrows the board by rep, survives a reload, and clears", async ({ page }) => {
+/**
+ * Builds "Rep is any of <first rep>" in the filter builder and applies it.
+ * Returns the rep's name and how many cards the board narrowed to.
+ */
+async function filterByFirstRep(page: Page) {
+  const cards = page.locator('[data-testid="pipeline-card"]');
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  await page.getByRole("combobox", { name: "Field" }).click();
+  await page.getByRole("option", { name: "Rep", exact: true }).click();
+
+  await page.getByRole("button", { name: /^Values/ }).click();
+  const picker = page.getByTestId("value-picker");
+  const repName = (await picker.locator("[data-option-label]").first().innerText()).trim();
+  await picker.getByRole("checkbox").first().click();
+  await page.keyboard.press("Escape"); // closes the value list, not the builder
+  await page.getByRole("button", { name: "Apply" }).click();
+
+  await expect(page.getByRole("button", { name: "Filters (1 active)" })).toBeVisible();
+  const narrowed = await cards.count();
+  return { repName, narrowed };
+}
+
+/**
+ * Opens the Views menu once any previous menu has finished closing, and returns
+ * only when the new one is open. A click on the trigger while the last menu is
+ * still animating shut is swallowed — measured: no menu open after reopening
+ * straight after picking a view, one open after waiting.
+ */
+async function openViewsMenu(page: Page, name: string | RegExp) {
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await page.getByRole("button", typeof name === "string" ? { name, exact: true } : { name }).click();
+  await expect(page.getByRole("menu")).toBeVisible();
+}
+
+test("pipeline: the filter builder narrows by rep, offers custom fields, and survives a reload", async ({ page }) => {
   await login(page, "manager@anexahomes.com");
   await page.goto("/portal/pipeline");
 
@@ -32,19 +66,16 @@ test("pipeline: Filters narrows the board by rep, survives a reload, and clears"
   await expect(cards.first()).toBeVisible({ timeout: 15000 });
   const total = await cards.count();
 
+  // The company's own fields (the seeded "Damage Type") sit beside the built-in ones.
   await page.getByRole("button", { name: "Filters", exact: true }).click();
-  await page.getByRole("combobox", { name: "Rep" }).click();
-  // The list opens on "Any rep"; the next option is the first real rep.
-  const option = page.getByRole("option").nth(1);
-  const repName = (await option.locator("[data-option-label]").innerText()).trim();
-  await option.click();
+  await page.getByRole("combobox", { name: "Field" }).click();
+  await expect(page.getByRole("option", { name: "Damage Type" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
 
-  await expect(page).toHaveURL(/[?&]rep=/);
-  await expect(page.getByRole("button", { name: "Filters (1 active)" })).toBeVisible();
-  await expect(page.getByRole("button", { name: `Remove filter Rep: ${repName}` })).toBeVisible();
-
-  const narrowed = await cards.count();
+  const { repName, narrowed } = await filterByFirstRep(page);
+  await expect(page).toHaveURL(/[?&]f=/);
+  await expect(page.getByRole("button", { name: `Remove filter Rep is any of ${repName}` })).toBeVisible();
   expect(narrowed).toBeGreaterThan(0);
   expect(narrowed).toBeLessThanOrEqual(total);
   for (const card of await cards.all()) await expect(card).toContainText(repName);
@@ -56,5 +87,37 @@ test("pipeline: Filters narrows the board by rep, survives a reload, and clears"
 
   await page.getByRole("button", { name: "Clear all" }).click();
   await expect(cards).toHaveCount(total);
-  await expect(page).not.toHaveURL(/[?&]rep=/);
+  await expect(page).not.toHaveURL(/[?&]f=/);
+});
+
+test("pipeline: a shared saved view reopens its filters and can be deleted", async ({ page }) => {
+  await login(page, "manager@anexahomes.com");
+  await page.goto("/portal/pipeline");
+
+  const cards = page.locator('[data-testid="pipeline-card"]');
+  await expect(cards.first()).toBeVisible({ timeout: 15000 });
+  const total = await cards.count();
+  const { narrowed } = await filterByFirstRep(page);
+
+  await openViewsMenu(page, "Views");
+  await page.getByRole("menuitem", { name: "Save current filters as a new view…" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Name").fill("E2E rep view");
+  await dialog.getByRole("checkbox", { name: /Share with the whole team/ }).click();
+  await dialog.getByRole("button", { name: "Save view" }).click();
+  await expect(page.getByRole("button", { name: /^Views \(E2E rep view/ })).toBeVisible({ timeout: 15000 });
+
+  // Off again, then back on from the menu.
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await expect(cards).toHaveCount(total);
+  await openViewsMenu(page, "Views");
+  await page.getByRole("menuitem", { name: /E2E rep view/ }).click();
+  await expect(cards).toHaveCount(narrowed);
+
+  await openViewsMenu(page, /^Views \(E2E rep view/);
+  await page.getByRole("menuitem", { name: /Delete “E2E rep view”/ }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByRole("button", { name: "Views", exact: true })).toBeVisible({ timeout: 15000 });
+  await openViewsMenu(page, "Views");
+  await expect(page.getByRole("menuitem", { name: /E2E rep view/ })).toHaveCount(0);
 });

@@ -348,6 +348,7 @@ model Company {
   invitations              Invitation[]
   notificationRules        NotificationRule[]
   automationRules          AutomationRule[]
+  pipelineFilterViews      PipelineFilterView[]
   automationRuns           AutomationRun[]
   notifications            Notification[]
   conversations            Conversation[]
@@ -626,6 +627,7 @@ model User {
   solarDealCompsTakenFrom SolarDealComp[]      @relation("SolarDealCompReassignedFrom")
   chargebacks             Chargeback[]         @relation("ChargebackUser")
   payrollAdjustments      PayrollAdjustment[]  @relation("PayrollAdjustmentUser")
+  pipelineFilterViews     PipelineFilterView[] @relation("PipelineFilterViewCreator")
 
   @@unique([companyId, email])
   @@unique([companyId, employeeNo])
@@ -2293,6 +2295,31 @@ model AutomationRule {
 
   @@index([companyId, vertical, trigger, active])
   @@map("automation_rules")
+}
+
+/// A saved Pipeline filter: a named list of filter-builder conditions, private to
+/// the person who made it or shared with everyone on this workspace's pipeline.
+/// `conditions` is `[{ field, op, values }]`, the shape src/lib/pipeline-filters.ts
+/// reads, and it is re-sanitised on every read. It holds no deal data: applying a
+/// view filters deals the viewer could already see.
+model PipelineFilterView {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: a roofing view names roofing stages and fields.
+  vertical    Vertical @default(roofing)
+  createdById String
+  createdBy   User     @relation("PipelineFilterViewCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  name        String
+  /// In everyone's Views menu, not just the creator's. Sharing needs Pipeline:update.
+  shared      Boolean  @default(false)
+  conditions  Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, vertical, shared])
+  @@index([createdById])
+  @@map("pipeline_filter_views")
 }
 
 /// One firing of one rule against one deal.

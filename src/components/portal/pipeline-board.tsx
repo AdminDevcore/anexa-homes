@@ -19,19 +19,22 @@ import { cn } from "@/lib/utils";
 import { useFormat } from "@/components/portal/branding-provider";
 import { moveLeadStage } from "@/server/modules/leads/actions";
 import { stageAccent } from "@/lib/chip-color";
-import {
-  isFiltering,
-  matchesPipelineFilters,
-  stageTimer,
-  type FilterableDeal,
-  type PipelineFilters,
-} from "@/lib/pipeline-filters";
+import { stageTimer } from "@/lib/pipeline-filters";
 
-export type BoardLead = FilterableDeal & {
+export type BoardLead = {
   id: string;
-  // Whole-day age since the appointment was booked (computed server-side);
-  // `stageDays`, the time in the current stage, comes with FilterableDeal.
+  name: string;
+  value: number;
+  phone: string | null;
+  city: string | null;
+  rep: string | null;
+  // Whole-day ages (computed server-side): total age since the appointment was
+  // booked, and time spent in the current stage.
   ageDays: number;
+  stageDays: number;
+  // Recorded outcomes (null until set on the deal).
+  appointmentOutcome: string | null;
+  inspectionOutcome: string | null;
 };
 type Stage = { id: string; name: string; color: string; targetDays?: number };
 
@@ -54,12 +57,19 @@ export function PipelineBoard({
   stages,
   initialLeadsByStage,
   canMove,
-  filters,
+  filtering,
+  isVisible,
+  visibleStageIds,
 }: {
   stages: Stage[];
   initialLeadsByStage: Record<string, BoardLead[]>;
   canMove: boolean;
-  filters: PipelineFilters;
+  /** Anything narrowing the board — the columns then count only what they show. */
+  filtering: boolean;
+  /** Whether a card passes the filters in the column it sits in right now. */
+  isVisible: (leadId: string, stage: Stage) => boolean;
+  /** Columns a Stage filter allows; null = every column. */
+  visibleStageIds: Set<string> | null;
 }) {
   const [columns, setColumns] = React.useState(initialLeadsByStage);
   const [activeId, setActiveId] = React.useState<string | null>(null);
@@ -117,15 +127,22 @@ export function PipelineBoard({
   }
 
   const active = activeId ? findLead(activeId) : null;
-  // A stage filter narrows the board to that column. The drag state underneath
-  // still holds every deal, so clearing a filter never loses a move.
-  const shownStages = filters.stage ? stages.filter((s) => s.id === filters.stage) : stages;
+  // The drag state underneath still holds every deal, so clearing a filter
+  // never loses a move made while it was on.
+  const shownStages = visibleStageIds ? stages.filter((s) => visibleStageIds.has(s.id)) : stages;
 
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="flex flex-1 gap-3 overflow-x-auto pb-4">
         {shownStages.map((stage) => (
-          <Column key={stage.id} stage={stage} leads={columns[stage.id] ?? []} canMove={canMove} filters={filters} />
+          <Column
+            key={stage.id}
+            stage={stage}
+            leads={columns[stage.id] ?? []}
+            canMove={canMove}
+            filtering={filtering}
+            isVisible={isVisible}
+          />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>
@@ -139,21 +156,20 @@ function Column({
   stage,
   leads: all,
   canMove,
-  filters,
+  filtering,
+  isVisible,
 }: {
   stage: Stage;
   leads: BoardLead[];
   canMove: boolean;
-  filters: PipelineFilters;
+  filtering: boolean;
+  isVisible: (leadId: string, stage: Stage) => boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   const fmt = useFormat();
-  const filtering = isFiltering(filters);
   // The count and the $ total describe the cards you can see, not the column's
   // whole contents — a filtered header that still said "12 · $480K" would lie.
-  const leads = filtering
-    ? all.filter((l) => matchesPipelineFilters(l, { stageId: stage.id, targetDays: stage.targetDays ?? 0 }, filters))
-    : all;
+  const leads = filtering ? all.filter((l) => isVisible(l.id, stage)) : all;
   const total = leads.reduce((sum, l) => sum + l.value, 0);
 
   return (

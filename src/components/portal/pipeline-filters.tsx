@@ -1,60 +1,86 @@
 "use client";
 
 import * as React from "react";
-import { SlidersHorizontal, X } from "lucide-react";
+import { ChevronDown, Plus, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useFormat } from "@/components/portal/branding-provider";
 import {
+  FIELD_GROUPS,
   NONE,
-  STAGE_TIMERS,
-  activeFilterCount,
-  clearFilters,
-  type FilterOption,
-  type PipelineFilterOptions,
-  type PipelineFilters,
-  type StageTimer,
+  VALUELESS,
+  describeCondition,
+  isComplete,
+  operatorsFor,
+  type Condition,
+  type FilterField,
+  type Operator,
 } from "@/lib/pipeline-filters";
 
-/** Radix Select reserves "" for "no value", so "any" needs a stand-in inside the control. */
-const ANY = "__any__";
-
-type Shared = {
-  filters: PipelineFilters;
-  onChange: (patch: Partial<PipelineFilters>) => void;
-  options: PipelineFilterOptions;
-  stages: FilterOption[];
-};
+let rowSeq = 0;
+/** Row ids only need to be unique inside one open builder. */
+const blankRow = (): Condition => ({ id: `row-${++rowSeq}`, field: "", op: "any_of", values: [] });
 
 /**
- * The Filters button and its panel. Every change applies as it is made — the
- * board behind the panel narrows live — so there is no Apply step to forget.
+ * The Filters button and its builder: "Where <field> <operator> <values>", as
+ * many rows as you like, all of which must hold. Rows are a DRAFT until Apply,
+ * so a half-picked row never empties the board behind the panel — but the
+ * footer counts what the draft would show as you build it.
  */
-export function PipelineFiltersButton({
-  filters,
-  onChange,
-  options,
-  stages,
-  shown,
+export function FilterBuilderButton({
+  fields,
+  conditions,
+  onApply,
+  countMatches,
   total,
-}: Shared & { shown: number; total: number }) {
-  const count = activeFilterCount(filters);
+  onSaveAsView,
+}: {
+  fields: FilterField[];
+  conditions: Condition[];
+  onApply: (next: Condition[]) => void;
+  countMatches: (draft: Condition[]) => number;
+  total: number;
+  onSaveAsView: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [draft, setDraft] = React.useState<Condition[]>([]);
+  const byKey = React.useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
+  const active = conditions.filter((c) => isComplete(c, byKey.get(c.field))).length;
+  const ready = draft.filter((c) => isComplete(c, byKey.get(c.field)));
 
-  function toggleTimer(key: StageTimer) {
-    const next = new Set(filters.timers);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    // Fixed order, so the same choice always writes the same URL.
-    onChange({ timers: STAGE_TIMERS.map((t) => t.key).filter((k) => next.has(k)) });
+  function onOpenChange(next: boolean) {
+    if (next) setDraft(conditions.length ? conditions.map((c) => ({ ...c })) : [blankRow()]);
+    setOpen(next);
   }
 
-  const hasInspections = options.inspections.some((o) => o.value !== NONE) || filters.inspection !== "";
+  const patch = (id: string, p: Partial<Condition>) =>
+    setDraft((d) => d.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  const remove = (id: string) =>
+    setDraft((d) => {
+      const next = d.filter((c) => c.id !== id);
+      return next.length ? next : [blankRow()];
+    });
+
+  function apply(e?: React.FormEvent) {
+    e?.preventDefault();
+    onApply(ready);
+    setOpen(false);
+  }
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -62,345 +88,401 @@ export function PipelineFiltersButton({
           className="shrink-0"
           // The badge is a bare number; without this a screen reader hears
           // "Filters" whether none or five are active.
-          aria-label={count > 0 ? `Filters (${count} active)` : "Filters"}
+          aria-label={active > 0 ? `Filters (${active} active)` : "Filters"}
         >
           <SlidersHorizontal className="size-4" />
           Filters
-          {count > 0 ? (
+          {active > 0 ? (
             <span className="ml-0.5 inline-flex size-4 items-center justify-center rounded-full bg-gold text-[10px] font-semibold text-gold-foreground tabular-nums">
-              {count}
+              {active}
             </span>
           ) : null}
         </Button>
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="max-h-[min(40rem,calc(100vh-10rem))] w-[min(34rem,calc(100vw-2rem))] gap-3 overflow-y-auto p-3"
+        className="max-h-[min(44rem,calc(100vh-10rem))] w-[min(48rem,calc(100vw-2rem))] gap-0 overflow-y-auto p-0"
       >
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Filters</span>
-          {count > 0 ? (
+        <form onSubmit={apply} className="flex flex-col">
+          <div className="border-b border-border px-4 py-3">
+            <p className="text-sm font-semibold">Filters</p>
+            <p className="text-xs text-muted-foreground">Show deals where every condition is true</p>
+          </div>
+
+          <div className="flex flex-col gap-2.5 px-4 py-3">
+            {draft.map((c, i) => (
+              <ConditionRow
+                key={c.id}
+                first={i === 0}
+                condition={c}
+                fields={fields}
+                field={byKey.get(c.field)}
+                onChange={(p) => patch(c.id, p)}
+                onRemove={() => remove(c.id)}
+              />
+            ))}
             <button
               type="button"
-              onClick={() => onChange(clearFilters(filters))}
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setDraft((d) => [...d, blankRow()])}
+              className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-gold-muted transition-colors hover:bg-muted sm:ml-12"
             >
-              <X className="size-3" /> Reset
+              <Plus className="size-4" /> Add condition
             </button>
-          ) : null}
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <OptionSelect
-            label="Rep"
-            anyLabel="Any rep"
-            value={filters.rep}
-            options={options.reps}
-            onChange={(rep) => onChange({ rep })}
-          />
-          <OptionSelect
-            label="Setter"
-            anyLabel="Any setter"
-            value={filters.setter}
-            options={options.setters}
-            onChange={(setter) => onChange({ setter })}
-          />
-          <OptionSelect
-            label="Stage"
-            anyLabel="Any stage"
-            value={filters.stage}
-            options={stages}
-            onChange={(stage) => onChange({ stage })}
-          />
-          <OptionSelect
-            label="Lead source"
-            anyLabel="Any source"
-            value={filters.source}
-            options={options.sources}
-            onChange={(source) => onChange({ source })}
-          />
-          <OptionSelect
-            label="Appointment outcome"
-            anyLabel="Any outcome"
-            value={filters.outcome}
-            options={options.outcomes}
-            onChange={(outcome) => onChange({ outcome })}
-            unknownLabel={filters.outcome}
-          />
-          {hasInspections ? (
-            <OptionSelect
-              label="Inspection outcome"
-              anyLabel="Any inspection outcome"
-              value={filters.inspection}
-              options={options.inspections}
-              onChange={(inspection) => onChange({ inspection })}
-              unknownLabel={filters.inspection}
-            />
-          ) : null}
-          <OptionSelect
-            label="City"
-            anyLabel="Any city"
-            value={filters.city}
-            options={options.cities}
-            onChange={(city) => onChange({ city })}
-            unknownLabel={filters.city}
-          />
-        </div>
-
-        <PanelField label="Stage timer" hint="Stages with a target only">
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Stage timer">
-            {STAGE_TIMERS.map((t) => {
-              const active = filters.timers.includes(t.key);
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => toggleTimer(t.key)}
-                  className={cn(
-                    "h-8 rounded-full border px-3 text-sm transition-colors",
-                    active
-                      ? "border-gold/40 bg-gold/10 font-medium text-foreground"
-                      : "border-border bg-card text-muted-foreground hover:bg-muted"
-                  )}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
           </div>
-        </PanelField>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <RangeField
-            label="Deal value"
-            min={filters.valueMin}
-            max={filters.valueMax}
-            onChange={(valueMin, valueMax) => onChange({ valueMin, valueMax })}
-            type="number"
-          />
-          <RangeField
-            label="Days in stage"
-            min={filters.daysMin}
-            max={filters.daysMax}
-            onChange={(daysMin, daysMax) => onChange({ daysMin, daysMax })}
-            type="number"
-          />
-        </div>
-
-        {/* A date input needs the room a number does not — two to a row clips "mm/dd/yyyy". */}
-        <div className="grid gap-3">
-          <RangeField
-            label="Appointment date"
-            min={filters.apptFrom}
-            max={filters.apptTo}
-            onChange={(apptFrom, apptTo) => onChange({ apptFrom, apptTo })}
-            type="date"
-          />
-          <RangeField
-            label="Created"
-            min={filters.createdFrom}
-            max={filters.createdTo}
-            onChange={(createdFrom, createdTo) => onChange({ createdFrom, createdTo })}
-            type="date"
-          />
-        </div>
-
-        <p className="border-t border-border pt-2.5 text-xs text-muted-foreground tabular-nums">
-          {`${shown} of ${total} ${total === 1 ? "deal" : "deals"} match`}
-        </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={ready.length === 0}
+              onClick={() => {
+                onApply(ready);
+                setOpen(false);
+                onSaveAsView();
+              }}
+            >
+              Save as view…
+            </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {`${countMatches(ready)} of ${total} ${total === 1 ? "deal" : "deals"} match`}
+              </span>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setDraft([blankRow()])}>
+                Clear
+              </Button>
+              <Button type="submit" size="sm">
+                Apply
+              </Button>
+            </div>
+          </div>
+        </form>
       </PopoverContent>
     </Popover>
   );
 }
 
-/** The filters in force, one removable chip each — so a narrowed board says why. */
-export function ActivePipelineFilters({ filters, onChange, options, stages }: Shared) {
-  const fmt = useFormat();
-  const money = (s: string) => fmt.money(Math.round(Number(s) * 100));
-  const chips: { key: string; label: string; clear: Partial<PipelineFilters> }[] = [];
+/** The values a row keeps when its operator changes: whatever still fits. */
+function carryValues(c: Condition, op: Operator): string[] {
+  if (VALUELESS.has(op)) return [];
+  const isList = (o: Operator) => o === "any_of" || o === "none_of";
+  const isDays = (o: Operator) => o === "last_days" || o === "next_days";
+  if (isList(op) !== isList(c.op) || isDays(op) !== isDays(c.op)) return [];
+  if (isList(op)) return c.values;
+  return op === "between" ? c.values.slice(0, 2) : c.values.slice(0, 1);
+}
 
-  const named = (opts: FilterOption[], v: string, unknown: string) =>
-    opts.find((o) => o.value === v)?.label ?? unknown;
-  const add = (key: string, label: string, clear: Partial<PipelineFilters>) => chips.push({ key, label, clear });
-
-  if (filters.rep) add("rep", `Rep: ${named(options.reps, filters.rep, "not on this pipeline")}`, { rep: "" });
-  if (filters.setter)
-    add("setter", `Setter: ${named(options.setters, filters.setter, "not on this pipeline")}`, { setter: "" });
-  if (filters.stage) add("stage", `Stage: ${named(stages, filters.stage, "unknown")}`, { stage: "" });
-  if (filters.timers.length)
-    add(
-      "timers",
-      STAGE_TIMERS.filter((t) => filters.timers.includes(t.key))
-        .map((t) => t.label)
-        .join(" or "),
-      { timers: [] }
-    );
-  if (filters.source)
-    add("source", `Source: ${named(options.sources, filters.source, "not on this pipeline")}`, { source: "" });
-  if (filters.outcome)
-    add("outcome", `Outcome: ${named(options.outcomes, filters.outcome, filters.outcome)}`, { outcome: "" });
-  if (filters.inspection)
-    add("inspection", `Inspection: ${named(options.inspections, filters.inspection, filters.inspection)}`, {
-      inspection: "",
-    });
-  if (filters.city) {
-    const city =
-      filters.city === NONE
-        ? "No city"
-        : options.cities.find((o) => o.value.trim().toLowerCase() === filters.city.trim().toLowerCase())?.label ??
-          filters.city;
-    add("city", `City: ${city}`, { city: "" });
-  }
-  if (filters.valueMin || filters.valueMax)
-    add("value", `Value ${range(filters.valueMin, filters.valueMax, money)}`, { valueMin: "", valueMax: "" });
-  if (filters.daysMin || filters.daysMax)
-    add("days", `Days in stage ${range(filters.daysMin, filters.daysMax, (s) => s)}`, { daysMin: "", daysMax: "" });
-  if (filters.apptFrom || filters.apptTo)
-    add("appt", `Appointment ${range(filters.apptFrom, filters.apptTo, shortDate)}`, { apptFrom: "", apptTo: "" });
-  if (filters.createdFrom || filters.createdTo)
-    add("created", `Created ${range(filters.createdFrom, filters.createdTo, shortDate)}`, {
-      createdFrom: "",
-      createdTo: "",
-    });
-
-  if (chips.length === 0) return null;
-
+function ConditionRow({
+  first,
+  condition: c,
+  fields,
+  field,
+  onChange,
+  onRemove,
+}: {
+  first: boolean;
+  condition: Condition;
+  fields: FilterField[];
+  field: FilterField | undefined;
+  onChange: (p: Partial<Condition>) => void;
+  onRemove: () => void;
+}) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Active filters">
-      {chips.map((c) => (
-        <button
-          key={c.key}
-          type="button"
-          onClick={() => onChange(c.clear)}
-          aria-label={`Remove filter ${c.label}`}
-          className="inline-flex max-w-full items-center gap-1 rounded-full border border-gold/40 bg-gold/10 px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-gold/20"
-        >
-          <span className="truncate">{c.label}</span>
-          <X className="size-3 shrink-0" />
-        </button>
-      ))}
-      <button
-        type="button"
-        onClick={() => onChange(clearFilters(filters))}
-        className="px-1.5 text-xs text-muted-foreground hover:text-foreground"
+    <div
+      data-testid="filter-condition"
+      className="flex flex-col gap-2 rounded-lg border border-border/70 p-2 sm:flex-row sm:items-start sm:border-0 sm:p-0"
+    >
+      <span className="hidden w-10 shrink-0 pt-2 text-xs font-medium text-muted-foreground sm:block">
+        {first ? "Where" : "and"}
+      </span>
+
+      <Select
+        value={c.field}
+        onValueChange={(key) => {
+          // Only a field this pipeline offers may land (see the operator
+          // select below for why a stray "" arrives), and re-picking the same
+          // field keeps what was already chosen for it.
+          const next = fields.find((f) => f.key === key);
+          if (!next || key === c.field) return;
+          onChange({ field: key, op: operatorsFor(next.kind)[0].op, values: [] });
+        }}
       >
-        Clear all
-      </button>
+        <SelectTrigger className="h-9 w-full sm:w-44" aria-label="Field">
+          <SelectValue placeholder="Choose a field" />
+        </SelectTrigger>
+        <SelectContent>
+          {FIELD_GROUPS.map((group) => {
+            const inGroup = fields.filter((f) => f.group === group);
+            if (inGroup.length === 0) return null;
+            return (
+              <SelectGroup key={group}>
+                <SelectLabel>{group}</SelectLabel>
+                {inGroup.map((f) => (
+                  <SelectItem key={f.key} value={f.key}>
+                    {f.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            );
+          })}
+        </SelectContent>
+      </Select>
+
+      <Select
+        // Remounted per field, so its value and its options arrive together.
+        // Kept in place, the hidden <select> Radix renders inside a <form> is
+        // handed "any_of" before that option exists, reads back "", and fires
+        // onValueChange("") — which blanked the operator the moment a field
+        // was picked, and with it the values picker.
+        key={c.field || "none"}
+        value={field ? c.op : ""}
+        disabled={!field}
+        onValueChange={(op) => {
+          if (!field || op === c.op || !operatorsFor(field.kind).some((o) => o.op === op)) return;
+          onChange({ op: op as Operator, values: carryValues(c, op as Operator) });
+        }}
+      >
+        <SelectTrigger className="h-9 w-full sm:w-40" aria-label="Condition">
+          <SelectValue placeholder="is…" />
+        </SelectTrigger>
+        <SelectContent>
+          {field
+            ? operatorsFor(field.kind).map((o) => (
+                <SelectItem key={o.op} value={o.op}>
+                  {o.label}
+                </SelectItem>
+              ))
+            : null}
+        </SelectContent>
+      </Select>
+
+      <div className="min-w-0 flex-1">
+        {field ? <ValueEditor field={field} condition={c} onChange={(values) => onChange({ values })} /> : null}
+      </div>
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-lg"
+        aria-label="Remove condition"
+        onClick={onRemove}
+        className="self-end text-muted-foreground sm:self-auto"
+      >
+        <X className="size-4" />
+      </Button>
     </div>
   );
 }
 
-function range(min: string, max: string, show: (s: string) => string) {
-  if (min && max) return `${show(min)} – ${show(max)}`;
-  return min ? `≥ ${show(min)}` : `≤ ${show(max)}`;
+function ValueEditor({
+  field,
+  condition: c,
+  onChange,
+}: {
+  field: FilterField;
+  condition: Condition;
+  onChange: (values: string[]) => void;
+}) {
+  const [a = "", b = ""] = c.values;
+  switch (c.op) {
+    case "empty":
+    case "not_empty":
+    case "checked":
+    case "unchecked":
+      return null;
+    case "any_of":
+    case "none_of":
+      return <MultiValuePicker field={field} selected={c.values} onChange={onChange} />;
+    case "last_days":
+    case "next_days":
+      return (
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={a}
+            onChange={(e) => onChange([e.target.value])}
+            className="h-9 w-24"
+            aria-label="Number of days"
+          />
+          <span className="text-sm text-muted-foreground">days</span>
+        </div>
+      );
+    case "between":
+      return (
+        <div className="flex items-center gap-1.5">
+          <ScalarInput field={field} value={a} onChange={(v) => onChange([v, b])} label="From" />
+          <span className="text-xs text-muted-foreground">and</span>
+          <ScalarInput field={field} value={b} onChange={(v) => onChange([a, v])} label="To" />
+        </div>
+      );
+    default:
+      return <ScalarInput field={field} value={a} onChange={(v) => onChange([v])} label="Value" />;
+  }
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/**
- * "2026-09-01" → "Sep 1". Formatted from the digits rather than through Date:
- * new Date("2026-09-01") is UTC midnight, which is the evening of Aug 31 in
- * Texas, and a server/browser timezone difference would split the render.
- */
-function shortDate(s: string) {
-  const [y, m, d] = s.split("-").map(Number);
-  const label = `${MONTHS[m - 1] ?? "?"} ${d}`;
-  return y === new Date().getFullYear() ? label : `${label}, ${y}`;
-}
-
-function OptionSelect({
-  label,
-  anyLabel,
+function ScalarInput({
+  field,
   value,
-  options,
   onChange,
-  unknownLabel = "Not on this pipeline",
-}: {
-  label: string;
-  anyLabel: string;
-  value: string;
-  options: FilterOption[];
-  onChange: (v: string) => void;
-  /** What the control reads when the chosen value has no deals left here. */
-  unknownLabel?: string;
-}) {
-  const selected = value ? options.find((o) => o.value === value)?.label ?? unknownLabel : anyLabel;
-  return (
-    <PanelField label={label}>
-      <Select value={value || ANY} onValueChange={(v) => onChange(v === ANY ? "" : v)}>
-        <SelectTrigger className="h-9 w-full" aria-label={label}>
-          {/* Explicit, so the trigger shows the name without the item's count. */}
-          <SelectValue>{selected}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ANY}>{anyLabel}</SelectItem>
-          {options.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              <span data-option-label>{o.label}</span>
-              <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">
-                <span className="sr-only">, </span>
-                {o.count}
-              </span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </PanelField>
-  );
-}
-
-function RangeField({
   label,
-  min,
-  max,
-  onChange,
-  type,
 }: {
+  field: FilterField;
+  value: string;
+  onChange: (v: string) => void;
   label: string;
-  min: string;
-  max: string;
-  onChange: (min: string, max: string) => void;
-  type: "number" | "date";
 }) {
-  const number = type === "number";
+  const type = field.kind === "number" ? "number" : field.kind === "date" ? "date" : "text";
+  const placeholder =
+    field.kind === "number"
+      ? field.unit === "money"
+        ? "Amount"
+        : field.unit === "days"
+          ? "Days"
+          : "Number"
+      : field.kind === "text"
+        ? "Text"
+        : undefined;
   return (
-    <PanelField label={label}>
-      <div className="flex items-center gap-1.5">
-        <Input
-          type={type}
-          value={min}
-          min={number ? 0 : undefined}
-          inputMode={number ? "numeric" : undefined}
-          placeholder={number ? "Min" : undefined}
-          onChange={(e) => onChange(e.target.value, max)}
-          className="h-9 min-w-0 flex-1"
-          aria-label={`${label} ${number ? "minimum" : "from"}`}
-        />
-        <span className="text-xs text-muted-foreground">to</span>
-        <Input
-          type={type}
-          value={max}
-          min={number ? 0 : undefined}
-          inputMode={number ? "numeric" : undefined}
-          placeholder={number ? "Max" : undefined}
-          onChange={(e) => onChange(min, e.target.value)}
-          className="h-9 min-w-0 flex-1"
-          aria-label={`${label} ${number ? "maximum" : "to"}`}
-        />
-      </div>
-    </PanelField>
+    <Input
+      type={type}
+      value={value}
+      min={type === "number" ? 0 : undefined}
+      step={type === "number" ? "any" : undefined}
+      inputMode={type === "number" ? "decimal" : undefined}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-9 w-full min-w-0"
+      aria-label={label}
+    />
   );
 }
 
-function PanelField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/** A checklist of a field's choices, each with how many deals on this pipeline hold it. */
+function MultiValuePicker({
+  field,
+  selected,
+  onChange,
+}: {
+  field: FilterField;
+  selected: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [q, setQ] = React.useState("");
+  const options = field.options ?? [];
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? options.filter((o) => o.label.toLowerCase().includes(needle)) : options;
+  const names = selected.map((v) => options.find((o) => o.value === v)?.label ?? v);
+  const summary =
+    names.length === 0
+      ? "Choose values"
+      : names.length <= 2
+        ? names.join(", ")
+        : `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
+  const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+
   return (
-    <div className="min-w-0">
-      <div className="mb-1.5 flex items-baseline gap-1.5 text-xs font-medium text-muted-foreground">
-        {label}
-        {hint ? <span className="font-normal text-muted-foreground/70">{`· ${hint}`}</span> : null}
-      </div>
-      {children}
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Values: ${summary}`}
+          className={cn(
+            "flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2.5 text-left text-sm transition-colors hover:bg-muted/50 dark:bg-input/30",
+            names.length === 0 && "text-muted-foreground"
+          )}
+        >
+          <span className="truncate">{summary}</span>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 gap-2 p-2" data-testid="value-picker">
+        {options.length > 7 ? (
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={`Search ${field.label.toLowerCase()}…`}
+            className="h-8"
+            aria-label="Search values"
+          />
+        ) : null}
+        <div className="max-h-64 overflow-y-auto" role="group" aria-label={field.label}>
+          {shown.length === 0 ? (
+            <p className="px-2 py-3 text-center text-xs text-muted-foreground">No matches</p>
+          ) : (
+            shown.map((o) => (
+              <label
+                key={o.value}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"
+              >
+                <Checkbox checked={selected.includes(o.value)} onCheckedChange={() => toggle(o.value)} />
+                <span
+                  data-option-label
+                  className={cn("min-w-0 flex-1 truncate", o.value === NONE && "italic text-muted-foreground")}
+                >
+                  {o.label}
+                </span>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  <span className="sr-only">, </span>
+                  {o.count}
+                </span>
+              </label>
+            ))
+          )}
+        </div>
+        {selected.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="self-start px-2 text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear selection
+          </button>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** The filters in force, one removable chip each, so a narrowed board says why. */
+export function ActiveFilterChips({
+  fields,
+  conditions,
+  onChange,
+  onClearAll,
+}: {
+  fields: FilterField[];
+  conditions: Condition[];
+  onChange: (next: Condition[]) => void;
+  onClearAll: () => void;
+}) {
+  const fmt = useFormat();
+  const byKey = React.useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
+  const chips = conditions.flatMap((c) => {
+    const field = byKey.get(c.field);
+    return field && isComplete(c, field) ? [{ c, label: describeCondition(c, field, (cents) => fmt.money(cents)) }] : [];
+  });
+  if (chips.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Active filters">
+      {chips.map(({ c, label }) => (
+        <button
+          key={c.id}
+          type="button"
+          onClick={() => onChange(conditions.filter((x) => x.id !== c.id))}
+          aria-label={`Remove filter ${label}`}
+          title={label}
+          className="inline-flex max-w-[24rem] items-center gap-1 rounded-full border border-gold/40 bg-gold/10 px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-gold/20"
+        >
+          <span className="truncate">{label}</span>
+          <X className="size-3 shrink-0" />
+        </button>
+      ))}
+      <button type="button" onClick={onClearAll} className="px-1.5 text-xs text-muted-foreground hover:text-foreground">
+        Clear all
+      </button>
     </div>
   );
 }
