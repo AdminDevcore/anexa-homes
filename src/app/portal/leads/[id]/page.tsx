@@ -1613,7 +1613,7 @@ export default async function LeadDetailPage({
               className="scroll-mt-24"
               slides={[
                 { id: "system", label: "System & financing" },
-                { id: "ops", label: "Operations", icon: "ops" },
+                { id: "timeline", label: "Timeline", icon: "timeline" },
                 { id: "install", label: "Installation", icon: "install" },
                 { id: "specs", label: "System info", icon: "specs" },
                 // Activity is always last, on every deal that has one. The
@@ -1660,7 +1660,7 @@ export default async function LeadDetailPage({
                 />
               </div>
 
-            <div data-deal-slide="ops">
+            <div data-deal-slide="timeline">
               {stageTimeline && <DealStageTimeline timeline={stageTimeline} />}
             </div>
 

@@ -5,11 +5,11 @@ import {
   Calculator,
   DollarSign,
   Hammer,
+  History,
   MessageSquare,
   PanelsTopLeft,
   ReceiptText,
   ShieldCheck,
-  Wrench,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -29,7 +29,7 @@ const SLIDE_ICONS: Record<string, LucideIcon> = {
   // so the switcher reads as the same two things moved, not as new ones.
   system: Zap,
   activity: MessageSquare,
-  ops: Wrench,
+  timeline: History,
   install: Hammer,
   specs: PanelsTopLeft,
 };

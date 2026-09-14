@@ -153,7 +153,7 @@ export async function createLeadAction(input: LeadInput) {
     },
   });
 
-  await recordStageEntry({ leadId: lead.id, stageId });
+  await recordStageEntry({ leadId: lead.id, stageId, movedById: user.userId });
 
   // The utility the rep read off the meter, put where the proposal looks for
   // it. Seeded into the design rather than stored on the lead: the design is
@@ -258,7 +258,7 @@ export async function updateLeadAction(id: string, input: LeadInput) {
     },
   });
 
-  if (stageChanged) await recordStageEntry({ leadId: id, stageId });
+  if (stageChanged) await recordStageEntry({ leadId: id, stageId, movedById: user.userId });
 
   // The utility is the design's, not the lead's, so an edit writes it through
   // to the design. Only when the form actually sent one: a roofing edit, or a
@@ -417,7 +417,7 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
   }
 
   await prisma.lead.update({ where: { id: existing.id }, data });
-  if (movedTo) await recordStageEntry({ leadId: existing.id, stageId: movedTo });
+  if (movedTo) await recordStageEntry({ leadId: existing.id, stageId: movedTo, movedById: user.userId });
 
   if (canAssign && d.assignedRepId && d.assignedRepId !== existing.assignedRepId) {
     await fireEvent({ companyId: user.companyId, event: "lead_assigned", actorId: user.userId, leadId: existing.id });

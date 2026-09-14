@@ -605,6 +605,7 @@ model User {
   overridesOnMe   CommissionOverride[] @relation("OverrideSource")
   payrollItems    PayrollItem[]
   activityLogs    ActivityLog[]
+  stageMoves      LeadStageEvent[]     @relation("LeadStageEventMovedBy")
   crewMemberships CrewMember[]
   invitationsSent Invitation[]         @relation("InviteInviter")
   passwordResets  PasswordResetToken[]
@@ -920,6 +921,13 @@ model LeadStageEvent {
   enteredAt DateTime       @default(now())
   /// Null on exactly one row per lead: the stage it is sitting in right now.
   exitedAt  DateTime?
+  /// The person who put the deal INTO this stage. Null when no person did (see
+  /// `via`), and on moves made before anyone was recorded.
+  movedById String?
+  movedBy   User?          @relation("LeadStageEventMovedBy", fields: [movedById], references: [id], onDelete: SetNull)
+  /// Why no person is named: "automation" (a rule moved it) or "signature" (the
+  /// homeowner's signature did). Null on a person's move.
+  via       String?
 
   @@index([leadId, enteredAt])
   @@map("lead_stage_events")

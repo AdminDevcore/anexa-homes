@@ -153,7 +153,7 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
       ...(parsed.data.position !== undefined ? { position: parsed.data.position } : {}),
     },
   });
-  await recordStageEntry({ leadId: parsed.data.leadId, stageId: stage.id, stage });
+  await recordStageEntry({ leadId: parsed.data.leadId, stageId: stage.id, stage, movedById: user.userId });
 
   await prisma.activityLog.create({
     data: {
@@ -272,7 +272,7 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
     }),
   ]);
 
-  await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage });
+  await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage, movedById: user.userId });
 
   // After the transaction commits, never inside it: a notification for a change
   // that then rolled back is a lie.
