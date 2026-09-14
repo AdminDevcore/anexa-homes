@@ -28,6 +28,8 @@ const { saveSolarFinanceAction, setSolarDealLenderAction, setSolarCreditClaimsAc
 const { setSolarDesignEquipmentAction } = await import("../equipment-actions");
 const { addDealAdderAction } = await import("../adder-actions");
 const { dealSignedAt } = await import("../signed-lock");
+const { unlockSignedContractAction, relockSignedContractAction } =
+  await import("../unlock-actions");
 
 const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
 
@@ -125,6 +127,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.activityLog.deleteMany({ where: { companyId } });
+  await db.solarContractUnlock.deleteMany({ where: { leadId } });
   await db.solarDealAdder.deleteMany({ where: { leadId } });
   await db.solarProposal.deleteMany({ where: { leadId } });
   await db.solarFinance.deleteMany({ where: { leadId } });
@@ -243,41 +246,135 @@ describe("after the customer signs, the economics are locked", () => {
   });
 });
 
-describe("a super admin may still change it, and is recorded", () => {
+describe("a super admin must reopen the contract, and say why", () => {
   beforeEach(sign);
 
-  it("lets the price through", async () => {
+  const REASON = "Lender correction — Amos re-issued at a 22% fee";
+
+  it("REFUSES a super admin who has not reopened it, and says which door to use", async () => {
+    // Holding the authority is not the same as using it. Without a live unlock
+    // the lock refuses a super admin exactly as it refuses anybody else.
     actAs("super_admin");
+    const res = await savePrice(500);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/reopen it first and give a reason/i);
+    expect((await finance())?.grossPpwCents).toBe(350);
+  });
+
+  it("REFUSES an unlock with no real reason", async () => {
+    actAs("super_admin");
+    for (const reason of ["", "   ", "oops"]) {
+      const res = await inSolar(() => unlockSignedContractAction({ leadId, reason }));
+      expect(res.ok, `reason "${reason}"`).toBe(false);
+    }
+    expect(await db.solarContractUnlock.count({ where: { leadId } })).toBe(0);
+  });
+
+  it("REFUSES an unlock from an admin — this is narrower than running the floor", async () => {
+    actAs("admin");
+    const res = await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/super admin/i);
+    expect(await db.solarContractUnlock.count({ where: { leadId } })).toBe(0);
+  });
+
+  it("lets the price through once reopened", async () => {
+    actAs("super_admin");
+    expect((await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }))).ok).toBe(true);
+
     const res = await savePrice(500);
     expect(res.ok).toBe(true);
     expect((await finance())?.grossPpwCents).toBe(500);
   });
 
-  it("names who, what and both figures on the deal's own trail", async () => {
+  it("records who, when, why, and both figures on the deal's own history", async () => {
     const before = (await finance())!.contractPriceCents;
     actAs("super_admin");
+    await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
     await savePrice(500);
     const after = (await finance())!.contractPriceCents;
     expect(after).not.toBe(before);
 
     const logs = await db.activityLog.findMany({ where: { leadId }, orderBy: { createdAt: "asc" } });
-    const edited = logs.find((l) => /edited the price and financing on a SIGNED contract/i.test(l.message));
-    expect(edited).toBeDefined();
-    expect(edited?.actorId).toBe(users.super_admin);
 
+    // 1 — the decision, with the reason, before anything changed.
+    const opened = logs.find((l) => /reopened this SIGNED contract/i.test(l.message));
+    expect(opened).toBeDefined();
+    expect(opened?.actorId).toBe(users.super_admin);
+    expect(opened?.message).toContain(REASON);
+
+    // 2 — the edit, naming the area and citing the same reason.
+    const edited = logs.find((l) => /edited the price and financing on a SIGNED contract/i.test(l.message));
+    expect(edited?.message).toContain(REASON);
+
+    // 3 — the figures, old and new, with the reason again.
     const moved = logs.find((l) => /changed the contract price on a SIGNED contract/i.test(l.message));
     expect(moved?.message).toContain(String(before));
     expect(moved?.message).toContain(String(after));
+    expect(moved?.message).toContain(REASON);
   });
 
-  it("records an override on the other locked surfaces too", async () => {
+  it("one reason covers the whole sitting, not one field", async () => {
+    // A super admin who reopens a contract and changes three things has made
+    // one decision. They are not asked three times.
     actAs("super_admin");
+    await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
+
+    expect((await savePrice(500)).ok).toBe(true);
     expect((await inSolar(() => setSolarDealLenderAction({ leadId, lenderId: lenderB }))).ok).toBe(true);
-    const log = await db.activityLog.findFirst({
-      where: { leadId, message: { contains: "SIGNED contract" } },
-      orderBy: { createdAt: "desc" },
+    expect(
+      (await inSolar(() =>
+        setSolarCreditClaimsAction({
+          leadId, claimItc: false, claimEnergyCommunity: false, claimDomesticContent: false,
+        })
+      )).ok
+    ).toBe(true);
+
+    expect(await db.solarContractUnlock.count({ where: { leadId } })).toBe(1);
+  });
+
+  it("closes again on request, and the lock comes straight back", async () => {
+    actAs("super_admin");
+    await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
+    expect((await savePrice(500)).ok).toBe(true);
+
+    expect((await inSolar(() => relockSignedContractAction(leadId))).ok).toBe(true);
+    const res = await savePrice(600);
+    expect(res.ok).toBe(false);
+    expect((await finance())?.grossPpwCents).toBe(500);
+  });
+
+  it("EXPIRES — an unlock left open is not a lock removed", async () => {
+    actAs("super_admin");
+    await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
+    // Wind it back past its window rather than waiting thirty minutes.
+    await db.solarContractUnlock.updateMany({
+      where: { leadId },
+      data: { expiresAt: new Date(Date.now() - 1000) },
     });
-    expect(log?.message).toMatch(/lender/i);
+
+    const res = await savePrice(700);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/reopen it first/i);
+  });
+
+  it("keeps the lapsed row — it is the record that an exception was made", async () => {
+    actAs("super_admin");
+    await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
+    await inSolar(() => relockSignedContractAction(leadId));
+
+    const rows = await db.solarContractUnlock.findMany({ where: { leadId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe(REASON);
+    expect(rows[0].unlockedById).toBe(users.super_admin);
+  });
+
+  it("will not reopen a contract nobody has signed", async () => {
+    await unsign();
+    actAs("super_admin");
+    const res = await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/not been signed/i);
   });
 
   it("writes NO override trail on a deal that was never signed", async () => {

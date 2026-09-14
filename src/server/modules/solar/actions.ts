@@ -794,6 +794,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       what: "the contract price",
       before: priceBefore,
       after: saved.contractPriceCents,
+      reason: lock_saveSolarFinanceAction.override.reason,
     });
   }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { runInVertical } from "@/server/vertical/context";
+import { verticalExtension } from "@/server/vertical/extension";
 
 /**
  * THE DEAL PAGE AND PAYROLL MUST AGREE.
@@ -25,7 +26,16 @@ process.env.SOLAR_VERTICAL_ENABLED = "1";
 const { estimatedSolarCommission, computeSolarCommissionsForProject } =
   await import("../solar-engine");
 
-const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
+/**
+ * The EXTENDED client, as the engine receives one in production.
+ *
+ * `Db` is the vertical-scoped client, and the functions under test are what has
+ * to survive that extension — handing them a plain client would test a code
+ * path production never uses. `raw` stays for fixtures, which are built outside
+ * any workspace. The same split `solar-pay.itest.ts` uses.
+ */
+const raw = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
+const db = raw.$extends(verticalExtension());
 
 let companyId: string;
 let leadId: string;
@@ -43,7 +53,7 @@ const inSolar = <T>(fn: () => Promise<T>) => runInVertical("solar", fn);
 const estimate = () => inSolar(() => estimatedSolarCommission(db, companyId, leadId));
 
 async function runPayroll() {
-  await db.commission.deleteMany({ where: { companyId } });
+  await raw.commission.deleteMany({ where: { companyId } });
   return inSolar(() =>
     computeSolarCommissionsForProject(db, companyId, {
       id: projectId,
@@ -56,26 +66,26 @@ async function runPayroll() {
 
 /** What payroll actually wrote for the rep, or null if it wrote nothing. */
 async function payrollLine() {
-  return db.commission.findFirst({
+  return raw.commission.findFirst({
     where: { companyId, projectId, userId: repId, overrideId: null },
     select: { amount: true, solarGrossAmount: true, solarBasis: true },
   });
 }
 
 async function sign() {
-  await db.solarProposal.updateMany({
+  await raw.solarProposal.updateMany({
     where: { leadId },
     data: { status: "signed", signedAt: new Date() },
   });
 }
 
 beforeAll(async () => {
-  const company = await db.company.create({
+  const company = await raw.company.create({
     data: { name: "Agree Co", slug: `agree-${process.pid}-${Date.now()}` },
   });
   companyId = company.id;
 
-  const rep = await db.user.create({
+  const rep = await raw.user.create({
     data: {
       companyId, email: `rep-agree-${process.pid}@test.local`,
       firstName: "Rhea", lastName: "Rep", role: "sales_rep", passwordHash: "x",
@@ -85,58 +95,58 @@ beforeAll(async () => {
   });
   repId = rep.id;
 
-  lenderId = (await db.solarLender.create({
+  lenderId = (await raw.solarLender.create({
     data: { companyId, name: "Agree Bank", repPayMode: "redline" },
     select: { id: true },
   })).id;
 
-  const pipeline = await db.pipeline.create({ data: { companyId, name: "Solar", vertical: "solar" } });
-  const stage = await db.pipelineStage.create({
+  const pipeline = await raw.pipeline.create({ data: { companyId, name: "Solar", vertical: "solar" } });
+  const stage = await raw.pipelineStage.create({
     data: { pipelineId: pipeline.id, key: "m1", name: "M1 Funding", position: 10 },
   });
-  const lead = await db.lead.create({
+  const lead = await raw.lead.create({
     data: {
       companyId, vertical: "solar", pipelineId: pipeline.id, stageId: stage.id,
       firstName: "Agree", lastName: "Deal", assignedRepId: repId,
     },
   });
   leadId = lead.id;
-  projectId = (await db.project.create({
+  projectId = (await raw.project.create({
     data: { companyId, vertical: "solar", leadId, projectNumber: `AG-${Date.now()}` },
     select: { id: true },
   })).id;
 });
 
 beforeEach(async () => {
-  await db.commission.deleteMany({ where: { companyId } });
-  await db.solarDealComp.deleteMany({ where: { leadId } });
-  await db.solarProposal.deleteMany({ where: { leadId } });
-  await db.solarFinance.deleteMany({ where: { leadId } });
-  await db.solarDesign.deleteMany({ where: { leadId } });
+  await raw.commission.deleteMany({ where: { companyId } });
+  await raw.solarDealComp.deleteMany({ where: { leadId } });
+  await raw.solarProposal.deleteMany({ where: { leadId } });
+  await raw.solarFinance.deleteMany({ where: { leadId } });
+  await raw.solarDesign.deleteMany({ where: { leadId } });
 
-  await db.solarDesign.create({
+  await raw.solarDesign.create({
     data: {
       companyId, leadId, vertical: "solar", systemType: "pv",
       systemSizeKwDc: SYSTEM_KW, moduleQty: 30, lenderId,
       year1ProductionKwh: 14_000, annualUsageKwh: 14_000,
     },
   });
-  await db.solarFinance.create({
+  await raw.solarFinance.create({
     data: {
       companyId, leadId, vertical: "solar", product: "loan",
       grossPpwCents: PPW, dealerFeePct: FEE,
       contractPriceCents: SYSTEM_KW * 1000 * PPW,
     },
   });
-  await db.solarProposal.create({
+  await raw.solarProposal.create({
     data: { companyId, leadId, version: 1, status: "generated", snapshot: { schemaVersion: 7 } as never },
   });
-  await db.user.update({ where: { id: repId }, data: { solarRedlineCentsPerWatt: REDLINE } });
+  await raw.user.update({ where: { id: repId }, data: { solarRedlineCentsPerWatt: REDLINE } });
 });
 
 afterAll(async () => {
-  await db.company.deleteMany({ where: { id: companyId } });
-  await db.$disconnect();
+  await raw.company.deleteMany({ where: { id: companyId } });
+  await raw.$disconnect();
 });
 
 describe("an UNSIGNED deal quotes the rep's current terms", () => {
@@ -161,7 +171,7 @@ describe("an UNSIGNED deal quotes the rep's current terms", () => {
 describe("a SIGNED deal quotes the terms it was sold on", () => {
   beforeEach(async () => {
     await sign();
-    await db.solarDealComp.create({
+    await raw.solarDealComp.create({
       data: {
         companyId, leadId, vertical: "solar", repId,
         basis: "redline", redlineCentsPerWatt: REDLINE, signedAt: new Date(),
@@ -179,7 +189,7 @@ describe("a SIGNED deal quotes the terms it was sold on", () => {
   it("IGNORES a redline raised after the signature — both of them", async () => {
     // The whole point of freezing terms: a rep whose profile is bumped must not
     // see, or be paid, a different number on a deal that already closed.
-    await db.user.update({ where: { id: repId }, data: { solarRedlineCentsPerWatt: 50 } });
+    await raw.user.update({ where: { id: repId }, data: { solarRedlineCentsPerWatt: 50 } });
 
     const est = await estimate();
     await runPayroll();
@@ -199,7 +209,7 @@ describe("THE CASE THE TWO USED TO DISAGREE ON", () => {
     // `snapshotSolarDealComp` throws. Payroll always refused this. The deal
     // page used to fall through to the rep's profile and quote a number.
     await sign();
-    expect(await db.solarDealComp.count({ where: { leadId } })).toBe(0);
+    expect(await raw.solarDealComp.count({ where: { leadId } })).toBe(0);
 
     const est = await estimate();
     expect(est.state).toBe("unavailable");
@@ -216,7 +226,7 @@ describe("THE CASE THE TWO USED TO DISAGREE ON", () => {
 
   it("a deal flagged for review is blocked on both sides", async () => {
     await sign();
-    await db.solarDealComp.create({
+    await raw.solarDealComp.create({
       data: {
         companyId, leadId, vertical: "solar", repId,
         basis: "unresolved", signedAt: new Date(), needsReview: true,
@@ -237,7 +247,7 @@ describe("THE CASE THE TWO USED TO DISAGREE ON", () => {
     // estimate never looked, so it showed a different number from the one
     // already generated against the rep's name.
     await sign();
-    await db.commission.create({
+    await raw.commission.create({
       data: {
         companyId, projectId, userId: repId, status: "pending",
         label: "Solar redline ($1.00/W over $2.50/W · 12,000 W)",
@@ -269,7 +279,7 @@ describe("THE CASE THE TWO USED TO DISAGREE ON", () => {
 describe("the company's lead take is applied identically", () => {
   it("both sides take 40% once M1 has classified the lead", async () => {
     await sign();
-    await db.solarDealComp.create({
+    await raw.solarDealComp.create({
       data: {
         companyId, leadId, vertical: "solar", repId,
         basis: "redline", redlineCentsPerWatt: REDLINE, signedAt: new Date(),

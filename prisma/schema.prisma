@@ -389,6 +389,8 @@ model Company {
   payrollAdjustments PayrollAdjustment[]
 
   @@map("companies")
+  solarContractUnlocks SolarContractUnlock[]
+
 }
 
 model CompanySettings {
@@ -1100,6 +1102,8 @@ model Lead {
   @@index([companyId, status])
   @@index([companyId, vertical], map: "leads_companyId_industry_idx")
   @@map("leads")
+  solarContractUnlocks SolarContractUnlock[]
+
 }
 
 model Project {
@@ -5032,6 +5036,44 @@ model SolarMilestone {
 /// person whose commission this deal generates. Managers earn through
 /// CommissionOverride, which is a separate arrangement between a manager and a
 /// rep and never comes out of the rep's number.
+/// A SUPER ADMIN'S PERMISSION TO REWRITE ONE SIGNED CONTRACT, and the reason.
+///
+/// A signature freezes a solar deal's economics — see `server/modules/solar/
+/// signed-lock.ts`. Designs do genuinely change between contract and install, so
+/// the business needs a way through; what it must never be is a silent one.
+///
+/// A ROW RATHER THAN A FLAG ON THE DEAL. The reason has to be given BEFORE the
+/// edit, not inferred from it afterwards, and a super admin who unlocks a
+/// contract and changes three things has made one decision, not three. The row
+/// is that decision: who, when, why, and for how long.
+///
+/// SHORT-LIVED ON PURPOSE. An unlock that lasted forever would be a lock that
+/// was removed, so it expires — see `UNLOCK_WINDOW_MINUTES`. An expired row is
+/// kept rather than deleted: it is the record of an exception being made, which
+/// is the whole point of asking for a reason.
+model SolarContractUnlock {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Why this contract is being reopened, in the person's own words. Required,
+  /// and never defaulted — a reason the product wrote is not a reason.
+  reason String
+
+  unlockedById String
+  unlockedAt   DateTime @default(now())
+  /// When the permission lapses. Past this the contract is locked again.
+  expiresAt    DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, leadId, expiresAt])
+  @@map("solar_contract_unlocks")
+}
+
 model SolarDealComp {
   id        String   @id @default(uuid())
   companyId String

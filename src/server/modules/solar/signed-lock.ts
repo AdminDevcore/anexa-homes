@@ -32,16 +32,35 @@ import type { AccessUser } from "@/server/rbac/guards";
  * photos, documents, stage moves, crew and install dates are all untouched by
  * this. Locking those would mean a signature stopped the job.
  *
- * ── THE OVERRIDE ────────────────────────────────────────────────────────────
- * A super admin passes. Designs do genuinely change between contract and
- * install — a structural problem, a panel that went end-of-life — and the
- * business needs a way through. What it did not have was a record: every
- * override now writes an attributed ActivityLog line naming the field, the old
- * value and the new one, so the change is answerable afterwards.
+ * ── THE OVERRIDE NEEDS A REASON, GIVEN FIRST ────────────────────────────────
+ * A super admin can reopen a signed contract, and must say why before they do.
+ * Designs genuinely change between contract and install — a structural problem,
+ * a panel that went end-of-life, a lender correction — so the business needs a
+ * way through; what it must never be is a silent one.
+ *
+ * THE REASON IS GIVEN BEFORE THE EDIT, not inferred from it afterwards, and it
+ * covers the whole sitting: a super admin who reopens a contract and changes
+ * the price, the panel count and the lender has made ONE decision, not three.
+ * `SolarContractUnlock` is that decision — who, when, why, and until when — and
+ * every protected write made under it cites it on the deal's own history,
+ * alongside the old and the new value.
+ *
+ * Holding the authority is therefore not the same as using it: without a live
+ * unlock this refuses a super admin exactly as it refuses anybody else, and
+ * tells them which door to use.
  *
  * `admin` is deliberately NOT enough. An admin runs the sales floor; rewriting
  * a signed contract's price is a narrower authority than that.
  */
+
+/**
+ * How long one unlock lasts.
+ *
+ * Long enough to finish a sitting — reopen the contract, change the price, the
+ * panel count and the lender — and short enough that an unlock left open is not
+ * a lock quietly removed.
+ */
+export const UNLOCK_WINDOW_MINUTES = 30;
 
 /** When this deal was first signed, or null if no version ever was. */
 export async function dealSignedAt(companyId: string, leadId: string): Promise<Date | null> {
@@ -54,10 +73,19 @@ export async function dealSignedAt(companyId: string, leadId: string): Promise<D
 }
 
 export type SignedLockVerdict =
-  /** Not signed, or the caller may override. Write, then audit if `override`. */
-  | { blocked: false; override: { signedAt: Date } | null }
-  /** Signed, and this caller may not rewrite it. */
-  | { blocked: true; error: string };
+  /** Not signed, or the caller holds an unlock. Write, then audit if `override`. */
+  | { blocked: false; override: { signedAt: Date; reason: string } | null }
+  /** Signed, and this caller may not rewrite it right now. */
+  | { blocked: true; error: string; needsUnlock: boolean };
+
+/** The live unlock on this deal, if somebody has opened one. */
+export async function activeUnlock(companyId: string, leadId: string) {
+  return prisma.solarContractUnlock.findFirst({
+    where: { companyId, leadId, expiresAt: { gt: new Date() } },
+    orderBy: { unlockedAt: "desc" },
+    select: { id: true, reason: true, unlockedById: true, unlockedAt: true, expiresAt: true },
+  });
+}
 
 /**
  * May this user change a protected economic field on this deal?
@@ -80,6 +108,22 @@ export async function checkSignedLock(
   if (!signedAt) return { blocked: false, override: null };
 
   if (user.role === "super_admin") {
+    /**
+     * A SUPER ADMIN IS NOT AUTOMATICALLY THROUGH. They hold the authority to
+     * reopen the contract; using it means saying why first. Without a live
+     * unlock this refuses exactly as it does for anyone else, and the caller is
+     * told which door to use.
+     */
+    const unlock = await activeUnlock(user.companyId, leadId);
+    if (!unlock) {
+      return {
+        blocked: true,
+        needsUnlock: true,
+        error:
+          "This contract is signed. Reopen it first and give a reason — the change is " +
+          "recorded against it.",
+      };
+    }
     if (what) {
       try {
         await prisma.activityLog.create({
@@ -88,7 +132,7 @@ export async function checkSignedLock(
             type: "system",
             message:
               `${user.fullName ?? "A super admin"} edited ${what} on a SIGNED contract ` +
-              `(signed ${signedAt.toISOString().slice(0, 10)})`,
+              `(signed ${signedAt.toISOString().slice(0, 10)}) — reason: ${unlock.reason}`,
             actorId: user.userId,
             leadId,
           },
@@ -97,11 +141,12 @@ export async function checkSignedLock(
         console.error(`[solar] could not record a signed-contract override on ${leadId}`, err);
       }
     }
-    return { blocked: false, override: { signedAt } };
+    return { blocked: false, override: { signedAt, reason: unlock.reason } };
   }
 
   return {
     blocked: true,
+    needsUnlock: false,
     error:
       "This deal has been signed, so its price, system and financing are locked. " +
       "Re-price it by issuing a new proposal, or ask a super admin to make the change on the contract.",
@@ -123,7 +168,7 @@ export async function checkSignedLock(
 export async function auditSignedEdit(
   user: AccessUser & { fullName?: string },
   leadId: string,
-  change: { what: string; before: unknown; after: unknown }
+  change: { what: string; before: unknown; after: unknown; reason?: string }
 ): Promise<void> {
   const show = (v: unknown) =>
     v === null || v === undefined ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v);
@@ -134,7 +179,8 @@ export async function auditSignedEdit(
         type: "system",
         message:
           `${user.fullName ?? "A super admin"} changed ${change.what} on a SIGNED contract — ` +
-          `${show(change.before)} → ${show(change.after)}`,
+          `${show(change.before)} → ${show(change.after)}` +
+          (change.reason ? ` — reason: ${change.reason}` : ""),
         actorId: user.userId,
         leadId,
       },
