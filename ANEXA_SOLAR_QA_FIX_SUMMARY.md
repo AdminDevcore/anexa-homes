@@ -250,15 +250,23 @@ Verified by role: `sales_rep`, `canvasser`, `manager`, `admin`, `accounting`, `s
 | Suite | Baseline (`c83ddce`) | After |
 |---|---|---|
 | Unit (`vitest`) | 137 files / **2,126 passed** | 139 files / **2,165 passed**, 0 failed |
-| Integration | 527 total / 525 passed / **2 pre-existing failures** | 602 total / **600 passed** / same 2 |
-| E2E — responsive | did not exist | **5 passed**, green 3 consecutive runs |
-| E2E — `solar-permitting` | 3 passed | **3 passed** |
+| Integration | 527 total / 525 passed / **2 pre-existing failures** | 628 total / **626 passed** / same 2 |
+| E2E (`playwright`, solar flag ON) | 259 total / **220 passed / 31 failed** / 8 skipped | 264 total / **227 passed / 29 failed** / 8 skipped |
 | Typecheck | clean | **clean** |
-| Lint | 42 errors / 23 warnings | **42 / 23 — identical, zero regression** |
+| Lint | 54 errors | **54 errors — identical, zero regression** |
 
-The 2 integration failures are **pre-existing on `origin/main`**, proven by stashing all my work and re-running on a pristine checkout: `calendar/visit-crew.itest.ts` and `solar/battery-pricing.itest.ts`. Untouched.
+**Integration.** The 2 failures are `calendar/visit-crew.itest.ts` and `solar/battery-pricing.itest.ts`. Re-proven pre-existing this pass by checking out `c83ddce` detached and running both there, where they fail on the same assertions with the same values (`expected 4750000 to be 9500000`; an installer href that should be null). Untouched in either pass.
 
-The 42 lint errors are the project's own backlog. One of them was briefly mine — a synchronous `setState` in my new effect — and is fixed (`7131e93`); the count is now byte-identical to the base.
+**E2E, and how I read it.** A single run is not evidence here, so I ran the suite **three times**: once on the baseline and twice on this branch, all with `SOLAR_VERTICAL_ENABLED=1` so the solar specs do not skip.
+
+- **27 failures are common to all three runs.** That is the project's own E2E backlog on this baseline, not something this work introduced. It spans the public homepage, photos, scope-of-work, notifications, contractor pay, template PDFs and more — areas this branch does not touch.
+- **7 more churn between runs**, failing in one and passing in another: `row-scope` ×3, `solar-install-crew` ×2, `solar-adders` ×1, and one of mine. Six of the seven are pre-existing flakes; `solar-install-crew` alternates between two tests *in the same file*, which is the signature of shared state rather than of a defect in either.
+- **`solar-adders:180` deserves naming** because it is exactly the code P1-6 changed. It failed in run 1, passed in run 2, and passes 3/3 in isolation. I did not leave it at that: `adderGrandTotal` calls `recomputeAdderTotal(force:true)` and then `recomputeDealMoney`, and the question is whether the second clobbers what the first wrote. It cannot — with no adder lines left, `resolveAdderTotal` returns the *stored* figures, which `recomputeAdderTotal` has already set to zero, so the two agree by construction. The legacy case is covered by `solar-adders:121`, which passes throughout.
+- **One flake was mine, and is fixed at cause.** `responsive-solar` desktop failed run 2 with `Cannot read properties of null (reading 'scrollWidth')` — the same late client-side redirect the spec's `measure()` helper already retried for, caught one step further along, where the context survives but `document.documentElement` is briefly null. Both measurements now report "no document" as a value instead of letting a TypeError escape, and `measure()` retries on it (`0f6632a`). Green 5/5 after.
+
+**Net: 7 more tests pass on this branch than on the baseline, and 2 fewer fail.** No failure in any run is attributable to a source change in this work.
+
+**Lint.** 54 errors, byte-identical to baseline. Two arose during this pass and both are fixed: a synchronous `setState` in an effect I added (`7131e93`) and a `prefer-const` in my own fixture (`1f6c02b`). The one remaining error in a file I touched — `bookkeeping-client.tsx` — is a reconciliation effect I never edited, verified byte-identical to `c83ddce` and merely shifted down 57 lines by code above it. The other 53 are the project's backlog.
 
 ---
 

@@ -91,28 +91,38 @@ async function login(page: Page, email: string) {
  * got: the execution context is destroyed under it, or the context survives but
  * `document.documentElement` is briefly null and the read dies on a property of
  * it. Both mean the same thing — the page was still moving — so both are
- * retried once the load state says it has stopped.
+ * retried until it has stopped.
  *
  * The null case is reported by the measurement returning `null` rather than by
  * letting a TypeError escape, because a TypeError from inside an `evaluate` is
  * indistinguishable from a genuine bug in the measuring code.
  */
 async function measure<T>(page: Page, fn: () => Promise<T | null>): Promise<T> {
-  const settle = async () => {
-    await page.waitForLoadState("domcontentloaded");
-    const again = await fn();
-    if (again === null) throw new Error("No document to measure, twice — the page never settled.");
-    return again;
-  };
-
-  let first: T | null;
-  try {
-    first = await fn();
-  } catch (err) {
-    if (!String(err).includes("Execution context was destroyed")) throw err;
-    return settle();
+  /**
+   * Poll rather than wait on a load state.
+   *
+   * `waitForLoadState("domcontentloaded")` resolves immediately when the
+   * PREVIOUS document already reached that state, so on a client-side
+   * navigation it returns without waiting for anything and the retry measures
+   * the same torn-down window a second time. Asking the page again on a short
+   * interval is the thing that actually waits for the new document.
+   */
+  const deadline = Date.now() + 15_000;
+  let last: unknown;
+  for (;;) {
+    try {
+      const got = await fn();
+      if (got !== null) return got;
+      last = "the page reported no document to measure";
+    } catch (err) {
+      if (!String(err).includes("Execution context was destroyed")) throw err;
+      last = err;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`Gave up measuring after 15s — the page never settled (${String(last)}).`);
+    }
+    await page.waitForTimeout(250);
   }
-  return first === null ? settle() : first;
 }
 
 async function unreachableOverflow(page: Page) {
