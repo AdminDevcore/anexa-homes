@@ -21,6 +21,16 @@ import {
   visibleRows,
   type OutcomeFilter,
 } from "@/lib/appointment-filters";
+import type { Vertical } from "@prisma/client";
+import { OUTCOME_CATEGORY_LABELS, type OutcomeCategory } from "@/lib/dispositions";
+import {
+  REP_FILTERS,
+  buildStatusFilters,
+  matchesRepFilter,
+  repCounts,
+  visibleStatusRows,
+  type RepFilter,
+} from "@/lib/appointment-status";
 
 /** One appointment row, fully formatted server-side (money/dates use company locale + tz). */
 export type AppointmentRow = {
@@ -47,20 +57,31 @@ export type AppointmentRow = {
   isPast: boolean;
   /** The recorded appointment outcome ("Ran", "No Show", …), or null if none. */
   outcome: string | null;
+  /** What `outcome` counts as (solar sorts by it). Null when there is no outcome. */
+  outcomeCategory: OutcomeCategory | null;
+  /** How many times the appointment was moved (solar only; roofing is always 0). */
+  rescheduleCount: number;
+  /** A rep is assigned. */
+  assigned: boolean;
 };
 
 export function AppointmentsList({
   rows,
   initialQuery = "",
   configuredOutcomes = [],
+  vertical = "roofing",
 }: {
   rows: AppointmentRow[];
   initialQuery?: string;
+  /** Solar sorts by whether each visit ran; roofing keeps its list as it was. */
+  vertical?: Vertical;
   /** Outcome labels from Settings → Appointment Outcomes, in configured order. */
   configuredOutcomes?: string[];
 }) {
+  const solar = vertical === "solar";
   const [q, setQ] = React.useState(initialQuery);
   const [filter, setFilter] = React.useState<string>(ALL_OUTCOMES);
+  const [rep, setRep] = React.useState<RepFilter>("any");
 
   const searching = q.trim().length > 0;
   const searched = React.useMemo(
@@ -68,10 +89,21 @@ export function AppointmentsList({
     [rows, q, searching]
   );
 
+  // Solar's rep filter narrows BEFORE the chips count, exactly as the search
+  // does, so every number describes what is on screen.
+  const narrowed = React.useMemo(
+    () => (solar ? searched.filter((r) => matchesRepFilter(r, rep)) : searched),
+    [solar, searched, rep]
+  );
+  const reps = React.useMemo(() => repCounts(searched, searching), [searched, searching]);
+
   // Counts reflect the current search, so the chips always add up to what's shown.
   const { states, outcomes } = React.useMemo(
-    () => buildOutcomeFilters(searched, configuredOutcomes, searching),
-    [searched, configuredOutcomes, searching]
+    () =>
+      solar
+        ? buildStatusFilters(narrowed, configuredOutcomes, searching)
+        : buildOutcomeFilters(narrowed, configuredOutcomes, searching),
+    [solar, narrowed, configuredOutcomes, searching]
   );
 
   // A state chip can disappear as the search narrows (e.g. the last upcoming
@@ -86,8 +118,16 @@ export function AppointmentsList({
   const active = selectable.has(filter) ? filter : ALL_OUTCOMES;
 
   const visible = React.useMemo(
-    () => visibleRows(searched, active, searching),
-    [searched, active, searching]
+    () => (solar ? visibleStatusRows(narrowed, active, searching) : visibleRows(narrowed, active, searching)),
+    [solar, narrowed, active, searching]
+  );
+
+  const statusChips = (
+    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
+      {states.map((f) => (
+        <FilterChip key={f.key} filter={f} active={active === f.key} onSelect={setFilter} />
+      ))}
+    </div>
   );
 
   return (
@@ -104,13 +144,12 @@ export function AppointmentsList({
           />
         </div>
 
-        {/* Row 1 — where an appointment stands. */}
-        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
-          {states.map((f) => (
-            <FilterChip key={f.key} filter={f} active={active === f.key} onSelect={setFilter} />
-          ))}
-        </div>
+        {/* Row 1 — where an appointment stands. Solar puts who has it here
+            instead, and gives the statuses a row of their own below. */}
+        {solar ? <RepToggle value={rep} counts={reps} onChange={setRep} /> : statusChips}
       </div>
+
+      {solar && statusChips}
 
       {/* Row 2 — what happened. Every configured outcome shows, including the
           ones nobody has used yet, so unused results are visible rather than
@@ -218,7 +257,7 @@ export function AppointmentsList({
                       {l.value}
                     </TableCell>
                     <TableCell>
-                      <AppointmentCell row={l} />
+                      <AppointmentCell row={l} solar={solar} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -265,7 +304,9 @@ export function AppointmentsList({
                   ) : (
                     <span className="text-muted-foreground/60">· Not scheduled</span>
                   )}
-                  {l.outcome ? (
+                  {solar ? (
+                    <SolarMarks row={l} />
+                  ) : l.outcome ? (
                     <OutcomePill outcome={l.outcome} />
                   ) : l.isPast ? (
                     <span className="rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -325,11 +366,16 @@ function FilterChip({
   );
 }
 
-function AppointmentCell({ row }: { row: AppointmentRow }) {
+function AppointmentCell({ row, solar }: { row: AppointmentRow; solar: boolean }) {
   if (!row.when) {
     return (
       <div className="flex flex-col gap-1">
         <span className="text-sm text-muted-foreground/50">Not scheduled</span>
+        {solar && (row.outcome || row.rescheduleCount > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <SolarMarks row={row} />
+          </div>
+        )}
       </div>
     );
   }
@@ -340,7 +386,9 @@ function AppointmentCell({ row }: { row: AppointmentRow }) {
         {row.relative && (
           <span className="text-[11px] text-muted-foreground/70">{row.relative}</span>
         )}
-        {row.outcome ? (
+        {solar ? (
+          <SolarMarks row={row} />
+        ) : row.outcome ? (
           <OutcomePill outcome={row.outcome} />
         ) : row.isPast ? (
           // A past appointment with no outcome is the thing a manager chases.
@@ -353,10 +401,82 @@ function AppointmentCell({ row }: { row: AppointmentRow }) {
   );
 }
 
-function OutcomePill({ outcome }: { outcome: string }) {
+/** Solar: what the outcome counts as, the gap if nothing was recorded, and any moves. */
+function SolarMarks({ row }: { row: AppointmentRow }) {
   return (
-    <span className="whitespace-nowrap rounded-full bg-gold/15 px-2 py-0.5 text-[11px] font-medium text-gold-muted">
+    <>
+      {row.outcome ? (
+        <OutcomePill outcome={row.outcome} category={row.outcomeCategory} />
+      ) : row.isPast ? (
+        <span className="rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          Needs outcome
+        </span>
+      ) : null}
+      {row.rescheduleCount > 0 && (
+        <span className="whitespace-nowrap rounded-full border border-sky-500/30 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+          {row.rescheduleCount > 1 ? `Rescheduled ×${row.rescheduleCount}` : "Rescheduled"}
+        </span>
+      )}
+    </>
+  );
+}
+
+const CATEGORY_PILL: Record<OutcomeCategory, string> = {
+  ran: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  not_ran: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  cancelled: "bg-red-500/15 text-red-700 dark:text-red-300",
+  rescheduled: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+};
+
+function OutcomePill({ outcome, category }: { outcome: string; category?: OutcomeCategory | null }) {
+  return (
+    <span
+      className={cn(
+        "whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium",
+        category ? CATEGORY_PILL[category] : "bg-gold/15 text-gold-muted"
+      )}
+      title={category ? `Counts as ${OUTCOME_CATEGORY_LABELS[category]}` : undefined}
+    >
       {outcome}
     </span>
+  );
+}
+
+/** Solar: who has the appointment. Combines with every status chip. */
+function RepToggle({
+  value,
+  counts,
+  onChange,
+}: {
+  value: RepFilter;
+  counts: Record<RepFilter, number>;
+  onChange: (next: RepFilter) => void;
+}) {
+  return (
+    <div
+      className="inline-flex shrink-0 items-center rounded-lg border border-border bg-card p-0.5"
+      role="group"
+      aria-label="Filter by rep"
+    >
+      {REP_FILTERS.map((o) => {
+        const on = value === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(o.key)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              on ? "bg-gold/12 text-gold-muted" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <span>{o.label}</span>
+            <span className="text-[10px] font-semibold tabular-nums opacity-70">{counts[o.key]}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
