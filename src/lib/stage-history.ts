@@ -14,7 +14,14 @@
  * change passed the human gate on its own. A change a person approved is that
  * person's move, and carries their name instead.
  */
-export type StageMoveVia = "automation" | "signature" | "document" | "agent";
+export const STAGE_MOVE_VIA = ["automation", "signature", "document", "agent"] as const;
+
+export type StageMoveVia = (typeof STAGE_MOVE_VIA)[number];
+
+/** Narrows a raw `LeadStageEvent.via` string to `StageMoveVia`, one list for both. */
+export function isStageMoveVia(value: unknown): value is StageMoveVia {
+  return typeof value === "string" && (STAGE_MOVE_VIA as readonly string[]).includes(value);
+}
 
 export type StageEventRow = {
   id: string;

@@ -5,6 +5,7 @@ import {
   formatDuration,
   isCompletionStage,
   isSaleStage,
+  isStageMoveVia,
   type StageEventRow,
 } from "../stage-history";
 
@@ -240,6 +241,20 @@ describe("buildTimeline", () => {
 
   it("never reports negative time from a clock skew", () => {
     expect(daysBetween("2026-01-10T00:00:00.000Z", "2026-01-01T00:00:00.000Z")).toBe(0);
+  });
+});
+
+describe("isStageMoveVia", () => {
+  it("accepts every known value, agent included", () => {
+    for (const v of ["automation", "signature", "document", "agent"]) {
+      expect(isStageMoveVia(v)).toBe(true);
+    }
+  });
+
+  it("rejects anything else, case included", () => {
+    for (const v of [null, "", "Agent", "person", 1]) {
+      expect(isStageMoveVia(v)).toBe(false);
+    }
   });
 });
 
