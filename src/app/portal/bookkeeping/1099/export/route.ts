@@ -11,7 +11,11 @@ function cell(v: string | number): string {
 /** 1099-NEC CSV for an e-file service. ?year=YYYY &all=1 (include under-$600). */
 export async function GET(req: Request) {
   const user = await requireUser();
-  if (!can(user, "read", "Bookkeeping")) return new NextResponse("Forbidden", { status: 403 });
+  // A download is `export`, not `read`. Same grant list either way today
+  // (super_admin + accounting), but the 1099 CSV carries recipient TINs and
+  // the books leave the product as a file — so the verb that exists to be
+  // withheld is the one that has to be asked for.
+  if (!can(user, "export", "Bookkeeping")) return new NextResponse("Forbidden", { status: 403 });
 
   const url = new URL(req.url);
   const year = Number(url.searchParams.get("year")) || new Date().getFullYear();

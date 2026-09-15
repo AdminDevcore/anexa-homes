@@ -35,7 +35,11 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-export function StormLeads() {
+/**
+ * @param canExport `export StormIntelligence` — leadership only. The table
+ *   below is `read` and stays wider; the CSV/PDF of it is not.
+ */
+export function StormLeads({ canExport }: { canExport: boolean }) {
   const [minScore, setMinScore] = React.useState("");
   const [subject, setSubject] = React.useState("all");
 
@@ -77,16 +81,20 @@ export function StormLeads() {
           <span className="mr-1 text-sm text-muted-foreground">
             {isFetching ? "Loading…" : `${matches.length} matches`}
           </span>
-          <Button asChild variant="outline" size="sm" className="gap-1.5">
-            <a href={`/portal/storm-intelligence/export?${qstr}`}>
-              <Download className="size-4" /> CSV
-            </a>
-          </Button>
-          <Button asChild variant="outline" size="sm" className="gap-1.5">
-            <a href={`/portal/storm-intelligence/pdf?${qstr}`}>
-              <FileText className="size-4" /> PDF
-            </a>
-          </Button>
+          {canExport && (
+            <>
+              <Button asChild variant="outline" size="sm" className="gap-1.5">
+                <a href={`/portal/storm-intelligence/export?${qstr}`}>
+                  <Download className="size-4" /> CSV
+                </a>
+              </Button>
+              <Button asChild variant="outline" size="sm" className="gap-1.5">
+                <a href={`/portal/storm-intelligence/pdf?${qstr}`}>
+                  <FileText className="size-4" /> PDF
+                </a>
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
