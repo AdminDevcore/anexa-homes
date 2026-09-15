@@ -1,7 +1,7 @@
 # Agents: a control plane for back-office automation
 
 Date: 2026-09-15
-Status: approved 2026-09-15, with amendments (decisions 8–12)
+Status: approved 2026-09-15, with amendments (decisions 8–13). Open questions 1 and 3 are decided later and do not block this build.
 Branch: `feat/agents-control-plane` (worktree `~/Desktop/anexa-agents-wt`, off `origin/main` at `c0a1a7e`)
 
 ## Problem
@@ -95,6 +95,7 @@ Verified against `origin/main` and against production on 2026-09-15.
 | 10 | Run now on a disabled agent stays, behind a confirmation prompt that the server enforces too. |
 | 11 | Stage flags: Solar's six "Action Required" stages are flagged; Roofing's Supplement Needed is flagged; three new roofing action-required stages are added — Claim Denied, QC Failed, Payment Issue. Nothing waiting on a carrier or homeowner, and nothing on the forward path, is flagged. |
 | 12 | Built on `main` as it stands: with no stage-requirement check there, the gate has no "blocked" outcome. |
+| 13 | Advance and the progress count use main-line stages only — not `isLost`, not `isActionRequired` — in both Roofing and Solar, including the change to Solar's Advance. Side-states stay reachable from the Move menu. Confirmed 2026-09-15. |
 
 ## Data model
 
@@ -518,6 +519,10 @@ when, how and why.
 - **Close without applying.** A note is required. `resolution = closed`. This
   is the only option for a run the handler itself marked `needs_human`.
 
+A `manager` holding the Agents access switch is refused Apply on any deal
+outside their team, and can still read and close the run. Whether that is
+right is Open question 3.
+
 ## Registry integrity
 
 Three checks. There is no boot check, and `instrumentation.ts` is untouched.
@@ -591,7 +596,7 @@ action:
 | `/portal/agents`, `/portal/agents/[id]`, `/portal/agents/runs` | `agentCan(read)`, else redirect to the dashboard. An agent or run outside the viewer's workspaces is not found. |
 | `/portal/agents/new`, create, update, enable toggle | `canEditAgentConfig` |
 | Run now | `agentCan(run)` |
-| Resolve | `agentCan(approve)`; Apply also checks `leadAccessible` for each deal |
+| Resolve | `agentCan(approve)`; Apply also checks `leadAccessible` for each deal (who should get past that check is Open question 3) |
 | Agents access switch | `super_admin` only |
 | `/api/cron/agents` | `CRON_SECRET` |
 | Sidebar item | `resource: "Agent"`, `roles: ["super_admin", "admin", "accounting", "manager"]` — the same set `agentCan(read)` can allow |
@@ -733,7 +738,7 @@ not `isActionRequired`:
 This also changes Solar once its six stages are flagged: from NTP Submitted,
 Advance offers NTP Approved rather than NTP Action Required. It ships in the
 same deploy as the stage migration, so no deal page ever offers a side-state as
-the next step.
+the next step. Confirmed 2026-09-15 (decision 13).
 
 ## Migrations and rollout
 
@@ -874,8 +879,61 @@ deliberately does not invent one. Decide before the first portal handler ships:
 Until this is decided, `deps.secrets` resolves only `env:AGENT_*` and
 `lender:<id>`.
 
-### 2. Advance skipping action-required stages — confirm before build
+### 2. Advance skipping action-required stages — resolved
 
-The Advance change above is required for the new roofing stages not to hijack
-the one-click forward move, and it changes Solar's Advance too. It is in the
-plan; confirm it, or say where the three roofing stages should sit instead.
+Confirmed 2026-09-15 (decision 13): main-line only for Advance and the progress
+count, in both verticals, including Solar's Advance. Side-states stay reachable
+from the Move menu.
+
+### 3. Runs about deals a manager can't open — decide before the first gated agent
+
+Not decided, and not blocking: the Hello Agent requests no changes, so nothing
+is ever held. It must be decided before the first agent that returns changes
+while gated.
+
+**The facts.**
+
+- A `manager`'s deal scope (`listScope(user, "Lead")` in
+  `src/server/rbac/policies.ts`) is their team: deals assigned to or created by
+  the manager, a rep who reports to them, or a canvasser under one of those
+  reps. `super_admin`, `admin` and `accounting` see every deal in the company,
+  so this question is only about managers holding the switch.
+- The solar coordinators are `manager` accounts and mostly have no reports, so
+  their scope is roughly the deals assigned to or created by them.
+- The Agents pages filter runs by company and workspace, never by deal (both
+  models are shared, and a run can name many deals).
+- Apply re-checks `leadAccessible` for every held change. Close does not look
+  at the deal. Run now checks only `agentCan(run)`.
+
+**What the build does in the meantime.** For a deal a switch holder cannot
+open:
+
+- it **shows** them the customer's name and address (`leadLabel` and each
+  change's `dealLabel`), with a deal link that 404s; the stage the deal is in
+  and the stage the agent wants; the agent's summary and reason; the handler's
+  `detail` JSON, the log lines and any error text — for a future portal agent
+  that could be a loan status, a stipulation, or a permit or application
+  number; and alert text built with `{{customer}}`;
+- it lets them **Close** a held change on that deal, dismissing the agent's
+  proposal without seeing the deal;
+- it **refuses Apply**, so the change waits for the owner or an admin;
+- it lets them press **Run now**, which on an *ungated* agent moves deals
+  anywhere in the workspace — including ones they cannot open — as the agent.
+
+`actions.itest.ts` pins the Apply refusal ("does not let a manager with Agents
+access apply a change to a deal outside their own team"). That is today's
+behaviour, recorded so any change to it is deliberate, not the answer.
+
+**Options.**
+
+| | What changes | On a deal they can't open, a switch holder… | Consequences |
+|---|---|---|---|
+| **A. Keep it** | Nothing. | …reads everything listed above, can Close, cannot Apply. | Gated work on out-of-team deals queues for the owner and admins. A coordinator with no reports can Apply on almost nothing, so for them the switch means reading, closing and Run now. The row-scope invariant is untouched. |
+| **B. The switch authorises Apply** | Apply skips `leadAccessible` for switch holders. Still same company and workspace, still the moved-since check. | …reads everything, can Close, and can Apply: the deal moves under their name, and `stage_changed` alerts and `stage_entered` automations (generated documents, emails) fire on a deal they cannot open to check. | The first row-scope exception for a role that does not already see the whole company: `row-scope-boundary.test.ts` needs a reviewed allow-list entry with a new kind of reason (the existing "the permission is the boundary" entries rely on the role being company-wide). A sales manager given the switch can move another team's deals, limited to what an agent proposed. |
+| **C. Hide it** | A switch holder sees a run, and gets its alert, only when they can open every deal it names. The rest is the owner's and admins'. | …sees nothing. The run does not exist for them. | Exposes nothing new. A coordinator's queue is close to empty, so the switch does little for gated agents. The most work: changes live in `detail` JSON, so filtering needs a per-change table or in-memory filtering that breaks page counts; `agents_access` alerts need a per-deal recipient check; a sweep run naming many deals needs a rule. Run now is unchanged. |
+| **D. Widen their deal scope** | Holding the switch makes that manager's `listScope(user, "Lead")` the whole company, in the workspaces they hold. | …can open the deal, so nothing is out of scope and Apply works. | The switch stops meaning "agents" and means "every deal", through every screen built on `listScope`: pipeline, search, deal pages, documents, pricing, and team and report numbers that assume a manager sees a team. On a sales manager it shows every other team's customers and prices. It is the Operations-role split (Known debt) done through a permission key. |
+| **E. Redact it** | Out-of-scope runs show to switch holders without the customer ("a deal outside your team"), without a deal link, and without handler detail, log or error. Close allowed with a note; Apply refused. | …sees the agent, the two stage names and that a proposal exists; can Close; cannot Apply. | Triage without the customer data. Handlers must keep customer details out of `summary` and `reason`, which stay visible. Redaction is per run and per viewer, so every page read pays a scope check. Apply still falls to the owner and admins. |
+
+**Separately, whichever option:** Run now on an ungated agent acts on deals the
+person pressing it may not be able to open. If that matters, Run now for switch
+holders can be limited to gated agents, independently of A–E.
