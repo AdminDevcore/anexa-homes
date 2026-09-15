@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SUMMARY_MAX, parseAgentResult, truncateSummary } from "../result";
+import { MAX_DETAIL_CHARS, SUMMARY_MAX, parseAgentResult, truncateSummary } from "../result";
 import { emptyDetail, errorText, missingHandlerMessage, readDetail } from "../detail";
 
 const LEAD = "0b8f5a8e-2f1e-4d7c-9a6b-1c2d3e4f5a6b";
@@ -31,10 +31,55 @@ describe("parseAgentResult", () => {
     expect(parseAgentResult(undefined).ok).toBe(false);
   });
 
+  it("refuses an empty summary", () => {
+    expect(parseAgentResult({ status: "success", summary: "" }).ok).toBe(false);
+  });
+
   it("truncates a long summary", () => {
     const r = parseAgentResult({ status: "success", summary: "x".repeat(400) });
     expect(r.ok && r.result.summary.length).toBe(SUMMARY_MAX);
     expect(truncateSummary("short")).toBe("short");
+  });
+
+  it("refuses a change: typo instead of changes:, rather than silently dropping it", () => {
+    const r = parseAgentResult({
+      status: "success",
+      summary: "x",
+      change: [{ type: "move_stage", leadId: LEAD, toStageKey: "k", reason: "r" }],
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("refuses an error over 4000 characters", () => {
+    const r = parseAgentResult({ status: "failed", summary: "x", error: "e".repeat(4001) });
+    expect(r.ok).toBe(false);
+  });
+
+  describe("detail must be JSON and bounded", () => {
+    it("refuses a circular detail", () => {
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      const r = parseAgentResult({ status: "success", summary: "x", detail: circular });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/JSON-serialisable/);
+    });
+
+    it("refuses a BigInt in detail", () => {
+      const r = parseAgentResult({ status: "success", summary: "x", detail: { big: BigInt(10) } });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/JSON-serialisable/);
+    });
+
+    it("refuses a detail over 32 KB serialised", () => {
+      const r = parseAgentResult({ status: "success", summary: "x", detail: { big: "x".repeat(40_000) } });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(new RegExp(`at most ${MAX_DETAIL_CHARS} characters`));
+    });
+
+    it("allows a normal, small detail", () => {
+      const r = parseAgentResult({ status: "success", summary: "x", detail: { observed: "stip", count: 3 } });
+      expect(r.ok).toBe(true);
+    });
   });
 });
 
@@ -59,6 +104,12 @@ describe("run detail", () => {
     expect(d.durationMs).toBeNull();
     expect(d.changes).toEqual([]);
     expect(readDetail(null).handlerKey).toBe("");
+  });
+
+  it("treats a handler array as absent, and drops non-object changes", () => {
+    const d = readDetail({ handler: [], changes: [null, 1, { outcome: "applied" }] });
+    expect(d.handler).toBeNull();
+    expect(d.changes).toEqual([{ outcome: "applied" }]);
   });
 
   it("keeps a stack when there is one", () => {
