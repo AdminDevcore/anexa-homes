@@ -267,12 +267,20 @@ describe("the battery reaches the contract", () => {
   });
 
   it("moves the DEAL's value, which is the number that started this", async () => {
-    await generate();
+    const res = await generate();
+    if (!res.ok) throw new Error(res.error);
     const lead = await db.lead.findUniqueOrThrow({
       where: { id: leadId },
       select: { value: true },
     });
-    expect(lead.value).toBe(ARRAY_CENTS + POWERWALL_CENTS);
+    // `Lead.value` is the household's NET after the credits their document
+    // quotes (solar/deal-value.ts), so it is read off that document's own
+    // ladder — which is priced on a contract with the fee-grossed battery in it.
+    // The array alone is worth less than $55,000 net; this deal is worth more.
+    const f = res.snapshot.financing;
+    expect(f.contractPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
+    expect(lead.value).toBe(f.creditLadder?.netCostCents ?? f.contractPriceCents);
+    expect(lead.value).toBeGreaterThan(ARRAY_CENTS);
   });
 
   it("writes the priced contract back onto the deal's own finance row", async () => {

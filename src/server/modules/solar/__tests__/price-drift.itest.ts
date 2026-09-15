@@ -251,7 +251,9 @@ describe("the contract follows every input that moves it", () => {
     expect((await design()).batteryQty).toBe(2);
 
     /**
-     * Two Powerwalls at the catalogue price ride on top at face value.
+     * Two Powerwalls at the catalogue price, grossed up by the programme's
+     * dealer fee like every other part of the gross (2026-09-15 — the fee is on
+     * the whole gross, battery included; there is no per-lender exception).
      *
      * Asserted as the DIFFERENCE from the array's own price rather than as an
      * absolute: `recomputeDesignFigures` owns the array size and re-derives it
@@ -263,7 +265,8 @@ describe("the contract follows every input that moves it", () => {
     const d = await design();
     expect(d.batteryQty).toBe(2);
     const arrayOnly = Math.round(d.systemSizeKwDc * 1000) * f.grossPpwCents;
-    expect(after - arrayOnly).toBe(2 * 1_400_000);
+    const fee = f.dealerFeePct > 0 && f.dealerFeePct < 100 ? f.dealerFeePct / 100 : 0;
+    expect(after - arrayOnly).toBe(Math.round((2 * 1_400_000) / (1 - fee)));
     expect(before).toBeGreaterThan(0);
   });
 

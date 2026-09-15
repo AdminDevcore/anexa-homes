@@ -3786,6 +3786,16 @@ model SolarLender {
   /// before the column existed.
   batteryRule SolarLenderBatteryRule @default(warn)
 
+  /// RETIRED 2026-09-15 -- read by nothing, written by nothing. Kept only so the
+  /// column survives this deploy: the build still serving when it goes out
+  /// selects it, and dropping it in the same release would 500 that build. The
+  /// dealer fee now ALWAYS applies to the battery, like every other part of the
+  /// gross (final = gross / (1 - fee)), so there is no switch to read. A guard
+  /// test (solar-battery-fee-retired.test.ts) fails if src/ references it again.
+  /// Drop it in a follow-up migration once this release is live.
+  batteryInsideFee Boolean @default(true)
+
+
   /// How the sign today credit is arrived at on this partner's deals -- see
   /// SolarSignTodayMode. `none` is the default, and leaves the per-deal box
   /// exactly as it was.
