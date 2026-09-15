@@ -1,4 +1,4 @@
-import type { HandlerKey } from "./handler-keys";
+import { isHandlerKey, type HandlerKey } from "./handler-keys";
 import type { AgentHandler } from "./types";
 import { systemHelloHandler } from "./handlers/system-hello";
 
@@ -12,7 +12,7 @@ export const HANDLERS = {
 } satisfies Record<HandlerKey, AgentHandler>;
 
 export function handlerFor(key: string): AgentHandler | null {
-  return (HANDLERS as Record<string, AgentHandler>)[key] ?? null;
+  return isHandlerKey(key) ? HANDLERS[key] : null;
 }
 
 export function handlerOptions(): { value: string; label: string }[] {

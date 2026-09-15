@@ -21,6 +21,12 @@ describe("handler registry", () => {
     expect(handlerFor("system.hello")?.key).toBe("system.hello");
   });
 
+  it("ignores keys inherited from Object.prototype", () => {
+    expect(handlerFor("constructor")).toBeNull();
+    expect(handlerFor("toString")).toBeNull();
+    expect(handlerFor("__proto__")).toBeNull();
+  });
+
   it("offers every handler to the picker", () => {
     expect(handlerOptions()).toContainEqual({ value: "system.hello", label: "Hello (test agent)" });
   });
