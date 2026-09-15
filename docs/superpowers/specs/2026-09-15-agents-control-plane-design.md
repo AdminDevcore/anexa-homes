@@ -194,6 +194,18 @@ model AgentRun {
 
 Back-relations are added on `Company`, `User` (three named relations) and `Lead`.
 
+### One run in flight
+
+At most one `queued` or `running` run per agent per workspace. The partial
+unique index `agent_runs_one_in_flight` on `("agentId", "vertical") WHERE status
+IN ('queued', 'running')` enforces this. It is written by hand in the migration,
+because Prisma 6 cannot declare it and `migrate diff` ignores it. `createRun`
+returns `null` when the index refuses. Without it, a tick and a Run now could
+both pass the in-flight check and move the same deals twice: history,
+notifications and stage automations, all doubled. `agent_runs` is also indexed
+on `leadId`, so a deleted deal does not scan the table. *(Amended after the
+Task 2 review.)*
+
 ### Where this differs from the original brief
 
 - `deal_id` → `leadId`, because a deal is a `Lead`.
@@ -369,7 +381,9 @@ calls `tick(now)`:
 5. **For each workspace** — `[agent.vertical]`, or for a "both" agent every
    live workspace (Solar only when `SOLAR_VERTICAL_ENABLED` is on):
    - if a run for this agent and workspace is already `queued` or `running`,
-     skip; that run is the record;
+     skip; that run is the record. The check is only the polite path. The
+     partial unique index `agent_runs_one_in_flight` is what holds when a tick
+     and Run now race, so a refused create is also a skip;
    - if the handler is missing, write a `failed` run immediately — `No handler
      is registered for "bank.ntp_poll". Deploy the handler or disable this
      agent.` — and notify;
@@ -425,10 +439,17 @@ external worker can call it without schema changes.
 
 At the start of every tick:
 
-- a run `running` for longer than its agent's `timeoutSeconds` + 60 seconds →
-  `failed`: `Reaped: still marked running N min after its T s timeout. The
-  process running it stopped (deploy, crash or platform limit); nothing after
-  the last log line is known to have happened.`
+- a run `running` for longer than 300 s (the function limit) + 60 seconds →
+  `failed`: `Reaped: still marked running N min past the 300 s limit on any
+  run. The process running it stopped (deploy, crash or platform limit);
+  nothing after the last log line is known to have happened.`
+
+  The clock is the function limit, not the agent's `timeoutSeconds`. Every run
+  executes inside a function killed 300 s after it starts: the tick's start, or
+  Run now's click, both at or before `startedAt`. A younger run may still be
+  applying changes (until 285 s). Reaping it would record that nothing happened
+  over deals that did move. `timeoutSeconds` can also be edited mid-run.
+  *(Amended after the Task 2 review.)*
 - a run `queued` for longer than 10 minutes → `failed`: `Never started.`
 
 Both notify. No run can stay `running`.
@@ -445,7 +466,9 @@ Both notify. No run can stay `running`.
   its **Run anyway** sends the flag, so a stale page or a direct call cannot
   skip the prompt;
 - if the handler is missing, writes a `failed` run and returns its error;
-- refuses while that agent already has a run in flight in a target workspace;
+- refuses while that agent already has a run in flight in a target workspace
+  (a create the in-flight index refuses counts the same; runs created for the
+  other workspaces still start);
 - creates one `queued` run per target workspace (the agent's own, or for a
   "both" agent each live workspace the viewer holds) with `triggeredById`,
   hands them to `after(() => executeRun(...))`, and returns;
@@ -842,6 +865,15 @@ a read-only query confirms the stage flags and the three new roofing stages.
 - A credential store (Open question 1).
 - Retries, config version history, deleting agents.
 - Splitting the `manager` role (see Known debt).
+
+## Follow-up: run retention
+
+Every run is kept, including runs that change nothing. A per-minute schedule
+adds about 1,440 rows a day per workspace. The Hello Agent ships disabled and
+unscheduled, so nothing accumulates from this build. A retention rule is needed
+before the first agent on a frequent schedule: for example, delete successful
+runs with no changes after N days, and keep failures, gated runs and anything
+that moved a deal. *(Raised in the Task 2 review.)*
 
 ## Known debt: `manager` is overloaded
 

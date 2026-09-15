@@ -18,6 +18,16 @@
 - **Before each push**, the user gets a plain-language paragraph for a roofing rep and one for a solar coordinator on what they will see differently, and gives the go.
 - **Open question 3:** option A is approved as the stopgap. The Apply-refusal test in Task 18 stays.
 
+**Amended after the Task 2 review (2026-09-15):**
+- **One run in flight, held by the database.** Task 2's migration gains `@@index([leadId])` and a hand-written partial unique index, `agent_runs_one_in_flight`, on `(agentId, vertical) WHERE status IN ('queued','running')`. Prisma 6.19's `migrate diff` ignores it, so the drift check stays empty.
+  - `createRun` returns `null` when the index refuses a second in-flight run (Task 12).
+  - The tick counts that as `skippedInFlight` (Task 13).
+  - Run now starts whatever was created, or fails with "already has a run in progress" (Task 18).
+  - Test fixtures never hold two queued or running runs for one agent in one workspace.
+- **The reaper's clock is the 300 s function limit + 60 s, not the agent's `timeoutSeconds`** (Task 13). A run can still be applying changes past its handler timeout. Reaping it then would record "nothing happened" over deals that moved.
+- **`listAgents` reads each agent's last run with its own `findFirst`**, not a nested `runs: { take: 1 }`, which Prisma applies in memory over every run (Task 17).
+- **Run retention** is recorded as a follow-up in the spec. It is not built here.
+
 ---
 
 ## Ground rules for this worktree
@@ -3769,6 +3779,8 @@ git commit -m "feat(agents): read deals in the run's workspace, and move one the
 
 ## Task 12: The runner
 
+> **Amended after the Task 2 review:** `createRun` returns `null` when the in-flight index refuses (catch `P2002`); add a concurrent-create test; fixtures never hold two in-flight runs for one agent and workspace. See the header amendment.
+
 **Files:**
 - Create: `src/server/modules/agents/runner.ts`
 - Test: `src/server/modules/agents/__tests__/runner.itest.ts`
@@ -4436,6 +4448,8 @@ git commit -m "feat(agents): the runner — a row before anything runs, a deadli
 ---
 
 ## Task 13: The reaper, the tick, and the cron route
+
+> **Amended after the Task 2 review:** reap `running` after `CRON_MAX_DURATION_SECONDS` × 1000 + `REAP_GRACE_MS` from `startedAt`, not `timeoutSeconds` + grace; the stuck-run fixture starts 365 s ago and its queued sibling is on a second agent; add "a 200 s-old run with a 60 s timeout is not reaped"; the tick skips when `createRun` returns `null`. See the header amendment.
 
 **Files:**
 - Create: `src/server/modules/agents/reaper.ts`, `src/server/modules/agents/tick.ts`, `src/app/api/cron/agents/route.ts`
@@ -5603,6 +5617,8 @@ git commit -m "feat(agents): every company gets the Hello Agent and starter agen
 
 ## Task 17: What the Agents pages read
 
+> **Amended after the Task 2 review:** no nested `runs: { take: 1 }` in `listAgents`; one `findFirst` per agent in `Promise.all`, same shape. See the header amendment.
+
 **Files:**
 - Create: `src/server/modules/agents/queries.ts`
 - Test: `src/server/modules/agents/__tests__/queries.itest.ts`
@@ -6018,6 +6034,8 @@ git commit -m "feat(agents): page reads that apply the viewer's workspaces on ev
 ---
 
 ## Task 18: The server actions
+
+> **Amended after the Task 2 review:** `createRun` can return `null`; Run now starts only the runs created and fails only if none were; clear Hello's runs before the "already in progress" fixture inserts a running one. See the header amendment.
 
 **Files:**
 - Create: `src/server/modules/agents/actions.ts`
