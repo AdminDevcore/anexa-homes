@@ -12,6 +12,8 @@ import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 import { runAutomations } from "@/server/modules/automations/engine";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { notifyProjectStatusChanged } from "@/server/modules/projects/status-events";
+import { solarStageRequirementError } from "@/server/modules/pipeline/solar-stage-requirements";
+import { stageEntryData } from "@/server/modules/pipeline/stage-entry-data";
 
 /** Ensures the lead exists AND is within the user's row-level scope. */
 async function assertLeadInScope(userCompanyId: string, scope: Prisma.LeadWhereInput, leadId: string) {
@@ -101,35 +103,6 @@ const moveSchema = z.object({
   position: z.number().int().min(0).optional(),
 });
 
-/** The stage fields every entry into a stage resets, whichever path got us here. */
-type StageEntry = Pick<
-  Prisma.PipelineStageGetPayload<{ select: { id: true; defaultBlocker: true; stageType: true } }>,
-  "id" | "defaultBlocker" | "stageType"
->;
-
-/**
- * What lands on the lead when it enters a stage.
- *
- * Entering a stage means a fresh SLA clock and a fresh follow-up clock: the
- * alerts that fired against the previous stage are cleared, and the chase
- * history is wiped so the cadence counts from this entry rather than inheriting
- * a touch logged against the old blocker. Cancelling is a stage entry like any
- * other, so it shares this rather than reimplementing it — two copies of this
- * block is two chances for a cancelled deal to keep escalating.
- */
-function stageEntryData(stage: StageEntry): Prisma.LeadUpdateInput {
-  return {
-    stage: { connect: { id: stage.id } },
-    stageChangedAt: new Date(),
-    stageAlertLevel: 0,
-    stageOverdue: false,
-    blockedBy: stage.defaultBlocker,
-    lastTouchAt: null,
-    lastChaseAlertAt: null,
-    ...(stage.stageType === "internally_owned" ? { blockerNote: null } : {}),
-  };
-}
-
 export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   const user = await requireUser();
   const parsed = moveSchema.safeParse(input);
@@ -142,9 +115,21 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   // Validate stage belongs to this company.
   const stage = await prisma.pipelineStage.findFirst({
     where: { id: parsed.data.stageId, pipeline: { companyId: user.companyId } },
-    select: { id: true, name: true, position: true, defaultBlocker: true, stageType: true },
+    select: { id: true, key: true, name: true, position: true, defaultBlocker: true, stageType: true },
   });
   if (!stage) return { ok: false as const, error: "Invalid stage." };
+
+  const lead = await prisma.lead.findUnique({
+    where: { id: parsed.data.leadId },
+    select: { vertical: true },
+  });
+  const requirementError = await solarStageRequirementError({
+    companyId: user.companyId,
+    leadId: parsed.data.leadId,
+    vertical: lead?.vertical ?? "roofing",
+    stage,
+  });
+  if (requirementError) return { ok: false as const, error: requirementError };
 
   await prisma.lead.update({
     where: { id: parsed.data.leadId },

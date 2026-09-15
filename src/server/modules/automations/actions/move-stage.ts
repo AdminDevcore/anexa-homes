@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
+import { solarStageRequirementError } from "@/server/modules/pipeline/solar-stage-requirements";
+import { stageEntryData } from "@/server/modules/pipeline/stage-entry-data";
 import type { ActionContext, AutomationActionModule, StepResult } from "../types";
 
 const schema = z.object({ stageId: z.string().min(1) });
@@ -35,20 +37,28 @@ export const moveStageAction: AutomationActionModule = {
     // never move a deal.
     const stage = await prisma.pipelineStage.findFirst({
       where: { id: parsed.data.stageId, pipeline: { companyId: ctx.companyId } },
-      select: { id: true, name: true, position: true },
+      select: { id: true, key: true, name: true, position: true, defaultBlocker: true, stageType: true },
     });
     if (!stage) return fail("That stage no longer exists.");
 
     const lead = await prisma.lead.findFirst({
       where: { id: ctx.leadId, companyId: ctx.companyId },
-      select: { id: true, stageId: true },
+      select: { id: true, stageId: true, vertical: true },
     });
     if (!lead) return fail("Deal not found.");
     if (lead.stageId === stage.id) {
       return { type: "move_stage", ok: true, detail: `Already in ${stage.name}.` };
     }
 
-    await prisma.lead.update({ where: { id: lead.id }, data: { stageId: stage.id } });
+    const requirementError = await solarStageRequirementError({
+      companyId: ctx.companyId,
+      leadId: lead.id,
+      vertical: lead.vertical,
+      stage,
+    });
+    if (requirementError) return fail(requirementError);
+
+    await prisma.lead.update({ where: { id: lead.id }, data: stageEntryData(stage) });
     await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage, via: "automation" });
 
     await prisma.activityLog.create({

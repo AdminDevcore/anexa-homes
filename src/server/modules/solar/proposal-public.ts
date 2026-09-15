@@ -9,6 +9,8 @@ import { approveProposalVersion } from "./proposal-approval";
 import { SIGNATURE_SELECT, certificateFor } from "./proposal-signature";
 import { readWitness } from "./witness";
 import { snapshotSolarDealComp } from "./deal-comp";
+import { solarStageRequirementError } from "@/server/modules/pipeline/solar-stage-requirements";
+import { stageEntryData } from "@/server/modules/pipeline/stage-entry-data";
 
 /**
  * Statuses that make a proposal publicly readable.
@@ -210,27 +212,29 @@ export async function acceptSolarProposal(
       },
     });
 
-    // Signing advances the pipeline to Contract Signed, if that stage exists.
+    // Signing records the customer agreement. It may only advance the pipeline
+    // once the workspace has a completed contract package as well; otherwise a
+    // stage labelled "Contract Signed" would be a false operational record.
     const { companyId: co } = await prisma.solarProposal.findUniqueOrThrow({
       where: { id: proposal.id },
       select: { companyId: true },
     });
     const stage = await prisma.pipelineStage.findFirst({
       where: { key: "contract_signed", pipeline: { companyId: co, vertical } },
-      select: { id: true, name: true, position: true, defaultBlocker: true },
+      select: { id: true, key: true, name: true, position: true, defaultBlocker: true, stageType: true },
     });
-    if (stage) {
+    const requirementError = stage
+      ? await solarStageRequirementError({
+          companyId: co,
+          leadId: proposal.leadId,
+          vertical,
+          stage,
+        })
+      : null;
+    if (stage && !requirementError) {
       await prisma.lead.update({
         where: { id: proposal.leadId },
-        data: {
-          stageId: stage.id,
-          stageChangedAt: new Date(),
-          stageAlertLevel: 0,
-          stageOverdue: false,
-          blockedBy: stage.defaultBlocker,
-          lastTouchAt: new Date(),
-          lastChaseAlertAt: null,
-        },
+        data: stageEntryData(stage),
       });
       await recordStageEntry({ leadId: proposal.leadId, stageId: stage.id, stage, via: "signature" });
     }
@@ -244,7 +248,9 @@ export async function acceptSolarProposal(
       data: {
         companyId: co,
         type: "system",
-        message: `${name} signed solar proposal v${proposal.version}${hostId ? " in person" : ""}`,
+        message: `${name} signed solar proposal v${proposal.version}${hostId ? " in person" : ""}${
+          requirementError ? `; Contract Signed not advanced: ${requirementError}` : ""
+        }`,
         leadId: proposal.leadId,
       },
     });
