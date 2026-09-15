@@ -71,8 +71,6 @@ export type OfferProduct = {
   finalPpwMode: FinalPpwMode;
   /** Which price that figure fixes on THIS programme. Absent reads as `final`. */
   ppwBasis?: PriceBasis;
-  /** Whether that lender takes its dealer fee on the battery. Absent reads as off. */
-  batteryInsideFee?: boolean;
   /**
    * That lender's sign-today rule, carried for the same reason as the cap —
    * and it has to be per COLUMN rather than per shelf, because two programmes
@@ -281,7 +279,6 @@ function purchaseRow(
           adderTotalCents: basis.adderTotalCents,
           onTopAdderTotalCents: basis.onTopAdderTotalCents,
           batteryPriceCents: basis.batteryPriceCents ?? 0,
-          batteryInsideFee: cash ? false : ((offer as OfferProduct).batteryInsideFee ?? false),
         })
       : null;
 

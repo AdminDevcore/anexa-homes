@@ -331,10 +331,10 @@ describe("the sign today credit is resolved per partner", () => {
   });
 
   it("measures the storage on the job alongside the array", () => {
-    // The wiring, not the arithmetic: a battery is priced on top at catalogue
+    // The wiring, not the arithmetic: a battery is priced inside the dealer fee
     // and the household signs for it, so it has to reach the cap. $40,000 of
-    // storage on the same 10 kW nets $20,000 more, and all of it is above the
-    // $1.50/W the partner allows.
+    // storage on this 18% programme is $48,780.49 on the contract, the credits
+    // take half of that, and all of it is above the $1.50/W the partner allows.
     const withStorage = build({
       finance: { ...LOAN, batteryPriceCents: 40_000_00 },
       signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 150 },
@@ -343,7 +343,7 @@ describe("the sign today credit is resolved per partner", () => {
       signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 150 },
     });
     expect(withStorage.financing.creditLadder!.signTodayCents).toBe(
-      without.financing.creditLadder!.signTodayCents + 20_000_00
+      without.financing.creditLadder!.signTodayCents + Math.round(Math.round(40_000_00 / 0.82) / 2)
     );
   });
 

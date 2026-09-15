@@ -85,7 +85,6 @@ export function SystemPriceCard({
   quotedMaxFinalPpwCents,
   quotedFinalPpwMode,
   quotedPpwBasis = "final",
-  quotedBatteryInsideFee = false,
   quotedMinBasePpwCents,
   quotedLabel,
   canEdit,
@@ -118,8 +117,9 @@ export function SystemPriceCard({
    * A rung of its own rather than a share of the adders, because it answers a
    * question a rep is asked out loud — "what am I charging them for the
    * battery?" — and because it is priced by a different rule: a rate per watt
-   * is a price for an array, so the battery rides on top of it exactly as a
-   * roof does on a flat-rate partner. Zero on a deal without one.
+   * is a price for an array, so the battery is charged from the catalogue,
+   * outside any partner's $/W, and grossed up by the dealer fee like an adder.
+   * Zero on a deal without one.
    */
   batteryPriceCents?: number;
   /** What it is, and how many, for the rung's own label. */
@@ -147,13 +147,6 @@ export function SystemPriceCard({
    * fee inside it, or the gross or base with the fee on top. See SolarPriceBasis.
    */
   quotedPpwBasis?: PriceBasis;
-  /**
-   * Whether that partner takes its dealer fee on the battery too. On, the
-   * battery is grossed up with the rest of the job and its share of the fee
-   * lands on the Dealer fee rung; off, it rides on top at its catalogue price.
-   * See `PurchaseInput.batteryInsideFee`.
-   */
-  quotedBatteryInsideFee?: boolean;
   /**
    * That publisher's floor under what the company keeps per watt, cents. Null
    * on cash and on any lender that sets none.
@@ -328,7 +321,6 @@ export function SystemPriceCard({
           adderTotalCents,
           onTopAdderTotalCents,
           batteryPriceCents,
-          batteryInsideFee: quotedBatteryInsideFee,
         })
       : null;
   const customerContract = customerPriced?.contractPriceCents ?? null;
@@ -769,7 +761,7 @@ export function SystemPriceCard({
             ) : (
               <>
                 {`takes a ${quotedFeePct}% dealer fee on the whole job, ${
-                  quotedBatteryInsideFee && batteryPriceCents > 0 ? "adders and battery" : "adders"
+                  batteryPriceCents > 0 ? "adders and battery" : "adders"
                 } included, so the customer’s final price is `}
               </>
             )}
@@ -801,9 +793,9 @@ export function SystemPriceCard({
                 ).toLocaleString()} for the ${batteryLabel ?? "battery"}${
                   batteryQty > 1 ? ` × ${batteryQty}` : ""
                 }${
-                  quotedBatteryInsideFee
+                  (quotedFeePct ?? 0) > 0
                     ? `: its $${Math.round(batteryPriceCents / 100).toLocaleString()} catalogue price, with the dealer fee taken on it like the rest of the job. `
-                    : ", priced from the catalogue and added on top of the rate. "
+                    : " at its catalogue price. "
                 }`}
               </>
             )}

@@ -745,11 +745,6 @@ export type LenderOption = {
    * cut, cents. Null — nearly every lender — means no floor.
    */
   minBasePpwCents: number | null;
-  /**
-   * Whether this partner takes its dealer fee on a battery beside the array —
-   * see SolarLender.batteryInsideFee.
-   */
-  batteryInsideFee: boolean;
 };
 
 export type LenderProductOption = {
@@ -840,10 +835,11 @@ export function SolarFinancePanel({
    * What the catalogue sells ONE of them for.
    *
    * On a deal with an array this is a PRICE ON THE CONTRACT: a rate per watt is
-   * a price for an array and cannot charge for a battery, so the storage rides
-   * on top at this figure — see `batteryChargeCents`. On a storage-only deal it
-   * is nothing of the kind: there the battery is the system, and the price per
-   * battery is the box the rep types in below.
+   * a price for an array and cannot charge for a battery, so the storage is
+   * charged at this figure, grossed up by the dealer fee like an adder — see
+   * `batteryChargeCents`. On a storage-only deal it is nothing of the kind:
+   * there the battery is the system, and the price per battery is the box the
+   * rep types in below.
    */
   batteryUnitPriceCents: number;
   /** The adders this company sells, for the rep to pick from. */
@@ -1047,7 +1043,6 @@ export function SolarFinancePanel({
                 label: lenderProductLabel(p),
                 maxFinalPpwCents: l.maxFinalPpwCents,
                 finalPpwMode: l.finalPpwMode,
-                batteryInsideFee: l.batteryInsideFee,
                 // Same reason as the ceiling above: the shelf prices a
                 // programme, and each column's closing credit is its own
                 // partner's to decide.
@@ -1220,7 +1215,6 @@ export function SolarFinancePanel({
       adderTotalCents,
       onTopAdderTotalCents,
       batteryPriceCents,
-      batteryInsideFee: quotedLender?.batteryInsideFee ?? false,
       maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
       finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
       ppwBasis: chosen?.ppwBasis,
@@ -1230,7 +1224,7 @@ export function SolarFinancePanel({
     adderTotalCents, onTopAdderTotalCents, batteryPriceCents,
     quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
     quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
-    chosen?.ppwBasis, chosen?.batteryPriceBasis, quotedLender?.batteryInsideFee,
+    chosen?.ppwBasis, chosen?.batteryPriceBasis,
   ]);
 
   /**
@@ -1527,8 +1521,6 @@ export function SolarFinancePanel({
         quotedFinalPpwMode={quotedLender?.finalPpwMode ?? "cap"}
         // Which price that figure fixes is the chosen PROGRAMME's to say.
         quotedPpwBasis={chosen?.ppwBasis ?? "final"}
-        // …and whether that partner takes its dealer fee on the battery.
-        quotedBatteryInsideFee={quotedLender?.batteryInsideFee ?? false}
         // The floor is the partner's too, and read the same way. Cash has no
         // lender and therefore no floor — the company band is all that guards
         // it, which is what "no lender" has always meant here.

@@ -1148,7 +1148,7 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
   const TEN_KW = { systemSizeKwDc: 10, dealerFeePct: 18 };
   const POWERWALL = 4_000_000; // $40,000
 
-  it("moves the contract by the battery's own price, exactly", () => {
+  it("moves the contract by the battery's price, grossed up by the fee", () => {
     // The defect this exists for: a $40,000 Powerwall attached to a 10 kW
     // system, and a contract value that did not move a cent. A rate per watt
     // is a price for an array, and no arithmetic over installed watts can
@@ -1160,20 +1160,22 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
       ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 0,
       batteryPriceCents: POWERWALL,
     });
-    expect(with_.contractPriceCents - without.contractPriceCents).toBe(POWERWALL);
+    // Inside the 18% fee, like an adder: $40,000 ÷ 0.82.
+    expect(with_.contractPriceCents - without.contractPriceCents).toBe(Math.round(POWERWALL / 0.82));
     expect(with_.batteryPriceCents).toBe(POWERWALL);
   });
 
-  it("passes the whole battery price through to the company, taking no fee on it", () => {
-    // At face on both sides of the fee: the customer pays the catalogue price
-    // and the company keeps it. Grossing it up on a 65% programme would put
-    // $114,285 on the contract for a $40,000 battery.
+  it("leaves the company the whole battery price, with the fee taken on top of it", () => {
+    // Grossed up like an adder: on a 65% programme the household pays
+    // $114,285.71 for a $40,000 battery, the partner keeps 65% of that, and the
+    // company keeps the catalogue price.
     const p = pricePurchase({
       product: "loan", systemSizeKwDc: 10, stickerPpwCents: 550, dealerFeePct: 65,
       adderTotalCents: 0, batteryPriceCents: POWERWALL,
     });
-    expect(p.contractPriceCents).toBe(5_500_000 + POWERWALL);
-    expect(p.dealerFeeCents).toBe(0.65 * 5_500_000); // nothing on the battery
+    expect(p.batteryStickerCents).toBe(11_428_571);
+    expect(p.contractPriceCents).toBe(5_500_000 + 11_428_571);
+    expect(p.dealerFeeCents).toBe(0.65 * 5_500_000 + (11_428_571 - POWERWALL));
     expect(p.grossPriceCents).toBe(0.35 * 5_500_000 + POWERWALL);
   });
 
@@ -1201,7 +1203,8 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
       dealerFeePct: 65, adderTotalCents: 0, batteryPriceCents: POWERWALL,
     });
     expect(priced.baseStickerCents).toBe(5_500_000);
-    expect(priced.contractPriceCents).toBe(5_500_000 + POWERWALL);
+    // Outside the rate, but inside the fee.
+    expect(priced.contractPriceCents).toBe(5_500_000 + Math.round(POWERWALL / 0.35));
   });
 
   it("keeps the customer's own breakdown adding up to its total", () => {
@@ -1214,7 +1217,7 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
         batteryPriceCents: battery,
       });
       expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
-      expect(p.baseStickerCents + p.adderStickerCents + p.batteryPriceCents).toBe(
+      expect(p.baseStickerCents + p.adderStickerCents + p.batteryStickerCents).toBe(
         p.contractPriceCents
       );
       expect(p.batteryPriceCents).toBe(battery);
@@ -1302,9 +1305,12 @@ describe("batteryChargeCents decides which price, times how many", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A partner that takes its dealer fee on the battery — 2026-09-14
+// The dealer fee is taken on the battery — 2026-09-14
+//
+// For one day this was a per-lender switch. It was removed on 2026-09-15: the
+// final price is the gross price plus the dealer fee, all together.
 // ---------------------------------------------------------------------------
-describe("a partner that takes its dealer fee on the battery", () => {
+describe("the dealer fee is taken on the battery", () => {
   // The deal it was asked about: 12.76 kW on a 25% programme, a $2.00/W base
   // stickered at $2.67/W, and two batteries at $36,000.
   const DEAL = {
@@ -1317,7 +1323,7 @@ describe("a partner that takes its dealer fee on the battery", () => {
   };
 
   it("grosses the battery up, so the fee is a share of the WHOLE final price", () => {
-    const p = pricePurchase({ ...DEAL, batteryInsideFee: true });
+    const p = pricePurchase(DEAL);
     expect(p.batteryStickerCents).toBe(9_600_000); // $72,000 ÷ 0.75
     expect(p.contractPriceCents).toBe(3_406_920 + 9_600_000);
     // 25% of the system's sticker, plus 25% of the battery's.
@@ -1326,49 +1332,14 @@ describe("a partner that takes its dealer fee on the battery", () => {
   });
 
   it("still leaves the company the battery's catalogue price", () => {
-    const p = pricePurchase({ ...DEAL, batteryInsideFee: true });
+    const p = pricePurchase(DEAL);
     expect(p.batteryPriceCents).toBe(7_200_000);
     expect(p.grossPriceCents - p.basePriceCents - p.adderTotalCents).toBe(7_200_000);
   });
 
-  it("keeps both ladders adding up to the contract", () => {
-    for (const battery of [0, 1, 99, 4_000_000, 9_999_999]) {
-      const p = pricePurchase({
-        product: "loan", systemSizeKwDc: 11.3, stickerPpwCents: 550, dealerFeePct: 65,
-        adderTotalCents: 233_333, onTopAdderTotalCents: 700_000,
-        batteryPriceCents: battery, batteryInsideFee: true,
-      });
-      expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
-      expect(p.baseStickerCents + p.adderStickerCents + p.batteryStickerCents).toBe(
-        p.contractPriceCents
-      );
-    }
-  });
-
-  it("prices exactly as before with the switch off", () => {
-    const off = pricePurchase({ ...DEAL, batteryInsideFee: false });
-    const absent = pricePurchase(DEAL);
-    expect(off).toEqual(absent);
-    expect(absent.batteryStickerCents).toBe(absent.batteryPriceCents);
-    expect(absent.contractPriceCents).toBe(3_406_920 + 7_200_000);
-  });
-
   it("changes nothing on cash, where there is no fee to take", () => {
-    const p = pricePurchase({ ...DEAL, product: "cash", dealerFeePct: 0, batteryInsideFee: true });
+    const p = pricePurchase({ ...DEAL, product: "cash", dealerFeePct: 0 });
     expect(p.batteryStickerCents).toBe(7_200_000);
     expect(p.dealerFeeCents).toBe(0);
-  });
-
-  it("keeps the battery outside a flat partner's $/W, with the fee on it", () => {
-    const cap = capStickerToFinalPpw({
-      stickerPpwCents: 857, maxFinalPpwCents: 550, mode: "flat",
-      systemSizeKwDc: 10, dealerFeePct: 65, adderTotalCents: 0,
-    });
-    const p = pricePurchase({
-      product: "loan", systemSizeKwDc: 10, stickerPpwCents: cap.stickerPpwCents,
-      dealerFeePct: 65, adderTotalCents: 0, batteryPriceCents: 4_000_000, batteryInsideFee: true,
-    });
-    expect(p.baseStickerCents).toBe(5_500_000);
-    expect(p.contractPriceCents).toBe(5_500_000 + Math.round(4_000_000 / 0.35));
   });
 });

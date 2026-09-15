@@ -1371,11 +1371,6 @@ const lenderSchema = z.object({
    */
   batteryRule: z.enum(["optional", "warn", "required"]).optional(),
   /**
-   * Whether this partner's dealer fee is taken on a battery beside the array —
-   * see SolarLender.batteryInsideFee. Written straight through with the rest.
-   */
-  batteryInsideFee: z.boolean().optional(),
-  /**
    * WHAT THIS PARTNER HANDS BACK FOR SIGNING TODAY — see `solar-sign-today`.
    *
    * `none` leaves the figure to the rep on the deal, `fixed` gives this

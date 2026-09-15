@@ -28,8 +28,9 @@ import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
  * catalogue afterwards, and whether a storage-only deal is billed for its
  * battery twice are all questions about rows and about time.
  *
- * The worked example: 10 kW at a flat $5.50/W is $55,000, a $40,000 battery on
- * top makes the contract $95,000.
+ * The worked example: 10 kW at a flat $5.50/W is $55,000. A $40,000 battery is
+ * grossed up by the programme's 65% dealer fee like the rest of the job, to
+ * $114,286, so the contract is $169,286.
  */
 
 process.env.SOLAR_VERTICAL_ENABLED = "1";
@@ -52,6 +53,9 @@ let user: SessionUser;
 
 const ARRAY_CENTS = 55_000_00;
 const POWERWALL_CENTS = 40_000_00;
+
+/** What the household pays for a battery: its price grossed up by the 65% fee. */
+const sticker = (cents: number) => Math.round(cents / (1 - 0.65));
 
 const generate = () =>
   runInVertical("solar", () => generateProposalVersion(user, leadId));
@@ -154,10 +158,6 @@ beforeAll(async () => {
       name: "Flat Rate Partner",
       maxFinalPpwCents: 550,
       finalPpwMode: "flat",
-      // These specs pin the battery riding ON TOP of the partner's price, so
-      // this partner does not take its fee on it. The inside-the-fee
-      // arithmetic is pinned in solar-money.test.ts.
-      batteryInsideFee: false,
     },
   });
   lenderId = lender.id;
@@ -232,14 +232,14 @@ afterAll(async () => {
 });
 
 describe("the battery reaches the contract", () => {
-  it("adds the catalogue price on top of the array's own price", async () => {
+  it("adds the catalogue price, grossed up by the fee, to the array's own price", async () => {
     const res = await generate();
     expect(res.ok, "ok" in res && !res.ok ? res.error : "").toBe(true);
     if (!res.ok) return;
 
     const f = res.snapshot.financing;
-    expect(f.batteryPriceCents).toBe(POWERWALL_CENTS);
-    expect(f.contractPriceCents).toBe(ARRAY_CENTS + POWERWALL_CENTS);
+    expect(f.batteryPriceCents).toBe(sticker(POWERWALL_CENTS));
+    expect(f.contractPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
     // The array is still sold at exactly the partner's published rate: the
     // battery rides above the ceiling rather than eating into what the company
     // keeps on the system.
@@ -281,23 +281,23 @@ describe("the battery reaches the contract", () => {
       where: { leadId },
       select: { contractPriceCents: true },
     });
-    expect(row.contractPriceCents).toBe(ARRAY_CENTS + POWERWALL_CENTS);
+    expect(row.contractPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
   });
 
   it("charges for every battery on the roof", async () => {
     await db.solarDesign.update({ where: { leadId }, data: { batteryQty: 2 } });
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
-    expect(res.snapshot.financing.batteryPriceCents).toBe(POWERWALL_CENTS * 2);
+    expect(res.snapshot.financing.batteryPriceCents).toBe(sticker(POWERWALL_CENTS * 2));
     expect(res.snapshot.financing.contractPriceCents).toBe(
-      ARRAY_CENTS + POWERWALL_CENTS * 2,
+      ARRAY_CENTS + sticker(POWERWALL_CENTS * 2),
     );
   });
 
-  it("charges every option on the menu the same for it", async () => {
+  it("charges every option on the menu for it, under that option's own fee", async () => {
     // The battery is on the roof whichever way the household pays. A menu that
     // charged for it on the loan and not in the cash column would be comparing
-    // two different houses.
+    // two different houses. Cash has no fee to gross it up by; the loan does.
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
     const purchases = (res.snapshot.options ?? []).filter(
@@ -305,7 +305,9 @@ describe("the battery reaches the contract", () => {
     );
     expect(purchases.length).toBeGreaterThan(1);
     for (const o of purchases) {
-      expect(o.financing.batteryPriceCents).toBe(POWERWALL_CENTS);
+      expect(o.financing.batteryPriceCents).toBe(
+        o.financing.product === "cash" ? POWERWALL_CENTS : sticker(POWERWALL_CENTS),
+      );
     }
   });
 });
@@ -321,9 +323,9 @@ describe("what a catalogue edit may and may not move", () => {
     });
 
     const frozen = await snapshotOf(first.id);
-    expect(frozen.financing.batteryPriceCents).toBe(POWERWALL_CENTS);
+    expect(frozen.financing.batteryPriceCents).toBe(sticker(POWERWALL_CENTS));
     expect(frozen.financing.contractPriceCents).toBe(
-      ARRAY_CENTS + POWERWALL_CENTS,
+      ARRAY_CENTS + sticker(POWERWALL_CENTS),
     );
   });
 
@@ -334,7 +336,7 @@ describe("what a catalogue edit may and may not move", () => {
     });
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
-    expect(res.snapshot.financing.batteryPriceCents).toBe(60_000_00);
+    expect(res.snapshot.financing.batteryPriceCents).toBe(sticker(60_000_00));
   });
 
   it("yields to a price typed on the deal itself", async () => {
@@ -346,9 +348,9 @@ describe("what a catalogue edit may and may not move", () => {
     });
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
-    expect(res.snapshot.financing.batteryPriceCents).toBe(32_000_00);
+    expect(res.snapshot.financing.batteryPriceCents).toBe(sticker(32_000_00));
     expect(res.snapshot.financing.contractPriceCents).toBe(
-      ARRAY_CENTS + 32_000_00,
+      ARRAY_CENTS + sticker(32_000_00),
     );
   });
 });

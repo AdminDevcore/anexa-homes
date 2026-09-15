@@ -249,31 +249,19 @@ export type PurchaseInput = {
    * contract value not move, and the company gave the battery away on every
    * such deal.
    *
-   * It rides ON TOP, exactly as a roof does on a flat-rate partner: at face
-   * value, not grossed up, and outside the ceiling in `capStickerToFinalPpw`.
-   * The reasoning is the same one written out at `pricePurchase` — the
-   * catalogue figure is what the customer pays for the hardware, so a fee taken
-   * out of it would leave the company holding less than the battery cost. At a
-   * 65% programme, grossing it up instead would put $114,285 on the contract
-   * for a $40,000 battery, which is not a price anybody would sign.
+   * It sits INSIDE the dealer fee, exactly as an ordinary adder does: what the
+   * customer pays for it is the catalogue figure grossed up by the programme's
+   * fee, so the fee is a percentage of the whole final price and the company
+   * still keeps the catalogue figure. It stays OUTSIDE the partner's $/W
+   * ceiling in `capStickerToFinalPpw`, because that figure is a price for an
+   * array. There is no per-lender exception — "the final price is the gross
+   * price plus the dealer fee, all together" (2026-09-15).
    *
    * OUT OF `basePriceCents`, therefore out of the rep's redline: the battery is
    * priced from the catalogue to cover its own cost, exactly like an adder, and
    * paying overage on it would pay a rep for the manufacturer's margin.
    */
   batteryPriceCents?: number;
-  /**
-   * WHETHER THE DEALER FEE IS TAKEN ON THAT BATTERY — the partner's switch,
-   * `SolarLender.batteryInsideFee`.
-   *
-   * On: the battery grosses up by the fee exactly as an ordinary adder does, so
-   * the fee is a percentage of the WHOLE final price and the company still
-   * keeps the catalogue figure. Off, or absent: it rides on top at face, as
-   * above. Absent reads as off so a caller with no partner — cash, a worked
-   * example — keeps its arithmetic; every caller that has one passes the
-   * partner's answer, and a CI guard checks that it does.
-   */
-  batteryInsideFee?: boolean;
   /** Our hard cost, for the margin basis. */
   equipmentCostCents?: number;
 };
@@ -294,15 +282,14 @@ export type PurchaseBreakdown = {
   onTopAdderTotalCents: number;
 
   /**
-   * THE BATTERY at its catalogue price. On top, at face, both sides of the fee
-   * — so it appears here unchanged and adds itself to gross and to the
-   * contract alike. Zero on every deal without one.
+   * THE BATTERY at its catalogue price — what the company keeps for it, and its
+   * share of GROSS. Zero on every deal without one.
    */
   batteryPriceCents: number;
   /**
    * What the CUSTOMER pays for that battery: its catalogue price grossed up by
-   * the fee where the partner takes its fee on the battery, and the catalogue
-   * price itself where it does not. The battery's line on their breakdown.
+   * the dealer fee, like an ordinary adder. The battery's line on their
+   * breakdown. Equal to `batteryPriceCents` on cash, where there is no fee.
    */
   batteryStickerCents: number;
 
@@ -368,8 +355,6 @@ export type UnitPriceInput = {
   onTopAdderTotalCents?: number;
   /** See `PurchaseInput.batteryPriceCents`. */
   batteryPriceCents?: number;
-  /** See `PurchaseInput.batteryInsideFee`. */
-  batteryInsideFee?: boolean;
   equipmentCostCents?: number;
 };
 
@@ -414,12 +399,10 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   // AFTER that gross-up, at face: the partner advances them and keeps nothing
   // of them, so there is no cut for the customer's price to have to cover.
   const adderStickerCents = up(insideAdderCents) + onTopAdderTotalCents;
-  // The battery. The company keeps its catalogue price either way; what the
-  // customer pays for it is the partner's to say. Inside the fee — the default
-  // since 2026-09-14 — it grosses up exactly like an ordinary adder, so the fee
-  // is a percentage of the WHOLE final price, battery included. On top, the
-  // customer pays the catalogue figure and the fee below is untouched by it.
-  const batteryStickerCents = input.batteryInsideFee ? up(batteryPriceCents) : batteryPriceCents;
+  // The battery grosses up exactly like an ordinary adder, so the fee is a
+  // percentage of the WHOLE final price, battery included, and the company
+  // still keeps its catalogue price.
+  const batteryStickerCents = up(batteryPriceCents);
   const contractPriceCents = baseStickerCents + adderStickerCents + batteryStickerCents;
   const grossPriceCents = basePriceCents + adderTotalCents + batteryPriceCents;
 
@@ -485,11 +468,12 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
  * `capStickerToFinalPpw` — is not measured against the partner's ceiling at
  * all. It is a pass-through: the customer borrows it, the company keeps it.
  *
- * A BATTERY IS PRICED THE SAME WAY, and for a plainer reason: a rate per watt
- * is a price for an array, and no arithmetic over installed watts can charge
- * for a Powerwall. It is charged on every deal that is not storage-only — see
- * `batteryPriceCents` — on top at its catalogue price, or grossed up by the fee
- * like an adder where the partner takes its fee on it (`batteryInsideFee`).
+ * A BATTERY IS PRICED FROM THE CATALOGUE, for a plainer reason: a rate per
+ * watt is a price for an array, and no arithmetic over installed watts can
+ * charge for a Powerwall. It is charged on every deal that is not storage-only
+ * — see `batteryPriceCents` — and grossed up by the fee like an ordinary adder,
+ * so the fee is taken on the whole gross. Like an on-top adder, it stays
+ * outside the partner's $/W ceiling.
  *
  * Cash has no lender and therefore no fee; passing one is rejected rather than
  * silently applied, because a cash deal quoted with a dealer fee is simply
@@ -508,7 +492,6 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     adderTotalCents: input.adderTotalCents,
     onTopAdderTotalCents: input.onTopAdderTotalCents,
     batteryPriceCents: input.batteryPriceCents,
-    batteryInsideFee: input.batteryInsideFee,
     equipmentCostCents: input.equipmentCostCents,
   });
   return {

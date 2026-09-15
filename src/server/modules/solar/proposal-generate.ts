@@ -454,12 +454,9 @@ export async function generateProposalVersion(
           paydownMonths: true,
           ppwBasis: true,
           batteryPriceBasis: true,
-          // Whether this programme's lender takes its dealer fee on the battery.
-          lender: { select: { batteryInsideFee: true } },
         },
       })
     : null;
-  const batteryInsideFee = quotedRow?.lender.batteryInsideFee ?? false;
 
   const capped = capStickerToFinalPpw({
     stickerPpwCents: finance.grossPpwCents,
@@ -502,7 +499,6 @@ export async function generateProposalVersion(
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,
       batteryPriceCents,
-      batteryInsideFee,
     }).contractPriceCents;
 
     if (
@@ -642,8 +638,6 @@ export async function generateProposalVersion(
           // does not fund, in a document nobody can correct afterwards.
           maxFinalPpwCents: true,
           finalPpwMode: true,
-          // Whether it takes its dealer fee on the battery, frozen likewise.
-          batteryInsideFee: true,
           // …and what it hands back for signing today. Frozen with the rest of
           // the menu for the same reason: each column is an offer from
           // whoever publishes it.
@@ -812,7 +806,6 @@ export async function generateProposalVersion(
         finalPpwMode: p.lender.finalPpwMode,
         maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
         finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
-        batteryInsideFee: p.lender.batteryInsideFee,
         signTodayMode: p.lender.signTodayMode,
         signTodayFixedCents: p.lender.signTodayFixedCents,
         signTodayCapPpwCents: p.lender.signTodayCapPpwCents,
@@ -977,7 +970,6 @@ export async function generateProposalVersion(
       // prices the whole system at zero installed watts — see the field's note.
       stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
       batteryPriceCents,
-      batteryInsideFee,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,

@@ -45,8 +45,6 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
           select: {
             ppwBasis: true,
             batteryPriceBasis: true,
-            // …and whether its lender takes the dealer fee on the battery.
-            lender: { select: { batteryInsideFee: true } },
           },
         },
       },
@@ -144,7 +142,6 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
           maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
           finalPpwMode: design.lender?.finalPpwMode,
           ppwBasis: finance.lenderProduct?.ppwBasis,
-          batteryInsideFee: finance.lenderProduct?.lender.batteryInsideFee ?? false,
         }).breakdown
       : null;
 

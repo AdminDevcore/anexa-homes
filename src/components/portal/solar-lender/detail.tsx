@@ -381,7 +381,6 @@ export function LenderDetail({
             draft.batteryMode === "normal" ? lender.finalBatteryPriceMode : draft.batteryMode,
           minBasePricePerBatteryCents,
           batteryRule: draft.batteryRule,
-          batteryInsideFee: draft.batteryInsideFee === "inside",
           signTodayMode: draft.signTodayMode,
           // Kept rather than cleared when the mode moves off them, so an admin
           // switching a partner to "the rep decides" for a month does not have
@@ -1203,32 +1202,6 @@ export function LenderDetail({
                       label: "Battery required — block the proposal",
                       detail:
                         "A grid-tied design on this partner cannot be generated at all. Better a rep finds out here than at submission.",
-                    },
-                  ]}
-                />
-              </Panel>
-
-              {/* WHETHER THE PARTNER'S CUT IS TAKEN ON THE BATTERY. The fee is a
-                  percentage of the final price; this says whether storage beside
-                  an array is inside that price or added on top of it. */}
-              <Panel title="Dealer fee on the battery">
-                <ChoiceCards
-                  name={`batt-fee-${lender.id}`}
-                  legend="When a design carries a battery beside the array"
-                  value={draft.batteryInsideFee}
-                  onChange={(v) => set("batteryInsideFee", v)}
-                  options={[
-                    {
-                      value: "inside",
-                      label: "Fee on the whole gross, battery included",
-                      detail:
-                        "The battery is grossed up by the programme's dealer fee like the system and the adders. A $36,000 battery on a 25% programme puts $48,000 on the price.",
-                    },
-                    {
-                      value: "on_top",
-                      label: "Battery on top, no fee on it",
-                      detail:
-                        "The battery is added at its catalogue price and the fee is taken on the system and adders only. How every lender priced before this setting existed.",
                     },
                   ]}
                 />

@@ -1305,11 +1305,12 @@ export type SolarProposalSnapshot = {
  *     programme, with the dealer fee added on top, as well as the FINAL price
  *     with the fee inside it. Chosen per programme; `final` is the default, so
  *     a revision-4 document was necessarily priced on `final`.
- * 6 — the BATTERY can sit inside the dealer fee. Per lender
- *     (`SolarLender.batteryInsideFee`, on by default) it grosses up by the
- *     programme's fee like an adder, and the customer's battery line is that
- *     grossed-up figure. Every document at revision 5 or below charged the
- *     battery on top, at its catalogue price.
+ * 6 — the BATTERY sits inside the dealer fee: it grosses up by the programme's
+ *     fee like an adder, and the customer's battery line is that grossed-up
+ *     figure. Every document at revision 5 or below charged the battery on top,
+ *     at its catalogue price. (On 2026-09-14 this shipped as a per-lender
+ *     switch, on for every lender; it was removed on 2026-09-15 with both live
+ *     lenders still on, so every revision-6 document prices it the same way.)
  */
 export const PRICING_CALCULATION_VERSION = 6;
 
@@ -1350,11 +1351,6 @@ export type ProposalFinanceInput = {
    * Zero on a storage-ONLY deal, where the battery is the system above.
    */
   batteryPriceCents?: number;
-  /**
-   * Whether this option's partner takes its dealer fee on that battery. Absent
-   * reads as off — cash, and every document generated before 2026-09-14.
-   */
-  batteryInsideFee?: boolean;
   dealerFeePct: number;
   /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
@@ -1503,7 +1499,6 @@ function priceOption(args: {
           adderTotalCents: finance.adderTotalCents,
           onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
           batteryPriceCents: finance.batteryPriceCents ?? 0,
-          batteryInsideFee: finance.batteryInsideFee ?? false,
         });
 
   const thirdParty = !isPurchase
