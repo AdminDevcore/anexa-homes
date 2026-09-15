@@ -124,9 +124,9 @@ export function PayrollLedger({
                   {a.amountCents > 0 ? "+" : ""}
                   {money(a.amountCents)}
                 </span>
-                {/* A recovery is deleted by removing it here, which leaves the
-                    chargeback balance untouched — the balance is the debt, this
-                    was only an instalment against it. */}
+                {/* Removing a recovery line takes the instalment back: the
+                    amount is owed on the chargeback again — see
+                    deletePayrollAdjustment. */}
                 {/* A recovery's amount is drawn from its chargeback's balance,
                     so it has no Edit — see updatePayrollAdjustment. */}
                 {editable && a.kind !== "chargeback_recovery" && (
@@ -306,6 +306,8 @@ function EditAdjustment({ adjustment, runId }: { adjustment: LedgerAdjustment; r
       toast.success("Adjustment updated");
       setOpen(false);
       router.refresh();
+    } catch {
+      toast.error("The change could not be saved. Refresh the page and try again.");
     } finally {
       setBusy(false);
     }
@@ -365,10 +367,15 @@ function RemoveAdjustment({ id, runId }: { id: string; runId: string }) {
       disabled={busy}
       onClick={async () => {
         setBusy(true);
-        const res = await deletePayrollAdjustmentAction(id, runId);
-        setBusy(false);
-        if (!res.ok) return toast.error(res.error);
-        router.refresh();
+        try {
+          const res = await deletePayrollAdjustmentAction(id, runId);
+          if (!res.ok) return toast.error(res.error);
+          router.refresh();
+        } catch {
+          toast.error("The line could not be removed. Refresh the page and try again.");
+        } finally {
+          setBusy(false);
+        }
       }}
       className="text-muted-foreground hover:text-destructive"
     >

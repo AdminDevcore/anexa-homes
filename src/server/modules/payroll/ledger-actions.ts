@@ -136,7 +136,7 @@ export async function deletePayrollAdjustmentAction(adjustmentId: string, payrol
   const user = await guard("update");
   if (!user) return fail("Not allowed.");
   const res = await locked(() =>
-    deletePayrollAdjustment({ companyId: user.companyId, adjustmentId })
+    deletePayrollAdjustment({ companyId: user.companyId, adjustmentId, deletedById: user.userId })
   );
   if (!res.ok) return fail(res.error);
   revalidatePath(`/portal/payroll/${payrollRunId}`);

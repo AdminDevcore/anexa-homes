@@ -133,6 +133,33 @@ export async function addPayrollAdjustment(
 const usd = (cents: number) => (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 /**
+ * The line, read AFTER its run is locked.
+ *
+ * Reading first and locking second lets an edit or removal that commits while
+ * this one waits go unseen: the audit entry would record values that were
+ * already gone, and an edit back to the original figure would log nothing at
+ * all. Every edit and removal takes the same run lock, so what this returns is
+ * exactly what the write replaces.
+ */
+async function lockedAdjustment(tx: Db, companyId: string, adjustmentId: string) {
+  const found = await tx.payrollAdjustment.findFirst({
+    where: { id: adjustmentId, companyId },
+    select: { payrollRunId: true },
+  });
+  if (!found) throw new PayrollRefusedError("Adjustment not found.");
+  await assertRunOpen(companyId, found.payrollRunId, tx);
+
+  const adj = await tx.payrollAdjustment.findFirst({
+    where: { id: adjustmentId, companyId },
+    select: {
+      id: true, payrollRunId: true, kind: true, amountCents: true, reason: true, leadId: true, chargebackId: true,
+    },
+  });
+  if (!adj) throw new PayrollRefusedError("Adjustment not found.");
+  return adj;
+}
+
+/**
  * Edit a line — open runs only, amount and reason only, never its payee, its
  * kind or its run.
  *
@@ -153,12 +180,7 @@ export async function updatePayrollAdjustment(args: {
   updatedById: string;
 }) {
   return prisma.$transaction(async (tx) => {
-    const adj = await tx.payrollAdjustment.findFirst({
-      where: { id: args.adjustmentId, companyId: args.companyId },
-      select: { id: true, payrollRunId: true, kind: true, amountCents: true, reason: true, leadId: true },
-    });
-    if (!adj) throw new PayrollRefusedError("Adjustment not found.");
-    await assertRunOpen(args.companyId, adj.payrollRunId, tx);
+    const adj = await lockedAdjustment(tx, args.companyId, args.adjustmentId);
 
     const data: { amountCents?: number; reason?: string; updatedById: string } = {
       updatedById: args.updatedById,
@@ -203,18 +225,72 @@ export async function updatePayrollAdjustment(args: {
   });
 }
 
+/**
+ * Remove a line — open runs only — and log what it said.
+ *
+ * A CHARGEBACK RECOVERY is one half of a pair: the same instalment is recorded
+ * against the chargeback's balance. Removing only the pay-stub line used to
+ * leave that instalment standing, so the debt read as recovered — even settled —
+ * while nobody's pay ever gave the money up. Removing the line now takes the
+ * instalment back with it, and a settled chargeback that is owed money again is
+ * reopened. Locks are taken run first, then chargeback, exactly as recovery
+ * takes them, so the two cannot deadlock.
+ */
 export async function deletePayrollAdjustment(args: {
   companyId: string;
   adjustmentId: string;
+  /** Who removed it, for the activity log. */
+  deletedById?: string | null;
 }) {
   await prisma.$transaction(async (tx) => {
-    const adj = await tx.payrollAdjustment.findFirst({
-      where: { id: args.adjustmentId, companyId: args.companyId },
-      select: { id: true, payrollRunId: true },
-    });
-    if (!adj) throw new PayrollRefusedError("Adjustment not found.");
-    await assertRunOpen(args.companyId, adj.payrollRunId, tx);
+    const adj = await lockedAdjustment(tx, args.companyId, args.adjustmentId);
+    let owedAgain = false;
+
+    if (adj.kind === "chargeback_recovery" && adj.chargebackId) {
+      await tx.chargeback.updateMany({
+        where: { id: adj.chargebackId, companyId: args.companyId },
+        data: { updatedAt: new Date() },
+      });
+      const instalment = await tx.chargebackRecovery.findFirst({
+        where: {
+          chargebackId: adj.chargebackId,
+          payrollRunId: adj.payrollRunId,
+          amountCents: Math.abs(adj.amountCents),
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (instalment) {
+        await tx.chargebackRecovery.delete({ where: { id: instalment.id } });
+        owedAgain = true;
+        const cb = await tx.chargeback.findFirst({
+          where: { id: adj.chargebackId, companyId: args.companyId },
+          select: { status: true, amountCents: true },
+        });
+        if (cb?.status === "settled") {
+          const recovered = await tx.chargebackRecovery.aggregate({
+            where: { chargebackId: adj.chargebackId },
+            _sum: { amountCents: true },
+          });
+          if (cb.amountCents - (recovered._sum.amountCents ?? 0) > 0) {
+            await tx.chargeback.update({ where: { id: adj.chargebackId }, data: { status: "approved" } });
+          }
+        }
+      }
+    }
+
     await tx.payrollAdjustment.delete({ where: { id: adj.id } });
+    await tx.activityLog.create({
+      data: {
+        companyId: args.companyId,
+        type: "payment",
+        message:
+          `Payroll ${adj.kind.replace(/_/g, " ")} removed — ${usd(Math.abs(adj.amountCents))}, "${adj.reason}"` +
+          (owedAgain ? "; the amount is owed on the chargeback again" : ""),
+        actorId: args.deletedById ?? null,
+        leadId: adj.leadId,
+      },
+    });
   });
 }
 
