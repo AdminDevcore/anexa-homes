@@ -26,6 +26,7 @@ export async function notifyRun(run: {
         companyId: run.companyId,
         event: run.status === "failed" ? "agent_run_failed" : "agent_needs_human",
         leadId: run.leadId,
+        vertical: run.vertical,
         status: run.summary,
         agentName: run.agentName,
       })

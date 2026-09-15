@@ -1,4 +1,4 @@
-import type { NotificationChannel, NotificationEvent, Role } from "@prisma/client";
+import type { NotificationChannel, NotificationEvent, Role, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
@@ -18,6 +18,13 @@ export type FireArgs = {
   status?: string | null;
   /** The agent a run belongs to, for agent_run_failed / agent_needs_human. */
   agentName?: string | null;
+  /**
+   * The run's own workspace, for an agent-level alert with no deal (e.g. "No
+   * handler is registered") — there is no lead/project/task to read a
+   * vertical off of, so the caller states it. A deal still wins when one is
+   * present: see `originVertical` below.
+   */
+  vertical?: Vertical | null;
 };
 
 type Tokens = Record<string, string>;
@@ -109,8 +116,10 @@ async function run(args: FireArgs) {
   // webhook fires with no workspace open at all, and stamping "whatever the
   // actor had selected" would file a Solar alert under Roofing. NULL is the
   // honest answer for a genuinely company-level event (payroll approved), and it
-  // shows in every workspace.
-  const originVertical = lead?.vertical ?? project?.vertical ?? task?.vertical ?? null;
+  // shows in every workspace. args.vertical is the fallback for an agent-level
+  // alert that has no deal to read a vertical off of (see FireArgs.vertical);
+  // a real deal still wins over it.
+  const originVertical = lead?.vertical ?? project?.vertical ?? task?.vertical ?? args.vertical ?? null;
 
   // --- Load branding for the from-name + branded email template ---
   const { brand, fromName } = await emailBrandFor(args.companyId);

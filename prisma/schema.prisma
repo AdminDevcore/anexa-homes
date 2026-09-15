@@ -2308,7 +2308,7 @@ model NotificationRule {
   // Event-specific match conditions, e.g. { "stageId": "..." } or { "status": "in_production" }.
   conditions    Json              @default("{}")
   // Who receives it: { roles: Role[], userIds: string[], dynamic: string[] }
-  // dynamic targets: assigned_rep | project_manager | customer | lead_creator | all_admins | all_managers
+  // dynamic targets: assigned_rep | project_manager | customer | lead_creator | task_assignee | all_admins | all_managers | agents_access
   recipients    Json              @default("{}")
   // Channels: ["in_app","email","sms"]
   channels      Json              @default("[\"in_app\"]")
