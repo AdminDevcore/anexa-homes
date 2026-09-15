@@ -2,6 +2,7 @@ import type { NotificationChannel, NotificationEvent, Role } from "@prisma/clien
 import { prisma } from "@/server/db/client";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
+import { AGENT_ACCESS_ROLE } from "@/server/modules/agents/access";
 import type { RecipientConfig } from "./types";
 import { sendEmail, sendSms } from "./delivery";
 
@@ -15,9 +16,14 @@ export type FireArgs = {
   taskId?: string | null;
   stageId?: string | null;
   status?: string | null;
+  /** The agent a run belongs to, for agent_run_failed / agent_needs_human. */
+  agentName?: string | null;
 };
 
 type Tokens = Record<string, string>;
+
+/** Agent events carry a sentence in `status`, not an enum value. */
+const AGENT_EVENTS: ReadonlySet<NotificationEvent> = new Set<NotificationEvent>(["agent_run_failed", "agent_needs_human"]);
 
 function fillTokens(tpl: string, tokens: Tokens): string {
   return tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, k: string) => tokens[k] ?? "");
@@ -85,7 +91,11 @@ async function run(args: FireArgs) {
     lead: customerName,
     project: project?.projectNumber ?? "",
     stage: stage?.name ?? "",
-    status: (args.status ?? "").replace(/_/g, " "),
+    // Enum statuses read better with spaces ("in production"). An agent's status
+    // is a sentence that can name a handler key ("bank.ntp_poll"), so it passes
+    // through untouched.
+    status: AGENT_EVENTS.has(args.event) ? (args.status ?? "") : (args.status ?? "").replace(/_/g, " "),
+    agent: args.agentName ?? "",
     document: doc?.title ?? "",
     task: task?.title ?? "",
     actor: actor ? `${actor.firstName} ${actor.lastName}`.trim() : "System",
@@ -122,6 +132,25 @@ async function run(args: FireArgs) {
   }
   const dynamicRoleUsers = (roleList: string[]) => usersByRoles(roleList);
 
+  // Holders of the Agents access switch (modules/agents/access.ts): managers
+  // whose permission overrides carry Agent:approve. Read now, when the alert
+  // fires, so switching someone off stops the next alert with no rule to edit.
+  let agentsAccessIds: string[] | null = null;
+  async function agentsAccessUsers(): Promise<string[]> {
+    if (agentsAccessIds) return agentsAccessIds;
+    const users = await prisma.user.findMany({
+      where: {
+        companyId: args.companyId,
+        status: "active",
+        role: AGENT_ACCESS_ROLE,
+        permissions: { path: ["Agent:approve"], equals: true },
+      },
+      select: { id: true },
+    });
+    agentsAccessIds = users.map((u) => u.id);
+    return agentsAccessIds;
+  }
+
   for (const rule of rules) {
     if (!conditionMatches(rule.event, rule.conditions as Record<string, unknown>, args)) continue;
 
@@ -139,6 +168,7 @@ async function run(args: FireArgs) {
       if (id) recipientIds.add(id);
       if (dyn === "all_admins") for (const x of await dynamicRoleUsers(["admin", "super_admin"])) recipientIds.add(x);
       if (dyn === "all_managers") for (const x of await dynamicRoleUsers(["manager"])) recipientIds.add(x);
+      if (dyn === "agents_access") for (const x of await agentsAccessUsers()) recipientIds.add(x);
     }
 
     // Note: the person who performed the action IS notified if they're in the
@@ -232,6 +262,9 @@ function buildLink(args: FireArgs, ids: { leadId?: string | null; projectId?: st
       return "/portal/commissions";
     case "payroll_approved":
       return "/portal/payroll";
+    case "agent_run_failed":
+    case "agent_needs_human":
+      return "/portal/agents/runs";
     default:
       return "/portal/dashboard";
   }

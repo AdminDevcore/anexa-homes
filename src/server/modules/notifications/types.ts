@@ -117,6 +117,22 @@ export const EVENT_DEFS: EventDef[] = [
     defaultTitle: "Automation failed on {{customer}}",
     defaultBody: "{{status}}",
   },
+  {
+    value: "agent_run_failed",
+    label: "An agent run failed",
+    condition: null,
+    tokens: ["{{agent}}", "{{customer}}", "{{status}}"],
+    defaultTitle: "Agent failed: {{agent}}",
+    defaultBody: "{{status}}",
+  },
+  {
+    value: "agent_needs_human",
+    label: "An agent run needs a human",
+    condition: null,
+    tokens: ["{{agent}}", "{{customer}}", "{{status}}"],
+    defaultTitle: "Needs a human: {{agent}}",
+    defaultBody: "{{status}}",
+  },
 ];
 
 export const DYNAMIC_TARGETS = [
@@ -126,6 +142,7 @@ export const DYNAMIC_TARGETS = [
   { value: "task_assignee", label: "Task assignee" },
   { value: "all_admins", label: "All admins" },
   { value: "all_managers", label: "All managers" },
+  { value: "agents_access", label: "People with Agents access" },
 ] as const;
 
 export type RecipientConfig = {
