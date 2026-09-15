@@ -289,7 +289,7 @@ describe("moveDeal", () => {
     // really cover recordStageEntry's write.
     await expect(
       runInVertical("roofing", () =>
-        moveDeal(companyId, atomicLead, c.fromStage!.id, c.toStage!, { kind: "agent", agentName: "bad   name" })
+        moveDeal(companyId, atomicLead, c.fromStage!.id, c.toStage!, { kind: "agent", agentName: "bad \u0000 name" })
       )
     ).rejects.toThrow();
 
