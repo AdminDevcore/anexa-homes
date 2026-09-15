@@ -24,6 +24,20 @@ describe("validateSchedule", () => {
     if (!r.ok) expect(r.error).toMatch(/not a valid cron expression/i);
   });
 
+  it("does not leak croner's internal 'CronPattern:' prefix into the error", () => {
+    const r = validateSchedule("61 * * * *");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).not.toContain("CronPattern");
+  });
+
+  it("says a schedule never runs, rather than surfacing croner's stack-overflow message", () => {
+    expect(validateSchedule("0 0 30 2 *")).toEqual({ ok: false, error: "That schedule never runs." });
+    expect(validateSchedule("0 0 31 2,4,6,9,11 *")).toEqual({
+      ok: false,
+      error: "That schedule never runs.",
+    });
+  });
+
   it("accepts every preset", () => {
     for (const p of SCHEDULE_PRESETS) expect(validateSchedule(p.schedule).ok).toBe(true);
   });
@@ -41,6 +55,11 @@ describe("next runs, in UTC", () => {
     expect(nextRunAfter("0 13 * * 1-5", from)?.toISOString()).toBe("2026-09-21T13:00:00.000Z");
   });
 
+  it("is strictly after `from`, even when `from` lands exactly on a match", () => {
+    const from = new Date("2026-09-15T14:15:00.000Z");
+    expect(nextRunAfter("*/15 * * * *", from)?.toISOString()).toBe("2026-09-15T14:30:00.000Z");
+  });
+
   it("lists the next three", () => {
     const from = new Date("2026-09-15T14:00:00.000Z");
     expect(nextRuns("0 * * * *", from, 3).map((d) => d.toISOString())).toEqual([
@@ -48,6 +67,13 @@ describe("next runs, in UTC", () => {
       "2026-09-15T16:00:00.000Z",
       "2026-09-15T17:00:00.000Z",
     ]);
+  });
+
+  it("returns an empty list rather than spinning forever, for a bad count", () => {
+    const from = new Date("2026-09-15T14:00:00.000Z");
+    expect(nextRuns("0 * * * *", from, -1)).toEqual([]);
+    expect(nextRuns("0 * * * *", from, 2.5)).toEqual([]);
+    expect(nextRuns("0 * * * *", from, 0)).toEqual([]);
   });
 
   it("is null for a broken expression rather than throwing", () => {
@@ -64,6 +90,10 @@ describe("nextRunAtFor", () => {
     expect(nextRunAtFor({ enabled: true, schedule: "*/5 * * * *" }, now)?.toISOString()).toBe(
       "2026-09-15T14:10:00.000Z"
     );
+  });
+
+  it("is null when the schedule is not a valid cron expression", () => {
+    expect(nextRunAtFor({ enabled: true, schedule: "not a cron" }, now)).toBeNull();
   });
 });
 

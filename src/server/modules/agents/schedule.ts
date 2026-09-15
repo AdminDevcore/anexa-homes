@@ -34,7 +34,14 @@ export function validateSchedule(
     const next = new Cron(schedule, OPTIONS).nextRun(new Date());
     if (!next) return { ok: false, error: "That schedule never runs." };
   } catch (err) {
-    const why = err instanceof Error ? err.message : String(err);
+    // A schedule that can never match (e.g. February 31st) makes croner's
+    // internal search recurse until the stack gives out, rather than
+    // returning null the way a same-tick miss does above.
+    if (err instanceof RangeError && err.message.includes("Maximum call stack size exceeded")) {
+      return { ok: false, error: "That schedule never runs." };
+    }
+    const rawWhy = err instanceof Error ? err.message : String(err);
+    const why = rawWhy.replace(/^CronPattern: /, "");
     return { ok: false, error: `Not a valid cron expression: ${why}` };
   }
   return { ok: true, schedule };
@@ -50,8 +57,12 @@ export function nextRunAfter(schedule: string, from: Date): Date | null {
 }
 
 export function nextRuns(schedule: string, from: Date, n: number): Date[] {
+  // croner's internal loop is `for(;e--;)`: a non-positive or fractional
+  // count never reaches 0, so it spins forever rather than returning.
+  const count = Number.isInteger(n) && n > 0 ? Math.min(n, 100) : 0;
+  if (count === 0) return [];
   try {
-    return new Cron(schedule, OPTIONS).nextRuns(n, from);
+    return new Cron(schedule, OPTIONS).nextRuns(count, from);
   } catch {
     return [];
   }
