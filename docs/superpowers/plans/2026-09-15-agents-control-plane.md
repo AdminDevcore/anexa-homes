@@ -14,7 +14,7 @@
 
 **Amended at build approval (2026-09-15):**
 - **Two deploys.** Deploy 1 is everything except Task 9: the agents control plane, the Hello Agent, and Task 8's Advance change. The Advance change alters nothing while production has no action-required stage. Deploy 2 is Task 9 alone — the three roofing stages and the seven flags — pushed after the user has told the roofing and solar teams. Advance goes first because the production build applies migrations before it compiles. In a single deploy, the old Advance would serve beside the new stages for as long as the build ran, and indefinitely if it failed.
-- **Order of work:** Tasks 0–8, 10–22, 23, 24, Task 25 for deploy 1; then Task 9, Tasks 23 and 24 again, and Task 25 for deploy 2. Task 9's migration is `20260915120300_action_required_stages`, so it sorts after the other two.
+- **Order of work:** Tasks 0–8, 10–22, 23, 24, Task 25 for deploy 1; then Task 9, Tasks 23 and 24 again, and Task 25 for deploy 2. Task 9's migration is `20260915140300_action_required_stages`, so it sorts after the other two.
 - **Before each push**, the user gets a plain-language paragraph for a roofing rep and one for a solar coordinator on what they will see differently, and gives the go.
 - **Open question 3:** option A is approved as the stopgap. The Apply-refusal test in Task 18 stays.
 
@@ -27,6 +27,8 @@
 - **The reaper's clock is the 300 s function limit + 60 s, not the agent's `timeoutSeconds`** (Task 13). A run can still be applying changes past its handler timeout. Reaping it then would record "nothing happened" over deals that moved.
 - **`listAgents` reads each agent's last run with its own `findFirst`**, not a nested `runs: { take: 1 }`, which Prisma applies in memory over every run (Task 17).
 - **Run retention** is recorded as a follow-up in the spec. It is not built here.
+
+**Rebased onto origin/main `ed3b832` (2026-09-15):** migrations renamed to `20260915140000` / `140200` / `140300` so they sort after main's `20260915130000_contract_evidence_classification`.
 
 ---
 
@@ -88,9 +90,9 @@
 | `src/app/portal/agents/[id]/page.tsx` | Agent detail: config and run history. |
 | `src/app/portal/agents/runs/page.tsx` | Run feed, with the needs-a-human queue first. |
 | `src/components/portal/agents/` | `href`, `agent-tabs`, `filter-chips`, `pagination`, `local-time`, `auto-refresh`, `run-status-pill`, `change-list`, `resolve-run`, `run-list`, `needs-human-card`, `run-now-button`, `agent-enabled-switch`, `agent-config-form`, `agents-access-card`, `product-choices`. |
-| `prisma/migrations/20260915120000_agents_control_plane/` | Enums, tables, notification event values (generated). |
-| `prisma/migrations/20260915120200_agents_seed_rows/` | Hello Agent and starter notification rules. |
-| `prisma/migrations/20260915120300_action_required_stages/` | Stage flags and three roofing stages. Deploy 2. |
+| `prisma/migrations/20260915140000_agents_control_plane/` | Enums, tables, notification event values (generated). |
+| `prisma/migrations/20260915140200_agents_seed_rows/` | Hello Agent and starter notification rules. |
+| `prisma/migrations/20260915140300_action_required_stages/` | Stage flags and three roofing stages. Deploy 2. |
 | `e2e/agents.spec.ts` | Browser coverage. |
 
 **Tests created**
@@ -379,7 +381,7 @@ Every later task imports the generated Prisma types, so the tables land before a
 
 **Files:**
 - Modify: `prisma/schema.prisma`
-- Create: `prisma/migrations/20260915120000_agents_control_plane/migration.sql` (generated)
+- Create: `prisma/migrations/20260915140000_agents_control_plane/migration.sql` (generated)
 
 - [ ] **Step 1: Add the two notification events**
 
@@ -573,7 +575,7 @@ Expected: `Formatted prisma/schema.prisma …` then `The schema at prisma/schema
 
 ```bash
 cd /Users/mustafajoulani/Desktop/anexa-agents-wt
-F=prisma/migrations/20260915120000_agents_control_plane/migration.sql
+F=prisma/migrations/20260915140000_agents_control_plane/migration.sql
 mkdir -p "$(dirname "$F")"
 pnpm exec prisma migrate diff \
   --from-migrations prisma/migrations \
@@ -605,7 +607,7 @@ pnpm exec prisma migrate deploy 2>&1 | grep -E "Applying|applied|Error"
 pnpm exec prisma generate 2>&1 | grep -E "Generated|Error"
 ```
 
-Expected: `Applying migration `20260915120000_agents_control_plane``, `All migrations have been successfully applied.`, `✔ Generated Prisma Client`.
+Expected: `Applying migration `20260915140000_agents_control_plane``, `All migrations have been successfully applied.`, `✔ Generated Prisma Client`.
 
 - [ ] **Step 7: Prove the schema and the migrations agree again**
 
@@ -631,7 +633,7 @@ Expected: `typecheck exit=0`; tests are the baseline plus Task 1's 10, all passi
 
 ```bash
 cd /Users/mustafajoulani/Desktop/anexa-agents-wt
-git add prisma/schema.prisma prisma/migrations/20260915120000_agents_control_plane/migration.sql
+git add prisma/schema.prisma prisma/migrations/20260915140000_agents_control_plane/migration.sql
 git commit -m "feat(agents): agents and agent_runs tables, and two notification events" -m "Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
@@ -2608,7 +2610,7 @@ git commit -m "feat(pipeline): Advance and step counts skip action-required side
 > Built after deploy 1 (see *Amended at build approval*). Nothing in Tasks 10–22 depends on it.
 
 **Files:**
-- Create: `prisma/migrations/20260915120300_action_required_stages/migration.sql`
+- Create: `prisma/migrations/20260915140300_action_required_stages/migration.sql`
 - Modify: `prisma/seed.ts` (STAGES, lines 9–26; roofing loop, lines ~186–203)
 - Modify: `prisma/seed-clean.ts` (STAGES, lines 29–46; roofing loop, lines ~175–192)
 - Test: `src/server/modules/pipeline/__tests__/action-required-stages.itest.ts`
@@ -2635,7 +2637,7 @@ import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 
 const MIGRATION = join(
   __dirname,
-  "../../../../../prisma/migrations/20260915120300_action_required_stages/migration.sql"
+  "../../../../../prisma/migrations/20260915140300_action_required_stages/migration.sql"
 );
 
 const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
@@ -2740,7 +2742,7 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-describe("20260915120300_action_required_stages", () => {
+describe("20260915140300_action_required_stages", () => {
   it("flags the six solar Action Required stages and nothing else", async () => {
     expect(await flaggedOf(solarId)).toEqual([
       "ntp_action_required_10",
@@ -2812,12 +2814,12 @@ VERTICAL_TEST_DATABASE_URL="postgresql://anexa:anexa@127.0.0.1:5544/anexa?schema
   pnpm exec vitest run --config vitest.integration.config.ts src/server/modules/pipeline/__tests__/action-required-stages.itest.ts 2>&1 | tail -6
 ```
 
-Expected: FAIL in `beforeAll` — psql: `could not open file ".../20260915120300_action_required_stages/migration.sql"`.
+Expected: FAIL in `beforeAll` — psql: `could not open file ".../20260915140300_action_required_stages/migration.sql"`.
 
 - [ ] **Step 3: Write the migration**
 
 ```sql
--- prisma/migrations/20260915120300_action_required_stages/migration.sql
+-- prisma/migrations/20260915140300_action_required_stages/migration.sql
 --
 -- Action-required stages: side-states a deal waits in while somebody clears a
 -- problem. A gated agent may move a deal INTO one of these and nowhere else, and
@@ -2921,7 +2923,7 @@ const STAGES = [
   // Side-states (isActionRequired): a deal waits in one while somebody clears a
   // problem, then rejoins the line. Advance and "step N of M" skip them
   // (src/lib/stage-progress.ts), and a gated agent may move a deal into one and
-  // nowhere else. Same rows as migration 20260915120300_action_required_stages.
+  // nowhere else. Same rows as migration 20260915140300_action_required_stages.
   { key: "claim_denied", name: "Claim Denied — Action Required", color: "#EF4444", isActionRequired: true },
   { key: "scope_received", name: "Scope Received", color: "#C084FC" },
   { key: "supplement_needed", name: "Supplement Needed", color: "#F472B6", isActionRequired: true },
@@ -2989,13 +2991,13 @@ psql "postgresql://anexa:anexa@127.0.0.1:5544/anexa" -qAt -c "SET search_path TO
 pnpm -s typecheck; echo "typecheck exit=$?"
 ```
 
-Expected: `Applying migration `20260915120300_action_required_stages``; `✅ Seed complete.`; 20 rows `0|new_lead|f` … `19|cancelled|f`, with `t` on exactly `claim_denied` (5), `supplement_needed` (7), `qc_failed` (13) and `payment_issue` (16); `typecheck exit=0`.
+Expected: `Applying migration `20260915140300_action_required_stages``; `✅ Seed complete.`; 20 rows `0|new_lead|f` … `19|cancelled|f`, with `t` on exactly `claim_denied` (5), `supplement_needed` (7), `qc_failed` (13) and `payment_issue` (16); `typecheck exit=0`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/mustafajoulani/Desktop/anexa-agents-wt
-git add prisma/migrations/20260915120300_action_required_stages/migration.sql src/server/modules/pipeline/__tests__/action-required-stages.itest.ts prisma/seed.ts prisma/seed-clean.ts
+git add prisma/migrations/20260915140300_action_required_stages/migration.sql src/server/modules/pipeline/__tests__/action-required-stages.itest.ts prisma/seed.ts prisma/seed-clean.ts
 git commit -m "feat(pipeline): flag action-required stages; add Claim Denied, QC Failed and Payment Issue to roofing" -m "Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
@@ -5467,13 +5469,13 @@ git commit -m "feat(agents): labels and form values, and every reason saving an 
 ## Task 16: The Hello Agent and starter alerts for every company
 
 **Files:**
-- Create: `prisma/migrations/20260915120200_agents_seed_rows/migration.sql`
+- Create: `prisma/migrations/20260915140200_agents_seed_rows/migration.sql`
 - Modify: `prisma/seed.ts`, `prisma/seed-clean.ts`
 
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- prisma/migrations/20260915120200_agents_seed_rows/migration.sql
+-- prisma/migrations/20260915140200_agents_seed_rows/migration.sql
 --
 -- The Hello Agent for every company: disabled, unscheduled, gated. It exists so
 -- an admin can press Run now and watch the runner and the run log work end to
@@ -5523,12 +5525,12 @@ WHERE NOT EXISTS (
 ```bash
 cd /Users/mustafajoulani/Desktop/anexa-agents-wt
 pnpm exec prisma migrate deploy 2>&1 | grep -E "Applying|Error"
-PGOPTIONS="-c search_path=agents_dev" psql "postgresql://anexa:anexa@127.0.0.1:5544/anexa" -v ON_ERROR_STOP=1 -f prisma/migrations/20260915120200_agents_seed_rows/migration.sql
+PGOPTIONS="-c search_path=agents_dev" psql "postgresql://anexa:anexa@127.0.0.1:5544/anexa" -v ON_ERROR_STOP=1 -f prisma/migrations/20260915140200_agents_seed_rows/migration.sql
 psql "postgresql://anexa:anexa@127.0.0.1:5544/anexa" -qAt -c "SET search_path TO agents_dev; SELECT c.name, a.name, a.\"handlerKey\", a.vertical IS NULL, a.enabled FROM agents a JOIN companies c ON c.id = a.\"companyId\" ORDER BY 1;"
 psql "postgresql://anexa:anexa@127.0.0.1:5544/anexa" -qAt -c "SET search_path TO agents_dev; SELECT vertical, event, count(*) FROM notification_rules WHERE event::text LIKE 'agent%' GROUP BY 1, 2 ORDER BY 1, 2;"
 ```
 
-Expected: `Applying migration `20260915120200_agents_seed_rows``; the manual re-run prints `INSERT 0 0` twice (nothing new); `Anexa Homes|Hello Agent|system.hello|t|f`; four rows `roofing|agent_needs_human|1`, `roofing|agent_run_failed|1`, `solar|agent_needs_human|1`, `solar|agent_run_failed|1`.
+Expected: `Applying migration `20260915140200_agents_seed_rows``; the manual re-run prints `INSERT 0 0` twice (nothing new); `Anexa Homes|Hello Agent|system.hello|t|f`; four rows `roofing|agent_needs_human|1`, `roofing|agent_run_failed|1`, `solar|agent_needs_human|1`, `solar|agent_run_failed|1`.
 
 - [ ] **Step 3: Give the seeds the same rows**
 
@@ -5548,7 +5550,7 @@ add:
 
 ```ts
   // Agents: the Hello Agent and its starter alerts in both workspaces — the same
-  // rows migration 20260915120200_agents_seed_rows gives every existing company.
+  // rows migration 20260915140200_agents_seed_rows gives every existing company.
   await prisma.agent.create({
     data: {
       companyId: company.id,
@@ -5609,7 +5611,7 @@ Expected: `✅ Seed complete.`; `1` then `4`; `typecheck exit=0`.
 
 ```bash
 cd /Users/mustafajoulani/Desktop/anexa-agents-wt
-git add prisma/migrations/20260915120200_agents_seed_rows/migration.sql prisma/seed.ts prisma/seed-clean.ts
+git add prisma/migrations/20260915140200_agents_seed_rows/migration.sql prisma/seed.ts prisma/seed-clean.ts
 git commit -m "feat(agents): every company gets the Hello Agent and starter agent alerts" -m "Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
@@ -9154,7 +9156,7 @@ Expected: all three print nothing.
 If any prints something, **stop and tell the user**, quoting what printed:
 - `solarStageRequirementError` on `main`: the spec's merge-time check applies. The applier must call it before applying, with a failing check becoming a `held` change.
 - `stage-entry-data.ts` on `main`: Task 7's extraction collides with it, and the two copies must become one.
-- A new migration touching `pipeline_stages`: the positions `20260915120300_action_required_stages` inserts at, and its itest fixture, must be re-checked against it.
+- A new migration touching `pipeline_stages`: the positions `20260915140300_action_required_stages` inserts at, and its itest fixture, must be re-checked against it.
 
 - [ ] **Step 3: Rebase**
 
@@ -9233,7 +9235,7 @@ rm -f "$ENVF"
 BASE=$(echo "$RAW" | sed -E 's/:6543/:5432/; s#\?.*$##'); PGURL="${BASE}?sslmode=require"
 psql "$PGURL" -qAt -v ON_ERROR_STOP=1 <<'SQL'
 SET default_transaction_read_only = on;
-SELECT migration_name, finished_at IS NOT NULL FROM _prisma_migrations WHERE migration_name LIKE '20260915120%' ORDER BY 1;
+SELECT migration_name, finished_at IS NOT NULL FROM _prisma_migrations WHERE migration_name LIKE '20260915140%' ORDER BY 1;
 SELECT (SELECT count(*) FROM companies) AS companies, (SELECT count(*) FROM agents WHERE name = 'Hello Agent') AS hello_agents;
 SELECT vertical, event, count(*) FROM notification_rules WHERE event::text LIKE 'agent%' GROUP BY 1, 2 ORDER BY 1, 2;
 SELECT p.industry, count(*) FROM pipeline_stages s JOIN pipelines p ON p.id = s."pipelineId" WHERE s."isActionRequired" GROUP BY 1 ORDER BY 1;
@@ -9245,7 +9247,7 @@ unset RAW BASE PGURL
 ```
 
 Expected:
-- the three `20260915120…` migrations, each `t`;
+- the three `20260915140…` migrations, each `t`;
 - `hello_agents` equals `companies`;
 - `roofing` and `solar` rows for both agent events, each count equal to `companies`;
 - action-required stages: `roofing` 4 and `solar` 6 for the single production company;
