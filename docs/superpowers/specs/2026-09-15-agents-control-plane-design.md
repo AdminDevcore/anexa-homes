@@ -1,7 +1,7 @@
 # Agents: a control plane for back-office automation
 
 Date: 2026-09-15
-Status: draft — awaiting review
+Status: approved 2026-09-15, with amendments (decisions 8–12)
 Branch: `feat/agents-control-plane` (worktree `~/Desktop/anexa-agents-wt`, off `origin/main` at `c0a1a7e`)
 
 ## Problem
@@ -36,20 +36,24 @@ No new UI, route, cron entry or migration per agent.
 
 ## What this builds on
 
-Verified in the codebase and against production on 2026-09-15.
+Verified against `origin/main` and against production on 2026-09-15.
 
 - **A deal is a `Lead`** (`leads`). Its stage is `Lead.stageId` →
   `PipelineStage`, a per-company, per-workspace editable list with a `key` that
   is unique and stable within its pipeline. `Project` is 1:1 with `Lead` and
   carries production status.
-- **A stage move is five steps, not an update**, in both `moveLeadStage`
-  (`src/server/modules/leads/actions.ts`) and the automation `move_stage`
-  action: solar stage-requirement check → `lead.update(stageEntryData(stage))`
-  → `recordStageEntry` (the deal timeline) → activity log → `stage_entered`
-  automations.
+- **A person's stage move** is `moveLeadStage`
+  (`src/server/modules/leads/actions.ts`): company stage lookup →
+  `lead.update(stageEntryData(stage))` → `recordStageEntry` (the deal timeline)
+  → activity log → `fireEvent("stage_changed")` →
+  `runAutomations("stage_entered")`. `stageEntryData` is a private function in
+  that `"use server"` file. **There is no stage-requirement check on `main`.**
+- **The deal page's Advance button** (`src/components/portal/deal-stage-bar.tsx`)
+  offers the next stage that is not `isLost`. It knows nothing about
+  action-required side-states.
 - **Workspace isolation** is a Prisma extension (`src/server/vertical/`).
-  `Lead`, `Project` and `Pipeline` are scoped; code that touches them needs an
-  active workspace, established with `runInVertical`.
+  `Lead`, `Project`, `Pipeline` and `NotificationRule` are scoped; code that
+  touches them needs an active workspace, established with `runInVertical`.
 - **RBAC** is `role → resource → verbs` in `src/server/rbac/matrix.ts`, checked
   with `can()` / `requireCan()`. `User.permissions` (`{"Resource:action":
   bool}`) overrides the role inside `can()` and is re-read on every request,
@@ -69,12 +73,13 @@ Verified in the codebase and against production on 2026-09-15.
 - **The Automation rules engine** (`src/server/modules/automations/`) is the
   nearest relative: settings-driven "when X happens, do Y" rules with an
   `AutomationRun` log. Agents stay separate — they are code against external
-  systems, on a clock, behind a human gate — but reuse its stage-move steps and
-  its failure-notification pattern.
-- **Notifications** reach people only through `NotificationRule` rows:
-  `fireEvent` returns early when no rule matches the event.
+  systems, on a clock, behind a human gate — but reuse the stage-move steps and
+  the failure-notification pattern.
+- **Notifications** reach people only through `NotificationRule` rows, which are
+  workspace-scoped. `fireEvent` returns early when no rule matches, and
+  swallows every error it hits.
 
-## Decisions (confirmed 2026-09-15)
+## Decisions
 
 | # | Decision |
 |---|---|
@@ -85,6 +90,11 @@ Verified in the codebase and against production on 2026-09-15.
 | 5 | Existing theme tokens and `chip-*` tone classes. No brand hex literals. |
 | 6 | Built in a worktree off `origin/main`. The uncommitted work on `feat/solar-commission-payroll` is not touched. |
 | 7 | Schedules are 5-field cron expressions evaluated in UTC, like `vercel.json`. The UI shows upcoming runs in the viewer's local time. |
+| 8 | Failure and needs-a-human notifications go to `super_admin`, `admin`, **and everyone holding the Agents access switch** — they work the queue. |
+| 9 | Execution inside a tick is concurrent, capped at 5 runs, and bound to a hard deadline, so a tick cannot outlive the cron function's 300-second limit (see Tick budget). |
+| 10 | Run now on a disabled agent stays, behind a confirmation prompt that the server enforces too. |
+| 11 | Stage flags: Solar's six "Action Required" stages are flagged; Roofing's Supplement Needed is flagged; three new roofing action-required stages are added — Claim Denied, QC Failed, Payment Issue. Nothing waiting on a carrier or homeowner, and nothing on the forward path, is flagged. |
+| 12 | Built on `main` as it stands: with no stage-requirement check there, the gate has no "blocked" outcome. |
 
 ## Data model
 
@@ -110,13 +120,13 @@ model Agent {
   /// "Product" in the UI. NULL = both Roofing and Solar. `others` is refused on save.
   vertical          Vertical?
   department        AgentDepartment
-  /// Scheduling only. A disabled agent can still be run by hand.
+  /// Scheduling only. A disabled agent can still be run by hand, after a confirmation.
   enabled           Boolean         @default(false)
   /// 5-field cron, UTC. NULL = never on the clock (manual or event only).
   schedule          String?
   /// When the tick next picks it up. NULL unless enabled AND scheduled.
   nextRunAt         DateTime?
-  /// Ceiling for one run, 5–240. The cron function's own limit is 300.
+  /// Ceiling for one run, 5–240 seconds.
   timeoutSeconds    Int             @default(60)
   /// Handler settings. References to secrets only, never secret values.
   config            Json            @default("{}")
@@ -146,12 +156,11 @@ model AgentRun {
   /// while deleting a company still cascades through both tables.
   agentId        String
   agent          Agent               @relation(fields: [agentId], references: [id], onDelete: NoAction)
-  /// The deal, when the run is about one. SetNull: deleting a deal must not
-  /// erase the record of what an agent did to it.
+  /// The deal, when the whole run is about one. SetNull: deleting a deal must
+  /// not erase the record of what an agent did to it.
   leadId         String?
   lead           Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  /// Customer name and address as they read at run time, so the feed never
-  /// has to read Lead across workspaces.
+  /// Customer name and address as they read at run time.
   leadLabel      String?
   /// The workspace this run executed in. A "both" agent writes one run per workspace.
   vertical       Vertical
@@ -189,10 +198,9 @@ Back-relations are added on `Company`, `User` (three named relations) and `Lead`
 - `product` → `vertical`, the enum the rest of the app uses; the UI calls it
   Product and offers Roofing, Solar or Both.
 - Added `companyId` (every table is per-tenant), `nextRunAt` (makes "due" an
-  indexed lookup and gives the tick a race-free claim), `timeoutSeconds` (a
-  portal poll and a submission need different limits), `leadLabel`,
-  `AgentRun.vertical`, `triggeredById`, `updatedById`, and the resolution
-  fields.
+  indexed lookup and gives the tick a race-free claim), `timeoutSeconds`,
+  `leadLabel`, `AgentRun.vertical`, `triggeredById`, `updatedById`, and the
+  resolution fields.
 
 ### Isolation class: shared
 
@@ -223,9 +231,10 @@ under `handler`.
     "leadId": "…",
     "toStageKey": "ntp_action_required_10",
     "reason": "Bank portal shows a stipulation on the NTP",
+    "dealLabel": "Maria Lopez · 12 Elm St, Dallas",
     "fromStage": { "id": "…", "key": "ntp_submitted_9", "name": "NTP Submitted" },
-    "toStage": { "id": "…", "key": "ntp_action_required_10", "name": "NTP Action Required" },
-    "outcome": "applied",         // applied | noop | held | blocked | discarded
+    "toStage": { "id": "…", "key": "ntp_action_required_10", "name": "NTP Action Required", "isActionRequired": true, "position": 3, "defaultBlocker": null, "stageType": "internally_owned" },
+    "outcome": "applied",         // applied | noop | held | discarded | invalid
     "note": null
   }],
   "resolution": null,             // what Apply did, once a human resolved the run
@@ -306,15 +315,15 @@ export type RequestedChange = {
 // registry.ts
 export const HANDLERS = {
   "system.hello": systemHelloHandler,
-} satisfies Record<HandlerKey, AgentHandler<any>>;
+} satisfies Record<HandlerKey, AgentHandler>;
 ```
 
 Rules:
 
 - **Handlers never write.** `deps.deals` is read-only, and handlers return the
-  changes they want. A guard test (`__tests__/handler-purity.test.ts`, in the
-  style of `no-raw-sql.test.ts`) fails when a file under `handlers/` imports
-  `@/server/db/client`, a runtime value from `@prisma/client`, or `next/*`.
+  changes they want. A guard test (`__tests__/handler-purity.test.ts`) fails
+  when a file under `handlers/` imports `@/server/db/client`, a runtime value
+  from `@prisma/client`, or `next/*`.
 - **The key list and the registry cannot drift.** `satisfies Record<HandlerKey,
   …>` makes the type check inside `next build` fail on a key with no handler or
   a handler with no key.
@@ -332,9 +341,10 @@ Rules:
 - `lender:<uuid>` — that lender's decrypted `apiKeyEncrypted`, only when the
   lender belongs to the run's company.
 
-Saving a config is refused when any key, at any depth, looks like a secret
-(`password`, `secret`, `token`, `apiKey`, `credential`, `otp`, `mfa`,
-case-insensitive) unless the key ends in `Ref` and its value is a valid
+Saving a config is refused when any key, at any depth, names a secret (the
+words `password`, `passwd`, `passcode`, `secret`, `token`, `api key`,
+`credential(s)`, `otp`, `totp`, `mfa`, matched as whole words inside camelCase
+or snake_case keys) unless the key ends in `Ref` and its value is a valid
 reference. Portal logins have no form yet — see Open question 1.
 
 ## Runner
@@ -347,11 +357,10 @@ calls `tick(now)`:
 
 1. **Reap** stuck runs (see The reaper).
 2. **Start stale queued runs**: manual runs still `queued` 30 seconds after
-   creation, in case `after()` never ran them.
-3. **Find due agents**: `enabled` and `nextRunAt <= now`, oldest first, at most
-   5 per tick (the runtime pool is `connection_limit=10`). The rest wait for
-   the next minute.
-4. **Claim** each one with a compare-and-set:
+   creation, in case `after()` never ran them. They count toward the cap.
+3. **Find due agents**: `enabled` and `nextRunAt <= now`, oldest first.
+4. **Claim** each one with a compare-and-set, and only if every workspace it
+   will run in still fits under the cap:
    `updateMany({ where: { id, enabled: true, nextRunAt: <value read> }, data: { nextRunAt: <next after now> } })`.
    A count of 0 means another tick claimed it, so skip. No locks table and no
    raw SQL (raw SQL is lint-banned in this repo).
@@ -362,26 +371,47 @@ calls `tick(now)`:
    - if the handler is missing, write a `failed` run immediately — `No handler
      is registered for "bank.ntp_poll". Deploy the handler or disable this
      agent.` — and notify;
-   - otherwise create the run as `running` with `startedAt`, then call
-     `executeRun`.
-6. Started runs execute concurrently; the tick awaits them all.
+   - otherwise create the run as `running` with `startedAt`.
+6. Execute every started run **concurrently** (`Promise.allSettled`) and await
+   them all.
+
+### Tick budget
+
+The cron function stops at 300 seconds. Execution is concurrent, never
+sequential, and three limits keep a tick inside that:
+
+| Limit | Value | Why |
+|---|---|---|
+| Runs started per tick | 5 (stale queued included) | The runtime pool is `connection_limit=10`; five concurrent runs leave headroom. |
+| Handler deadline | `min(timeoutSeconds, 240 s − time since the tick started)` | Every handler has finished or been aborted by 240 s. A run with under 5 s left is not started. |
+| Apply deadline | 285 s after the tick started | Changes are applied only before this. A run that reaches it is finalised `failed` and its changes recorded as `discarded`. |
+
+Worst case: handlers end by 240 s; applying changes, finalising and notifying
+for at most five runs happens between 240 s and 285 s; 15 s of margin remain
+under 300 s. Every limit is measured from the tick's own start, so time spent
+reaping and claiming comes out of the budget rather than adding to it.
+
+Run now uses the same limits, anchored at the click, inside `after()` on a page
+that sets `maxDuration = 300`.
 
 ### `executeRun(runId)`
 
 Shared by the tick and Run now. It knows nothing about Vercel, so a future
 external worker can call it without schema changes.
 
-1. Flip `queued` → `running` with a compare-and-set. Lost the race → return.
+1. A run created `queued` (Run now) is flipped to `running` with a
+   compare-and-set; lost the race → return. A run the tick created `running`
+   is already owned.
 2. Look up the handler. Missing → `failed`.
 3. `parseConfig`. Invalid → `failed` with its message.
 4. Inside `runInVertical(run.vertical)`: build `deps`, start an
-   `AbortController`, race `handler.run(ctx)` against `timeoutSeconds`.
+   `AbortController`, race `handler.run(ctx)` against the handler deadline.
    - throws → `failed`, `error` = message and stack;
    - times out → abort the signal, `failed`, `Timed out after 60 s.`;
    - malformed result → `failed`.
-5. Apply requested changes through the gate (next section). When the handler
-   itself returned `failed`, nothing is applied and every change is recorded as
-   `discarded`.
+5. Apply requested changes through the gate (next section), unless the handler
+   itself returned `failed` — then nothing is applied and every change is
+   recorded as `discarded`.
 6. Final status, strongest wins: `failed` > `needs_human` > `success`.
 7. Finalise with a compare-and-set on `status = running`. If the reaper got
    there first, the status stays `failed` and what came back is stored under
@@ -403,24 +433,29 @@ Both notify. No run can stay `running`.
 
 ### Run now
 
-`runAgentNow(agentId)`:
+`runAgentNow(agentId, { confirmDisabled })`:
 
 - needs `run` on `Agent`; the agent must be in the viewer's company and in a
-  workspace they hold. `enabled` is not required, so a disabled agent can be
-  tried by hand;
+  workspace they hold;
+- **a disabled agent** is refused unless the request carries
+  `confirmDisabled: true`. The button opens a confirmation first — "Run a
+  disabled agent? This agent is turned off, possibly on purpose." — and only
+  its **Run anyway** sends the flag, so a stale page or a direct call cannot
+  skip the prompt;
 - if the handler is missing, writes a `failed` run and returns its error;
-- refuses while that agent already has a run in flight in the target workspace;
+- refuses while that agent already has a run in flight in a target workspace;
 - creates one `queued` run per target workspace (the agent's own, or for a
   "both" agent each live workspace the viewer holds) with `triggeredById`,
-  hands each to `after(() => executeRun(id))`, and returns;
+  hands them to `after(() => executeRun(...))`, and returns;
 - the agent page refreshes every 3 seconds while any run on screen is `queued`
   or `running`.
 
-`after()` runs within the route's `maxDuration` (Next 16 docs,
-`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md`);
-the agent pages set `maxDuration = 300`. If `after()` is ever cut short, the
-tick's stale-queued step picks the run up, and the reaper catches anything that
-dies mid-flight.
+`after()` runs within the page's `maxDuration` (Next 16 docs:
+`01-app/03-api-reference/04-functions/after.md` and `maxDuration.md`, "set the
+maxDuration at the page level to change the default timeout of all Server
+Actions used on the page"). If `after()` is ever cut short, the tick's
+stale-queued step picks the run up, and the reaper catches anything that dies
+mid-flight.
 
 ## The gate
 
@@ -428,32 +463,39 @@ Every `move_stage` change is checked before **any** change is applied, so a run
 never half-applies.
 
 1. **Resolve** the deal (in this company and workspace) and `toStageKey` inside
-   the deal's own pipeline. Either not found → the run is `failed`, nothing is
-   applied, and the reason is recorded against the change.
+   the deal's own pipeline. Either not found → the change is `invalid`, the run
+   is `failed`, and nothing in the run is applied (other changes are recorded
+   as `discarded`).
 2. **Decide** each change. This is a pure function, unit-tested as a table:
 
-   | Deal already in target stage | Agent gated | Target `isActionRequired` | Stage requirement check | Outcome |
-   |---|---|---|---|---|
-   | yes | — | — | — | `noop` |
-   | no | yes | no | not evaluated | `held` → run `needs_human` |
-   | no | yes | yes | fails | `blocked` → run `needs_human` |
-   | no | no | — | fails | `blocked` → run `needs_human` |
-   | no | yes | yes | passes | `applied` |
-   | no | no | — | passes | `applied` |
+   | Deal already in target stage | Agent gated | Target `isActionRequired` | Outcome |
+   |---|---|---|---|
+   | yes | — | — | `noop` |
+   | no | yes | no | `held` → run `needs_human` |
+   | no | yes | yes | `applied` |
+   | no | no | — | `applied` |
 
-3. **Apply** each `applied` change with the same steps a person's move takes:
-   1. `lead.update({ data: stageEntryData(stage) })`;
+3. **Apply** each `applied` change with the steps a person's move takes:
+   1. `lead.update({ data: stageEntryData(stage) })` — `stageEntryData` moves
+      out of `leads/actions.ts` into `src/server/modules/pipeline/stage-entry-data.ts`
+      so `moveLeadStage` and the applier share one copy;
    2. `recordStageEntry({ …, movedById: null, via: "agent" })` — `StageMoveVia`
       in `src/lib/stage-history.ts` gains `"agent"`, and the deal's Timeline tab
-      labels it;
+      reads "by an agent";
    3. activity log: `Agent "NTP Poller" moved the deal to NTP Action Required`;
-   4. `fireEvent("stage_changed")`, best-effort, so per-stage notifications fire
-      exactly as they do on a person's move;
+   4. `fireEvent("stage_changed")`, so per-stage notifications fire exactly as
+      they do on a person's move;
    5. after leaving the runner's workspace wrapper,
       `runAutomations({ trigger: "stage_entered", depth: 0 })`. The engine owns
       its workspace, and rules waiting at that stage still run.
 
    Agents are never triggered by automations, so this cannot loop.
+
+**Merge-time check.** The unmerged `feat/solar-commission-payroll` branch adds
+`solarStageRequirementError` and its own `stage-entry-data.ts`. If either
+reaches `main` before this ships, the applier calls the requirement check
+before applying, and a failing check becomes a `held` change with the reason in
+its `note`.
 
 ### Resolving a `needs_human` run
 
@@ -463,13 +505,12 @@ when, how and why.
 
 `resolveRun(runId, { resolution, note })` needs `approve` on `Agent`.
 
-- **Apply change** (offered only when the run has `held` or `blocked`
-  changes). Every change is re-checked before any is applied:
+- **Apply change** (offered only when the run has `held` changes). Every change
+  is re-checked before any is applied:
   - the viewer can open the deal (`leadAccessible`);
-  - the deal is still in the stage the agent saw — otherwise refused: `This deal
-    has moved since the agent looked (now in Scope Received). Close this run
-    instead.`;
-  - the stage requirement check passes.
+  - the deal is still in the stage the agent saw — otherwise refused: `Maria
+    Lopez · 12 Elm St has moved since the agent looked (now in Scope Received).
+    Close this run instead.`
 
   Each change is then applied through the same steps with `movedById` = the
   resolver and no `via`, and the outcomes land in `detail.resolution`.
@@ -499,8 +540,7 @@ Three checks. There is no boot check, and `instrumentation.ts` is untouched.
 2. **Save.** Creating an agent, changing its handler, or enabling it is refused
    for an unregistered key, and `parseConfig` must pass.
 3. **Runtime.** A broken agent writes a `failed` run every time it comes due or
-   is run (Runner, tick step 5, and Run now), and the Agents list shows a
-   `Handler missing` danger chip on its row.
+   is run, and the Agents list shows a `Handler missing` danger chip on its row.
 
 ## Permissions
 
@@ -524,8 +564,8 @@ Nothing deletes an agent. Disabling is how one is retired.
   the member's role is `manager`. The owner and admins already hold more,
   accounting stays read-only (decision 4), and field and outside roles are
   refused.
-- `setAgentsAccess(userId, on)`: `requireRole(user, "super_admin")`, same
-  company, target role `manager`.
+- `setAgentsAccess(userId, on)`: `super_admin` only, same company, target role
+  `manager`.
   - **On** writes `Agent:read`, `Agent:run` and `Agent:approve` = `true` into
     `User.permissions`, keeping any other keys.
   - **Off** deletes those three keys. It never writes `false`, which would
@@ -542,14 +582,14 @@ action:
 
 - `agentCan(user, "read" | "run" | "approve")` — the role grant, or for a
   `manager` the override keys. Overrides on any other role are ignored.
-- `requireAgentConfigEditor(user)` — the role is `super_admin` or `admin`.
-  **Role only; overrides are ignored**, so a hand-edited `Agent:update: true`
-  can never become config access.
+- `canEditAgentConfig(user)` — the role is `super_admin` or `admin`. **Role
+  only; overrides are ignored**, so a hand-edited `Agent:update: true` can
+  never become config access.
 
 | Surface | Check |
 |---|---|
 | `/portal/agents`, `/portal/agents/[id]`, `/portal/agents/runs` | `agentCan(read)`, else redirect to the dashboard. An agent or run outside the viewer's workspaces is not found. |
-| Create agent, update agent, enable toggle | `requireAgentConfigEditor` |
+| `/portal/agents/new`, create, update, enable toggle | `canEditAgentConfig` |
 | Run now | `agentCan(run)` |
 | Resolve | `agentCan(approve)`; Apply also checks `leadAccessible` for each deal |
 | Agents access switch | `super_admin` only |
@@ -562,14 +602,16 @@ action:
 ## UI
 
 Existing tokens (`bg-card`, `border-border`, `text-muted-foreground` and the
-rest) and `chip-*` tone classes. No new colours, fonts or layout primitives.
-Filters live in the URL and are read on the server.
+rest), `chip-*` tone classes, the settings-kit form fields, and the existing
+`PageHeader`, `EmptyState`, table, switch and alert-dialog components. No new
+colours, fonts or layout primitives. Filters live in the URL and are read on the
+server.
 
 **Status pills:** `queued` neutral · `running` info · `success` good · `failed`
 danger · `needs_human` warning, labelled "Needs a human".
 
 **Sidebar.** **Agents** in the admin group, with two tabs: **Agents** and
-**Runs**.
+**Runs** (the Runs tab carries a count of unresolved needs-a-human runs).
 
 **Agents list** (`/portal/agents`)
 
@@ -584,7 +626,8 @@ danger · `needs_human` warning, labelled "Needs a human".
 **Agent detail** (`/portal/agents/[id]`)
 
 - Header: name, product, department, handler, a gate badge ("Human gate" or
-  "Can advance deals"), enabled, and **Run now** for anyone holding `run`.
+  "Can advance deals"), enabled, and **Run now** for anyone holding `run` (with
+  the disabled-agent confirmation).
 - Config. Editors get a form: name, description, handler (a picker built from
   the registry), product, department, schedule (presets every 5, 15 or 30
   minutes, hourly, daily, weekdays, or a custom cron, with the next three runs
@@ -605,7 +648,7 @@ danger · `needs_human` warning, labelled "Needs a human".
 **Runs** (`/portal/agents/runs`)
 
 - **Needs a human** comes first, always: every unresolved `needs_human` run as
-  a card, with a count. Each card shows the agent, a link to the deal, the
+  a card, with a count. Each card shows the agent, a link to each deal, the
   summary, the held change in words ("Move Maria Lopez · 12 Elm St from NTP
   Submitted to NTP Approved"), and the resolve buttons.
 - Below it, the feed of runs across every agent the viewer can see, newest
@@ -619,14 +662,98 @@ create or edit agents."
 
 - `NotificationEvent` gains `agent_run_failed` and `agent_needs_human`. Both
   join the Settings → Notifications catalog, with the tokens `{{agent}}`,
-  `{{customer}}` and `{{status}}`.
+  `{{customer}}` and `{{status}}`, and link to `/portal/agents/runs`.
+- A new dynamic recipient, **`agents_access`** ("People with Agents access"),
+  resolves when the notification fires to every active `manager` whose
+  `permissions` carry `Agent:approve`. Resolving at fire time means turning the
+  switch on or off takes effect on the next alert, with no rule to edit.
 - `fireEvent` delivers only to matching rules, so a data migration adds two
-  starter rules per company per workspace: in-app, to the roles `super_admin`
-  and `admin`. People holding the switch can be added by name in Settings →
-  Notifications.
-- Events are fired through `await import()` inside try/catch, as the
-  automations engine does: the run row is the business record and must survive
-  the notifier failing to load.
+  starter rules per company per workspace: in-app, recipients `roles:
+  ["super_admin", "admin"]` plus `dynamic: ["agents_access"]`.
+- Events are fired inside `runInVertical(run.vertical)` — rules are
+  workspace-scoped, and `fireEvent` swallows the missing-workspace error, so a
+  call outside it would notify nobody and say nothing — through `await
+  import()` inside try/catch, as the automations engine does: the run row is
+  the business record and must survive the notifier failing to load.
+
+## Stage flags and the Advance button
+
+### Solar
+
+Flag every solar stage whose name contains "Action Required" (matched by name,
+because production's keys were generated by the stage builder). In production
+that is exactly six: `ntp_action_required_10`, `design_action_required_13`,
+`permit_action_required_15`, `inspection_action_required_21`,
+`monitoring_action_required_29`, `interconnection_action_required_25`. Seeded
+solar pipelines already flag their own redline and corrections stages.
+
+### Roofing
+
+- **Flag** `supplement_needed` (Supplement Needed).
+- **Add** three action-required stages, each placed straight after the step it
+  branches from, with later stages shifted down one position:
+
+  | New stage | Key | Placed after (production) | Fallback anchor |
+  |---|---|---|---|
+  | Claim Denied — Action Required | `claim_denied` | Adjuster Meeting Complete (`adjuster_meeting_complete_16`) | Adjuster Meeting Scheduled (`adjuster_meeting`) |
+  | QC Failed — Action Required | `qc_failed` | QC Inspection (`qc_inspection`) | — |
+  | Payment Issue — Action Required | `payment_issue` | Depreciation Requested (`depreciation_requested`) | — |
+
+  Colour `#EF4444` (the colour the solar defaults use for their action-required
+  stages), `internally_owned`, no SLA, no notification recipient. A pipeline
+  missing an anchor is skipped for that stage; one that already has the key or
+  name is left alone.
+- **Not flagged:** Supplement Submitted, Invoice Sent, Depreciation Requested
+  (waiting on the carrier or the homeowner), and every forward step.
+
+Consequences, checked against the code on `main`:
+
+- **Sale line** (at or past Contract Signed counts as sold): QC Failed and
+  Payment Issue count as sold; Claim Denied does not.
+- **Roofing payroll gate** (at or past Depreciation Requested,
+  `payroll/gate.ts`): a deal in Payment Issue stays commission-eligible; Claim
+  Denied and QC Failed are not eligible.
+- **`isWon`** (Paid, Closed): unchanged.
+- `prisma/seed.ts` and `prisma/seed-clean.ts` gain the same three stages and the
+  Supplement Needed flag, so local, e2e and any new company match production.
+
+### Advance skips action-required stages
+
+Today Advance offers the next stage that is not Cancelled. With the new roofing
+stages in line, Advance from Adjuster Meeting Complete would offer Claim Denied.
+So Advance and the progress bar count only **main-line** stages — not `isLost`,
+not `isActionRequired`:
+
+- Advance offers the next main-line stage after the current one; from a
+  side-state it offers the next main-line stage after that side-state.
+- Progress ("step N of M") counts main-line stages only.
+- Side-states stay reachable from the Move menu, and agents move deals into
+  them.
+
+This also changes Solar once its six stages are flagged: from NTP Submitted,
+Advance offers NTP Approved rather than NTP Action Required. It ships in the
+same deploy as the stage migration, so no deal page ever offers a side-state as
+the next step.
+
+## Migrations and rollout
+
+Three migrations, because Postgres will not use an enum value inside the
+transaction that adds it:
+
+1. `agents_control_plane` — the four enums, both tables, indexes and foreign
+   keys, and the two `NotificationEvent` values.
+2. `agents_seed_rows` — the Hello Agent per company and the starter
+   notification rules.
+3. `action_required_stages` — the solar and roofing flags and the three new
+   roofing stages.
+
+All are additive and ship with the deploy through `prod-migrate`. One new
+dependency, `croner` 10.0.1, parses and validates cron expressions. The
+per-minute cron entry needs a Vercel plan that allows sub-daily crons; the
+existing `*/15` entries show this project's plan does.
+
+After pushing, confirm the production deployment reads `● Ready` in `vercel ls`
+— a failed build still has its migrations applied.
 
 ## Stub agent
 
@@ -638,42 +765,28 @@ create or edit agents."
   Logs hello and records a successful run, proving the runner and run log work
   end to end." · `system.hello` · Both · Operations · disabled · no schedule ·
   gated · config `{}`. `prisma/seed.ts` creates the same row locally.
-- Run now on it writes one run per workspace the viewer holds, so the owner
-  sees two runs: Roofing and Solar.
-
-## Migrations and rollout
-
-Two migrations, because Postgres will not use an enum value inside the
-transaction that adds it:
-
-1. `agents_control_plane` — the four enums, both tables, indexes and foreign
-   keys, and the two `NotificationEvent` values.
-2. `agents_seed_rows` — the Hello Agent per company and the starter
-   notification rules.
-
-Both are additive and ship with the deploy through `prod-migrate`. One new
-dependency, `croner`, parses and validates cron expressions. The per-minute
-cron entry needs a Vercel plan that allows sub-daily crons; the existing
-`*/15` entries show this project's plan does.
-
-After pushing, confirm the production deployment reads `● Ready` in `vercel ls`
-— a failed build still has its migrations applied.
+- Because it is disabled, Run now asks for confirmation first. It then writes
+  one run per workspace the viewer holds, so the owner sees two runs: Roofing
+  and Solar.
 
 ## Testing
 
 **Unit (Vitest)**
 
-- the gate decision table;
+- the gate decision table and final-status precedence;
+- change planning: invalid deal, invalid stage, noop, held, applied;
 - result validation;
 - the secret-key guard and reference parsing (the `env:AGENT_` prefix, the
-  lender company check);
-- schedule validation and next-run computation;
-- the handler purity guard, and the build check script against a fake agent
-  list;
-- matrix grants per role;
-- `agentCan` with overrides: a manager with the switch (allowed), a rep with a
-  stale override (denied), an `Agent:update` override (ignored);
-- `setAgentsAccess` merge and delete semantics.
+  lender reference shape, keys like `footprint` not mistaken for `otp`);
+- schedule validation (5 fields only) and next-run computation;
+- the tick budget: handler deadline and the not-started threshold;
+- the handler purity guard, the registry/key agreement, and the build check
+  against a fake agent list;
+- matrix grants per role; `agentCan` with overrides: a manager with the switch
+  (allowed), a rep with a stale override (denied), an `Agent:update` override
+  (ignored); switch merge and delete semantics;
+- Advance: next main-line stage, from a side-state, never Cancelled; progress
+  counts main-line stages only.
 
 **Integration (`.itest.ts`, real database, `can()` not mocked)**
 
@@ -684,22 +797,30 @@ After pushing, confirm the production deployment reads `● Ready` in `vercel ls
 - a gated change held → Apply, including the moved-since refusal → Close;
 - an ungated change applied, producing a `LeadStageEvent` with `via = "agent"`,
   an activity line and a fired `stage_entered` automation;
+- notifications reach `super_admin`, `admin` and a manager with the switch, and
+  not a manager without it;
+- Run now on a disabled agent refused without `confirmDisabled`, allowed with
+  it;
 - the refusal matrix for every action: a manager without the switch, accounting
-  trying to run and resolve, a manager with the switch trying to update.
+  trying to run and resolve, a manager with the switch trying to update;
+- the stage migration against a copy of production's pipelines: six solar flags,
+  Supplement Needed flagged, three roofing stages at the right positions, and a
+  second run changes nothing.
 
 **E2E (Playwright)**
 
-- admin: Agents → Hello Agent → Run now → a `success` run reading "Said hello"
-  appears and expands to its JSON;
+- admin: Agents → Hello Agent → Run now → confirm → a `success` run reading
+  "Said hello" appears and expands to its JSON;
 - manager: no Agents item, and `/portal/agents` redirects;
-- Runs: the status filter works and the Needs a human section renders.
+- Runs: the Needs a human section renders, and the status filter works.
 
 **Production-build check.** Workspace behaviour is verified on
 `next build && next start`, not `next dev`, which loads the workspace context
 twice and makes `runInVertical` silently no-op.
 
 **After deploy.** Run now on the Hello Agent in production writes `success`
-runs, and the function log shows `/api/cron/agents` answering 200 every minute.
+runs, the function log shows `/api/cron/agents` answering 200 every minute, and
+a read-only query confirms the stage flags and the three new roofing stages.
 
 ## Out of scope
 
@@ -709,7 +830,6 @@ runs, and the function log shows `/api/cron/agents` answering 200 every minute.
   `runAutomations` call in `moveLeadStage`.
 - A credential store (Open question 1).
 - Retries, config version history, deleting agents.
-- Changing which stages are flagged `isActionRequired` (Open question 2).
 - Splitting the `manager` role (see Known debt).
 
 ## Known debt: `manager` is overloaded
@@ -754,39 +874,8 @@ deliberately does not invent one. Decide before the first portal handler ships:
 Until this is decided, `deps.secrets` resolves only `env:AGENT_*` and
 `lender:<id>`.
 
-### 2. Which stages are flagged `isActionRequired`
+### 2. Advance skipping action-required stages — confirm before build
 
-Checked read-only against production on 2026-09-15: **no stage in either
-pipeline is flagged.** Until some are, every gated agent — Roofing or Solar —
-can only flag work. The Hello Agent is unaffected.
-
-The flag is descriptive today: only the settings screens read it, so flagging a
-stage changes nothing else. The roofing stage editor shows it read-only.
-
-**Roofing** (22 stages in production). Recommended:
-
-- **Flag `supplement_needed` (Supplement Needed).** It is the pipeline's one
-  correction state: the carrier's scope is short, and our side has to build the
-  supplement before the job can move.
-- **Do not flag** Supplement Submitted, Invoice Sent or Depreciation Requested
-  (those wait on the carrier or the homeowner), or any forward step (Adjuster
-  Meeting, Scope Received, QC Inspection and the rest). Flagging a forward step
-  would let a gated agent walk deals down the main line, which is exactly what
-  the gate exists to stop.
-- **Consider adding** the correction states roofing lacks, following the solar
-  pipeline's "<step> Action Required" pattern: *Claim Denied — Action Required*
-  (after Insurance Claim Opened or Adjuster Meeting), *QC Failed — Action
-  Required* (after QC Inspection), and *Payment Issue — Action Required* (after
-  Invoice Sent or Depreciation Requested). Without them, Supplement Needed is
-  the only stage a gated roofing agent can move a deal into.
-
-**Solar.** The production pipeline has six stages **named** "Action Required"
-that carry no flag: `ntp_action_required_10`, `design_action_required_13`,
-`permit_action_required_15`, `inspection_action_required_21`,
-`monitoring_action_required_29` and `interconnection_action_required_25`.
-Recommended: flag all six. They are exactly where a bank NTP poller or a
-design-partner agent would move a deal.
-
-**How to set them:** a data migration flagging these keys, or exposing the
-toggle in the roofing stage editor. This needs a decision before the first
-gated agent; it does not block this build.
+The Advance change above is required for the new roofing stages not to hijack
+the one-click forward move, and it changes Solar's Advance too. It is in the
+plan; confirm it, or say where the three roofing stages should sit instead.
