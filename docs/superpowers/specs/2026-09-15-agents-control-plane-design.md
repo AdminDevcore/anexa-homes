@@ -413,7 +413,11 @@ that sets `maxDuration = 300`.
 ### `executeRun(runId)`
 
 Shared by the tick and Run now. It knows nothing about Vercel, so a future
-external worker can call it without schema changes.
+external worker can call it without schema changes. Such a worker has no 300 s
+kill, and the reaper relies on that kill (see The reaper). A worker must impose
+its own ceiling on a run, at most 300 s from `startedAt`, or the reaper's clock
+must change with it. Otherwise a live run can be reaped mid-apply. What it did
+would still be kept in `detail.lateResult`, but the run would read `failed`.
 
 1. A run created `queued` (Run now) is flipped to `running` with a
    compare-and-set; lost the race → return. A run the tick created `running`
