@@ -89,6 +89,10 @@ export type ResolvedChange = {
   lead: { id: string; label: string } | null;
   fromStage: StageRef | null;
   toStage: TargetStage | null;
+  /** Set when Contract Signed blocks this move: the refusal to show as the note. */
+  contractRefusal: string | null;
+  /** Set when M1 Funding blocks this move: the refusal to show as the note. */
+  fundingRefusal: string | null;
 };
 
 export type ChangeOutcome = "applied" | "noop" | "held" | "discarded" | "invalid";
