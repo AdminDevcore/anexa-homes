@@ -747,8 +747,9 @@ solar pipelines already flag their own redline and corrections stages.
   | QC Failed — Action Required | `qc_failed` | QC Inspection (`qc_inspection`) | — |
   | Payment Issue — Action Required | `payment_issue` | Depreciation Requested (`depreciation_requested`) | — |
 
-  Colour `#EF4444` (the colour the solar defaults use for their action-required
-  stages), `internally_owned`, no SLA, no notification recipient. A pipeline
+  Colour rose `#E11D48`. The user chose it on 2026-09-15 because `#EF4444`, the
+  colour of the solar action-required stages, is exactly roofing Cancelled's red.
+  `internally_owned`, no SLA, no notification recipient. A pipeline
   missing an anchor is skipped for that stage; one that already has the key or
   name is left alone.
 - **Not flagged:** Supplement Submitted, Invoice Sent, Depreciation Requested
