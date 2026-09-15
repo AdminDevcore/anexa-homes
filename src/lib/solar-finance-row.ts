@@ -6,6 +6,7 @@ import {
   leaseMonthlyCents,
   type SolarAssumptions,
   type FinalPpwMode,
+  type PriceBasis,
 } from "./solar-money";
 
 /**
@@ -77,6 +78,14 @@ export type LenderProductTerms = {
   maxFinalPpwCents?: number | null;
   /** Whether that figure is a ceiling or the price itself. */
   finalPpwMode?: FinalPpwMode | null;
+  /**
+   * Which price that figure fixes on THIS programme — see SolarPriceBasis. Off
+   * the programme, not the lender: one partner's $5.50 is the gross on one
+   * product and the base on another.
+   */
+  ppwBasis?: PriceBasis | null;
+  /** The same, for the partner's figure per battery. */
+  batteryPriceBasis?: PriceBasis | null;
 };
 
 export type FinanceRow = {
@@ -168,6 +177,7 @@ export function financeRowForProduct(
         // holding it down — see SolarFinalPpwMode. On such a lender the box a
         // rep types in stops being the price of anything the customer sees.
         mode: lp?.finalPpwMode ?? undefined,
+        basis: lp?.ppwBasis ?? undefined,
         systemSizeKwDc: ctx.systemSizeKwDc,
         dealerFeePct,
         // Only the work the partner's figure is a price FOR. A roof rides on

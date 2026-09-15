@@ -131,6 +131,10 @@ export type LenderProduct = {
   paydownPct: number | null;
   paydownMonths: number | null;
   isActive: boolean;
+  /** Which price the lender's $/W fixes on this programme. See SolarPriceBasis. */
+  ppwBasis: "final" | "gross" | "base";
+  /** Which price the lender's $/battery fixes on this programme. */
+  batteryPriceBasis: "final" | "gross" | "base";
 };
 
 /**
@@ -328,6 +332,20 @@ export function draftFrom(lender: LenderRow) {
       : lender.finalBatteryPriceMode) as PricingMode,
     maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
     minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
+    /**
+     * Which price the figures above fix, programme by programme. Keyed by
+     * programme id. Edited on the Pricing tab beside the figure it qualifies,
+     * and saved with the lender.
+     */
+    programmeBases: Object.fromEntries(
+      lender.products.map((p) => [
+        p.id,
+        { ppwBasis: p.ppwBasis, batteryPriceBasis: p.batteryPriceBasis },
+      ])
+    ) as Record<
+      string,
+      { ppwBasis: "final" | "gross" | "base"; batteryPriceBasis: "final" | "gross" | "base" }
+    >,
     batteryRule: lender.batteryRule,
     signTodayMode: lender.signTodayMode,
     signTodayFixed: batteryPriceToDollars(lender.signTodayFixedCents),

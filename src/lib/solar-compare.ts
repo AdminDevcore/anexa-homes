@@ -6,6 +6,7 @@ import {
   pricePurchase,
   priceThirdParty,
   type FinalPpwMode,
+  type PriceBasis,
 } from "@/lib/solar-money";
 import {
   factorQuote,
@@ -68,6 +69,8 @@ export type OfferProduct = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is that lender's ceiling or its flat price. */
   finalPpwMode: FinalPpwMode;
+  /** Which price that figure fixes on THIS programme. Absent reads as `final`. */
+  ppwBasis?: PriceBasis;
   /**
    * That lender's sign-today rule, carried for the same reason as the cap —
    * and it has to be per COLUMN rather than per shelf, because two programmes
@@ -259,6 +262,7 @@ function purchaseRow(
           stickerPpwCents: uncappedPpwCents,
           maxFinalPpwCents,
           mode: finalPpwMode,
+          basis: cash ? undefined : (offer as OfferProduct).ppwBasis,
           systemSizeKwDc: basis.systemSizeKwDc,
           dealerFeePct,
           adderTotalCents: basis.adderTotalCents,

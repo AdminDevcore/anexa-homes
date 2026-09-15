@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { getSolarSettings } from "./settings";
 import { resolveDesignBattery, resolveSizingModule } from "./sizing";
 import { recomputeDesignFigures } from "./recompute";
@@ -123,10 +124,7 @@ export async function setSolarCreditClaimsAction(input: z.infer<typeof creditCla
   if (!parsed.success) return fail("Invalid credit selection.");
   const { leadId, ...claims } = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
@@ -175,10 +173,7 @@ export async function setSolarSignTodayCreditAction(input: z.infer<typeof signTo
   if (!parsed.success) return fail("Enter a credit between $0 and $100,000.");
   const { leadId, cents } = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
@@ -247,10 +242,7 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   if (!parsed.success) return fail("Invalid design.");
   const d = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: d.leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, d.leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
@@ -337,6 +329,7 @@ export async function saveSolarBuildDetailsAction(input: z.infer<typeof buildDet
   const parsed = buildDetailsSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid build details.");
   const d = parsed.data;
+  if (!(await leadAccessible(user, d.leadId))) return fail("Deal not found.");
 
   const design = await prisma.solarDesign.findFirst({
     where: { leadId: d.leadId, companyId: user.companyId },
@@ -403,10 +396,7 @@ export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderS
   if (!parsed.success) return fail("Invalid lender.");
   const { leadId, lenderId } = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { id: leadId, companyId: user.companyId },
-    select: { id: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
 
   // A lender id from another company must never attach to this design.
@@ -708,10 +698,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   if (!parsed.success) return fail("Invalid financing.");
   const f = parsed.data;
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: f.leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, f.leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
@@ -802,6 +789,8 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
           onTopAdderTotalCents: adders.onTopAdderTotalCents,
           maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
           finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
+          // Which price that figure fixes is the quoted programme's to say.
+          batteryPriceBasis: lenderProduct?.batteryPriceBasis,
         })
       : null;
 
@@ -833,7 +822,14 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 
   const saved = await prisma.solarFinance.upsert({
     where: { leadId: f.leadId },
-    create: { companyId: user.companyId, leadId: f.leadId, ...data },
+    create: {
+      companyId: user.companyId,
+      leadId: f.leadId,
+      claimItc: true,
+      claimEnergyCommunity: false,
+      claimDomesticContent: false,
+      ...data,
+    },
     update: data,
     select: {
       product: true, grossPpwCents: true, stickerPricePerBatteryCents: true,
@@ -862,6 +858,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 export async function validateSolarDealAction(leadId: string) {
   const user = await requireUser();
   if (!can(user, "read", "Lead")) return fail("Not allowed.");
+  if (!(await leadAccessible(user, leadId))) return fail("Deal not found.");
   const readiness = await readSolarReadiness(user.companyId, leadId);
   if (!readiness.ok) return fail(readiness.error);
   return { ok: true as const, issues: readiness.issues, canGenerate: canGenerate(readiness.issues) };
@@ -1450,6 +1447,22 @@ const lenderSchema = z.object({
   submissionRepNameBasis: z.enum(["deal_rep", "submitter", "fixed"]).optional(),
   submissionRepName: z.string().trim().max(120).nullable().optional(),
   submissionDelivery: z.enum(["in_person", "customer"]).optional(),
+  /**
+   * Which price this partner's figures fix, programme by programme — see
+   * SolarPriceBasis. Set on the Pricing tab beside the figure it qualifies, so
+   * it travels with the lender's own save. Only THIS lender's programmes are
+   * written; an id from anywhere else matches nothing.
+   */
+  programmeBases: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        ppwBasis: z.enum(["final", "gross", "base"]),
+        batteryPriceBasis: z.enum(["final", "gross", "base"]),
+      })
+    )
+    .max(200)
+    .optional(),
 });
 
 /**
@@ -1475,7 +1488,9 @@ export async function upsertSolarLenderAction(
   // name that is too long and a link that is not http(s), and both are things
   // the person typing can fix once they are told which.
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid lender.");
-  const d = parsed.data;
+  // The bases belong to the programmes, not the lender row, so they are
+  // written separately below.
+  const { programmeBases, ...d } = parsed.data;
 
   const clash = await prisma.solarLender.findFirst({
     where: {
@@ -1515,6 +1530,14 @@ export async function upsertSolarLenderAction(
       select: { id: true },
     });
     savedId = created.id;
+  }
+  if (programmeBases?.length && savedId) {
+    for (const b of programmeBases) {
+      await prisma.solarLenderProduct.updateMany({
+        where: { id: b.id, lenderId: savedId, companyId: user.companyId },
+        data: { ppwBasis: b.ppwBasis, batteryPriceBasis: b.batteryPriceBasis },
+      });
+    }
   }
   revalidatePath("/portal/settings/solar-equipment");
   revalidatePath("/portal/settings/solar-lenders");
@@ -1788,10 +1811,7 @@ export async function submitCreditApplicationAction(input: z.infer<typeof credit
   const parsed = creditSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid application.");
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: parsed.data.leadId },
-    select: { id: true },
-  });
+  const lead = await leadAccessible(user, parsed.data.leadId);
   if (!lead) return fail("Deal not found.");
 
   await prisma.creditApplication.create({
@@ -1848,6 +1868,7 @@ export async function setSolarSystemTypeAction(input: unknown) {
   const parsed = systemTypeSchema.safeParse(input);
   if (!parsed.success) return fail("Pick solar, solar + storage, or storage only.");
   const { leadId, systemType } = parsed.data;
+  if (!(await leadAccessible(user, leadId))) return fail("Deal not found.");
 
   const design = await prisma.solarDesign.findFirst({
     where: { leadId, companyId: user.companyId },

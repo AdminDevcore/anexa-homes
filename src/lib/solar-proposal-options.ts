@@ -9,6 +9,7 @@ import {
   capStickerToFinalUnit,
   type SolarAssumptions,
   type FinalPpwMode,
+  type PriceBasis,
 } from "./solar-money";
 
 /**
@@ -54,6 +55,13 @@ export type CatalogueProgramme = {
    * programme picker already applies when the design says storage.
    */
   financesStorageOnly?: boolean;
+  /**
+   * Which price the partner's figures below fix on THIS programme — per watt
+   * and per battery. On the programme, not the lender: one partner's $5.50 is
+   * the gross on one product and the base on another. Absent reads as `final`.
+   */
+  ppwBasis?: PriceBasis;
+  batteryPriceBasis?: PriceBasis;
   lender: {
     id: string;
     name: string;
@@ -310,6 +318,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
           termYears: p.termYears,
           maxFinalPpwCents: p.lender.maxFinalPpwCents,
           finalPpwMode: p.lender.finalPpwMode,
+          ppwBasis: p.ppwBasis,
         },
         targetNetPpwCents: input.targetNetPpwCents,
       }
@@ -331,6 +340,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
             grossPpwFromNet(baseBatteryCents, row.dealerFeePct) ?? baseBatteryCents,
           maxFinalPerUnitCents: p.lender.maxFinalPricePerBatteryCents ?? null,
           mode: p.lender.finalBatteryPriceMode,
+          basis: p.batteryPriceBasis,
           units: storage.batteryQty,
           dealerFeePct: row.dealerFeePct,
           adderTotalCents: input.adderTotalCents,

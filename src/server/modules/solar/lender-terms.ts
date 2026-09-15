@@ -1,5 +1,5 @@
 import type { LenderProductTerms } from "@/lib/solar-finance-row";
-import type { FinalPpwMode } from "@/lib/solar-money";
+import type { FinalPpwMode, PriceBasis } from "@/lib/solar-money";
 
 /**
  * The terms a deal is priced from, read off a rate-sheet row.
@@ -31,11 +31,20 @@ export const LENDER_TERMS_SELECT = {
   rateMillsPerKwh: true,
   escalatorPct: true,
   termYears: true,
+  // Which price the partner's figure fixes IS the programme's to say — one
+  // partner's $5.50 is the gross on one product and the base on another.
+  ppwBasis: true,
+  batteryPriceBasis: true,
   lender: { select: { maxFinalPpwCents: true, finalPpwMode: true } },
 } as const;
 
 /** What that select comes back as. */
-export type LenderTermsRow = Omit<LenderProductTerms, "maxFinalPpwCents" | "finalPpwMode"> & {
+export type LenderTermsRow = Omit<
+  LenderProductTerms,
+  "maxFinalPpwCents" | "finalPpwMode" | "ppwBasis" | "batteryPriceBasis"
+> & {
+  ppwBasis: PriceBasis;
+  batteryPriceBasis: PriceBasis;
   lender: { maxFinalPpwCents: number | null; finalPpwMode: FinalPpwMode };
 };
 
