@@ -1371,6 +1371,11 @@ const lenderSchema = z.object({
    */
   batteryRule: z.enum(["optional", "warn", "required"]).optional(),
   /**
+   * Whether this partner's dealer fee is taken on a battery beside the array —
+   * see SolarLender.batteryInsideFee. Written straight through with the rest.
+   */
+  batteryInsideFee: z.boolean().optional(),
+  /**
    * WHAT THIS PARTNER HANDS BACK FOR SIGNING TODAY — see `solar-sign-today`.
    *
    * `none` leaves the figure to the rep on the deal, `fixed` gives this
@@ -1399,6 +1404,22 @@ const lenderSchema = z.object({
   submissionRepNameBasis: z.enum(["deal_rep", "submitter", "fixed"]).optional(),
   submissionRepName: z.string().trim().max(120).nullable().optional(),
   submissionDelivery: z.enum(["in_person", "customer"]).optional(),
+  /**
+   * Which price this partner's figures fix, programme by programme — see
+   * SolarPriceBasis. Set on the Pricing tab beside the figure it qualifies, so
+   * it travels with the lender's own save. Only THIS lender's programmes are
+   * written; an id from anywhere else matches nothing.
+   */
+  programmeBases: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        ppwBasis: z.enum(["final", "gross", "base"]),
+        batteryPriceBasis: z.enum(["final", "gross", "base"]),
+      })
+    )
+    .max(200)
+    .optional(),
 });
 
 /**
@@ -1424,7 +1445,9 @@ export async function upsertSolarLenderAction(
   // name that is too long and a link that is not http(s), and both are things
   // the person typing can fix once they are told which.
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid lender.");
-  const d = parsed.data;
+  // The bases belong to the programmes, not the lender row, so they are
+  // written separately below.
+  const { programmeBases, ...d } = parsed.data;
 
   const clash = await prisma.solarLender.findFirst({
     where: {
@@ -1464,6 +1487,14 @@ export async function upsertSolarLenderAction(
       select: { id: true },
     });
     savedId = created.id;
+  }
+  if (programmeBases?.length && savedId) {
+    for (const b of programmeBases) {
+      await prisma.solarLenderProduct.updateMany({
+        where: { id: b.id, lenderId: savedId, companyId: user.companyId },
+        data: { ppwBasis: b.ppwBasis, batteryPriceBasis: b.batteryPriceBasis },
+      });
+    }
   }
   revalidatePath("/portal/settings/solar-equipment");
   revalidatePath("/portal/settings/solar-lenders");

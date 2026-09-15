@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Menu, Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PORTAL_NAV, navRoutes, type NavItem } from "@/lib/nav";
+import { NAV_GROUPS, PORTAL_NAV, navRoutes, type NavItem } from "@/lib/nav";
 import { Logo } from "@/components/marketing/logo";
 import type { Branding } from "@/server/branding/defaults";
 import { UserMenu } from "./user-menu";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { WorkspaceSwitcher } from "./workspace-switcher";
+import { NovaDock } from "./nova/nova-dock";
 import { rememberAppPath, SettingsSidebarNav, SETTINGS_ROOT } from "./settings-nav";
 import { VERTICAL_ACCENT, type ActiveVertical } from "@/lib/vertical";
 
@@ -71,49 +72,69 @@ function AppNavList({
   unread: number;
   onNavigate?: () => void;
 }) {
+  // Ungrouped items lead, then each heading in order. Built from what this user
+  // may open, so a heading with nothing under it for them is never drawn.
+  const sections = [
+    { key: "top", label: null as string | null, items: items.filter((i) => !i.group) },
+    ...NAV_GROUPS.map((g) => ({
+      key: g.key,
+      label: g.label as string | null,
+      items: items.filter((i) => i.group === g.key),
+    })),
+  ].filter((s) => s.items.length > 0);
+
   return (
-    <nav className="flex flex-col gap-1 px-3">
-      {items.map((item) => {
-        // Longest matching href wins, so a parent route (Settings) doesn't also
-        // highlight on a child owned by another item. An item's tab routes
-        // count as its own:
-        // standing on Contractor Pay lights up Commissions, which is where the
-        // tab that opened it lives.
-        const mine = matchLength(item, pathname);
-        const active = mine >= 0 && !items.some((o) => matchLength(o, pathname) > mine);
-        const badge = item.href === "/portal/chat" && unread > 0 ? unread : null;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            className={cn(
-              "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              // Active is a lifted surface, not a slab of brand colour, with a
-              // thin orange rule at the leading edge. The eye still lands on it
-              // instantly, and the orange stays available for the button that
-              // actually wants pressing.
-              active
-                ? "bg-white/[0.08] text-white before:absolute before:inset-y-1.5 before:-left-1 before:w-[3px] before:rounded-full before:bg-gold"
-                : "text-white/55 hover:bg-white/[0.04] hover:text-white/90"
-            )}
-          >
-            <item.icon className="size-[18px] shrink-0" />
-            <span className="flex-1">{item.label}</span>
-            <NavPending />
-            {badge !== null && (
-              <Badge
+    <nav className="flex flex-col gap-3 px-3">
+      {sections.map((section) => (
+        <div key={section.key} className="flex flex-col gap-0.5">
+          {section.label && (
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-white/35">
+              {section.label}
+            </p>
+          )}
+          {section.items.map((item) => {
+            // Longest matching href wins, so a parent route (Settings) doesn't also
+            // highlight on a child owned by another item. An item's tab routes
+            // count as its own:
+            // standing on Contractor Pay lights up Commissions, which is where the
+            // tab that opened it lives.
+            const mine = matchLength(item, pathname);
+            const active = mine >= 0 && !items.some((o) => matchLength(o, pathname) > mine);
+            const badge = item.href === "/portal/chat" && unread > 0 ? unread : null;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onNavigate}
                 className={cn(
-                  "h-5 min-w-5 justify-center rounded-full px-1.5 tabular-nums",
-                  active && "bg-background text-foreground"
+                  "relative flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                  // Active is a lifted surface, not a slab of brand colour, with a
+                  // thin orange rule at the leading edge. The eye still lands on it
+                  // instantly, and the orange stays available for the button that
+                  // actually wants pressing.
+                  active
+                    ? "bg-white/[0.08] text-white before:absolute before:inset-y-1.5 before:-left-1 before:w-[3px] before:rounded-full before:bg-gold"
+                    : "text-white/55 hover:bg-white/[0.04] hover:text-white/90"
                 )}
               >
-                {badge}
-              </Badge>
-            )}
-          </Link>
-        );
-      })}
+                <item.icon className="size-[18px] shrink-0" />
+                <span className="flex-1">{item.label}</span>
+                <NavPending />
+                {badge !== null && (
+                  <Badge
+                    className={cn(
+                      "h-5 min-w-5 justify-center rounded-full px-1.5 tabular-nums",
+                      active && "bg-background text-foreground"
+                    )}
+                  >
+                    {badge}
+                  </Badge>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }
@@ -125,6 +146,7 @@ export function PortalShell({
   vertical,
   availableVerticals,
   settingsVertical,
+  nova = null,
   children,
 }: {
   user: ShellUser;
@@ -139,6 +161,8 @@ export function PortalShell({
    * menu still has to know which sections belong to it.
    */
   settingsVertical: ActiveVertical;
+  /** Nova, the Solar assistant. Null wherever it is off — including every Roofing page. */
+  nova?: { voice: boolean } | null;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -186,22 +210,22 @@ export function PortalShell({
       {/* Desktop sidebar. The shell is workspace furniture: when someone prints
           a page from inside the portal they want the document on it, not the
           navigation around it. */}
-      <aside className="dark fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-shell-border bg-shell text-foreground lg:flex print:hidden">
-        <div className="flex h-16 items-center border-b border-shell-border px-5">
-          <Link href="/portal/dashboard" className="group inline-flex items-center">
-            <div className="flex items-center gap-2">
+      <aside className="dark fixed inset-y-0 left-0 hidden w-56 flex-col border-r border-shell-border bg-shell text-foreground lg:flex print:hidden">
+        <div className="flex h-16 items-center border-b border-shell-border px-4">
+          <Link href="/portal/dashboard" className="group inline-flex min-w-0 items-center">
+            <div className="flex min-w-0 items-center gap-2">
               {branding.logoUrl ? (
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={branding.logoUrl} alt={branding.companyName} className="h-10 w-auto" />
-                  <span className="font-display text-lg font-semibold tracking-tight">
+                  <img src={branding.logoUrl} alt={branding.companyName} className="h-10 w-auto shrink-0" />
+                  <span className="truncate font-display text-lg font-semibold tracking-tight">
                     {branding.companyName}
                   </span>
                 </>
               ) : (
                 // Default brand: full Anexa lockup (mark + wordmark) — white, for the dark sidebar.
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src="/anexa-lockup.png" alt={branding.companyName} className="h-11 w-auto" />
+                <img src="/anexa-lockup.png" alt={branding.companyName} className="h-10 w-auto" />
               )}
             </div>
           </Link>
@@ -232,7 +256,7 @@ export function PortalShell({
       {/* Main column — min-w-0 lets it shrink below content width so wide tables
           scroll inside their own container instead of pushing the page (and the
           header actions) past the viewport's right edge. */}
-      <div className="flex min-w-0 flex-1 flex-col lg:pl-64 print:pl-0">
+      <div className="flex min-w-0 flex-1 flex-col lg:pl-56 print:pl-0">
         <header className="dark sticky top-0 z-30 flex h-16 relative items-center justify-between gap-3 border-b border-shell-border bg-shell px-4 text-foreground sm:px-6 print:hidden">
           <div className="flex items-center gap-3">
             {/* Mobile menu */}
@@ -275,6 +299,7 @@ export function PortalShell({
             <span className="hidden text-sm text-muted-foreground sm:inline">
               {user.roleLabel}
             </span>
+            {nova && <NovaDock voice={nova.voice} />}
             <NotificationBell />
             <UserMenu name={user.name} email={user.email} roleLabel={user.roleLabel} />
           </div>

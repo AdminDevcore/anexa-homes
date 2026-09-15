@@ -10,6 +10,7 @@ import { currentBranding } from "@/server/branding/resolve";
 import { getActiveVertical, userVerticals } from "@/server/auth/vertical";
 import { solarVerticalEnabled } from "@/server/vertical/flag";
 import { BrandingProvider } from "@/components/portal/branding-provider";
+import { novaEnabled } from "@/server/modules/nova/gate";
 
 export async function generateMetadata(): Promise<Metadata> {
   const branding = await currentBranding();
@@ -67,6 +68,10 @@ export default async function PortalLayout({
   const settingsVertical = await getActiveVertical(user);
   const vertical = multiVertical ? settingsVertical : null;
 
+  // Nova appears in the Solar workspace only. Without a speech key it still
+  // works by text, so the mic is hidden rather than left to fail.
+  const nova = novaEnabled() && vertical === "solar" ? { voice: Boolean(process.env.OPENAI_API_KEY) } : null;
+
   return (
     <BrandingProvider branding={branding}>
       {branding.fontFamily && (
@@ -83,6 +88,7 @@ export default async function PortalLayout({
         vertical={vertical}
         availableVerticals={availableVerticals}
         settingsVertical={settingsVertical}
+        nova={nova}
       >
         {children}
       </PortalShell>

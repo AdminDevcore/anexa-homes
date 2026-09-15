@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
   ArrowUpRight,
   BatteryCharging,
+  ChevronDown,
   ClipboardList,
   Compass,
   Cpu,
@@ -122,12 +123,35 @@ export type SystemBuild = {
 /** An em dash, so an unset figure reads as unset rather than as zero. */
 const NOT_SET = <span className="font-normal text-muted-foreground">—</span>;
 
+/* A panel's fold is remembered per panel, per browser: whoever folds the
+   equipment list away to get at the arrays wants it still folded on the next
+   deal they open. localStorage is an external store, so it is read through
+   useSyncExternalStore — the server renders every panel open and the client
+   picks up the stored fold without a hydration mismatch. localStorage fires
+   no event for same-tab writes, hence the manual listener set. */
+const FOLD_KEY = "operations-folded:";
+const foldListeners = new Set<() => void>();
+function subscribeFold(cb: () => void) {
+  foldListeners.add(cb);
+  return () => {
+    foldListeners.delete(cb);
+  };
+}
+function setFolded(title: string, folded: boolean) {
+  if (folded) window.localStorage.setItem(FOLD_KEY + title, "1");
+  else window.localStorage.removeItem(FOLD_KEY + title);
+  foldListeners.forEach((cb) => cb());
+}
+
 /**
  * A panel: a titled surface, recessed against the slide it sits on.
  *
  * `bg-muted/30` rather than `bg-card` deliberately — this whole slide renders
  * inside the deal's card, and a card on a card is invisible in light mode and
  * muddy in dark. A recess reads as "inside" in both.
+ *
+ * Folds from the arrow on the right, or from anywhere on the header that is
+ * not the panel's own action — a "Manage fields" link must still be a link.
  */
 function Panel({
   title,
@@ -144,16 +168,53 @@ function Panel({
   bodyClassName?: string;
   children: React.ReactNode;
 }) {
+  const folded = React.useSyncExternalStore(
+    subscribeFold,
+    () => window.localStorage.getItem(FOLD_KEY + title) === "1",
+    () => false
+  );
+  const bodyId = React.useId();
   return (
     <section className={cn("overflow-hidden rounded-xl border border-border bg-muted/30", className)}>
-      <header className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border/70 px-4 py-2.5">
+      <header
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("a, button, input, label")) return;
+          setFolded(title, !folded);
+        }}
+        className={cn(
+          "flex min-w-0 cursor-pointer select-none flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2.5",
+          // Folded, the header is the whole panel; a rule under it would sit on
+          // the panel's own bottom border as a double line.
+          !folded && "border-b border-border/70"
+        )}
+      >
         <h3 className="flex min-w-0 items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {Icon && <Icon className="size-3.5 shrink-0 text-solar" />}
           <span className="truncate">{title}</span>
         </h3>
-        {action}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {action}
+          <button
+            type="button"
+            aria-expanded={!folded}
+            aria-controls={bodyId}
+            aria-label={`${folded ? "Expand" : "Collapse"} ${title}`}
+            title={folded ? "Expand" : "Collapse"}
+            onClick={() => setFolded(title, !folded)}
+            className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronDown
+              className={cn(
+                "size-4 transition-transform motion-reduce:transition-none",
+                folded && "-rotate-90"
+              )}
+            />
+          </button>
+        </div>
       </header>
-      <div className={cn("p-4", bodyClassName)}>{children}</div>
+      <div id={bodyId} hidden={folded} className={cn("p-4", bodyClassName)}>
+        {children}
+      </div>
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import type { ServiceType } from "@prisma/client";
 import { serviceTypeLabel } from "@/lib/service-types";
 import { addressSearchText } from "@/lib/address";
+import { outcomeCategory, type Disposition } from "@/lib/dispositions";
 import type { AppointmentRow } from "@/components/portal/appointments-list";
 
 /**
@@ -49,6 +50,7 @@ type LeadForRow = {
   stage: { name: string; color: string; isLost: boolean } | null;
   source: { name: string } | null;
   assignedRep: { firstName: string; lastName: string } | null;
+  _count: { appointmentReschedules: number };
 };
 
 type Formatters = {
@@ -59,6 +61,8 @@ type Formatters = {
 export function buildAppointmentRows(
   leads: LeadForRow[],
   fmt: Formatters,
+  /** The vertical's outcome list, to resolve what each outcome counts as. */
+  dispositions: Disposition[] = [],
   now: number = Date.now()
 ): AppointmentRow[] {
   return leads.map((l) => ({
@@ -82,5 +86,9 @@ export function buildAppointmentRows(
     relative: l.appointmentAt ? relativeLabel(l.appointmentAt, now) : null,
     isPast: l.appointmentAt ? l.appointmentAt.getTime() < now : false,
     outcome: l.appointmentDisposition,
+    // Solar sorts by these; roofing's list never reads them.
+    outcomeCategory: l.appointmentDisposition ? outcomeCategory(l.appointmentDisposition, dispositions) : null,
+    rescheduleCount: l._count.appointmentReschedules,
+    assigned: l.assignedRep !== null,
   }));
 }

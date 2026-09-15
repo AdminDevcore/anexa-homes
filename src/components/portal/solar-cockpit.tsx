@@ -192,6 +192,8 @@ export type SystemMoney = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is a ceiling or this partner's flat price. */
   finalPpwMode: "cap" | "flat";
+  /** Which price that figure fixes on the quoted programme. See SolarPriceBasis. */
+  ppwBasis: "final" | "gross" | "base";
   /** True when that rule is what set this price, rather than the base. */
   cappedByLender: boolean;
   lenderName: string | null;
@@ -348,6 +350,7 @@ export function SolarSystemMoneyPanel({
                         ? {
                             ppwCents: money.maxFinalPpwCents,
                             mode: money.finalPpwMode,
+                            basis: money.ppwBasis,
                             lenderName: money.lenderName,
                           }
                         : null
@@ -404,6 +407,13 @@ export function SolarSystemMoneyPanel({
  * Getting that wrong is not cosmetic: the same "$4.42/W" means what the company
  * keeps under one label and what the household pays under the other.
  */
+/** What a partner's figure covers, on the quoted programme's basis. */
+function capCovers(basis: "final" | "gross" | "base"): string {
+  if (basis === "gross") return "gross, adders included, with the dealer fee on top";
+  if (basis === "base") return "base, with adders and the dealer fee on top";
+  return "final, fee and adders included";
+}
+
 function PriceLadder({
   ladder,
   redrawn,
@@ -413,7 +423,12 @@ function PriceLadder({
   /** True when the drawing has moved since the reported version was frozen. */
   redrawn: boolean;
   /** The partner's own rule, when it is what set this price. */
-  cap: { ppwCents: number; mode: "cap" | "flat"; lenderName: string | null } | null;
+  cap: {
+    ppwCents: number;
+    mode: "cap" | "flat";
+    basis: "final" | "gross" | "base";
+    lenderName: string | null;
+  } | null;
 }) {
   const frozen = ladder.source === "proposal";
   const { credits } = ladder;
@@ -485,8 +500,8 @@ function PriceLadder({
           hint on the row. */}
       {ladder.batteryPriceCents > 0 && (
         <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-          The battery is billed at its catalogue price, on top of what the array itself is priced
-          per watt.
+          The battery is priced from the catalogue rather than per watt, so it does not move with the
+          rate above it.
         </p>
       )}
       {/* WHAT THE NET IS AND IS NOT. Two prices on one ladder invite exactly one
@@ -524,19 +539,9 @@ function PriceLadder({
           the price it was held down FROM. */}
       {!frozen && cap && (
         <p className="mt-1 text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-500">
-          {cap.mode === "flat" ? (
-            <>
-              {cap.lenderName ?? "This lender"} sells at a flat {usdc(cap.ppwCents)}/W, fee and
-              adders included — the base above is what is left of it, not a price typed on this
-              deal.
-            </>
-          ) : (
-            <>
-              Held at {cap.lenderName ?? "this lender"}&rsquo;s ceiling of {usdc(cap.ppwCents)}/W,
-              fee and adders included. The base above is what survives it — not the price typed on
-              the deal.
-            </>
-          )}
+          {cap.mode === "flat"
+            ? `${cap.lenderName ?? "This lender"} sells at a flat ${usdc(cap.ppwCents)}/W ${capCovers(cap.basis)} — the base above is what is left of it, not a price typed on this deal.`
+            : `Held at ${cap.lenderName ?? "this lender"}’s ceiling of ${usdc(cap.ppwCents)}/W ${capCovers(cap.basis)}. The base above is what survives it — not the price typed on the deal.`}
         </p>
       )}
     </>
@@ -1137,6 +1142,16 @@ export type FeedPost = {
   createdAt: string;
 };
 
+/** A change Nova made on the deal, as its audit trail records it. */
+export type NovaFeedEvent = {
+  id: string;
+  /** The person Nova acted for. */
+  actor: string;
+  text: string;
+  failed: boolean;
+  createdAt: string;
+};
+
 /**
  * One stream, like roofing's notes.
  *
@@ -1155,11 +1170,19 @@ export function SolarActivityFeed({
   leadId,
   posts,
   canPost,
+  novaEvents = [],
 }: {
   leadId: string;
   posts: FeedPost[];
   canPost: boolean;
+  /** Changes Nova made on this deal, from its audit trail. Shown in the same stream. */
+  novaEvents?: NovaFeedEvent[];
 }) {
+  const stream = [
+    ...posts.map((p) => ({ kind: "post" as const, at: p.createdAt, post: p })),
+    ...novaEvents.map((e) => ({ kind: "nova" as const, at: e.createdAt, event: e })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+
   const router = useRouter();
   const [body, setBody] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -1194,21 +1217,40 @@ export function SolarActivityFeed({
         </div>
       )}
 
-      {posts.length === 0 ? (
+      {stream.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing here yet.</p>
       ) : (
         <ul className="space-y-3">
-          {posts.map((p) => (
-            <li key={p.id} className="rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-medium">{p.author}</span>
-                <span className="text-muted-foreground">
-                  {new Date(p.createdAt).toLocaleString()}
-                </span>
-              </div>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm">{p.body}</p>
-            </li>
-          ))}
+          {stream.map((item) =>
+            item.kind === "post" ? (
+              <li key={item.post.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-medium">{item.post.author}</span>
+                  <span className="text-muted-foreground">
+                    {new Date(item.post.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <p className="mt-1.5 whitespace-pre-wrap text-sm">{item.post.body}</p>
+              </li>
+            ) : (
+              <li
+                key={`nova-${item.event.id}`}
+                className="rounded-lg border border-dashed border-border p-3"
+                data-testid="nova-activity-item"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Nova</span>
+                  <span className="text-muted-foreground">{`for ${item.event.actor}`}</span>
+                  <span className="text-muted-foreground">
+                    {new Date(item.event.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <p className={cn("mt-1.5 whitespace-pre-wrap text-sm", item.event.failed && "text-destructive")}>
+                  {item.event.text}
+                </p>
+              </li>
+            )
+          )}
         </ul>
       )}
     </div>

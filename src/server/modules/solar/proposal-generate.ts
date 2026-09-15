@@ -429,10 +429,43 @@ export async function generateProposalVersion(
     cataloguePerBatteryCents: design.battery?.priceCents ?? null,
   });
 
+  // The catalogue row this deal was quoted from — its payment factors, and the
+  // label it carries on the rate sheet. Read for EVERY product, not just a
+  // loan: a lease quoted from a programme should name that programme in the
+  // menu, and only the factor block below is loan-only. Read HERE, before the
+  // re-price, because which price the partner's figure fixes is this row's to
+  // say — one partner's $5.50 is the gross on one product and the base on another.
+  const quotedRow = finance.lenderProductId
+    ? await prisma.solarLenderProduct.findFirst({
+        where: { companyId: user.companyId, id: finance.lenderProductId },
+        select: {
+          product: true,
+          name: true,
+          aprPct: true,
+          termMonths: true,
+          dealerFeePct: true,
+          leaseRateCentsPerKwMonth: true,
+          rateMillsPerKwh: true,
+          escalatorPct: true,
+          termYears: true,
+          factorWithPaydownMicros: true,
+          factorWithoutPaydownMicros: true,
+          paydownPct: true,
+          paydownMonths: true,
+          ppwBasis: true,
+          batteryPriceBasis: true,
+          // Whether this programme's lender takes its dealer fee on the battery.
+          lender: { select: { batteryInsideFee: true } },
+        },
+      })
+    : null;
+  const batteryInsideFee = quotedRow?.lender.batteryInsideFee ?? false;
+
   const capped = capStickerToFinalPpw({
     stickerPpwCents: finance.grossPpwCents,
     maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
     mode: dealLender?.finalPpwMode,
+    basis: quotedRow?.ppwBasis,
     systemSizeKwDc: design.systemSizeKwDc,
     dealerFeePct: finance.dealerFeePct,
     // The adders the partner's figure is a price FOR. A roof financed on top
@@ -469,6 +502,7 @@ export async function generateProposalVersion(
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,
       batteryPriceCents,
+      batteryInsideFee,
     }).contractPriceCents;
 
     if (
@@ -501,6 +535,7 @@ export async function generateProposalVersion(
       stickerPerUnitCents: finance.stickerPricePerBatteryCents,
       maxFinalPerUnitCents: dealLender?.maxFinalPricePerBatteryCents ?? null,
       mode: dealLender?.finalBatteryPriceMode,
+      basis: quotedRow?.batteryPriceBasis,
       units: design.batteryQty,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
@@ -535,30 +570,6 @@ export async function generateProposalVersion(
     }
   }
 
-  // The catalogue row this deal was quoted from — its payment factors, and the
-  // label it carries on the rate sheet. Read for EVERY product, not just a
-  // loan: a lease quoted from a programme should name that programme in the
-  // menu, and only the factor block below is loan-only.
-  const quotedRow = finance.lenderProductId
-    ? await prisma.solarLenderProduct.findFirst({
-        where: { companyId: user.companyId, id: finance.lenderProductId },
-        select: {
-          product: true,
-          name: true,
-          aprPct: true,
-          termMonths: true,
-          dealerFeePct: true,
-          leaseRateCentsPerKwMonth: true,
-          rateMillsPerKwh: true,
-          escalatorPct: true,
-          termYears: true,
-          factorWithPaydownMicros: true,
-          factorWithoutPaydownMicros: true,
-          paydownPct: true,
-          paydownMonths: true,
-        },
-      })
-    : null;
 
   const quotedProduct =
     finance.product === "loan" && quotedRow
@@ -611,6 +622,10 @@ export async function generateProposalVersion(
       // the menu is frozen: a storage document that offered a programme which
       // will not take a battery on its own is a decline nobody can correct.
       financesStorageOnly: true,
+      // Which price the partner's figures fix on this programme. Frozen with
+      // the menu for the reason the figures themselves are.
+      ppwBasis: true,
+      batteryPriceBasis: true,
       lender: {
         select: {
           id: true,
@@ -627,6 +642,8 @@ export async function generateProposalVersion(
           // does not fund, in a document nobody can correct afterwards.
           maxFinalPpwCents: true,
           finalPpwMode: true,
+          // Whether it takes its dealer fee on the battery, frozen likewise.
+          batteryInsideFee: true,
           // …and what it hands back for signing today. Frozen with the rest of
           // the menu for the same reason: each column is an offer from
           // whoever publishes it.
@@ -795,6 +812,7 @@ export async function generateProposalVersion(
         finalPpwMode: p.lender.finalPpwMode,
         maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
         finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
+        batteryInsideFee: p.lender.batteryInsideFee,
         signTodayMode: p.lender.signTodayMode,
         signTodayFixedCents: p.lender.signTodayFixedCents,
         signTodayCapPpwCents: p.lender.signTodayCapPpwCents,
@@ -959,6 +977,7 @@ export async function generateProposalVersion(
       // prices the whole system at zero installed watts — see the field's note.
       stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
       batteryPriceCents,
+      batteryInsideFee,
       dealerFeePct: finance.dealerFeePct,
       adderTotalCents: finance.adderTotalCents,
       onTopAdderTotalCents: finance.onTopAdderTotalCents,

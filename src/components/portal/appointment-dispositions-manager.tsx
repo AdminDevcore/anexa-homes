@@ -13,10 +13,16 @@ import {
   SaveBar,
   type ListRow,
 } from "@/components/portal/settings-kit";
-import { DEFAULT_APPOINTMENT_DISPOSITIONS, type Disposition } from "@/lib/dispositions";
+import {
+  OUTCOME_CATEGORIES,
+  OUTCOME_CATEGORY_LABELS,
+  inferCountsAs,
+  type Disposition,
+  type OutcomeCategory,
+} from "@/lib/dispositions";
 import { updateAppointmentDispositionsAction } from "@/server/modules/settings/actions";
 
-type Row = ListRow & { group: string };
+type Row = ListRow & { group: string; countsAs: OutcomeCategory };
 
 /**
  * The outcomes a rep records at the end of an appointment.
@@ -28,35 +34,63 @@ type Row = ListRow & { group: string };
  * The group is what turns a flat list of fifteen into a menu somebody can read:
  * "Sold", "Not sold", "No show". Left blank, an outcome sits on its own at the
  * top level.
+ *
+ * On solar each outcome also says what it COUNTS AS — ran, not ran,
+ * rescheduled, cancelled — which is how the Appointments list sorts. Roofing
+ * shows no such control and saves exactly the shape it always saved.
  */
-export function AppointmentDispositionsManager({ items }: { items: Disposition[] }) {
+export function AppointmentDispositionsManager({
+  items,
+  defaults,
+  showCategories,
+}: {
+  items: Disposition[];
+  /** What "Standard list" loads: this workspace's own defaults. */
+  defaults: Disposition[];
+  showCategories: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
 
+  // The shape a save writes, and so the shape "dirty" is measured in. Roofing's
+  // has no category, or its parsed (inferred) one would read as an unsaved edit.
+  const toStored = React.useCallback(
+    (d: { group: string | null; label: string; countsAs: OutcomeCategory }) =>
+      showCategories
+        ? { group: d.group, label: d.label, countsAs: d.countsAs }
+        : { group: d.group, label: d.label },
+    [showCategories]
+  );
+
   const seed = React.useCallback(
     (): Row[] =>
-      items.map((d, i) => ({ id: `${i}-${d.label}`, label: d.label, group: d.group ?? "" })),
+      items.map((d, i) => ({
+        id: `${i}-${d.label}`,
+        label: d.label,
+        group: d.group ?? "",
+        countsAs: d.countsAs,
+      })),
     [items]
   );
   const [rows, setRows] = React.useState(seed);
 
-  const serverKey = JSON.stringify(items);
+  const serverKey = JSON.stringify(items.map(toStored));
   const [seen, setSeen] = React.useState(serverKey);
   if (seen !== serverKey) {
     setSeen(serverKey);
     setRows(seed());
   }
 
-  const payload: Disposition[] = rows
+  const payload = rows
     .filter((r) => r.label.trim() !== "")
-    .map((r) => ({ group: r.group.trim() || null, label: r.label.trim() }));
+    .map((r) => toStored({ group: r.group.trim() || null, label: r.label.trim(), countsAs: r.countsAs }));
   const dirty = JSON.stringify(payload) !== serverKey;
 
   // Every group already in use, so adding another outcome to one is a matter of
   // recognising the name rather than spelling it the same way twice.
   const groups = Array.from(new Set(rows.map((r) => r.group.trim()).filter(Boolean)));
 
-  async function commit(next: Disposition[], okMsg: string) {
+  async function commit(next: typeof payload, okMsg: string) {
     setBusy(true);
     try {
       const res = await updateAppointmentDispositionsAction({ items: next });
@@ -82,10 +116,11 @@ export function AppointmentDispositionsManager({ items }: { items: Disposition[]
             disabled={busy}
             onClick={() => {
               setRows(
-                DEFAULT_APPOINTMENT_DISPOSITIONS.map((d, i) => ({
+                defaults.map((d, i) => ({
                   id: `default-${i}`,
                   label: d.label,
                   group: d.group ?? "",
+                  countsAs: d.countsAs,
                 }))
               );
               toast.info("Standard list loaded — Save to keep it.");
@@ -102,6 +137,8 @@ export function AppointmentDispositionsManager({ items }: { items: Disposition[]
               next.map((n) => ({
                 ...n,
                 group: (n as Row).group ?? "",
+                // A freshly added row has no category yet: guess from its words.
+                countsAs: (n as Row).countsAs ?? inferCountsAs(n.label),
               }))
             )
           }
@@ -109,19 +146,39 @@ export function AppointmentDispositionsManager({ items }: { items: Disposition[]
           placeholder="e.g. Sold — full replacement"
           disabled={busy}
           renderExtra={(row, i) => (
-            <Input
-              value={(row as Row).group}
-              disabled={busy}
-              list="disposition-groups"
-              placeholder="group"
-              aria-label={`Group for ${row.label || `outcome ${i + 1}`}`}
-              onChange={(e) =>
-                setRows((prev) =>
-                  prev.map((r, j) => (j === i ? { ...r, group: e.target.value } : r))
-                )
-              }
-              className="h-9 w-32 shrink-0"
-            />
+            <>
+              <Input
+                value={(row as Row).group}
+                disabled={busy}
+                list="disposition-groups"
+                placeholder="group"
+                aria-label={`Group for ${row.label || `outcome ${i + 1}`}`}
+                onChange={(e) =>
+                  setRows((prev) =>
+                    prev.map((r, j) => (j === i ? { ...r, group: e.target.value } : r))
+                  )
+                }
+                className="h-9 w-32 shrink-0"
+              />
+              {showCategories && (
+                <select
+                  value={(row as Row).countsAs}
+                  disabled={busy}
+                  aria-label={`Counts as for ${row.label || `outcome ${i + 1}`}`}
+                  onChange={(e) => {
+                    const countsAs = e.target.value as OutcomeCategory;
+                    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, countsAs } : r)));
+                  }}
+                  className="h-9 w-32 shrink-0 rounded-lg border border-border bg-background px-2 text-sm"
+                >
+                  {OUTCOME_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {OUTCOME_CATEGORY_LABELS[c]}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
           )}
         />
         <datalist id="disposition-groups">
@@ -133,6 +190,12 @@ export function AppointmentDispositionsManager({ items }: { items: Disposition[]
           Outcomes sharing a group are shown together under it. Leave the group blank and the
           outcome sits on its own.
         </Hint>
+        {showCategories && (
+          <Hint>
+            Counts as decides where an appointment with this outcome lands on the Appointments
+            list: Ran, Not ran, Rescheduled or Cancelled.
+          </Hint>
+        )}
       </Panel>
 
       <SaveBar

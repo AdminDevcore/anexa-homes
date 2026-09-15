@@ -48,6 +48,7 @@ export const SCOPED_MODELS = [
   "Claim",
   // Pipeline + workflow config
   "Pipeline",
+  "PipelineFilterView",
   // Per-vertical configuration
   "LeadSource",
   "CustomFieldDef",
@@ -77,6 +78,9 @@ export const SCOPED_MODELS = [
   "SolarFinance",
   "SolarMilestone",
   "CreditApplication",
+  // Nova's proposed writes. Scoped so a pending Solar action can only ever be
+  // confirmed from the Solar workspace.
+  "NovaPendingAction",
 ] as const;
 
 /**
@@ -100,6 +104,10 @@ export const TAGGED_MODELS = [
   // real cost for no gain. Every call site already runs inside the action that
   // resolved the workspace, so the ambient value is the provenance.
   "ActivityLog",
+  // Nova's audit trail. Tagged like ActivityLog for the same reason: the row
+  // records which workspace the assistant acted in, and an auditor granted both
+  // workspaces reads it without toggling.
+  "NovaAuditEvent",
 ] as const;
 
 export type ScopedModel = (typeof SCOPED_MODELS)[number];

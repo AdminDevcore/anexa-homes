@@ -1301,8 +1301,17 @@ export type SolarProposalSnapshot = {
  *     read by nothing. From here it rides on top at its catalogue price, like a
  *     roof does. Every document at revision 3 or below was quoted with the
  *     storage given away.
+ * 5 — a partner's $/W (and $/battery) figure can fix the GROSS or the BASE on a
+ *     programme, with the dealer fee added on top, as well as the FINAL price
+ *     with the fee inside it. Chosen per programme; `final` is the default, so
+ *     a revision-4 document was necessarily priced on `final`.
+ * 6 — the BATTERY can sit inside the dealer fee. Per lender
+ *     (`SolarLender.batteryInsideFee`, on by default) it grosses up by the
+ *     programme's fee like an adder, and the customer's battery line is that
+ *     grossed-up figure. Every document at revision 5 or below charged the
+ *     battery on top, at its catalogue price.
  */
-export const PRICING_CALCULATION_VERSION = 4;
+export const PRICING_CALCULATION_VERSION = 6;
 
 /** The standing non-binding-estimate wording. Shown on every proposal. */
 export const ESTIMATE_DISCLAIMER =
@@ -1341,6 +1350,11 @@ export type ProposalFinanceInput = {
    * Zero on a storage-ONLY deal, where the battery is the system above.
    */
   batteryPriceCents?: number;
+  /**
+   * Whether this option's partner takes its dealer fee on that battery. Absent
+   * reads as off — cash, and every document generated before 2026-09-14.
+   */
+  batteryInsideFee?: boolean;
   dealerFeePct: number;
   /** The adders INSIDE the partner's price. See `PurchaseInput`. */
   adderTotalCents: number;
@@ -1489,6 +1503,7 @@ function priceOption(args: {
           adderTotalCents: finance.adderTotalCents,
           onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
           batteryPriceCents: finance.batteryPriceCents ?? 0,
+          batteryInsideFee: finance.batteryInsideFee ?? false,
         });
 
   const thirdParty = !isPurchase
@@ -1544,9 +1559,10 @@ function priceOption(args: {
   const signToday = resolveSignToday({
     rule: args.signTodayRule,
     systemPriceCents: purchase?.baseStickerCents ?? 0,
-    // The storage rides on top at catalogue price and the household signs for
-    // it, so the cap is measured over it too. See `solar-sign-today`.
-    batteryPriceCents: purchase?.batteryPriceCents ?? 0,
+    // The storage as the household signs for it — with the partner's fee on it
+    // where the partner takes one — so the cap is measured over it too. See
+    // `solar-sign-today`.
+    batteryPriceCents: purchase?.batteryStickerCents ?? 0,
     systemWatts: purchase?.systemWatts ?? 0,
     // The same percentages and the same tick-boxes the ladder below is built
     // from, so the rung and the net cost it lands on cannot disagree.
@@ -1864,7 +1880,10 @@ function priceOption(args: {
      */
     ...(purchase && purchase.batteryPriceCents > 0
       ? {
-          batteryPriceCents: purchase.batteryPriceCents,
+          // What the HOUSEHOLD pays for it, so the rows on their breakdown —
+          // system, work, battery — still add up to the total. The catalogue
+          // price itself unless the partner takes its fee on the battery.
+          batteryPriceCents: purchase.batteryStickerCents,
           batteryQty: design.batteryQty,
           ...(design.batteryLabel ? { batteryLabel: design.batteryLabel } : {}),
         }

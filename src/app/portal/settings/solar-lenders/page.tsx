@@ -57,6 +57,7 @@ export default async function SolarLendersPage({
       minBasePricePerBatteryCents: true, maxFinalPricePerBatteryCents: true,
       finalBatteryPriceMode: true,
       batteryRule: true,
+      batteryInsideFee: true,
       // What this partner hands back for signing today — see
       // `solar-sign-today`.
       signTodayMode: true, signTodayFixedCents: true, signTodayCapPpwCents: true,
@@ -167,6 +168,7 @@ export default async function SolarLendersPage({
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
           batteryRule: l.batteryRule,
+          batteryInsideFee: l.batteryInsideFee,
           signTodayMode: l.signTodayMode,
           signTodayFixedCents: l.signTodayFixedCents,
           signTodayCapPpwCents: l.signTodayCapPpwCents,
@@ -215,6 +217,8 @@ export default async function SolarLendersPage({
             paydownPct: p.paydownPct,
             paydownMonths: p.paydownMonths,
             isActive: p.isActive,
+            ppwBasis: p.ppwBasis,
+            batteryPriceBasis: p.batteryPriceBasis,
           })),
         }))}
       />

@@ -262,6 +262,18 @@ export type PurchaseInput = {
    * paying overage on it would pay a rep for the manufacturer's margin.
    */
   batteryPriceCents?: number;
+  /**
+   * WHETHER THE DEALER FEE IS TAKEN ON THAT BATTERY — the partner's switch,
+   * `SolarLender.batteryInsideFee`.
+   *
+   * On: the battery grosses up by the fee exactly as an ordinary adder does, so
+   * the fee is a percentage of the WHOLE final price and the company still
+   * keeps the catalogue figure. Off, or absent: it rides on top at face, as
+   * above. Absent reads as off so a caller with no partner — cash, a worked
+   * example — keeps its arithmetic; every caller that has one passes the
+   * partner's answer, and a CI guard checks that it does.
+   */
+  batteryInsideFee?: boolean;
   /** Our hard cost, for the margin basis. */
   equipmentCostCents?: number;
 };
@@ -287,6 +299,12 @@ export type PurchaseBreakdown = {
    * contract alike. Zero on every deal without one.
    */
   batteryPriceCents: number;
+  /**
+   * What the CUSTOMER pays for that battery: its catalogue price grossed up by
+   * the fee where the partner takes its fee on the battery, and the catalogue
+   * price itself where it does not. The battery's line on their breakdown.
+   */
+  batteryStickerCents: number;
 
   /** GROSS — base + adders + battery, still before the cut. What we keep. */
   grossPriceCents: number;
@@ -309,7 +327,7 @@ export type PurchaseBreakdown = {
    * What the customer pays for the extra work: the ordinary adders grossed up
    * by the fee, PLUS the on-top ones at their own price. "Additional work".
    *
-   * `baseStickerCents + adderStickerCents + batteryPriceCents === contractPriceCents`
+   * `baseStickerCents + adderStickerCents + batteryStickerCents === contractPriceCents`
    * always, which is the invariant the customer's own breakdown is printed
    * from. The battery is in that sum at its own price for the same reason an
    * on-top adder is: it is a line the household pays, and a breakdown missing
@@ -350,6 +368,8 @@ export type UnitPriceInput = {
   onTopAdderTotalCents?: number;
   /** See `PurchaseInput.batteryPriceCents`. */
   batteryPriceCents?: number;
+  /** See `PurchaseInput.batteryInsideFee`. */
+  batteryInsideFee?: boolean;
   equipmentCostCents?: number;
 };
 
@@ -360,6 +380,7 @@ export type UnitPriceBreakdown = {
   adderTotalCents: number;
   onTopAdderTotalCents: number;
   batteryPriceCents: number;
+  batteryStickerCents: number;
   grossPriceCents: number;
   grossPerUnitCents: number;
   dealerFeeCents: number;
@@ -393,11 +414,13 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   // AFTER that gross-up, at face: the partner advances them and keeps nothing
   // of them, so there is no cut for the customer's price to have to cover.
   const adderStickerCents = up(insideAdderCents) + onTopAdderTotalCents;
-  // The battery is added to BOTH sides at its own price — the customer pays the
-  // catalogue figure and the company keeps all of it — so the fee below, which
-  // is the difference between them, is untouched by it. That is the whole
-  // meaning of "on top".
-  const contractPriceCents = baseStickerCents + adderStickerCents + batteryPriceCents;
+  // The battery. The company keeps its catalogue price either way; what the
+  // customer pays for it is the partner's to say. Inside the fee — the default
+  // since 2026-09-14 — it grosses up exactly like an ordinary adder, so the fee
+  // is a percentage of the WHOLE final price, battery included. On top, the
+  // customer pays the catalogue figure and the fee below is untouched by it.
+  const batteryStickerCents = input.batteryInsideFee ? up(batteryPriceCents) : batteryPriceCents;
+  const contractPriceCents = baseStickerCents + adderStickerCents + batteryStickerCents;
   const grossPriceCents = basePriceCents + adderTotalCents + batteryPriceCents;
 
   // Subtracted rather than recomputed as `contract × f`: gross + fee has to
@@ -416,6 +439,7 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
     adderTotalCents,
     onTopAdderTotalCents,
     batteryPriceCents,
+    batteryStickerCents,
     grossPriceCents,
     grossPerUnitCents: per(grossPriceCents),
     dealerFeeCents,
@@ -463,8 +487,9 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
  *
  * A BATTERY IS PRICED THE SAME WAY, and for a plainer reason: a rate per watt
  * is a price for an array, and no arithmetic over installed watts can charge
- * for a Powerwall. It rides on top at its catalogue price on every deal that is
- * not storage-only — see `batteryPriceCents`.
+ * for a Powerwall. It is charged on every deal that is not storage-only — see
+ * `batteryPriceCents` — on top at its catalogue price, or grossed up by the fee
+ * like an adder where the partner takes its fee on it (`batteryInsideFee`).
  *
  * Cash has no lender and therefore no fee; passing one is rejected rather than
  * silently applied, because a cash deal quoted with a dealer fee is simply
@@ -483,6 +508,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     adderTotalCents: input.adderTotalCents,
     onTopAdderTotalCents: input.onTopAdderTotalCents,
     batteryPriceCents: input.batteryPriceCents,
+    batteryInsideFee: input.batteryInsideFee,
     equipmentCostCents: input.equipmentCostCents,
   });
   return {
@@ -492,6 +518,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
     batteryPriceCents: u.batteryPriceCents,
+    batteryStickerCents: u.batteryStickerCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: u.grossPerUnitCents,
     dealerFeeCents: u.dealerFeeCents,
@@ -648,6 +675,18 @@ export function underBaseFloor(
 /** Whether a partner's stated $/W is a ceiling or the price itself. */
 export type FinalPpwMode = "cap" | "flat";
 
+/**
+ * Which rung of the ladder a partner's figure is a price FOR. Set per programme,
+ * because one partner's $5.50 is not one rule: "some products are on a flat 5.5
+ * per watt on base price, some are on the gross price — and the dealer fee is on
+ * top of the gross price."
+ *
+ *   final  system + adders, fee INCLUDED       — the rule as it always was
+ *   gross  system + adders, fee added on top   — extra work comes out of the base
+ *   base   the system alone, fee added on top  — extra work rides above it too
+ */
+export type PriceBasis = "final" | "gross" | "base";
+
 export type FinalPpwCap = {
   /** The system sticker to price with. Unchanged when the cap did not bite. */
   stickerPpwCents: number;
@@ -730,6 +769,8 @@ export function capStickerToFinalUnit(input: {
   maxFinalPerUnitCents: number | null | undefined;
   /** Ceiling or price. Defaults to `cap`, the behaviour that predates flat partners. */
   mode?: FinalPpwMode;
+  /** Which price the figure fixes. Defaults to `final`, the behaviour that predates the choice. */
+  basis?: PriceBasis;
   /** Installed watts, or batteries. Zero means no rule — nothing to divide by. */
   units: number;
   dealerFeePct: number;
@@ -753,22 +794,46 @@ export function capStickerToFinalUnit(input: {
   const rawPct = input.dealerFeePct;
   const f = Number.isFinite(rawPct) && rawPct > 0 && rawPct < 100 ? rawPct / 100 : 0;
 
+  const basis = input.basis ?? "final";
+  // The fee as a percentage, for grossing a pinned base back up to a sticker.
+  // `× 100 / (100 − pct)` stays exact on the fees rate sheets publish, where
+  // `/ (1 − f)` turns 18% into 0.8200000000000001.
+  const pct = f > 0 ? rawPct : 0;
+  const grossUp = (cents: number) => (cents * 100) / (100 - pct);
+
   const adderTotalCents = Math.round(input.adderTotalCents);
   const adderStickerCents = f > 0 ? Math.round(adderTotalCents / (1 - f)) : adderTotalCents;
 
-  const uncappedContract = Math.round(units * input.stickerPerUnitCents) + adderStickerCents;
-  const cappedContract = max * units;
+  const typedStickerCents = Math.round(units * input.stickerPerUnitCents);
+  // The base the typed sticker leaves, rounded exactly as `priceUnits` rounds it.
+  const typedBaseCents = typedStickerCents - Math.round(typedStickerCents * f);
+  const pinnedCents = max * units;
+
+  // The deal's own figure on the rung the partner's figure is a price for.
+  const actualCents =
+    basis === "final"
+      ? typedStickerCents + adderStickerCents
+      : basis === "gross"
+        ? typedBaseCents + adderTotalCents
+        : typedBaseCents;
   // A ceiling only bites downwards. A flat price is the price, so it binds a
   // deal that would have come out cheaper just as firmly as one that came out
   // dear — that is the entire difference between the two modes.
-  if (input.mode !== "flat" && uncappedContract <= cappedContract) return uncapped;
+  if (input.mode !== "flat" && actualCents <= pinnedCents) return uncapped;
 
-  // What is left for the system once the grossed-up extras have taken their
-  // share of the ceiling. Negative means the extras alone have blown through
-  // it, and no system price — not even a free one — brings this contract under
-  // the cap. Flooring at zero keeps a negative rate off the screen.
-  const baseStickerCents = cappedContract - adderStickerCents;
-  if (baseStickerCents <= 0) {
+  // What is left for the system once the extras inside the figure have taken
+  // their share of it — grossed up on `final`, at catalogue price on `gross`,
+  // nothing on `base`, where the extras are not inside the figure at all.
+  // Negative means the extras alone have blown through it, and no system price
+  // — not even a free one — brings this deal under the figure. Flooring at zero
+  // keeps a negative rate off the screen.
+  const systemCents =
+    basis === "final"
+      ? pinnedCents - adderStickerCents
+      : basis === "gross"
+        ? pinnedCents - adderTotalCents
+        : pinnedCents;
+  if (systemCents <= 0) {
     return { stickerPerUnitCents: 0, capped: true, adderOverrun: true };
   }
 
@@ -786,7 +851,9 @@ export function capStickerToFinalUnit(input: {
    * stay under but a figure to land on: a partner selling at $5.50/W wants
    * $5.50/W on the paper, and floor prints $5.49 on any job carrying adders.
    */
-  const exact = baseStickerCents / units;
+  // On `final` what is left is already a sticker. On `gross` and `base` it is a
+  // base, and the fee goes on top of it.
+  const exact = (basis === "final" ? systemCents : grossUp(systemCents)) / units;
   const stickerPerUnitCents = input.mode === "flat" ? Math.round(exact) : Math.floor(exact);
   return {
     stickerPerUnitCents,
@@ -809,6 +876,7 @@ export function capStickerToFinalPpw(input: {
   stickerPpwCents: number;
   maxFinalPpwCents: number | null | undefined;
   mode?: FinalPpwMode;
+  basis?: PriceBasis;
   systemSizeKwDc: number;
   dealerFeePct: number;
   adderTotalCents: number;
@@ -817,6 +885,7 @@ export function capStickerToFinalPpw(input: {
     stickerPerUnitCents: input.stickerPpwCents,
     maxFinalPerUnitCents: input.maxFinalPpwCents,
     mode: input.mode,
+    basis: input.basis,
     units: Math.round(input.systemSizeKwDc * 1000),
     dealerFeePct: input.dealerFeePct,
     adderTotalCents: input.adderTotalCents,
@@ -858,6 +927,8 @@ export function priceStoredPurchase(input: PurchaseInput & {
   maxFinalPpwCents: number | null | undefined;
   /** Whether that figure is a ceiling or the price. Defaults to `cap`. */
   finalPpwMode?: FinalPpwMode;
+  /** The quoted programme's basis for that figure. Defaults to `final`. */
+  ppwBasis?: PriceBasis;
 }): { breakdown: PurchaseBreakdown; cap: FinalPpwCap } {
   const cap = capStickerToFinalPpw({
     stickerPpwCents: input.stickerPpwCents,
@@ -865,6 +936,7 @@ export function priceStoredPurchase(input: PurchaseInput & {
     // builder's price card and the finance-row save already draw.
     maxFinalPpwCents: input.product === "cash" ? null : input.maxFinalPpwCents,
     mode: input.finalPpwMode,
+    basis: input.ppwBasis,
     systemSizeKwDc: input.systemSizeKwDc,
     dealerFeePct: input.dealerFeePct,
     // Only the adders the ceiling is a price FOR. The on-top ones ride above it
@@ -981,6 +1053,8 @@ export function priceStorageStored(
     maxFinalPricePerBatteryCents: number | null | undefined;
     /** Whether that figure is a ceiling or the price. Defaults to `cap`. */
     finalBatteryPriceMode?: FinalPpwMode;
+    /** The quoted programme's basis for that figure. Defaults to `final`. */
+    batteryPriceBasis?: PriceBasis;
   }
 ): { breakdown: UnitPriceBreakdown; cap: UnitCap } {
   const cap = capStickerToFinalUnit({
@@ -989,6 +1063,7 @@ export function priceStorageStored(
     // builder's price card and the finance-row save already draw.
     maxFinalPerUnitCents: input.product === "cash" ? null : input.maxFinalPricePerBatteryCents,
     mode: input.finalBatteryPriceMode,
+    basis: input.batteryPriceBasis,
     units: input.batteryQty,
     dealerFeePct: input.dealerFeePct,
     // Only the adders the ceiling is a price FOR. The on-top ones ride above it
@@ -1030,6 +1105,7 @@ export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
     // battery is the SYSTEM, counted in `basePriceCents`, and charging for it
     // again on top would bill the household twice for one Powerwall.
     batteryPriceCents: u.batteryPriceCents,
+    batteryStickerCents: u.batteryStickerCents,
     grossPriceCents: u.grossPriceCents,
     grossPpwCents: 0,
     dealerFeeCents: u.dealerFeeCents,

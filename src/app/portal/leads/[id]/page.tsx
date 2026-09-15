@@ -87,6 +87,7 @@ import { SolarProposalStrip } from "@/components/portal/solar/proposal-strip";
 import { readSolarReadiness } from "@/server/modules/solar/readiness";
 import { estimatedSolarCommission } from "@/server/modules/payroll/solar-engine";
 import { approverNames } from "@/server/modules/solar/proposal-approval";
+import { getNovaActivity } from "@/server/modules/nova/activity";
 import {
   readLenderAttempts,
   versionLenderBadge,
@@ -457,6 +458,11 @@ export default async function LeadDetailPage({
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
             maxFinalPpwCents: true, finalPpwMode: true,
+            // Whether its dealer fee is taken on the battery beside the array.
+            batteryInsideFee: true,
+            // Which price that figure fixes, per programme — the deal is
+            // priced on the basis of the programme it was quoted on.
+            products: { select: { id: true, ppwBasis: true } },
             // The partner's own closing-credit rule. Read for the same reason
             // the ceiling above it is: the credit ladder on this page has to
             // be the one the builder and the document draw, and two of the
@@ -639,6 +645,15 @@ export default async function LeadDetailPage({
           }),
           maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
           finalPpwMode: designLenderRow?.finalPpwMode,
+          ppwBasis: designLenderRow?.products.find((p) => p.id === solarFinance.lenderProductId)
+            ?.ppwBasis,
+          // Only on a deal QUOTED on one of this partner's programmes, the way
+          // the builder reads it: no programme, no partner's fee on the battery.
+          batteryInsideFee: designLenderRow?.products.some(
+            (p) => p.id === solarFinance.lenderProductId
+          )
+            ? designLenderRow.batteryInsideFee
+            : false,
         })
       : null;
 
@@ -696,7 +711,7 @@ export default async function LeadDetailPage({
             // left holding, so a deal page that passed only the array would
             // print a closing credit the builder next door disagrees with.
             systemPriceCents: workingPrice.breakdown.baseStickerCents,
-            batteryPriceCents: workingPrice.breakdown.batteryPriceCents,
+            batteryPriceCents: workingPrice.breakdown.batteryStickerCents,
             systemWatts: workingPrice.breakdown.systemWatts,
             creditRates: solarSettings.creditRates,
             creditClaims: solarCreditClaims,
@@ -896,7 +911,7 @@ export default async function LeadDetailPage({
   // One row: the rep's commission, which pays in full on M1 funding. The table
   // still holds whatever four-slot schedules were written before that changed,
   // and the deal simply stops asking about them.
-  const [solarCommission, solarFeed] = isSolarDeal
+  const [solarCommission, solarFeed, novaActivity] = isSolarDeal
     ? await Promise.all([
         prisma.solarMilestone.findFirst({
           where: { companyId: user.companyId, leadId: lead.id, payee: "rep", sequence: 1 },
@@ -907,8 +922,10 @@ export default async function LeadDetailPage({
           take: 50,
           include: { author: { select: { firstName: true, lastName: true } } },
         }),
+        // What Nova changed on this deal, straight from its audit trail.
+        getNovaActivity(user.companyId, lead.id),
       ])
-    : [null, []];
+    : [null, [], []];
 
   /**
    * What the pay engine says this deal is worth to its rep, beside the figure
@@ -1179,6 +1196,8 @@ export default async function LeadDetailPage({
        */
       maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
       finalPpwMode: dealLender?.finalPpwMode ?? "cap",
+      ppwBasis:
+        dealLender?.products.find((p) => p.id === fin?.lenderProductId)?.ppwBasis ?? "final",
       cappedByLender: priced?.cap.capped ?? false,
       lenderName: dealLender?.name ?? null,
     };
@@ -1611,6 +1630,7 @@ export default async function LeadDetailPage({
             <DealSlides
               id="production"
               className="scroll-mt-24"
+              foldable
               slides={[
                 { id: "system", label: "System & financing" },
                 { id: "timeline", label: "Timeline", icon: "timeline" },
@@ -1798,6 +1818,7 @@ export default async function LeadDetailPage({
                     author: f.author ? `${f.author.firstName} ${f.author.lastName}`.trim() : "System",
                     createdAt: f.createdAt.toISOString(),
                   }))}
+                  novaEvents={novaActivity}
                 />
               </div>
             </DealSlides>
@@ -1992,7 +2013,7 @@ export default async function LeadDetailPage({
                 only place on the deal that answers it. */}
             {isSolarDeal && solarProposals.length > 0 && (
               <section id="proposal" className="scroll-mt-24">
-                <Card title="Proposal" icon={Sun} tone="solar">
+                <Card title="Proposal" icon={Sun} tone="solar" foldKey="proposal">
                   <SolarProposalStrip
                     leadId={lead.id}
                     state={solarState}
@@ -2079,6 +2100,8 @@ export default async function LeadDetailPage({
             icon={FolderOpen}
             tone={isSolarDeal ? "solar" : "brand"}
             description="Signed paperwork, photos and every file on this job"
+            // Solar only: roofing's Documents & Files card renders as it did.
+            foldKey={isSolarDeal ? "documents" : undefined}
           >
             <DealFolders
               leadId={lead.id}

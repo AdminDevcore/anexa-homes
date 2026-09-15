@@ -68,6 +68,8 @@ export type LenderRow = {
    * every lender did before the column existed.
    */
   batteryRule: "optional" | "warn" | "required";
+  /** Whether this partner's dealer fee is taken on a battery beside the array. */
+  batteryInsideFee: boolean;
   /** Which figure this partner's paper is written at — see the Submission tab. */
   submissionAmountBasis: "contract_value" | "customer_obligation" | "after_credits";
   /** What this partner means by "estimated saving". */
@@ -131,6 +133,10 @@ export type LenderProduct = {
   paydownPct: number | null;
   paydownMonths: number | null;
   isActive: boolean;
+  /** Which price the lender's $/W fixes on this programme. See SolarPriceBasis. */
+  ppwBasis: "final" | "gross" | "base";
+  /** Which price the lender's $/battery fixes on this programme. */
+  batteryPriceBasis: "final" | "gross" | "base";
 };
 
 /**
@@ -328,7 +334,23 @@ export function draftFrom(lender: LenderRow) {
       : lender.finalBatteryPriceMode) as PricingMode,
     maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
     minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
+    /**
+     * Which price the figures above fix, programme by programme. Keyed by
+     * programme id. Edited on the Pricing tab beside the figure it qualifies,
+     * and saved with the lender.
+     */
+    programmeBases: Object.fromEntries(
+      lender.products.map((p) => [
+        p.id,
+        { ppwBasis: p.ppwBasis, batteryPriceBasis: p.batteryPriceBasis },
+      ])
+    ) as Record<
+      string,
+      { ppwBasis: "final" | "gross" | "base"; batteryPriceBasis: "final" | "gross" | "base" }
+    >,
     batteryRule: lender.batteryRule,
+    /** A choice card, so a word rather than a boolean. Saved back as one. */
+    batteryInsideFee: (lender.batteryInsideFee ? "inside" : "on_top") as "inside" | "on_top",
     signTodayMode: lender.signTodayMode,
     signTodayFixed: batteryPriceToDollars(lender.signTodayFixedCents),
     signTodayCapPpw: ppwToDollars(lender.signTodayCapPpwCents),

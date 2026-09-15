@@ -144,6 +144,8 @@ export async function dealMoneyColumns(
           onTopAdderTotalCents: adders.onTopAdderTotalCents,
           maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
           finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
+          // Which price that figure fixes is the quoted programme's to say.
+          batteryPriceBasis: lenderProduct?.batteryPriceBasis,
         })
       : null;
 

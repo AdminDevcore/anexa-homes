@@ -6,6 +6,7 @@ import {
   pricePurchase,
   priceThirdParty,
   type FinalPpwMode,
+  type PriceBasis,
 } from "@/lib/solar-money";
 import {
   factorQuote,
@@ -68,6 +69,10 @@ export type OfferProduct = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is that lender's ceiling or its flat price. */
   finalPpwMode: FinalPpwMode;
+  /** Which price that figure fixes on THIS programme. Absent reads as `final`. */
+  ppwBasis?: PriceBasis;
+  /** Whether that lender takes its dealer fee on the battery. Absent reads as off. */
+  batteryInsideFee?: boolean;
   /**
    * That lender's sign-today rule, carried for the same reason as the cap —
    * and it has to be per COLUMN rather than per shelf, because two programmes
@@ -102,8 +107,8 @@ export type CompareBasis = {
   onTopAdderTotalCents: number;
   /**
    * The storage on this job, at its catalogue price — the same figure on every
-   * column, for the same reason the on-top adders are. A battery does not cost
-   * more because the money is dearer.
+   * column, for the same reason the on-top adders are. Whether a column's
+   * partner takes its dealer fee on it is that partner's own switch.
    */
   batteryPriceCents?: number;
   downPaymentCents: number;
@@ -259,6 +264,7 @@ function purchaseRow(
           stickerPpwCents: uncappedPpwCents,
           maxFinalPpwCents,
           mode: finalPpwMode,
+          basis: cash ? undefined : (offer as OfferProduct).ppwBasis,
           systemSizeKwDc: basis.systemSizeKwDc,
           dealerFeePct,
           adderTotalCents: basis.adderTotalCents,
@@ -275,6 +281,7 @@ function purchaseRow(
           adderTotalCents: basis.adderTotalCents,
           onTopAdderTotalCents: basis.onTopAdderTotalCents,
           batteryPriceCents: basis.batteryPriceCents ?? 0,
+          batteryInsideFee: cash ? false : ((offer as OfferProduct).batteryInsideFee ?? false),
         })
       : null;
 
@@ -357,7 +364,7 @@ function purchaseRow(
     // what the household is actually left holding. The adders are the one
     // exclusion — separate work, and it raises the price and stays raised.
     systemPriceCents: priced.baseStickerCents,
-    batteryPriceCents: priced.batteryPriceCents,
+    batteryPriceCents: priced.batteryStickerCents,
     systemWatts: priced.systemWatts,
     creditRates: basis.credits?.rates ?? null,
     creditClaims: basis.credits?.claims ?? null,

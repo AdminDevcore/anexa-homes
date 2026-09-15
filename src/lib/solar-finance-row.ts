@@ -6,6 +6,7 @@ import {
   leaseMonthlyCents,
   type SolarAssumptions,
   type FinalPpwMode,
+  type PriceBasis,
 } from "./solar-money";
 
 /**
@@ -37,8 +38,9 @@ export type FinanceInput = {
   onTopAdderTotalCents?: number;
   /**
    * The storage on this job, at its catalogue price, already resolved by
-   * `batteryChargeCents`. Rides on top exactly as a roof does, so it is added
-   * to the contract below and kept out of the ceiling solve above it.
+   * `batteryChargeCents`. Kept out of the ceiling solve above and added to the
+   * contract below — at face, or grossed up by the fee where the quoted
+   * partner takes its fee on the battery (`LenderProductTerms.batteryInsideFee`).
    */
   batteryPriceCents?: number;
   rateMillsPerKwh?: number | null;
@@ -77,6 +79,19 @@ export type LenderProductTerms = {
   maxFinalPpwCents?: number | null;
   /** Whether that figure is a ceiling or the price itself. */
   finalPpwMode?: FinalPpwMode | null;
+  /**
+   * Which price that figure fixes on THIS programme — see SolarPriceBasis. Off
+   * the programme, not the lender: one partner's $5.50 is the gross on one
+   * product and the base on another.
+   */
+  ppwBasis?: PriceBasis | null;
+  /** The same, for the partner's figure per battery. */
+  batteryPriceBasis?: PriceBasis | null;
+  /**
+   * Whether the publishing LENDER takes its dealer fee on a battery beside the
+   * array — `SolarLender.batteryInsideFee`. Off the lender, like the ceiling.
+   */
+  batteryInsideFee?: boolean | null;
 };
 
 export type FinanceRow = {
@@ -168,6 +183,7 @@ export function financeRowForProduct(
         // holding it down — see SolarFinalPpwMode. On such a lender the box a
         // rep types in stops being the price of anything the customer sees.
         mode: lp?.finalPpwMode ?? undefined,
+        basis: lp?.ppwBasis ?? undefined,
         systemSizeKwDc: ctx.systemSizeKwDc,
         dealerFeePct,
         // Only the work the partner's figure is a price FOR. A roof rides on
@@ -187,6 +203,7 @@ export function financeRowForProduct(
       adderTotalCents: f.adderTotalCents ?? 0,
       onTopAdderTotalCents: f.onTopAdderTotalCents ?? 0,
       batteryPriceCents: f.batteryPriceCents ?? 0,
+      batteryInsideFee: lp?.batteryInsideFee ?? false,
     });
     contractPriceCents = breakdown.contractPriceCents;
   }

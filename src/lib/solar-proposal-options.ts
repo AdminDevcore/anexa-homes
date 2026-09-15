@@ -9,6 +9,7 @@ import {
   capStickerToFinalUnit,
   type SolarAssumptions,
   type FinalPpwMode,
+  type PriceBasis,
 } from "./solar-money";
 
 /**
@@ -54,6 +55,13 @@ export type CatalogueProgramme = {
    * programme picker already applies when the design says storage.
    */
   financesStorageOnly?: boolean;
+  /**
+   * Which price the partner's figures below fix on THIS programme — per watt
+   * and per battery. On the programme, not the lender: one partner's $5.50 is
+   * the gross on one product and the base on another. Absent reads as `final`.
+   */
+  ppwBasis?: PriceBasis;
+  batteryPriceBasis?: PriceBasis;
   lender: {
     id: string;
     name: string;
@@ -82,6 +90,11 @@ export type CatalogueProgramme = {
     signTodayMode?: SignTodayMode;
     signTodayFixedCents?: number | null;
     signTodayCapPpwCents?: number | null;
+    /**
+     * Whether this partner takes its dealer fee on a battery beside the array.
+     * Per column, for the same reason as everything else on the menu.
+     */
+    batteryInsideFee?: boolean;
   };
 };
 
@@ -310,6 +323,8 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
           termYears: p.termYears,
           maxFinalPpwCents: p.lender.maxFinalPpwCents,
           finalPpwMode: p.lender.finalPpwMode,
+          ppwBasis: p.ppwBasis,
+          batteryInsideFee: p.lender.batteryInsideFee ?? false,
         },
         targetNetPpwCents: input.targetNetPpwCents,
       }
@@ -331,6 +346,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
             grossPpwFromNet(baseBatteryCents, row.dealerFeePct) ?? baseBatteryCents,
           maxFinalPerUnitCents: p.lender.maxFinalPricePerBatteryCents ?? null,
           mode: p.lender.finalBatteryPriceMode,
+          basis: p.batteryPriceBasis,
           units: storage.batteryQty,
           dealerFeePct: row.dealerFeePct,
           adderTotalCents: input.adderTotalCents,
@@ -371,11 +387,14 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         dealerFeePct: row.dealerFeePct,
         adderTotalCents: row.adderTotalCents,
         onTopAdderTotalCents: row.onTopAdderTotalCents,
-        // At the same price on every programme. The battery does not get more
-        // expensive because the money is dearer — it rides on top of whatever
-        // the partner's paper says, at what the catalogue sells one for.
+        // At the same catalogue price on every programme. Whether the dealer
+        // fee is taken on it is THIS partner's switch, so it travels with the
+        // column rather than with the deal.
         ...(input.batteryPriceCents && input.batteryPriceCents > 0
-          ? { batteryPriceCents: input.batteryPriceCents }
+          ? {
+              batteryPriceCents: input.batteryPriceCents,
+              batteryInsideFee: p.lender.batteryInsideFee ?? false,
+            }
           : {}),
         ...(row.adderTotalCents + row.onTopAdderTotalCents > 0
           ? { adders: input.adders }

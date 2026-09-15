@@ -348,6 +348,7 @@ model Company {
   invitations              Invitation[]
   notificationRules        NotificationRule[]
   automationRules          AutomationRule[]
+  pipelineFilterViews      PipelineFilterView[]
   automationRuns           AutomationRun[]
   notifications            Notification[]
   conversations            Conversation[]
@@ -608,6 +609,7 @@ model User {
   payrollItems    PayrollItem[]
   activityLogs    ActivityLog[]
   stageMoves      LeadStageEvent[]     @relation("LeadStageEventMovedBy")
+  appointmentMoves LeadAppointmentReschedule[] @relation("LeadAppointmentRescheduleMovedBy")
   crewMemberships CrewMember[]
   invitationsSent Invitation[]         @relation("InviteInviter")
   passwordResets  PasswordResetToken[]
@@ -627,6 +629,7 @@ model User {
   solarDealCompsTakenFrom SolarDealComp[]      @relation("SolarDealCompReassignedFrom")
   chargebacks             Chargeback[]         @relation("ChargebackUser")
   payrollAdjustments      PayrollAdjustment[]  @relation("PayrollAdjustmentUser")
+  pipelineFilterViews     PipelineFilterView[] @relation("PipelineFilterViewCreator")
 
   @@unique([companyId, email])
   @@unique([companyId, employeeNo])
@@ -948,6 +951,28 @@ model LeadStageEvent {
   @@map("lead_stage_events")
 }
 
+/// One row per time a solar deal's appointment moved from one time to another.
+///
+/// Written by server/modules/leads/appointment-moves.ts from every path that
+/// moves a time. A child of Lead with no vertical column, like LeadStageEvent:
+/// only ever reached through a deal the caller has already scoped.
+model LeadAppointmentReschedule {
+  id             String   @id @default(uuid())
+  leadId         String
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromAt         DateTime
+  toAt           DateTime
+  /// The outcome the old visit carried, cleared off the deal by this move.
+  clearedOutcome String?
+  /// SetNull: removing a user must not erase that the appointment moved.
+  movedById      String?
+  movedBy        User?    @relation("LeadAppointmentRescheduleMovedBy", fields: [movedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@map("lead_appointment_reschedules")
+}
+
 model Lead {
   id        String  @id @default(uuid())
   companyId String
@@ -1081,6 +1106,7 @@ model Lead {
   documentPackages       DocumentPackage[]
   activityLogs           ActivityLog[]
   stageEvents            LeadStageEvent[]
+  appointmentReschedules LeadAppointmentReschedule[]
   knocks                 Knock[]                 @relation("KnockLead")
   scope                  ScopeOfWork?
   estimate               Estimate?
@@ -2286,6 +2312,33 @@ model AutomationRule {
 
   @@index([companyId, vertical, trigger, active])
   @@map("automation_rules")
+}
+
+/// A saved Pipeline filter: a named list of filter-builder conditions, private to
+/// the person who made it or shared with everyone on this workspace's pipeline.
+/// `conditions` is `[{ field, op, values }]`, the shape src/lib/pipeline-filters.ts
+/// reads, and it is re-sanitised on every read. It holds no deal data: applying a
+/// view filters deals the viewer could already see.
+model PipelineFilterView {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// Isolated per vertical: a roofing view names roofing stages and fields.
+  vertical    Vertical @default(roofing)
+  createdById String
+  createdBy   User     @relation("PipelineFilterViewCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  name        String
+  /// In everyone's Views menu, not just the creator's. Sharing needs Pipeline:update.
+  shared      Boolean  @default(false)
+  conditions  Json     @default("[]")
+  /// How the conditions combine: "all" (AND) or "any" (OR). Read through sanitizeMatch.
+  match       String   @default("all")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, vertical, shared])
+  @@index([createdById])
+  @@map("pipeline_filter_views")
 }
 
 /// One firing of one rule against one deal.
@@ -3518,6 +3571,17 @@ enum SolarFinalPpwMode {
   flat
 }
 
+/// Which rung of the price ladder a partner's figure is a price FOR.
+enum SolarPriceBasis {
+  /// System + adders, dealer fee INCLUDED. The figure is what the homeowner
+  /// signs. The only rule before this enum existed.
+  final
+  /// System + adders, dealer fee added ON TOP. Extra work comes out of the base.
+  gross
+  /// The system alone, dealer fee added ON TOP. Extra work rides above it too.
+  base
+}
+
 /// WHICH FIGURE A PARTNER UNDERWRITES.
 ///
 /// A priced solar deal carries several defensible "amounts" and they can differ
@@ -3721,6 +3785,15 @@ model SolarLender {
   /// SolarLenderBatteryRule. `warn` is the default and is what every lender did
   /// before the column existed.
   batteryRule SolarLenderBatteryRule @default(warn)
+
+  /// Whether this partner's dealer fee is taken on a BATTERY beside an array, as
+  /// it is on the system and the ordinary adders. On -- the default -- the
+  /// battery grosses up by the programme's fee like everything before it on the
+  /// ladder, so the fee is a share of the whole final price. Off, it rides on
+  /// top at its catalogue price, which is how every lender priced before
+  /// 2026-09-14. A storage-only deal is unaffected: there the battery IS the
+  /// system and was always inside the fee.
+  batteryInsideFee Boolean @default(true)
 
   /// How the sign today credit is arrived at on this partner's deals -- see
   /// SolarSignTodayMode. `none` is the default, and leaves the per-deal box
@@ -3940,6 +4013,17 @@ model SolarLenderProduct {
   termMonths   Int?
   /// The lender's cut, as a % of gross. Drives the derived sticker price.
   dealerFeePct Float?
+
+  /// Which price the LENDER's figure fixes on this programme — its $/W
+  /// (`SolarLender.maxFinalPpwCents`) and its $/battery
+  /// (`maxFinalPricePerBatteryCents`) respectively. See SolarPriceBasis.
+  ///
+  /// Per programme and not per lender because one partner's figure is not one
+  /// rule: Amos's $5.50 is the gross on one product and the base on another.
+  /// `final` is the default and what every programme did before the column
+  /// existed, so nothing already quoted moves.
+  ppwBasis          SolarPriceBasis @default(final)
+  batteryPriceBasis SolarPriceBasis @default(final)
 
   // ── Payment factors ─────────────────────────────────────────────────────
   // Solar lenders publish a PAYMENT FACTOR rather than expecting the dealer to
@@ -5324,4 +5408,90 @@ model DealFeedPost {
 
   @@index([companyId, leadId, createdAt])
   @@map("deal_feed_posts")
+}
+
+// ---------------------------------------------------------------------------
+// Nova — the voice assistant in the Solar portal
+// ---------------------------------------------------------------------------
+
+enum NovaToolKind {
+  read
+  write
+  decline
+}
+
+enum NovaAuditPhase {
+  /// A read ran, or a confirmed write ran and succeeded.
+  executed
+  /// The permission or row check said no. Nothing ran.
+  refused
+  /// It ran (or tried to) and errored, or its input was invalid.
+  failed
+  /// A write was put to the user for confirmation. Nothing ran yet.
+  proposed
+  cancelled
+  expired
+  /// The request named something Nova does not do at all (stage moves, pricing…).
+  declined
+}
+
+/// Everything Nova did or was asked to do, one row per event.
+///
+/// APPEND-ONLY. Nothing in the app updates or deletes these rows — a guard test
+/// fails the build on any `novaAuditEvent.update/delete` in the module — so the
+/// record of what the assistant did as somebody cannot be edited afterwards.
+///
+/// Plain id columns, no relations, on purpose: the audit trail must outlive the
+/// deal and the person it names, and a cascade from either would delete the
+/// evidence along with the thing it is evidence about.
+model NovaAuditEvent {
+  id              String         @id @default(uuid())
+  companyId       String
+  vertical        Vertical?
+  actorId         String
+  conversationId  String
+  tool            String
+  kind            NovaToolKind
+  phase           NovaAuditPhase
+  args            Json           @default("{}")
+  result          Json?
+  error           String?
+  leadId          String?
+  entityType      String?
+  entityId        String?
+  pendingActionId String?
+  createdAt       DateTime       @default(now())
+
+  @@index([companyId, leadId, createdAt])
+  @@index([companyId, actorId, createdAt])
+  @@map("nova_audit_events")
+}
+
+enum NovaPendingStatus {
+  pending
+  confirmed
+  cancelled
+  expired
+}
+
+/// A write Nova has proposed and is waiting on the user to confirm. Single use:
+/// confirming claims the row atomically, so a double click or a replayed request
+/// cannot run the write twice. What actually happened is in nova_audit_events.
+model NovaPendingAction {
+  id             String            @id @default(uuid())
+  companyId      String
+  vertical       Vertical
+  actorId        String
+  conversationId String
+  tool           String
+  args           Json              @default("{}")
+  summary        String
+  leadId         String?
+  status         NovaPendingStatus @default(pending)
+  expiresAt      DateTime
+  resolvedAt     DateTime?
+  createdAt      DateTime          @default(now())
+
+  @@index([companyId, actorId, status])
+  @@map("nova_pending_actions")
 }
