@@ -771,7 +771,17 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
 
   const saved = await prisma.solarFinance.upsert({
     where: { leadId: f.leadId },
-    create: { companyId: user.companyId, leadId: f.leadId, ...data },
+    // A new deal claims the ITC and NEITHER bonus: whether a roof is in an
+    // energy community, or the kit is domestic content, is established case by
+    // case. The column defaults agree; stated here so no create path can differ.
+    create: {
+      companyId: user.companyId,
+      leadId: f.leadId,
+      claimItc: true,
+      claimEnergyCommunity: false,
+      claimDomesticContent: false,
+      ...data,
+    },
     update: data,
     select: {
       product: true, grossPpwCents: true, stickerPricePerBatteryCents: true,

@@ -540,8 +540,10 @@ export default async function SolarProposalBuilderPage({
         // one is created holding, so that is what an unsaved deal shows.
         creditClaims={{
           itc: finance?.claimItc ?? true,
-          energyCommunity: finance?.claimEnergyCommunity ?? true,
-          domesticContent: finance?.claimDomesticContent ?? true,
+          // Both bonuses start OFF and are ticked case by case — the column
+          // defaults say the same. See SolarFinance.claimEnergyCommunity.
+          energyCommunity: finance?.claimEnergyCommunity ?? false,
+          domesticContent: finance?.claimDomesticContent ?? false,
         }}
         // Nothing typed on a deal with no financing row yet, which is the
         // ordinary case for the credit as well: it is money a rep decides to

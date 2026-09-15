@@ -4619,8 +4619,12 @@ model SolarFinance {
   /// sourcing threshold) and a rep who knows this job does not qualify unticks
   /// them.
   claimItc             Boolean @default(true)
-  claimEnergyCommunity Boolean @default(true)
-  claimDomesticContent Boolean @default(true)
+  /// The two bonus credits start OFF (2026-09-15): whether a roof is in an energy
+  /// community, or the kit qualifies as domestic content, is established case by
+  /// case, so a deal claims neither until a rep ticks it. Existing rows keep
+  /// whatever they were quoted with.
+  claimEnergyCommunity Boolean @default(false)
+  claimDomesticContent Boolean @default(false)
 
   /// The rep's own closing credit on this deal, cents. Zero on nearly all.
   ///
