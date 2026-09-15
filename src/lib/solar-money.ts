@@ -46,6 +46,12 @@ export type SolarAssumptions = {
   defaultGrossPpwCents: number;
   defaultDealerFeePct: number;
   minOffsetPct: number;
+  /**
+   * Whether the company DECIDED that minimum. Optional so pure callers keep
+   * their behaviour: absent reads as "a minimum above zero was decided, a zero
+   * was not". See SolarSettings.minOffsetConfigured.
+   */
+  minOffsetConfigured?: boolean;
   maxOffsetPct: number;
 };
 

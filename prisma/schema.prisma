@@ -3444,6 +3444,14 @@ model SolarSettings {
   // These are the guard rails; see src/lib/solar-validation.ts.
   minOffsetPct Float @default(0)
   maxOffsetPct Float @default(150)
+  /// Whether somebody has DECIDED the minimum offset. `minOffsetPct` defaults to 0,
+  /// so a zero alone cannot tell "no minimum, deliberately" from "never set up".
+  ///   configured + min > 0  -> enforced: generation is blocked below it
+  ///   configured + min = 0  -> a deliberate "no minimum": nothing is raised
+  ///   not configured        -> a warning on the deal and a Settings gap, never a
+  ///                            block, so an uninitialised workspace still quotes
+  /// Backfilled true wherever a minimum above zero was already saved.
+  minOffsetConfigured Boolean @default(false)
 
   // ── RETIRED 2026-09-02: the company-wide Min/Max $/W band ───────────────
   // Nothing reads or writes these any more. What a deal may price at is a

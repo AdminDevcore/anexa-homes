@@ -56,6 +56,10 @@ const settingsSchema = z.object({
   // outage. Optional so a client that predates the field leaves it alone.
   backupOutageDrawFactor: z.number().min(1).max(3).optional(),
   minOffsetPct: z.number().min(0).max(200),
+  // A minimum of 0 CONFIRMED as "no minimum", as opposed to never set up. Only
+  // meaningful at 0; a minimum above zero is always a decision. Optional so a
+  // client that predates it leaves the stored answer alone.
+  minOffsetNone: z.boolean().optional(),
   maxOffsetPct: z.number().min(0).max(500),
   // The federal credits, for the contract-adjustment ladder. Statute, so they
   // are typed rather than compiled in. Zero is meaningful — it means the
@@ -79,8 +83,18 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const parsed = settingsSchema.safeParse(input);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid settings.");
-  const d = parsed.data;
+  const { minOffsetNone, ...d } = parsed.data;
   if (d.minOffsetPct >= d.maxOffsetPct) return fail("Minimum offset must be below the maximum.");
+
+  // Decided = a minimum above zero, or zero confirmed as "no minimum". Saving
+  // this form for any other reason must not turn an unset minimum into a
+  // decided one, nor a confirmed "no minimum" back into an unset one.
+  const stored = await prisma.solarSettings.findUnique({
+    where: { companyId: user.companyId },
+    select: { minOffsetConfigured: true },
+  });
+  const minOffsetConfigured =
+    d.minOffsetPct > 0 ? true : (minOffsetNone ?? stored?.minOffsetConfigured ?? false);
 
   // No incentive is quoted anywhere in the product, so saving settings also
   // clears anything a legacy row still carries. Leaving a stale 30% sitting in
@@ -88,8 +102,8 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
   const incentives = { federalItcPct: null, stateIncentiveNote: null };
   await prisma.solarSettings.upsert({
     where: { companyId: user.companyId },
-    create: { companyId: user.companyId, ...d, ...incentives },
-    update: { ...d, ...incentives },
+    create: { companyId: user.companyId, ...d, minOffsetConfigured, ...incentives },
+    update: { ...d, minOffsetConfigured, ...incentives },
   });
   revalidatePath("/portal/settings/solar");
   return ok();

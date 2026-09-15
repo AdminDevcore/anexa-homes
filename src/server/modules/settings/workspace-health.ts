@@ -196,11 +196,15 @@ export const SETUP_CHECKS: Check[] = [
     key: "solar_settings",
     label: "Minimum system offset",
     href: "/portal/settings/solar",
-    hint: "No minimum offset is set, so nothing catches a system quoted far too small for the home. Reps see a warning they cannot act on.",
+    hint: "No minimum offset has been set up, so nothing catches a system quoted far too small for the home. Reps see a warning they cannot act on. Set a minimum, or confirm there is none.",
     severity: "silent",
     verticals: ["solar"],
+    // Cleared by a DECISION: a minimum above zero, or zero confirmed as "no
+    // minimum". See SolarSettings.minOffsetConfigured.
     count: (companyId) =>
-      prisma.solarSettings.count({ where: { companyId, minOffsetPct: { gt: 0 } } }),
+      prisma.solarSettings.count({
+        where: { companyId, OR: [{ minOffsetPct: { gt: 0 } }, { minOffsetConfigured: true }] },
+      }),
   },
   {
     // The one check with no settings card behind it. Both rates are per rep, on

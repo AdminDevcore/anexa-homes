@@ -224,6 +224,9 @@ export function builderStepFromHref(href: string): BuilderStep | null {
 
 const DESIGN_HREF = (leadId: string) => builderHref(leadId, "design");
 const FINANCE_HREF = (leadId: string) => builderHref(leadId, "financing");
+/** One sentence for both shapes of deal, so a battery job reads the same rule. */
+const PROVIDER_MISSING =
+  "Record the customer's utility provider. The proposal names the utility its savings are measured against, and buyback and VPP terms come from that provider.";
 /** Not deal-scoped: the catalogue is company-wide, and so is its fix. */
 const EQUIPMENT_HREF = "/portal/settings/solar-equipment";
 
@@ -275,6 +278,11 @@ export function validateDesign(
         "annualUsageKwh",
         "No usage on file, so the proposal cannot say how long this battery lasts or what it saves."
       );
+    }
+    // The provider whose bill the battery is saving against, and whose VPP it
+    // may enrol in. Required on a storage deal exactly as on an array.
+    if (d.utilityProvider !== undefined && !d.utilityProvider?.trim()) {
+      block("utility.provider_missing", "utility", "utilityProvider", PROVIDER_MISSING);
     }
     return issues;
   }
@@ -343,8 +351,11 @@ export function validateDesign(
     }
   }
 
+  // A BLOCK, not the warning it was (2026-09-15): a proposal quoting savings on
+  // a bill from no named utility, with no provider to take buyback or VPP terms
+  // from, is not one to put in front of a homeowner.
   if (d.utilityProvider !== undefined && !d.utilityProvider?.trim()) {
-    warn("utility.provider_missing", "utility", "utilityProvider", "No utility provider recorded.");
+    block("utility.provider_missing", "utility", "utilityProvider", PROVIDER_MISSING);
   }
   // ── Offset ─────────────────────────────────────────────────────────────
   if (d.offsetPct < a.minOffsetPct) {
@@ -365,15 +376,18 @@ export function validateDesign(
       `Offset is ${d.offsetPct.toFixed(0)}%. Most utilities do not credit production far beyond usage — confirm the customer is adding load (EV, pool, addition).`
     );
   }
-  // A minimum of 0 is not a guard rail, it is the absence of one: it permits a
-  // proposal that offsets nothing. Surfaced so it gets configured rather than
-  // silently passing every deal.
-  if (a.minOffsetPct <= 0) {
+  // A minimum of 0 is either a decision ("no minimum") or nobody having looked.
+  // Only the second is raised, and as a WARNING: an uninitialised workspace must
+  // still be able to quote, and inventing a minimum for it here would enforce a
+  // sizing policy nobody chose. A minimum above zero is always a decision, and
+  // is enforced just above. See SolarSettings.minOffsetConfigured.
+  const minOffsetDecided = a.minOffsetPct > 0 || a.minOffsetConfigured === true;
+  if (!minOffsetDecided) {
     warn(
       "config.min_offset_unset",
       "design",
       "minOffsetPct",
-      "No minimum offset is configured (currently 0%), so an undersized system cannot be caught. Set one in Solar settings.",
+      "No minimum offset has been set up for this workspace, so an undersized system cannot be caught. An admin can set one, or confirm there is no minimum, in Settings → Solar Settings → Guard rails.",
     );
   }
 
