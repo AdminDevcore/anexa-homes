@@ -67,10 +67,28 @@ describe("a design is judged only on what the form still collects", () => {
   });
 
   it("passes a complete design clean", () => {
-    const blocking = validateDesign(design(), SOLAR_ASSUMPTION_DEFAULTS).filter(
+    const blocking = validateDesign(
+      design(),
+      { ...SOLAR_ASSUMPTION_DEFAULTS, minOffsetPct: 70 }
+    ).filter(
       (i) => i.severity === "block"
     );
     expect(blocking).toEqual([]);
+  });
+
+  it("blocks proposal generation without a utility provider", () => {
+    const issue = validateDesign(
+      design({ utilityProvider: null }),
+      { ...SOLAR_ASSUMPTION_DEFAULTS, minOffsetPct: 70 }
+    ).find((i) => i.code === "utility.provider_missing");
+    expect(issue?.severity).toBe("block");
+  });
+
+  it("blocks proposal generation until the minimum offset policy is configured", () => {
+    const issue = validateDesign(design(), SOLAR_ASSUMPTION_DEFAULTS).find(
+      (i) => i.code === "config.min_offset_unset"
+    );
+    expect(issue?.severity).toBe("block");
   });
 });
 

@@ -344,7 +344,12 @@ export function validateDesign(
   }
 
   if (d.utilityProvider !== undefined && !d.utilityProvider?.trim()) {
-    warn("utility.provider_missing", "utility", "utilityProvider", "No utility provider recorded.");
+    block(
+      "utility.provider_missing",
+      "utility",
+      "utilityProvider",
+      "Record the utility provider before generating a proposal. Net-metering, meter fees, and savings assumptions cannot be verified without it."
+    );
   }
   // ── Offset ─────────────────────────────────────────────────────────────
   if (d.offsetPct < a.minOffsetPct) {
@@ -369,11 +374,11 @@ export function validateDesign(
   // proposal that offsets nothing. Surfaced so it gets configured rather than
   // silently passing every deal.
   if (a.minOffsetPct <= 0) {
-    warn(
+    block(
       "config.min_offset_unset",
       "design",
       "minOffsetPct",
-      "No minimum offset is configured (currently 0%), so an undersized system cannot be caught. Set one in Solar settings.",
+      "No minimum offset is configured (currently 0%), so an undersized system cannot be caught. Set one in Solar settings before generating a proposal.",
     );
   }
 
