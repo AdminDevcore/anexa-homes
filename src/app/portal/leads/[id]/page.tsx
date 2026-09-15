@@ -35,10 +35,10 @@ import {
 import { claimStatusLabel, claimStatusOptionsFor } from "@/lib/claim-status";
 import { DealStageTimeline } from "@/components/portal/deal-stage-timeline";
 import {
-  SolarSystemInfo,
+  SolarOperations,
   type SystemSpecs,
   type SpecSource,
-} from "@/components/portal/solar-system-info";
+} from "@/components/portal/solar-operations";
 import { hasCreditSwitch, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 import {
   blockPanelCount,
@@ -457,6 +457,9 @@ export default async function LeadDetailPage({
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
             maxFinalPpwCents: true, finalPpwMode: true,
+            // Which price that figure fixes, per programme — the deal is
+            // priced on the basis of the programme it was quoted on.
+            products: { select: { id: true, ppwBasis: true } },
             // The partner's own closing-credit rule. Read for the same reason
             // the ceiling above it is: the credit ladder on this page has to
             // be the one the builder and the document draw, and two of the
@@ -472,7 +475,7 @@ export default async function LeadDetailPage({
    *
    * Settings has always let a company define these; until now nothing rendered
    * them, so every definition was a field that could be mapped into a document
-   * template and never filled. They live on the System info slide with the rest
+   * template and never filled. They live on the Operations slide, in their own tab, with the rest
    * of what is true about the job.
    */
   const projectFieldDefs = isSolarDeal
@@ -497,7 +500,7 @@ export default async function LeadDetailPage({
     : NO_LENDER_ATTEMPTS;
 
   /**
-   * The interconnection and permitting half of the System info slide.
+   * The Permitting and Interconnection tabs of the Operations slide.
    *
    * Everything here is recorded AFTER the sale, by whoever is walking the job
    * through the utility and the jurisdiction — which is why none of it is asked
@@ -535,7 +538,7 @@ export default async function LeadDetailPage({
    * reopening the builder to look.
    *
    * Read off the LIVE design rather than the last proposal's snapshot, unlike
-   * the System info slide. The two answer different questions: that one reports
+   * the Operations slide's Design tab. The two answer different questions: that one reports
    * what the customer was quoted and must not move under them, this one is the
    * roof as it stands, so a redraw shows here immediately.
    *
@@ -559,7 +562,7 @@ export default async function LeadDetailPage({
   })();
 
   /**
-   * The system as specifications, for the System info slide.
+   * The system as specifications, for the Operations slide's Design tab.
    *
    * READ OFF THE APPROVED PROPOSAL when there is one, and off the newest
    * otherwise. The slide used to report the live SolarDesign, which is the
@@ -584,7 +587,7 @@ export default async function LeadDetailPage({
   /**
    * WHICH SYSTEM THIS DEAL IS — resolved ONCE, for every card that reports it.
    *
-   * This page used to answer that question twice. The System info slide and the
+   * This page used to answer that question twice. The Operations slide's Design tab and the
    * Deal Value card read the frozen proposal; the System & financing tiles read
    * the live design. Both rules were defensible on their own and together they
    * put two different systems on one screen: a deal signed at 25 panels / 11.00
@@ -639,6 +642,8 @@ export default async function LeadDetailPage({
           }),
           maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
           finalPpwMode: designLenderRow?.finalPpwMode,
+          ppwBasis: designLenderRow?.products.find((p) => p.id === solarFinance.lenderProductId)
+            ?.ppwBasis,
         })
       : null;
 
@@ -1063,12 +1068,12 @@ export default async function LeadDetailPage({
       /**
        * WHAT THIS DEAL IS, for the four tiles and the equipment rows.
        *
-       * The same object the System info slide reports and the same one the
+       * The same object the Operations slide's Design tab reports and the same one the
        * Deal Value card prices off, so the three cannot disagree. It is the
        * approved proposal wherever there is one — see `reportedSystem`.
        */
       reported: {
-        // THE SAME TWO STRINGS the System info slide puts in its badge, not a
+        // THE SAME TWO STRINGS the Operations slide's Design tab puts in its badge, not a
         // second rendering of the same idea: one place decides how a version is
         // named, so the two slides cannot label the same document differently.
         sourceKind: solarSpecsSource.kind,
@@ -1179,6 +1184,8 @@ export default async function LeadDetailPage({
        */
       maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
       finalPpwMode: dealLender?.finalPpwMode ?? "cap",
+      ppwBasis:
+        dealLender?.products.find((p) => p.id === fin?.lenderProductId)?.ppwBasis ?? "final",
       cappedByLender: priced?.cap.capped ?? false,
       lenderName: dealLender?.name ?? null,
     };
@@ -1192,7 +1199,7 @@ export default async function LeadDetailPage({
    * signed. The figure is derived instead — see src/lib/solar-deal-value.ts for
    * why a lease and a PPA are not a "value" of the same kind.
    *
-   * READ OFF THE LAST PROPOSAL, exactly like the System info slide: what this
+   * READ OFF THE LAST PROPOSAL, exactly like the Operations slide's Design tab: what this
    * customer was last quoted, frozen, rather than a live design a rep may be
    * halfway through redrawing. The live price is the fallback only while no
    * proposal exists at all — that being the one moment the working figure IS
@@ -1611,13 +1618,20 @@ export default async function LeadDetailPage({
             <DealSlides
               id="production"
               className="scroll-mt-24"
+              foldable
               slides={[
                 { id: "system", label: "System & financing" },
-                { id: "timeline", label: "Timeline", icon: "timeline" },
+                // Design, permitting and interconnection are TABS inside
+                // Operations, in the order a job goes through them — and that
+                // order ends where Installation begins. This slide was "System
+                // info", a name that said none of the three.
+                { id: "ops", label: "Operations", icon: "ops" },
                 { id: "install", label: "Installation", icon: "install" },
-                { id: "specs", label: "System info", icon: "specs" },
+                // The stage history reads after the work it records, and ahead
+                // of the feed.
+                { id: "timeline", label: "Timeline", icon: "timeline" },
                 // Activity is always last, on every deal that has one. The
-                // first three are the job; the feed is what people said about
+                // slides before it are the job; the feed is what people said about
                 // it, and a running commentary does not belong between two
                 // halves of the work.
                 { id: "activity", label: "Activity" },
@@ -1660,9 +1674,24 @@ export default async function LeadDetailPage({
                 />
               </div>
 
-            <div data-deal-slide="timeline">
-              {stageTimeline && <DealStageTimeline timeline={stageTimeline} />}
-            </div>
+              <div data-deal-slide="ops">
+                <SolarOperations
+                  leadId={lead.id}
+                  specs={solarSpecs}
+                  source={solarSpecsSource}
+                  build={solarBuild}
+                  canEdit={can(user, "update", "Lead")}
+                  projectFields={projectFieldDefs.map((f) => ({
+                    key: f.key,
+                    label: f.label,
+                    type: f.type,
+                    options: (f.options as string[]) ?? [],
+                    required: f.required,
+                  }))}
+                  projectValues={projectFieldValues}
+                  hasProject={!!lead.project}
+                />
+              </div>
 
             <div data-deal-slide="install" className="space-y-5">
                 {/* The job's own line, at the top of the slide it belongs to.
@@ -1764,24 +1793,9 @@ export default async function LeadDetailPage({
                 )}
             </div>
 
-              <div data-deal-slide="specs">
-                <SolarSystemInfo
-                  leadId={lead.id}
-                  specs={solarSpecs}
-                  source={solarSpecsSource}
-                  build={solarBuild}
-                  canEdit={can(user, "update", "Lead")}
-                  projectFields={projectFieldDefs.map((f) => ({
-                    key: f.key,
-                    label: f.label,
-                    type: f.type,
-                    options: (f.options as string[]) ?? [],
-                    required: f.required,
-                  }))}
-                  projectValues={projectFieldValues}
-                  hasProject={!!lead.project}
-                />
-              </div>
+            <div data-deal-slide="timeline">
+              {stageTimeline && <DealStageTimeline timeline={stageTimeline} />}
+            </div>
 
               <div data-deal-slide="activity">
                 <SolarActivityFeed
@@ -1987,7 +2001,7 @@ export default async function LeadDetailPage({
                 only place on the deal that answers it. */}
             {isSolarDeal && solarProposals.length > 0 && (
               <section id="proposal" className="scroll-mt-24">
-                <Card title="Proposal" icon={Sun} tone="solar">
+                <Card title="Proposal" icon={Sun} tone="solar" foldKey="proposal">
                   <SolarProposalStrip
                     leadId={lead.id}
                     state={solarState}
@@ -2074,6 +2088,8 @@ export default async function LeadDetailPage({
             icon={FolderOpen}
             tone={isSolarDeal ? "solar" : "brand"}
             description="Signed paperwork, photos and every file on this job"
+            // Solar only: roofing's Documents & Files card renders as it did.
+            foldKey={isSolarDeal ? "documents" : undefined}
           >
             <DealFolders
               leadId={lead.id}

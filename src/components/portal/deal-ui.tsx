@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { FoldableCard } from "@/components/portal/deal-card-fold";
 
 /**
  * The card / label / value vocabulary of the deal detail page.
@@ -31,6 +32,7 @@ export function Card({
   action,
   bodyClassName,
   className,
+  foldKey,
   children,
 }: {
   title?: string;
@@ -41,53 +43,93 @@ export function Card({
   action?: React.ReactNode;
   bodyClassName?: string;
   className?: string;
+  /**
+   * An arrow at the top right that folds the card down to its header,
+   * remembered per browser under this key. Opt-in, and only on a titled card:
+   * without it a card renders exactly the markup it always has.
+   */
+  foldKey?: string;
   children: React.ReactNode;
 }) {
   const solar = tone === "solar";
-  return (
-    <section
-      className={cn(
-        "rounded-xl border border-border bg-card",
-        // Solar-only lift. Roofing keeps the flat card it has today.
-        solar && "overflow-hidden shadow-sm",
-        className
+  const sectionClassName = cn(
+    "rounded-xl border border-border bg-card",
+    // Solar-only lift. Roofing keeps the flat card it has today.
+    solar && "overflow-hidden shadow-sm",
+    className
+  );
+  const headerClassName = cn(
+    "border-b border-border px-5 py-3.5",
+    solar
+      ? // min-w-0 is load-bearing: this card sits in a grid column whose
+        // automatic minimum size is the min-content width of its
+        // contents, and without it the header's text sets a floor that
+        // makes the whole column overflow the viewport on a phone.
+        "flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2"
+      : "flex items-center gap-2"
+  );
+  const solarTitle = (
+    <div className="flex min-w-0 items-center gap-2.5">
+      {Icon && (
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-solar/10 text-solar">
+          <Icon className="size-4" />
+        </span>
       )}
-    >
+      <div className="min-w-0">
+        <h2 className="truncate font-semibold tracking-tight">{title}</h2>
+        {description && (
+          // Clamped, never `truncate`. `truncate` implies
+          // white-space: nowrap, whose min-content width is the WHOLE
+          // sentence — enough to blow out the page on a phone. A clamp
+          // wraps (min-content = longest word) and still can't grow
+          // the header unboundedly.
+          <p className="line-clamp-2 text-xs font-normal text-muted-foreground">
+            {description}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
+  if (foldKey && title) {
+    return (
+      <FoldableCard
+        foldKey={foldKey}
+        label={title}
+        className={sectionClassName}
+        headerClassName={headerClassName}
+        header={
+          solar ? (
+            solarTitle
+          ) : (
+            <div className="flex min-w-0 items-center gap-2">
+              {Icon && <Icon className="size-4 shrink-0 text-gold" />}
+              <div className="min-w-0">
+                <h2 className="font-semibold">{title}</h2>
+                {description && (
+                  <p className="line-clamp-2 text-xs font-normal text-muted-foreground">
+                    {description}
+                  </p>
+                )}
+              </div>
+            </div>
+          )
+        }
+        action={action}
+        bodyClassName={cn("p-5", bodyClassName)}
+      >
+        {children}
+      </FoldableCard>
+    );
+  }
+
+  return (
+    <section className={sectionClassName}>
       {title && (
-        <header
-          className={cn(
-            "border-b border-border px-5 py-3.5",
-            solar
-              ? // min-w-0 is load-bearing: this card sits in a grid column whose
-                // automatic minimum size is the min-content width of its
-                // contents, and without it the header's text sets a floor that
-                // makes the whole column overflow the viewport on a phone.
-                "flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2"
-              : "flex items-center gap-2"
-          )}
-        >
+        <header className={headerClassName}>
           {solar ? (
             <>
-              <div className="flex min-w-0 items-center gap-2.5">
-                {Icon && (
-                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-solar/10 text-solar">
-                    <Icon className="size-4" />
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <h2 className="truncate font-semibold tracking-tight">{title}</h2>
-                  {description && (
-                    // Clamped, never `truncate`. `truncate` implies
-                    // white-space: nowrap, whose min-content width is the WHOLE
-                    // sentence — enough to blow out the page on a phone. A clamp
-                    // wraps (min-content = longest word) and still can't grow
-                    // the header unboundedly.
-                    <p className="line-clamp-2 text-xs font-normal text-muted-foreground">
-                      {description}
-                    </p>
-                  )}
-                </div>
-              </div>
+              {solarTitle}
               {action}
             </>
           ) : (

@@ -91,7 +91,7 @@ export type SystemMoney = {
    * WHAT THIS DEAL IS — the signed proposal wherever there is one.
    *
    * These four figures and the equipment under them used to be read straight
-   * off the live SolarDesign while the System info slide read them off the
+   * off the live SolarDesign while the Operations → Design tab read them off the
    * frozen proposal, so one deal showed two systems on two tabs of the same
    * page: 24 panels / 10.56 kW / $58,080 here against 25 / 11.00 / $60,500
    * there. Both now come from `resolveReportedSystem`, which is the only way
@@ -192,6 +192,8 @@ export type SystemMoney = {
   maxFinalPpwCents: number | null;
   /** Whether that figure is a ceiling or this partner's flat price. */
   finalPpwMode: "cap" | "flat";
+  /** Which price that figure fixes on the quoted programme. See SolarPriceBasis. */
+  ppwBasis: "final" | "gross" | "base";
   /** True when that rule is what set this price, rather than the base. */
   cappedByLender: boolean;
   lenderName: string | null;
@@ -233,7 +235,7 @@ export function SolarSystemMoneyPanel({
       {money && (
         <>
           {/* Provenance first, in the same words and the same colours the
-              System info slide uses. Four numbers with no document named
+              Operations → Design tab uses. Four numbers with no document named
               against them is exactly how this page came to show two systems
               and look like neither was wrong. */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -345,6 +347,7 @@ export function SolarSystemMoneyPanel({
                         ? {
                             ppwCents: money.maxFinalPpwCents,
                             mode: money.finalPpwMode,
+                            basis: money.ppwBasis,
                             lenderName: money.lenderName,
                           }
                         : null
@@ -400,6 +403,13 @@ export function SolarSystemMoneyPanel({
  * Getting that wrong is not cosmetic: the same "$4.42/W" means what the company
  * keeps under one label and what the household pays under the other.
  */
+/** What a partner's figure covers, on the quoted programme's basis. */
+function capCovers(basis: "final" | "gross" | "base"): string {
+  if (basis === "gross") return "gross, adders included, with the dealer fee on top";
+  if (basis === "base") return "base, with adders and the dealer fee on top";
+  return "final, fee and adders included";
+}
+
 function PriceLadder({
   ladder,
   redrawn,
@@ -409,7 +419,12 @@ function PriceLadder({
   /** True when the drawing has moved since the reported version was frozen. */
   redrawn: boolean;
   /** The partner's own rule, when it is what set this price. */
-  cap: { ppwCents: number; mode: "cap" | "flat"; lenderName: string | null } | null;
+  cap: {
+    ppwCents: number;
+    mode: "cap" | "flat";
+    basis: "final" | "gross" | "base";
+    lenderName: string | null;
+  } | null;
 }) {
   const frozen = ladder.source === "proposal";
   const { credits } = ladder;
@@ -520,19 +535,9 @@ function PriceLadder({
           the price it was held down FROM. */}
       {!frozen && cap && (
         <p className="mt-1 text-[11px] font-medium leading-snug text-amber-700 dark:text-amber-500">
-          {cap.mode === "flat" ? (
-            <>
-              {cap.lenderName ?? "This lender"} sells at a flat {usdc(cap.ppwCents)}/W, fee and
-              adders included — the base above is what is left of it, not a price typed on this
-              deal.
-            </>
-          ) : (
-            <>
-              Held at {cap.lenderName ?? "this lender"}&rsquo;s ceiling of {usdc(cap.ppwCents)}/W,
-              fee and adders included. The base above is what survives it — not the price typed on
-              the deal.
-            </>
-          )}
+          {cap.mode === "flat"
+            ? `${cap.lenderName ?? "This lender"} sells at a flat ${usdc(cap.ppwCents)}/W ${capCovers(cap.basis)} — the base above is what is left of it, not a price typed on this deal.`
+            : `Held at ${cap.lenderName ?? "this lender"}’s ceiling of ${usdc(cap.ppwCents)}/W ${capCovers(cap.basis)}. The base above is what survives it — not the price typed on the deal.`}
         </p>
       )}
     </>

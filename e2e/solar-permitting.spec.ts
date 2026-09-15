@@ -50,10 +50,20 @@ async function ensureDesign(page: Page, leadId: string) {
   await expect(page.getByText(/Energy saved/)).toBeVisible({ timeout: 15000 });
 }
 
-async function openSystemInfo(page: Page, leadId: string) {
+/**
+ * Operations, then one of its tabs. These forms were a "System info" slide of
+ * their own; they are now steps inside Operations, one tab each.
+ */
+async function openOperations(
+  page: Page,
+  leadId: string,
+  tab: "Permitting" | "Interconnection" | "Project fields"
+) {
   await page.goto(`/portal/leads/${leadId}`);
-  await page.getByRole("tab", { name: "System info" }).click();
-  await expect(page.getByRole("heading", { name: "Permitting & AHJ" })).toBeVisible({
+  await page.getByRole("tab", { name: "Operations" }).click();
+  await page.getByRole("tab", { name: tab }).click();
+  const heading = tab === "Permitting" ? "Permitting & AHJ" : tab;
+  await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible({
     timeout: 15000,
   });
 }
@@ -65,7 +75,9 @@ test.describe(FLAG_ON ? "permitting on the deal" : "permitting on the deal (flag
     await login(page, "admin@anexahomes.com");
     const leadId = await openDesignerDeal(page);
     await ensureDesign(page, leadId);
-    await openSystemInfo(page, leadId);
+    await openOperations(page, leadId, "Permitting");
+    // The slide it replaced is gone, not merely renamed beside it.
+    await expect(page.getByRole("tab", { name: "System info" })).toHaveCount(0);
 
     await page.getByLabel("AHJ", { exact: true }).fill("City of Plano");
     await page.getByLabel("Permit #").fill("PMT-2026-8890");
@@ -73,12 +85,10 @@ test.describe(FLAG_ON ? "permitting on the deal" : "permitting on the deal (flag
     await page.getByLabel("AHJ contact phone / email").fill("(214) 555-0100");
     await page.getByLabel("Installer title").fill("Project Manager");
 
-    await page.getByRole("button", { name: "Save permitting & interconnection" }).click();
-    await expect(page.getByText(/Permitting & interconnection saved/)).toBeVisible({
-      timeout: 15000,
-    });
+    await page.getByRole("button", { name: "Save permitting" }).click();
+    await expect(page.getByText(/Permitting saved/)).toBeVisible({ timeout: 15000 });
 
-    await openSystemInfo(page, leadId);
+    await openOperations(page, leadId, "Permitting");
     await expect(page.getByLabel("AHJ", { exact: true })).toHaveValue("City of Plano");
     await expect(page.getByLabel("Permit #")).toHaveValue("PMT-2026-8890");
     await expect(page.getByLabel("AHJ contact name")).toHaveValue("Dana Ruiz");
@@ -89,7 +99,7 @@ test.describe(FLAG_ON ? "permitting on the deal" : "permitting on the deal (flag
     await login(page, "admin@anexahomes.com");
     const leadId = await openDesignerDeal(page);
     await ensureDesign(page, leadId);
-    await openSystemInfo(page, leadId);
+    await openOperations(page, leadId, "Interconnection");
 
     // An empty box asks for nothing. A permit packet that carries a blank
     // "other status" line is worse than one that carries none.
@@ -98,19 +108,24 @@ test.describe(FLAG_ON ? "permitting on the deal" : "permitting on the deal (flag
 
     await page.getByRole("checkbox", { name: "Other utility status" }).check();
     await detail.fill("Awaiting meter swap");
+    await page.getByLabel("Meter #").fill("MTR-55120");
+    await page.getByRole("button", { name: "Save interconnection" }).click();
+    await expect(page.getByText(/Interconnection saved/)).toBeVisible({ timeout: 15000 });
+
+    // The two tabs write the same row. Saving the second must not undo the first.
+    await page.getByRole("tab", { name: "Permitting" }).click();
     await page.getByRole("checkbox", { name: "Permit not required" }).check();
+    await page.getByRole("button", { name: "Save permitting" }).click();
+    await expect(page.getByText(/Permitting saved/)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: "Save permitting & interconnection" }).click();
-    await expect(page.getByText(/Permitting & interconnection saved/)).toBeVisible({
-      timeout: 15000,
-    });
-
-    await openSystemInfo(page, leadId);
+    await openOperations(page, leadId, "Permitting");
     await expect(page.getByRole("checkbox", { name: "Permit not required" })).toBeChecked();
+    await page.getByRole("tab", { name: "Interconnection" }).click();
     await expect(page.getByRole("checkbox", { name: "Other utility status" })).toBeChecked();
     await expect(page.getByLabel("Other utility status — detail")).toHaveValue(
       "Awaiting meter swap"
     );
+    await expect(page.getByLabel("Meter #")).toHaveValue("MTR-55120");
   });
 });
 
@@ -149,11 +164,7 @@ test.describe(
       await page.waitForURL(/\/portal\/leads\/[0-9a-f-]+$/, { timeout: 15000 });
       const leadId = page.url().split("/").pop()!;
       await ensureDesign(page, leadId);
-      await page.goto(`/portal/leads/${leadId}`);
-      await page.getByRole("tab", { name: "System info" }).click();
-      await expect(page.getByRole("heading", { name: "Project fields" })).toBeVisible({
-        timeout: 15000,
-      });
+      await openOperations(page, leadId, "Project fields");
 
       await page.getByLabel(label).fill("Left with the city on the 12th");
       await page
@@ -161,8 +172,7 @@ test.describe(
         .click();
       await expect(page.getByText("Project fields saved")).toBeVisible({ timeout: 15000 });
 
-      await page.goto(`/portal/leads/${leadId}`);
-      await page.getByRole("tab", { name: "System info" }).click();
+      await openOperations(page, leadId, "Project fields");
       await expect(page.getByLabel(label)).toHaveValue("Left with the city on the 12th");
       // The job exists now, so the button stops offering to create one.
       await expect(page.getByRole("button", { name: "Save project fields" })).toBeVisible();

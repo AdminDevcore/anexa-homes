@@ -12,7 +12,7 @@ import type { SnapshotFinancing, SolarProposalSnapshot } from "@/lib/solar-propo
  * legitimate: one is what was sold, the other is what is currently drawn.
  *
  * The defect this module exists to stop is REPORTING BOTH AT ONCE. The deal
- * page derived its System info slide and its Deal Value from the snapshot while
+ * page derived its Operations → Design tab and its Deal Value from the snapshot while
  * deriving the System & financing tiles from the live design, so a deal signed
  * at 25 panels / 11.00 kW / $60,500 showed 24 panels / 10.56 kW / $58,080 one
  * tab away, with nothing on screen saying the two figures were answers to
