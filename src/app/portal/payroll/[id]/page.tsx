@@ -72,7 +72,8 @@ export default async function PayrollRunPage({
     run.items.map((i) => [i.userId, `${i.user.firstName} ${i.user.lastName}`.trim()])
   );
 
-  /* Who entered each adjustment. `createdById` is stored without a relation —
+  /* Who entered each adjustment, and who last edited it. Both ids are stored
+   * without a relation — `createdById`
    * it is an audit stamp, and a foreign key would let deleting a departed
    * admin's account cascade into or block the financial record they made. So
    * the names are resolved here, and an id with no user left simply reads
@@ -80,7 +81,13 @@ export default async function PayrollRunPage({
   const authors = await prisma.user.findMany({
     where: {
       companyId: user.companyId,
-      id: { in: [...new Set(adjustments.map((a) => a.createdById))] },
+      id: {
+        in: [
+          ...new Set(
+            adjustments.flatMap((a) => (a.updatedById ? [a.createdById, a.updatedById] : [a.createdById]))
+          ),
+        ],
+      },
     },
     select: { id: true, firstName: true, lastName: true },
   });
@@ -165,6 +172,7 @@ export default async function PayrollRunPage({
             payeeName: `${a.user.firstName} ${a.user.lastName}`.trim(),
             createdByName: authorName.get(a.createdById) ?? "System",
             createdAt: a.createdAt.toISOString(),
+            editedByName: a.updatedById ? (authorName.get(a.updatedById) ?? "System") : null,
           }))}
           openChargebacks={openChargebacks}
         />
