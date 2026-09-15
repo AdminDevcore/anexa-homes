@@ -70,6 +70,10 @@ const ALLOWED: Record<string, string> = {
     "Creates a lead from a knock; the knock is what gets authorised, by knockScope.",
 
   // ── THE CUSTOMER'S OWN ACTION, NO SESSION TO SCOPE ───────────────────────
+  "src/server/modules/solar/proposal-sign-action.ts#signSolarProposalAction":
+    "The homeowner signing, authorised by the share token alone (acceptSolarProposal). " +
+    "The proposalId it names is the row that token unlocked, handed back by the server " +
+    "to file the signed PDF — never a value the caller supplies.",
   "src/server/modules/proposals/actions.ts#selectPaymentOptionAction":
     "The homeowner picking how they want to pay, resolved by publicToken under " +
     "runUnscoped. There is no `user` here — a staff scope check would break the " +

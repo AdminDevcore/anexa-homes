@@ -20,6 +20,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/portal/ui";
+import { VPP_DEFAULT_MAX_BATTERIES } from "@/lib/solar-provider-terms";
 import {
   ActiveSwitch,
   Caution,
@@ -561,6 +562,16 @@ function ProviderPanel({
                   value={draft.vppAnnual}
                   onChange={(v) => set("vppAnnual", v)}
                 />
+                {/* The two figures above are rates PER BATTERY. Without a
+                    ceiling a ten-battery design quoted ten times the rate on a
+                    document the customer signs — see vppPaidBatteryCount. */}
+                <TextField
+                  label="Max batteries"
+                  type="number"
+                  value={draft.vppMaxBatteries}
+                  onChange={(v) => set("vppMaxBatteries", v)}
+                  hint={`Blank = ${VPP_DEFAULT_MAX_BATTERIES}. The most batteries this programme pays for on one house.`}
+                />
               </FieldGrid>
             )}
           </Panel>
@@ -802,6 +813,7 @@ type TermsDraft = {
   vppProgramme: string;
   vppUpfront: string;
   vppAnnual: string;
+  vppMaxBatteries: string;
   financeProducts: FinanceProduct[];
   batteryIds: string[];
   productIds: string[];
@@ -820,6 +832,7 @@ function seedTerms(r: ProviderRow): TermsDraft {
     vppProgramme: r.vppProgramme ?? "",
     vppUpfront: r.vppUpfrontCents == null ? "" : String(Math.round(r.vppUpfrontCents / 100)),
     vppAnnual: r.vppAnnualCents == null ? "" : String(Math.round(r.vppAnnualCents / 100)),
+    vppMaxBatteries: r.vppMaxBatteries == null ? "" : String(r.vppMaxBatteries),
     financeProducts: r.vppFinanceProducts,
     batteryIds: r.vppBatteries.map((b) => b.id),
     productIds: r.vppProducts.map((p) => p.id),
@@ -863,6 +876,7 @@ function termsFromDraft(d: TermsDraft): ProviderTermsInput {
     vppProgramme: d.vppProgramme.trim() || null,
     vppUpfrontCents: num(d.vppUpfront, 100),
     vppAnnualCents: num(d.vppAnnual, 100),
+    vppMaxBatteries: num(d.vppMaxBatteries, 1),
     vppFinanceProducts: d.financeProducts,
     vppBatteryIds: d.batteryIds,
     vppProductIds: d.productIds,

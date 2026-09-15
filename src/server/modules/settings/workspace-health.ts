@@ -169,6 +169,44 @@ export const SETUP_CHECKS: Check[] = [
       }),
   },
   {
+    /**
+     * THE GUARD RAIL THAT IS OFF BY DEFAULT.
+     *
+     * `SolarSettings.minOffsetPct` ships at 0, and zero is not a minimum — it
+     * is the absence of one. Validation says so on every deal, as a warning,
+     * which is the right severity: a company that has not configured a guard
+     * rail should be told, not stopped from quoting. But a warning on a deal is
+     * seen by a rep who cannot change the setting, so it never reaches anybody
+     * who can.
+     *
+     * DELIBERATELY NOT A BLOCK, and deliberately not defaulted to a business
+     * value. Blocking generation would make a brand-new workspace unable to
+     * quote anything until somebody guessed a number, and picking one here —
+     * 80%, say — would be this file inventing a sizing policy on a company's
+     * behalf and then enforcing it silently. What a system may be undersized to
+     * is the company's call; the product's job is to make sure the question
+     * gets asked of somebody who can answer it.
+     */
+    /**
+     * KEYED TO THE CARD, not to the check. The Settings hub highlights a card
+     * by matching its own key against the gap's, so a gap pointing at the Solar
+     * Settings card has to be called what that card is called — see
+     * `workspace-health.test.ts`, which pins the rule.
+     */
+    key: "solar_settings",
+    label: "Minimum system offset",
+    href: "/portal/settings/solar",
+    hint: "No minimum offset has been set up, so nothing catches a system quoted far too small for the home. Reps see a warning they cannot act on. Set a minimum, or confirm there is none.",
+    severity: "silent",
+    verticals: ["solar"],
+    // Cleared by a DECISION: a minimum above zero, or zero confirmed as "no
+    // minimum". See SolarSettings.minOffsetConfigured.
+    count: (companyId) =>
+      prisma.solarSettings.count({
+        where: { companyId, OR: [{ minOffsetPct: { gt: 0 } }, { minOffsetConfigured: true }] },
+      }),
+  },
+  {
     // The one check with no settings card behind it. Both rates are per rep, on
     // their own Team profile, so there is no screen in Settings to key this to —
     // a "Rep Pay" card was tried as a signpost and removed for pretending to be

@@ -45,27 +45,30 @@ async function leadIdBySearch(page: Page, q: string): Promise<string> {
 }
 
 /**
- * WHY THIS DOES NOT ASSERT A 404 STATUS, AND WHY IT ACCEPTS TWO SHAPES.
+ * WHY THIS DOES NOT ASSERT A 404 STATUS, AND WHY IT ACCEPTS THE SHAPES IT DOES.
  *
- * A refused deal renders one of two ways, and which one you get is Next's
+ * A refused deal renders one of these, and which one you get is Next's
  * business, not the product's:
  *
- *   1. The portal shell with a COMPLETELY EMPTY `<main>` — sidebar, header,
- *      your initials, and nothing else. `notFound()` fired inside the page
- *      segment after the layout had already streamed, so the 200 was sent long
- *      before anything was refused and the status cannot change.
+ *   1. The portal's own not-found boundary (`app/portal/not-found.tsx`): the
+ *      shell with "Not found" and a way back, and nothing of the record. This is
+ *      what a refused deal shows now.
  *   2. A bare Next 404 page with no portal chrome and no `<main>` at all.
+ *   3. The shell with a COMPLETELY EMPTY `<main>` — the old wart: `notFound()`
+ *      fired after the layout had streamed and no boundary caught it, so there
+ *      was a blank screen where a 404 belongs. Still accepted, because it leaks
+ *      nothing; the not-found spec is what pins the message.
  *
- * Shape 1 is a real product wart — a blank screen where a 404 belongs, with no
- * "not found" message of any kind — and worth fixing on its own. Neither shape
- * is a security hole, and pinning the test to either one would make it fail on
- * a rendering detail while proving nothing about access.
+ * None is a security hole, and pinning the test to one would make it fail on a
+ * rendering detail while proving nothing about access. The message is the SAME
+ * for a record that does not exist and one you may not see, so it tells a
+ * prober nothing either.
  *
- * So the assertion is the property both shapes share: NOTHING of the deal is on
- * the page. `main` empty-or-absent catches the body; the name check catches a
- * page that renders the customer somewhere outside it; and the login check
- * stops the whole thing passing vacuously because the session was dropped and
- * every assertion became trivially true.
+ * So the assertion is the property they share: NOTHING of the deal is on the
+ * page. `main` holding at most the not-found message catches the body; the name
+ * check catches a page that renders the customer somewhere outside it; and the
+ * login check stops the whole thing passing vacuously because the session was
+ * dropped and every assertion became trivially true.
  */
 async function expectDealHidden(page: Page, url: string, customerName: string) {
   await page.goto(url);
@@ -77,7 +80,8 @@ async function expectDealHidden(page: Page, url: string, customerName: string) {
 
   const main = page.locator("main");
   const body = (await main.count()) ? ((await main.innerText()) || "").trim() : "";
-  expect(body, `${url} rendered deal content`).toBe("");
+  const refused = body === "" || body.startsWith("Not found");
+  expect(refused, `${url} rendered deal content: ${body.slice(0, 160)}`).toBe(true);
 
   await expect(
     page.getByText(customerName),

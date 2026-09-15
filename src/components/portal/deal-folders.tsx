@@ -19,7 +19,13 @@ import {
 import { GROUP_KIND, type PhotoGroup } from "@/lib/photo-groups";
 import type { CallGroup } from "@/lib/call-groups";
 import type { PhotoChecklist } from "@/server/modules/photos/queries";
-import { uploadFileAction, deleteFileAction, moveFileAction } from "@/server/modules/files/actions";
+import {
+  uploadFileAction,
+  deleteFileAction,
+  moveFileAction,
+  setSignedLenderContractAction,
+} from "@/server/modules/files/actions";
+import { CONTRACT_FOLDER_KEY, CONTRACT_MIME_TYPE, SIGNED_LENDER_CONTRACT } from "@/lib/contract-signed";
 import { PhotoGroupBody, type GroupPhoto } from "./deal-photos";
 import { DealCallRecordings, type CallRecording } from "./deal-call-recordings";
 import {
@@ -33,6 +39,10 @@ export type FolderFile = {
   id: string;
   name: string;
   kind: string;
+  /** Only a PDF can be marked as the lender's signed contract. */
+  mimeType?: string | null;
+  /** See FileDocumentType: set when somebody marked what this document is. */
+  documentType?: string | null;
   category: string | null;
 };
 
@@ -69,6 +79,7 @@ export function DealFolders({
   dropboxCounts = {},
   canUpload,
   canDelete,
+  canClassifyContract = false,
 }: {
   leadId: string;
   projectId?: string | null;
@@ -85,6 +96,8 @@ export function DealFolders({
   dropboxCounts?: Record<string, number>;
   canUpload: boolean;
   canDelete: boolean;
+  /** File:update — may mark a Contract-folder PDF as the lender's signed contract. */
+  canClassifyContract?: boolean;
 }) {
   const folders = foldersFor(vertical);
   const [openKey, setOpenKey] = React.useState<string | null>(null);
@@ -131,6 +144,7 @@ export function DealFolders({
           checklists={checklists}
           canUpload={canUpload}
           canDelete={canDelete}
+          canClassifyContract={canClassifyContract && vertical === "solar"}
           onBack={() => setOpenKey(null)}
         />
       </div>
@@ -196,6 +210,7 @@ function OpenFolder({
   checklists,
   canUpload,
   canDelete,
+  canClassifyContract,
   onBack,
 }: {
   folder: DealFolder;
@@ -208,6 +223,7 @@ function OpenFolder({
   checklists: PhotoChecklist[];
   canUpload: boolean;
   canDelete: boolean;
+  canClassifyContract: boolean;
   onBack: () => void;
 }) {
   const Icon = folder.icon;
@@ -260,6 +276,7 @@ function OpenFolder({
           leadId={leadId}
           projectId={projectId}
           canUpload={canUpload}
+          canMarkContract={canClassifyContract && folder.key === CONTRACT_FOLDER_KEY}
           canDelete={canDelete}
         />
       )}
@@ -277,6 +294,7 @@ function GenericFolder({
   projectId,
   canUpload,
   canDelete,
+  canMarkContract = false,
 }: {
   folderKey: string;
   files: FolderFile[];
@@ -286,6 +304,8 @@ function GenericFolder({
   projectId?: string | null;
   canUpload: boolean;
   canDelete: boolean;
+  /** A solar deal's Contract folder, opened by somebody holding File:update. */
+  canMarkContract?: boolean;
 }) {
   const router = useRouter();
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -320,6 +340,20 @@ function GenericFolder({
     const res = await deleteFileAction(id);
     if (res.ok) {
       toast.success("Deleted");
+      router.refresh();
+    } else {
+      toast.error(res.error);
+    }
+  }
+
+  // The lender's signed contract is a PDF somebody MARKS as such — being in
+  // this folder is not enough. See setSignedLenderContractAction.
+  async function markContract(id: string, signed: boolean) {
+    setBusy(true);
+    const res = await setSignedLenderContractAction({ fileId: id, signed });
+    setBusy(false);
+    if (res.ok) {
+      toast.success(signed ? "Marked as the signed contract" : "No longer marked as the signed contract");
       router.refresh();
     } else {
       toast.error(res.error);
@@ -449,6 +483,21 @@ function GenericFolder({
                   label="Download"
                   className={DOWNLOAD_BUTTON_CLASS}
                 />
+                {folderKey === CONTRACT_FOLDER_KEY && f.documentType === SIGNED_LENDER_CONTRACT && (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                    Signed contract
+                  </span>
+                )}
+                {canMarkContract && f.mimeType === CONTRACT_MIME_TYPE && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void markContract(f.id, f.documentType !== SIGNED_LENDER_CONTRACT)}
+                  >
+                    {f.documentType === SIGNED_LENDER_CONTRACT ? "Unmark" : "Mark as signed contract"}
+                  </Button>
+                )}
                 {canDelete && <MoveControl file={f} folders={folders} currentKey={folderKey} />}
                 {canDelete && (
                   <button onClick={() => remove(f.id)} aria-label={`Delete ${f.name}`}>

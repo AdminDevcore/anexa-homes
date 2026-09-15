@@ -44,7 +44,24 @@ export async function getPayStubData(companyId: string, runId: string, userId: s
       },
     },
   });
-  if (!run || run.items.length === 0) return null;
+  /**
+   * A PERSON CAN BE PAID WITHOUT A COMMISSION LINE.
+   *
+   * This returned null whenever `items` was empty, so a rep whose commission
+   * was fully clawed back, or who is owed only a bonus, or who carries only a
+   * chargeback recovery this period, got no pay stub at all — no PDF, no entry
+   * in "email all stubs", no receipt attached to their ledger line. The money
+   * still moved; the paperwork did not exist.
+   *
+   * The honest test is "does this run owe this person anything", which is
+   * items OR adjustments.
+   */
+  if (!run) return null;
+  const hasAdjustments =
+    (await prisma.payrollAdjustment.count({
+      where: { companyId, payrollRunId: runId, userId },
+    })) > 0;
+  if (run.items.length === 0 && !hasAdjustments) return null;
   const employee = await prisma.user.findFirst({
     where: { id: userId, companyId },
     select: { firstName: true, lastName: true, email: true, title: true },
@@ -72,8 +89,12 @@ export async function getPayStubData(companyId: string, runId: string, userId: s
 }
 
 export async function getRunStubList(companyId: string, runId: string): Promise<NonNullable<PayStubData>[]> {
-  const items = await prisma.payrollItem.findMany({ where: { payrollRun: { id: runId, companyId } }, select: { userId: true } });
-  const userIds = [...new Set(items.map((i) => i.userId))];
+  // Everyone the run owes, by either kind of line — see `getPayStubData`.
+  const [items, adjustments] = await Promise.all([
+    prisma.payrollItem.findMany({ where: { payrollRun: { id: runId, companyId } }, select: { userId: true } }),
+    prisma.payrollAdjustment.findMany({ where: { companyId, payrollRunId: runId }, select: { userId: true } }),
+  ]);
+  const userIds = [...new Set([...items.map((i) => i.userId), ...adjustments.map((a) => a.userId)])];
   const out: NonNullable<PayStubData>[] = [];
   for (const uid of userIds) {
     const d = await getPayStubData(companyId, runId, uid);

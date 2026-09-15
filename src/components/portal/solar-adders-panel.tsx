@@ -54,7 +54,7 @@ export type AdderOption = {
   /** This adder changes what the house uses, so the line takes a kWh figure. */
   consumptionAdjustable: boolean;
   /**
-   * Added to the loan on top of a fixed-price partner's $/W, at its own price.
+   * Added on top of a fixed-price partner's $/W, grossed up by the dealer fee like any adder.
    * Shown at PICK time as well as on the line, because it is the difference
    * between a $7,000 roof the customer borrows and a $7,000 roof that comes out
    * of the company's margin.
@@ -296,7 +296,7 @@ export function SolarAddersPanel({
               {l.financedOnTop && (
                 <span
                   className="rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium"
-                  title="Financed on top of the lender's fixed or maximum $/W, at its own price, instead of coming out of the system price."
+                  title="Financed on top of the lender's fixed or maximum $/W instead of coming out of the system price. The dealer fee still applies to it."
                 >
                   on top
                 </span>
@@ -530,8 +530,8 @@ export function SolarAddersPanel({
                     }
                   />
                   <span>
-                    Financed on top of the lender&rsquo;s fixed price — a roof. Added to the
-                    loan at its own price instead of coming out of the system price.
+                    Financed on top of the lender&rsquo;s fixed price — a roof. Added above the
+                    rate instead of coming out of the system price; the dealer fee still applies.
                   </span>
                 </label>
               )}

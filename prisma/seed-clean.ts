@@ -49,7 +49,7 @@ const SOLAR_STAGES = [
   { key: "new_appt", name: "New Appointment", color: "#FBBF24" },
   { key: "site_survey", name: "Site Survey", color: "#F59E0B" },
   { key: "proposal_sent", name: "Proposal Sent", color: "#F97316" },
-  { key: "contract_signed", name: "Contract Signed", color: "#FB923C", countsAsSold: true },
+  { key: "contract_signed", name: "Contract Signed", color: "#FB923C", countsAsSold: true, milestone: "contract_signed" as const },
   { key: "permitting", name: "Permitting", color: "#A78BFA" },
   { key: "install_scheduled", name: "Install Scheduled", color: "#60A5FA" },
   { key: "installed", name: "Installed", color: "#34D399" },
@@ -204,6 +204,7 @@ async function main() {
           pipelineId: p.id, key: s.key, name: s.name, color: s.color, position: i,
           isWon: (s as { isWon?: boolean }).isWon ?? false,
           countsAsSold: (s as { countsAsSold?: boolean }).countsAsSold ?? false,
+          milestone: (s as { milestone?: "contract_signed" }).milestone ?? null,
         },
       });
     }

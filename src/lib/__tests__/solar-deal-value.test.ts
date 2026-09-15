@@ -4,6 +4,7 @@ import {
   snapshotPriceSource,
   solarDealValue,
   solarLeadValueCents,
+  solarContractRevenueCents,
 } from "@/lib/solar-deal-value";
 import type { SnapshotFinancing } from "@/lib/solar-proposal";
 
@@ -151,5 +152,105 @@ describe("what gets stamped onto Lead.value", () => {
         rateMillsPerKwh: 145,
       })
     ).toBe(0);
+  });
+});
+
+describe("contract revenue is the gross, never the after-credit net", () => {
+  /**
+   * THE REGRESSION THIS FILE EXISTS FOR.
+   *
+   * A $56,000 solar contract was reported as $39,200 of revenue — exactly
+   * $56,000 × 0.70 — because every revenue surface read `Project.contractValue`,
+   * which on solar had been stamped from `Lead.value`, which is the household's
+   * net after the 30% federal credit.
+   *
+   * A tax credit is claimed by the homeowner on their own return. It is not a
+   * discount the company gave and it must never reduce booked revenue.
+   */
+  const CONTRACT = 5_600_000; // $56,000
+  const NET_AFTER_30PCT_ITC = 3_920_000; // $39,200
+
+  it("a $56,000 contract is $56,000 of revenue even when a 30% credit is quoted", () => {
+    const src = {
+      product: "loan" as const,
+      contractPriceCents: CONTRACT,
+      netAfterCreditsCents: NET_AFTER_30PCT_ITC,
+      monthlyPaymentCents: null,
+      rateMillsPerKwh: null,
+    };
+    expect(solarContractRevenueCents(src)).toBe(CONTRACT);
+    // …and the two answers stay distinct rather than one overwriting the other.
+    expect(solarLeadValueCents(src)).toBe(NET_AFTER_30PCT_ITC);
+    expect(solarContractRevenueCents(src)).not.toBe(solarLeadValueCents(src));
+  });
+
+  it("is unmoved by how many credits the deal claims", () => {
+    const base = {
+      product: "loan" as const,
+      contractPriceCents: CONTRACT,
+      monthlyPaymentCents: null,
+      rateMillsPerKwh: null,
+    };
+    // ITC only, ITC + both bonuses (50%), and nothing claimed at all.
+    expect(solarContractRevenueCents({ ...base, netAfterCreditsCents: 3_920_000 })).toBe(CONTRACT);
+    expect(solarContractRevenueCents({ ...base, netAfterCreditsCents: 2_800_000 })).toBe(CONTRACT);
+    expect(solarContractRevenueCents({ ...base, netAfterCreditsCents: null })).toBe(CONTRACT);
+  });
+
+  it("a cash deal books its contract exactly like a financed one", () => {
+    const cash = {
+      product: "cash" as const,
+      contractPriceCents: CONTRACT,
+      netAfterCreditsCents: NET_AFTER_30PCT_ITC,
+      monthlyPaymentCents: null,
+      rateMillsPerKwh: null,
+    };
+    expect(solarContractRevenueCents(cash)).toBe(CONTRACT);
+  });
+
+  it("books nothing on a lease or a PPA — the household buys no system", () => {
+    expect(
+      solarContractRevenueCents({
+        product: "lease",
+        contractPriceCents: null,
+        netAfterCreditsCents: null,
+        monthlyPaymentCents: 18_500,
+        rateMillsPerKwh: null,
+      })
+    ).toBe(0);
+    expect(
+      solarContractRevenueCents({
+        product: "ppa",
+        contractPriceCents: null,
+        netAfterCreditsCents: null,
+        monthlyPaymentCents: null,
+        rateMillsPerKwh: 145,
+      })
+    ).toBe(0);
+  });
+
+  it("an unpriced deal books nothing rather than a sale of zero", () => {
+    expect(solarContractRevenueCents(null)).toBe(0);
+    expect(solarContractRevenueCents(undefined)).toBe(0);
+    expect(
+      solarContractRevenueCents({
+        product: "loan",
+        contractPriceCents: 0,
+        netAfterCreditsCents: null,
+        monthlyPaymentCents: null,
+        rateMillsPerKwh: null,
+      })
+    ).toBe(0);
+  });
+
+  it("reads the contract straight off a frozen snapshot", () => {
+    const financing = {
+      product: "loan",
+      contractPriceCents: CONTRACT,
+      creditLadder: { netCostCents: NET_AFTER_30PCT_ITC },
+      monthlyPaymentCents: null,
+      rateMillsPerKwh: null,
+    } as unknown as SnapshotFinancing;
+    expect(solarContractRevenueCents(snapshotPriceSource(financing))).toBe(CONTRACT);
   });
 });

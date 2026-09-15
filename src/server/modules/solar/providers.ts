@@ -46,6 +46,7 @@ export async function listSolarProviders(
       buyback: true, buybackRateMills: true,
       touPeakRateMills: true, touOffPeakRateMills: true, touPeakWindow: true,
       vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
+      vppMaxBatteries: true,
       vppFinanceProducts: true,
       notes: true,
       /**

@@ -14,6 +14,7 @@ import {
   SaveBar,
   TextAreaField,
   TextField,
+  ToggleRow,
 } from "@/components/portal/settings-kit";
 import { updateSolarSettingsAction } from "@/server/modules/solar/actions";
 import { wholeHomeBackup } from "@/lib/solar-storage";
@@ -59,6 +60,8 @@ function seedFrom(settings: SolarSettingsView) {
     backupOutageDrawFactor: String(settings.backupOutageDrawFactor),
     minOffsetPct: String(settings.minOffsetPct),
     maxOffsetPct: String(settings.maxOffsetPct),
+    // Only a zero can be "no minimum"; a figure above zero is the decision.
+    minOffsetNone: settings.minOffsetConfigured === true && settings.minOffsetPct <= 0,
     creditItcPct: String(settings.creditRates.itcPct),
     creditEnergyCommunityPct: String(settings.creditRates.energyCommunityPct),
     creditDomesticContentPct: String(settings.creditRates.domesticContentPct),
@@ -173,6 +176,7 @@ export function SolarSettingsForm({
             : Number(f.backupOutageDrawFactor),
         minOffsetPct: Number(f.minOffsetPct),
         maxOffsetPct: Number(f.maxOffsetPct),
+        minOffsetNone: Number(f.minOffsetPct) <= 0 ? f.minOffsetNone : false,
         // Blank is zero, and zero means the bonus is not claimed at all — the
         // row is dropped from the customer's page rather than printed as "0%".
         creditItcPct: f.creditItcPct.trim() === "" ? 0 : Number(f.creditItcPct),
@@ -409,6 +413,26 @@ export function SolarSettingsForm({
                 both and every proposal on this workspace would be blocked from
                 generating.
               </Caution>
+            )}
+            {/* Zero is either a decision or nobody having looked, and only the
+                admin can say which. Undecided is warned on every deal but never
+                blocks; a minimum above zero blocks generation below it. */}
+            {Number(f.minOffsetPct) <= 0 && (
+              <>
+                <ToggleRow
+                  label="No minimum offset"
+                  description="Confirms this workspace deliberately allows a system of any size. Leave it off and set a minimum above to stop undersized systems being quoted."
+                  checked={f.minOffsetNone}
+                  onChange={(v) => setF((p) => ({ ...p, minOffsetNone: v }))}
+                />
+                {!f.minOffsetNone && (
+                  <Caution>
+                    No minimum offset has been set up. Proposals still generate,
+                    but every deal carries a warning that an undersized system
+                    cannot be caught. Set a minimum, or confirm there is none.
+                  </Caution>
+                )}
+              </>
             )}
             {/* THE MIN/MAX $/W BAND USED TO BE THE OTHER HALF OF THIS ROW.
                 Removed 2026-09-02. What a deal may price at is a property of

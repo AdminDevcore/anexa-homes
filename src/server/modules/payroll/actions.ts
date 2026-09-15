@@ -413,14 +413,24 @@ export async function emailPayStubAction(input: z.infer<typeof emailStubSchema>)
   const { brand, fromName } = await emailBrandFor(me.companyId);
 
   const pdf = await buildPayStubPdf(data);
-  const gross = data.items.reduce((s, i) => s + i.amount, 0);
+  /**
+   * THE NET, off the same breakdown the PDF prints.
+   *
+   * This line summed `data.items` — the commission lines alone — and called the
+   * answer "Net pay". A rep with a $1,000 trenching deduction was emailed
+   * "Net pay: $10,000" over an attachment that correctly said $9,000, and a
+   * bank transfer that agreed with the attachment. `payStubBreakdown` already
+   * folds in bonuses, deductions and chargeback recoveries; `getPayStubData`
+   * already returns it.
+   */
+  const netPay = data.breakdown.finalCents;
   const tpl = brandedEmailTemplate({
     brand,
     subject: `Your pay stub — ${data.run.label}`,
     heading: "Your pay stub is ready",
     paragraphs: [
       `Hi ${data.employee.firstName},`,
-      `Your pay stub for ${data.run.label} is attached as a PDF. Net pay: ${formatCents(gross)}.`,
+      `Your pay stub for ${data.run.label} is attached as a PDF. Net pay: ${formatCents(netPay)}.`,
     ],
     note: "This pay stub is confidential — please keep it for your records.",
   });
@@ -452,14 +462,15 @@ export async function emailAllPayStubsAction(runId: string) {
     }
     try {
       const pdf = await buildPayStubPdf(data);
-      const gross = data.items.reduce((s, i) => s + i.amount, 0);
+      // The net, not the commission subtotal — see `emailPayStubAction`.
+      const netPay = data.breakdown.finalCents;
       const tpl = brandedEmailTemplate({
         brand,
         subject: `Your pay stub — ${data.run.label}`,
         heading: "Your pay stub is ready",
         paragraphs: [
           `Hi ${data.employee.firstName},`,
-          `Your pay stub for ${data.run.label} is attached as a PDF. Net pay: ${formatCents(gross)}.`,
+          `Your pay stub for ${data.run.label} is attached as a PDF. Net pay: ${formatCents(netPay)}.`,
         ],
         note: "This pay stub is confidential — please keep it for your records.",
       });

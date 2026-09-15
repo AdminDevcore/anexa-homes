@@ -226,6 +226,7 @@ async function main() {
           position: i,
           isWon: s.isWon ?? false,
           countsAsSold: s.countsAsSold ?? false,
+          milestone: s.milestone ?? null,
           // Solar stages carry their own SLA model: internally-owned stages get
           // a hard deadline that escalates to the owning department role;
           // externally-blocked stages get a follow-up cadence and NO deadline,

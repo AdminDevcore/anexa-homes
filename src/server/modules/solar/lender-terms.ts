@@ -35,17 +35,17 @@ export const LENDER_TERMS_SELECT = {
   // partner's $5.50 is the gross on one product and the base on another.
   ppwBasis: true,
   batteryPriceBasis: true,
-  lender: { select: { maxFinalPpwCents: true, finalPpwMode: true, batteryInsideFee: true } },
+  lender: { select: { maxFinalPpwCents: true, finalPpwMode: true } },
 } as const;
 
 /** What that select comes back as. */
 export type LenderTermsRow = Omit<
   LenderProductTerms,
-  "maxFinalPpwCents" | "finalPpwMode" | "ppwBasis" | "batteryPriceBasis" | "batteryInsideFee"
+  "maxFinalPpwCents" | "finalPpwMode" | "ppwBasis" | "batteryPriceBasis"
 > & {
   ppwBasis: PriceBasis;
   batteryPriceBasis: PriceBasis;
-  lender: { maxFinalPpwCents: number | null; finalPpwMode: FinalPpwMode; batteryInsideFee: boolean };
+  lender: { maxFinalPpwCents: number | null; finalPpwMode: FinalPpwMode };
 };
 
 /** Flatten the partner's price rule onto the programme's own terms. */
@@ -58,6 +58,5 @@ export function toLenderProductTerms(row: LenderTermsRow | null): LenderProductT
     ...terms,
     maxFinalPpwCents: lender.maxFinalPpwCents,
     finalPpwMode: lender.finalPpwMode,
-    batteryInsideFee: lender.batteryInsideFee,
   };
 }

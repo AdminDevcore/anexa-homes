@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { getSaleLine } from "@/server/modules/pipeline/sale-line";
+import { solarContractByLead } from "./solar-contract";
 import type { Prisma } from "@prisma/client";
 import type { Period, RenderableReport, ResolvedScope } from "./builders";
 
@@ -26,11 +27,23 @@ export async function buildRepScorecardReport(user: ReportUser, period: Period, 
   const [leads, projects, comms, openTasks] = await Promise.all([
     prisma.lead.findMany({
       where: { ...leadWhere, createdAt: inPeriod },
-      select: { stageId: true, assignedRep: { select: { id: true, firstName: true, lastName: true } } },
+      // `id` and `vertical` are the sold-but-not-yet-in-production case: a
+      // solar deal past the sale line with no Project has no contract for the
+      // projects query below to sum. See `solarContractByLead`.
+      select: {
+        id: true,
+        vertical: true,
+        stageId: true,
+        assignedRep: { select: { id: true, firstName: true, lastName: true } },
+      },
     }),
     prisma.project.findMany({
       where: { ...projectWhere, createdAt: inPeriod },
-      select: { contractValue: true, lead: { select: { assignedRep: { select: { id: true, firstName: true, lastName: true } } } } },
+      select: {
+        leadId: true,
+        contractValue: true,
+        lead: { select: { assignedRep: { select: { id: true, firstName: true, lastName: true } } } },
+      },
     }),
     prisma.commission.findMany({
       where: { companyId: user.companyId, createdAt: inPeriod, ...(userScope ? { userId: userScope } : {}) },
@@ -51,11 +64,35 @@ export async function buildRepScorecardReport(user: ReportUser, period: Period, 
     return r;
   };
 
+  /**
+   * The solar deals that are SOLD but have no job yet.
+   *
+   * Only those: a deal with a Project is answered by the Project's own column
+   * below, which is stamped from the same proposal, and a deal that has not
+   * reached the sale line has no revenue to book at all. Looking up only the
+   * gap keeps this to one extra query on the rows that need it.
+   */
+  const projectLeadIds = new Set(projects.map((p) => p.leadId));
+  const soldSolarWithoutJob = leads
+    .filter(
+      (l) =>
+        l.vertical === "solar" &&
+        !!l.stageId &&
+        saleLine.stageIds.has(l.stageId) &&
+        !projectLeadIds.has(l.id)
+    )
+    .map((l) => l.id);
+  const solarContracts = await solarContractByLead(user.companyId, soldSolarWithoutJob);
+
   for (const l of leads) {
     if (!l.assignedRep) continue;
     const r = ensure(l.assignedRep.id, nm(l.assignedRep));
     r.appts++;
     if (l.stageId && saleLine.stageIds.has(l.stageId)) r.won++;
+    // Sold, no job yet — book the contract so a row cannot read "won 1, $0".
+    // `jobs` deliberately does NOT move: nothing is in production.
+    const pending = solarContracts.get(l.id);
+    if (pending) r.revenue += pending;
   }
   for (const p of projects) {
     const ar = p.lead?.assignedRep;

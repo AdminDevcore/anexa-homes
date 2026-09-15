@@ -29,6 +29,7 @@ import { solarEquipmentLabel } from "@/lib/solar-equipment-label";
 import { autoBatteryCount, autoBatteryBasisKwh } from "@/lib/solar-storage";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
+import { activeUnlock, dealSignedAt } from "@/server/modules/solar/signed-lock";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,27 @@ export default async function SolarProposalBuilderPage({
   // builder rather than staring at an empty solar design form.
   if (lead.vertical !== "solar") redirect(`/portal/leads/${id}/presentation`);
 
+  /**
+   * IS THIS CONTRACT SIGNED, and may this viewer reopen it?
+   *
+   * Read before anything is rendered because it decides whether the whole
+   * builder is editable. `canOverride` is super admin only, deliberately — an
+   * admin runs the sales floor; rewriting a contract a household signed is a
+   * narrower authority than that.
+   */
+  const signedAt = await dealSignedAt(user.companyId, lead.id);
+  const liveUnlock = signedAt ? await activeUnlock(user.companyId, lead.id) : null;
+  const contractLock = {
+    signedAt: signedAt?.toISOString() ?? null,
+    canOverride: user.role === "super_admin",
+    unlock: liveUnlock
+      ? { reason: liveUnlock.reason, expiresAt: liveUnlock.expiresAt.toISOString() }
+      : null,
+  };
+  // Locked = signed and not currently reopened. A super admin with no live
+  // unlock is locked too: holding the authority is not the same as using it.
+  const contractLocked = !!signedAt && !liveUnlock;
+
   // The design is read FIRST: it carries the lender this system is being built
   // for, which is what the Financing step seeds its picker from.
   const design = await prisma.solarDesign.findUnique({
@@ -129,8 +151,6 @@ export default async function SolarProposalBuilderPage({
           minBasePricePerBatteryCents: true,
           finalBatteryPriceMode: true,
           finalPpwMode: true,
-          // Whether this partner takes its dealer fee on the battery.
-          batteryInsideFee: true,
           // How this partner's closing credit is arrived at — see
           // `solar-sign-today`. Every column of the shelf resolves its own.
           signTodayMode: true,
@@ -448,7 +468,16 @@ export default async function SolarProposalBuilderPage({
             ? step
             : "customer"
         }
-        canEditDeal={can(user, "update", "Lead")}
+        /**
+         * A SIGNED CONTRACT IS READ-ONLY, and the screen says so rather than
+         * offering controls the server will refuse. `canEditDeal` threads to
+         * every panel already, so gating it here disables the price, the
+         * design, the storage, the adders and the lender in one place. The
+         * banner beside them explains why — and, for a super admin, is the door
+         * through. See `signed-lock.ts`.
+         */
+        canEditDeal={can(user, "update", "Lead") && !contractLocked}
+        contractLock={contractLock}
         canCreateProposal={can(user, "create", "Proposal")}
         design={
           design && {
@@ -471,7 +500,6 @@ export default async function SolarProposalBuilderPage({
           maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
           finalBatteryPriceMode: l.finalBatteryPriceMode,
-          batteryInsideFee: l.batteryInsideFee,
           signTodayMode: l.signTodayMode,
           signTodayFixedCents: l.signTodayFixedCents,
           signTodayCapPpwCents: l.signTodayCapPpwCents,
@@ -512,8 +540,10 @@ export default async function SolarProposalBuilderPage({
         // one is created holding, so that is what an unsaved deal shows.
         creditClaims={{
           itc: finance?.claimItc ?? true,
-          energyCommunity: finance?.claimEnergyCommunity ?? true,
-          domesticContent: finance?.claimDomesticContent ?? true,
+          // Both bonuses start OFF and are ticked case by case — the column
+          // defaults say the same. See SolarFinance.claimEnergyCommunity.
+          energyCommunity: finance?.claimEnergyCommunity ?? false,
+          domesticContent: finance?.claimDomesticContent ?? false,
         }}
         // Nothing typed on a deal with no financing row yet, which is the
         // ordinary case for the credit as well: it is money a rep decides to

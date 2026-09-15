@@ -218,6 +218,7 @@ export function SolarSystemMoneyPanel({
   estimate,
   payroll,
   canEdit,
+  canCertifyFunding,
 }: {
   leadId: string;
   money: SystemMoney | null;
@@ -229,6 +230,8 @@ export function SolarSystemMoneyPanel({
   /** What payroll generated for this deal. Null until it has, or if unreadable. */
   payroll: CommissionPayrollLine | null;
   canEdit: boolean;
+  /** Whether this viewer may record that the lender funded the deal. */
+  canCertifyFunding: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -372,6 +375,7 @@ export function SolarSystemMoneyPanel({
           )}
           <Block label="Rep commission">
             <RepCommission
+              canCertifyFunding={canCertifyFunding}
               leadId={leadId}
               row={commission}
               estimate={estimate}
@@ -604,12 +608,14 @@ function RepCommission({
   estimate,
   payroll,
   canEdit,
+  canCertifyFunding,
 }: {
   leadId: string;
   row: CommissionLite | null;
   estimate: CommissionEstimate | null;
   payroll: CommissionPayrollLine | null;
   canEdit: boolean;
+  canCertifyFunding: boolean;
 }) {
   const [editing, setEditing] = React.useState(false);
   const est = estimate?.state === "estimate" ? estimate : null;
@@ -620,6 +626,7 @@ function RepCommission({
         leadId={leadId}
         existing={row}
         estimateCents={est?.netCents ?? null}
+        canCertifyFunding={canCertifyFunding}
         onDone={() => setEditing(false)}
       />
     );
@@ -866,12 +873,21 @@ function CommissionForm({
   leadId,
   existing,
   estimateCents,
+  canCertifyFunding,
   onDone,
 }: {
   leadId: string;
   existing: CommissionLite | null;
   /** The engine's figure, used to fill an empty box. Null when it has none. */
   estimateCents: number | null;
+  /**
+   * Whether this viewer may move the funding tick.
+   *
+   * The real control is in the server action — see `upsertSolarCommissionAction`
+   * — and this is only here so a rep is not offered a checkbox that will refuse
+   * them. Hiding it is not the enforcement.
+   */
+  canCertifyFunding: boolean;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -973,16 +989,27 @@ function CommissionForm({
           type="checkbox"
           aria-label="Funding received"
           checked={paid}
+          disabled={!canCertifyFunding}
           onChange={(e) => setPaid(e.target.checked)}
-          className="mt-0.5 size-4 shrink-0"
+          className="mt-0.5 size-4 shrink-0 disabled:opacity-50"
         />
-        <span>
+        <span className={canCertifyFunding ? undefined : "opacity-60"}>
           Funding received
           <span className="text-muted-foreground">
             {" — releases this deal to payroll, which cannot generate the rep's commission until " +
               "it is ticked. It is not the rep's payment: that is marked on the Commissions page. " +
               "Stamps today's date; unticking clears it."}
           </span>
+          {/*
+            SAID OUT LOUD RATHER THAN LEFT AS A DEAD TICK. A control that does
+            nothing and does not say why reads as a bug; this reads as a rule.
+            The server refuses it regardless — see upsertSolarCommissionAction.
+          */}
+          {!canCertifyFunding && (
+            <span className="mt-0.5 block font-medium text-muted-foreground">
+              Only an administrator or accounting can confirm funding.
+            </span>
+          )}
         </span>
       </label>
       <div className="flex gap-2">

@@ -38,7 +38,11 @@
  * DATABASE_URL must point at the environment you mean.
  */
 import { PrismaClient } from "@prisma/client";
-import { solarLeadValueCents, type SolarPriceSource } from "../src/lib/solar-deal-value";
+import {
+  solarContractRevenueCents,
+  solarLeadValueCents,
+  type SolarPriceSource,
+} from "../src/lib/solar-deal-value";
 import { REPORTED_PROPOSAL_ORDER } from "../src/lib/solar-system-of-record";
 
 /**
@@ -90,7 +94,15 @@ function financingOf(snapshot: unknown): SolarPriceSource | null {
 async function main() {
   const leads = await prisma.lead.findMany({
     where: { vertical: "solar" },
-    select: { id: true, firstName: true, lastName: true, value: true },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      value: true,
+      // The job, where production has started. Its contract is the SECOND
+      // denormalised total and it holds the gross, not the net.
+      project: { select: { id: true, contractValue: true } },
+    },
     orderBy: { createdAt: "asc" },
   });
 
@@ -114,17 +126,44 @@ async function main() {
     }
     quoted++;
 
-    const value = solarLeadValueCents(financingOf(proposal.snapshot));
+    const price = financingOf(proposal.snapshot);
+    const value = solarLeadValueCents(price);
+    /**
+     * THE CONTRACT, for the job. A different figure from `value` above and
+     * deliberately so: `Lead.value` is the household's net after the federal
+     * credits, and `Project.contractValue` is what the contract is written
+     * for. Stamping the net onto the job is what booked a $56,000 solar
+     * contract as $39,200 of revenue on every Project-based report.
+     */
+    const contract = solarContractRevenueCents(price);
     const name = `${lead.firstName} ${lead.lastName}`.trim() || lead.id;
-    if (value === lead.value) continue;
+
+    const valueMoved = value !== lead.value;
+    const contractMoved =
+      !!lead.project && contract > 0 && contract !== lead.project.contractValue;
+    if (!valueMoved && !contractMoved) continue;
 
     changed++;
-    console.log(
-      `${apply ? "SET " : "WOULD SET"}  ${name.padEnd(28)} v${proposal.version}  ` +
-        `${usd(lead.value)} → ${usd(value)}`
-    );
+    if (valueMoved) {
+      console.log(
+        `${apply ? "SET " : "WOULD SET"}  ${name.padEnd(28)} v${proposal.version}  ` +
+          `value ${usd(lead.value)} → ${usd(value)}`
+      );
+    }
+    if (contractMoved) {
+      console.log(
+        `${apply ? "SET " : "WOULD SET"}  ${name.padEnd(28)} v${proposal.version}  ` +
+          `contract ${usd(lead.project!.contractValue)} → ${usd(contract)}`
+      );
+    }
     if (apply) {
-      await prisma.lead.update({ where: { id: lead.id }, data: { value } });
+      if (valueMoved) await prisma.lead.update({ where: { id: lead.id }, data: { value } });
+      if (contractMoved) {
+        await prisma.project.update({
+          where: { id: lead.project!.id },
+          data: { contractValue: contract },
+        });
+      }
     }
   }
 

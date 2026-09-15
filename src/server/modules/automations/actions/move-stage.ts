@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
+import { contractSignedMoveError } from "@/server/modules/pipeline/contract-signed";
 import type { ActionContext, AutomationActionModule, StepResult } from "../types";
 
 const schema = z.object({ stageId: z.string().min(1) });
@@ -41,12 +42,22 @@ export const moveStageAction: AutomationActionModule = {
 
     const lead = await prisma.lead.findFirst({
       where: { id: ctx.leadId, companyId: ctx.companyId },
-      select: { id: true, stageId: true },
+      select: { id: true, stageId: true, vertical: true },
     });
     if (!lead) return fail("Deal not found.");
     if (lead.stageId === stage.id) {
       return { type: "move_stage", ok: true, detail: `Already in ${stage.name}.` };
     }
+
+    // The same rule a person moving the card is held to: a rule firing on a
+    // signature must not carry a deal over Contract Signed before the contract
+    // is on file either.
+    const contractError = await contractSignedMoveError({
+      companyId: ctx.companyId,
+      lead: { id: lead.id, vertical: lead.vertical, stageId: lead.stageId },
+      targetStageId: stage.id,
+    });
+    if (contractError) return fail(contractError);
 
     await prisma.lead.update({ where: { id: lead.id }, data: { stageId: stage.id } });
     await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage, via: "automation" });

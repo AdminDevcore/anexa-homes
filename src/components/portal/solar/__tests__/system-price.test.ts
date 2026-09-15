@@ -54,11 +54,12 @@ describe("SystemPriceCard — the dealer fee and the final price", () => {
     const { html, read, printed } = card({ quotedFeePct: 65 });
 
     // $5.50/W × 12,760 W = $70,180 sticker, of which Amos keeps 65% ($45,617)
-    // and the company keeps $24,563 — plus the $72,000 of storage on both sides.
+    // and the company keeps $24,563 — plus the $72,000 of storage, which the fee
+    // grosses up to $205,714 on the final price.
     expect(html).toContain("Dealer fee · 65%");
     expect(read("gross-total")).toBe(96563);
-    expect(read("fee-total")).toBe(45617);
-    expect(read("final-total")).toBe(142180);
+    expect(read("fee-total")).toBe(179331);
+    expect(read("final-total")).toBe(275894);
     expect(read("gross-total")! + read("fee-total")!).toBe(read("final-total"));
 
     // The same money the pricing engine charges at the capped sticker.
@@ -130,7 +131,7 @@ describe("SystemPriceCard — the dealer fee and the final price", () => {
   });
 });
 
-describe("SystemPriceCard — a partner that takes its fee on the battery", () => {
+describe("SystemPriceCard — the dealer fee on the battery", () => {
   it("puts the battery inside the dealer fee, and says so", () => {
     const { html, read } = card({
       basePpwCents: 200,
@@ -138,7 +139,6 @@ describe("SystemPriceCard — a partner that takes its fee on the battery", () =
       quotedMaxFinalPpwCents: null,
       quotedMinBasePpwCents: null,
       quotedLabel: "Credit Human · 20 yr",
-      quotedBatteryInsideFee: true,
     });
 
     // Gross $97,520 = $25,520 base + $72,000 of batteries. The fee is 25% of the
@@ -150,20 +150,11 @@ describe("SystemPriceCard — a partner that takes its fee on the battery", () =
     expect(read("gross-total")! + read("fee-total")!).toBe(read("final-total"));
     expect(html).toContain("adders and battery included");
     expect(html).toContain("$96,000 for the Battery × 2: its $72,000 catalogue price");
+    expect(html).not.toContain("added on top");
   });
 
-  it("leaves the battery on top when the partner does not take its fee on it", () => {
-    const { html, read } = card({
-      basePpwCents: 200,
-      quotedFeePct: 25,
-      quotedMaxFinalPpwCents: null,
-      quotedMinBasePpwCents: null,
-      quotedLabel: "Credit Human · 20 yr",
-    });
-
-    expect(read("fee-total")).toBe(8549);
-    expect(read("final-total")).toBe(106069);
-    expect(html).toContain("adders included");
-    expect(html).toContain("$72,000 for the Battery × 2, priced from the catalogue and added on top");
+  it("does not claim a fee on the battery on a 0% programme", () => {
+    const { html } = card({});
+    expect(html).toContain("$72,000 for the Battery × 2 at its catalogue price.");
   });
 });

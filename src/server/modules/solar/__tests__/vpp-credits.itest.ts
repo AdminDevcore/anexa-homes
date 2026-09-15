@@ -211,3 +211,67 @@ describe("the programme's conditions gate the money", () => {
     expect(credits).toEqual([]);
   });
 });
+
+/**
+ * THE CEILING, end to end.
+ *
+ * The unit table lives in lib/__tests__/solar-vpp-cap.test.ts; this proves the
+ * resolver actually applies it and that the count it reports alongside is the
+ * count the money was worked out from — the customer's card divides one by the
+ * other to print a per-battery rate.
+ */
+describe("a programme will only pay for so many batteries", () => {
+  it("pays the full rate up to six", async () => {
+    await oncor();
+    const credits = await resolveVppCredits({
+      companyId, ...DEAL, batteryQty: 6,
+      batteryId, batteryLabel: "Tesla Powerwall 3", financeProductId: productId,
+    });
+    expect(credits[0].annualCents).toBe(6 * 40_000);
+    expect(credits[0].batteryQty).toBe(6);
+  });
+
+  it("CAPS a seventh battery, and everything above it", async () => {
+    await oncor();
+    for (const qty of [7, 10, 40]) {
+      const credits = await resolveVppCredits({
+        companyId, ...DEAL, batteryQty: qty,
+        batteryId, batteryLabel: "Tesla Powerwall 3", financeProductId: productId,
+      });
+      expect(credits[0].annualCents, `${qty} batteries`).toBe(6 * 40_000);
+      // The reported count is capped too, so the per-battery rate the customer's
+      // card derives stays the rate the programme actually publishes.
+      expect(credits[0].batteryQty).toBe(6);
+      expect(credits[0].annualCents / credits[0].batteryQty).toBe(40_000);
+    }
+  });
+
+  it("honours a programme that states its own, lower ceiling", async () => {
+    await oncor({ vppMaxBatteries: 2 });
+    const credits = await resolveVppCredits({
+      companyId, ...DEAL, batteryQty: 9,
+      batteryId, batteryLabel: "Tesla Powerwall 3", financeProductId: productId,
+    });
+    expect(credits[0].annualCents).toBe(2 * 40_000);
+    expect(credits[0].batteryQty).toBe(2);
+  });
+
+  it("caps the enrolment money by the same count", async () => {
+    await oncor({ vppUpfrontCents: 10_000 });
+    const credits = await resolveVppCredits({
+      companyId, ...DEAL, batteryQty: 12,
+      batteryId, batteryLabel: "Tesla Powerwall 3", financeProductId: productId,
+    });
+    expect(credits[0].upfrontCents).toBe(6 * 10_000);
+    expect(credits[0].annualCents).toBe(6 * 40_000);
+  });
+
+  it("earns nothing on a negative quantity rather than reading it as one", async () => {
+    await oncor();
+    const credits = await resolveVppCredits({
+      companyId, ...DEAL, batteryQty: -3,
+      batteryId, batteryLabel: "Tesla Powerwall 3", financeProductId: productId,
+    });
+    expect(credits).toEqual([]);
+  });
+});

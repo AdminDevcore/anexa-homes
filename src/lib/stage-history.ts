@@ -10,7 +10,7 @@
  */
 
 /** How a deal got into a stage when no person moved it. */
-export type StageMoveVia = "automation" | "signature";
+export type StageMoveVia = "automation" | "signature" | "document";
 
 export type StageEventRow = {
   id: string;

@@ -13,6 +13,7 @@ import { isAdmin } from "@/server/rbac/matrix";
 import { listScope } from "@/server/rbac/policies";
 import { projectAccessible } from "@/server/rbac/lead-access";
 import { fireEvent } from "@/server/modules/notifications/engine";
+import { restampLeadValue } from "@/server/modules/solar/deal-value";
 import { getQcChecklistTemplate } from "@/server/modules/settings/queries";
 
 import { brandingForCompany } from "@/server/branding/resolve";
@@ -528,6 +529,10 @@ export async function ensureProjectForLeadAction(
           zip: lead.zip,
           // The insurance-approved claim price is the real contract; fall back
           // to the rep's estimate if it hasn't been entered yet.
+          //
+          // ROOFING'S RULE. On solar neither field is the contract — `value` is
+          // the household's net after the federal credits — so a solar job is
+          // re-stamped from its own proposal immediately below.
           contractValue: lead.claimPrice ?? lead.value,
           // Seed the QC checklist from the company's customizable template.
           qcChecklist,
@@ -541,6 +546,26 @@ export async function ensureProjectForLeadAction(
     }
   }
   if (!project) return fail("Could not allocate a project number — try again.");
+
+  /**
+   * A SOLAR JOB TAKES ITS CONTRACT FROM ITS PROPOSAL, not from `Lead.value`.
+   *
+   * The create above stamps roofing's answer, which on solar is the household's
+   * net after the federal credits — the figure that booked a $56,000 contract
+   * as $39,200 of revenue on every Project-based report. `restampLeadValue`
+   * re-reads the deal's reported proposal and writes the contract over it.
+   *
+   * Best-effort: starting production must not fail because a deal has no
+   * proposal to read. A job left holding the fallback is corrected by the next
+   * generate, approve or unapprove, all of which call the same function.
+   */
+  if (lead.vertical === "solar") {
+    try {
+      await restampLeadValue(user.companyId, lead.id);
+    } catch (err) {
+      console.warn(`[projects] could not stamp the solar contract on ${project.id}`, err);
+    }
+  }
 
   revalidatePath(`/portal/leads/${leadId}`);
   return { ok: true, projectId: project.id };

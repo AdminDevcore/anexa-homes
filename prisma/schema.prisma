@@ -96,6 +96,15 @@ enum FileKind {
   other
 }
 
+/// What a file IS, where that has to be known reliably rather than read off its
+/// folder or its name. Set only by a person, explicitly — never inferred.
+enum FileDocumentType {
+  /// The lender's own signed contract (Amos's), marked as such on a PDF in a
+  /// solar deal's Contract folder. With a signed proposal it satisfies Contract
+  /// Signed — see server/modules/pipeline/contract-signed.ts.
+  signed_lender_contract
+}
+
 enum ActivityType {
   note
   call
@@ -119,6 +128,10 @@ enum DocumentTemplateType {
   warranty_certificate
   customer_closeout
   custom
+  /// The solar customer contract. A COMPLETED package from a template of this
+  /// type, in the deal's Contract folder, is the Anexa contract Contract Signed
+  /// accepts. Chosen on the template ("This is the customer's contract").
+  solar_contract
 }
 
 enum DocumentFieldType {
@@ -390,6 +403,8 @@ model Company {
   payrollAdjustments PayrollAdjustment[]
 
   @@map("companies")
+  solarContractUnlocks SolarContractUnlock[]
+
 }
 
 model CompanySettings {
@@ -727,10 +742,23 @@ model SolarProvider {
   /// Its name, where the programme is branded separately from the provider —
   /// a customer signs up to "Renew Home", not to their retailer.
   vppProgramme    String?
-  /// One-off enrolment money, cents.
+  /// One-off enrolment money, cents. PER BATTERY — see `vppMaxBatteries`.
   vppUpfrontCents Int?
-  /// Recurring money, cents a year.
+  /// Recurring money, cents a year. PER BATTERY — see `vppMaxBatteries`.
   vppAnnualCents  Int?
+  /// The most batteries this programme will pay for on one house.
+  ///
+  /// The two figures above are rates per battery and were multiplied by the
+  /// design's raw count with no ceiling at all, so a ten-battery design quoted
+  /// $2,000 a year against a programme that pays at most $1,200 — on a document
+  /// the customer signs, under a twenty-five-year projection built on it.
+  ///
+  /// Null means the standard six (`VPP_DEFAULT_MAX_BATTERIES`), which with the
+  /// $200 rate is the $1,200 ceiling the business runs. A column rather than a
+  /// constant because the RATE beside it is already the provider's own: a
+  /// programme paying something else has a different ceiling, and one hardcoded
+  /// number would contradict the other the first time a second provider signs.
+  vppMaxBatteries Int?
 
   // ── Who the programme is actually open to ────────────────────────────────
   //
@@ -851,6 +879,13 @@ model Pipeline {
   @@map("pipelines")
 }
 
+/// Business milestones a pipeline stage can stand for. Rules key off these, never
+/// off a stage's display name.
+enum StageMilestone {
+  /// Customer-signed proposal AND a completed contract are both on the deal.
+  contract_signed
+}
+
 model PipelineStage {
   id                    String        @id @default(uuid())
   pipelineId            String
@@ -868,6 +903,11 @@ model PipelineStage {
   /// one flag cannot honestly mark both. Unset on every stage falls back to the
   /// stage NAMED for the signature, then to `isWon`. See lib/sold-stage.ts.
   countsAsSold          Boolean       @default(false)
+  /// The business milestone this stage IS, independent of its name and key. A
+  /// stage can be renamed, and a hand-made one gets an auto-suffixed key, so
+  /// neither is a safe thing to enforce a rule against. At most one stage per
+  /// pipeline holds a given milestone. See pipeline/contract-signed.ts.
+  milestone             StageMilestone?
   /// Whether we control completion (hard SLA) or are waiting on someone else
   /// (follow-up cadence). See StageType.
   stageType             StageType     @default(internally_owned)
@@ -898,6 +938,7 @@ model PipelineStage {
   stageEvents LeadStageEvent[]
 
   @@unique([pipelineId, key])
+  @@unique([pipelineId, milestone])
   @@map("pipeline_stages")
 }
 
@@ -1113,6 +1154,8 @@ model Lead {
   @@index([companyId, status])
   @@index([companyId, vertical], map: "leads_companyId_industry_idx")
   @@map("leads")
+  solarContractUnlocks SolarContractUnlock[]
+
 }
 
 model Project {
@@ -1539,6 +1582,15 @@ model FileAsset {
   mimeType            String?
   size                Int                @default(0)
   category            String? // e.g. "before", "after", "contract", or a photo slot label
+  /// Explicit classification — see FileDocumentType. NULL on every file nobody
+  /// has classified, which is nearly all of them. A folder is where a file is
+  /// KEPT; this is what it IS, and only this can make an uploaded file count as
+  /// a completed contract.
+  documentType        FileDocumentType?
+  /// Who classified it and when. An id rather than a relation, like
+  /// DocumentPackage.createdById: an audit stamp, not a join anybody reads.
+  documentTypeSetById String?
+  documentTypeSetAt   DateTime?
   leadId              String?
   lead                Lead?              @relation(fields: [leadId], references: [id], onDelete: Cascade)
   projectId           String?
@@ -3427,6 +3479,14 @@ model SolarSettings {
   // These are the guard rails; see src/lib/solar-validation.ts.
   minOffsetPct Float @default(0)
   maxOffsetPct Float @default(150)
+  /// Whether somebody has DECIDED the minimum offset. `minOffsetPct` defaults to 0,
+  /// so a zero alone cannot tell "no minimum, deliberately" from "never set up".
+  ///   configured + min > 0  -> enforced: generation is blocked below it
+  ///   configured + min = 0  -> a deliberate "no minimum": nothing is raised
+  ///   not configured        -> a warning on the deal and a Settings gap, never a
+  ///                            block, so an uninitialised workspace still quotes
+  /// Backfilled true wherever a minimum above zero was already saved.
+  minOffsetConfigured Boolean @default(false)
 
   // ── RETIRED 2026-09-02: the company-wide Min/Max $/W band ───────────────
   // Nothing reads or writes these any more. What a deal may price at is a
@@ -3769,13 +3829,13 @@ model SolarLender {
   /// before the column existed.
   batteryRule SolarLenderBatteryRule @default(warn)
 
-  /// Whether this partner's dealer fee is taken on a BATTERY beside an array, as
-  /// it is on the system and the ordinary adders. On -- the default -- the
-  /// battery grosses up by the programme's fee like everything before it on the
-  /// ladder, so the fee is a share of the whole final price. Off, it rides on
-  /// top at its catalogue price, which is how every lender priced before
-  /// 2026-09-14. A storage-only deal is unaffected: there the battery IS the
-  /// system and was always inside the fee.
+  /// RETIRED 2026-09-15 -- read by nothing, written by nothing. Kept only so the
+  /// column survives this deploy: the build still serving when it goes out
+  /// selects it, and dropping it in the same release would 500 that build. The
+  /// dealer fee now ALWAYS applies to the battery, like every other part of the
+  /// gross (final = gross / (1 - fee)), so there is no switch to read. A guard
+  /// test (solar-battery-fee-retired.test.ts) fails if src/ references it again.
+  /// Drop it in a follow-up migration once this release is live.
   batteryInsideFee Boolean @default(true)
 
   /// How the sign today credit is arrived at on this partner's deals -- see
@@ -4183,9 +4243,10 @@ model SolarLenderAdderRule {
   equipmentId String
   equipment   SolarEquipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 
-  /// TRUE: this partner adds the work to the loan at its own price, above the
-  /// $/W. FALSE: it comes out of the $/W, so the work is paid for out of what
-  /// the company keeps and the homeowner's number does not move.
+  /// TRUE: this partner funds the work above its $/W (still grossed up by the
+  /// dealer fee, like every adder). FALSE: it comes out of the $/W, so the work
+  /// is paid for out of what the company keeps and the homeowner's number does
+  /// not move.
   financedOnTop Boolean
 
   createdAt DateTime @default(now())
@@ -4249,15 +4310,17 @@ model SolarEquipment {
   /// homeowner has no reason to read a paragraph about.
   showOnProposal        Boolean            @default(false)
   /// Adders only: this work is added to the loan ON TOP of a partner's fixed
-  /// or maximum final $/W, at its own price, instead of coming out of the
+  /// or maximum final $/W — still grossed up by the dealer fee, which is taken
+  /// on the whole gross — instead of coming out of the
   /// system price.
   ///
   /// The re-roof is the case, and it is Amos Capital Fund's own rule: their
   /// paper is a flat $5.50/W however big the job, EXCEPT that a roof rides on
-  /// the loan at what the roof costs. A 10 kW system is $55,000 and the same
-  /// job with a $7,000 roof under it is $62,000, with the payment amortised
-  /// over the larger number. Every other adder still comes out of the ceiling,
-  /// which is what makes this a flag on the ADDER rather than on the lender.
+  /// the loan above it. At an 18% fee a 10 kW system is $55,000 and the same
+  /// job with a $7,000 roof is $63,537 — the fee is taken on the roof like any
+  /// other gross — with the payment amortised over the larger number. Every
+  /// other adder still comes out of the ceiling, which is what makes this a
+  /// flag on the ADDER rather than on the lender.
   ///
   /// Off means the rule that has always applied: the adder grosses up by the
   /// dealer fee and, under a ceiling, eats into the system price.
@@ -4601,8 +4664,12 @@ model SolarFinance {
   /// sourcing threshold) and a rep who knows this job does not qualify unticks
   /// them.
   claimItc             Boolean @default(true)
-  claimEnergyCommunity Boolean @default(true)
-  claimDomesticContent Boolean @default(true)
+  /// The two bonus credits start OFF (2026-09-15): whether a roof is in an energy
+  /// community, or the kit qualifies as domestic content, is established case by
+  /// case, so a deal claims neither until a rep ticks it. Existing rows keep
+  /// whatever they were quoted with.
+  claimEnergyCommunity Boolean @default(false)
+  claimDomesticContent Boolean @default(false)
 
   /// The rep's own closing credit on this deal, cents. Zero on nearly all.
   ///
@@ -5103,6 +5170,44 @@ model SolarMilestone {
 /// person whose commission this deal generates. Managers earn through
 /// CommissionOverride, which is a separate arrangement between a manager and a
 /// rep and never comes out of the rep's number.
+/// A SUPER ADMIN'S PERMISSION TO REWRITE ONE SIGNED CONTRACT, and the reason.
+///
+/// A signature freezes a solar deal's economics — see `server/modules/solar/
+/// signed-lock.ts`. Designs do genuinely change between contract and install, so
+/// the business needs a way through; what it must never be is a silent one.
+///
+/// A ROW RATHER THAN A FLAG ON THE DEAL. The reason has to be given BEFORE the
+/// edit, not inferred from it afterwards, and a super admin who unlocks a
+/// contract and changes three things has made one decision, not three. The row
+/// is that decision: who, when, why, and for how long.
+///
+/// SHORT-LIVED ON PURPOSE. An unlock that lasted forever would be a lock that
+/// was removed, so it expires — see `UNLOCK_WINDOW_MINUTES`. An expired row is
+/// kept rather than deleted: it is the record of an exception being made, which
+/// is the whole point of asking for a reason.
+model SolarContractUnlock {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vertical  Vertical @default(solar)
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Why this contract is being reopened, in the person's own words. Required,
+  /// and never defaulted — a reason the product wrote is not a reason.
+  reason String
+
+  unlockedById String
+  unlockedAt   DateTime @default(now())
+  /// When the permission lapses. Past this the contract is locked again.
+  expiresAt    DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, leadId, expiresAt])
+  @@map("solar_contract_unlocks")
+}
+
 model SolarDealComp {
   id        String   @id @default(uuid())
   companyId String

@@ -59,7 +59,14 @@ type Copy = {
  * and the honest answers are "yes, this one" and "no, because this went wrong".
  */
 export async function fileApprovedCopy(
-  actor: { companyId: string; userId: string },
+  /**
+   * `userId` is NULLABLE because the sweep that guarantees this happens is a
+   * cron with no user behind it — see api/cron/file-signed-proposals. The same
+   * reasoning as `ApprovalActor.userId`: inventing an uploader would put a name
+   * against an act nobody performed, and `FileAsset.uploadedById` is nullable
+   * for exactly this case.
+   */
+  actor: { companyId: string; userId: string | null },
   proposal: { id: string; leadId: string; version: number },
 ): Promise<{ fileId: string | null; error: string | null }> {
   let rendered: { copy: Copy; pdf: Buffer }[];

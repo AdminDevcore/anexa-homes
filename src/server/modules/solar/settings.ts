@@ -24,6 +24,8 @@ export const SOLAR_ASSUMPTION_DEFAULTS: SolarAssumptions = {
   defaultGrossPpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
+  // Nobody has decided a minimum until an admin does — warned, never enforced.
+  minOffsetConfigured: false,
   maxOffsetPct: 150,
 };
 
@@ -147,6 +149,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     defaultGrossPpwCents: row.defaultGrossPpwCents,
     defaultDealerFeePct: row.defaultDealerFeePct,
     minOffsetPct: row.minOffsetPct,
+    minOffsetConfigured: row.minOffsetConfigured,
     maxOffsetPct: row.maxOffsetPct,
     targetNetPpwCents: row.targetNetPpwCents,
     homeValueUpliftPct: row.homeValueUpliftPct,

@@ -63,6 +63,8 @@ export type ProviderTerms = {
   vppProgramme: string | null;
   vppUpfrontCents: number | null;
   vppAnnualCents: number | null;
+  /** The most batteries the programme pays for. Null = VPP_DEFAULT_MAX_BATTERIES. */
+  vppMaxBatteries: number | null;
   notes: string | null;
 } & VppRestrictions;
 
@@ -277,4 +279,81 @@ export function vppVerdictLine(v: VppVerdict): string | null {
     case "ineligible":
       return `Not eligible — ${v.reasons.join("; ")}.`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// What a battery programme actually pays
+// ---------------------------------------------------------------------------
+
+/**
+ * How many batteries one VPP will enrol, when the programme has not said.
+ *
+ * SIX, which is the rule the business runs: $200 a battery a year, six
+ * batteries, $1,200 a year at the ceiling. It is a DEFAULT rather than a
+ * constant because the rate beside it is already per-provider data — a
+ * programme that pays a different amount will have a different ceiling, and
+ * hard-coding one here would make the two disagree the first time a second
+ * provider is signed. See `SolarProvider.vppMaxBatteries`.
+ */
+export const VPP_DEFAULT_MAX_BATTERIES = 6;
+
+/**
+ * How many of this deal's batteries the programme will actually pay for.
+ *
+ * THE CEILING WAS MISSING ENTIRELY. `resolveVppCredits` multiplied the rate by
+ * the raw battery count with no clamp, so a ten-battery design quoted $2,000 a
+ * year against a programme that pays at most $1,200 — on the customer's own
+ * signed proposal, under a twenty-five-year projection built on that figure.
+ *
+ * NORMALISATION, not trust. This figure reaches here from a design a rep types
+ * into and from JSON a caller can post, so:
+ *
+ *   - anything not a finite number earns NOTHING. A NaN, a null, a string that
+ *     did not parse: none of them are a battery count, and inventing one is how
+ *     a rebate appears on a deal that has no storage.
+ *   - a NEGATIVE count earns nothing, for the same reason. It used to floor to
+ *     one, which paid a rebate on nonsense.
+ *   - a FRACTION floors. Half a battery is not installed, and rounding up would
+ *     quote money for hardware nobody is fitting.
+ *   - EXACTLY ZERO, with a battery chosen, is ONE — the long-standing rule, kept
+ *     deliberately. The quantity box is optional on the designer and the
+ *     equipment card already prints "1 total" for that row; earning for none
+ *     while the document names a battery is the contradiction it exists to
+ *     avoid. The caller decides whether a battery is chosen at all.
+ */
+export function vppPaidBatteryCount(input: {
+  /** The design's count. Zero means "chosen but never typed" — see above. */
+  batteryQty: number | null | undefined;
+  /** This programme's ceiling. Null falls back to `VPP_DEFAULT_MAX_BATTERIES`. */
+  maxBatteries?: number | null;
+}): number {
+  const raw = input.batteryQty;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+  if (raw < 0) return 0;
+  // Zero is the untyped case and reads as one; anything else floors.
+  const wanted = raw === 0 ? 1 : Math.floor(raw);
+
+  const ceiling =
+    typeof input.maxBatteries === "number" && Number.isFinite(input.maxBatteries)
+      ? Math.max(0, Math.floor(input.maxBatteries))
+      : VPP_DEFAULT_MAX_BATTERIES;
+
+  return Math.min(wanted, ceiling);
+}
+
+/**
+ * What a programme pays on this deal, given its per-battery rate.
+ *
+ * The one multiplication, so the annual money, the enrolment money and the
+ * count printed beside them cannot disagree about how many batteries were
+ * counted.
+ */
+export function vppCreditCents(input: {
+  /** The programme's rate for ONE battery, cents. */
+  perBatteryCents: number | null | undefined;
+  paidBatteries: number;
+}): number {
+  const rate = input.perBatteryCents;
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return 0;
+  return Math.round(rate) * Math.max(0, Math.floor(input.paidBatteries));
 }

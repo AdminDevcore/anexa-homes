@@ -91,6 +91,8 @@ const ALLOWED: Record<string, string> = {
   "src/server/modules/payroll/__tests__/solar-comp-snapshot.itest.ts":
     'TRUNCATE TABLE "companies" CASCADE — isolated test-schema reset',
   // The guard itself and its own fixtures mention the identifiers in strings.
+  "src/server/modules/solar/__tests__/solar-config-defaults.itest.ts":
+    "Runs two migrations' own backfill UPDATEs against the isolated test schema, fenced to the suite's company, to prove they pick the right rows. Test-only; no app code path.",
   "src/lib/__tests__/no-raw-sql.test.ts": "this guard",
 };
 

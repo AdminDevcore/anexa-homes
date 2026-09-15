@@ -53,6 +53,7 @@ export default async function SolarProvidersPage({
       buyback: true, buybackRateMills: true,
       touPeakRateMills: true, touOffPeakRateMills: true, touPeakWindow: true,
       vpp: true, vppProgramme: true, vppUpfrontCents: true, vppAnnualCents: true,
+      vppMaxBatteries: true,
       vppFinanceProducts: true,
       notes: true,
       // Who each programme is open to, with the names spelled out: a retired
