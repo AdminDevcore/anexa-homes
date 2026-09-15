@@ -3318,6 +3318,8 @@ git commit -m "feat(notifications): agent failure and needs-a-human alerts reach
 
 > **Amended for main's stage rules:** `resolveChanges` fills `contractRefusal` (`contractSignedMoveError`) and `fundingRefusal` (`fundingGateError` with `actor: null`). Both are main's own exports; `funding-authority.ts` is not changed. `moveDeal` doesn't re-check. Main's `stage-moves-guarded.test.ts` must pass. See the header amendment.
 
+> **Amended after the Task 11 code review:** `moveDeal(companyId, leadId, fromStageId, stage, by)` writes only while the deal is still in the stage the caller saw. It uses a conditional `updateMany` on `{ id, companyId, stageId: fromStageId }` and runs it, `recordStageEntry(…, tx)` and the activity line in one transaction, sending `stage_changed` after the commit. Otherwise it throws "This deal has moved since the agent looked at it; nothing was changed." Also: the `secrets.ts` comments are corrected (SolarLender is shared), `inStages` clamps a bad `limit`, and new itests cover another company's deal, a stale move and the workspace stamp.
+
 **Files:**
 - Create: `src/server/modules/agents/deal-label.ts`, `secrets.ts`, `deps.ts`, `apply-changes.ts`, `notify.ts`
 - Test: `src/server/modules/agents/__tests__/deal-label.test.ts`
@@ -3799,6 +3801,8 @@ git commit -m "feat(agents): read deals in the run's workspace, and move one the
 > **Amended for main's stage rules:** add runner tests. An ungated move past Contract Signed or M1 Funding fails the run and moves nothing; a gated funding move is held. See the header amendment.
 
 > **Amended after the Task 2 review:** `createRun` returns `null` when the in-flight index refuses (catch `P2002`); add a concurrent-create test; fixtures never hold two in-flight runs for one agent and workspace. See the header amendment.
+
+> **Amended after the Task 11 code review:** `applyChanges` passes `c.fromStage?.id ?? null` to `moveDeal`. In `executeRun`, the `applyChanges` call sits in a try, so a throw from `resolveChanges` finalizes the run as `failed` with its changes `discarded` ("Failed while checking changes: …") instead of leaving it `running` until the reaper. A new `runner-resolve-error.itest.ts` mocks `resolveChanges` to throw.
 
 **Files:**
 - Create: `src/server/modules/agents/runner.ts`
@@ -6057,6 +6061,8 @@ git commit -m "feat(agents): page reads that apply the viewer's workspaces on ev
 > **Amended for main's stage rules:** Apply runs main's `stageMoveError({ companyId, actor: user, lead, targetStageId })` for every change, and refuses the whole Apply on a refusal. Test that an admin can apply past M1 Funding and a manager holding Agents access cannot. See the header amendment.
 
 > **Amended after the Task 2 review:** `createRun` can return `null`; Run now starts only the runs created and fails only if none were; clear Hello's runs before the "already in progress" fixture inserts a running one. See the header amendment.
+
+> **Amended after the Task 11 code review:** Apply passes `change.fromStage?.id ?? null` to `moveDeal`. The existing "has moved since the agent looked" check stays as the friendly refusal before the claim, and the conditional write covers the gap between that check and the move.
 
 **Files:**
 - Create: `src/server/modules/agents/actions.ts`
