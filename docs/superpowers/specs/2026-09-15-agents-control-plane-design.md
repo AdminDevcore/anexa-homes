@@ -491,6 +491,8 @@ mid-flight.
 Every `move_stage` change is checked before **any** change is applied, so a run
 never half-applies.
 
+A run may move a deal only once. A second change for a deal the same run already named is `invalid`, so the run applies nothing, and every other change, held ones included, is recorded as `discarded`. *(Added after the Task 5 review.)*
+
 1. **Resolve** the deal (in this company and workspace) and `toStageKey` inside
    the deal's own pipeline. Either not found → the change is `invalid`, the run
    is `failed`, and nothing in the run is applied (other changes are recorded
@@ -540,6 +542,12 @@ Main enforces two rules on every write that moves a solar deal, and agents follo
   - A `held` change stays held. At Apply, the approving person's own authority decides, so a manager holding Agents access cannot carry the deal past the line.
 
 The run-time check happens in `resolveChanges`, before anything applies, so a run never half-applies. `moveDeal` itself does not re-check.
+
+Both checks use main's own rules from `pipeline/stage-guard.ts` and its parts:
+- **At run time:** `contractSignedMoveError`, and `fundingGateError` with `actor: null`. An agent, like an automation rule, carries no one's authority. The two are asked separately because the gate treats them differently.
+- **At Apply:** `stageMoveError`, with the approving person as `actor`.
+
+`apply-changes.ts` writes deal stages, so main's CI test `stage-moves-guarded.test.ts` covers it. *(Revised after main's `d694e57`.)*
 
 ### Resolving a `needs_human` run
 

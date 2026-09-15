@@ -33,9 +33,10 @@
 **Amended for main's stage rules (user decisions, 2026-09-15):**
 - After the rebase, main enforces two rules on every solar stage move: **Contract Signed** (`pipeline/contract-signed.ts`) and **M1 Funding** (`payroll/funding-authority.ts`). The first plan's agent move and Apply skipped both. The user chose **agents obey both**.
   - **Task 5:** `ResolvedChange` gains `contractRefusal` and `fundingRefusal`. `planChanges` makes a Contract Signed refusal `invalid`. A funding refusal is `invalid` only on a change that would apply by itself; a `held` change stays held.
-  - **Task 11:** `resolveChanges` fills both refusals. The funding one comes from `uncertifiedFundingMoveError`, extracted from `fundingGateMoveError` with no change in behaviour for people.
+  - **Task 11:** `resolveChanges` fills both refusals with main's own rules: `contractSignedMoveError`, and `fundingGateError` with `actor: null`, since an agent carries no one's authority, like an automation. `funding-authority.ts` is not modified. `apply-changes.ts` writes deal stages, so main's `stage-moves-guarded` CI test must pass.
   - **Task 12:** runner tests for both rules.
-  - **Task 18:** Apply re-checks both with the approving person's own authority. Owner, admin and accounting can carry a deal past M1 Funding; a manager holding Agents access cannot.
+  - **Task 18:** Apply re-checks with main's `stageMoveError`, passing the approving person as `actor`. Owner, admin and accounting can carry a deal past M1 Funding; a manager holding Agents access cannot.
+- **Main moved again (`d694e57`, PR #35, already in production).** A single `pipeline/stage-guard.ts` now holds both rules for every stage writer, backed by a CI test. The branch is rebased onto it before Task 7, and its migrations are renamed to sort after main's `20260916090000`.
 - **Task 9's three new roofing stages are rose `#E11D48`,** not `#EF4444`, which is Cancelled's red.
 
 ---
@@ -3313,7 +3314,7 @@ git commit -m "feat(notifications): agent failure and needs-a-human alerts reach
 
 ## Task 11: Reading and moving deals for a run
 
-> **Amended for main's stage rules:** `resolveChanges` fills `contractRefusal` (`contractSignedMoveError`) and `fundingRefusal` (a new exported `uncertifiedFundingMoveError`, extracted in `payroll/funding-authority.ts`). `moveDeal` doesn't re-check. See the header amendment.
+> **Amended for main's stage rules:** `resolveChanges` fills `contractRefusal` (`contractSignedMoveError`) and `fundingRefusal` (`fundingGateError` with `actor: null`). Both are main's own exports; `funding-authority.ts` is not changed. `moveDeal` doesn't re-check. Main's `stage-moves-guarded.test.ts` must pass. See the header amendment.
 
 **Files:**
 - Create: `src/server/modules/agents/deal-label.ts`, `secrets.ts`, `deps.ts`, `apply-changes.ts`, `notify.ts`
@@ -6051,7 +6052,7 @@ git commit -m "feat(agents): page reads that apply the viewer's workspaces on ev
 
 ## Task 18: The server actions
 
-> **Amended for main's stage rules:** Apply runs `contractSignedMoveError` and `fundingGateMoveError(user, …)` for every change, and refuses the whole Apply on either. Test that an admin can apply past M1 Funding and a manager holding Agents access cannot. See the header amendment.
+> **Amended for main's stage rules:** Apply runs main's `stageMoveError({ companyId, actor: user, lead, targetStageId })` for every change, and refuses the whole Apply on a refusal. Test that an admin can apply past M1 Funding and a manager holding Agents access cannot. See the header amendment.
 
 > **Amended after the Task 2 review:** `createRun` can return `null`; Run now starts only the runs created and fails only if none were; clear Hello's runs before the "already in progress" fixture inserts a running one. See the header amendment.
 
