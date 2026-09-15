@@ -30,6 +30,14 @@
 
 **Rebased onto origin/main `ed3b832` (2026-09-15):** migrations renamed to `20260915140000` / `140200` / `140300` so they sort after main's `20260915130000_contract_evidence_classification`.
 
+**Amended for main's stage rules (user decisions, 2026-09-15):**
+- After the rebase, main enforces two rules on every solar stage move: **Contract Signed** (`pipeline/contract-signed.ts`) and **M1 Funding** (`payroll/funding-authority.ts`). The first plan's agent move and Apply skipped both. The user chose **agents obey both**.
+  - **Task 5:** `ResolvedChange` gains `contractRefusal` and `fundingRefusal`. `planChanges` makes a Contract Signed refusal `invalid`. A funding refusal is `invalid` only on a change that would apply by itself; a `held` change stays held.
+  - **Task 11:** `resolveChanges` fills both refusals. The funding one comes from `uncertifiedFundingMoveError`, extracted from `fundingGateMoveError` with no change in behaviour for people.
+  - **Task 12:** runner tests for both rules.
+  - **Task 18:** Apply re-checks both with the approving person's own authority. Owner, admin and accounting can carry a deal past M1 Funding; a manager holding Agents access cannot.
+- **Task 9's three new roofing stages are rose `#E11D48`,** not `#EF4444`, which is Cancelled's red.
+
 ---
 
 ## Ground rules for this worktree
@@ -1356,6 +1364,8 @@ git commit -m "feat(agents): config holds references to secrets, and a handler's
 ---
 
 ## Task 5: Gate, budget, timeout, workspaces
+
+> **Amended for main's stage rules:** `ResolvedChange` gains `contractRefusal` and `fundingRefusal`, which `planChanges` turns into `invalid`. A funding refusal on a held change stays held. There are 4 new gate tests. See the header amendment.
 
 **Files:**
 - Create: `src/server/modules/agents/gate.ts`, `src/server/modules/agents/budget.ts`, `src/server/modules/agents/timeout.ts`, `src/server/modules/agents/verticals.ts`
@@ -2773,9 +2783,9 @@ describe("20260915140300_action_required_stages", () => {
       orderBy: { position: "asc" },
     });
     expect(added.map((s) => [s.name, s.color, s.stageType, s.isLost, s.countsAsSold])).toEqual([
-      ["Claim Denied — Action Required", "#EF4444", "internally_owned", false, false],
-      ["QC Failed — Action Required", "#EF4444", "internally_owned", false, false],
-      ["Payment Issue — Action Required", "#EF4444", "internally_owned", false, false],
+      ["Claim Denied — Action Required", "#E11D48", "internally_owned", false, false],
+      ["QC Failed — Action Required", "#E11D48", "internally_owned", false, false],
+      ["Payment Issue — Action Required", "#E11D48", "internally_owned", false, false],
     ]);
   });
 
@@ -2891,7 +2901,7 @@ BEGIN
         "id", "pipelineId", "name", "key", "position", "color",
         "stageType", "isActionRequired", "notificationRecipient"
       ) VALUES (
-        gen_random_uuid()::text, pipe."id", spec.stage_name, spec.stage_key, anchor_pos + 1, '#EF4444',
+        gen_random_uuid()::text, pipe."id", spec.stage_name, spec.stage_key, anchor_pos + 1, '#E11D48',
         'internally_owned', true, 'none'
       );
     END LOOP;
@@ -2924,7 +2934,7 @@ const STAGES = [
   // problem, then rejoins the line. Advance and "step N of M" skip them
   // (src/lib/stage-progress.ts), and a gated agent may move a deal into one and
   // nowhere else. Same rows as migration 20260915140300_action_required_stages.
-  { key: "claim_denied", name: "Claim Denied — Action Required", color: "#EF4444", isActionRequired: true },
+  { key: "claim_denied", name: "Claim Denied — Action Required", color: "#E11D48", isActionRequired: true },
   { key: "scope_received", name: "Scope Received", color: "#C084FC" },
   { key: "supplement_needed", name: "Supplement Needed", color: "#F472B6", isActionRequired: true },
   { key: "contract_signed", name: "Contract Signed", color: "#FB923C", countsAsSold: true },
@@ -2932,10 +2942,10 @@ const STAGES = [
   { key: "scheduled", name: "Scheduled", color: "#FACC15" },
   { key: "in_production", name: "In Production", color: "#A3E635" },
   { key: "qc_inspection", name: "QC Inspection", color: "#4ADE80" },
-  { key: "qc_failed", name: "QC Failed — Action Required", color: "#EF4444", isActionRequired: true },
+  { key: "qc_failed", name: "QC Failed — Action Required", color: "#E11D48", isActionRequired: true },
   { key: "invoice_sent", name: "Invoice Sent", color: "#34D399" },
   { key: "depreciation_requested", name: "Depreciation Requested", color: "#2DD4BF" },
-  { key: "payment_issue", name: "Payment Issue — Action Required", color: "#EF4444", isActionRequired: true },
+  { key: "payment_issue", name: "Payment Issue — Action Required", color: "#E11D48", isActionRequired: true },
   { key: "paid", name: "Paid", color: "#22C55E", isWon: true },
   { key: "closed", name: "Closed", color: "#16A34A", isWon: true },
 ];
@@ -3302,6 +3312,8 @@ git commit -m "feat(notifications): agent failure and needs-a-human alerts reach
 ---
 
 ## Task 11: Reading and moving deals for a run
+
+> **Amended for main's stage rules:** `resolveChanges` fills `contractRefusal` (`contractSignedMoveError`) and `fundingRefusal` (a new exported `uncertifiedFundingMoveError`, extracted in `payroll/funding-authority.ts`). `moveDeal` doesn't re-check. See the header amendment.
 
 **Files:**
 - Create: `src/server/modules/agents/deal-label.ts`, `secrets.ts`, `deps.ts`, `apply-changes.ts`, `notify.ts`
@@ -3780,6 +3792,8 @@ git commit -m "feat(agents): read deals in the run's workspace, and move one the
 ---
 
 ## Task 12: The runner
+
+> **Amended for main's stage rules:** add runner tests. An ungated move past Contract Signed or M1 Funding fails the run and moves nothing; a gated funding move is held. See the header amendment.
 
 > **Amended after the Task 2 review:** `createRun` returns `null` when the in-flight index refuses (catch `P2002`); add a concurrent-create test; fixtures never hold two in-flight runs for one agent and workspace. See the header amendment.
 
@@ -6036,6 +6050,8 @@ git commit -m "feat(agents): page reads that apply the viewer's workspaces on ev
 ---
 
 ## Task 18: The server actions
+
+> **Amended for main's stage rules:** Apply runs `contractSignedMoveError` and `fundingGateMoveError(user, …)` for every change, and refuses the whole Apply on either. Test that an admin can apply past M1 Funding and a manager holding Agents access cannot. See the header amendment.
 
 > **Amended after the Task 2 review:** `createRun` can return `null`; Run now starts only the runs created and fails only if none were; clear Hello's runs before the "already in progress" fixture inserts a running one. See the header amendment.
 

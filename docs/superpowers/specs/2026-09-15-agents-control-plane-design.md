@@ -526,6 +526,21 @@ reaches `main` before this ships, the applier calls the requirement check
 before applying, and a failing check becomes a `held` change with the reason in
 its `note`.
 
+### Main's rules on solar stage moves
+
+*(Added 2026-09-15, after rebasing onto main. The user decided that agents obey both rules.)*
+
+Main enforces two rules on every write that moves a solar deal, and agents follow them. Neither rule touches roofing deals.
+
+- **Contract Signed** (`pipeline/contract-signed.ts`). No move to or past Contract Signed until the signed proposal and a completed contract are both on file.
+  - A change that crosses the line without them is `invalid` at run time: the run fails and nothing in it applies.
+  - Apply refuses the change too, whoever presses it.
+- **M1 Funding** (`payroll/funding-authority.ts`). No move to or past M1 Funding before the rep's M1 milestone is certified, unless the mover may certify funding: owner, admin or accounting.
+  - An agent holds no such authority. A change that would apply by itself is `invalid`.
+  - A `held` change stays held. At Apply, the approving person's own authority decides, so a manager holding Agents access cannot carry the deal past the line.
+
+The run-time check happens in `resolveChanges`, before anything applies, so a run never half-applies. `moveDeal` itself does not re-check.
+
 ### Resolving a `needs_human` run
 
 The queue is `status = needs_human AND resolvedAt IS NULL`. Resolving does not
