@@ -19,6 +19,11 @@ import ts from "typescript";
  * or a string from code, so `// import { moveDeal } from "../apply-changes"`
  * and `` `Moved from '${a}' to '${b}'` `` would either slip an import past a
  * denylist or get flagged by one that doesn't understand what it's reading.
+ *
+ * A `.ts` file is parsed as TypeScript, not JSX — `<T>` there is a generic
+ * arrow or a type assertion, and reading it as JSX misparses everything
+ * after it, silently. A file the parser can't read cleanly fails outright
+ * instead of passing on a guess.
  */
 
 const AGENTS_DIR = join(__dirname, "..");
@@ -61,7 +66,22 @@ function allElementsTypeOnly(elements: readonly { isTypeOnly: boolean }[]): bool
 
 /** Every specifier `filePath`'s source reaches for that the allowlist doesn't cover. */
 function offendingImports(source: string, filePath: string): string[] {
-  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  // A misparse is worse than silence: `<T>` in a .ts file is a generic arrow
+  // or a type assertion, but read as .tsx it's JSX, and everything after it
+  // parses as garbage — including a write that should have been caught. Fail
+  // the file instead of guessing past a parse the guard couldn't do cleanly.
+  const { diagnostics } = ts.transpileModule(source, {
+    fileName: filePath,
+    reportDiagnostics: true,
+    compilerOptions: { jsx: ts.JsxEmit.Preserve },
+  });
+  if (diagnostics && diagnostics.length > 0) {
+    const message = ts.flattenDiagnosticMessageText(diagnostics[0].messageText, " ");
+    return [`<parse error: ${message}>`];
+  }
+
+  const scriptKind = filePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind);
   const offences: string[] = [];
 
   const checkSpecifier = (spec: string) => {
@@ -257,5 +277,40 @@ describe("offendingImports", () => {
   it("allows a multi-line type-only import", () => {
     const src = `import {\n  type AgentHandler,\n} from "../types";`;
     expect(offendingImports(src, at("x.ts"))).toEqual([]);
+  });
+
+  // A .ts file is parsed as TypeScript, not JSX: `<T>` there is a generic
+  // arrow or a type assertion, and misreading it as JSX would throw off
+  // everything that follows — including a write.
+
+  it("does not let a generic arrow in a .ts file mask a re-export after it", () => {
+    const src = `const id = <T>(v: T) => v;\nexport { moveDeal } from "../apply-changes";`;
+    expect(offendingImports(src, at("x.ts"))).toEqual(["../apply-changes"]);
+  });
+
+  it("does not let a generic arrow in a .ts file mask a dynamic import after it", () => {
+    const src = `const id = <T>(v: T) => v;\nawait import("../apply-changes");`;
+    expect(offendingImports(src, at("x.ts"))).toEqual(["../apply-changes"]);
+  });
+
+  it("does not let a type assertion in a .ts file mask a require after it", () => {
+    const src = `const n = <number>foo;\nrequire("../deps");`;
+    expect(offendingImports(src, at("x.ts"))).toEqual(["../deps"]);
+  });
+
+  it("still allows a type-only import after a generic arrow in a .ts file", () => {
+    const src = `const id = <T>(v: T) => v;\nimport type { AgentHandler } from "../types";`;
+    expect(offendingImports(src, at("x.ts"))).toEqual([]);
+  });
+
+  it("parses real JSX in a .tsx file", () => {
+    const src = `const el = <div />;\nimport { z } from "zod";`;
+    expect(offendingImports(src, join(HANDLERS_DIR, "x.tsx"))).toEqual([]);
+  });
+
+  it("fails the file, instead of passing it, on a parse error", () => {
+    const offences = offendingImports(`import { from "zod"`, at("x.ts"));
+    expect(offences).toHaveLength(1);
+    expect(offences[0]).toMatch(/^<parse error: /);
   });
 });
