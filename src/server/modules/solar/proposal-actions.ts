@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { putObject } from "@/server/storage";
 import { LAYOUT_CATEGORY, pruneSupersededLayouts, resolveLayoutAsset } from "./layout-asset";
 import { generateProposalVersion } from "./proposal-generate";
@@ -29,6 +30,7 @@ export async function generateSolarProposalAction(leadId: string): Promise<
 > {
   const user = await requireUser();
   if (!can(user, "create", "Proposal")) return fail("Not allowed.");
+  if (!(await leadAccessible(user, leadId))) return fail("Deal not found.");
   const res = await generateProposalVersion(user, leadId);
   // The snapshot is several hundred kilobytes and the caller here only reloads
   // the page. Ordinary generation does not need it crossing the wire.
@@ -64,6 +66,10 @@ export async function markProposalSentAction(proposalId: string) {
     select: { id: true, leadId: true, version: true, publicToken: true, supersededAt: true, signedAt: true },
   });
   if (!p) return fail("Proposal not found.");
+  // Scoped to the caller's own deals, not just their company: `p.leadId`
+  // came out of an id the browser supplied. Same sentence as a missing
+  // proposal, so the two cases stay indistinguishable from outside.
+  if (!(await leadAccessible(user, p.leadId))) return fail("Proposal not found.");
   if (p.supersededAt) return fail("This version has been superseded. Send the current one.");
 
   // 24 random bytes from the CSPRNG — the same source the rest of the app uses
@@ -139,6 +145,10 @@ export async function sendSolarProposalAction(input: {
     },
   });
   if (!p) return fail("Proposal not found.");
+  // Scoped to the caller's own deals, not just their company: `p.leadId`
+  // came out of an id the browser supplied. Same sentence as a missing
+  // proposal, so the two cases stay indistinguishable from outside.
+  if (!(await leadAccessible(user, p.leadId))) return fail("Proposal not found.");
   if (p.supersededAt) return fail("This version has been superseded. Send the current one.");
 
   const to = { email: p.lead.email?.trim() || null, phone: p.lead.phone?.trim() || null };
@@ -268,6 +278,10 @@ export async function setProposalApprovalAction(proposalId: string, approved: bo
     },
   });
   if (!p) return fail("Proposal not found.");
+  // Scoped to the caller's own deals, not just their company: `p.leadId`
+  // came out of an id the browser supplied. Same sentence as a missing
+  // proposal, so the two cases stay indistinguishable from outside.
+  if (!(await leadAccessible(user, p.leadId))) return fail("Proposal not found.");
 
   if (approved) {
     await approveProposalVersion(
@@ -304,6 +318,10 @@ export async function setProposalComparisonAction(proposalId: string, show: bool
     select: { id: true, leadId: true },
   });
   if (!p) return fail("Proposal not found.");
+  // Scoped to the caller's own deals, not just their company: `p.leadId`
+  // came out of an id the browser supplied. Same sentence as a missing
+  // proposal, so the two cases stay indistinguishable from outside.
+  if (!(await leadAccessible(user, p.leadId))) return fail("Proposal not found.");
 
   await prisma.solarProposal.update({
     where: { id: p.id },
@@ -347,10 +365,7 @@ export async function uploadPanelLayoutAction(formData: FormData) {
   }
 
   // Ownership: the deal must be this company's, and solar.
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
@@ -436,10 +451,7 @@ export async function setLayoutApprovalAction(leadId: string, approved: boolean)
     return fail("Only a manager or admin can mark a layout final.");
   }
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
@@ -473,10 +485,7 @@ export async function removePanelLayoutAction(leadId: string) {
   const user = await requireUser();
   if (!can(user, "update", "Lead")) return fail("Not allowed.");
 
-  const lead = await prisma.lead.findFirst({
-    where: { companyId: user.companyId, id: leadId },
-    select: { id: true, vertical: true },
-  });
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
