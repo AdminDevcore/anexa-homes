@@ -2253,6 +2253,9 @@ model PayrollItem {
   createdAt       DateTime       @default(now())
 
   @@index([payrollRunId])
+  // A commission's run lines are looked up from the commission side; without
+  // this, each such lookup scans every line ever paid.
+  @@index([commissionId])
   @@index([contractorPayId])
   @@map("payroll_items")
 }
