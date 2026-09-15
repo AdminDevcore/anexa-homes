@@ -361,12 +361,23 @@ test.describe("a solar deal shows no insurance or roofing concepts", () => {
     const bar = page.getByTestId("deal-stage-bar");
     await expect(bar).toBeVisible({ timeout: 15000 });
     await page.getByTestId("deal-stage-actions").getByRole("button", { name: /Move/ }).click();
-    await page.getByRole("menuitem", { name: /Permit Approved/ }).click();
+    // Menu items are numbered ("2 Qualified"), so anchor on the name's end.
+    await page.getByRole("menuitem", { name: /\bQualified$/ }).click();
     await expect(page.getByText(/Stage updated/)).toBeVisible({ timeout: 15000 });
 
     // Reload and confirm it actually stuck, rather than trusting the toast.
     await page.reload();
-    await expect(page.getByText("Permit Approved").first()).toBeVisible({ timeout: 15000 });
+    await expect(bar).toContainText("Qualified", { timeout: 15000 });
+
+    // Jumping PAST Contract Signed is refused while the deal has neither a
+    // signed proposal nor a completed contract, with the reason, and the deal
+    // stays where it was. (This test used to jump a bare deal to Permit Approved.)
+    await page.getByTestId("deal-stage-actions").getByRole("button", { name: /Move/ }).click();
+    await page.getByRole("menuitem", { name: /Permit Approved/ }).click();
+    await expect(page.getByText(/Contract Signed needs both a signed proposal/)).toBeVisible({ timeout: 15000 });
+    await page.reload();
+    await expect(bar).toContainText("Qualified", { timeout: 15000 });
+    await expect(bar).not.toContainText("Permit Approved");
   });
 
 
