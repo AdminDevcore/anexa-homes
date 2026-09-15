@@ -1633,13 +1633,15 @@ export default async function LeadDetailPage({
               foldable
               slides={[
                 { id: "system", label: "System & financing" },
-                { id: "timeline", label: "Timeline", icon: "timeline" },
                 // Design, permitting and interconnection are TABS inside
                 // Operations, in the order a job goes through them — and that
                 // order ends where Installation begins. This slide was "System
                 // info", a name that said none of the three.
                 { id: "ops", label: "Operations", icon: "ops" },
                 { id: "install", label: "Installation", icon: "install" },
+                // The stage history reads after the work it records, and ahead
+                // of the feed.
+                { id: "timeline", label: "Timeline", icon: "timeline" },
                 // Activity is always last, on every deal that has one. The
                 // slides before it are the job; the feed is what people said about
                 // it, and a running commentary does not belong between two
@@ -1683,10 +1685,6 @@ export default async function LeadDetailPage({
                   }
                 />
               </div>
-
-            <div data-deal-slide="timeline">
-              {stageTimeline && <DealStageTimeline timeline={stageTimeline} />}
-            </div>
 
               <div data-deal-slide="ops">
                 <SolarOperations
@@ -1805,6 +1803,10 @@ export default async function LeadDetailPage({
                     </Section>
                   </>
                 )}
+            </div>
+
+            <div data-deal-slide="timeline">
+              {stageTimeline && <DealStageTimeline timeline={stageTimeline} />}
             </div>
 
               <div data-deal-slide="activity">
