@@ -25,6 +25,15 @@ process.env.SOLAR_VERTICAL_ENABLED = "1";
 
 const { estimatedSolarCommission, computeSolarCommissionsForProject } =
   await import("../solar-engine");
+/**
+ * The deal's price, re-derived after the design moves.
+ *
+ * Production never edits a design and leaves the contract behind — that was
+ * P1-6, and `recomputeDealMoney` is the fix. A battery test that skipped it
+ * would be asserting against a contract the battery never reached, which is
+ * how the first draft of these two cases "passed" at the wrong figure.
+ */
+const { recomputeDealMoney } = await import("@/server/modules/solar/deal-money");
 
 /**
  * The EXTENDED client, as the engine receives one in production.
@@ -295,5 +304,246 @@ describe("the company's lead take is applied identically", () => {
     expect(est.state === "estimate" && est.grossCents).toBe(line!.solarGrossAmount);
     // 40% kept by the company, so the rep nets 60% of what the basis produced.
     expect(line!.amount).toBe(Math.round(line!.solarGrossAmount! * 0.6));
+  });
+});
+
+/**
+ * THE REST OF THE COMPENSATION MATRIX.
+ *
+ * The cases above cover redline. A rep can also be paid a flat rate per watt,
+ * a battery can be paid on separately from the array, and the company's share
+ * of a lead it supplied comes off the top. Every one of those is a separate
+ * branch of `resolveDealPayTerms`, and the whole point of extracting it was
+ * that the deal page and payroll walk the SAME branch.
+ *
+ * So none of these assert a figure I chose. Each asserts the two answers agree,
+ * and then names the one property that makes the case distinctive — that flat
+ * ignores the redline entirely, that a battery adds on top of the array, that
+ * the company's take comes off the gross.
+ */
+
+/** Put the deal on a lender paying the given way, and re-read the design. */
+async function lenderPaying(
+  mode: "redline" | "per_watt",
+  batteryMode?: "redline" | "flat"
+) {
+  await raw.solarLender.update({
+    where: { id: lenderId },
+    data: { repPayMode: mode, ...(batteryMode ? { batteryPayMode: batteryMode } : {}) },
+  });
+}
+
+/** Both sides, for the deal as it currently stands. */
+async function bothAgree() {
+  const est = await estimate();
+  await runPayroll();
+  const line = await payrollLine();
+  return { est, line };
+}
+
+describe("a FLAT per-watt rep", () => {
+  beforeEach(async () => {
+    await lenderPaying("per_watt");
+    await raw.user.update({
+      where: { id: repId },
+      // 15 mills = $0.15 a watt, and a redline that must be ignored.
+      data: { solarPerWattMills: 15, solarRedlineCentsPerWatt: REDLINE },
+    });
+  });
+
+  it("is paid the same by both, on an unsigned deal", async () => {
+    const { est, line } = await bothAgree();
+    expect(line).not.toBeNull();
+    expect(est.state === "estimate" && est.netCents).toBe(line!.amount);
+    expect(est.state === "estimate" && est.basis).toBe(line!.solarBasis);
+  });
+
+  it("does NOT quote the redline — the lender decides the mode, not the profile", async () => {
+    const { est, line } = await bothAgree();
+    // The redline answer for this deal is a different, larger number; if either
+    // side had reached for it the two would still agree but both be wrong, so
+    // this pins the mode rather than only the agreement.
+    const redlineAnswer =
+      SYSTEM_KW * 1000 * PPW -
+      Math.round(SYSTEM_KW * 1000 * PPW * (FEE / 100)) -
+      REDLINE * SYSTEM_KW * 1000;
+    expect(line!.amount).not.toBe(redlineAnswer);
+    expect(est.state === "estimate" && est.netCents).toBe(line!.amount);
+    // $0.15 x 12,000 W.
+    expect(line!.solarGrossAmount).toBe(Math.round((15 / 1000) * 100 * SYSTEM_KW * 1000));
+  });
+
+  it("keeps the flat rate it was SIGNED at when the profile moves", async () => {
+    await sign();
+    await raw.solarDealComp.create({
+      data: {
+        companyId, leadId, vertical: "solar", repId,
+        basis: "per_watt", millsPerWatt: 15, signedAt: new Date(),
+      },
+    });
+    await raw.user.update({ where: { id: repId }, data: { solarPerWattMills: 99 } });
+
+    const { est, line } = await bothAgree();
+    expect(est.state === "estimate" && est.fromSnapshot).toBe(true);
+    expect(est.state === "estimate" && est.netCents).toBe(line!.amount);
+    expect(line!.solarGrossAmount).toBe(Math.round((15 / 1000) * 100 * SYSTEM_KW * 1000));
+  });
+});
+
+describe("BATTERIES, priced beside the array", () => {
+  beforeEach(async () => {
+    await raw.solarDesign.update({
+      where: { leadId },
+      data: { systemType: "pv_storage", batteryQty: 2 },
+    });
+    await raw.solarFinance.update({
+      where: { leadId },
+      data: { stickerPricePerBatteryCents: 1_200_000 },
+    });
+    await inSolar(() => recomputeDealMoney(companyId, leadId));
+  });
+
+  it("SOLAR + BATTERY: the battery does NOT move the array's pay, and both sides say so", async () => {
+    await lenderPaying("redline", "redline");
+    await raw.user.update({
+      where: { id: repId },
+      data: { solarRedlineCentsPerWatt: REDLINE, solarRedlinePerBatteryCents: 900_000 },
+    });
+
+    const withBatteries = await bothAgree();
+    expect(withBatteries.est.state === "estimate" && withBatteries.est.netCents)
+      .toBe(withBatteries.line!.amount);
+
+    /**
+     * And it is the SAME figure with the batteries taken off.
+     *
+     * This is the documented rule, not an oversight — `solar-pay.ts` sends `pv`
+     * and `pv_storage` down one path, and a redline is measured on
+     * `basePriceCents`, which the battery is deliberately priced outside of.
+     * The battery reaches the CONTRACT (recomputeDealMoney above puts it there)
+     * without reaching the array's commission.
+     *
+     * Asserted rather than assumed because my first draft of this test expected
+     * the opposite, and a test that merely checked the two sides agree would
+     * have passed either way.
+     */
+    await raw.solarDesign.update({
+      where: { leadId },
+      data: { systemType: "pv", batteryQty: 0 },
+    });
+    await inSolar(() => recomputeDealMoney(companyId, leadId));
+    const without = await bothAgree();
+    expect(without.est.state === "estimate" && without.est.netCents).toBe(without.line!.amount);
+    expect(withBatteries.line!.solarGrossAmount).toBe(without.line!.solarGrossAmount);
+  });
+
+  it("BATTERY-ONLY (storage): the REP's own battery plan pays, and both agree", async () => {
+    // Storage prices at zero per watt, which is how battery-only deals once
+    // paid a rep nothing at all. The plan read here is the REP's, never the
+    // lender's — a partner's battery pricing is not a rep's pay agreement.
+    await raw.solarDesign.update({ where: { leadId }, data: { systemType: "storage" } });
+    await inSolar(() => recomputeDealMoney(companyId, leadId));
+    await raw.user.update({
+      where: { id: repId },
+      data: { solarBatteryPayPlan: "flat", solarPerBatteryFlatCents: 50_000 },
+    });
+
+    const { est, line } = await bothAgree();
+    expect(est.state === "estimate" && est.netCents).toBe(line!.amount);
+    expect(line!.solarBasis).toBe("battery_flat");
+    // $500 a battery, two of them.
+    expect(line!.solarGrossAmount).toBe(100_000);
+  });
+
+  it("BATTERY-ONLY with NO plan on the rep is refused by both, not guessed", async () => {
+    await raw.solarDesign.update({ where: { leadId }, data: { systemType: "storage" } });
+    await inSolar(() => recomputeDealMoney(companyId, leadId));
+    await raw.user.update({
+      where: { id: repId },
+      data: { solarBatteryPayPlan: null, solarPerBatteryFlatCents: null },
+    });
+
+    const est = await estimate();
+    const { created } = await runPayroll();
+    expect(est.state).not.toBe("estimate");
+    expect(created).toBe(0);
+    expect(await payrollLine()).toBeNull();
+  });
+});
+
+describe("who supplied the lead", () => {
+  beforeEach(async () => {
+    await lenderPaying("redline");
+    await raw.user.update({ where: { id: repId }, data: { solarRedlineCentsPerWatt: REDLINE } });
+    await sign();
+  });
+
+  it("a REP-GENERATED lead is not docked, and both sides say so", async () => {
+    await raw.solarDealComp.create({
+      data: {
+        companyId, leadId, vertical: "solar", repId,
+        basis: "redline", redlineCentsPerWatt: REDLINE, signedAt: new Date(),
+        companyProvidedLead: false, leadAdjustMode: "percentage", companyLeadTakePct: 40,
+      },
+    });
+    const { est, line } = await bothAgree();
+    expect(est.state === "estimate" && est.netCents).toBe(line!.amount);
+    // The percentage is configured but the lead is the rep's, so nothing is
+    // taken: net equals gross. This is the case a naive reading gets wrong.
+    expect(line!.amount).toBe(line!.solarGrossAmount);
+  });
+
+  it("a COMPANY lead on a FLAT take is docked identically by both", async () => {
+    await raw.solarDealComp.create({
+      data: {
+        companyId, leadId, vertical: "solar", repId,
+        basis: "redline", redlineCentsPerWatt: REDLINE, signedAt: new Date(),
+        companyProvidedLead: true, leadAdjustMode: "flat", companyLeadFlatCents: 75_000,
+      },
+    });
+    const { est, line } = await bothAgree();
+    expect(est.state === "estimate" && est.netCents).toBe(line!.amount);
+    expect(line!.amount).toBe(line!.solarGrossAmount! - 75_000);
+  });
+});
+
+describe("a MANAGER override rides beside the rep's line, not inside it", () => {
+  it("the rep's own figure is untouched by an override, on both sides", async () => {
+    await lenderPaying("redline");
+    await raw.user.update({ where: { id: repId }, data: { solarRedlineCentsPerWatt: REDLINE } });
+
+    const before = await bothAgree();
+
+    const manager = await raw.user.create({
+      data: {
+        companyId, email: `mgr-agree-${process.pid}-${Date.now()}@test.local`,
+        firstName: "Mo", lastName: "Manager", role: "manager", passwordHash: "x",
+      },
+      select: { id: true },
+    });
+    const override = await raw.commissionOverride.create({
+      data: {
+        companyId, beneficiaryId: manager.id, sourceId: repId,
+        vertical: "solar", percent: 10,
+      },
+      select: { id: true },
+    });
+
+    const after = await bothAgree();
+
+    // The estimate is the REP's, and an override paid to somebody else must not
+    // move it — the deal page would otherwise quote the rep a number that
+    // shrinks when their manager is enrolled.
+    expect(after.est.state === "estimate" && after.est.netCents).toBe(after.line!.amount);
+    expect(after.line!.amount).toBe(before.line!.amount);
+
+    // …and the override itself is written as its own line, against the manager.
+    const mgrLine = await raw.commission.findFirst({
+      where: { companyId, projectId, userId: manager.id },
+      select: { amount: true, overrideId: true },
+    });
+    expect(mgrLine).not.toBeNull();
+    expect(mgrLine!.overrideId).toBe(override.id);
+    expect(mgrLine!.amount).toBe(Math.round(after.line!.amount * 0.1));
   });
 });
