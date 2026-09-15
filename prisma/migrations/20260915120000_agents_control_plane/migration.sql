@@ -89,6 +89,9 @@ CREATE INDEX "agent_runs_agentId_vertical_status_idx" ON "agent_runs"("agentId",
 -- CreateIndex
 CREATE INDEX "agent_runs_status_startedAt_idx" ON "agent_runs"("status", "startedAt");
 
+-- CreateIndex
+CREATE INDEX "agent_runs_leadId_idx" ON "agent_runs"("leadId");
+
 -- AddForeignKey
 ALTER TABLE "agents" ADD CONSTRAINT "agents_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -110,3 +113,7 @@ ALTER TABLE "agent_runs" ADD CONSTRAINT "agent_runs_triggeredById_fkey" FOREIGN 
 -- AddForeignKey
 ALTER TABLE "agent_runs" ADD CONSTRAINT "agent_runs_resolvedById_fkey" FOREIGN KEY ("resolvedById") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
+-- One queued or running run per agent per workspace. The tick and Run now both
+-- check before creating a run; this index is what holds when they race. Prisma
+-- cannot declare a partial index, so it lives only here (migrate diff ignores it).
+CREATE UNIQUE INDEX "agent_runs_one_in_flight" ON "agent_runs"("agentId", "vertical") WHERE "status" IN ('queued', 'running');

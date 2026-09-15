@@ -5706,10 +5706,14 @@ model AgentRun {
   resolution     AgentRunResolution?
   resolutionNote String?
 
+  /// At most one queued or running run per agent per workspace. The partial
+  /// unique index agent_runs_one_in_flight, written by hand in the migration,
+  /// enforces this; Prisma cannot declare a partial index.
   @@index([companyId, createdAt])
   @@index([companyId, status, createdAt])
   @@index([agentId, createdAt])
   @@index([agentId, vertical, status])
   @@index([status, startedAt])
+  @@index([leadId])
   @@map("agent_runs")
 }
