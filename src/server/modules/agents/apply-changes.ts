@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { ActiveVertical } from "@/lib/vertical";
 import { runAutomations } from "@/server/modules/automations/engine";
@@ -155,8 +155,21 @@ export async function moveDeal(
       // extended client's transaction handle is structurally the same client
       // for these two pass-through models (stage-history.ts says so: neither
       // is vertical-scoped), but its generated type carries the extension's
-      // own generics, which the base type doesn't know about.
-      tx as unknown as PrismaClient
+      // own generics, which the base type doesn't know about. Cast to exactly
+      // the parameter recordStageEntry declares, not the whole client, so
+      // this claims no more than it needs.
+      //
+      // A SIDE EFFECT OF PASSING tx: recordStageEntry never throws on its own
+      // (its own doc comment says so), but inside a Postgres transaction a
+      // failed statement aborts the WHOLE transaction, not just itself — the
+      // next statement fails with "current transaction is aborted" even
+      // though recordStageEntry swallowed its own error. That next statement
+      // is tx.activityLog.create below, which is NOT wrapped, so its failure
+      // propagates and rolls the move back. Before this change, a timeline
+      // write on its own connection could never fail a move this way. For an
+      // agent that is the right outcome: the run records the move as not
+      // applied, which is now true.
+      tx as unknown as Parameters<typeof recordStageEntry>[1]
     );
     await tx.activityLog.create({
       data: {

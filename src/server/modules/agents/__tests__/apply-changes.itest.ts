@@ -31,6 +31,7 @@ let otherRoofingPipe = "";
 let roofingLead = "";
 let solarLead = "";
 let solarFundingLead = "";
+let solarSkipLead = "";
 let otherRoofingLead = "";
 let buildDepsLead = "";
 let staleLead = "";
@@ -65,7 +66,7 @@ beforeAll(async () => {
   const contractStage = await db.pipelineStage.create({
     data: { pipelineId: solarPipe, key: "contract_signed_stage", name: "Contract Signed", position: 1, milestone: "contract_signed" },
   });
-  await db.pipelineStage.create({
+  const fundingStage = await db.pipelineStage.create({
     data: { pipelineId: solarPipe, key: "m1_funding", name: "M1 Funding", position: 2 },
   });
 
@@ -91,6 +92,13 @@ beforeAll(async () => {
   // funding rule alone — it is not, itself, crossing the Contract Signed line.
   solarFundingLead = (
     await db.lead.create({ data: { companyId, vertical: "solar", pipelineId: solarPipe, stageId: contractStage.id, firstName: "Fund", lastName: "Test" } })
+  ).id;
+  // Already sitting IN M1 Funding, with no milestone on file at all — the
+  // dedicated fixture for the "already in target" skip test below. Kept
+  // separate from solarFundingLead so that case's own milestone (paid partway
+  // through its test) never touches this one.
+  solarSkipLead = (
+    await db.lead.create({ data: { companyId, vertical: "solar", pipelineId: solarPipe, stageId: fundingStage.id, firstName: "Skip", lastName: "Test" } })
   ).id;
   otherRoofingLead = (
     await db.lead.create({
@@ -161,17 +169,20 @@ describe("resolveChanges — Contract Signed and M1 Funding", () => {
   });
 
   it("never refuses a roofing deal", async () => {
-    // Read-only: resolveChanges does not move anything, so this runs safely
-    // ahead of the "moveDeal" tests below that do move roofingLead.
+    // resolveChanges only reads — it never moves a deal — so this holds
+    // whatever stage roofingLead happens to be in when it runs.
     const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(roofingLead, "action_required")]));
     expect(c.contractRefusal).toBeNull();
     expect(c.fundingRefusal).toBeNull();
   });
 
   it("skips both refusals when the deal is already in its target stage", async () => {
-    // solarLead has sat in "action_required" since creation and nothing in
-    // this file moves it, so this is genuinely a no-op change.
-    const [c] = await runInVertical("solar", () => resolveChanges(companyId, [change(solarLead, "action_required")]));
+    // solarSkipLead sits IN M1 Funding with no milestone on file — without
+    // the skip, fundingGateError would refuse this on its own merits (see
+    // the M1 Funding case above, which is this same situation MINUS the
+    // "already there" fact). With the skip, resolving a change that asks for
+    // the stage the deal is already in never calls either rule.
+    const [c] = await runInVertical("solar", () => resolveChanges(companyId, [change(solarSkipLead, "m1_funding")]));
     expect(c.contractRefusal).toBeNull();
     expect(c.fundingRefusal).toBeNull();
   });
@@ -270,14 +281,15 @@ describe("moveDeal", () => {
 
   it("rolls back the whole move, atomically, if the activity write fails", async () => {
     const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(atomicLead, "action_required")]));
-    // A userId that cannot exist: ActivityLog.actorId is a real foreign key
-    // to User, so this write fails inside the transaction, after the lead's
-    // updateMany and the timeline insert already ran in the same transaction.
-    const ghostUserId = "00000000-0000-0000-0000-000000000000";
-
+    // An embedded NUL byte fails ONLY the activity write: Postgres text
+    // columns reject 0x00, and the agent's name reaches nowhere else — the
+    // "agent" form's timeline row carries `via: "agent"` and no name at all
+    // (see moveDeal). This isolates the failure to the activity statement, so
+    // a surviving timeline row here can only mean the transaction didn't
+    // really cover recordStageEntry's write.
     await expect(
       runInVertical("roofing", () =>
-        moveDeal(companyId, atomicLead, c.fromStage!.id, c.toStage!, { kind: "person", userId: ghostUserId, fullName: "Ghost", agentName: "NTP Poller" })
+        moveDeal(companyId, atomicLead, c.fromStage!.id, c.toStage!, { kind: "agent", agentName: "bad   name" })
       )
     ).rejects.toThrow();
 
