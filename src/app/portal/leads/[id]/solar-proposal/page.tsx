@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { can } from "@/server/rbac/guards";
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "@/server/modules/solar/settings";
@@ -56,6 +57,10 @@ export default async function SolarProposalBuilderPage({
   if (!can(user, "create", "Proposal") && !can(user, "update", "Proposal")) {
     redirect(`/portal/leads/${id}`);
   }
+
+  // The layout above 404s an out-of-scope deal, but a layout is a backstop:
+  // Next renders page segments independently. The page proves it for itself.
+  if (!(await leadAccessible(user, id))) notFound();
 
   const lead = await prisma.lead.findFirst({
     where: { id, companyId: user.companyId },
@@ -487,6 +492,8 @@ export default async function SolarProposalBuilderPage({
           paydownPct: p.paydownPct,
           paydownMonths: p.paydownMonths,
           isActive: p.isActive,
+          ppwBasis: p.ppwBasis,
+          batteryPriceBasis: p.batteryPriceBasis,
         }))}
         // What a deal nobody has priced yet opens on. The company's net
         // target when it has set one — that is already "what we keep per watt
@@ -498,12 +505,12 @@ export default async function SolarProposalBuilderPage({
         }
         creditRates={settings.creditRates}
         // Which credits this job earns. A deal with no financing row yet has
-        // nothing saved, and the ordinary case — all three — is what a fresh
-        // one is created holding, so that is what an unsaved deal shows.
+        // nothing proven beyond the ordinary federal credit, so the two bonus
+        // credits start off until the rep confirms this job qualifies.
         creditClaims={{
           itc: finance?.claimItc ?? true,
-          energyCommunity: finance?.claimEnergyCommunity ?? true,
-          domesticContent: finance?.claimDomesticContent ?? true,
+          energyCommunity: finance?.claimEnergyCommunity ?? false,
+          domesticContent: finance?.claimDomesticContent ?? false,
         }}
         // Nothing typed on a deal with no financing row yet, which is the
         // ordinary case for the credit as well: it is money a rep decides to

@@ -4533,14 +4533,12 @@ model SolarFinance {
 
   /// Which federal credits this address and this equipment actually earn.
   ///
-  /// TRUE by default because the base credit is earned on nearly every owned
-  /// system and because a deal nobody has looked at yet should quote the
-  /// ordinary case — but the two bonuses are conditional (a census tract, a
-  /// sourcing threshold) and a rep who knows this job does not qualify unticks
-  /// them.
+  /// TRUE by default only for the base credit. The two bonuses are conditional
+  /// on the address and equipment, so they start off until a rep confirms this
+  /// job qualifies.
   claimItc             Boolean @default(true)
-  claimEnergyCommunity Boolean @default(true)
-  claimDomesticContent Boolean @default(true)
+  claimEnergyCommunity Boolean @default(false)
+  claimDomesticContent Boolean @default(false)
 
   /// The rep's own closing credit on this deal, cents. Zero on nearly all.
   ///
