@@ -12,6 +12,13 @@ export const SUMMARY_MAX = 280;
  */
 export const MAX_DETAIL_CHARS = 32_000;
 
+/**
+ * `error` is shortened, never rejected: a failed handler — browser
+ * automation especially — can easily return a long stack trace, and the
+ * real failure is worth keeping even when it's verbose.
+ */
+export const MAX_ERROR_CHARS = 4000;
+
 const detailSchema = z.record(z.unknown()).superRefine((value, ctx) => {
   let json: string;
   try {
@@ -46,7 +53,10 @@ const resultSchema = z
     summary: z.string().min(1),
     detail: detailSchema.optional(),
     changes: z.array(changeSchema).max(500).optional(),
-    error: z.string().max(4000).optional(),
+    error: z
+      .string()
+      .transform((s) => (s.length > MAX_ERROR_CHARS ? s.slice(0, MAX_ERROR_CHARS) : s))
+      .optional(),
   })
   .strict();
 

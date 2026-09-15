@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MAX_DETAIL_CHARS, SUMMARY_MAX, parseAgentResult, truncateSummary } from "../result";
+import { MAX_DETAIL_CHARS, MAX_ERROR_CHARS, SUMMARY_MAX, parseAgentResult, truncateSummary } from "../result";
 import { emptyDetail, errorText, missingHandlerMessage, readDetail } from "../detail";
 
 const LEAD = "0b8f5a8e-2f1e-4d7c-9a6b-1c2d3e4f5a6b";
@@ -50,9 +50,10 @@ describe("parseAgentResult", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("refuses an error over 4000 characters", () => {
-    const r = parseAgentResult({ status: "failed", summary: "x", error: "e".repeat(4001) });
-    expect(r.ok).toBe(false);
+  it("shortens a long error instead of rejecting it", () => {
+    const r = parseAgentResult({ status: "failed", summary: "x", error: "e".repeat(5000) });
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.result.error?.length).toBe(MAX_ERROR_CHARS);
   });
 
   describe("detail must be JSON and bounded", () => {

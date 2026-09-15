@@ -63,8 +63,9 @@ export const RESOURCES = [
   "Proposal", // customer-facing roofing presentation / proposal builder
   // Back-office automation agents and their run log. Config edits are
   // owner/admin only by ROLE (see modules/agents/access.ts, which ignores
-  // overrides for them); Operations get read/run/approve per person through
-  // the Agents access switch on Team → member.
+  // overrides for them); owners and admins also run and resolve by role,
+  // and managers with the Agents access switch get read/run/approve per
+  // person through Team → member.
   "Agent",
 ] as const;
 
@@ -289,7 +290,8 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ["read"],
     Scope: ["read"],
     Proposal: ["read"],
-    // Reads agents and their runs. Running and resolving belong to Operations.
+    // Reads agents and their runs. Running and resolving belong to owners
+    // and admins by role, and to managers with the Agents access switch.
     Agent: ["read"],
   },
 };
