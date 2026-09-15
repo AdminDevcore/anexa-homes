@@ -32,6 +32,15 @@ export type StageProgress<S extends ProgressStage> = {
   isSideState: boolean;
 };
 
+/**
+ * `stages` must already be in the pipeline's position order — this function
+ * does not sort them, unlike sold-stage.ts's `soldStageIds`. Callers pass the
+ * pipeline's stages straight through; an out-of-order list gives a wrong step
+ * count and a wrong Advance target.
+ *
+ * No imports here, on purpose: deal-stage-bar.tsx pulls this file into the
+ * client bundle, and anything imported here would ride along with it.
+ */
 export function stageProgress<S extends ProgressStage>(
   stages: S[],
   currentStageId: string | null

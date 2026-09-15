@@ -70,4 +70,25 @@ describe("stageProgress", () => {
     expect(p).toMatchObject({ currentIndex: 1, step: 2, liveCount: 3, isCancelled: false, isSideState: false });
     expect(p.nextStage?.id).toBe("c");
   });
+
+  it("counts a live stage past an early lost stage, excluding the lost one from step and live count", () => {
+    const withEarlyLoss = [s("a"), s("dead_early", { isLost: true }), s("b"), s("c")];
+    const p = stageProgress(withEarlyLoss, "b");
+    expect(p.step).toBe(2);
+    expect(p.liveCount).toBe(3);
+    expect(p.nextStage?.id).toBe("c");
+  });
+
+  it("treats an unknown stage id, or no stage at all, as before the first main-line stage", () => {
+    const unknown = stageProgress(ROOFING, "not_a_real_stage");
+    const none = stageProgress(ROOFING, null);
+    for (const p of [unknown, none]) {
+      expect(p.currentIndex).toBe(-1);
+      expect(p.current).toBeNull();
+      expect(p.step).toBe(0);
+      expect(p.nextStage?.id).toBe("adjuster_meeting");
+      expect(p.isCancelled).toBe(false);
+      expect(p.isSideState).toBe(false);
+    }
+  });
 });
