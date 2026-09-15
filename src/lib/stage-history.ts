@@ -9,8 +9,12 @@
  * interesting the moment the deal moves on.
  */
 
-/** How a deal got into a stage when no person moved it. */
-export type StageMoveVia = "automation" | "signature" | "document";
+/**
+ * How a deal got into a stage when no person moved it. `agent`: an agent's
+ * change passed the human gate on its own. A change a person approved is that
+ * person's move, and carries their name instead.
+ */
+export type StageMoveVia = "automation" | "signature" | "document" | "agent";
 
 export type StageEventRow = {
   id: string;
