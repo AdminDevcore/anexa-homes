@@ -166,6 +166,29 @@ async function unreachableOverflow(page: Page) {
  * routing behaviour, not a layout defect, and this spec is about layout — so
  * the abort is absorbed and whatever the browser settled on is measured.
  */
+/**
+ * Put this session in the Solar workspace, and check it took.
+ *
+ * `getActiveVertical` reads the `anexa_vertical` cookie and otherwise falls back
+ * to roofing for anybody granted both — which admin@ is. Signing in clears
+ * cookies, so without this the Solar Settings page redirects to /portal/settings
+ * and the run measures the wrong page; it only ever passed when an earlier spec
+ * in the same run had left a solar session behind. Same approach as
+ * row-scope.spec.ts: set the cookie the server reads, then CHECK the switcher,
+ * because a workspace that quietly falls back to roofing is exactly how this
+ * spec would stop testing solar.
+ */
+async function useSolarWorkspace(page: Page) {
+  await page.context().addCookies([
+    { name: "anexa_vertical", value: "solar", url: new URL(page.url()).origin },
+  ]);
+  await visit(page, "/portal/dashboard");
+  await expect(
+    page.getByRole("button", { name: "Switch workspace" }),
+    "the solar workspace must actually be active, or this spec measures roofing"
+  ).toHaveText(/Solar/, { timeout: 15_000 });
+}
+
 async function visit(page: Page, path: string) {
   const once = async () => {
     try {
@@ -242,6 +265,7 @@ test.describe("solar screens are usable at every width", () => {
     test(`${vp.name} — ${vp.width}px`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await login(page, "admin@anexahomes.com");
+      await useSolarWorkspace(page);
 
       const failures: string[] = [];
 
