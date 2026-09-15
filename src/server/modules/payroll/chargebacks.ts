@@ -1,6 +1,7 @@
 import type { ChargebackReason } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { addPayrollAdjustment, assertRunOpen } from "./adjustments";
+import { assertPayrollReferences } from "./references";
 
 /**
  * Clawing back commission, and recovering it a piece at a time.
@@ -52,6 +53,11 @@ export type ChargebackBalance = {
  * that has since closed, or the deal may have been reassigned; the money is owed
  * by a PERSON either way. When it is supplied the link is kept so the two
  * records can be read together.
+ *
+ * Every id handed in — the person, the commission, the job, the deal — is
+ * checked against the company before anything is written, and against each
+ * other: a commission names who was paid it, so a chargeback for it is owed by
+ * that person. See references.ts.
  */
 export async function requestChargeback(args: {
   companyId: string;
@@ -71,6 +77,13 @@ export async function requestChargeback(args: {
     // day somebody widens it.
     throw new Error("A chargeback needs a documented rep-caused reason.");
   }
+
+  await assertPayrollReferences(args.companyId, {
+    userId: args.userId,
+    commissionId: args.commissionId,
+    projectId: args.projectId,
+    leadId: args.leadId,
+  });
 
   // Denormalise the deal so the record still reads correctly if the commission
   // is ever removed — the FK is SetNull for exactly that case.
@@ -207,6 +220,12 @@ export async function openBalancesFor(companyId: string, userId: string) {
 }
 
 /**
+ * A refusal decided inside the recovery transaction. Thrown, so everything the
+ * transaction touched rolls back; returned to the caller as `{ ok: false }`.
+ */
+class RecoveryRefused extends Error {}
+
+/**
  * Take an instalment on one payroll run.
  *
  * `amountCents` is the admin's choice: the whole balance, part of it, or — by
@@ -214,6 +233,27 @@ export async function openBalancesFor(companyId: string, userId: string) {
  * remaining balance so a double-entry cannot recover more than is owed, and it
  * writes a `chargeback_recovery` adjustment so the deduction appears as its own
  * line on the pay stub rather than vanishing into a smaller commission.
+ *
+ * ── ONE AT A TIME, PER DEBT ────────────────────────────────────────────────
+ * The balance used to be read and the instalment written afterwards. Two
+ * recoveries in the same second — two admins, or one admin in two tabs — both
+ * read the full balance and both took it, so a $1,000 debt came off somebody's
+ * pay twice. And a run finalised between the two writes left a recovery counted
+ * against the balance with no deduction on any pay stub.
+ *
+ * Now it is one transaction that LOCKS before it reads:
+ *   1. the run (assertRunOpen) — finalisation waits for this to commit, or this
+ *      sees the run finalised and refuses;
+ *   2. the chargeback — a second recovery against the same debt, on this run or
+ *      any other, waits here until this one commits, then reads the balance
+ *      this one left;
+ * then re-reads the balance, clamps, and writes the recovery, its pay-stub line
+ * and the settlement together. Nothing is written unless all of it is.
+ *
+ * Locks are always taken run first, chargeback second, so two recoveries cannot
+ * deadlock each other. They are conditional updates rather than
+ * `SELECT … FOR UPDATE` because raw SQL is fenced out of the app
+ * (src/lib/__tests__/no-raw-sql.test.ts).
  */
 export async function recordChargebackRecovery(args: {
   companyId: string;
@@ -223,57 +263,75 @@ export async function recordChargebackRecovery(args: {
   createdById: string;
   notes?: string | null;
 }) {
-  await assertRunOpen(args.companyId, args.payrollRunId);
+  const asked = Math.abs(Math.round(args.amountCents));
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await assertRunOpen(args.companyId, args.payrollRunId, tx);
 
-  const balance = await chargebackBalance(args.companyId, args.chargebackId);
-  if (!balance) return { ok: false as const, error: "Chargeback not found." };
+      const held = await tx.chargeback.updateMany({
+        where: { id: args.chargebackId, companyId: args.companyId },
+        data: { updatedAt: new Date() },
+      });
+      if (held.count !== 1) throw new RecoveryRefused("Chargeback not found.");
 
-  const cb = await prisma.chargeback.findFirstOrThrow({
-    where: { id: args.chargebackId, companyId: args.companyId },
-    select: { status: true, leadId: true, projectId: true },
-  });
-  if (cb.status !== "approved") {
-    return { ok: false as const, error: "Only an approved chargeback can be recovered." };
-  }
-  if (balance.remainingCents <= 0) {
-    return { ok: false as const, error: "This chargeback is already fully recovered." };
-  }
+      const cb = await tx.chargeback.findFirstOrThrow({
+        where: { id: args.chargebackId, companyId: args.companyId },
+        select: { status: true, userId: true, amountCents: true, leadId: true, projectId: true },
+      });
+      if (cb.status !== "approved") {
+        throw new RecoveryRefused("Only an approved chargeback can be recovered.");
+      }
 
-  const take = Math.min(balance.remainingCents, Math.abs(Math.round(args.amountCents)));
-  if (take === 0) return { ok: false as const, error: "Enter an amount to recover." };
+      const recovered = await tx.chargebackRecovery.aggregate({
+        where: { chargebackId: args.chargebackId },
+        _sum: { amountCents: true },
+      });
+      const owed = Math.max(0, cb.amountCents - (recovered._sum.amountCents ?? 0));
+      if (owed <= 0) throw new RecoveryRefused("This chargeback is already fully recovered.");
 
-  await prisma.chargebackRecovery.create({
-    data: {
-      chargebackId: args.chargebackId,
-      payrollRunId: args.payrollRunId,
-      amountCents: take,
-      notes: args.notes?.trim() || null,
-      createdById: args.createdById,
-    },
-  });
+      const take = Math.min(owed, asked);
+      if (take === 0) throw new RecoveryRefused("Enter an amount to recover.");
 
-  await addPayrollAdjustment({
-    companyId: args.companyId,
-    payrollRunId: args.payrollRunId,
-    userId: balance.userId,
-    kind: "chargeback_recovery",
-    amountCents: take,
-    reason: args.notes?.trim() || "Chargeback recovery",
-    createdById: args.createdById,
-    chargebackId: args.chargebackId,
-    leadId: cb.leadId,
-    projectId: cb.projectId,
-  });
+      await tx.chargebackRecovery.create({
+        data: {
+          chargebackId: args.chargebackId,
+          payrollRunId: args.payrollRunId,
+          amountCents: take,
+          notes: args.notes?.trim() || null,
+          createdById: args.createdById,
+        },
+      });
 
-  // Settled only when the balance actually reaches zero — a partial recovery
-  // leaves it approved and open for the next run.
-  const remaining = balance.remainingCents - take;
-  if (remaining <= 0) {
-    await prisma.chargeback.update({
-      where: { id: args.chargebackId },
-      data: { status: "settled" },
+      await addPayrollAdjustment(
+        {
+          companyId: args.companyId,
+          payrollRunId: args.payrollRunId,
+          userId: cb.userId,
+          kind: "chargeback_recovery",
+          amountCents: take,
+          reason: args.notes?.trim() || "Chargeback recovery",
+          createdById: args.createdById,
+          chargebackId: args.chargebackId,
+          leadId: cb.leadId,
+          projectId: cb.projectId,
+        },
+        tx
+      );
+
+      // Settled only when the balance actually reaches zero — a partial recovery
+      // leaves it approved and open for the next run.
+      const remaining = owed - take;
+      if (remaining <= 0) {
+        await tx.chargeback.update({
+          where: { id: args.chargebackId },
+          data: { status: "settled" },
+        });
+      }
+
+      return { ok: true as const, recoveredCents: take, remainingCents: remaining };
     });
+  } catch (err) {
+    if (err instanceof RecoveryRefused) return { ok: false as const, error: err.message };
+    throw err;
   }
-
-  return { ok: true as const, recoveredCents: take, remainingCents: remaining };
 }

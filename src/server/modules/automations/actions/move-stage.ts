@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
-import { contractSignedMoveError } from "@/server/modules/pipeline/contract-signed";
+import { stageMoveError } from "@/server/modules/pipeline/stage-guard";
 import type { ActionContext, AutomationActionModule, StepResult } from "../types";
 
 const schema = z.object({ stageId: z.string().min(1) });
@@ -49,15 +49,18 @@ export const moveStageAction: AutomationActionModule = {
       return { type: "move_stage", ok: true, detail: `Already in ${stage.name}.` };
     }
 
-    // The same rule a person moving the card is held to: a rule firing on a
+    // The same rules a person moving the card is held to: a rule firing on a
     // signature must not carry a deal over Contract Signed before the contract
-    // is on file either.
-    const contractError = await contractSignedMoveError({
+    // is on file, and a rule firing on install photos must not carry one past
+    // M1 Funding before the money is certified. A rule runs on whatever
+    // triggered it, so it carries nobody's authority — see stage-guard.ts.
+    const moveError = await stageMoveError({
       companyId: ctx.companyId,
+      actor: null,
       lead: { id: lead.id, vertical: lead.vertical, stageId: lead.stageId },
       targetStageId: stage.id,
     });
-    if (contractError) return fail(contractError);
+    if (moveError) return fail(moveError);
 
     await prisma.lead.update({ where: { id: lead.id }, data: { stageId: stage.id } });
     await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage, via: "automation" });
