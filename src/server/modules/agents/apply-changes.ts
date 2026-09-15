@@ -1,3 +1,4 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import type { ActiveVertical } from "@/lib/vertical";
 import { runAutomations } from "@/server/modules/automations/engine";
@@ -97,33 +98,82 @@ export async function resolveChanges(companyId: string, changes: RequestedChange
  * the stage-entry fields, the timeline row, the activity line, and the
  * stage_changed notification. Call inside the run's workspace.
  *
+ * THE WRITE IS CONDITIONAL ON THE STAGE THE CALLER SAW. `fromStageId` is the
+ * stage `resolveChanges` found the deal in; the update only takes effect if
+ * the deal is STILL there. A rep can cancel a deal — or approve, or run,
+ * another change — between the moment a run resolves its changes and the
+ * moment this applies one, and writing the agent's target unconditionally
+ * would silently carry a cancelled (or otherwise since-moved) deal back onto
+ * the board. `pipeline/contract-signed.ts`'s own unattended mover,
+ * `advanceToContractSignedIfReady`, guards its write the same way and for the
+ * same reason. When the deal has moved since, NOTHING is written: this throws
+ * rather than applying a stale move, and the caller decides what that means
+ * for its run.
+ *
  * Does NOT re-check either stage rule: the caller runs them first —
  * resolveChanges for a run, stageMoveError at Apply for a person approving one.
+ *
+ * THE LEAD WRITE, THE TIMELINE ROW AND THE ACTIVITY LINE COMMIT TOGETHER, in
+ * one transaction: a half-finished move — the lead moved but the activity
+ * line failed to write — must never be recorded by a caller as "not applied"
+ * when the deal in fact did move. `stage_changed` fires AFTER the transaction
+ * commits, still wrapped exactly as before, so a notification failure can
+ * never roll back a move that already happened.
  *
  * Automations are NOT fired here: the engine establishes its own workspace, so
  * the caller runs runStageEnteredAutomations after leaving runInVertical.
  */
-export async function moveDeal(companyId: string, leadId: string, stage: TargetStage, by: MovedBy): Promise<void> {
-  await prisma.lead.update({ where: { id: leadId }, data: stageEntryData(stage) });
-  await recordStageEntry({
-    leadId,
-    stageId: stage.id,
-    stage,
-    ...(by.kind === "agent" ? { via: "agent" as const } : { movedById: by.userId }),
+export async function moveDeal(
+  companyId: string,
+  leadId: string,
+  fromStageId: string | null,
+  stage: TargetStage,
+  by: MovedBy
+): Promise<void> {
+  // stageEntryData() connects the relation (`stage: { connect }`), which
+  // updateMany's scalar-only input can't take — swap it for the plain
+  // `stageId` column updateMany does accept, and leave every other field as
+  // stage-entry-data.ts computed it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping the relation field only
+  const { stage: _connect, ...entryFields } = stageEntryData(stage);
+  const data: Prisma.LeadUncheckedUpdateManyInput = { ...entryFields, stageId: stage.id };
+
+  await prisma.$transaction(async (tx) => {
+    const moved = await tx.lead.updateMany({ where: { id: leadId, companyId, stageId: fromStageId }, data });
+    if (moved.count !== 1) {
+      throw new Error("This deal has moved since the agent looked at it; nothing was changed.");
+    }
+    await recordStageEntry(
+      {
+        leadId,
+        stageId: stage.id,
+        stage,
+        ...(by.kind === "agent" ? { via: "agent" as const } : { movedById: by.userId }),
+      },
+      // recordStageEntry is typed off the BASE PrismaClient on purpose (see
+      // its own doc comment) so a plain client can stand in for it; the
+      // extended client's transaction handle is structurally the same client
+      // for these two pass-through models (stage-history.ts says so: neither
+      // is vertical-scoped), but its generated type carries the extension's
+      // own generics, which the base type doesn't know about.
+      tx as unknown as PrismaClient
+    );
+    await tx.activityLog.create({
+      data: {
+        companyId,
+        type: "stage_change",
+        message:
+          by.kind === "agent"
+            ? `Agent "${by.agentName}" moved the deal to ${stage.name}`
+            : `${by.fullName} moved the deal to ${stage.name}, approving agent "${by.agentName}"`,
+        actorId: by.kind === "person" ? by.userId : null,
+        leadId,
+      },
+    });
   });
-  await prisma.activityLog.create({
-    data: {
-      companyId,
-      type: "stage_change",
-      message:
-        by.kind === "agent"
-          ? `Agent "${by.agentName}" moved the deal to ${stage.name}`
-          : `${by.fullName} moved the deal to ${stage.name}, approving agent "${by.agentName}"`,
-      actorId: by.kind === "person" ? by.userId : null,
-      leadId,
-    },
-  });
-  // Lazily loaded and wrapped: the move is the record, the alert a consequence.
+
+  // Lazily loaded and wrapped: the move already committed, so a notification
+  // failure here is a consequence, never a reason to undo it.
   try {
     const { fireEvent } = await import("@/server/modules/notifications/engine");
     await fireEvent({

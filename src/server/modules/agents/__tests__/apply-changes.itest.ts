@@ -15,6 +15,9 @@ import { resolveSecretRef } from "../secrets";
  * Also: agents obey main's two solar stage rules (Contract Signed and M1
  * Funding — user decision 2026-09-15). `resolveChanges` fills a refusal for
  * either rule a move would cross; a roofing deal is never refused by either.
+ *
+ * And: a move is conditional on the stage the caller saw, and the write is
+ * atomic — code review findings on c4dcdc6, fixed here.
  */
 process.env.SOLAR_VERTICAL_ENABLED = "1";
 
@@ -24,9 +27,15 @@ let companyId = "";
 let otherCompanyId = "";
 let roofingPipe = "";
 let solarPipe = "";
+let otherRoofingPipe = "";
 let roofingLead = "";
 let solarLead = "";
 let solarFundingLead = "";
+let otherRoofingLead = "";
+let buildDepsLead = "";
+let staleLead = "";
+let atomicLead = "";
+let stampLead = "";
 let userId = "";
 const stage: Record<string, string> = {};
 
@@ -34,7 +43,9 @@ beforeAll(async () => {
   companyId = (await db.company.create({ data: { name: "Apply Co", slug: `apply-${process.pid}-${Date.now()}` } })).id;
   otherCompanyId = (await db.company.create({ data: { name: "Other Apply Co", slug: `apply-other-${process.pid}-${Date.now()}` } })).id;
   userId = (
-    await db.user.create({ data: { companyId, email: `ada-${process.pid}@apply.test`, firstName: "Ada", lastName: "Admin", role: "admin", status: "active", passwordHash: "x" } })
+    await db.user.create({
+      data: { companyId, email: `ada-${process.pid}-${Date.now()}@apply.test`, firstName: "Ada", lastName: "Admin", role: "admin", status: "active", passwordHash: "x" },
+    })
   ).id;
 
   roofingPipe = (await db.pipeline.create({ data: { companyId, name: "Roofing", vertical: "roofing" } })).id;
@@ -58,11 +69,21 @@ beforeAll(async () => {
     data: { pipelineId: solarPipe, key: "m1_funding", name: "M1 Funding", position: 2 },
   });
 
+  // A SEPARATE company with a pipeline that uses the SAME stage key as ours —
+  // "submitted" — so a companyId filter dropped from resolveChanges, or from
+  // either deps.deals query, would still happen to match on the key alone.
+  otherRoofingPipe = (await db.pipeline.create({ data: { companyId: otherCompanyId, name: "Other Roofing", vertical: "roofing" } })).id;
+  const otherSubmitted = await db.pipelineStage.create({ data: { pipelineId: otherRoofingPipe, key: "submitted", name: "Submitted", position: 0 } });
+
   roofingLead = (
     await db.lead.create({
       data: { companyId, vertical: "roofing", pipelineId: roofingPipe, stageId: stage.submitted, firstName: "Maria", lastName: "Lopez", address: "12 Elm St", city: "Dallas" },
     })
   ).id;
+  // A real move flow logs entry into the starting stage too; back that in so
+  // the first move below has a previous timeline row to close.
+  await db.leadStageEvent.create({ data: { leadId: roofingLead, stageId: stage.submitted, stageName: "Submitted", position: 0 } });
+
   solarLead = (
     await db.lead.create({ data: { companyId, vertical: "solar", pipelineId: solarPipe, stageId: solarStage.id, firstName: "Sol", lastName: "Customer" } })
   ).id;
@@ -71,16 +92,34 @@ beforeAll(async () => {
   solarFundingLead = (
     await db.lead.create({ data: { companyId, vertical: "solar", pipelineId: solarPipe, stageId: contractStage.id, firstName: "Fund", lastName: "Test" } })
   ).id;
+  otherRoofingLead = (
+    await db.lead.create({
+      data: { companyId: otherCompanyId, vertical: "roofing", pipelineId: otherRoofingPipe, stageId: otherSubmitted.id, firstName: "Not", lastName: "Ours" },
+    })
+  ).id;
+  buildDepsLead = (
+    await db.lead.create({ data: { companyId, vertical: "roofing", pipelineId: roofingPipe, stageId: stage.submitted, firstName: "Build", lastName: "Deps" } })
+  ).id;
+  staleLead = (
+    await db.lead.create({ data: { companyId, vertical: "roofing", pipelineId: roofingPipe, stageId: stage.submitted, firstName: "Stale", lastName: "Move" } })
+  ).id;
+  atomicLead = (
+    await db.lead.create({ data: { companyId, vertical: "roofing", pipelineId: roofingPipe, stageId: stage.submitted, firstName: "Atomic", lastName: "Move" } })
+  ).id;
+  stampLead = (
+    await db.lead.create({ data: { companyId, vertical: "roofing", pipelineId: roofingPipe, stageId: stage.submitted, firstName: "Stamp", lastName: "Move" } })
+  ).id;
 });
 
 afterAll(async () => {
-  await db.activityLog.deleteMany({ where: { companyId } });
-  await db.leadStageEvent.deleteMany({ where: { lead: { companyId } } });
+  delete process.env.AGENT_ITEST_TOKEN;
+  await db.activityLog.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
+  await db.leadStageEvent.deleteMany({ where: { lead: { companyId: { in: [companyId, otherCompanyId] } } } });
   await db.solarMilestone.deleteMany({ where: { companyId } });
-  await db.lead.deleteMany({ where: { companyId } });
+  await db.lead.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
   await db.solarLender.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
-  await db.pipelineStage.deleteMany({ where: { pipelineId: { in: [roofingPipe, solarPipe] } } });
-  await db.pipeline.deleteMany({ where: { companyId } });
+  await db.pipelineStage.deleteMany({ where: { pipelineId: { in: [roofingPipe, solarPipe, otherRoofingPipe] } } });
+  await db.pipeline.deleteMany({ where: { companyId: { in: [companyId, otherCompanyId] } } });
   await db.user.deleteMany({ where: { companyId } });
   await db.company.deleteMany({ where: { id: { in: [companyId, otherCompanyId] } } });
   await db.$disconnect();
@@ -128,17 +167,44 @@ describe("resolveChanges — Contract Signed and M1 Funding", () => {
     expect(c.contractRefusal).toBeNull();
     expect(c.fundingRefusal).toBeNull();
   });
+
+  it("skips both refusals when the deal is already in its target stage", async () => {
+    // solarLead has sat in "action_required" since creation and nothing in
+    // this file moves it, so this is genuinely a no-op change.
+    const [c] = await runInVertical("solar", () => resolveChanges(companyId, [change(solarLead, "action_required")]));
+    expect(c.contractRefusal).toBeNull();
+    expect(c.fundingRefusal).toBeNull();
+  });
+});
+
+describe("company isolation", () => {
+  it("resolveChanges cannot find another company's deal, even with a matching stage key", async () => {
+    const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(otherRoofingLead, "submitted")]));
+    expect(c.lead).toBeNull();
+  });
+
+  it("deps.deals.get and deps.deals.inStages cannot see another company's deal, even with a matching stage key", async () => {
+    const deps = buildDeps(companyId);
+    expect(await runInVertical("roofing", () => deps.deals.get(otherRoofingLead))).toBeNull();
+    const inRoofing = await runInVertical("roofing", () => deps.deals.inStages(["submitted"]));
+    expect(inRoofing.map((d) => d.id)).not.toContain(otherRoofingLead);
+  });
 });
 
 describe("moveDeal", () => {
-  it("moves a deal as an agent: entry fields, a timeline row via agent, an activity line", async () => {
+  it("moves a deal as an agent: entry fields, a timeline row via agent, an activity line, and closes the row it left", async () => {
+    const previousEvent = await db.leadStageEvent.findFirstOrThrow({ where: { leadId: roofingLead, exitedAt: null } });
+
     const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(roofingLead, "action_required")]));
-    await runInVertical("roofing", () => moveDeal(companyId, roofingLead, c.toStage!, { kind: "agent", agentName: "NTP Poller" }));
+    await runInVertical("roofing", () => moveDeal(companyId, roofingLead, c.fromStage!.id, c.toStage!, { kind: "agent", agentName: "NTP Poller" }));
 
     expect(await db.lead.findUniqueOrThrow({ where: { id: roofingLead } })).toMatchObject({
       stageId: stage.action,
       blockedBy: "lender",
       stageAlertLevel: 0,
+    });
+    expect(await db.leadStageEvent.findUnique({ where: { id: previousEvent.id } })).toMatchObject({
+      exitedAt: expect.any(Date),
     });
     expect(await db.leadStageEvent.findFirst({ where: { leadId: roofingLead, exitedAt: null } })).toMatchObject({
       stageName: "Action Required",
@@ -155,7 +221,7 @@ describe("moveDeal", () => {
   it("names the person when a person approved the change", async () => {
     const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(roofingLead, "approved")]));
     await runInVertical("roofing", () =>
-      moveDeal(companyId, roofingLead, c.toStage!, { kind: "person", userId, fullName: "Ada Admin", agentName: "NTP Poller" })
+      moveDeal(companyId, roofingLead, c.fromStage!.id, c.toStage!, { kind: "person", userId, fullName: "Ada Admin", agentName: "NTP Poller" })
     );
     expect(await db.leadStageEvent.findFirst({ where: { leadId: roofingLead, exitedAt: null } })).toMatchObject({
       stageName: "Approved",
@@ -167,14 +233,73 @@ describe("moveDeal", () => {
       message: 'Ada Admin moved the deal to Approved, approving agent "NTP Poller"',
     });
   });
+
+  it("stamps the activity row and the timeline row with the run's own workspace", async () => {
+    const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(stampLead, "action_required")]));
+    await runInVertical("roofing", () => moveDeal(companyId, stampLead, c.fromStage!.id, c.toStage!, { kind: "agent", agentName: "NTP Poller" }));
+
+    // ActivityLog is TAGGED: the isolation extension stamps `vertical` with
+    // whatever workspace was active when the write happened, even through
+    // the transaction's tx client.
+    expect(await db.activityLog.findFirst({ where: { leadId: stampLead }, orderBy: { createdAt: "desc" } })).toMatchObject({
+      vertical: "roofing",
+    });
+    // LeadStageEvent carries no vertical column of its own — it is reached
+    // only through its parent Lead — so "the right workspace" here means the
+    // row exists, open, against the deal that move actually ran against.
+    expect(await db.leadStageEvent.findFirst({ where: { leadId: stampLead, exitedAt: null } })).toMatchObject({
+      stageName: "Action Required",
+    });
+  });
+
+  it("refuses a stale move: the deal moved since the agent looked, so nothing is written", async () => {
+    const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(staleLead, "action_required")]));
+
+    // Somebody else moves the deal first, directly — a rep cancelling it, in
+    // spirit, though any other move demonstrates the same race.
+    await db.lead.update({ where: { id: staleLead }, data: { stageId: stage.approved } });
+
+    await expect(
+      runInVertical("roofing", () => moveDeal(companyId, staleLead, c.fromStage!.id, c.toStage!, { kind: "agent", agentName: "NTP Poller" }))
+    ).rejects.toThrow("This deal has moved since the agent looked at it; nothing was changed.");
+
+    expect(await db.lead.findUniqueOrThrow({ where: { id: staleLead } })).toMatchObject({ stageId: stage.approved });
+    expect(await db.leadStageEvent.findFirst({ where: { leadId: staleLead, stageName: "Action Required" } })).toBeNull();
+    expect(await db.activityLog.count({ where: { leadId: staleLead } })).toBe(0);
+  });
+
+  it("rolls back the whole move, atomically, if the activity write fails", async () => {
+    const [c] = await runInVertical("roofing", () => resolveChanges(companyId, [change(atomicLead, "action_required")]));
+    // A userId that cannot exist: ActivityLog.actorId is a real foreign key
+    // to User, so this write fails inside the transaction, after the lead's
+    // updateMany and the timeline insert already ran in the same transaction.
+    const ghostUserId = "00000000-0000-0000-0000-000000000000";
+
+    await expect(
+      runInVertical("roofing", () =>
+        moveDeal(companyId, atomicLead, c.fromStage!.id, c.toStage!, { kind: "person", userId: ghostUserId, fullName: "Ghost", agentName: "NTP Poller" })
+      )
+    ).rejects.toThrow();
+
+    expect(await db.lead.findUniqueOrThrow({ where: { id: atomicLead } })).toMatchObject({ stageId: stage.submitted });
+    expect(await db.leadStageEvent.findFirst({ where: { leadId: atomicLead, stageName: "Action Required" } })).toBeNull();
+    expect(await db.activityLog.count({ where: { leadId: atomicLead } })).toBe(0);
+  });
 });
 
 describe("buildDeps", () => {
-  it("reads deals in the run's workspace only", async () => {
+  it("reads deals in the run's workspace and company only", async () => {
+    // Self-contained: sets the state this test cares about directly, rather
+    // than relying on the "moveDeal" tests above having already run.
+    await db.lead.update({ where: { id: buildDepsLead }, data: { stageId: stage.approved, stageChangedAt: new Date() } });
+
     const deps = buildDeps(companyId);
     const inRoofing = await runInVertical("roofing", () => deps.deals.inStages(["submitted", "action_required", "approved"]));
-    expect(inRoofing.map((d) => [d.id, d.stageKey])).toEqual([[roofingLead, "approved"]]);
+    expect(inRoofing.map((d) => [d.id, d.stageKey])).toContainEqual([buildDepsLead, "approved"]);
+    expect(inRoofing.map((d) => d.id)).not.toContain(otherRoofingLead);
+
     expect(await runInVertical("roofing", () => deps.deals.get(solarLead))).toBeNull();
+    expect(await runInVertical("roofing", () => deps.deals.get(otherRoofingLead))).toBeNull();
   });
 });
 

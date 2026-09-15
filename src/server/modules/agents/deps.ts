@@ -41,10 +41,17 @@ export function buildDeps(companyId: string): AgentDeps {
       },
       async inStages(stageKeys, opts) {
         if (stageKeys.length === 0) return [];
+        // A caller can hand this a bad number (NaN, 2.5, Infinity); Prisma's
+        // `take` throws on anything but a plain integer, and this is meant to
+        // clamp, not crash.
+        const rawLimit = opts?.limit;
+        const limit = Number.isFinite(rawLimit) ? Math.trunc(rawLimit as number) : DEFAULT_DEALS;
         const leads = await prisma.lead.findMany({
           where: { companyId, stage: { key: { in: stageKeys } } },
-          orderBy: { stageChangedAt: "asc" },
-          take: Math.min(Math.max(opts?.limit ?? DEFAULT_DEALS, 1), MAX_DEALS),
+          // `id` breaks ties: two deals that changed stage in the same instant
+          // would otherwise come back in a database-chosen, unstable order.
+          orderBy: [{ stageChangedAt: "asc" }, { id: "asc" }],
+          take: Math.min(Math.max(limit, 1), MAX_DEALS),
           select: DEAL_SELECT,
         });
         return leads.map(toSnapshot);
