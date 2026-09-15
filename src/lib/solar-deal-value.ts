@@ -12,7 +12,7 @@ import type { SnapshotFinancing } from "@/lib/solar-proposal";
  *
  * THE PROPOSAL IS THE ANSWER. Not the design, not the finance row: the frozen
  * snapshot of the version this customer was last quoted. Same rule as the
- * System info slide — a design keeps moving while a rep redraws a roof, and the
+ * Operations → Design tab — a design keeps moving while a rep redraws a roof, and the
  * deal screen must not disagree with the paper on the kitchen table.
  *
  * THE PRODUCT DECIDES WHAT KIND OF NUMBER IT IS. A purchase has a price, a
