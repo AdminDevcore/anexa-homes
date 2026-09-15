@@ -778,8 +778,9 @@ export function SystemPriceCard({
                 and has to guess which of the two the customer signs. */}
             {onTopAdderTotalCents > 0 && (
               <>
-                That includes ${Math.round(onTopAdderTotalCents / 100).toLocaleString()} of work
-                financed on top of the rate.{" "}
+                {`That includes $${Math.round(
+                  (customerPriced?.onTopAdderStickerCents ?? onTopAdderTotalCents) / 100
+                ).toLocaleString()} of work financed on top of the rate, dealer fee included. `}
               </>
             )}
             {/* Said for the same reason the roof is: this is the other figure

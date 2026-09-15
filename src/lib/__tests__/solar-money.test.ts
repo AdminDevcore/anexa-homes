@@ -794,7 +794,7 @@ describe("a FLAT partner sells at one price per watt, in both directions", () =>
    *
    * Every figure below is that sentence, done by hand.
    */
-  it("adds a roof to the loan on top of the flat rate, at what the roof costs", () => {
+  it("adds a roof on top of the flat rate, and takes the dealer fee on it like any gross", () => {
     const TEN_KW = { systemSizeKwDc: 10, dealerFeePct: 65 };
     const ROOF = 700_000; // $7,000
 
@@ -818,12 +818,12 @@ describe("a FLAT partner sells at one price per watt, in both directions", () =>
       onTopAdderTotalCents: ROOF,
     });
     expect(priced.baseStickerCents).toBe(5_500_000);
-    expect(priced.contractPriceCents).toBe(6_200_000); // $62,000, his figure
-    expect(priced.adderStickerCents).toBe(ROOF); // at face, not grossed up
-    // And it is a PASS-THROUGH: the partner takes its 65% of the system and
-    // nothing of the roof, so the company is left with the roof's price whole
-    // rather than 35% of it.
-    expect(priced.dealerFeeCents).toBe(0.65 * 5_500_000);
+    // The roof is customer sell-side work, so it is in the gross and carries the
+    // fee (2026-09-15): $7,000 / (1 − 65%) = $20,000 on the contract. It used to
+    // ride at face ($62,000), which gave the fee on the roof away.
+    expect(priced.adderStickerCents).toBe(Math.round(ROOF / 0.35));
+    expect(priced.contractPriceCents).toBe(5_500_000 + Math.round(ROOF / 0.35));
+    expect(priced.dealerFeeCents).toBe(priced.contractPriceCents - priced.grossPriceCents);
     expect(priced.grossPriceCents).toBe(0.35 * 5_500_000 + ROOF);
     // The base per watt — what a redline and a lender floor are measured on —
     // is the same as it would be with no roof on the job at all.
@@ -845,12 +845,13 @@ describe("a FLAT partner sells at one price per watt, in both directions", () =>
       adderTotalCents: 255_000,
       onTopAdderTotalCents: 700_000,
     });
-    // $55,000 for the whole capped side — trenching included — plus the roof.
+    // $55,000 for the whole capped side — trenching included — plus the roof,
+    // grossed up by the fee like every adder.
     // Within half a cent a watt, which on 10 kW is $50: the sticker is a whole
     // number of cents and is solved backwards out of the ceiling, so a job
     // carrying extra work lands beside the published rate rather than on it.
     // That residual is documented on `capStickerToFinalPpw` and predates this.
-    expect(Math.abs(priced.contractPriceCents - 6_200_000)).toBeLessThanOrEqual(5_000);
+    expect(Math.abs(priced.contractPriceCents - (5_500_000 + Math.round(700_000 / 0.35)))).toBeLessThanOrEqual(5_000);
     // The trenching came out of the array's share; the roof did not.
     expect(priced.baseStickerCents).toBeLessThan(5_500_000);
   });
@@ -867,10 +868,9 @@ describe("a FLAT partner sells at one price per watt, in both directions", () =>
       adderTotalCents: 100_000,
       onTopAdderTotalCents: 700_000,
     });
-    // The roof is still passed through at face on any lender: the flag says the
-    // partner advances it and keeps none of it, and that is not a statement
-    // about ceilings.
-    expect(split.adderStickerCents).toBe(Math.round(100_000 / 0.82) + 700_000);
+    // With no ceiling the flag has nothing to do: the roof carries the fee like
+    // every other adder, so the split prices exactly as all-inside would.
+    expect(split.adderStickerCents).toBe(Math.round(800_000 / 0.82));
     expect(split.adderTotalCents).toBe(800_000);
     expect(split.baseStickerCents + split.adderStickerCents).toBe(split.contractPriceCents);
   });

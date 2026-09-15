@@ -234,8 +234,10 @@ export type PurchaseInput = {
   /** The extra work at its CATALOGUE price, before any dealer fee. */
   adderTotalCents: number;
   /**
-   * The extra work that rides ON TOP of the partner's price, at its catalogue
-   * price — the re-roof on a flat-rate lender. See `pricePurchase`.
+   * The extra work that rides ON TOP of the partner's $/W ceiling, at its
+   * catalogue price — the re-roof on a flat-rate lender. Grossed up by the
+   * dealer fee like every other adder; only the ceiling leaves it out. See
+   * `pricePurchase`.
    *
    * Optional and zero by default, so every caller written before on-top adders
    * existed keeps its exact arithmetic. Disjoint from `adderTotalCents`: a line
@@ -286,6 +288,8 @@ export type PurchaseBreakdown = {
   adderTotalCents: number;
   /** Of that, the part financed on top of the partner's price. */
   onTopAdderTotalCents: number;
+  /** The on-top adders' share of the contract, dealer fee included. */
+  onTopAdderStickerCents: number;
 
   /**
    * THE BATTERY at its catalogue price — what the company keeps for it, and its
@@ -370,6 +374,8 @@ export type UnitPriceBreakdown = {
   basePerUnitCents: number;
   adderTotalCents: number;
   onTopAdderTotalCents: number;
+  /** The on-top adders' share of the contract, dealer fee included. */
+  onTopAdderStickerCents: number;
   batteryPriceCents: number;
   batteryStickerCents: number;
   grossPriceCents: number;
@@ -400,11 +406,18 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   const baseStickerCents = units * Math.round(input.stickerPerUnitCents);
   const basePriceCents = baseStickerCents - Math.round(baseStickerCents * f);
 
-  // The adders, grossed up by the SAME fee, so that what survives the lender's
-  // cut is the catalogue price and not 82% of it. The on-top ones are added
-  // AFTER that gross-up, at face: the partner advances them and keeps nothing
-  // of them, so there is no cut for the customer's price to have to cover.
-  const adderStickerCents = up(insideAdderCents) + onTopAdderTotalCents;
+  // EVERY adder, grossed up by the SAME fee, so that what survives the lender's
+  // cut is the catalogue price and not 82% of it. That includes the lines
+  // flagged `financedOnTop` — a roof on a capped partner. They are customer
+  // sell-side work, part of the gross like any other adder, and the dealer fee
+  // is a percentage of the ENTIRE gross (2026-09-15). The flag decides only
+  // which side of the partner's $/W ceiling the work sits on — see
+  // `capStickerToFinalPpw` — never whether the fee applies to it.
+  const adderStickerCents = up(insideAdderCents + onTopAdderTotalCents);
+  // The on-top work's share of that sticker, fee included, for the screens that
+  // name the roof separately. The remainder, so the two shares add up to
+  // `adderStickerCents` to the cent.
+  const onTopAdderStickerCents = adderStickerCents - up(insideAdderCents);
   // The battery grosses up exactly like an ordinary adder, so the fee is a
   // percentage of the WHOLE final price, battery included, and the company
   // still keeps its catalogue price.
@@ -427,6 +440,7 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
     basePerUnitCents: per(basePriceCents),
     adderTotalCents,
     onTopAdderTotalCents,
+    onTopAdderStickerCents,
     batteryPriceCents,
     batteryStickerCents,
     grossPriceCents,
@@ -465,14 +479,15 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
  * job carrying extra work. So the adder grosses up by the same fee the system
  * does, and the company is left holding exactly what the catalogue said.
  *
- * EXCEPT AN ADDER FINANCED ON TOP, which is the one kind the partner adds to
- * the loan at its own price and takes no cut of. Amos Capital Fund's paper is
- * the case: a flat $5.50/W however big the job, and a roof on top at what the
- * roof costs. Ten kilowatts is $55,000, the same job with a $7,000 roof under
- * it is $62,000, and the payment amortises the larger number. So `onTop` does
- * not gross up, does not move the system's sticker, and — in
- * `capStickerToFinalPpw` — is not measured against the partner's ceiling at
- * all. It is a pass-through: the customer borrows it, the company keeps it.
+ * AN ADDER FINANCED ON TOP IS NO EXCEPTION TO THE FEE. It is the work a capped
+ * partner funds ABOVE its $/W — Amos Capital Fund's re-roof — and it is still
+ * customer sell-side work: part of the gross, grossed up by the same fee as
+ * every other adder, because the dealer fee is taken on the ENTIRE gross. What
+ * the flag changes is the ceiling alone: in `capStickerToFinalPpw` it is not
+ * measured against the partner's $/W, so it neither eats into what is left for
+ * the array nor counts towards the figure being capped. At an 18% fee, a 10 kW
+ * job at $5.50/W is $55,000, and $63,537 with a $7,000 roof on top of it. (It
+ * used to be added at face — $62,000 — which gave the fee on the roof away.)
  *
  * A BATTERY IS PRICED FROM THE CATALOGUE, for a plainer reason: a rate per
  * watt is a price for an array, and no arithmetic over installed watts can
@@ -506,6 +521,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
     basePpwCents: u.basePerUnitCents,
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
+    onTopAdderStickerCents: u.onTopAdderStickerCents,
     batteryPriceCents: u.batteryPriceCents,
     batteryStickerCents: u.batteryStickerCents,
     grossPriceCents: u.grossPriceCents,
@@ -706,14 +722,15 @@ export type FinalPpwCap = {
  * give in it. That is the whole behaviour in one sentence: under a cap, extra
  * work comes out of the company's side, and the homeowner's number never moves.
  *
- * ONE KIND OF WORK IS OUTSIDE THE RULE. An adder marked `financedOnTop` — a
+ * ONE KIND OF WORK IS OUTSIDE THE CEILING. An adder marked `financedOnTop` — a
  * roof — is not part of what the partner's $/W is a price FOR. Amos publishes
- * $5.50/W and funds a roof above it at what the roof costs, so a 10 kW job with
- * a $7,000 roof is $55,000 + $7,000 and not $55,000 with the roof taken out of
- * the company's margin. It is therefore excluded from the ceiling on both
- * sides: it does not eat into what is left for the array, and it does not count
- * towards the figure being tested against the ceiling. `onTopAdderTotalCents`
- * is not returned here at all — the caller hands the same number to
+ * $5.50/W and funds a roof above it, so a 10 kW job with a roof is $55,000 plus
+ * the roof, not $55,000 with the roof taken out of the company's margin. It is
+ * therefore excluded from the ceiling on both sides: it does not eat into what
+ * is left for the array, and it does not count towards the figure being tested
+ * against the ceiling. It is NOT outside the dealer fee — `pricePurchase`
+ * grosses it up with every other adder, the fee being taken on the whole gross.
+ * `onTopAdderTotalCents` is not taken here at all — the caller hands it to
  * `pricePurchase`, which adds it to the contract afterwards.
  *
  * TWO RULES, ONE SOLVE — `mode` decides which.
@@ -1090,6 +1107,7 @@ export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
     basePpwCents: 0,
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
+    onTopAdderStickerCents: u.onTopAdderStickerCents,
     // Always zero out of `priceStoragePurchase`: on a storage-only deal the
     // battery is the SYSTEM, counted in `basePriceCents`, and charging for it
     // again on top would bill the household twice for one Powerwall.

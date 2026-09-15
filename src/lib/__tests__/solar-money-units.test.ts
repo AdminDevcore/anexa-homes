@@ -31,7 +31,7 @@ describe("priceUnits", () => {
     expect(b.baseStickerCents + b.adderStickerCents).toBe(b.contractPriceCents);
   });
 
-  it("an on-top adder does not gross up and does not move the base", () => {
+  it("an on-top adder grosses up like any adder, and does not move the base", () => {
     const b = priceUnits({
       product: "loan",
       units: 2,
@@ -40,8 +40,10 @@ describe("priceUnits", () => {
       adderTotalCents: 0,
       onTopAdderTotalCents: 7_000_00,
     });
-    expect(b.adderStickerCents).toBe(7_000_00);
-    expect(b.contractPriceCents).toBe(b.baseStickerCents + 7_000_00);
+    expect(b.adderStickerCents).toBe(Math.round(7_000_00 / 0.75));
+    expect(b.onTopAdderStickerCents).toBe(Math.round(7_000_00 / 0.75));
+    expect(b.contractPriceCents).toBe(b.baseStickerCents + Math.round(7_000_00 / 0.75));
+    expect(b.dealerFeeCents).toBe(b.contractPriceCents - b.grossPriceCents);
   });
 
   it("refuses a dealer fee on cash", () => {

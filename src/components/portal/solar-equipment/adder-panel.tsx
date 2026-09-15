@@ -449,16 +449,17 @@ export function AdderPanel({
             tone={draft.financedOnTop ? "accent" : "plain"}
           >
             <ToggleRow
-              label="Added to the loan at its own price"
-              description="For work a partner adds to the loan separately — a roof."
+              label="Added above the partner's rate"
+              description="For work a partner funds above its fixed or maximum $/W — a roof. The dealer fee still applies to it."
               checked={draft.financedOnTop}
               onChange={(v) => set("financedOnTop", v)}
             />
             <Hint>
               On a lender with a fixed or maximum $/W this is added on top of that rate instead of
-              coming out of the system price: 10 kW at $5.50/W is $55,000, and $62,000 with a $7,000
-              roof under it. Every other adder still comes out of the rate, and nothing changes on a
-              lender with no fixed rate.
+              coming out of the system price. It is still part of the gross, so the dealer fee is taken
+              on it like every other adder: at an 18% fee, 10 kW at $5.50/W is $55,000, and $63,537
+              with a $7,000 roof. Every other adder still comes out of the rate, and nothing changes on
+              a lender with no fixed rate.
             </Hint>
             {discountOnTop && (
               <Caution>

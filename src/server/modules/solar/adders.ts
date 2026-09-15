@@ -382,7 +382,7 @@ export async function applyAutoAdders(
 export type AdderSplit = {
   /** Inside the partner's price: grosses up by the fee, eats into a ceiling. */
   adderTotalCents: number;
-  /** On top of it, at its own price. A roof on a flat-rate partner. */
+  /** On top of the partner's $/W (dealer fee still applied). A roof on a flat-rate partner. */
   onTopAdderTotalCents: number;
 };
 

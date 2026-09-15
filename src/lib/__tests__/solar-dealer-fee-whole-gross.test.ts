@@ -144,11 +144,11 @@ describe("fee percentages", () => {
   });
 });
 
-describe("the one exception still standing: an adder a partner finances ON TOP", () => {
-  it("rides at face, outside the fee (a lender rule, e.g. Amos's roof above its flat $/W)", () => {
+describe("an adder a partner finances ON TOP is no exception to the fee", () => {
+  it("is in the gross and grossed up like any adder (e.g. Amos's roof above its flat $/W)", () => {
     const p = pricePurchase({ ...KW10, onTopAdderTotalCents: $(7_000) });
-    expect(p.contractPriceCents).toBe($(47_000));
     expect(p.grossPriceCents).toBe($(37_000));
-    expect(p.dealerFeeCents).toBe($(10_000));
+    expect(p.contractPriceCents).toBe($(40_000) + Math.round($(7_000) / 0.75)); // $49,333.33, not $47,000
+    expectFeeOnWholeGross(p, 25);
   });
 });

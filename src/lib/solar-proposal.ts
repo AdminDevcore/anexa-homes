@@ -1833,26 +1833,21 @@ function priceOption(args: {
     // leaves a breakdown a few cents out from its own total, which is a
     // question a homeowner with a calculator is entitled to ask.
     //
-    // APPORTIONED WITHIN THE FEE-BEARING HALF ONLY. A line financed on top does
-    // not carry a share of the dealer fee — that is the whole meaning of the
-    // flag — so it is printed at its own amount, and only the rest is spread
-    // across the grossed-up total. Sharing the fee out over all of them would
-    // put part of the array's cut on the roof line and leave the roof reading
-    // $20,000 on a contract that added $7,000 for it.
+    // APPORTIONED ACROSS EVERY LINE, a roof financed on top included. The
+    // dealer fee is taken on the whole gross, so each line of work carries its
+    // share of it; a line flagged on top used to print at its own amount, which
+    // was the fee on that line given away.
     ...(purchase && finance.adders?.some((x) => x.amountCents > 0)
       ? (() => {
           const lines = finance.adders!.filter((x) => x.amountCents > 0);
-          const inside = lines.filter((x) => !x.financedOnTop);
-          const grossedInside = apportionCents(
-            purchase.adderStickerCents - purchase.onTopAdderTotalCents,
-            inside.map((x) => x.amountCents)
+          const grossed = apportionCents(
+            purchase.adderStickerCents,
+            lines.map((x) => x.amountCents)
           );
-          const byLine = new Map<(typeof lines)[number], number>();
-          inside.forEach((x, i) => byLine.set(x, grossedInside[i]));
           return {
-            adders: lines.map((x) => ({
+            adders: lines.map((x, i) => ({
               label: x.label,
-              amountCents: x.financedOnTop ? x.amountCents : (byLine.get(x) ?? 0),
+              amountCents: grossed[i],
               // Spread, not assigned undefined: the snapshot is asserted to
               // hold no undefined anywhere, because an undefined reaching a
               // renderer prints as "undefined" in front of a homeowner.

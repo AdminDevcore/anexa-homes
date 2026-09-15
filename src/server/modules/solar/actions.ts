@@ -876,7 +876,7 @@ const equipmentSchema = z.object({
   autoApplyMinKw: z.number().min(0).max(1000).nullable().optional(),
   autoApplyMaxKw: z.number().min(0).max(1000).nullable().optional(),
   // Adders only: this work is added to the loan ON TOP of a partner's fixed or
-  // maximum $/W, at its own price, rather than coming out of the system price.
+  // maximum $/W, rather than coming out of the system price (the dealer fee still applies).
   financedOnTop: z.boolean().optional(),
   rank: z.number().int().min(0).max(999).optional(),
   isActive: z.boolean().optional(),

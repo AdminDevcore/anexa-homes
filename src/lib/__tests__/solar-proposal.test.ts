@@ -494,11 +494,10 @@ describe("the extra work is named on the customer's copy", () => {
     );
   });
 
-  it("prints a roof financed on top at its own price, not grossed up", () => {
-    // The Amos exception on the customer's own page. The re-roof is added to
-    // the loan at $14,500 and the steep-roof charge still carries the fee, so
-    // the two lines are priced by different rules on one breakdown — and the
-    // three rows still have to add up to the total printed under them.
+  it("prints a roof financed on top with its share of the dealer fee, like every line", () => {
+    // A re-roof on a capped partner is still customer sell-side work: it is in
+    // the gross and carries the fee, exactly as the steep-roof charge does — and
+    // the rows still have to add up to the total printed under them.
     const s = build({
       finance: {
         ...LOAN,
@@ -511,8 +510,8 @@ describe("the extra work is named on the customer's copy", () => {
       },
     });
     const [roof, steep] = s.financing.adders!;
-    expect(roof.amountCents).toBe(1_450_000); // at face
-    expect(steep.amountCents).toBe(Math.round(96_000 / 0.82)); // fee included
+    expect(Math.abs(roof.amountCents - Math.round(1_450_000 / 0.82))).toBeLessThanOrEqual(1); // fee included
+    expect(Math.abs(steep.amountCents - Math.round(96_000 / 0.82))).toBeLessThanOrEqual(1); // fee included
     expect(roof.amountCents + steep.amountCents).toBe(s.financing.adderTotalCents);
     expect(s.financing.basePriceCents! + s.financing.adderTotalCents!).toBe(
       s.financing.contractPriceCents

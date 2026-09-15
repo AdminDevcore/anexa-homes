@@ -4221,9 +4221,10 @@ model SolarLenderAdderRule {
   equipmentId String
   equipment   SolarEquipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 
-  /// TRUE: this partner adds the work to the loan at its own price, above the
-  /// $/W. FALSE: it comes out of the $/W, so the work is paid for out of what
-  /// the company keeps and the homeowner's number does not move.
+  /// TRUE: this partner funds the work above its $/W (still grossed up by the
+  /// dealer fee, like every adder). FALSE: it comes out of the $/W, so the work
+  /// is paid for out of what the company keeps and the homeowner's number does
+  /// not move.
   financedOnTop Boolean
 
   createdAt DateTime @default(now())
@@ -4287,15 +4288,17 @@ model SolarEquipment {
   /// homeowner has no reason to read a paragraph about.
   showOnProposal        Boolean            @default(false)
   /// Adders only: this work is added to the loan ON TOP of a partner's fixed
-  /// or maximum final $/W, at its own price, instead of coming out of the
+  /// or maximum final $/W — still grossed up by the dealer fee, which is taken
+  /// on the whole gross — instead of coming out of the
   /// system price.
   ///
   /// The re-roof is the case, and it is Amos Capital Fund's own rule: their
   /// paper is a flat $5.50/W however big the job, EXCEPT that a roof rides on
-  /// the loan at what the roof costs. A 10 kW system is $55,000 and the same
-  /// job with a $7,000 roof under it is $62,000, with the payment amortised
-  /// over the larger number. Every other adder still comes out of the ceiling,
-  /// which is what makes this a flag on the ADDER rather than on the lender.
+  /// the loan above it. At an 18% fee a 10 kW system is $55,000 and the same
+  /// job with a $7,000 roof is $63,537 — the fee is taken on the roof like any
+  /// other gross — with the payment amortised over the larger number. Every
+  /// other adder still comes out of the ceiling, which is what makes this a
+  /// flag on the ADDER rather than on the lender.
   ///
   /// Off means the rule that has always applied: the adder grosses up by the
   /// dealer fee and, under a ceiling, eats into the system price.

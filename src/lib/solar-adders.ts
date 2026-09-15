@@ -103,7 +103,7 @@ export type AdderLine = {
   qty: number;
   /**
    * This work is added to the loan ON TOP of a partner's fixed or maximum
-   * final $/W, at its own price — the re-roof on Amos's flat $5.50/W paper.
+   * final $/W — the re-roof on Amos's flat $5.50/W paper — still grossed up by the dealer fee.
    *
    * Optional so that a caller assembling a line by hand cannot forget it into
    * being true; absent reads as false, which is the rule every adder followed
