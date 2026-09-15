@@ -66,6 +66,7 @@ export default async function SolarSettingsPage({
                 sendInApp: s.sendInApp,
                 sendEmail: s.sendEmail,
                 markOverdue: s.markOverdue,
+                milestone: s.milestone,
               }))}
             />
           ) : null

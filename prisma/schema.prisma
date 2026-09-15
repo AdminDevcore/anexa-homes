@@ -866,6 +866,13 @@ model Pipeline {
   @@map("pipelines")
 }
 
+/// Business milestones a pipeline stage can stand for. Rules key off these, never
+/// off a stage's display name.
+enum StageMilestone {
+  /// Customer-signed proposal AND a completed contract are both on the deal.
+  contract_signed
+}
+
 model PipelineStage {
   id                    String        @id @default(uuid())
   pipelineId            String
@@ -883,6 +890,11 @@ model PipelineStage {
   /// one flag cannot honestly mark both. Unset on every stage falls back to the
   /// stage NAMED for the signature, then to `isWon`. See lib/sold-stage.ts.
   countsAsSold          Boolean       @default(false)
+  /// The business milestone this stage IS, independent of its name and key. A
+  /// stage can be renamed, and a hand-made one gets an auto-suffixed key, so
+  /// neither is a safe thing to enforce a rule against. At most one stage per
+  /// pipeline holds a given milestone. See pipeline/contract-signed.ts.
+  milestone             StageMilestone?
   /// Whether we control completion (hard SLA) or are waiting on someone else
   /// (follow-up cadence). See StageType.
   stageType             StageType     @default(internally_owned)
@@ -913,6 +925,7 @@ model PipelineStage {
   stageEvents LeadStageEvent[]
 
   @@unique([pipelineId, key])
+  @@unique([pipelineId, milestone])
   @@map("pipeline_stages")
 }
 
@@ -3802,7 +3815,6 @@ model SolarLender {
   /// test (solar-battery-fee-retired.test.ts) fails if src/ references it again.
   /// Drop it in a follow-up migration once this release is live.
   batteryInsideFee Boolean @default(true)
-
 
   /// How the sign today credit is arrived at on this partner's deals -- see
   /// SolarSignTodayMode. `none` is the default, and leaves the per-deal box

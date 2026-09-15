@@ -14,6 +14,7 @@ import { getClaimStatuses } from "@/server/modules/settings/queries";
 import { claimStatusOpensClaim } from "@/lib/claim-status";
 import { VERTICAL_SERVICE_TYPE } from "@/lib/vertical";
 import { resolveStageForAppointment } from "./staging";
+import { guardedStageId } from "@/server/modules/pipeline/contract-signed";
 import { resolveOwningRepId } from "./owning-rep";
 import { zonedWallClockToUtc } from "@/lib/tz";
 import { addressChanged } from "@/server/modules/geo/resolve";
@@ -115,11 +116,22 @@ export async function createLeadAction(input: LeadInput) {
   // Stage follows the appointment date: a date lands the deal in "Appointment Set",
   // no date keeps it in "New Lead" (unless an explicit forward stage was chosen).
   const hasAppointment = Boolean(d.appointmentAt);
-  const stageId = await resolveStageForAppointment({
+  const resolvedStageId = await resolveStageForAppointment({
     pipelineId: pipeline?.id ?? null,
     candidateStageId: d.stageId || null,
     hasAppointment,
   });
+  // A new deal has no documents on file, so it can never START at or past
+  // Contract Signed — see guardedStageId.
+  const guard = await guardedStageId({
+    companyId: user.companyId,
+    lead: { id: null, vertical, stageId: null },
+    resolvedStageId,
+    explicitStageId: d.stageId || null,
+    fallbackStageId: pipeline?.stages[0]?.id ?? null,
+  });
+  if (!guard.ok) return { ok: false as const, error: guard.error };
+  const stageId = guard.stageId;
 
   const tz = await companyTimeZone(user.companyId);
   const lead = await prisma.lead.create({
@@ -226,11 +238,21 @@ export async function updateLeadAction(id: string, input: LeadInput) {
   // date moves it to "Appointment Set", clearing it returns it to "New Lead";
   // deals already past those stages are left where they are.
   const hasAppointment = Boolean(d.appointmentAt);
-  const stageId = await resolveStageForAppointment({
+  const resolvedStageId = await resolveStageForAppointment({
     pipelineId: existing.pipelineId,
     candidateStageId: d.stageId || existing.stageId,
     hasAppointment,
   });
+  // The lead form can move a deal as well as the board can, so it is held to
+  // the same Contract Signed rule.
+  const guard = await guardedStageId({
+    companyId: user.companyId,
+    lead: { id, vertical: existing.vertical, stageId: existing.stageId },
+    resolvedStageId,
+    explicitStageId: d.stageId || null,
+  });
+  if (!guard.ok) return { ok: false as const, error: guard.error };
+  const stageId = guard.stageId;
   const stageChanged = stageId !== existing.stageId;
 
   const tz = await companyTimeZone(user.companyId);
@@ -423,11 +445,20 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
     // Moving a solar deal's time is a reschedule; a stale outcome comes off with it.
     move = await planLeadAppointmentMove(user.companyId, existing, nextAt);
     Object.assign(data, appointmentMovePatch(move));
-    const stageId = await resolveStageForAppointment({
+    const resolvedStageId = await resolveStageForAppointment({
       pipelineId: existing.pipelineId,
       candidateStageId: existing.stageId,
       hasAppointment: Boolean(d.appointmentAt),
     });
+    // Automatic only, so a re-stage that would cross Contract Signed is simply
+    // not applied rather than failing the save — see guardedStageId.
+    const guard = await guardedStageId({
+      companyId: user.companyId,
+      lead: { id: existing.id, vertical: existing.vertical, stageId: existing.stageId },
+      resolvedStageId,
+      explicitStageId: null,
+    });
+    const stageId = guard.ok ? guard.stageId : existing.stageId;
     if (stageId && stageId !== existing.stageId) {
       data.stage = { connect: { id: stageId } };
       data.stageChangedAt = new Date();

@@ -91,6 +91,8 @@ export type SolarStageDef = {
   isLost?: boolean;
   /** Where the sale is booked — see lib/sold-stage.ts. */
   countsAsSold?: boolean;
+  /** The business milestone this stage stands for — see PipelineStage.milestone. */
+  milestone?: "contract_signed";
 };
 
 /**
@@ -154,6 +156,8 @@ export const SOLAR_SALES_STAGES: SolarStageDef[] = [
     // The sale is booked here: everything past it counts as won on the team
     // leaderboard, months before the lender funds it.
     countsAsSold: true,
+    // Enforced on every move — see lib/contract-signed.ts.
+    milestone: "contract_signed",
   },
 ];
 

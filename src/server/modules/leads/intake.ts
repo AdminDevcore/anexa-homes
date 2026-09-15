@@ -12,6 +12,7 @@ import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { resolveStageForAppointment } from "./staging";
+import { guardedStageId } from "@/server/modules/pipeline/contract-signed";
 import { zonedWallClockToUtc } from "@/lib/tz";
 import { COMPANY } from "@/lib/site";
 
@@ -140,11 +141,21 @@ async function createWebsiteLead(
   const assignedRepId = data.type === "careers" ? null : await pickAssignedRep(company.id);
 
   // A requested appointment date lands the lead in "Appointment Set"; otherwise New Lead.
-  const stageId = await resolveStageForAppointment({
+  const resolvedStageId = await resolveStageForAppointment({
     pipelineId: pipeline?.id ?? null,
     candidateStageId: null,
     hasAppointment: Boolean(appointmentAt),
   });
+  // A web lead never lands at or past Contract Signed, however a pipeline is
+  // ordered — see guardedStageId.
+  const guard = await guardedStageId({
+    companyId: company.id,
+    lead: { id: null, vertical, stageId: null },
+    resolvedStageId,
+    explicitStageId: null,
+    fallbackStageId: pipeline?.stages[0]?.id ?? null,
+  });
+  const stageId = guard.ok ? guard.stageId : (pipeline?.stages[0]?.id ?? null);
 
   const lead = await prisma.lead.create({
     data: {

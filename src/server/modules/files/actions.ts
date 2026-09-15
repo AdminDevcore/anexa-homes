@@ -14,6 +14,8 @@ import { getMembership } from "@/server/modules/chat/queries";
 import { companyExportLabel } from "@/lib/company-exports";
 import { isContractorInvoice } from "@/lib/contractor-invoice";
 import { foldersFor } from "@/lib/deal-folders";
+import { CONTRACT_FOLDER_KEY } from "@/lib/contract-signed";
+import { advanceToContractSignedIfReady } from "@/server/modules/pipeline/contract-signed";
 import { photoGroupFor } from "@/lib/photo-groups";
 import { checklistJustCompleted } from "@/server/modules/automations/checklist";
 import { runAutomations } from "@/server/modules/automations/engine";
@@ -335,6 +337,14 @@ export async function uploadFileAction(formData: FormData) {
     },
   });
 
+  // A contract filed into a solar deal's Contract folder — the lender's signed
+  // contract, typically Amos's — is one of the two documents Contract Signed
+  // waits for. Re-evaluated now, so the deal advances without anyone moving it.
+  const filedVertical = lead?.vertical ?? project?.vertical;
+  if (dealLeadId && filedVertical === "solar" && category === CONTRACT_FOLDER_KEY) {
+    await advanceToContractSignedIfReady({ companyId: user.companyId, leadId: dealLeadId, via: "document" });
+  }
+
   // The shot that closes the last required slot is the one people want work
   // hung off — "photos are all in, compile them and move the job on". Asked
   // per upload rather than on a schedule so it happens while the crew is still
@@ -419,6 +429,10 @@ export async function moveFileAction(id: string, category: string) {
   }
 
   await prisma.fileAsset.update({ where: { id }, data: { category } });
+  // Refiling a contract INTO Contract counts exactly like uploading it there.
+  if (file.leadId && file.lead?.vertical === "solar" && category === CONTRACT_FOLDER_KEY) {
+    await advanceToContractSignedIfReady({ companyId: user.companyId, leadId: file.leadId, via: "document" });
+  }
   if (file.projectId) revalidatePath(`/portal/projects/${file.projectId}`);
   if (file.leadId) revalidatePath(`/portal/leads/${file.leadId}`);
   return { ok: true as const };

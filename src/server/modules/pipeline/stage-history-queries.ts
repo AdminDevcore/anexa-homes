@@ -65,7 +65,7 @@ export async function leadStageTimeline(lead: {
     enteredAt: e.enteredAt.toISOString(),
     exitedAt: e.exitedAt ? e.exitedAt.toISOString() : null,
     movedBy: e.movedBy ? `${e.movedBy.firstName} ${e.movedBy.lastName}`.trim() : null,
-    via: e.via === "automation" || e.via === "signature" ? e.via : null,
+    via: e.via === "automation" || e.via === "signature" || e.via === "document" ? e.via : null,
   }));
 
   return buildTimeline(rows, {
