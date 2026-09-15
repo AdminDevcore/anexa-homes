@@ -1,0 +1,1107 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden: every pure pricing site, every golden deal > deal value and revenue (snapshotPriceSource, solarDealValue, solarLeadValueCents, solarContractRevenueCents) 1`] = `
+{
+  "cappedPartner": {
+    "dealValue": {
+      "cents": 10712600,
+      "kind": "total",
+    },
+    "leadValueCents": 10712600,
+    "revenueCents": 29589429,
+    "source": {
+      "contractPriceCents": 29589429,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 10712600,
+      "product": "loan",
+      "rateMillsPerKwh": null,
+    },
+  },
+  "cash": {
+    "dealValue": {
+      "cents": 1791000,
+      "kind": "total",
+    },
+    "leadValueCents": 1791000,
+    "revenueCents": 2630000,
+    "source": {
+      "contractPriceCents": 2630000,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 1791000,
+      "product": "cash",
+      "rateMillsPerKwh": null,
+    },
+  },
+  "storageOnly": {
+    "dealValue": {
+      "cents": 3360000,
+      "kind": "total",
+    },
+    "leadValueCents": 3360000,
+    "revenueCents": 4800000,
+    "source": {
+      "contractPriceCents": 4800000,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 3360000,
+      "product": "loan",
+      "rateMillsPerKwh": null,
+    },
+  },
+  "workedExample": {
+    "dealValue": {
+      "cents": 4545333,
+      "kind": "total",
+    },
+    "leadValueCents": 4545333,
+    "revenueCents": 6493333,
+    "source": {
+      "contractPriceCents": 6493333,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 4545333,
+      "product": "loan",
+      "rateMillsPerKwh": null,
+    },
+  },
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > loan payments on each credit state (programmeMonthlyCents) 1`] = `
+{
+  "cappedPartner": {
+    "onFinalCents": 82193,
+    "onNetFinalCreditsAppliedCents": 29757,
+  },
+  "cash": {
+    "onFinalCents": null,
+    "onNetFinalCreditsAppliedCents": null,
+  },
+  "workedExample": {
+    "onFinalCents": 45852,
+    "onNetFinalCreditsAppliedCents": 32096,
+  },
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > programme labels (lenderProductLabel): an unnamed programme's label carries the fee 1`] = `
+{
+  "named": "Amos 30 Year Solar",
+  "unnamed": "30 yr · 0% · fee 25%",
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > rep pay and the manager override (solarRepPayCents, managerOverrideCents) 1`] = `
+{
+  "cappedPartner": {
+    "overrideOnRedline": {
+      "amountCents": 0,
+      "basisCents": 0,
+    },
+    "perWatt": {
+      "amountCents": 191400,
+      "basePpwCents": 192.5,
+      "basisCents": 12760,
+      "overageCentsPerWatt": 0,
+    },
+    "redline": {
+      "amountCents": 0,
+      "basePpwCents": 192.5,
+      "basisCents": 2456300,
+      "overageCentsPerWatt": 0,
+    },
+  },
+  "cash": {
+    "overrideOnRedline": {
+      "amountCents": 88000,
+      "basisCents": 880000,
+    },
+    "perWatt": {
+      "amountCents": 120000,
+      "basePpwCents": 310,
+      "basisCents": 8000,
+      "overageCentsPerWatt": 0,
+    },
+    "redline": {
+      "amountCents": 880000,
+      "basePpwCents": 310,
+      "basisCents": 2480000,
+      "overageCentsPerWatt": 110,
+    },
+  },
+  "storageOnly": {
+    "batteryFlat": {
+      "amountCents": 100000,
+      "basePpwCents": 0,
+      "basisCents": 2,
+      "overageCentsPerWatt": 0,
+    },
+    "batteryRedline": {
+      "amountCents": 600000,
+      "basePpwCents": 0,
+      "basisCents": 2400000,
+      "overageCentsPerWatt": 0,
+    },
+  },
+  "workedExample": {
+    "overrideOnRedline": {
+      "amountCents": 100000,
+      "basisCents": 1000000,
+    },
+    "perWatt": {
+      "amountCents": 150000,
+      "basePpwCents": 300,
+      "basisCents": 10000,
+      "overageCentsPerWatt": 0,
+    },
+    "redline": {
+      "amountCents": 1000000,
+      "basePpwCents": 300,
+      "basisCents": 3000000,
+      "overageCentsPerWatt": 100,
+    },
+  },
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > the builder price cards (SystemPriceCard, StoragePriceCard) 1`] = `
+{
+  "cappedPartner": {
+    "amounts": [
+      "$3.50/W",
+      "$8.12",
+      "$103,563",
+      "$1.93/W",
+      "$24,627",
+      "$5.50/W",
+      "$1.93",
+      "$24,563",
+      "$0.55",
+      "$7,000",
+      "$72,000",
+      "$8.12",
+      "$103,563",
+      "$15.07",
+      "$192,331",
+      "$5.50/W",
+      "$23.19",
+      "$295,894",
+      "$1.93/W",
+      "$2.00/W",
+      "$5.50/W",
+      "$23.19/W",
+      "$295,894",
+      "$20,000",
+      "$205,714",
+      "$72,000",
+    ],
+    "feeLabels": [
+      "Dealer fee · 65%",
+    ],
+    "figures": {
+      "customer-final": "$23.19/W · $295,894",
+      "fee-ppw": "$15.07",
+      "fee-total": "$192,331",
+      "final-ppw": "$23.19",
+      "final-total": "$295,894",
+      "gross-ppw": "$8.12",
+      "gross-total": "$103,563",
+    },
+    "ruleNotes": [
+      "after the $5.50/W cap",
+    ],
+  },
+  "cash": {
+    "amounts": [
+      "$3.50/W",
+      "$3.29",
+      "$26,300",
+      "$3.10/W",
+      "$24,800",
+      "$3.10",
+      "$24,800",
+      "$0.19",
+      "$1,500",
+      "$3.29",
+      "$26,300",
+    ],
+    "feeLabels": [],
+    "figures": {
+      "gross-ppw": "$3.29",
+      "gross-total": "$26,300",
+    },
+    "ruleNotes": [],
+  },
+  "storageOnly": {
+    "amounts": [
+      "$24,000",
+      "$48,000",
+      "$24,000",
+      "$24,000",
+      "$48,000",
+      "$12,000",
+    ],
+    "feeLabels": [],
+    "figures": {},
+    "ruleNotes": [],
+  },
+  "workedExample": {
+    "amounts": [
+      "$3.50/W",
+      "$4.87",
+      "$48,700",
+      "$3.00/W",
+      "$30,000",
+      "$3.00",
+      "$30,000",
+      "$0.37",
+      "$3,700",
+      "$15,000",
+      "$4.87",
+      "$48,700",
+      "$1.62",
+      "$16,233",
+      "$6.49",
+      "$64,933",
+      "$6.49/W",
+      "$64,933",
+      "$20,000",
+      "$15,000",
+    ],
+    "feeLabels": [
+      "Dealer fee · 25%",
+    ],
+    "figures": {
+      "customer-final": "$6.49/W · $64,933",
+      "fee-ppw": "$1.62",
+      "fee-total": "$16,233",
+      "final-ppw": "$6.49",
+      "final-total": "$64,933",
+      "gross-ppw": "$4.87",
+      "gross-total": "$48,700",
+    },
+    "ruleNotes": [],
+  },
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > the builder shelf (compareOffers) 1`] = `
+{
+  "cappedPartner": [
+    {
+      "adderOverrun": false,
+      "capped": true,
+      "dealerFeePct": 65,
+      "finalCents": 29589429,
+      "grossPpwCents": 811.6222570532915,
+      "id": "programme-quoted",
+      "monthlyHeadlineCents": 29757,
+      "monthlyOnFinalCents": 82193,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 10712600,
+      "paydownCents": null,
+      "product": "loan",
+      "stickerPpwCents": 550,
+      "totalPaidCents": 10712520,
+      "totalPaidWithoutPaydownCents": null,
+    },
+    {
+      "adderOverrun": false,
+      "capped": false,
+      "dealerFeePct": 0,
+      "finalCents": 10362680,
+      "grossPpwCents": 812.1222570532915,
+      "id": "cash",
+      "monthlyHeadlineCents": null,
+      "monthlyOnFinalCents": null,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": null,
+      "paydownCents": null,
+      "product": "cash",
+      "stickerPpwCents": 193,
+      "totalPaidCents": 10362680,
+      "totalPaidWithoutPaydownCents": null,
+    },
+  ],
+  "cash": [
+    {
+      "adderOverrun": false,
+      "capped": false,
+      "dealerFeePct": 0,
+      "finalCents": 2630000,
+      "grossPpwCents": 328.75,
+      "id": "cash",
+      "monthlyHeadlineCents": null,
+      "monthlyOnFinalCents": null,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": null,
+      "paydownCents": null,
+      "product": "cash",
+      "stickerPpwCents": 310,
+      "totalPaidCents": 2630000,
+      "totalPaidWithoutPaydownCents": null,
+    },
+  ],
+  "workedExample": [
+    {
+      "adderOverrun": false,
+      "capped": false,
+      "dealerFeePct": 25,
+      "finalCents": 6493333,
+      "grossPpwCents": 487,
+      "id": "programme-quoted",
+      "monthlyHeadlineCents": 32096,
+      "monthlyOnFinalCents": 45852,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 4545333,
+      "paydownCents": null,
+      "product": "loan",
+      "stickerPpwCents": 400,
+      "totalPaidCents": 9628800,
+      "totalPaidWithoutPaydownCents": null,
+    },
+    {
+      "adderOverrun": false,
+      "capped": false,
+      "dealerFeePct": 0,
+      "finalCents": 4870000,
+      "grossPpwCents": 487,
+      "id": "cash",
+      "monthlyHeadlineCents": null,
+      "monthlyOnFinalCents": null,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": null,
+      "paydownCents": null,
+      "product": "cash",
+      "stickerPpwCents": 300,
+      "totalPaidCents": 4870000,
+      "totalPaidWithoutPaydownCents": null,
+    },
+  ],
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > the credit ladder and sign-today credit, called directly 1`] = `
+{
+  "cappedPartner": {
+    "creditAmountCents": 8876829,
+    "credits": [
+      [
+        "itc",
+        30,
+        8876829,
+      ],
+    ],
+    "netFinalCreditsAppliedCents": 10712600,
+    "signToday": {
+      "capPpwCents": 600,
+      "cents": 10000000,
+      "editable": false,
+      "source": "above_cap",
+    },
+    "signTodayCents": 10000000,
+  },
+  "cash": {
+    "creditAmountCents": 789000,
+    "credits": [
+      [
+        "itc",
+        30,
+        789000,
+      ],
+    ],
+    "netFinalCreditsAppliedCents": 1791000,
+    "signToday": {
+      "capPpwCents": null,
+      "cents": 50000,
+      "editable": true,
+      "source": "typed",
+    },
+    "signTodayCents": 50000,
+  },
+  "workedExample": {
+    "creditAmountCents": 1948000,
+    "credits": [
+      [
+        "itc",
+        30,
+        1948000,
+      ],
+    ],
+    "netFinalCreditsAppliedCents": 4545333,
+    "signToday": {
+      "capPpwCents": null,
+      "cents": 0,
+      "editable": true,
+      "source": "typed",
+    },
+    "signTodayCents": 0,
+  },
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > the document (proposalAlternatives + buildProposalSnapshot) 1`] = `
+{
+  "cappedPartner": [
+    {
+      "adderLinesFinal": [
+        [
+          "Re-roof",
+          2000000,
+        ],
+      ],
+      "addersFinalCents": 2000000,
+      "baseFinalCents": 7018000,
+      "creditAmountCents": 8876829,
+      "credits": [
+        [
+          "itc",
+          30,
+          8876829,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": 20571429,
+      "finalCents": 29589429,
+      "finalPpwCents": 2319,
+      "financedCents": 29589429,
+      "financedCreditsAppliedCents": 10712600,
+      "key": "quoted:loan",
+      "label": "Capped Partner · 30 yr · 0%",
+      "monthlyCents": 82193,
+      "monthlyCreditsAppliedCents": 29757,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 10712600,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 1345,
+      "product": "loan",
+      "programmeLabel": "30 Year Solar",
+      "quoted": true,
+      "savings": {
+        "netCents": -17880806,
+        "paidCents": 29589480,
+        "paybackYear": null,
+      },
+      "savingsCreditsApplied": {
+        "netCents": 996154,
+        "paidCents": 10712520,
+        "paybackYear": 25,
+      },
+      "signTodayCents": 10000000,
+      "stickerPpwCents": 550,
+      "totalCreditsAppliedCents": 29589429,
+    },
+    {
+      "adderLinesFinal": [
+        [
+          "Re-roof",
+          700000,
+        ],
+      ],
+      "addersFinalCents": 700000,
+      "baseFinalCents": 2462680,
+      "creditAmountCents": 3108804,
+      "credits": [
+        [
+          "itc",
+          30,
+          3108804,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": 7200000,
+      "finalCents": 10362680,
+      "finalPpwCents": 812,
+      "financedCents": 10362680,
+      "financedCreditsAppliedCents": 7253876,
+      "key": "cash",
+      "label": "Pay in full",
+      "monthlyCents": null,
+      "monthlyCreditsAppliedCents": null,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 7253876,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 1345,
+      "product": "cash",
+      "programmeLabel": null,
+      "quoted": false,
+      "savings": {
+        "netCents": -1377368,
+        "paidCents": 10362680,
+        "paybackYear": null,
+      },
+      "savingsCreditsApplied": {
+        "netCents": 1731436,
+        "paidCents": 10362680,
+        "paybackYear": 22,
+      },
+      "signTodayCents": 0,
+      "stickerPpwCents": 193,
+      "totalCreditsAppliedCents": 10362680,
+    },
+    {
+      "adderLinesFinal": [
+        [
+          "Re-roof",
+          933333,
+        ],
+      ],
+      "addersFinalCents": 933333,
+      "baseFinalCents": 4466000,
+      "creditAmountCents": 4499800,
+      "credits": [
+        [
+          "itc",
+          30,
+          4499800,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": 9600000,
+      "finalCents": 14999333,
+      "finalPpwCents": 1175,
+      "financedCents": 14999333,
+      "financedCreditsAppliedCents": 10499533,
+      "key": "loan:programme-second",
+      "label": "Second Lender · 30 yr · 0% · fee 25%",
+      "monthlyCents": 41665,
+      "monthlyCreditsAppliedCents": 29165,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 10499533,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 1345,
+      "product": "loan",
+      "programmeLabel": "30 yr · 0% · fee 25%",
+      "quoted": false,
+      "savings": {
+        "netCents": -3290726,
+        "paidCents": 14999400,
+        "paybackYear": null,
+      },
+      "savingsCreditsApplied": {
+        "netCents": 1209274,
+        "paidCents": 10499400,
+        "paybackYear": 24,
+      },
+      "signTodayCents": 0,
+      "stickerPpwCents": 350,
+      "totalCreditsAppliedCents": 14999333,
+    },
+  ],
+  "cash": [
+    {
+      "adderLinesFinal": [
+        [
+          "Critter guard",
+          150000,
+        ],
+      ],
+      "addersFinalCents": 150000,
+      "baseFinalCents": 2480000,
+      "creditAmountCents": 789000,
+      "credits": [
+        [
+          "itc",
+          30,
+          789000,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": null,
+      "finalCents": 2630000,
+      "finalPpwCents": 329,
+      "financedCents": 2630000,
+      "financedCreditsAppliedCents": 1791000,
+      "key": "cash",
+      "label": "Pay in full",
+      "monthlyCents": null,
+      "monthlyCreditsAppliedCents": null,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 1791000,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 2115,
+      "product": "cash",
+      "programmeLabel": null,
+      "quoted": true,
+      "savings": {
+        "netCents": 2963725,
+        "paidCents": 2630000,
+        "paybackYear": 14,
+      },
+      "savingsCreditsApplied": {
+        "netCents": 3802725,
+        "paidCents": 2630000,
+        "paybackYear": 11,
+      },
+      "signTodayCents": 50000,
+      "stickerPpwCents": 310,
+      "totalCreditsAppliedCents": 2630000,
+    },
+  ],
+  "storageOnly": [
+    {
+      "adderLinesFinal": [],
+      "addersFinalCents": null,
+      "baseFinalCents": 4800000,
+      "creditAmountCents": 1440000,
+      "credits": [
+        [
+          "itc",
+          30,
+          1440000,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": null,
+      "finalCents": 4800000,
+      "finalPpwCents": null,
+      "financedCents": 4800000,
+      "financedCreditsAppliedCents": 3360000,
+      "key": "quoted:loan",
+      "label": "Battery Partner · 20 yr · 0%",
+      "monthlyCents": 20000,
+      "monthlyCreditsAppliedCents": 14000,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 3360000,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 22017,
+      "product": "loan",
+      "programmeLabel": "20 Year Battery",
+      "quoted": true,
+      "savings": {
+        "netCents": -5267397,
+        "paidCents": 4800000,
+        "paybackYear": null,
+      },
+      "savingsCreditsApplied": {
+        "netCents": -3827397,
+        "paidCents": 3360000,
+        "paybackYear": null,
+      },
+      "signTodayCents": 0,
+      "stickerPpwCents": null,
+      "totalCreditsAppliedCents": 4800000,
+    },
+    {
+      "adderLinesFinal": [],
+      "addersFinalCents": null,
+      "baseFinalCents": 2400000,
+      "creditAmountCents": 720000,
+      "credits": [
+        [
+          "itc",
+          30,
+          720000,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": null,
+      "finalCents": 2400000,
+      "finalPpwCents": null,
+      "financedCents": 2400000,
+      "financedCreditsAppliedCents": 1680000,
+      "key": "cash",
+      "label": "Pay in full",
+      "monthlyCents": null,
+      "monthlyCreditsAppliedCents": null,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 1680000,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 22017,
+      "product": "cash",
+      "programmeLabel": null,
+      "quoted": false,
+      "savings": {
+        "netCents": -2867397,
+        "paidCents": 2400000,
+        "paybackYear": null,
+      },
+      "savingsCreditsApplied": {
+        "netCents": -2147397,
+        "paidCents": 2400000,
+        "paybackYear": null,
+      },
+      "signTodayCents": 0,
+      "stickerPpwCents": null,
+      "totalCreditsAppliedCents": 2400000,
+    },
+  ],
+  "workedExample": [
+    {
+      "adderLinesFinal": [
+        [
+          "Main panel upgrade",
+          360000,
+        ],
+        [
+          "Steep roof",
+          133333,
+        ],
+      ],
+      "addersFinalCents": 493333,
+      "baseFinalCents": 4000000,
+      "creditAmountCents": 1948000,
+      "credits": [
+        [
+          "itc",
+          30,
+          1948000,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": 2000000,
+      "finalCents": 6493333,
+      "finalPpwCents": 649,
+      "financedCents": 6493333,
+      "financedCreditsAppliedCents": 4545333,
+      "key": "quoted:loan",
+      "label": "Example Lender · 25 yr · 6.99%",
+      "monthlyCents": 45852,
+      "monthlyCreditsAppliedCents": 32096,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 4545333,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 1644,
+      "product": "loan",
+      "programmeLabel": "25 yr · 6.99% · fee 25%",
+      "quoted": true,
+      "savings": {
+        "netCents": -6646757,
+        "paidCents": 13755600,
+        "paybackYear": null,
+      },
+      "savingsCreditsApplied": {
+        "netCents": -2519957,
+        "paidCents": 9628800,
+        "paybackYear": null,
+      },
+      "signTodayCents": 0,
+      "stickerPpwCents": 400,
+      "totalCreditsAppliedCents": 6493333,
+    },
+    {
+      "adderLinesFinal": [
+        [
+          "Main panel upgrade",
+          270000,
+        ],
+        [
+          "Steep roof",
+          100000,
+        ],
+      ],
+      "addersFinalCents": 370000,
+      "baseFinalCents": 3000000,
+      "creditAmountCents": 1461000,
+      "credits": [
+        [
+          "itc",
+          30,
+          1461000,
+        ],
+      ],
+      "disclaimer": "Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.",
+      "equipmentFinalCents": 1500000,
+      "finalCents": 4870000,
+      "finalPpwCents": 487,
+      "financedCents": 4870000,
+      "financedCreditsAppliedCents": 3409000,
+      "key": "cash",
+      "label": "Pay in full",
+      "monthlyCents": null,
+      "monthlyCreditsAppliedCents": null,
+      "monthlyWithoutPaydownCents": null,
+      "netFinalCreditsAppliedCents": 3409000,
+      "paydownCents": null,
+      "postSolarMonthlyCents": 1644,
+      "product": "cash",
+      "programmeLabel": null,
+      "quoted": false,
+      "savings": {
+        "netCents": 2238843,
+        "paidCents": 4870000,
+        "paybackYear": 19,
+      },
+      "savingsCreditsApplied": {
+        "netCents": 3699843,
+        "paidCents": 4870000,
+        "paybackYear": 15,
+      },
+      "signTodayCents": 0,
+      "stickerPpwCents": 300,
+      "totalCreditsAppliedCents": 4870000,
+    },
+  ],
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > the ladder (priceStoredPurchase, priceStorageStored) 1`] = `
+{
+  "cappedPartner": {
+    "addersCents": 700000,
+    "addersFinalCents": 2000000,
+    "addersOutsideRuleCents": 700000,
+    "addersOutsideRuleFinalCents": 2000000,
+    "baseFinalCents": 7018000,
+    "basePpwCents": 192.5,
+    "basePriceCents": 2456300,
+    "cap": {
+      "adderOverrun": false,
+      "capped": true,
+      "stickerPpwCents": 550,
+    },
+    "dealerFeeCents": 19233129,
+    "equipmentChargesCents": 7200000,
+    "equipmentFinalCents": 20571429,
+    "finalCents": 29589429,
+    "finalPpwCents": 2318.9208,
+    "grossPpwCents": 811.6223,
+    "grossPriceCents": 10356300,
+  },
+  "cash": {
+    "addersCents": 150000,
+    "addersFinalCents": 150000,
+    "addersOutsideRuleCents": 0,
+    "addersOutsideRuleFinalCents": 0,
+    "baseFinalCents": 2480000,
+    "basePpwCents": 310,
+    "basePriceCents": 2480000,
+    "cap": {
+      "adderOverrun": false,
+      "capped": false,
+      "stickerPpwCents": 310,
+    },
+    "dealerFeeCents": 0,
+    "equipmentChargesCents": 0,
+    "equipmentFinalCents": 0,
+    "finalCents": 2630000,
+    "finalPpwCents": 328.75,
+    "grossPpwCents": 328.75,
+    "grossPriceCents": 2630000,
+  },
+  "storageOnly": {
+    "addersCents": 0,
+    "addersFinalCents": 0,
+    "baseFinalCents": 4800000,
+    "basePerUnitCents": 1200000,
+    "basePriceCents": 2400000,
+    "cap": {
+      "adderOverrun": false,
+      "capped": true,
+      "stickerPerUnitCents": 2400000,
+    },
+    "dealerFeeCents": 2400000,
+    "finalCents": 4800000,
+    "finalPerUnitCents": 2400000,
+    "grossPriceCents": 2400000,
+    "units": 2,
+  },
+  "workedExample": {
+    "addersCents": 370000,
+    "addersFinalCents": 493333,
+    "addersOutsideRuleCents": 0,
+    "addersOutsideRuleFinalCents": 0,
+    "baseFinalCents": 4000000,
+    "basePpwCents": 300,
+    "basePriceCents": 3000000,
+    "cap": {
+      "adderOverrun": false,
+      "capped": false,
+      "stickerPpwCents": 400,
+    },
+    "dealerFeeCents": 1623333,
+    "equipmentChargesCents": 1500000,
+    "equipmentFinalCents": 2000000,
+    "finalCents": 6493333,
+    "finalPpwCents": 649.3333,
+    "grossPpwCents": 487,
+    "grossPriceCents": 4870000,
+  },
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > the reported system and its frozen price ladder (resolveReportedSystem, frozenPriceLadder) 1`] = `
+{
+  "cappedPartner": {
+    "ladder": {
+      "adders": {
+        "ppwCents": 157,
+        "totalCents": 2000000,
+      },
+      "base": {
+        "ppwCents": 550,
+        "totalCents": 7018000,
+      },
+      "batteryPriceCents": 20571429,
+      "batteryQty": 2,
+      "credits": {
+        "creditTotalCents": 8876829,
+        "netCostCents": 10712600,
+      },
+      "final": {
+        "ppwCents": 2319,
+        "totalCents": 29589429,
+      },
+      "source": "proposal",
+      "systemWatts": 12760,
+    },
+    "system": {
+      "contractPriceCents": 29589429,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 10712600,
+      "product": "loan",
+      "source": {
+        "approved": false,
+        "at": null,
+        "kind": "proposal",
+        "status": "generated",
+        "version": 1,
+      },
+    },
+  },
+  "cash": {
+    "ladder": {
+      "adders": {
+        "ppwCents": 19,
+        "totalCents": 150000,
+      },
+      "base": {
+        "ppwCents": 310,
+        "totalCents": 2480000,
+      },
+      "batteryPriceCents": 0,
+      "batteryQty": 0,
+      "credits": {
+        "creditTotalCents": 789000,
+        "netCostCents": 1791000,
+      },
+      "final": {
+        "ppwCents": 329,
+        "totalCents": 2630000,
+      },
+      "source": "proposal",
+      "systemWatts": 8000,
+    },
+    "system": {
+      "contractPriceCents": 2630000,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 1791000,
+      "product": "cash",
+      "source": {
+        "approved": false,
+        "at": null,
+        "kind": "proposal",
+        "status": "generated",
+        "version": 1,
+      },
+    },
+  },
+  "storageOnly": {
+    "ladder": {
+      "adders": {
+        "ppwCents": null,
+        "totalCents": 0,
+      },
+      "base": {
+        "ppwCents": null,
+        "totalCents": 4800000,
+      },
+      "batteryPriceCents": 0,
+      "batteryQty": 0,
+      "credits": {
+        "creditTotalCents": 1440000,
+        "netCostCents": 3360000,
+      },
+      "final": {
+        "ppwCents": null,
+        "totalCents": 4800000,
+      },
+      "source": "proposal",
+      "systemWatts": 0,
+    },
+    "system": {
+      "contractPriceCents": 4800000,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 3360000,
+      "product": "loan",
+      "source": {
+        "approved": false,
+        "at": null,
+        "kind": "proposal",
+        "status": "generated",
+        "version": 1,
+      },
+    },
+  },
+  "workedExample": {
+    "ladder": {
+      "adders": {
+        "ppwCents": 49,
+        "totalCents": 493333,
+      },
+      "base": {
+        "ppwCents": 400,
+        "totalCents": 4000000,
+      },
+      "batteryPriceCents": 2000000,
+      "batteryQty": 1,
+      "credits": {
+        "creditTotalCents": 1948000,
+        "netCostCents": 4545333,
+      },
+      "final": {
+        "ppwCents": 649,
+        "totalCents": 6493333,
+      },
+      "source": "proposal",
+      "systemWatts": 10000,
+    },
+    "system": {
+      "contractPriceCents": 6493333,
+      "monthlyPaymentCents": null,
+      "netAfterCreditsCents": 4545333,
+      "product": "loan",
+      "source": {
+        "approved": false,
+        "at": null,
+        "kind": "proposal",
+        "status": "generated",
+        "version": 1,
+      },
+    },
+  },
+}
+`;
+
+exports[`golden: every pure pricing site, every golden deal > the save (financeRowForProduct) 1`] = `
+{
+  "cappedPartner": {
+    "addersInsideRuleCents": 0,
+    "addersOutsideRuleCents": 700000,
+    "aprPct": 0,
+    "dealerFeePct": 65,
+    "finalCents": 29589429,
+    "loanTermMonths": 360,
+    "product": "loan",
+    "stickerPpwCents": 550,
+  },
+  "cash": {
+    "addersInsideRuleCents": 150000,
+    "addersOutsideRuleCents": 0,
+    "aprPct": null,
+    "dealerFeePct": 0,
+    "finalCents": 2630000,
+    "loanTermMonths": null,
+    "product": "cash",
+    "stickerPpwCents": 310,
+  },
+  "workedExample": {
+    "addersInsideRuleCents": 370000,
+    "addersOutsideRuleCents": 0,
+    "aprPct": 6.99,
+    "dealerFeePct": 25,
+    "finalCents": 6493333,
+    "loanTermMonths": 300,
+    "product": "loan",
+    "stickerPpwCents": 400,
+  },
+}
+`;
