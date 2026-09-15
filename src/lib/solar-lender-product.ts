@@ -33,6 +33,31 @@ function loanTerm(months: number): string {
   return months % 12 === 0 ? `${months / 12} yr` : `${months} mo`;
 }
 
+/**
+ * The same label for a page a HOMEOWNER reads: every term except the dealer fee.
+ *
+ * The fee is what the lender charges the company. It is inside the price the
+ * customer is quoted and is never a line they are shown — but an unnamed
+ * programme's label ("25 yr · 6.99% · fee 25%") printed it on the proposal, its
+ * payment menu and the filed PDFs.
+ */
+export function customerProductLabel(p: ProductForLabel): string {
+  return lenderProductLabel({ ...p, dealerFeePct: null });
+}
+
+/**
+ * A label already frozen into a document, with any dealer fee taken out as it
+ * is rendered. For documents generated before `customerProductLabel`; a label
+ * with no fee in it passes through unchanged.
+ */
+export function withoutDealerFee<T extends string | null | undefined>(label: T): T {
+  if (!label) return label;
+  return label
+    .split(" · ")
+    .filter((part) => !/^fee \d+(?:\.\d+)?%$/.test(part.trim()))
+    .join(" · ") as T;
+}
+
 export function lenderProductLabel(p: ProductForLabel): string {
   if (p.name?.trim()) return p.name.trim();
 

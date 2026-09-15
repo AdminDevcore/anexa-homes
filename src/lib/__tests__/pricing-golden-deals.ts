@@ -22,7 +22,7 @@ import { adderTotals, type AdderLine } from "@/lib/solar-adders";
 import { compareOffers, type OfferProduct } from "@/lib/solar-compare";
 import type { CreditClaims, CreditRates } from "@/lib/solar-credit-ladder";
 import { financeRowForProduct, type LenderProductTerms } from "@/lib/solar-finance-row";
-import { lenderProductLabel } from "@/lib/solar-lender-product";
+import { customerProductLabel } from "@/lib/solar-lender-product";
 import {
   batteryChargeCents,
   grossPpwFromNet,
@@ -389,7 +389,7 @@ export function priceToday(d: PerWattDeal) {
     lenderProductLabel:
       d.product === "cash"
         ? null
-        : lenderProductLabel({
+        : customerProductLabel({
             product: d.product,
             name: d.programmeName,
             aprPct: d.aprPct,
@@ -486,7 +486,7 @@ export function storageToday() {
       downPaymentCents: null,
     },
     lender: s.lenderName,
-    lenderProductLabel: lenderProductLabel({
+    lenderProductLabel: customerProductLabel({
       product: "loan",
       name: s.programmeName,
       aprPct: s.aprPct,

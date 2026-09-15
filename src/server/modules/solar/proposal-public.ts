@@ -224,7 +224,12 @@ export async function acceptSolarProposal(
     // Freeze what this deal pays, now that it is sold. Best-effort and
     // create-only: a customer's signature must never fail because a rep's
     // redline was not configured. See solar/deal-comp.ts.
-    await snapshotSolarDealComp({ companyId: co, leadId: proposal.leadId, signedAt: now });
+    await snapshotSolarDealComp({
+      companyId: co,
+      leadId: proposal.leadId,
+      signedAt: now,
+      proposalId: proposal.id,
+    });
 
     await prisma.activityLog.create({
       data: {

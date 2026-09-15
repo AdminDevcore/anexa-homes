@@ -80,8 +80,17 @@ describe("cash is priced at what the company keeps, not at the financed sticker"
     expect(cashPpwCents({ quoted: base.quoted, targetNetPpwCents: null })).toBe(287);
   });
 
-  it("prefers the company's own target net rate when one is set", () => {
-    expect(cashPpwCents({ quoted: base.quoted, targetNetPpwCents: 300 })).toBe(300);
+  it("prices cash at the deal's own base even when the company has a target net", () => {
+    // L15: the target net used to win here, pricing cash at $3.00/W whatever
+    // the rep sold.
+    expect(cashPpwCents({ quoted: base.quoted, targetNetPpwCents: 300 })).toBe(287);
+  });
+
+  it("falls back to the target net only when the quote has no per-watt price", () => {
+    // A lease or PPA quote stores no sticker.
+    expect(
+      cashPpwCents({ quoted: { product: "lease", grossPpwCents: 0, dealerFeePct: 0 }, targetNetPpwCents: 300 })
+    ).toBe(300);
   });
 
   it("leaves a cash deal's own price alone, because it carries no fee", () => {
@@ -313,13 +322,14 @@ describe("a capped lender is capped on the customer's own menu too", () => {
       targetNetPpwCents: 568,
       programmes: [{ ...amos, lender: lender("L-amos", "Amos Capital Fund", 0, null) }],
     });
-    // 568 / (1 − 0.65) = 1623¢ — the uncapped sticker.
-    expect(option.finance.grossPpwCents).toBe(1623);
+    // The deal's base, not the target net: $3.50/W at 18% keeps 287¢, and
+    // 287 / (1 − 0.65) = 820¢ — the uncapped sticker.
+    expect(option.finance.grossPpwCents).toBe(820);
   });
 
   it("does not let a capped lender drag down the cash option", () => {
-    // Cash is priced at what the company must keep, with no lender in the
-    // picture — so no partner's ceiling applies to it.
+    // Cash is priced at the deal's base, with no lender in the picture — so no
+    // partner's ceiling applies to it.
     const [cash] = proposalAlternatives({
       ...base,
       design: { systemSizeKwDc: 8.8 },
@@ -327,6 +337,37 @@ describe("a capped lender is capped on the customer's own menu too", () => {
       programmes: [amos],
     });
     expect(cash.key).toBe("cash");
-    expect(cash.finance.grossPpwCents).toBe(568);
+    expect(cash.finance.grossPpwCents).toBe(287);
+  });
+});
+
+describe("every option is priced from the base this deal was sold at (L15)", () => {
+  const other = loanProgramme({ id: "p-other", lenderId: "L2", lenderName: "Sunergy", dealerFeePct: 30 });
+
+  it("re-grosses the deal's base by each programme's own fee, ignoring the target net", () => {
+    // Sold at $4.00/W through 20%: the company keeps 320¢. At Sunergy's 30%
+    // that base stickers at 320 / 0.7 = 457¢ — not the $2.50 target net
+    // grossed up (357¢), which is what every other lender used to be quoted at.
+    const [cash, option] = proposalAlternatives({
+      ...base,
+      quoted: { ...base.quoted, grossPpwCents: 400, dealerFeePct: 20 },
+      targetNetPpwCents: 250,
+      programmes: [other],
+    });
+    expect(cash.finance.grossPpwCents).toBe(320);
+    expect(option.finance.grossPpwCents).toBe(457);
+    expect(option.finance.dealerFeePct).toBe(30);
+  });
+
+  it("keeps the old derivation for a quote with no per-watt price", () => {
+    // A lease stores no sticker, so there is no base to start from.
+    const [cash, option] = proposalAlternatives({
+      ...base,
+      quoted: { product: "lease", lenderProductId: null, lenderId: null, grossPpwCents: 0, dealerFeePct: 0 },
+      targetNetPpwCents: 250,
+      programmes: [other],
+    });
+    expect(cash.finance.grossPpwCents).toBe(250);
+    expect(option.finance.grossPpwCents).toBe(357);
   });
 });
